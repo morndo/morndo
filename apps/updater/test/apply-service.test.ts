@@ -8,6 +8,7 @@ import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { RevocationJournal, readHold, writeFloor } from "@morndo/service-kit";
+import { ApplyInterrupted } from "../src/application/apply-steps.ts";
 import { NodesStore } from "../../fleet/src/adapters/nodes-store.ts";
 import { applyRevocationJournal } from "../../fleet/src/application/revocations.ts";
 import {
@@ -618,6 +619,100 @@ describe("the apply service (§6.2–§6.5)", () => {
     const renders = w.tape.filter(t => t.startsWith("renderUnits:"));
     expect(renders.length, "the swap's render and the rollback's").toBe(2);
     for (const r of renders) expect(r, "every render names the machine's services: node only").toMatch(/\(node\)$/);
+  });
+
+  // ---- the owner path (C4-6): three checks on the control plane's hub, judged against the before-baseline
+
+  const withOwner = (
+    w: Awaited<ReturnType<typeof buildApplyWorld>>,
+    owner: (current: string | null) => Record<string, boolean>,
+  ): void => {
+    w.probe.healthScript = (s) => ({
+      service: s, version: w.current() ?? A,
+      checks: { ready: true, database: true, ...(s === "hub" ? owner(w.current()) : {}) },
+    });
+  };
+
+  it("probation fails a control plane whose hub answers 503 for the app", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, current => ({ owner_app_served: current !== B, owner_origin_ready: true, owner_manager_lane: true }));
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_app_served");
+  });
+
+  it("probation fails when the https origin does not answer", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, current => ({ owner_app_served: true, owner_origin_ready: current !== B, owner_manager_lane: true }));
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_origin_ready");
+  });
+
+  it("probation fails when the manager is unreachable through the hub", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, current => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: current !== B }));
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_manager_lane");
+  });
+
+  it("a control plane that passes all three commits", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: true }));
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(w.alerts.raised.some(a => a.kind === "update_check_already_failing")).toBe(false);
+  });
+
+  it("a check that already failed before the update began is reported as \"was already failing\" and does not roll the update back; a check that passes before and fails after does", async () => {
+    const already = await buildApplyWorld(scratch);
+    withOwner(already, () => ({ owner_app_served: false, owner_origin_ready: true, owner_manager_lane: true }));
+    expect(await already.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    const alerts = already.alerts.raised.filter(a => a.kind === "update_check_already_failing");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.detail).toBe(
+      `hub: owner_app_served was already failing before the update to ${B}; it is not held against it`,
+    );
+
+    const regressed = await buildApplyWorld(scratch);
+    withOwner(regressed, current => ({ owner_app_served: current !== B, owner_origin_ready: true, owner_manager_lane: true }));
+    const out = await regressed.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_app_served");
+    expect(regressed.alerts.raised.filter(a => a.kind === "update_check_already_failing")).toHaveLength(0);
+  });
+
+  it("a node's probation does not run the control plane's checks", async () => {
+    const w = await buildApplyWorld(scratch, { running: ["node"] });
+    const reports: { checks: Record<string, boolean> }[] = [];
+    w.probe.healthScript = (s) => {
+      const report = { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+      reports.push(report);
+      return report;
+    };
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(w.probe.healthCalls.length).toBeGreaterThan(0);
+    expect(w.probe.healthCalls.every(c => c.service === "node")).toBe(true);
+    expect(reports.every(r => Object.keys(r.checks).every(name => !name.startsWith("owner_")))).toBe(true);
+  });
+
+  it("a recovery does not judge the owner path", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: false }));
+    w.die.on = { op: "start", call: 1 };
+    let interrupted = false;
+    try { await w.apply().apply({ now: false }); } catch (error) { interrupted = error instanceof ApplyInterrupted; }
+    w.die.on = null;
+    expect(interrupted, "the apply died after the swap, before a before-baseline was stored").toBe(true);
+    expect(w.store.openUpdate()?.judgeBaseline, "recovery has no before").toBeNull();
+    expect(await w.recover().recover()).toEqual({ kind: "committed", version: B });
+    const judged = w.store.commitBaseline();
+    expect(judged).not.toBeNull();
+    for (const names of Object.values(judged ?? {})) expect(names.some(name => name.startsWith("owner_"))).toBe(false);
   });
 
 });

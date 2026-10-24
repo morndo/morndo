@@ -32,7 +32,7 @@ import { HttpsFeed } from "./adapters/feed-https.ts";
 import { HoldFileWriter } from "./adapters/hold-file.ts";
 import { DirsInstaller } from "./adapters/installer-dirs.ts";
 import { LaunchdServices } from "./adapters/services-launchd.ts";
-import { ServiceProbes } from "./adapters/probes.ts";
+import { ServiceProbes, ownerOriginAllowed } from "./adapters/probes.ts";
 import { SqliteRevocations } from "./adapters/revocations-sqlite.ts";
 import { SqliteSchemas } from "./adapters/schema-sqlite.ts";
 import { StateFileWriter } from "./adapters/state-file.ts";
@@ -325,6 +325,10 @@ export async function runUpdater(
     }
     feedBase = env.MORNDO_UPDATE_FEED.endsWith("/") ? env.MORNDO_UPDATE_FEED : `${env.MORNDO_UPDATE_FEED}/`;
   }
+  if (env.MORNDO_ORIGIN !== undefined && !ownerOriginAllowed(env.MORNDO_ORIGIN)) {
+    io.err(`MORNDO_ORIGIN must be https, or http on localhost or 127.0.0.1, not ${JSON.stringify(env.MORNDO_ORIGIN)}\n`);
+    return EXIT_CONFIG;
+  }
   const platform = platformWord(process.platform, process.arch);
   if (platform === null) {
     io.err(`no Morndo build for ${process.platform}-${process.arch}: nothing to update with\n`);
@@ -369,6 +373,10 @@ export async function runUpdater(
       hubUrl: `http://127.0.0.1:${env.MORNDO_PORT ?? 8790}`,
       fleetSocket: env.MORNDO_FLEET_SOCKET || join(home, ".local/state/morndo-fleet/fleet.sock"),
       nodeStatus: join(home, ".local/state/morndo-node/status.json"),
+      ownerPath: {
+        ...(env.MORNDO_ORIGIN !== undefined ? { origin: env.MORNDO_ORIGIN } : {}),
+        managerLane: true,
+      },
     });
     const alerts: AlertSink = {
       raise: (kind, detail) => { io.err(`${kind}: ${detail}\n`); },

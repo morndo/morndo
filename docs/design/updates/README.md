@@ -290,6 +290,8 @@ Read from outside the service, never taken from its own word alone:
 | fleet | `GET /v1/health` on its socket answers with the target's version and schema; the control plane's own node reconnects, and so do most of the nodes connected at the baseline, within the deadline (agents retry from 1 second with jitter). One laptop that went to sleep must not roll back the control plane. |
 | node | `status.json` names the target's version; the relay answers on its port; the fleet handshake ends in `welcome` if it did before. A close with 4426 fails the check (the Version caused it); an unreachable fleet fails it only if the fleet was reachable before. |
 
+On the control plane the hub's report also names three owner-path checks, read before the Update begins and judged against that baseline: `owner_app_served` (its own pages answer 200 with a body), `owner_origin_ready` (`GET /api/health` on the https address `MORNDO_ORIGIN` names, and only when that variable is set), and `owner_manager_lane` (the fleet's manager lane is free of conflict and its node is online). A check that was already failing is reported with the alert `update_check_already_failing` and is not held against the target. A recovery has no before, so it does not judge them — a network or a reverse proxy that is not up yet at boot would otherwise roll a good Update back. A node has none of these checks.
+
 A check that failed before the Update is not held against the target (RL7: only checks that passed before must pass after). Each failure names its service and check in HealthFailed.
 
 ### 6.5 Rollback

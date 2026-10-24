@@ -180,25 +180,42 @@ export async function waitHoldSeen(ctx: StepCtx, running: readonly UpdateService
 
 // ---- the baselines (§6.4), twice over
 
-// Before the update: what passed is what must pass after — what already failed is not held against the target. A
-// recovery has no before, so its baseline (baselineNow) is every check each service names right now: a service
-// sick at the Version being judged stays a failure instead of forgiving itself. A service that answers nothing
-// gets its entry either way — silence after the swap is no_report, never a pass by omission.
-export async function baselineBefore(deps: ApplyDeps, running: readonly UpdateService[]): Promise<Record<string, string[]>> {
-  const baseline: Record<string, string[]> = {};
+// An owner-path check that was already false. It is reported and left out of `passed`, so the target is not held to it.
+export type FailingOwnerCheck = { service: string; check: string };
+
+// Before the update: what passed is what must pass after — what already failed is not held against the target.
+// `alreadyFailing` lists the owner_ checks that were false, one entry per check, for the single alert the apply
+// raises. A recovery has no before, so its baseline (baselineNow) is every check each service names right now
+// except the owner path: a service sick at the Version being judged stays a failure instead of forgiving itself.
+// A service that answers nothing gets its entry either way — silence after the swap is no_report, never a pass
+// by omission.
+export async function baselineBefore(deps: ApplyDeps, running: readonly UpdateService[]): Promise<{
+  passed: Record<string, string[]>;
+  alreadyFailing: FailingOwnerCheck[];
+}> {
+  const passed: Record<string, string[]> = {};
+  const alreadyFailing: FailingOwnerCheck[] = [];
   for (const s of running) {
     const report = await deps.probe.health(s);
-    baseline[s] = report === null ? []
-      : Object.entries(report.checks).filter(([, passed]) => passed === true).map(([name]) => name);
+    if (report === null) { passed[s] = []; continue; }
+    const names: string[] = [];
+    for (const [name, passedCheck] of Object.entries(report.checks)) {
+      if (passedCheck === true) names.push(name);
+      else if (name.startsWith("owner_")) alreadyFailing.push({ service: s, check: name });
+    }
+    passed[s] = names;
   }
-  return baseline;
+  return { passed, alreadyFailing };
 }
 
 export async function baselineNow(deps: ApplyDeps, running: readonly UpdateService[]): Promise<Record<string, string[]>> {
   const baseline: Record<string, string[]> = {};
   for (const s of running) {
     const report = await deps.probe.health(s);
-    baseline[s] = report === null ? [] : Object.keys(report.checks);
+    // No before-baseline: a network or a reverse proxy that is not up yet at boot would roll a good update back.
+    // Owner-path checks are left out, so a recovery never holds them against a Version it cannot compare.
+    baseline[s] = report === null ? []
+      : Object.keys(report.checks).filter(name => !name.startsWith("owner_"));
   }
   return baseline;
 }
