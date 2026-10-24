@@ -658,6 +658,21 @@ describe("verifying (B14, B15)", () => {
   });
 });
 
+describe("a proof list is redacted like a brief (B17)", () => {
+  it("a key pasted into an item is removed before it is stored, and a drop finds the stored form", () => {
+    const { store, board } = made();
+    atReview(board);
+    const key = ["sk", "abcdefgh".repeat(3)].join("-");              // key-shaped, built here so none sits in the source
+    expect(board.act("T-1", { action: "proof_list", add: [`data: a sample, token ${key} in the notes`] }, manager).ok).toBe(true);
+    const change = JSON.stringify(store.taskEvents("T-1").at(-1)?.change);
+    expect(change).not.toContain(key);
+    expect(change).toContain("[redacted]");
+    // the same words again are the same item (a repeat), and dropping them with the key in them finds the stored item
+    expect(board.act("T-1", { action: "proof_list", drop: [`data: a sample, token ${key} in the notes`] }, manager).ok).toBe(true);
+    store.close();
+  });
+});
+
 describe("a stand-in forge is shown, not hidden (B14)", () => {
   it("the proof view says whether its references were read from a stand-in forge", async () => {
     const store = new Store(tempDir());

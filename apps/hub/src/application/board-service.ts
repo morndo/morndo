@@ -137,6 +137,12 @@ export class BoardService {
         ...action,
         ...(action.title !== undefined ? { title: action.title === redactKeyMaterial(task.title) ? task.title : action.title } : {}),
         ...(action.description !== undefined ? { description: action.description === redactKeyMaterial(task.description) ? task.description : action.description } : {}),
+      } : action.action === "proof_list" ? {
+        // B17: an item's words lose key material before they are judged and stored, as a brief's do (a drop is redacted the
+        // same way, so it finds the stored item).
+        ...action,
+        ...(action.add !== undefined ? { add: action.add.map(redactKeyMaterial) } : {}),
+        ...(action.drop !== undefined ? { drop: action.drop.map(redactKeyMaterial) } : {}),
       } : action;
       // B5 needs only the tasks in progress, not the whole board. B11: Done is judged against the task's merges. B16:
       // the proof is in the gate only where the domain reads it — a brief (its repositories) and a move to Done.
