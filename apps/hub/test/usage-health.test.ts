@@ -29,6 +29,12 @@ const statusLine = (five: number, account = "seat-a") => fetch(`${hub.base}/api/
   headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-lane": "builder", "x-morndo-account": account },
   body: JSON.stringify({ session_id: "s1", rate_limits: { five_hour: { used_percentage: five, resets_at: Math.floor((now + 2 * HOUR) / 1000) } } }),
 });
+// The same, with the five-hour reset the caller names (a far one, so the window stays alive across a long clock jump).
+const statusLineAt = (five: number, resetsAt: number, account = "seat-a") => fetch(`${hub.base}/api/agent/usage`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-lane": "builder", "x-morndo-account": account },
+  body: JSON.stringify({ session_id: "s1", rate_limits: { five_hour: { used_percentage: five, resets_at: Math.floor(resetsAt / 1000) } } }),
+});
 const fiveHour = (usedPercent: number, resetsAt = now + 2 * HOUR) => ({ id: "five_hour", used_percent: usedPercent, resets_at: Math.floor(resetsAt / 1000), length_mins: 300 });
 const viewOf = async () => {
   const cookie = await hub.cookie();
@@ -160,11 +166,68 @@ describe("source health (plan 4.3)", () => {
     expect(((a as Body).fiveHour as Body).usedPercentage).toBe(45);
     expect(a?.disagree).toEqual([]);                                                                          // 12 minutes apart: no disagreement
   });
-  it("a reading with nothing readable is refused, and a stamp from the future is capped at the hub's clock plus the skew", async () => {
+  it("a reading with nothing readable is refused and recorded as a failure, and a stamp from the future is capped at the hub's clock plus the skew", async () => {
     expect((await reading({ windows: [] })).status).toBe(400);
     expect((await reading({ windows: [{ id: "x", used_percent: 1_700_000_000, resets_at: 1 }] })).status).toBe(400);      // an epoch value is no percentage, so nothing is readable
-    expect(await sourcesOf()).toEqual([]);
+    // PR #125 finding 4a changed this pin: an all-unreadable reading is a failure the principal sees, not silence.
+    expect(await sourceState("app-server")).toMatchObject({ state: "unavailable", reason: "unknown_screen", hint: "the reading had no readable window" });
     expect((await reading({ windows: [fiveHour(20)], capturedAt: now + DAY })).status).toBe(200);
     expect(((await sourcesOf())[0] as Body).asOf).toBe(now + 5 * MIN);
+  });
+
+  it("a last-known echo shows over a status line that spoke days ago, with no disagreement invented (PR #125 finding 1)", async () => {
+    expect((await statusLineAt(20, now + 10 * DAY)).status).toBe(200);                                // three days of fake clock ago
+    now += 3 * DAY;
+    const reset = now + 2 * HOUR;
+    expect((await reading({ windows: [fiveHour(55, reset)], capturedAt: now - 10 * MIN })).status).toBe(200);   // the source's previous read
+    expect((await reading({ windows: [fiveHour(55, reset)], capturedAt: now })).status).toBe(200);              // the same numbers again: an echo
+    const a = await accountOf();
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(55);
+    expect(a?.disagree).toEqual([]);                                                                  // three days apart: the 15-point rule cannot apply
+  });
+
+  it("a reading older than the source's newest known stamp is ignored, good or bad (PR #125 finding 2)", async () => {
+    const t = now;
+    expect((await reading({ windows: [fiveHour(30)], capturedAt: t })).status).toBe(200);
+    now += MIN;                                                                                        // the clock moves, the old stamp does not
+    expect((await reading({ windows: [fiveHour(99)], capturedAt: t - 5 * DAY })).status).toBe(200);    // an ok five days older: ignored
+    const a = await accountOf();
+    expect(await sourceState("app-server")).toMatchObject({ state: "available", asOf: t });
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(30);
+    expect((await reading({ failure: { reason: "unknown_screen" }, capturedAt: t - 10 * MIN })).status).toBe(200);  // an older failure: ignored too
+    expect(await sourceState("app-server")).toMatchObject({ state: "available", asOf: t, reason: null });
+  });
+
+  it("a failure at T then an older ok: the source stays failing; an equal-stamp ok clears it (PR #125 finding 2)", async () => {
+    const t = now;
+    expect((await reading({ failure: { reason: "unknown_screen" }, capturedAt: t })).status).toBe(200);
+    now += MIN;
+    expect((await reading({ windows: [fiveHour(30)], capturedAt: t - 10 * MIN })).status).toBe(200);   // older than the failure: ignored
+    expect(await sourceState("app-server")).toMatchObject({ state: "unavailable", since: t, reason: "unknown_screen" });
+    expect((await reading({ windows: [fiveHour(30)], capturedAt: t })).status).toBe(200);              // equal stamps are accepted
+    expect(await sourceState("app-server")).toMatchObject({ state: "available", asOf: t });
+  });
+
+  it("an all-unreadable reading is a failure the principal sees, and a good reading clears it (PR #125 finding 4a)", async () => {
+    const at = now;
+    const r = await reading({ windows: [{ id: "five_hour", used_percent: 1_700_000_000, resets_at: Math.floor((now + HOUR) / 1000) }], capturedAt: at });
+    expect(r.status).toBe(400);                                                                        // still a bad reading on the wire
+    expect(await sourceState("app-server")).toMatchObject({ state: "unavailable", since: at, reason: "unknown_screen", hint: "the reading had no readable window" });
+    now += MIN;
+    expect((await reading({ windows: [fiveHour(30)], capturedAt: now })).status).toBe(200);
+    expect(await sourceState("app-server")).toMatchObject({ state: "available", hint: null });
+  });
+
+  it("the status line's health row is rewritten at most once a minute (PR #125 finding 5a)", async () => {
+    const t = now;
+    expect((await statusLine(20)).status).toBe(200);
+    const row = () => hub.store.usageSources().find(r => r.account === "seat-a" && r.source === "status-line");
+    expect(row()?.body.health.lastOkAt).toBe(t);
+    now += 30_000;
+    expect((await statusLine(21)).status).toBe(200);
+    expect(row()?.body.health.lastOkAt).toBe(t);                                                       // inside 60 s of the stored row: the save is skipped
+    now += 31_000;                                                                                     // 61 s after the first
+    expect((await statusLine(22)).status).toBe(200);
+    expect(row()?.body.health.lastOkAt).toBe(t + 61_000);
   });
 });

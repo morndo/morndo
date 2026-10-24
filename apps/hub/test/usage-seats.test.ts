@@ -15,6 +15,17 @@ type Body = Record<string, unknown>;
 const limit = (body: unknown, token = workerToken) => fetch(`${hub.base}/api/agent/usage/limit`, {
   method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": "builder" }, body: JSON.stringify(body),
 });
+// A reading through the route, as the collector posts it, with the plan name it read (finding 3a's cases).
+const postReading = (o: { account?: string; source?: string; plan: string | null; capturedAt: number; windows: unknown[] }) =>
+  fetch(`${hub.base}/api/agent/usage/readings`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-lane": "builder", "x-morndo-account": o.account ?? "seat-a" },
+    body: JSON.stringify({
+      source: o.source ?? "claude-usage", node: null, captured_at: Math.floor(o.capturedAt / 1000), plan: o.plan,
+      windows: o.windows,
+    }),
+  });
+const fiveHour = (usedPercent: number, resetsAt: number) => ({ id: "five_hour", used_percent: usedPercent, resets_at: Math.floor(resetsAt / 1000), length_mins: 300 });
 // A reading straight to the service, for the lease cases: the same body the route would hand it.
 const actor: BoardActor = { kind: "worker", name: "builder", token: "t" };
 // The hub's clock follows a reading's stamp (a source cannot have taken a reading after the hub's own now; the hub caps a stamp past its skew).
@@ -106,5 +117,49 @@ describe("seats (plan 4.5)", () => {
     const v = await viewOf();
     expect((v.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
     expect(await noticesOf("seat")).toEqual([]);
+  });
+
+  it("a plan change the plan watch tells drops the derived seat, with one reset notice; an unchanged plan leaves it (PR #125 finding 3a)", async () => {
+    const reset = now + 2 * HOUR;
+    const post = (plan: string | null, n: number, account = "seat-a") => postReading({ account, plan, capturedAt: now, windows: [fiveHour(20 + n, reset)] });
+    // The plan watch's baseline and its agreement, on the plan the seat is marked under.
+    expect((await post("Max 5x", 0)).status).toBe(200);
+    now += MIN;
+    expect((await post("Max 5x", 1)).status).toBe(200);
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
+    expect(await seatOf()).toMatchObject({ state: "out", owner: "derived" });
+    // A different plan, told by two agreeing readings: the first only holds it.
+    now += MIN;
+    expect((await post("Max 20x", 2)).status).toBe(200);
+    expect(await seatOf()).toMatchObject({ state: "out" });
+    now += MIN;
+    expect((await post("Max 20x", 3)).status).toBe(200);
+    expect(await seatOf()).toBeUndefined();
+    expect(await noticesOf("back")).toEqual([
+      { id: expect.stringMatching(/^seat-a\|back\|reset\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: the plan or account changed, so its earlier limit mark is dropped." },
+    ]);
+    // An unchanged plan tells nothing, so a seat under it stays.
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
+    const postB = (plan: string | null, n: number) => postReading({ account: "seat-b", plan, capturedAt: now, windows: [fiveHour(20 + n, reset)] });
+    now += MIN;
+    expect((await postB("Max 5x", 4)).status).toBe(200);
+    now += MIN;
+    expect((await postB("Max 5x", 5)).status).toBe(200);
+    expect(await seatOf("seat-b")).toMatchObject({ state: "out", owner: "derived" });
+    expect((await noticesOf("back")).filter(n => n.account === "seat-b")).toEqual([]);
+  });
+
+  it("by is untrusted display text: cleaned before it is stored, and never raw in a notice (PR #125 finding 3b)", async () => {
+    const raw = `\u0001see https://evil.example/x mail a@b.example ${"k".repeat(200)}`;
+    const told = await limit({ kind: "usage_limit", by: raw, account: "seat-a", at: Math.floor(now / 1000) });
+    expect(await told.json()).toEqual({ ok: true });
+    const v = await viewOf();
+    expect((v.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toMatchObject({ by: `see mail ${"k".repeat(31)}` });
+    expect(JSON.stringify(v)).not.toMatch(/evil|:\/\/|@/);      // the link, the address and the control character are gone whole
+    // Cleaned to nothing, the reporter is "a source".
+    expect(await limit({ kind: "refused", by: "https://x.example/ a@b.example", account: "seat-b", at: Math.floor(now / 1000) })).toMatchObject({ status: 200 });
+    const again = await viewOf();
+    expect((again.accounts as Body[]).find(a => a.account === "seat-b")?.seat).toMatchObject({ by: "a source" });
+    expect(JSON.stringify(again)).not.toMatch(/evil|:\/\/|@/);
   });
 });

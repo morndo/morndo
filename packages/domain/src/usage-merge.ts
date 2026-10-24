@@ -3,7 +3,7 @@
 // source already read) loses to any status line that spoke after it, so a silent echo never hides the live line.
 import type { UsageSource } from "./usage-reading.ts";
 
-export type Candidate = { source: UsageSource; node: string | null; capturedAt: number; usedPercent: number; resetsAt: number | null; sameAsPrevious: boolean };
+export type Candidate = { source: UsageSource; node: string | null; capturedAt: number; usedPercent: number; resetsAt: number | null; sameAsPrevious: boolean; previousCapturedAt?: number | null };
 export type Merged = { shown: Candidate | null; disagree: { a: Candidate; b: Candidate } | null };
 export const DISAGREE_POINTS = 15;
 export const DISAGREE_WITHIN_MS = 10 * 60_000;

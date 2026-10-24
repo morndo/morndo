@@ -43,7 +43,7 @@ export type AgentToken = { id: string; name: string; role: "manager" | "worker";
 export type UsageSourceBody = {
   health: SourceHealth;
   reading: { capturedAt: number; plan: string | null; windows: WindowReading[] } | null;
-  previous: { windows: { id: string; usedPercent: number | null; resetsAt: number | null }[] } | null;
+  previous: { capturedAt?: number | null; windows: { id: string; usedPercent: number | null; resetsAt: number | null }[] } | null;
   hint: string | null;
 };
 export type UsageSourceRow = { account: string; source: string; node: string; body: UsageSourceBody };
@@ -179,6 +179,12 @@ export class Store {
   }
 
   transaction<T>(fn: () => T): T { return this.db.transaction(fn)(); }
+
+  // Fix round on PR #125: the usage writes that must stand or fall together (finding 4c), one row by key instead of a
+  // scan (finding 5a) and notice retention (finding 5c). This round only writes the red tests: all three throw.
+  atomically<T>(fn: () => T): T { throw new Error("not implemented"); }
+  usageSource(account: string, source: string, node: string): UsageSourceRow | null { throw new Error("not implemented"); }
+  pruneUsageNotices(keep: number, olderThanMs: number, now: number): number { throw new Error("not implemented"); }
 
   setting<T>(key: string): T | null {
     const r = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
