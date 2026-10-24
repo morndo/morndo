@@ -172,6 +172,25 @@ async function codexPassOnce(o: { mode?: string; accounts?: Record<string, unkno
 }
 
 describe("the collector's codex account (S6, plan 4.6)", () => {
+  // Slice 6 review (LOW): two accounts on one machine are told apart by their directory, and nothing checked the two
+  // differ: the same home would post one account's numbers under two names.
+  it("two codex accounts that share one CODEX_HOME read nothing and say which two", async () => {
+    const server = codexServer();
+    const { code, err } = await codexPassOnce({ accounts: { "codex-a": { kind: "codex", codexHome: server.dir }, "codex-b": { kind: "codex", codexHome: `${server.dir}/` } } });
+    expect(code).toBe(1);
+    expect(err).toContain("codex-a");
+    expect(err).toContain("codex-b");
+    expect(hub.of("/api/agent/usage/lease")).toEqual([]);          // nothing was asked, nothing read
+  });
+
+  it("two claude accounts that share one config directory read nothing either", async () => {
+    const { code, err } = await codexPassOnce({ accounts: { "seat-a": { configDir: "/cfg/shared" }, "seat-b": { configDir: "/cfg/shared/../shared" } } });
+    expect(code).toBe(1);
+    expect(err).toContain("seat-a");
+    expect(err).toContain("seat-b");
+    expect(hub.of("/api/agent/usage/lease")).toEqual([]);
+  });
+
   it("a granted lease for source app-server reads the app server and posts the reading with the lease id", async () => {
     hub.answerWith({ status: "granted", lease_id: "lease-9-test", expires_at: 4_102_444_800 });
     const { code, err } = await codexPassOnce();
