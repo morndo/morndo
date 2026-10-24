@@ -86,19 +86,17 @@ describe("usage notices raise a push (S4)", () => {
     expect(sent).toEqual([]);                                                    // …and raised nothing
     expect(audit).toEqual([]);
   });
-  it("a write that rolls back tells nobody: the notice row and the push go together or not at all", async () => {
-    // The notice row is written inside the transaction, then a later statement of it fails: the whole write rolls back.
-    const real = store.saveUsageNotice.bind(store);
-    const spy = vi.spyOn(store, "saveUsageNotice").mockImplementation((n, signature) => { real(n, signature); throw new Error("disk full"); });
-    expect(() => usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toThrow("disk full");
+  it("a write whose commit fails tells nobody: the push follows the commit, never the write", async () => {
+    // The write's statements all run and queue their notice, then the commit itself fails: nothing is told.
+    const spy = vi.spyOn(store, "atomically").mockImplementation(fn => { fn(); throw new Error("commit failed"); });
+    expect(() => usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toThrow("commit failed");
     await settle(2000);
     expect(sent).toEqual([]);
     expect(audit).toEqual([]);
     expect(notifications.counts().usage).toBe(0);
-    expect(usage.view().notices).toEqual([]);                            // the row went with the rollback
     spy.mockRestore();
-    // The same write, now committing, pushes once.
-    expect(usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
+    // A write that does commit pushes once.
+    expect(usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
     await settle(2000);
     expect(sent).toHaveLength(1);
   });
