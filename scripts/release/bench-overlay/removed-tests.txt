@@ -1,0 +1,6 @@
+scripts/release/workflow.test.ts
+scripts/release/signing.test.ts
+scripts/release/release.test.ts
+apps/hub/test/val-b12-e2e-listed.test.ts
+plugins/transcribe-whisper-cpp/test/install.test.ts
+apps/updater/test/docs.test.ts
