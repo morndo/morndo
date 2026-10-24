@@ -57,6 +57,19 @@ describe("account resolution from the fleet's taps (plan 4.5 item 4)", () => {
     } finally { await alone.close(); }
   });
 
+  it("a status-line report leaves the lane's record, which outlives the fresh session (writer b)", async () => {
+    const w1 = hub.agents.issue("w1", "worker").secret;
+    const report = await fetch(`${hub.base}/api/agent/usage`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${w1}`, "content-type": "application/json", "x-morndo-lane": "w1", "x-morndo-account": "seat-a" },
+      body: JSON.stringify({ session_id: "s1", rate_limits: { five_hour: { used_percentage: 10, resets_at: Math.floor((now + 4 * 3_600_000) / 1000) } } }),
+    });
+    expect(report.status).toBe(200);
+    now += 30 * MIN;                                            // the session (10 minutes) is no longer fresh; the record (7 days) is
+    failure(hub, { lane: "w1", account: null, at: now });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit" });
+  });
+
   it("a moved lane with a stale record resolves from the hook's own field (AT-20)", async () => {
     laneAccount(hub, "w1", "seat-a", now - 8 * DAY);          // the record is a week old: the lane long moved
     failure(hub, { lane: "w1", account: "seat-b", at: now }); // the account it works under now, the hook's own word

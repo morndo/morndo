@@ -36,6 +36,8 @@ describe("which account a lane's failure belongs to (plan 4.5 item 4)", () => {
     expect(resolveAccount(input({ records: [record({ account: "seat-b" })] }))).toEqual({ account: "seat-b", by: "record" });
     expect(resolveAccount(input({ records: [record({ account: "seat-b", at: T - 30_000 }), record({ account: "seat-c" })] })))
       .toEqual({ account: "seat-b", by: "record" });       // seat-b's stamp (T-30s) is the newer of the two
+    // a node whose name the hub could not give ("") is never "the node": a record of node "" says nothing of it
+    expect(resolveAccount(input({ node: "", lane: null, records: [record({ node: "", lane: "w9", account: "seat-a" })] }))).toEqual({ account: null, by: null });
     expect(resolveAccount(input({ lane: null, records: [record()] }))).toEqual({ account: "seat-a", by: "node" });      // no lane: the record step is skipped, the node's only account still serves
   });
 

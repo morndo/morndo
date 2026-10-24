@@ -172,5 +172,9 @@ describe("the usage tap", () => {
     expect(takeWith("studio", { session_id: SID, error_type: "overloaded" }).r.limit).toBeNull();
     expect(takeWith("studio", { session_id: SID, text: "x" }, "/hook/stop").r.limit).toBeNull();
     expect(takeWith("api", { session_id: SID, error_type: "rate_limit", account: 42 }).r.limit).toEqual({ kind: "failure", lane: "api", window: "api", sessionId: SID, error: "rate_limit", account: null, at: AT });
+    // a string that is not an account name is no account either (a space, a link, too long)
+    for (const bad of ["has a space", "https://x.example/", "k".repeat(81)])
+      expect(takeWith("api", { session_id: SID, error_type: "rate_limit", account: bad }).r.limit?.account, bad).toBeNull();
+    expect(takeWith("api", { session_id: SID, error_type: "rate_limit", account: "seat-a" }).r.limit?.account).toBe("seat-a");
   });
 });
