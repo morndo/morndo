@@ -58,6 +58,8 @@ describe("plan changes (U8)", () => {
     expect(d3.told).toEqual([]);
     expect(changeSignature({ kind: "drop", window: "five-hour", from: "80", to: "20", resetsAt: NOW + 3 * DAY })).toBe(changeSignature({ kind: "drop", window: "five-hour", from: "80", to: "26", resetsAt: NOW + 3 * DAY }));
     expect(changeSignature({ kind: "drop", window: "five-hour", from: "80", to: "20", resetsAt: NOW + 3 * DAY })).not.toBe(changeSignature({ kind: "drop", window: "weekly", from: "80", to: "20", resetsAt: NOW + 3 * DAY }));
+    // a second real drop in the same cycle (it rose again, then fell from a different level) is a different notice
+    expect(changeSignature({ kind: "drop", window: "five-hour", from: "80", to: "20", resetsAt: NOW + 3 * DAY })).not.toBe(changeSignature({ kind: "drop", window: "five-hour", from: "60", to: "10", resetsAt: NOW + 3 * DAY }));
   });
 
   it("a window the status line leaves out is no change, however often it goes and comes back", () => {

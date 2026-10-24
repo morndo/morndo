@@ -4,7 +4,8 @@
 // stands still is a drop of points, not a reset; a rolling window never drops.
 export type PlanWindow = { id: string; lengthMins: number | null; usedPercent: number | null; resetsAt: number | null; rolling: boolean };   // resetsAt in ms
 // `complete`: this reading names every window the account has (a source that reports them all), so a window missing from it is
-// really gone. A status line leaves a window out when it resets or when no turn has run, so it is never complete.
+// really gone. A status line leaves a window out when it resets or when no turn has run, so it is never complete. It is the
+// caller's claim: only a source that lists the account's whole window set (the headless usage report) may set it.
 export type PlanFact = { plan: string | null; identity: string | null; windows: readonly PlanWindow[]; complete?: boolean };
 // `resetsAt`: for a drop, the reset time the window stood still at (a drop is the same drop at any new percentage).
 export type PlanChange = { kind: "name" | "account" | "cadence" | "windows" | "drop"; window: string | null; from: string | null; to: string | null; resetsAt?: number | null };
@@ -85,8 +86,10 @@ function confirms(held: readonly PlanChange[], now: readonly PlanChange[]): bool
   });
 }
 
-// What a notice is deduplicated by. A drop is signed by its window and its reset, not by the percentage it fell to.
+// What a notice is deduplicated by. A drop is signed by its window, its reset and the level it fell from (in tens), not by the
+// percentage it fell to: the same fall seen at 20, 22 and 24 is one drop, and a second real drop in the same cycle (it rose
+// again, then fell from a different level) is another. Two falls from within the same ten points in one cycle are one notice.
 export function changeSignature(c: PlanChange): string {
-  if (c.kind === "drop") return `drop|${c.window ?? ""}|${c.resetsAt == null ? "" : Math.round(c.resetsAt / 60_000)}`;
+  if (c.kind === "drop") return `drop|${c.window ?? ""}|${c.resetsAt == null ? "" : Math.round(c.resetsAt / 60_000)}|${Math.floor(Number(c.from) / 10)}`;
   return `${c.kind}|${c.window ?? ""}|${c.to ?? ""}`;
 }

@@ -21,6 +21,9 @@ export type UsageReport = {
   account: string; sessionId: string; lane: string | null; model: string | null; at: number;
   fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; spend: SpendWindow | null; contextUsed: number | null;
   limits: NamedWindow[] | null; onDemand: string | null;
+  // U14: windows this report carries but could not read (a percentage that is not one). They are unknown now: the number kept
+  // from before is not shown as if this report had said it. A window the report leaves out is not listed here.
+  unknown?: readonly ("fiveHour" | "sevenDay" | "spend")[];
 };
 // U5: what names an account besides its name, for the label. Only the hub sets it, from the pool's usage file; a
 // Report never does, and no part of it reaches the agent door's reply.
@@ -139,6 +142,8 @@ export function takeNamed(raw: readonly NamedWindow[]): NamedWindow[] | null {
 };
 const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0;
 
+// A window the report carried (readable or not) is what the report says of it; only one it left out is kept from before.
+const settled = <W>(read: W | null, carried: boolean, kept: W | null): W | null => (carried ? read : kept);
 // U2: the account after one report. A report older than the account's last never moves the windows (reports from
 // several sessions of one account can cross), but its session is still noted when it is newer than that session's last.
 export function applyReport(current: AccountUsage | null, r: UsageReport, now: number): AccountUsage {
@@ -151,14 +156,15 @@ export function applyReport(current: AccountUsage | null, r: UsageReport, now: n
   const sessions = had && had.at > r.at ? base.sessions : [...base.sessions.filter(s => s.sessionId !== r.sessionId), session];
   if (!newer) return { ...base, sessions: pruneSessions(sessions, now) };
   // A report that names its windows replaces them. An empty list is not that report: the previous windows stay until each reset.
+  const unreadable = (w: "fiveHour" | "sevenDay" | "spend") => r.unknown?.includes(w) === true;
   const namedNow = r.limits == null ? null : takeNamed(r.limits);
   const limits = namedNow ?? keepNamed(base.limits, now, base.reportedAt);
   return {
     account: base.account,
     reportedAt: r.at,
-    fiveHour: window(r.fiveHour) ?? keep(base.fiveHour, now),
-    sevenDay: window(r.sevenDay) ?? keep(base.sevenDay, now),
-    spend: spendOf(r.spend) ?? keep(base.spend, now),
+    fiveHour: settled(window(r.fiveHour), r.fiveHour !== null || unreadable("fiveHour"), keep(base.fiveHour, now)),
+    sevenDay: settled(window(r.sevenDay), r.sevenDay !== null || unreadable("sevenDay"), keep(base.sevenDay, now)),
+    spend: settled(spendOf(r.spend), r.spend !== null || unreadable("spend"), keep(base.spend, now)),
     limits,
     onDemand: namedNow ? demandOf(r.onDemand) : (limits === null ? null : base.onDemand),
     profile: base.profile ?? null,

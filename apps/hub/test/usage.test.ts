@@ -76,6 +76,14 @@ describe("reports under an agent token (U1)", () => {
     expect(a).toMatchObject({ fiveHour: { usedPercentage: 23.5 }, sevenDay: { usedPercentage: 41.2 } });
     expect((a.sessions as Body[]).map(s => s.sessionId)).toEqual(["s2", "s1"]);
   });
+  it("a window with an epoch value in its percentage is unknown, not the old number shown as fresh (U14)", async () => {
+    await post(statusLine({ session: "s1", five: 60, week: 40 }), "max-1");
+    now += 10 * 60_000;
+    const a = (await json(await post(statusLine({ session: "s1", five: 1_700_000_000, week: 41 }), "max-1"))).account as Body;
+    expect(a.fiveHour).toBeNull();
+    expect(a.sevenDay).toMatchObject({ usedPercentage: 41 });
+    expect(a.reportedAt).toBe(now);
+  });
   it("a report that names its windows keeps those bars and does not invent a 5-hour window", async () => {
     const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
     const body = {
