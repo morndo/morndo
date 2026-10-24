@@ -9,7 +9,7 @@ repository: no workflow and no script of this repository changes a setting, and
 
 ## What the check requires
 
-`sh scripts/release/check-release-settings.sh --reviewer-id <id> --app-id <app_id> [--repo <owner/name>] [--no-org-secrets]`
+`sh scripts/release/check-release-settings.sh --reviewer-id <id> --app-id <app_id> [--repo <owner/name>] [--no-org-secrets] [--allow-main-bypass]`
 prints one `FAIL:` line per problem and exits 1, and `check-release-settings: ok (...)` and exits 0 when there is none
 (2 for a usage error: both ids are required); `INFO:` lines never fail. `<id>` is the release reviewer's
 user id (the second account) and `<app_id>` the release App's id, so the check compares numbers, never names. It checks,
@@ -26,51 +26,68 @@ read-only and printing secret names only, never values:
 | key secrets | derived from the workflows, not from a name pattern: every `secrets.<NAME>` a job uses in `release`, `feed`, `promote` or `withdraw` must be a secret of exactly that environment, of no other environment, and neither a repository nor an organisation secret; a job with no environment that reads a key (`RELEASE_SSH_KEY`, `FEED_SSH_KEY`, `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` by name, a secret a key job reads, or one a key environment holds) fails |
 | the App's secrets | `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are environment secrets of `release-please` only: not a repository secret, not an organisation secret, and not a secret of any other environment (step 6). Any other secret a job with no environment uses is an `INFO:` line, and so is every repository or organisation secret that no workflow on `main` uses (a stray key kept as a backup shows up there; it is listed, not judged by its name) |
 | the `main` rulesets | their bypass actors are printed as `INFO:` lines for the owner to read |
-| CODEOWNERS | `.github/CODEOWNERS` on `main`, read through the contents API with the raw media type, has a non-comment, non-blank line whose pattern is `/trust/`, `/trust/*`, `trust/` or `trust/*`, followed by at least one owner starting with `@` (the LAST such line decides, a `*` line before it does not count and a catch-all line after it takes the files over and fails; who the owner is is not judged); and an active ruleset on `main` has a `pull_request` rule with `require_code_owner_review` true |
+| CODEOWNERS | `.github/CODEOWNERS` on `main`, read through the contents API with the raw media type. For **each** of `trust/keys.json`, `trust/keys.json.sig`, `trust/release_allowed_signers` and `trust/feed_allowed_signers` the LAST non-comment line whose pattern covers the file (gitignore-style: `/trust/`, `trust/`, `/trust/*`, `/trust/**`, `/trust/keys.json`, but also `*.json` or `*`) decides, and it must name an owner starting with `@` and name the trust directory or file in its pattern. A later generic line (`*`, `**`, `*.json`, `*.sig`) takes the files over and fails; a later line with no owner (`/trust/*`) removes the owner and fails; a line before the trust line is overridden and does not matter; who the owner is is not judged. And an active ruleset on `main` has a `pull_request` rule with `require_code_owner_review` true, **an empty `exclude`** (an exclude may drop `main`) and **no bypass actor** (a bypass actor can skip the review; `--allow-main-bypass` accepts one knowingly, see below) |
 
 Two exposures were named so they are decided with open eyes (the release plan's section 1, decisions 9 and 10).
 Decision 9 stays open: the account the lanes run as is a repository administrator that can merge a changed workflow
-and bypass the review rule, and the approval screen shows the run, not the diff — so the check prints the `main`
-rulesets' bypass actors and the release card lists every change to the release-critical paths, and the owner decides
-with that in front of him. Decision 10 is closed by the setup below.
+and bypass the review rule, and the approval screen shows the run, not the diff. The live `main: pull request and code
+owners` ruleset has exactly that bypass actor (the repository role Admin, mode `pull_request`, read 2026-10-24), so the
+check **fails on it by default** and prints it. The owner who accepts the exposure says so with `--allow-main-bypass`,
+which turns the failure into a `WARN:` line naming the actors, at every run; an `exclude` is never accepted. The release
+card lists every change to the release-critical paths, and the owner decides with that in front of him. Decision 10 is closed by the setup below.
 
 ## The steps
 
 Each command is exact, each with the one-line result to expect. `<login>` below is the owner's second GitHub account
 (the release reviewer) and `<id>` the number the first command of step 1 prints for it.
 
+**Name the repository once, and read it before every write.** Every command below takes `$REPO`, none has a repository
+hard-coded, and every write is preceded by `repo`, which prints the slug. **Stop unless the slug is the repository you
+mean**: the same steps are run on the release bench (`morndo/morndo-release-test`) as a rehearsal, and a write that
+lands on the wrong repository changes the settings that guard a key.
+
+```sh
+REPO=morndo/morndo          # the repository you mean; the release bench is morndo/morndo-release-test
+repo() { echo "repository: $REPO (stop unless this is the repository you mean)" >&2; }
+```
+
+Set both again in every new shell. `ORG=${REPO%%/*}` is the organisation part where a command needs it.
+
 1. **Create `promote` and `withdraw` before the workflows that name them are merged.** A workflow that names a missing
    environment creates it with no reviewer and no branch rule, so the environment must be there first:
 
    ```sh
    gh api users/<login> --jq .id
-   gh api -X PUT repos/morndo/morndo/environments/promote --input - <<'EOF'
+   repo
+   gh api -X PUT repos/$REPO/environments/promote --input - <<'EOF'
    {"reviewers":[{"type":"User","id":<id>}],"prevent_self_review":true,"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
    EOF
    ```
 
    Expected: the first command prints the second account's id (look it up; do not paste an id you did not look up),
-   the second answers with the environment object. Repeat the `PUT` for `withdraw`.
+   the second answers with the environment object. Repeat the `PUT` for `withdraw` (run `repo` before it).
 
 2. **Give `promote` and `withdraw` their branch policy**, the branch `main` only:
 
    ```sh
-   gh api -X POST repos/morndo/morndo/environments/promote/deployment-branch-policies -f name=main -f type=branch
+   repo
+   gh api -X POST repos/$REPO/environments/promote/deployment-branch-policies -f name=main -f type=branch
    ```
 
-   Expected: the policy object (`"name":"main"`, `"type":"branch"`). Repeat for `withdraw`.
+   Expected: the policy object (`"name":"main"`, `"type":"branch"`). Repeat for `withdraw` (run `repo` before it).
 
 3. **Remove the tag policy `v*` from `release`, `feed` and `github-pages`**, which allow `main` and `v*` today (a run
    started from a tag must not reach a key), and make sure `main` is present:
 
    ```sh
-   gh api repos/morndo/morndo/environments/release/deployment-branch-policies --jq '.branch_policies[] | select(.type=="tag") | .id'
-   gh api -X DELETE repos/morndo/morndo/environments/release/deployment-branch-policies/<id>
-   gh api repos/morndo/morndo/environments/release/deployment-branch-policies --jq '.branch_policies[] | "\(.name) \(.type)"'
+   gh api repos/$REPO/environments/release/deployment-branch-policies --jq '.branch_policies[] | select(.type=="tag") | .id'
+   repo
+   gh api -X DELETE repos/$REPO/environments/release/deployment-branch-policies/<id>
+   gh api repos/$REPO/environments/release/deployment-branch-policies --jq '.branch_policies[] | "\(.name) \(.type)"'
    ```
 
    Expected: the first command prints the tag policy's id, the `DELETE` answers with no body, the third prints
-   `main branch` and nothing else. Repeat all three for `feed` and `github-pages`.
+   `main branch` and nothing else. Repeat all three for `feed` and `github-pages` (run `repo` before each `DELETE`).
 
 4. **Turn off administrator bypass on `release`, `feed`, `promote` and `withdraw`.** The account the lanes run as is a
    repository administrator; with the bypass on it could skip the required reviewer, so the reviewer would stop nothing.
@@ -82,7 +99,7 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    the check is the proof:
 
    ```sh
-   gh api repos/morndo/morndo/environments --jq '.environments[] | {name, can_admins_bypass}'
+   gh api repos/$REPO/environments --jq '.environments[] | {name, can_admins_bypass}'
    ```
 
    Expected: `can_admins_bypass` is `false` for `release`, `feed`, `promote` and `withdraw` (`github-pages` may stay
@@ -92,8 +109,9 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    App token). The App's id is on its page under Settings > GitHub Apps, or in the org's installations:
 
    ```sh
-   gh api orgs/morndo/installations --jq '.installations[] | {app_id, app_slug}'
-   gh api -X POST repos/morndo/morndo/rulesets --input - <<'EOF'
+   gh api orgs/${REPO%%/*}/installations --jq '.installations[] | {app_id, app_slug}'
+   repo
+   gh api -X POST repos/$REPO/rulesets --input - <<'EOF'
    {"name":"v* tags: only the release App","target":"tag","enforcement":"active",
     "conditions":{"ref_name":{"include":["refs/tags/v*"],"exclude":[]}},
     "rules":[{"type":"creation"},{"type":"update","parameters":{"update_allows_fetch_and_merge":false}},{"type":"deletion"}],
@@ -117,10 +135,11 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
       request that names it merges:
 
       ```sh
-      gh api -X PUT repos/morndo/morndo/environments/release-please --input - <<'EOF'
+      repo
+      gh api -X PUT repos/$REPO/environments/release-please --input - <<'EOF'
       {"deployment_branch_policy":{"protected_branches":false,"custom_branch_policies":true}}
       EOF
-      gh api -X POST repos/morndo/morndo/environments/release-please/deployment-branch-policies -f name=main -f type=branch
+      gh api -X POST repos/$REPO/environments/release-please/deployment-branch-policies -f name=main -f type=branch
       ```
 
       Expected: the `PUT` answers with the environment object (no reviewers) and the `POST` with the policy object
@@ -129,8 +148,9 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    2. Set `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` in that environment:
 
       ```sh
-      gh secret set RELEASE_APP_ID -R morndo/morndo --env release-please --body "<the App's id>"
-      gh secret set RELEASE_APP_PRIVATE_KEY -R morndo/morndo --env release-please < release-app-key.pem
+      repo
+      gh secret set RELEASE_APP_ID -R "$REPO" --env release-please --body "<the App's id>"
+      gh secret set RELEASE_APP_PRIVATE_KEY -R "$REPO" --env release-please < release-app-key.pem
       ```
 
       `release-app-key.pem` is the private key file the App's settings page produced; delete the local copy afterwards.
@@ -144,8 +164,9 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    5. Delete the repository-level copies:
 
       ```sh
-      gh secret delete RELEASE_APP_ID -R morndo/morndo
-      gh secret delete RELEASE_APP_PRIVATE_KEY -R morndo/morndo
+      repo
+      gh secret delete RELEASE_APP_ID -R "$REPO"
+      gh secret delete RELEASE_APP_PRIVATE_KEY -R "$REPO"
       ```
 
       Expected: the `secret delete` commands remove the two repository secrets.
@@ -164,7 +185,8 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    recomputes it from the branch, but it cannot tell a rewritten branch from a real one:
 
    ```sh
-   gh api -X POST repos/morndo/morndo/rulesets --input - <<'EOF'
+   repo
+   gh api -X POST repos/$REPO/rulesets --input - <<'EOF'
    {"name":"feed branch: no force push, no deletion","target":"branch","enforcement":"active",
     "conditions":{"ref_name":{"include":["refs/heads/feed"],"exclude":[]}},
     "rules":[{"type":"non_fast_forward"},{"type":"deletion"}],
@@ -184,9 +206,10 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    An active ruleset on `main` with a `pull_request` rule that has `require_code_owner_review` true (the existing
    `main: pull request and code owners`) is what turns that line into a required review, so the check requires that
    rule too (https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners,
-   read 2026-10-24). CODEOWNERS is last-match-wins: the last `/trust/` line decides and must name an owner, and a later
-   catch-all line (`*`, `**`, `/**`) would take the trust files over, so the check fails on one. With one maintainer account that the lanes also use, the `/trust/` entry names the same owner as
-   `*`, so it is explicit but not yet a second review. It becomes one once the lanes get a GitHub account of their own
+   read 2026-10-24). CODEOWNERS is last-match-wins, per file: for each trust file the last line that covers it decides and must
+   name an owner and the trust directory or file, so a later `*`, `*.json` or `*.sig` line, or a later `/trust/*` line
+   with no owner, takes the files over and the check fails on it. With one maintainer account that the lanes also use,
+   the `/trust/` entry names the same owner as `*`, so it is explicit but not yet a second review. It becomes one once the lanes get a GitHub account of their own
    without administrator rights (the plan's decision 9, "the real fix"). The check requires the entry either way.
 
 9. **Run the check and keep its output.** It needs the second account's user id (the number `gh api users/<login>
@@ -194,11 +217,11 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
 
    ```sh
    gh auth status
-   sh scripts/release/check-release-settings.sh --reviewer-id <id> --app-id <app_id>
+   sh scripts/release/check-release-settings.sh --repo "$REPO" --reviewer-id <id> --app-id <app_id>
    ```
 
    Expected: `gh auth status` shows the token's scopes (organisation secrets need `admin:org`), the check prints
-   `check-release-settings: ok (morndo/morndo: ...)`. Without `admin:org` the organisation secrets cannot be read and
+   `check-release-settings: ok ($REPO: ...)`, with the slug it read. On `morndo/morndo` today the check also fails on the repository Admin bypass actor of the `main` code-owner ruleset (decision 9) until the owner runs it with `--allow-main-bypass`, which turns that line into a `WARN:`. Without `admin:org` the organisation secrets cannot be read and
    the check says so: run it with an administrator token, or pass `--no-org-secrets` to leave them unchecked. The
    check runs before every release and every Monday (the manager's Monday card), never inside Actions (the Actions
    token cannot read environment secrets, rulesets or reviewers), and its output is kept as evidence in the run book.
@@ -211,6 +234,11 @@ moment, and the commit job refuses ("the feed branch moved; run this job again")
 `feed.yml`'s Monday re-sign holds the `morndo-feed` concurrency group while it waits for its approval, and the feed
 expires after 14 days: a missed week is safe, two are not. The withdraw workflow takes `morndo-feed` only in its
 commit job. Withdrawing the last Version a channel offers needs the `allow_empty_channel` input.
+
+A withdrawal marks the Feed. It does not change which release GitHub calls latest, so a first install made from
+`https://github.com/<owner>/<repo>/releases/latest/download/install.sh` can still take a withdrawn Release until a newer
+one is published. Until then, give people the address of a Version that is good
+(`.../releases/download/v<version>/install.sh`, which installs exactly that Version), or publish the next release.
 
 ## Endpoints used
 
