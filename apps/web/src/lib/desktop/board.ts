@@ -81,8 +81,12 @@ export function decodeProof(raw: unknown): ProofView | null {
 export function acceptLabel(proof: ProofView | null, merged: MergedView | null): { label: string; title: string | undefined } {
   if (merged?.live === false)
     return { label: "Accept anyway", title: "Its merge is not live on every node; this is recorded as accepted by you" };
-  if (proof !== null && !proof.state.accepts)
+  // The gate's mode decides what the button promises: on holds the Done (so this is an override, recorded), warn only
+  // records it, off says nothing.
+  if (proof !== null && !proof.state.accepts && proof.mode === "on")
     return { label: "Accept anyway", title: "Its proof is not green; this is recorded as accepted by you" };
+  if (proof !== null && !proof.state.accepts && proof.mode === "warn")
+    return { label: "Accept as done", title: "Its proof is not green; the gate is in warn mode, so this is recorded" };
   return { label: "Accept as done", title: undefined };
 }
 

@@ -100,6 +100,7 @@ describe("proof in the board app (ADR-0035 step 5)", () => {
       rev: 4,
       brief: { summary: "Totals row", decisions: "", leftOut: "nothing", limits: "none known", refs: ["acme/shop#42@3e9d1a7"], attested: [], noCode: "" },
       results: [{ ref: "acme/shop#42@3e9d1a7", state: "green", detail: null, checkedAt: 1 }],
+      mode: "on",
       state: { kind: "verified", green: 1, total: 1, accepts: true, line: "proof: 1 of 1 green" },
     };
     const view = parseBody(ProofViewSchema, raw);
@@ -118,6 +119,7 @@ describe("proof in the board app (ADR-0035 step 5)", () => {
       rev: 4,
       brief: { summary: "x", decisions: "", leftOut: "nothing", limits: "none known", refs: ["acme/shop@3e9d1a7:ci,lint"], attested: [], noCode: "" },
       results: [{ ref: "acme/shop@3e9d1a7:ci,lint", state: "red", detail: "\"lint\" failed", checkedAt: 1 }],
+      mode: "on",
       state: { kind: "failing", green: 0, total: 1, accepts: false, line: "proof: 0 of 1 green · ✗ acme/shop@3e9d1a7:ci,lint \"lint\" failed" },
     };
     const liveMerge: MergedView = { key: "T-1" as Task["key"], merges: [], live: true, label: "merged, live" };
@@ -138,10 +140,15 @@ describe("proof in the board app (ADR-0035 step 5)", () => {
       rev: 4,
       brief: failing.brief,
       results: [{ ref: "acme/shop@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: 1 }],
+      mode: "on",
       state: { kind: "verified", green: 1, total: 1, accepts: true, line: "proof: 1 of 1 green" },
     };
     expect(acceptLabel(verified, liveMerge)).toEqual({ label: "Accept as done", title: undefined });
     expect(acceptLabel(null, liveMerge)).toEqual({ label: "Accept as done", title: undefined });
+    // the gate's mode decides what the label promises: warn records, off says nothing
+    expect(acceptLabel({ ...failing, mode: "warn" }, liveMerge)).toEqual({ label: "Accept as done", title: "Its proof is not green; the gate is in warn mode, so this is recorded" });
+    expect(acceptLabel({ ...failing, mode: "off" }, liveMerge)).toEqual({ label: "Accept as done", title: undefined });
+    expect(acceptLabel({ ...failing, mode: "warn" }, notLiveMerge).label).toBe("Accept anyway");   // the merge still wins
     // negative control: proof must change the label when it does not accept
     expect(acceptLabel(failing, liveMerge).label).not.toBe("Accept as done");
   });

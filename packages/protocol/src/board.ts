@@ -2,7 +2,7 @@
 // agents' CLI, and the bodies a change is sent with, from the app (a Command, AC7) or from an agent (a bearer token).
 // Types are the domain's own; a task this build can't read is dropped from the list, never guessed.
 import type { EndpointId, MergeRecord, MergedView, ProofBrief, ProofState, RefResult, SessionId, Task, TaskActor, TaskChange, TaskEvent, TASK_PRIORITIES, TASK_STATUSES } from "@morndo/domain";
-import { ATTESTED_KINDS, PROOF_KINDS, REF_STATES } from "@morndo/domain";
+import { ATTESTED_KINDS, PROOF_KINDS, PROOF_MODES, REF_STATES } from "@morndo/domain";
 import * as z from "./z.ts";
 
 const str = (max: number) => z.string().check(z.maxLength(max));
@@ -23,7 +23,7 @@ export const ProofBriefSchema = z.object({
 });
 export const RefResultSchema = z.object({ ref: text(), state: z.enum(REF_STATES), detail: z.nullable(text()), checkedAt: count() });
 export const ProofViewSchema = z.object({
-  rev: z.nullable(z.int().check(z.gte(1))), brief: z.nullable(ProofBriefSchema), results: z.array(RefResultSchema),
+  rev: z.nullable(z.int().check(z.gte(1))), brief: z.nullable(ProofBriefSchema), results: z.array(RefResultSchema), mode: z.enum(PROOF_MODES),
   state: z.object({ kind: z.enum(PROOF_KINDS), green: count(), total: count(), accepts: z.boolean(), line: text() }),
 });
 export type ProofView = z.output<typeof ProofViewSchema>;

@@ -15,7 +15,8 @@ import type { BoardResult, BoardService } from "./board-service.ts";
 
 // What the card shows of one task's proof (B15): the brief that still counts, its rows and the one line. No brief:
 // `rev` and `brief` null, the no_brief line.
-export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; state: ProofState };
+// `mode`: the gate's mode, so a reader (the panel's Accept button) says only what the gate would do.
+export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; mode: ProofMode; state: ProofState };
 
 export class ProofService {
   #store: Store;
@@ -77,10 +78,10 @@ export class ProofService {
   view(key: string): ProofView | null {
     if (this.#store.task(key) === null) return null;
     const current = currentBrief(this.#store.taskEvents(key));
-    if (current === null) return { rev: null, brief: null, results: [], state: proofOf(null, []) };
+    if (current === null) return { rev: null, brief: null, results: [], mode: this.#mode, state: proofOf(null, []) };
     const results = this.#store.proofResultsOf(key, current.rev);
     const merges = this.#store.mergesOf(key).map(m => ({ repo: m.repo, sha: m.sha }));
-    return { rev: current.rev, brief: current.brief, results, state: proofOf(current.brief, results, merges) };
+    return { rev: current.rev, brief: current.brief, results, mode: this.#mode, state: proofOf(current.brief, results, merges) };
   }
 
   // The one line per task in review (B15), for the board view the agents read: keyed by task, `no brief` included, so
