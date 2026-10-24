@@ -6,6 +6,7 @@ import { DISAGREE_POINTS, DISAGREE_WITHIN_MS, mergeWindow, type Candidate } from
 
 const T = 1_700_000_000_000;      // 10:00
 const MIN = 60_000;
+const DAY = 86_400_000;
 
 const cand = (o: Partial<Candidate> & { source: Candidate["source"]; capturedAt: number; usedPercent: number }): Candidate =>
   ({ node: null, resetsAt: null, sameAsPrevious: false, ...o });
@@ -57,6 +58,36 @@ describe("merging two sources' readings of one window (AT-30)", () => {
     ]);
     expect(m.shown?.usedPercent).toBe(70);
     expect(m.disagree).toBeNull();
+  });
+
+  it("a last-known echo beats a status line that has not spoken since the source's previous read (PR #125 finding 1)", () => {
+    const m = mergeWindow([
+      cand({ source: "status-line", capturedAt: T - 3 * DAY, usedPercent: 20 }),
+      cand({ source: "app-server", capturedAt: T, usedPercent: 55, sameAsPrevious: true, previousCapturedAt: T - 10 * MIN }),
+    ]);
+    expect(m.shown?.usedPercent).toBe(55);
+    expect(m.shown?.source).toBe("app-server");
+    expect(m.disagree).toBeNull();      // three days apart: the 15-point rule cannot apply
+  });
+
+  it("the echo still loses when the status line spoke after the source's previous read (PR #125 finding 1)", () => {
+    const m = mergeWindow([
+      cand({ source: "app-server", capturedAt: T + 10 * MIN, usedPercent: 40, sameAsPrevious: true, previousCapturedAt: T }),
+      cand({ source: "status-line", capturedAt: T + 3 * MIN, usedPercent: 70 }),
+    ]);
+    expect(m.shown?.usedPercent).toBe(70);
+    expect(m.shown?.source).toBe("status-line");
+    expect(m.disagree).toBeNull();
+  });
+
+  it("an echo whose previous read is unknown still loses to any status line, however old (PR #125 finding 1)", () => {
+    const line = { source: "status-line" as const, capturedAt: T - 3 * DAY, usedPercent: 20 };
+    const nullPrevious = mergeWindow([cand(line), cand({ source: "app-server", capturedAt: T, usedPercent: 55, sameAsPrevious: true, previousCapturedAt: null })]);
+    expect(nullPrevious.shown?.usedPercent).toBe(20);
+    expect(nullPrevious.shown?.source).toBe("status-line");
+    const noPrevious = mergeWindow([cand(line), cand({ source: "app-server", capturedAt: T, usedPercent: 55, sameAsPrevious: true })]);
+    expect(noPrevious.shown?.usedPercent).toBe(20);
+    expect(noPrevious.shown?.source).toBe("status-line");
   });
 
   it("an empty list shows nothing and disagrees about nothing", () => {

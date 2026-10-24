@@ -50,6 +50,11 @@ export function backNoticeText(account: string, by: string): string {
   return `${account}: back in use (${by} shows a new cycle).`;
 }
 
+// A derived seat dropped because the plan or the account behind it changed (fix round on PR #125, finding 3a).
+export function seatResetNoticeText(account: string): string {
+  return `${account}: the plan or account changed, so its earlier limit mark is dropped.`;
+}
+
 export function thresholdNoticeText(account: string, windowTitle: string, level: ThresholdLevel): string {
   return `${account}: the ${windowTitle} window passed ${level === "critical" ? 90 : 75}%.`;
 }

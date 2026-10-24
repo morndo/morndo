@@ -27,6 +27,12 @@ const reading = (o: {
 const limit = (body: unknown) => fetch(`${hub.base}/api/agent/usage/limit`, {
   method: "POST", headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-lane": "builder" }, body: JSON.stringify(body),
 });
+// A status line's report with the five-hour reset the caller names, so a run of reports keeps one cycle.
+const statusLine = (five: number, resetsAt: number, account = "seat-a") => fetch(`${hub.base}/api/agent/usage`, {
+  method: "POST",
+  headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-lane": "builder", "x-morndo-account": account },
+  body: JSON.stringify({ session_id: "s1", rate_limits: { five_hour: { used_percentage: five, resets_at: Math.floor(resetsAt / 1000) } } }),
+});
 const fiveHour = (usedPercent: number, resetsAt = now + 2 * HOUR) => ({ id: "five_hour", used_percent: usedPercent, resets_at: Math.floor(resetsAt / 1000), length_mins: 300 });
 const viewOf = async () => {
   const cookie = await hub.cookie();
@@ -74,6 +80,32 @@ describe("usage notices (plan 4.4)", () => {
     expect((await reading({ windows: [fiveHour(78)], capturedAt: now + 2 * MIN })).status).toBe(200);
     v = await viewOf();
     expect((v.notices as Body[]).filter(n => n.kind === "threshold")).toHaveLength(1);
+  });
+
+  it("a retried duplicate post is not a second reading for a threshold (PR #125 finding 4b)", async () => {
+    const reset = now + 2 * HOUR;
+    expect((await reading({ windows: [fiveHour(76, reset)], capturedAt: now })).status).toBe(200);
+    expect((await reading({ windows: [fiveHour(76, reset)], capturedAt: now })).status).toBe(200);    // the same post again, one stamp
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "threshold")).toEqual([]);
+    now += MIN;
+    expect((await reading({ windows: [fiveHour(77, reset)], capturedAt: now })).status).toBe(200);   // a later stamp is a second reading
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "threshold")).toEqual([
+      { id: expect.any(String), kind: "threshold", account: "seat-a", at: expect.any(Number), text: "seat-a: the 5-hour window passed 75%." },
+    ]);
+  });
+
+  it("a steady headless echo does not reset a threshold run the status line is building (PR #125 finding 4b)", async () => {
+    const reset = now + 2 * HOUR;
+    expect((await reading({ windows: [fiveHour(40, reset)], capturedAt: now })).status).toBe(200);    // the headless source reads 40% all along
+    now += MIN;
+    expect((await statusLine(76, reset)).status).toBe(200);                                          // the status line starts the run
+    now += MIN;
+    expect((await reading({ windows: [fiveHour(40, reset)], capturedAt: now })).status).toBe(200);    // an echo of its own earlier reading
+    now += MIN;
+    expect((await statusLine(77, reset)).status).toBe(200);                                          // the run's second reading tells
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "threshold")).toEqual([
+      { id: expect.any(String), kind: "threshold", account: "seat-a", at: expect.any(Number), text: "seat-a: the 5-hour window passed 75%." },
+    ]);
   });
 
   it("a notice carries only the hub's own words", async () => {
