@@ -70,6 +70,28 @@ beforeEach(async () => {
 afterEach(async () => { await hub.close(); });
 
 describe("seats (plan 4.5)", () => {
+  // The product lane's question (2026-10-24): Home lists an account's sessions of the last 10 minutes, so a lane stopped on a
+  // blocked account drops off that list. The seat is the account's own, so its limit stays on the account's card.
+  it("a seat stays on the account after its lane's session has dropped off the list", async () => {
+    const report = await fetch(`${hub.base}/api/agent/usage`, {
+      method: "POST", headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-account": "seat-a", "x-morndo-lane": "builder" },
+      body: JSON.stringify({ session_id: "s-builder", rate_limits: { five_hour: { used_percentage: 100, resets_at: Math.floor((now + 3 * DAY) / 1000) } } }),
+    });
+    expect(report.status).toBe(200);
+    const hit = await limit({ kind: "usage_limit", by: "builder", account: "seat-a", back_at: Math.floor((now + 4 * DAY) / 1000), at: Math.floor(now / 1000) });
+    expect(hit.status).toBe(200);
+    const live = ((await viewOf()).accounts as Body[]).find(a => a.account === "seat-a")!;
+    expect((live.sessions as Body[]).length).toBe(1);
+    expect(live.seat).toMatchObject({ state: "out" });
+    now += 3 * HOUR;                                   // far past the 10-minute session window: the lane has stopped
+    const later = ((await viewOf()).accounts as Body[]).find(a => a.account === "seat-a")!;
+    expect(later.sessions).toEqual([]);                // the list no longer shows the lane
+    expect(later.seat).toMatchObject({ state: "out", why: "usage_limit" });   // but the account's own card still says so
+    now += 2 * DAY;                                    // and the account is not forgotten while its seat stands
+    const days = ((await viewOf()).accounts as Body[]).find(a => a.account === "seat-a");
+    expect(days?.seat).toMatchObject({ state: "out" });
+  });
+
   it("two reporters, one change, one notice (AT-16)", async () => {
     const backAt = now + HOUR;
     const worker = await limit({ kind: "usage_limit", by: "reporter-one", account: "seat-a", back_at: Math.floor(backAt / 1000), at: Math.floor(now / 1000) });
