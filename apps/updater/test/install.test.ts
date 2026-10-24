@@ -10,6 +10,7 @@ import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TreeFile } from "../../../scripts/release/archive.ts";
 import { listFiles } from "../../../scripts/release/files.ts";
+import { ConfigFile } from "../src/adapters/config-file.ts";
 import { DirsInstaller } from "../src/adapters/installer-dirs.ts";
 import { updaterPaths } from "../src/adapters/paths.ts";
 import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
@@ -122,6 +123,20 @@ describe("`morndo install --role control-plane` (§10.3)", () => {
     expect(w.services.tape).toContain(`renderUnits:${VERSION} (hub,fleet,node)`);
     expect(w.services.enables[0]).toEqual([...UPDATE_UNITS, "morndo-hub.service", "morndo-fleet.service", "morndo-node.service"]);
     for (const s of ["hub", "fleet", "node"]) expect(r.out).toMatch(new RegExp(`${s}: healthy at ${VERSION}`));
+  });
+
+  it("a fresh install defaults to mode apply and channel stable", async () => {
+    const w = world({ joined: true });
+    const r = await w.run(["install", "--role", "control-plane"]);   // no --channel: the domain's own default
+    expect(r.code, r.err).toBe(0);
+    expect(JSON.parse(readFileSync(w.paths.config, "utf8"))).toEqual({ channel: "stable" });
+    const settings = new ConfigFile(w.paths.config).read();
+    expect(settings.channel).toBe("stable");
+    expect(settings.mode).toBe("apply");
+    const status = await w.run(["update", "--status"]);
+    expect(status.code, status.err).toBe(0);
+    expect(status.out).toMatch(/channel: stable/);
+    expect(status.out).toMatch(/mode: apply/);
   });
 
   it("--channel latest writes the channel it was given", async () => {

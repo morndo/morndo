@@ -1,7 +1,7 @@
 // The updater's ports (design §4.6). The application decides; these touch the network, the disk and the clock.
 import type {
-  Channel, DatabaseName, DbState, HealthReport, InstallMethod, KeySet, SafePointReport, Update, UpdateService,
-  UpdateSettings,
+  Channel, DatabaseName, DbState, HealthReport, InstallMethod, KeySet, SafePointReport, Update, UpdateMode,
+  UpdateService, UpdateSettings, Version, Window,
 } from "@morndo/domain";
 import type { RolloutWire, UpdateStateFile } from "@morndo/protocol";
 
@@ -186,6 +186,18 @@ export interface UpdateStateSink {
 export type MachineSettings = UpdateSettings & { soakMinutes: number | null };
 
 export interface SettingsSource { read(): MachineSettings }
+
+// One edit of the settings file (§8.1, §8.3). The application names the change; the adapter reads the file again,
+// applies this and nothing else, and writes it back. A value the file already holds is still a write.
+export type SettingsChange =
+  | { kind: "channel"; channel: Channel }
+  | { kind: "mode"; mode: UpdateMode }
+  | { kind: "pin"; version: Version }
+  | { kind: "unpin" }
+  | { kind: "window"; window: Window }
+  | { kind: "windowAny" };
+
+export interface SettingsSink { change(c: SettingsChange): MachineSettings }
 export interface Clock { now(): number }
 
 // ---- the apply's own ports (§4.6); the adapters for the machine come with the apply's PR, tests fake them

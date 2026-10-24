@@ -8,7 +8,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { dirname, isAbsolute, join } from "node:path";
 import {
   compareVersions, formatVersion, parseVersion, rollbackRestores, DEFAULT_SOAK_MINUTES,
-  type Channel, type Platform, type ProtocolRange, type UpdateService,
+  type Channel, type Platform, type ProtocolRange, type UpdateService, type Window,
 } from "@morndo/domain";
 import { ATTEMPT_ID, KeySetSchema, ManifestSchema, UpdateStatusSchema } from "@morndo/protocol";
 import { ApplyService, type ApplyOutcome } from "./application/apply-service.ts";
@@ -18,9 +18,11 @@ import { doctor } from "./application/doctor-service.ts";
 import { FEED_CHECK_MS, FRESH_VIEW_MS, applyUnitGate, controlPlaneSkew, deferSentence, nodeGate } from "./application/fleet-follow.ts";
 import type { RecoverOutcome } from "./application/recovery-service.ts";
 import { RecoveryService } from "./application/recovery-service.ts";
+import { planSettings } from "./application/settings-commands.ts";
 import { formatStatus, readStatus } from "./application/status-service.ts";
 import type {
-  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, UpdateHistory,
+  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, SettingsChange,
+  UpdateHistory,
 } from "./application/ports.ts";
 import { ConfigFile, ConfigInvalid } from "./adapters/config-file.ts";
 import { ApplyingFileMarker } from "./adapters/applying-file.ts";
@@ -63,11 +65,23 @@ const USAGE = `usage: morndo-update update [--yes] [--now] [--detach] [--staged 
        morndo-update update --rollback --preview --json   what a rollback would drop, as JSON; writes and starts nothing
        morndo-update update apply --version <v> [--attempt <id>]   one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
+       morndo-update update --channel stable|latest set the channel
+       morndo-update update auto apply|stage|off    set the mode
+       morndo-update update pin <version>           hold this machine at a Version
+       morndo-update update unpin                   remove the pin
+       morndo-update update window <HH:MM-HH:MM>|any   local hours for automatic applies, or any
        morndo-update install --role control-plane|node [--channel stable|latest] [--force]
        morndo-update doctor [--json]                re-verify the installed tree
-morndo update --to, --channel, pin and auto arrive with the settings step.`;
+morndo update --to arrives with the next settings step.`;
 
-const NOT_YET_SENTENCE = "morndo update --to, --channel, pin and auto arrive with the settings step.";
+const NOT_YET_SENTENCE = "morndo update --to arrives with the next settings step.";
+// UpdateConfigSchema's window (§8.3): 24-hour, zero-padded. A window past midnight (22:00-06:00) matches.
+const WINDOW_TEXT = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+const windowOf = (text: string): Window => {
+  const [start, end] = text.split("-");
+  const minutes = (clock: string): number => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
+  return { start: minutes(start!), end: minutes(end!) };
+};
 // §4.7: a machine whose services no manager runs — no systemd user manager, no launchd — stages only (§6.1's
 // step 1 without step 2): --check works, nothing applies, nothing runs.
 const NO_MANAGER = "no service manager runs here (neither systemd nor launchd): this machine stages only; --check still works";
@@ -200,10 +214,10 @@ export async function runUpdater(
   const [command = "", ...flags] = argv;
   if (command !== "update" && command !== "doctor" && command !== "install") { io.err(`${USAGE}\n`); return EXIT_USAGE; }
   const json = flags.includes("--json");
-  // `--to`, `--channel`, pin and auto are named so a script written against the design's table meets one
-  // sentence, not silence (§8.1). They are `update`'s missing settings step, not `install`'s words: install's
-  // own --channel is here today.
-  if (command === "update" && flags.some(f => ["--to", "--channel", "pin", "auto"].includes(f))) {
+  // `--to` is named so a script written against the design's table meets one sentence, not silence (§8.1).
+  // It arrives with the next settings step. `--channel`, `auto`, `pin` and `window` are this step; install's
+  // own --channel is unchanged.
+  if (command === "update" && flags.includes("--to")) {
     io.err(`${NOT_YET_SENTENCE}\n`);
     return EXIT_USAGE;
   }
@@ -216,6 +230,7 @@ export async function runUpdater(
     | { cmd: "rollback"; yes: boolean; detach: boolean; preview: boolean; typed?: string }
     | { cmd: "apply-unit"; version: string; attempt?: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
+    | { cmd: "settings"; change: SettingsChange }
     | { cmd: "install"; role: "control-plane" | "node"; channel: Channel; force: boolean };
   const usage = (): number => { io.err(`${USAGE}\n`); return EXIT_USAGE; };
   let parsed: Parsed;
@@ -310,7 +325,28 @@ export async function runUpdater(
         // "${FOO}" is one argument), so an empty value reaches here as "--attempt=" and is judged below, by name
         parsed = { cmd: "apply-unit", version: flags[2]!, attempt: flags[3]!.slice("--attempt=".length) };
       } else return usage();
-    } else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
+    } else if (flags[0] === "--channel" && flags.length === 2 && (flags[1] === "stable" || flags[1] === "latest")) {
+      parsed = { cmd: "settings", change: { kind: "channel", channel: flags[1] } };
+    } else if (flags[0] === "--channel") return usage();
+    else if (flags[0] === "auto" && flags.length === 2 && (flags[1] === "apply" || flags[1] === "stage" || flags[1] === "off")) {
+      parsed = { cmd: "settings", change: { kind: "mode", mode: flags[1] } };
+    } else if (flags[0] === "auto") return usage();
+    else if (flags[0] === "pin" && flags.length === 2) {
+      const version = parseVersion(flags[1] ?? "");
+      if (version === null) {
+        io.err(`${JSON.stringify(flags[1])} is not a Version\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "settings", change: { kind: "pin", version } };
+    } else if (flags[0] === "pin") return usage();
+    else if (flags[0] === "unpin" && flags.length === 1) parsed = { cmd: "settings", change: { kind: "unpin" } };
+    else if (flags[0] === "unpin") return usage();
+    else if (flags[0] === "window" && flags.length === 2 && flags[1] === "any") {
+      parsed = { cmd: "settings", change: { kind: "windowAny" } };
+    } else if (flags[0] === "window" && flags.length === 2 && WINDOW_TEXT.test(flags[1] ?? "")) {
+      parsed = { cmd: "settings", change: { kind: "window", window: windowOf(flags[1]!) } };
+    } else if (flags[0] === "window") return usage();
+    else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
     else if (flags.includes("--status") && flags.every(f => f === "--status" || f === "--json")) parsed = { cmd: "status" };
     else return usage();
   }
@@ -337,6 +373,23 @@ export async function runUpdater(
     if (!(error instanceof ConfigInvalid)) throw error;
     io.err(`${error.message}\n`);
     return EXIT_CONFIG;
+  }
+
+  // The settings commands (§8.1, §8.3): the file was read once, above. They edit that file and nothing else — no
+  // service manager, no feed, no store. A switch stops updates, not this edit; the sentence says it still holds.
+  if (parsed.cmd === "settings") {
+    const plan = planSettings(settings.read(), parsed.change, {
+      disableUpdates: env.MORNDO_DISABLE_UPDATES === "1",
+      disableAutoUpdate: env.MORNDO_DISABLE_AUTOUPDATE === "1",
+    });
+    try { settings.change(plan.change); }
+    catch (error) {
+      if (!(error instanceof ConfigInvalid)) throw error;
+      io.err(`${error.message}\n`);
+      return EXIT_CONFIG;
+    }
+    io.out(`${plan.sentence}\n`);
+    return EXIT_OK;
   }
 
   // The store is every command's (§5): the state directory is the store's own, private before anything lands in it.
