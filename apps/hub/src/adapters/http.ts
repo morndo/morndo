@@ -42,7 +42,7 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLeaseBody, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -463,6 +463,17 @@ export function startHttp(p: {
       const r = p.usage.reading(await readBody(req, UsageReadingsBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
       return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
     }
+    // A node's ask for a lease before a rationed read (S5, plan 4.4, U16): granted with an opaque id and its expiry,
+    // fresh with the capture time the caller may use instead of spawning, or denied with one reason and a wait. The
+    // answer leaks nothing else — not which node holds a live lease, not why a reading is fresh.
+    if (path === "/api/agent/usage/lease" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      const body = await readBody(req, UsageLeaseBody);
+      const g = p.usage.leases.grant(body.account, body.source, body.node ?? null);
+      if (g.status === "granted") return json(res, 200, { status: "granted", lease_id: g.id, expires_at: Math.floor(g.expiresAt / 1000) });
+      if (g.status === "fresh") return json(res, 200, { status: "fresh", captured_at: Math.floor(g.capturedAt / 1000) });
+      return json(res, 200, { status: "denied", reason: g.reason, retry_after_s: Math.ceil(g.retryAfterMs / 1000) });
+    }
     // A seat's limit hit as any source reports it (U9). The reply says only that it was taken: the agent door leaks
     // nothing of the seat or any state. The route is a manager's or the pool's (PR #127, finding 2): a manager-role
     // token, or one holding the usage-pool scope. A worker token without the scope stays refused — a lane's own
@@ -822,6 +833,14 @@ export function startHttp(p: {
       const body = await readBody(req, UsageForgetBody);
       return json(res, 200, { forgotten: p.usage.forget(body.account, body.source, body.node) });
     }
+    // The principal looked at usage (S5, AT-45): marks every account somebody now wants read — the same demand a
+    // feed hello raises. A Command like the forget above, limited the same; the reads themselves stay leased.
+    if (path === "/api/usage/look" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      p.usage.look();
+      return json(res, 200, { ok: true });
+    }
     // The principal's own clear of a seat (U17): the pool's word or the hub's derived one, or both. A Command like
     // the others: limited, and the principal's session only — an agent token never reaches here.
     if (path === "/api/usage/seat/clear" && method === "POST") {
@@ -1025,6 +1044,7 @@ export function startHttp(p: {
             send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id) });
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
+            p.usage?.look();                                                // S5 (AT-45): somebody is looking — mark the demand
             if (p.queue) send({ t: "deliveries", items: p.queue.commandsOf(conn.auth.endpoint.id) });   // all of the last day
             send({ t: "manager", queue: steering.managerQueue });           // whether a message waits for it while it has no window
             if (p.alerts) send({ t: "alerts", ...p.alerts.view() });        // the fleet's latest alerts, after every hello

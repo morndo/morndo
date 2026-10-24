@@ -103,7 +103,9 @@ export class UsageService {
     this.#store = p.store;
     this.#now = p.now ?? Date.now;
     this.#profiles = p.profiles ?? (() => EMPTY_PROFILES);
-    this.#leaseBook = p.leases ?? new LeaseBook(this.#now);
+    // S5 (plan 4.4, AT-45): the book it makes itself asks this service whether an account is wanted — the demand set
+    // is the service's, the policy the book's, and the injection keeps the policy free of the service.
+    this.#leaseBook = p.leases ?? new LeaseBook(this.#now, (account, at) => this.#wanted(account, at));
     // S3 (plan 4.5 item 4): where a lane runs, for the lane records a report writes and a failure resolves through.
     // Without a fleet the hub knows no lane's node, so a record is kept under node "" and never serves a node's rule.
     this.#laneNode = p.laneNode ?? (() => null);
@@ -114,6 +116,18 @@ export class UsageService {
 
   // The seat leases (U13), for tests and the S5 route.
   get leases(): LeaseBook { return this.#leaseBook; }
+
+  // S5 (plan 4.4, AT-45, U16): a viewer said somebody is looking — a feed hello (the principal opened Home) or the
+  // look route. It only marks demand; the reads themselves stay leased and rationed (this.leases.grant). Round 2
+  // implements the demand set itself; until then a look marks nothing, so a hub that is only watched spawns no read.
+  look(): void {}
+
+  // Whether an account is wanted for a read just now (AT-45): demand the look() above and a derived mark's passed
+  // backAt raise, each for its own ten minutes. Round 2 (S5); the lease book asks through the injected closure.
+  #wanted(account: string, now: number): boolean {
+    void account; void now;
+    throw new Error("not implemented");
+  }
 
   subscribe(fn: (v: UsageView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
 

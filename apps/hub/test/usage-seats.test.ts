@@ -52,6 +52,12 @@ const viewOf = async () => {
 };
 const seatOf = async (account = "seat-a") => ((await viewOf()).accounts as Body[]).find(a => a.account === account)?.seat;
 const noticesOf = async (kind: string) => ((await viewOf()).notices as Body[]).filter(n => n.kind === kind);
+// S5: grant answers the policy's shape now (granted/fresh/denied); a seat test needs only the id of a granted one.
+const leaseIdOf = (account: string, source: UsageReadingsBody["source"] = "app-server") => {
+  const g = hub.usage.leases.grant(account, source, null);
+  expect(g.status).toBe("granted");
+  return g.status === "granted" ? g.id : null;
+};
 
 beforeEach(async () => {
   now = 1_700_000_000_000;      // 10:00
@@ -92,12 +98,11 @@ describe("seats (plan 4.5)", () => {
     // says nothing of a back time, so the default hour holds: 11:00.
     expect(read({ capturedAt: t0 - 5 * MIN, usedPercent: 95, resetsAt: t0 + 3 * HOUR })).toEqual({ ok: true });
     expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
-    // A lease lasts 150 s, so each one is granted at the moment its read is taken.
+    // A lease lasts 210 s, so each one is granted at the moment its read is taken.
     now = t0 + 65 * MIN;
-    const lease = hub.usage.leases.grant("seat-a", "app-server", null);
-    expect(lease.ok).toBe(true);
+    const lease = leaseIdOf("seat-a");
     // A leased read stamped 11:05 that carries the old cycle's numbers (80% at 13:00, taken at 09:55) holds.
-    expect(read({ capturedAt: t0 + 65 * MIN, usedPercent: 80, resetsAt: t0 + 3 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    expect(read({ capturedAt: t0 + 65 * MIN, usedPercent: 80, resetsAt: t0 + 3 * HOUR, leaseId: lease })).toEqual({ ok: true });
     expect(await seatOf()).toMatchObject({ state: "out" });
     // A read at 10:30, before the back time, holds.
     expect(read({ capturedAt: t0 + 30 * MIN, usedPercent: 20, resetsAt: t0 + 8 * HOUR })).toEqual({ ok: true });
@@ -107,16 +112,16 @@ describe("seats (plan 4.5)", () => {
     expect(read({ capturedAt: t0 + 3 * HOUR + 5 * MIN, usedPercent: 20, resetsAt: t0 + 8 * HOUR })).toEqual({ ok: true });
     expect(await seatOf()).toMatchObject({ state: "out" });
     // The same read, leased, clears the seat with one back notice.
-    const lease13 = hub.usage.leases.grant("seat-a", "app-server", null);
-    expect(read({ capturedAt: t0 + 3 * HOUR + 5 * MIN, usedPercent: 20, resetsAt: t0 + 8 * HOUR, leaseId: lease13.ok ? lease13.id : null })).toEqual({ ok: true });
+    const lease13 = leaseIdOf("seat-a");
+    expect(read({ capturedAt: t0 + 3 * HOUR + 5 * MIN, usedPercent: 20, resetsAt: t0 + 8 * HOUR, leaseId: lease13 })).toEqual({ ok: true });
     expect(await seatOf()).toBeUndefined();
     expect(await noticesOf("back")).toEqual([
       { id: expect.any(String), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: back in use (a fresh reading shows a new cycle)." },
     ]);
     // A first-ever hit with no recorded cycle: the stale read still holds.
     expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
-    const leaseB = hub.usage.leases.grant("seat-b", "app-server", null);
-    expect(read({ account: "seat-b", capturedAt: t0 + 65 * MIN, usedPercent: 80, resetsAt: t0 + 3 * HOUR, leaseId: leaseB.ok ? leaseB.id : null })).toEqual({ ok: true });
+    const leaseB = leaseIdOf("seat-b");
+    expect(read({ account: "seat-b", capturedAt: t0 + 65 * MIN, usedPercent: 80, resetsAt: t0 + 3 * HOUR, leaseId: leaseB })).toEqual({ ok: true });
     expect(await seatOf("seat-b")).toMatchObject({ state: "out" });
   });
 
@@ -209,9 +214,9 @@ describe("seats (plan 4.5)", () => {
     // A derived one clears: a fresh leased read of a new cycle (AT-18's rule).
     expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
     now += 65 * MIN;
-    const lease = hub.usage.leases.grant("seat-b", "app-server", null);
+    const lease = leaseIdOf("seat-b");
     // A cycle begun at or after the mark (AT-18's rule): the read is 65 min past it, its 5-hour window reset 4 h out.
-    expect(read({ account: "seat-b", capturedAt: now, usedPercent: 20, resetsAt: now + 4 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    expect(read({ account: "seat-b", capturedAt: now, usedPercent: 20, resetsAt: now + 4 * HOUR, leaseId: lease })).toEqual({ ok: true });
     expect(await seatOf("seat-b")).toBeUndefined();
     // Authority is the token's: the scope, not the role — the manager's own token is refused without it.
     const managerToken = hub.agents.issue("manager", "manager").secret;
@@ -227,8 +232,8 @@ describe("seats (plan 4.5)", () => {
     expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });   // the hub's own derived mark
     expect(await seatOf()).toMatchObject({ state: "out", owner: "pool" });           // an equal state: the pool's
     now += 65 * MIN;
-    const lease = hub.usage.leases.grant("seat-a", "app-server", null);
-    expect(read({ capturedAt: now, usedPercent: 20, resetsAt: now + 3 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    const lease = leaseIdOf("seat-a");
+    expect(read({ capturedAt: now, usedPercent: 20, resetsAt: now + 3 * HOUR, leaseId: lease })).toEqual({ ok: true });
     expect(await seatOf()).toMatchObject({ state: "out", owner: "pool" });           // the derived one cleared; the pool's stands
   });
 
