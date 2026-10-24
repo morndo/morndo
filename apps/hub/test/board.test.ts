@@ -498,6 +498,16 @@ describe("the proof on the agents' reads", () => {
     expect(await json(r)).toEqual({ error: "proof_not_green", detail: "proof: no brief" });
     expect((await json(await m.get("/api/agent/board/tasks/T-1"))).task).toMatchObject({ status: "review" });
   });
+
+  it("the principal's GET task carries proof when the service is wired", async () => {
+    const m = onForge(forgeManager), b = onForge(forgeBuilder, "builder");
+    await m.post("/api/agent/board/tasks", { title: "Ship it", assignee: "builder" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+    const cookie = await forgeHub.cookie();
+    const record = await json(await fetch(`${forgeHub.base}/api/board/tasks/T-1`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    expect(record.proof).toMatchObject({ state: { line: "proof: no brief" } });
+  });
 });
 
 describe("the principal's proof path (B13, B16)", () => {

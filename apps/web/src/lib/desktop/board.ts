@@ -1,7 +1,8 @@
 // How the board is shown (ADR-0015): the columns in work order, the words for each status and refusal, and what the
 // app may do from where. The rules live in the domain and the hub; this presents their results and asks the hub.
 import { workingOn, type AuthorKind, type BoardRule, type MergedView, type Run, type Task, type TaskActor, type TaskEvent, type TaskPriority, type TaskStatus } from "@morndo/domain";
-import { BoardTaskSchema, MergedViewSchema, RunViewSchema, parseBody } from "@morndo/protocol";
+import { BoardTaskSchema, MergedViewSchema, ProofViewSchema, RunViewSchema, parseBody, type ProofView } from "@morndo/protocol";
+export type { ProofView };
 import { saidOf } from "./run-words.ts";
 
 export type { MergedView, Run, Task, TaskEvent, TaskPriority, TaskStatus };
@@ -71,6 +72,20 @@ export function decodeMerged(raw: readonly unknown[] | undefined): { merged: Rea
   return { merged, dropped };
 }
 
+// The hub's proof view for one task (ADR-0035 step 5): absent or unreadable on an older hub → no Proof section.
+export function decodeProof(raw: unknown): ProofView | null {
+  return raw === undefined || raw === null ? null : parseBody(ProofViewSchema, raw);
+}
+
+// The Accept-as-done button while a task is in review (B11 merge gate, B16 proof gate): merge override wins over proof.
+export function acceptLabel(proof: ProofView | null, merged: MergedView | null): { label: string; title: string | undefined } {
+  if (merged?.live === false)
+    return { label: "Accept anyway", title: "Its merge is not live on every node; this is recorded as accepted by you" };
+  if (proof !== null && !proof.state.accepts)
+    return { label: "Accept anyway", title: "Its proof is not green; this is recorded as accepted by you" };
+  return { label: "Accept as done", title: undefined };
+}
+
 export const byStatus = (tasks: readonly Task[]) => {
   const m = new Map<TaskStatus, Task[]>(COLUMNS.map(c => [c.status, []]));
   for (const t of tasks) m.get(t.status)?.push(t);
@@ -138,7 +153,8 @@ export function eventLine(e: TaskEvent): { who: string; text: string; comment: s
         const said = boardSaid(e.actor.rule, c.reason);
         return { who: w, text: `moved it to ${STATUS_WORDS[c.to]} ${BOARD_WHY[e.actor.rule](e.actor.lane)}${said ? `: ${said}` : ""}`, comment: null };
       }
-      return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}`, comment: null };
+      const proofComment = c.proofSeen ? `Proof when accepted: ${c.proofSeen}` : null;
+      return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}`, comment: proofComment };
     }
     case "assigned": return { who: w, text: c.to ? `assigned it to ${c.to}` : "unassigned it", comment: null };
     case "edited": return { who: w, text: `edited the ${Object.keys(c).filter(k => k !== "kind").join(", ")}`, comment: null };

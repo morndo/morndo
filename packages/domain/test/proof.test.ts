@@ -222,6 +222,14 @@ describe("the brief that counts (B13)", () => {
   const filed = (rev: number) => event(rev, { kind: "briefed", brief: brief() });
   const backToDoing = (rev: number) => event(rev, { kind: "moved", from: "review", to: "doing", reason: null });
 
+  it("a brief stays current when the task is accepted as done: the proof it was accepted on", () => {
+    const toDone = event(5, { kind: "moved", from: "review", to: "done", reason: "read the diff" });
+    expect(currentBrief([filed(3), toDone])).toEqual({ brief: brief(), rev: 3 });
+    // reopened afterwards (done to doing is not a move out of review): still current; a round that leaves review again is stale
+    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "doing", reason: null })])).toEqual({ brief: brief(), rev: 3 });
+    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "review", reason: null }), event(7, { kind: "moved", from: "review", to: "doing", reason: null })])).toBeNull();
+  });
+
   it("a brief older than the last review to doing move is stale", () => {
     expect(currentBrief([filed(3), backToDoing(5)])).toBeNull();
     expect(currentBrief([filed(2), filed(3), backToDoing(5)])).toBeNull();      // the newest brief is the one judged

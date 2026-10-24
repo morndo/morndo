@@ -3,7 +3,8 @@
 // a task's merges stand (B11), decoded the same way.
 import { describe, expect, it } from "vitest";
 import { GONE_REASON, type TaskActor, type TaskChange, type TaskEvent, type TaskStatus } from "@morndo/domain";
-import { avatarOf, decodeMerged, decodeRuns, eventLine, REFUSALS, whoOf } from "../src/lib/desktop/board.ts";
+import { acceptLabel, avatarOf, decodeMerged, decodeProof, decodeRuns, eventLine, REFUSALS, whoOf, type MergedView, type ProofView, type Task } from "../src/lib/desktop/board.ts";
+import { ProofViewSchema, parseBody } from "@morndo/protocol";
 
 const ev = (actor: TaskActor, change: TaskChange): TaskEvent => ({ key: "T-1" as TaskEvent["key"], rev: 2, at: 1, actor, change });
 const moved = (from: TaskStatus, to: TaskStatus, reason: string | null = null): TaskChange => ({ kind: "moved", from, to, reason });
@@ -90,5 +91,58 @@ describe("where a task's merges stand (BoardFrameSchema.merged, B11)", () => {
     expect(REFUSALS.no_merge).toBe("That merge isn't recorded on this task.");
     expect(REFUSALS.too_many).toBe("A task holds at most 5 merge records.");
     expect(REFUSALS.no_commit).toBe("The hub's checkout doesn't have that commit yet.");
+  });
+});
+
+describe("proof in the board app (ADR-0035 step 5)", () => {
+  it("decodeProof reads a view, and null for a missing or malformed one", () => {
+    const raw = {
+      rev: 4,
+      brief: { summary: "Totals row", decisions: "", leftOut: "nothing", limits: "none known", refs: ["acme/shop#42@3e9d1a7"], attested: [], noCode: "" },
+      results: [{ ref: "acme/shop#42@3e9d1a7", state: "green", detail: null, checkedAt: 1 }],
+      state: { kind: "verified", green: 1, total: 1, accepts: true, line: "proof: 1 of 1 green" },
+    };
+    const view = parseBody(ProofViewSchema, raw);
+    expect(decodeProof(raw)).toEqual(view);
+    expect(decodeProof(undefined)).toBeNull();
+    expect(decodeProof({ rev: 4, state: { kind: "nope" } })).toBeNull();
+  });
+
+  it("a moved event with proofSeen shows it under the record entry", () => {
+    const e = ev({ kind: "manager", name: "manager", token: "t" }, { kind: "moved", from: "review", to: "done", reason: "read the diff", proofSeen: "proof: 1 of 2 green · ✗ acme/shop@3e9d1a7:ci,lint \"lint\" failed" });
+    expect(eventLine(e).comment).toBe("Proof when accepted: proof: 1 of 2 green · ✗ acme/shop@3e9d1a7:ci,lint \"lint\" failed");
+  });
+
+  it("Accept anyway names the proof when it is not green, the merge wins when both hold, and plain Accept as done otherwise", () => {
+    const failing: ProofView = {
+      rev: 4,
+      brief: { summary: "x", decisions: "", leftOut: "nothing", limits: "none known", refs: ["acme/shop@3e9d1a7:ci,lint"], attested: [], noCode: "" },
+      results: [{ ref: "acme/shop@3e9d1a7:ci,lint", state: "red", detail: "\"lint\" failed", checkedAt: 1 }],
+      state: { kind: "failing", green: 0, total: 1, accepts: false, line: "proof: 0 of 1 green · ✗ acme/shop@3e9d1a7:ci,lint \"lint\" failed" },
+    };
+    const liveMerge: MergedView = { key: "T-1" as Task["key"], merges: [], live: true, label: "merged, live" };
+    const notLiveMerge: MergedView = { key: "T-1" as Task["key"], merges: [], live: false, label: "merged, not live: pc offline" };
+    expect(acceptLabel(failing, liveMerge)).toEqual({
+      label: "Accept anyway",
+      title: "Its proof is not green; this is recorded as accepted by you",
+    });
+    expect(acceptLabel(failing, notLiveMerge)).toEqual({
+      label: "Accept anyway",
+      title: "Its merge is not live on every node; this is recorded as accepted by you",
+    });
+    expect(acceptLabel(failing, null)).toEqual({
+      label: "Accept anyway",
+      title: "Its proof is not green; this is recorded as accepted by you",
+    });
+    const verified: ProofView = {
+      rev: 4,
+      brief: failing.brief,
+      results: [{ ref: "acme/shop@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: 1 }],
+      state: { kind: "verified", green: 1, total: 1, accepts: true, line: "proof: 1 of 1 green" },
+    };
+    expect(acceptLabel(verified, liveMerge)).toEqual({ label: "Accept as done", title: undefined });
+    expect(acceptLabel(null, liveMerge)).toEqual({ label: "Accept as done", title: undefined });
+    // negative control: proof must change the label when it does not accept
+    expect(acceptLabel(failing, liveMerge).label).not.toBe("Accept as done");
   });
 });

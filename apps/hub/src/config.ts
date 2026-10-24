@@ -57,6 +57,8 @@ export type Config = {
   // it at start; the token is never a setting). Optional: without it only public repositories answer, the
   // unauthenticated limit is 60 requests an hour, and a private repository's references read "not checked".
   githubTokenFile?: string | null;
+  // MORNDO_FORGE_URL: a stand-in forge base (http(s) origin only), for tests and a scratch hub — never with a token.
+  forgeUrl?: string | null;
 };
 
 const bool = (v: string | undefined) => v === "1" || v === "true";
@@ -145,6 +147,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     proofGate: proofGateOf(env),
     proofRepos: proofReposOf(env),
     githubTokenFile: tokenFileOf(env),
+    forgeUrl: forgeUrlOf(env),
   };
 }
 
@@ -155,6 +158,25 @@ function proofGateOf(env: NodeJS.ProcessEnv): ProofMode {
   if (v !== "off" && v !== "warn" && v !== "on")
     throw new Error(`MORNDO_PROOF_GATE must be off, warn or on: ${v}`);
   return v;
+}
+
+// MORNDO_FORGE_URL: unset or empty is none; otherwise an http(s) origin with no path beyond "/" and no credentials.
+function forgeUrlOf(env: NodeJS.ProcessEnv): string | null {
+  const v = env.MORNDO_FORGE_URL;
+  if (v === undefined || v === "") return null;
+  let u: URL;
+  try { u = new URL(v); } catch { throw new Error(`MORNDO_FORGE_URL must be an http(s) URL: ${v}`); }
+  if (u.protocol !== "http:" && u.protocol !== "https:")
+    throw new Error(`MORNDO_FORGE_URL must be an http(s) URL: ${v}`);
+  if (u.username || u.password)
+    throw new Error(`MORNDO_FORGE_URL must not include credentials: ${v}`);
+  const path = u.pathname.replace(/\/+$/, "") || "/";
+  if (path !== "/")
+    throw new Error(`MORNDO_FORGE_URL must be a bare origin with no path: ${v}`);
+  const token = tokenFileOf(env);
+  if (token !== null)
+    throw new Error("MORNDO_FORGE_URL names a stand-in forge and cannot be used with MORNDO_GITHUB_TOKEN_FILE: the token would be sent to it");
+  return u.origin;
 }
 
 // MORNDO_GITHUB_TOKEN_FILE: unset or empty is none; otherwise an absolute path (a relative one would depend on where the

@@ -1,9 +1,9 @@
 // The forge adapter (ADR-0035 step 3, B14): reads a pull request and one commit's check runs from the forge's web api
 // and answers in facts the domain judges. Only the two documented shapes of address are ever asked, built from parts
 // the domain's own grammar validated, so nothing a lane wrote can aim the request; the credential is sent on every ask
-// and never said back — not in a failure detail, a log line or a thrown message (this class never throws). `baseUrl`
-// exists for the tests' local stand-in alone: it is an option, never an environment variable or a setting, exactly so
-// a credential cannot be pointed anywhere but the forge itself.
+// and never said back — not in a failure detail, a log line or a thrown message (this class never throws). A setting
+// (MORNDO_FORGE_URL) exists for a stand-in forge in tests and scratch hubs; loadConfig refuses it whenever a token is
+// configured, so a credential cannot be aimed at another host. Callers pass `baseUrl` only from that setting.
 import { REPO_NAME, type CheckRunFacts, type PrFacts } from "@morndo/domain";
 import type { ForgeAnswer, ForgeChecks } from "../application/ports.ts";
 

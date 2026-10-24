@@ -2,7 +2,7 @@
 // merged change in the events, and the MergedView the board frame carries (decoded one by one by whoever reads it).
 // B13 to B16: the brief action's body, and the briefed change and the proofSeen a move to done may carry.
 import { describe, expect, it } from "vitest";
-import { BoardActionBody, BoardFrameSchema, MergedViewSchema, TaskChangeSchema, TaskEventSchema, parseBody } from "../src/index.ts";
+import { BoardActionBody, BoardFrameSchema, MergedViewSchema, ProofViewSchema, TaskChangeSchema, TaskEventSchema, parseBody } from "../src/index.ts";
 
 describe("the board wire (B11)", () => {
   it("a merged action's body: a sha, a repo optionally; a move to done may carry notLive", () => {
@@ -60,5 +60,41 @@ describe("the board wire (B13 to B16)", () => {
     expect(parseBody(TaskEventSchema, { key: "T-1", rev: 3, at: 6, actor: { kind: "manager", name: "manager", token: "tok-m" }, change: { kind: "moved", from: "review", to: "done", reason: "npm test: 14 passed", proofSeen: "proof: 1 of 1 green" } }))
       .toEqual({ key: "T-1", rev: 3, at: 6, actor: { kind: "manager", name: "manager", token: "tok-m" }, change: { kind: "moved", from: "review", to: "done", reason: "npm test: 14 passed", proofSeen: "proof: 1 of 1 green" } });
     expect(parseBody(TaskEventSchema, { key: "T-1", rev: 2, at: 5, actor: worker, change: { kind: "briefed", brief: { ...brief, attested: [{ kind: "quick", how: "had a look" }] } } })).toBeNull();   // the kinds are fixed
+  });
+});
+
+describe("the proof view on the wire (ADR-0035 step 5)", () => {
+  const PR = "acme/shop#42@3e9d1a7";
+  const CI = "acme/shop@3e9d1a7:ci,lint";
+  const full = {
+    rev: 4,
+    brief: {
+      summary: "Totals row rounds to cents", decisions: "round at display", leftOut: "nothing", limits: "none known",
+      refs: [PR, CI], attested: [{ kind: "tests", how: "npm test: 14 passed" }], noCode: "",
+    },
+    results: [
+      { ref: PR, state: "green", detail: null, checkedAt: 1 },
+      { ref: CI, state: "green", detail: null, checkedAt: 2 },
+    ],
+    state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" },
+  };
+
+  it("a full proof view parses", () => {
+    expect(parseBody(ProofViewSchema, full)).toEqual(full);
+  });
+
+  it("a view with an unknown ref state or proof kind does not parse", () => {
+    expect(parseBody(ProofViewSchema, { ...full, results: [{ ref: PR, state: "purple", detail: null, checkedAt: 1 }] })).toBeNull();
+    expect(parseBody(ProofViewSchema, { ...full, state: { ...full.state, kind: "maybe" } })).toBeNull();
+  });
+
+  it("rev null and brief null parse (a task with no brief yet)", () => {
+    expect(parseBody(ProofViewSchema, {
+      rev: null, brief: null, results: [],
+      state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" },
+    })).toEqual({
+      rev: null, brief: null, results: [],
+      state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" },
+    });
   });
 });

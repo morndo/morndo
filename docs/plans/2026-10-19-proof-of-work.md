@@ -158,7 +158,7 @@ Each result keeps `checkedAt`, the full sha, and for `red` the first failing run
 | D1 does not fire (wake-up pending; T-398) and the manager or the lane moves the task by hand | Trigger 2 fires on the explicit move; same result. |
 | Task reaches review, no brief ever filed | Card says `no brief`. `morndo-board list --status review` lists it. The Done is gated (§3.5). Nobody has to wake the lane for the board to know. |
 | Brief filed after the move, in review | Accepted (§3.2); trigger 1 verifies. |
-| The task goes back to doing and returns | The brief of the earlier round is *stale*: a brief counts only if no move out of review (to doing, blocked or any other status) has a higher `rev` than the brief's event. A new entry into review needs a new brief; `brief --show --from-last` prints the old one to edit. |
+| The task goes back to doing and returns | The brief of the earlier round is *stale*: a brief counts only if no move out of review (to doing, blocked or any other status except Done) has a higher `rev` than the brief's event; a Done task keeps the brief it was accepted on. A new entry into review needs a new brief; `brief --show --from-last` prints the old one to edit. |
 | The hub restarts with refs `pending` | Results are rows, not memory; the timer resumes from the table. |
 
 ### 3.7 UI proof (screenshots) without real data in a public repository

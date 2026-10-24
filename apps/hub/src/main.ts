@@ -339,7 +339,10 @@ switch (cmd) {
     // the store's close, so they end before it runs.
     const githubToken = readTokenFile(config.githubTokenFile ?? null, m => log.warn(m));
     const proof = new ProofService({
-      store, board, forge: new GithubChecks({ token: githubToken }), mode: config.proofGate ?? "warn",
+      store, board, forge: new GithubChecks({
+        token: githubToken,
+        ...(config.forgeUrl ? { baseUrl: config.forgeUrl } : {}),
+      }), mode: config.proofGate ?? "warn",
       allowedRepos: config.proofRepos ?? [MORNDO_REPO], authenticated: githubToken !== null,
     });
     const proofTimer = setInterval(() => { void proof.tick().catch((e: unknown) => log.error("proof: the timer pass failed", e)); }, 60_000);

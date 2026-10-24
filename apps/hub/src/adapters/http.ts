@@ -809,7 +809,7 @@ export function startHttp(p: {
       const task = /^\/api\/board\/tasks\/(T-\d{1,9})$/.exec(path);
       if (task && method === "GET") {
         const t = service.task(task[1] ?? "");
-        return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
+        return t ? json(res, 200, { ...t, ...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {}) }) : json(res, 404, { error: "unknown" });
       }
       if ((path === "/api/board/tasks" || task) && method === "POST") {
         limited(buckets.commands.take(a.endpoint.id));

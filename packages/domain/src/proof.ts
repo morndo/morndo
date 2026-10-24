@@ -174,7 +174,8 @@ export type RefState = "green" | "pending" | "red" | "mismatch" | "missing" | "u
 // wrote it) is never taken for one.
 export const REF_STATES: readonly RefState[] = ["green", "pending", "red", "mismatch", "missing", "unfetchable", "not_checked"];
 export type RefResult = { ref: string; state: RefState; detail: string | null; checkedAt: number };   // ref: a brief's own canonical form
-export type ProofKind = "no_brief" | "unchecked" | "pending" | "failing" | "unfetchable" | "not_checked" | "verified" | "attested_only";
+export const PROOF_KINDS = ["no_brief", "unchecked", "pending", "failing", "unfetchable", "not_checked", "verified", "attested_only"] as const;
+export type ProofKind = (typeof PROOF_KINDS)[number];
 export type ProofState = { kind: ProofKind; green: number; total: number; accepts: boolean; line: string };
 
 export const MARK: Record<RefState, string> = { green: "✓", red: "✗", mismatch: "≠", missing: "?", unfetchable: "!", pending: "…", not_checked: "○" };
@@ -219,10 +220,11 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
 }
 
 // B13: the brief that still counts — the newest `briefed` event, unless the task has left review since (any review →
-// elsewhere move with a higher rev stales every brief before it; a new round of work files a new one).
+// elsewhere move with a higher rev stales every brief before it; a new round of work files a new one). The move to Done
+// is not leaving: a task accepted as done keeps the brief it was accepted on, for its card and its record.
 export function currentBrief(events: readonly TaskEvent[]): { brief: ProofBrief; rev: number } | null {
   let back = 0;
-  for (const e of events) if (e.change.kind === "moved" && e.change.from === "review" && e.rev > back) back = e.rev;
+  for (const e of events) if (e.change.kind === "moved" && e.change.from === "review" && e.change.to !== "done" && e.rev > back) back = e.rev;
   let best: { brief: ProofBrief; rev: number } | null = null;
   for (const e of events) if (e.change.kind === "briefed" && e.rev > back && (best === null || e.rev > best.rev)) best = { brief: e.change.brief, rev: e.rev };
   return best;
