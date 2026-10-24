@@ -4277,7 +4277,7 @@ export const CONTROLS: Control[] = [
     find: "many(Math.max(p.usage, 1), \"Usage needs a look\", \"# usage changes need a look\")", replace: "many(p.usage, \"Usage needs a look\", \"# usage changes need a look\")",
     run: ["apps/web/test/sw-push.test.ts"] },
   { id: "t415s4-forget-on-one-tap", task: "T-415", file: "apps/web/src/lib/desktop/HomeView.svelte",
-    find: "if (!confirming[key]) { confirming[key] = true; return; }", replace: "",
+    find: "    if (!confirming[key]) {\n      confirming[key] = true;", replace: "    if (false) {\n      confirming[key] = true;",
     run: ["apps/web/test/usage-card.test.ts"] },
   { id: "t415s3r3-five-hour-always-first", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "    const all: { id: string; usedPercentage: number; resetsAt: number | null }[] = [];\n    if (a.fiveHour !== null) all.push", replace: "    if (a.fiveHour !== null && a.fiveHour.resetsAt !== null) return { windowId: \"five_hour\", resetsAt: a.fiveHour.resetsAt };\n    const all: { id: string; usedPercentage: number; resetsAt: number | null }[] = [];\n    if (a.fiveHour !== null) all.push",
