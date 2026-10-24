@@ -1,7 +1,7 @@
 // The updater's ports (design §4.6). The application decides; these touch the network, the disk and the clock.
 import type {
-  Channel, DatabaseName, DbState, HealthReport, InstallMethod, KeySet, SafePointReport, Update, UpdateService,
-  UpdateSettings,
+  Channel, DatabaseName, DbState, HealthReport, InstallMethod, KeySet, SafePointReport, Update, UpdateMode,
+  UpdateService, UpdateSettings, Version, Window,
 } from "@morndo/domain";
 import type { RolloutWire, UpdateStateFile } from "@morndo/protocol";
 
@@ -117,6 +117,9 @@ export interface UpdateStore {
   recordStaged(r: StagedRecord): void;
   /** The newest staged record whose Version is above every committed one, or null. */
   staged(): StagedRecord | null;
+  /** Drops staged records whose Version is above both `version` and the highest committed Version, so `staged()`
+   *  is the one a named `--to` just staged. A record at or below the highest committed Version stays. */
+  retireStagedAbove(version: string): void;
   versionRecord(version: string): StagedRecord | null;
   recordCheck(r: CheckRecord): void;
   /** Newest first. */
@@ -186,6 +189,18 @@ export interface UpdateStateSink {
 export type MachineSettings = UpdateSettings & { soakMinutes: number | null };
 
 export interface SettingsSource { read(): MachineSettings }
+
+// One edit of the settings file (§8.1, §8.3). The application names the change; the adapter reads the file again,
+// applies this and nothing else, and writes it back. A value the file already holds is still a write.
+export type SettingsChange =
+  | { kind: "channel"; channel: Channel }
+  | { kind: "mode"; mode: UpdateMode }
+  | { kind: "pin"; version: Version }
+  | { kind: "unpin" }
+  | { kind: "window"; window: Window }
+  | { kind: "windowAny" };
+
+export interface SettingsSink { change(c: SettingsChange): MachineSettings }
 export interface Clock { now(): number }
 
 // ---- the apply's own ports (§4.6); the adapters for the machine come with the apply's PR, tests fake them
@@ -250,7 +265,7 @@ export interface ApplyingMarker {
 export interface Sleeper { sleep(ms: number): Promise<void> }
 export type AlertKind =
   | "update_rolled_back" | "update_rollback_failed" | "update_rollback_waiting" | "update_deferred"
-  | "update_unknown_record";
+  | "update_unknown_record" | "update_check_already_failing" | "update_origin_not_judged";
 export interface AlertSink { raise(kind: AlertKind, detail: string): void }
 
 // RL10, before the journals arrive (PR 5c): a restore must not undo a revocation. During a probation that may restore,
