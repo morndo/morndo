@@ -37,7 +37,7 @@ Restart=on-failure
 WantedBy=default.target
 ```
 
-The clients there point at `$XDG_RUNTIME_DIR/fleet-worker.sock` (`MORNDO_FLEET_SOCKET` for the hub console's `lanes`). `-T` asks for no pty, as the forced command needs an 8-bit clean channel. The events stream is a WebSocket upgrade over the same HTTP connection, so it needs nothing more.
+socat splits an address on `:`, so keep the `EXEC:` command line free of colons (a non-default ssh port or an IPv6 address goes in an `ssh_config` host alias, or in a small wrapper script that `EXEC:` runs). The clients there point at `$XDG_RUNTIME_DIR/fleet-worker.sock` (`MORNDO_FLEET_SOCKET` for the hub console's `lanes`). `-T` asks for no pty, as the forced command needs an 8-bit clean channel. The events stream is a WebSocket upgrade over the same HTTP connection, so it needs nothing more.
 
 ## What the remote machine can do
 
