@@ -108,6 +108,31 @@ describe("install and update documentation", () => {
     );
   });
 
+  it("the manual QA checklist saves the same key line as the README before it verifies", () => {
+    const qa = read("docs/design/updates/manual-qa.md");
+    const save = qa.indexOf(`> morndo.allowed_signers`);
+    expect(save, "step 1 creates morndo.allowed_signers").toBeGreaterThan(0);
+    expect(qa.slice(qa.lastIndexOf("\n", save), save)).toContain(KEY_LINE);
+    expect(qa.indexOf("ssh-keygen -Y verify -f morndo.allowed_signers")).toBeGreaterThan(save);
+  });
+
+  it("the docs say what install.sh installs, what releases/latest is, and that the attestation is the independent check", () => {
+    const readme = read("README.md");
+    expect(readme).toContain("stamped into the copy you downloaded");
+    expect(readme).toContain("does not choose the Version");
+    expect(readme).toContain("releases/download/v<version>/");
+    expect(readme).toMatch(/withdrawn Release is still there until a newer one is published/);
+    expect(readme).not.toContain("installs the Channel's Version");
+    expect(readme).toMatch(/independent check[^.]*not optional/);
+    expect(read("SECURITY.md")).toMatch(/gh attestation verify install\.sh[^.]*independent check[^.]*not optional/);
+  });
+
+  it("the README's Status line does not call release verification unbuilt", () => {
+    const status = read("README.md").split("\n").find(line => line.includes("Today the desktop")) ?? "";
+    expect(status).toContain("Releases are verified before anything is installed");
+    expect(status).toContain("verifying an agent's work");
+  });
+
   it("the README's install flags are the ones install.sh accepts", () => {
     const ran = spawnSync("/bin/sh", [join(ROOT, "install.sh")], { encoding: "utf8" });
     expect(ran.status).toBe(64);

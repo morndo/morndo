@@ -20,4 +20,4 @@ release@morndo.github.io namespaces="release@morndo.github.io" ssh-ed25519 AAAAC
 ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s install.sh.sig < install.sh
 ```
 
-The key line is the same in the README; if they differ, do not install and report it as a vulnerability.
+The key line is the same in the README; if they differ, do not install and report it as a vulnerability. Both copies come from this repository, so a match is not proof that the key is genuine: `gh attestation verify install.sh --repo morndo/morndo` is the independent check, and for an install you rely on it is not optional.

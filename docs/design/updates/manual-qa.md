@@ -7,6 +7,8 @@ Results go in the private QA notes, never in this tree, and nothing in this file
 ```sh
 curl -fsSLO https://github.com/morndo/morndo/releases/latest/download/install.sh
 curl -fsSLO https://github.com/morndo/morndo/releases/latest/download/install.sh.sig
+echo 'release@morndo.github.io namespaces="release@morndo.github.io" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILGOA2QkwWhAgWf3mM3sUCqH38i9HiFRe84R7qadRdh7' > morndo.allowed_signers
+gh attestation verify install.sh --repo morndo/morndo
 ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s install.sh.sig < install.sh
 sh install.sh --role control-plane --signers morndo.allowed_signers
 sh install.sh --role node --signers morndo.allowed_signers

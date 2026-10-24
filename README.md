@@ -43,7 +43,7 @@ I'm a software engineer at a startup, and we live in Slack all day. When I thoug
 
 ## Status
 
-Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Verification is designed and written down, but not built yet. This is one person's project, a few weeks old, and it is not installable by anyone else yet: from source today; from the first release by the commands in Install and update.
+Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Releases are verified before anything is installed (signed files, and an updater that checks them), but none is published yet; verifying an agent's work, the proof the worker didn't produce, is designed and written down, but not built yet. This is one person's project, a few weeks old, and it is not installable by anyone else yet: from source today; from the first release by the commands in Install and update.
 
 ## Run locally
 
@@ -79,9 +79,11 @@ Use `--role node` for a machine that only hosts agents. Use `--channel latest` f
 sh install.sh --role node --channel latest --signers morndo.allowed_signers
 ```
 
-`install.sh` checks the Manifest and the archive again. It installs the Channel's Version, writes the units, and starts the services. Nothing runs before the check passes.
+`install.sh` installs **the Version stamped into the copy you downloaded**, not the newest one: it checks that release's Manifest and archive again, installs that Version, writes the units, and starts the services. `--channel` is stored as the machine's channel, which decides what the updater offers next; it does not choose the Version that is installed. Nothing runs before the check passes.
 
-`gh attestation verify install.sh --repo morndo/morndo` is a second, independent check. The same key line is in SECURITY.md, so a mismatch shows.
+`https://github.com/morndo/morndo/releases/latest/download/` is GitHub's newest published release. That is the newest Version of the `latest` channel, not of `stable`, and a withdrawn Release is still there until a newer one is published (a withdrawal marks the Feed; it does not change what GitHub calls latest). To install an exact Version, download both files from `https://github.com/morndo/morndo/releases/download/v<version>/` instead.
+
+The key line above and the one in SECURITY.md are served from the same repository, so their agreement shows that the two copies match, not that the key is genuine. `gh attestation verify install.sh --repo morndo/morndo` is the independent check, because it is GitHub's own build provenance for the file: for a machine you rely on, run it too; it is not optional.
 
 ### Update
 
@@ -137,7 +139,7 @@ morndo doctor
 
 ### Channels
 
-`stable` is the default and the right one for most machines. `latest` is newer. `morndo update --channel latest` switches to it. A machine never moves down: on a newer build it waits until the other channel catches up. `morndo install --channel latest` (through `install.sh --channel latest`) installs from `latest`.
+`stable` is the default and the right one for most machines. `latest` is newer. `morndo update --channel latest` switches to it. A machine never moves down: on a newer build it waits until the other channel catches up. `install.sh --channel latest` stores `latest` as the channel of a new install; the Version it installs is still the one stamped into that `install.sh`.
 
 ```sh
 morndo update --channel latest
