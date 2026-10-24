@@ -124,7 +124,7 @@ Rules:
 
 | State | Means | Shown as |
 |---|---|---|
-| `green` | `pr`: open or merged, sha matches. `ci`: every named run `completed` with `success`; for `*`, at least one run, none red or pending. | ✓ |
+| `green` | `pr`: open or merged, sha matches (an open pull request at its head is green *by design*: the reference proves the pull request is at that commit; checks are a `ci` reference's job, and the assigner's proof list can require one). `ci`: every named run `completed` with `success`; for `*`, at least one run, none red or pending. | ✓ |
 | `pending` | a named run is queued, in progress or absent *and* the sha is young (under 15 minutes since the brief); `*` with a run not completed. | … |
 | `red` | any named run `failure`, `cancelled`, `timed_out`, `action_required`; a PR closed without merge. | ✗ with the run's name |
 | `mismatch` | the PR's head moved on from the sha in the ref (the proof is for older code). | ≠ with both shas |

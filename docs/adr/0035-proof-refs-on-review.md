@@ -47,7 +47,8 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 - One new table (migration 26), one adapter, one application service, one domain file; the board's rules D1 to D6 do
   not change.
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
-- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff.
+- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged), by design and not that its checks passed: that is a `ci` reference's job, which the assigner's proof list can require.
+- A stand-in forge (`MORNDO_FORGE_URL`) is for tests and scratch hubs: refused with a token, refused with the gate `on` unless the hub declares itself a scratch hub (`MORNDO_SCRATCH_HUB=1`), logged at start, and shown hub-wide (a chip in the Board header, a line in `morndo-board list`) and on every proof.
 - After a rollback to a build from before this decision: the table is additive and is left alone, but the `briefed`
   events and the `proofSeen` of Done events stay in a task's record, and an older build's event schema has no `briefed`
   kind, so its CLI and app may fail to read the history of a task that carries one (not run; the fix is to roll forward,
