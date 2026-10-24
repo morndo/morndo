@@ -56,7 +56,10 @@ describe("release pipeline files", () => {
     expect(prepare).toContain("permission-contents: write");
     expect(prepare).toContain("permission-pull-requests: write");
     expect(prepare).toContain("steps.app.outputs.token");
-    expect(JSON.parse(readFileSync(".release-please-manifest.json", "utf8"))).toEqual({ ".": "0.0.0" });
+    // The manifest names the root package's own version: Release Please bumps both together in its release PR, so the
+    // test follows the package and pins neither.
+    const root = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
+    expect(JSON.parse(readFileSync(".release-please-manifest.json", "utf8"))).toEqual({ ".": root.version });
     expect(readFileSync("CHANGELOG.md", "utf8").startsWith("# Changelog\n")).toBe(true);
     expect(release).toContain(`googleapis/release-please-action@${RELEASE_PLEASE}`);
     expect(release).toContain("config-file: release-please-config.json");
