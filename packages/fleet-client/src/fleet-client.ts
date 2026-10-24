@@ -19,7 +19,7 @@ import { createConnection } from "node:net";
 import { homedir } from "node:os";
 import { WebSocket } from "ws";
 import {
-  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, PRINCIPAL_HEADER, readOpError, redactText, RolloutWireSchema, RunViewSchema, SEMVER, toLogFormat, UpdateHealthSchema,
+  CLIENT_API, DeliverySchema, JobsListSchema, LaneEventSchema, LIMITS, parseBody, PRINCIPAL_HEADER, readOpError, redactText, RolloutWireSchema, RunViewSchema, SEMVER, toLogFormat, UpdateHealthSchema, UsageTapBody,
   type Alert, type AlertKind, type Delivery, type DeliveryState, type FleetNode, type JobsList, type LaneEvent, type LaneWatchEntry, type OpArgs, type OpError,
   type OpName, type OpResult, type RolloutWire, type RunView,
 } from "@morndo/protocol";
@@ -37,13 +37,14 @@ const STDERR_LOG: FleetLog = { warn: stderrLog("warn"), error: stderrLog("error"
 export type { FleetNode };
 export type FleetLane = { name: string; node: string; workerId: string | null; conflict: boolean };
 // `alert`: its body is an Alert, and `node` is the alert's node or "". `delivery`, `lane` (fleet clients §4.4, §7),
-// `run` (a lane's Run, ADR-0032) and `rollout` (the Rollout as it stands, updates §7): their bodies are checked here,
-// so they come typed.
+// `run` (a lane's Run, ADR-0032), `rollout` (the Rollout as it stands, updates §7) and `usage` (the usage tap, plan
+// 4.5 item 4): their bodies are checked here, so they come typed.
 export type FleetEvent = { t: "inventory" | "health" | "status" | "conflict" | "alert" | "job"; node: string; body: unknown }
   | { t: "delivery"; node: string; body: Delivery & { stale: boolean } }
   | { t: "lane"; node: string; body: LaneEvent }
   | { t: "run"; node: string; body: RunView }
-  | { t: "rollout"; node: string; body: RolloutWire };
+  | { t: "rollout"; node: string; body: RolloutWire }
+  | { t: "usage"; node: string; body: UsageTapBody };
 // A delivery as the fleet serves it: its latest state, and whether its node is offline now (stale).
 export type FleetDelivery = Delivery & { stale: boolean };
 export type OpTarget = { workerId: string } | { node: string } | { lane: string };
@@ -111,7 +112,7 @@ const CLIENT_NAME = /^[a-z]{1,16}$/;
 const FILE_IDLE_MS = 30_000;
 const RECONNECT_MS = [1000, 2000, 5000, 10_000, 30_000] as const;
 const STATUSES = new Set<string>(["online", "stale", "offline"]);
-const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job", "run", "rollout"]);
+const EVENTS = new Set<string>(["inventory", "health", "status", "conflict", "alert", "delivery", "lane", "job", "run", "rollout", "usage"]);
 // The alert kinds this client knows, a copy of the protocol's own list (packages/protocol ALERT_KINDS) so a read of
 // GET /v1/alerts can filter what it doesn't know without importing the set at call time. "unrouted_hook": hook events
 // for a script path no subscriber takes (ADR-0012 decision 8; detail { path, events }). "delivery_waiting" and
@@ -434,6 +435,10 @@ export class FleetClient {
           const body = parseBody(RolloutWireSchema, v.body);
           if (!body) { this.#log.warn("fleet events: a rollout event of an unknown shape, ignored"); return; }
           e = { t: "rollout", node: v.node, body };
+        } else if (v.t === "usage") {
+          const body = parseBody(UsageTapBody, v.body);
+          if (!body) { this.#log.warn("fleet events: a usage event of an unknown shape, ignored"); return; }
+          e = { t: "usage", node: v.node, body };
         } else {
           e = { t: v.t as "inventory" | "health" | "status" | "conflict" | "alert" | "job", node: v.node, body: v.body };
         }

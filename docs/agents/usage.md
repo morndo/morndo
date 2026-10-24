@@ -42,3 +42,61 @@ With a pool, each member posts its own windows: see [`codex.md`](codex.md) §5.
 
 Usage decides nothing (U4): which engine runs is the engine layer's (ADR-0013), and a lane that hits its limit says so
 itself in its conversation. Home only shows what the accounts reported.
+
+## A lane's failure and its account
+
+When a turn fails, the failure hook posts its JSON to the node relay as it does today; it SHOULD add the account the
+session runs on as `"account": "$MORNDO_ACCOUNT"` (a pool-style hook may send the config directory's name instead).
+The fleet turns a failure whose error word is a limit (`rate_limit`, `billing_error`, `authentication_failed`,
+`account_on_hold`, `oauth_org_not_allowed`) into a usage tap and hands it to the hub, which resolves the account in
+this order:
+
+1. the hook's own `account` field, when it is a valid account name **and** an account the hub already knows of that is
+   run on the node the failure came from (a word naming an unknown account is dropped, and nothing is ever created by
+   a failure);
+2. the lane's last record — written when a lane is started with an account, and by each status-line report — if it is
+   at most seven days old; a record written at the lane's start outranks one written by a report for twelve hours, so
+   a lane started with an account keeps it against a self-declared header;
+3. the session the failure's `session_id` names, while that session is fresh;
+4. the node's only account, when every record and session on that node names the same one.
+
+A failure that resolves to no account is kept as nothing: no seat changes (U9). A failure older than five minutes is a
+replayed event and marks nothing.
+
+A lane's record is bound to the worker token that reported for it (the tokens are trusted to report, R3). Another
+token reporting the same account for the lane only refreshes the record's stamp, but two tokens reporting different
+accounts for one lane make its record ambiguous for an hour: a failure of that lane then marks nothing unless its hook
+word names an account this node runs. Giving each lane — or each node — its own worker token is what makes that
+protection bite.
+
+An account first heard of through a hub-issued `lane.start` is the principal's own act, so its account is known from
+that moment: it appears on Home as soon as a failure names it, and Forget (the principal's) removes it — the account,
+its seat and its lane records together, so a later failure of one of its lanes marks nothing until a start or a report
+names the account again.
+
+## Pool seats
+
+The accounts pool can set a seat by hand, with a token that carries the `usage-pool` scope:
+
+```sh
+morndo agent-token new pool --role worker --scope usage-pool
+```
+
+That token posts to `POST /api/agent/usage/pool`:
+
+```json
+{ "account": "max-1", "action": "set", "state": "retired", "why": "refused", "by": "pool-bot", "at": 1760000000 }
+```
+
+`state` is one of `logged-out`, `retired`, `out`, `low`, `ok`; `why` one of `usage_limit`, `refused`, `signed_out`,
+`plan_ended`, `billing`, `by_hand`; `action: "cleared"` removes the pool's word again. A pool-set seat is sticky: no
+reading clears it, and it wins over the hub's own derived mark when both name the same state. The principal clears
+either owner's seat with `POST /api/usage/seat/clear` (`{ "account": "max-1", "owner": "pool" | "derived" }`, no
+`owner` for both).
+
+A limit post (`POST /api/agent/usage/limit`) is for a manager token or a token with the `usage-pool` scope; it always
+speaks for the hub's own derived seat, never the pool's. Until the headless reader arrives, a derived mark ends when
+the plan or account changes, when the principal clears it, or when it expires: an out mark is dropped six hours after
+the later of its back time and the cycle's own reset (the cycle the limit hit is the clock, so a weekly window that
+resets days later is not shown as fine while it still reads 100%), with no newer hit to push either out. A retired or
+logged-out derived mark never expires by time: it ends by a leased read, a plan or account change, or the principal.

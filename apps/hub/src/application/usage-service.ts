@@ -6,15 +6,18 @@
 import {
   ACCOUNT_NAME, DEFAULT_ACCOUNT, FORGET_MS, NOTICE_KEEP, SESSION_FRESH_MS,
   accountNow, applyLimit, applyReport, backNoticeText, cadenceInput, cadenceOf, changeSignature, cleanHint, cleanLength,
-  cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, mergeWindow, noCycleBook, noHealth,
-  noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, reasonOf, seatNoticeText, seatResetNoticeText,
-  sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince, watchPlan, watchThreshold,
-  windowTitle,
+  cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, limitKindOfError, markExpired, mergeWindow, noCycleBook,
+  noHealth, noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, pruneSessions, reasonOf, resolveAccount,
+  seatExpiredNoticeText, seatNoticeText,
+  seatResetNoticeText, shownSeat, sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince,
+  watchPlan, watchThreshold, windowTitle,
+  poolSeat as poolSeatOf,
   type AccountProfile, type AccountUsage, type BoardActor, type Candidate, type CycleBook, type DisagreeView,
-  type FreshRead, type LimitHit, type LimitKind, type NamedWindow, type PlanFact, type PlanWatch, type SeatRecord,
-  type SeatView, type SourceView, type ThresholdWatch, type UsageNotice, type UsageReport, type UsageSource,
-  type UsageWindow, type WindowReading, type NoticeKind,
+  type FreshRead, type FreshSession, type LaneRecord, type LimitHit, type LimitKind, type NamedWindow, type PlanFact,
+  type PlanWatch, type SeatRecord, type SeatState, type SeatView, type SeatWhy, type SourceView, type ThresholdWatch,
+  type UsageNotice, type UsageReport, type UsageSource, type UsageWindow, type WindowReading, type NoticeKind,
 } from "@morndo/domain";
+import { UsageTapBody } from "@morndo/protocol";
 import type { UsageReadingsBody, UsageReportBody } from "@morndo/protocol";
 import type { Store, UsageSourceBody, UsageSourceRow } from "../adapters/store.ts";
 import { LeaseBook } from "./usage-leases.ts";
@@ -65,6 +68,8 @@ function namedLimits(raw: UsageReportBody["limits"]): NamedWindow[] | null {
 const num = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 // How far ahead of the hub's clock a source's own stamp may run before the hub caps it (two machines' clocks differ).
 export const CLOCK_SKEW_MS = 5 * 60_000;
+// How much older than the hub's clock a fleet failure may be before it is a replay, not news (PR #127, finding 3a).
+export const STALE_FAILURE_MS = 5 * 60_000;
 // Fix round on PR #125. The hint the hub itself writes when a reading carried no readable window at all (finding 4a),
 // how often the status line's health row may be rewritten (finding 5a) and what notice retention keeps (finding 5c).
 const UNREADABLE_HINT = "the reading had no readable window";
@@ -88,12 +93,16 @@ export class UsageService {
   #lastTold = "";
   #profiles: () => ReadonlyMap<string, AccountProfile>;
   #leaseBook: LeaseBook;
+  #laneNode: (lane: string) => string | null;
 
-  constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile>; leases?: LeaseBook }) {
+  constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile>; leases?: LeaseBook; laneNode?: (lane: string) => string | null }) {
     this.#store = p.store;
     this.#now = p.now ?? Date.now;
     this.#profiles = p.profiles ?? (() => EMPTY_PROFILES);
     this.#leaseBook = p.leases ?? new LeaseBook(this.#now);
+    // S3 (plan 4.5 item 4): where a lane runs, for the lane records a report writes and a failure resolves through.
+    // Without a fleet the hub knows no lane's node, so a record is kept under node "" and never serves a node's rule.
+    this.#laneNode = p.laneNode ?? (() => null);
     for (const a of this.#store.usageAccounts()) this.#accounts.set(a.account, a);
   }
 
@@ -109,18 +118,20 @@ export class UsageService {
     const now = this.#now();
     const profiles = this.#profiles();
     const rows = this.#store.usageSources();
-    const seats = new Map(this.#store.usageSeats().map(s => [s.account, s.record]));
+    const derived = new Map(this.#store.usageSeats().map(s => [s.account, s.record]));
+    // The pool's own seats (U15, U17) stand beside the derived ones; what the principal is shown is the worse of the two.
+    const pooled = new Map(this.#store.usagePoolSeats().map(s => [s.account, s.record]));
     const byAccount = new Map<string, UsageSourceRow[]>();
     for (const r of rows) {
       const mine = byAccount.get(r.account) ?? [];
       mine.push(r);
       byAccount.set(r.account, mine);
     }
-    const names = [...new Set([...this.#accounts.keys(), ...byAccount.keys(), ...seats.keys()])].sort((a, b) => a.localeCompare(b));
+    const names = [...new Set([...this.#accounts.keys(), ...byAccount.keys(), ...derived.keys(), ...pooled.keys()])].sort((a, b) => a.localeCompare(b));
     const accounts = names.map(account => {
       const mine = byAccount.get(account) ?? [];
       const base = this.#accounts.has(account) ? accountNow(this.#accounts.get(account)!, now) : this.#skeleton(account, mine);
-      return { ...this.#accountView(base, mine, seats.get(account) ?? null, now), profile: profiles.get(account) ?? base.profile ?? null };
+      return { ...this.#accountView(base, mine, shownSeat(pooled.get(account) ?? null, derived.get(account) ?? null), now), profile: profiles.get(account) ?? base.profile ?? null };
     });
     return { accounts, at: now, notices: this.#store.usageNotices(NOTICE_KEEP) };
   }
@@ -241,6 +252,17 @@ export class UsageService {
     const account = (accountHeader ?? "").trim() || DEFAULT_ACCOUNT;
     if (!ACCOUNT_NAME.test(account)) return { ok: false, problem: "bad_account" };
     const now = this.#now();
+    // S3 (plan 4.5 item 4): a lane's report writes the lane record its failures resolve from, replacing the record of
+    // that (node, lane) — the lane may have moved to another account since its last report. A lane the fleet's list
+    // places on no node writes none (PR #127, finding 4a): no node "" records are written any more, though resolution
+    // still tolerates the ones stored before. The store keeps a start record of the last twelve hours against a report.
+    const lane = actor.kind === "principal" ? null : actor.name;
+    if (lane !== null && lane !== "") {
+      const laneNodeOf = this.#laneNode(lane);
+      // Fix round 2 on PR #127 (finding 1): the record carries the id of the token that reported it, so another token's
+      // word for the same lane is a disagreement, never a silent replacement.
+      if (laneNodeOf !== null) this.#store.saveLaneAccount(laneNodeOf, lane, account, now, "report", actor.kind === "principal" ? null : actor.token);
+    }
     const next = applyReport(this.#accounts.get(account) ?? null, reportFrom(body, account, actor, now), now);
     this.#accounts.set(account, next);
     this.#store.saveUsageAccount(next);
@@ -262,6 +284,102 @@ export class UsageService {
 
   // The pool's file can change with no report in sight (every lane quiet): what it changed is told the same way.
   refreshProfiles() { this.#tellIfChanged(); }
+
+  // The fleet's usage tap (plan 4.5 item 4): a lane's start with an account writes its lane record; a limit failure
+  // resolves to an account — the hook's own word, the lane's record, the session, the node's only one — and marks that
+  // account's seat. A failure that resolves to nothing is kept as nothing (U9): no seat changes, and no account is
+  // ever created by one.
+  fromFleet(node: string, body: unknown): void {
+    const parsed = UsageTapBody.safeParse(body);
+    if (!parsed.success) return;
+    const tap = parsed.data;
+    if (tap.kind === "lane_account") {
+      this.#store.saveLaneAccount(node, tap.lane, tap.account, tap.at, "start");
+      return;
+    }
+    const kind = limitKindOfError(tap.error);
+    if (kind === null) return;
+    const now = this.#now();
+    // A failure older than the skew is a node replaying its events after a reconnect (PR #127, finding 3a): not news,
+    // no mark. A failure stamped ahead of the hub's clock is capped as a reading's stamp is.
+    if (now - tap.at > STALE_FAILURE_MS) return;
+    const at = Math.min(tap.at, now + CLOCK_SKEW_MS);
+    // The fresh sessions of every account, as pruneSessions keeps them: a failure's session id resolves through them.
+    const sessions: FreshSession[] = [];
+    for (const a of this.#accounts.values()) for (const s of pruneSessions(a.sessions, now)) sessions.push({ account: a.account, sessionId: s.sessionId, lane: s.lane });
+    const records: readonly LaneRecord[] = this.#store.laneAccounts();
+    // The hook's own word is passed on only for an account this node is seen to run (PR #127, finding 1): a lane record
+    // of this node names it, or a fresh session of it sits on a lane of this node. Either one means the hub knows the
+    // account (a record or a session is how it learns one), so no separate "known" test is left to fail alone. Anything
+    // else is dropped and resolution goes on without it: a failure naming an account nobody knows creates nothing, and
+    // one node's word never marks another node's account.
+    const hook = typeof tap.account === "string" && this.#seenOnNode(tap.account, node, records, sessions) ? tap.account : null;
+    const resolved = resolveAccount({
+      hookAccount: hook, node, lane: tap.lane, sessionId: tap.sessionId ?? null, now,
+      records, sessions, laneNode: this.#laneNode,
+    });
+    // An unresolved hit is kept as nothing (U9): no seat changes. `by` is the lane's name, cleaned inside noteLimit.
+    if (resolved.account === null) return;
+    // A pool-owned seat in state "retired" or "logged-out" takes no further hits from a lane (finding 1): the pool's
+    // word is final for that account, and no derived mark is made behind it.
+    const pool = this.#store.usagePoolSeats().find(s => s.account === resolved.account)?.record ?? null;
+    if (pool !== null && (pool.state === "retired" || pool.state === "logged-out")) return;
+    this.noteLimit({ account: resolved.account, kind, backAt: null, by: tap.lane ?? "a lane", at });
+  }
+
+  // Whether this node runs the account (PR #127, finding 1): a lane record of this node naming it, or a fresh session
+  // of it whose lane the fleet's list places on this node.
+  #seenOnNode(account: string, node: string, records: readonly LaneRecord[], sessions: readonly FreshSession[]): boolean {
+    return records.some(r => r.node === node && r.account === account)
+      || sessions.some(s => s.account === account && s.lane !== null && this.#laneNode(s.lane) === node);
+  }
+
+  // The pool's own word on a seat (U15): set by a token with the usage-pool scope, cleared by the same or by the
+  // principal. One seat notice per change, one back notice per clear.
+  poolSeat(a: { account: string; action: "set" | "cleared"; state?: SeatState; why?: SeatWhy | null; backAt: number | null; at: number | null; by: string }): { ok: true } | { ok: false; problem: "bad_account" | "bad_state" } {
+    if (!ACCOUNT_NAME.test(a.account)) return { ok: false, problem: "bad_account" };
+    if (a.action === "cleared") {
+      const prev = this.#store.usagePoolSeats().find(s => s.account === a.account)?.record ?? null;
+      if (prev === null) return { ok: true };
+      this.#store.atomically(() => {
+        this.#store.deleteUsagePoolSeat(a.account);
+        this.#note(a.account, "back", `pool|back|${prev.markedAt}`, backNoticeText(a.account, "the pool"));
+      });
+      this.#tellIfChanged();
+      return { ok: true };
+    }
+    if (a.state === undefined) return { ok: false, problem: "bad_state" };
+    // `by` is a reporter's untrusted display text, cleaned before it is stored, like every limit's.
+    const by = cleanNote(a.by) ?? "a source";
+    const at = a.at ?? this.#now();
+    const record = poolSeatOf({ state: a.state, why: a.why ?? null, backAt: a.backAt, at, by });
+    const prev = this.#store.usagePoolSeats().find(s => s.account === a.account)?.record ?? null;
+    // One seat notice when the state or the why differs from what is already there; no seat yet is a change too.
+    const changed = prev === null || prev.state !== record.state || prev.why !== record.why;
+    this.#store.atomically(() => {
+      this.#store.saveUsagePoolSeat(a.account, record);
+      if (changed) this.#note(a.account, "seat", `pool|${record.state}|${record.why}|${at}`, seatNoticeText(a.account, record));
+    });
+    this.#tellIfChanged();
+    return { ok: true };
+  }
+
+  // The principal's own clear of a seat (U17): true when something was removed, with one back notice. Without an
+  // owner, both the pool's and the derived one go.
+  clearSeat(account: string, owner?: "pool" | "derived"): boolean {
+    if (!ACCOUNT_NAME.test(account)) return false;
+    const pool = owner === undefined || owner === "pool" ? this.#store.usagePoolSeats().find(s => s.account === account)?.record ?? null : null;
+    const derived = owner === undefined || owner === "derived" ? this.#store.usageSeats().find(s => s.account === account)?.record ?? null : null;
+    if (pool === null && derived === null) return false;
+    const now = this.#now();
+    this.#store.atomically(() => {
+      if (pool !== null) this.#store.deleteUsagePoolSeat(account);
+      if (derived !== null) this.#store.deleteUsageSeat(account);
+      this.#note(account, "back", `cleared|${now}`, backNoticeText(account, "the principal"));
+    });
+    this.#tellIfChanged();
+    return true;
+  }
 
   // A usage reading a source posts (plan 4.3, U14): the windows it can see now, or the one reason it cannot. The
   // account comes from the header, as with a status line's report; the body's own `source` says who read it.
@@ -410,18 +528,24 @@ export class UsageService {
     return { ok: true, resolved: true };
   }
 
-  // The window a limit hit limited (plan 4.5): the 5-hour window when a reading of it names a reset, else the fullest
-  // window the account shows. No reading at all: no cycle, so the mark keeps only its own back time.
+  // The window a limit hit limited (plan 4.5; re-check R3): the window that reads 100%, the one that holds the account
+  // back for longest when several do (the latest reset), else the fullest window the account shows. A full weekly window
+  // beside a low 5-hour one is therefore the weekly one, and its reset is the mark's clock. No reading at all: no cycle,
+  // so the mark keeps only its own back time.
   #cycleOf(a: AccountUsage | null): LimitHit["cycle"] {
     if (a === null) return null;
-    if (a.fiveHour !== null && a.fiveHour.resetsAt !== null) return { windowId: "five_hour", resetsAt: a.fiveHour.resetsAt };
     const all: { id: string; usedPercentage: number; resetsAt: number | null }[] = [];
     if (a.fiveHour !== null) all.push({ id: "five_hour", ...a.fiveHour });
     if (a.sevenDay !== null) all.push({ id: "seven_day", ...a.sevenDay });
     for (const w of a.limits ?? []) all.push({ id: w.label, usedPercentage: w.usedPercentage, resetsAt: w.resetsAt });
     if (all.length === 0) return null;
-    let best = all[0]!;
-    for (const w of all) if (w.usedPercentage > best.usedPercentage) best = w;
+    const full = all.filter(w => w.usedPercentage >= 100);
+    const pool = full.length > 0 ? full : all;
+    let best = pool[0]!;
+    for (const w of pool) {
+      const better = full.length > 0 ? (w.resetsAt ?? 0) > (best.resetsAt ?? 0) : w.usedPercentage > best.usedPercentage;
+      if (better) best = w;
+    }
     return { windowId: best.id, resetsAt: best.resetsAt };
   }
 
@@ -432,11 +556,16 @@ export class UsageService {
     if (!ACCOUNT_NAME.test(account)) return false;
     const rows = this.#store.usageSourcesOf(account);
     if (source === undefined) {
-      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeat(account) !== null;
+      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeat(account) !== null || this.#store.usagePoolSeats().some(s => s.account === account)
+        || this.#store.laneAccounts().some(r => r.account === account);
       this.#store.deleteUsageSources(account);
       this.#store.deleteUsageWatches(account);
       this.#store.deleteUsageSeat(account);
+      this.#store.deleteUsagePoolSeat(account);
       this.#store.deleteUsageAccount(account);
+      // The account's lane records go with it (fix round 2 on PR #127, finding 4): a later failure of one of its lanes
+      // resolves nothing until a start or a report names the account again.
+      this.#store.deleteLaneAccountsOf(account);
       this.#accounts.delete(account);
       if (had) this.#tellIfChanged();
       return had;
@@ -450,7 +579,8 @@ export class UsageService {
   }
 
   // The silence and forgetting pass (AT-24): every 60 s from main.ts. A source silent for two weeks is forgotten,
-  // with one notice; an account with no sources, no seat and nothing said for two weeks goes too.
+  // with one notice; an account with no sources, no seat and nothing said for two weeks goes too; and a derived out
+  // mark past its back time by six hours expires, with one notice (PR #127, finding 3b).
   sweep(): void {
     const now = this.#now();
     this.#store.pruneUsageNotices(NOTICE_KEEP_ROWS, NOTICE_KEEP_MS, now);      // retention (PR #125, finding 5c)
@@ -477,8 +607,20 @@ export class UsageService {
       if (a.sessions.some(s => now - s.at < SESSION_FRESH_MS)) continue;
       this.#store.deleteUsageAccount(a.account);
       this.#store.deleteUsageWatches(a.account);
+      // The pool's seat goes with the whole account (U15): the pool sets it again if its word still stands.
+      this.#store.deleteUsagePoolSeat(a.account);
       this.#accounts.delete(a.account);
       this.#note(a.account, "forgotten", `|${now}`, forgottenNoticeText(a.account, null));
+    }
+    // A derived out mark whose back time passed more than six hours ago, with no newer limit post to push it out
+    // (applyLimit extends backAt), is dropped with one notice (PR #127, finding 3b). The pool's seats are kept
+    // elsewhere and never expire by time; neither does a retired or logged-out derived one.
+    for (const s of this.#store.usageSeats()) {
+      if (!markExpired(s.record, now)) continue;
+      this.#store.atomically(() => {
+        this.#store.deleteUsageSeat(s.account);
+        this.#note(s.account, "back", `expired|${s.record.markedAt}`, seatExpiredNoticeText(s.account));
+      });
     }
     this.#tellIfChanged();
   }

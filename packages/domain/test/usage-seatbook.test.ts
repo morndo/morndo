@@ -2,10 +2,10 @@
 // same state and why only extends the back time, and a mark clears only the way usage-seat's clearsMark says. A
 // seat the pool set by hand is never cleared by a reading.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MARK_MS, MAX_MARK_MS, MIN_MARK_MS, applyLimit, clearSeat, type FreshRead, type LimitHit, type SeatRecord } from "../src/index.ts";
+import { DEFAULT_MARK_MS, MARK_EXPIRY_MS, MAX_MARK_MS, MIN_MARK_MS, applyLimit, clearSeat, markExpired, poolSeat, shownSeat, type FreshRead, type LimitHit, type SeatRecord } from "../src/index.ts";
 
 const T = 1_700_000_000_000;      // 10:00
-const MIN = 60_000, HOUR = 3_600_000;
+const MIN = 60_000, HOUR = 3_600_000, DAY = 86_400_000;
 
 const hit = (o: Partial<LimitHit> = {}): LimitHit =>
   ({ kind: "usage_limit", at: T, backAt: null, by: "seat-a", cycle: { windowId: "five_hour", resetsAt: T + 3 * HOUR }, ...o });
@@ -72,5 +72,53 @@ describe("one seat state per account (plan 4.5)", () => {
   it("a seat the pool set by hand is never cleared here", () => {
     const pooled = out({ owner: "pool", by: "hand" });
     expect(clearSeat(pooled, read())).toEqual({ seat: pooled, cleared: false });
+  });
+
+  it("a derived out mark expires six hours past its back time, and nothing else does (PR #127, finding 3b)", () => {
+    expect(MARK_EXPIRY_MS).toBe(6 * HOUR);
+    // Fix round 2, finding 2 turned the clock from the back time alone to the later of it and the cycle's own reset,
+    // so this case is pinned with no cycle: the back time alone (the cycleReset term has its own case below).
+    expect(markExpired(out({ backAt: T, cycleReset: null }), T + 6 * HOUR)).toBe(false);        // exactly six hours: not yet
+    expect(markExpired(out({ backAt: T, cycleReset: null }), T + 6 * HOUR + 1)).toBe(true);     // a millisecond past: expired
+    expect(markExpired(out({ backAt: T, cycleReset: null }), T + 5 * HOUR)).toBe(false);        // the back time not six hours past
+    expect(markExpired(out({ backAt: null }), T + 8 * HOUR)).toBe(false);     // no back time to pass
+    expect(markExpired(out({ owner: "pool" }), T + 40 * HOUR)).toBe(false);    // the pool's word never expires by time, however late (past the back time and the cycle's reset by more than six hours)
+    expect(markExpired(out(), T + 40 * HOUR)).toBe(true);                       // the same seat, derived, has expired by then
+    const retired: SeatRecord = { ...out(), state: "retired", why: "refused", backAt: null, cycleReset: null, windowId: null };
+    expect(markExpired(retired, T + 8 * HOUR)).toBe(false);                   // a retired derived seat stays
+    const signedOut: SeatRecord = { ...out(), state: "logged-out", why: "signed_out", backAt: null, cycleReset: null, windowId: null };
+    expect(markExpired(signedOut, T + 8 * HOUR)).toBe(false);                 // a logged-out derived seat stays
+  });
+
+  // Fix round 2 on PR #127, finding 2: the cycle the limit hit is the clock a derived out mark expires by — a weekly
+  // window resets days later than the default one-hour back time, and the seat is not shown as fine while that window
+  // still reads 100%. A null or earlier cycleReset keeps the old rule: six hours past the back time.
+  it("a derived out mark with a cycle reset later than its back time waits for the cycle's own reset (fix round 2, finding 2)", () => {
+    const weekly = out({ backAt: T, cycleReset: T + 3 * DAY });
+    expect(markExpired(weekly, T + 7 * HOUR)).toBe(false);                    // past the back time's six hours, but the weekly window has not reset
+    expect(markExpired(weekly, T + 3 * DAY + 6 * HOUR)).toBe(false);          // exactly six hours past the reset: not yet
+    expect(markExpired(weekly, T + 3 * DAY + 6 * HOUR + MIN)).toBe(true);     // six hours and a minute past the reset: expired
+    expect(markExpired(out({ backAt: T, cycleReset: null }), T + 6 * HOUR + 1)).toBe(true);      // no cycle: the back time alone
+    expect(markExpired(out({ backAt: T, cycleReset: T - HOUR }), T + 6 * HOUR + 1)).toBe(true);  // an earlier reset: the back time alone
+  });
+
+  it("the pool's own record: owner pool, its own times, no cycle and no window, the back time as given (U15)", () => {
+    expect(poolSeat({ state: "retired", why: "refused", backAt: null, at: T + 5 * MIN, by: "pool-bot" })).toEqual({
+      state: "retired", why: "refused", since: T + 5 * MIN, markedAt: T + 5 * MIN, backAt: null, cycleReset: null, windowId: null, owner: "pool", by: "pool-bot",
+    });
+    expect(poolSeat({ state: "out", why: null, backAt: T + 2 * HOUR, at: T, by: "hand" })).toMatchObject({ state: "out", why: null, backAt: T + 2 * HOUR, owner: "pool", by: "hand" });
+  });
+
+  it("the seat shown is the worse of the pool's and the derived one; on an equal state, the pool's (U17)", () => {
+    const pooled = out({ owner: "pool", by: "hand" });
+    const derivedOut = out({ owner: "derived", by: "worker-one" });
+    const derivedRetired: SeatRecord = { ...out(), state: "retired", why: "refused", backAt: null, cycleReset: null, windowId: null, owner: "derived", by: "worker-one" };
+    expect(shownSeat(pooled, null)).toBe(pooled);
+    expect(shownSeat(null, derivedOut)).toBe(derivedOut);
+    expect(shownSeat(null, null)).toBeNull();
+    expect(shownSeat({ ...pooled, state: "ok" }, derivedOut)).toBe(derivedOut);
+    expect(shownSeat(pooled, { ...derivedOut, state: "low" })).toBe(pooled);
+    expect(shownSeat(pooled, derivedRetired)).toBe(derivedRetired);
+    expect(shownSeat({ ...derivedRetired, owner: "pool" }, derivedRetired)).toMatchObject({ state: "retired", owner: "pool" });
   });
 });

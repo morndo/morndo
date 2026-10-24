@@ -28,6 +28,7 @@ export * from "./usage-seat.ts";
 export * from "./usage-cadence.ts";
 export * from "./usage-merge.ts";
 export * from "./usage-seatbook.ts";
+export * from "./usage-account.ts";
 export * from "./usage-notice.ts";
 export * from "./usage-view.ts";
 export * from "./jobs.ts";
