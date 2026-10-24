@@ -174,7 +174,7 @@ export type RefState = "green" | "pending" | "red" | "mismatch" | "missing" | "u
 // wrote it) is never taken for one.
 export const REF_STATES: readonly RefState[] = ["green", "pending", "red", "mismatch", "missing", "unfetchable", "not_checked"];
 export type RefResult = { ref: string; state: RefState; detail: string | null; checkedAt: number };   // ref: a brief's own canonical form
-export const PROOF_KINDS = ["no_brief", "unchecked", "pending", "failing", "unfetchable", "not_checked", "verified", "attested_only"] as const;
+export const PROOF_KINDS = ["no_brief", "unchecked", "pending", "failing", "unfetchable", "not_checked", "not_covered", "verified", "attested_only"] as const;
 export type ProofKind = (typeof PROOF_KINDS)[number];
 export type ProofState = { kind: ProofKind; green: number; total: number; accepts: boolean; line: string };
 
@@ -184,14 +184,125 @@ export const WORD: Record<RefState, string> = { green: "green", red: "failed", m
 // What the card shows of one brief against the results the hub holds (B15): one line, whatever the references' states.
 // Verified proof only — attested items never move it (B14), one reference the board could not read is never green, and
 // one red reference makes the whole task failing whatever else is green. A reference with no row yet counts as pending.
+export const ITEM_KINDS = ["pr", "ci", "tests", "manual", "ui", "data", "infra"] as const;
+export type ItemKind = (typeof ITEM_KINDS)[number];
+export const LIST_MAX = 12;
+export const ITEM_TEXT_MAX = 200;
+export type ProofItem = { spec: string; kind: ItemKind; repo: string | null; text: string; by: "assigner" | "lane" };
+export type ItemProblem = { problem: "bad_item"; detail: string };
+export const COVERAGE_STATUSES = ["covered", "told", "open", "not_covered"] as const;
+export type CoverageStatus = (typeof COVERAGE_STATUSES)[number];
+export type CoverageItem = ProofItem & { status: CoverageStatus };
+
+const ITEM_GRAMMAR = "an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra";
+const badItem = (detail: string): Result<never, ItemProblem> => err({ problem: "bad_item", detail });
+
+// B17: one line the assigner files — what kind of proof the work needs, in words. `pr` and `ci` may name a repository;
+// the rest stand on the lane's attested word alone.
+export function parseItemSpec(input: string): Result<Omit<ProofItem, "by">, ItemProblem> {
+  const raw = input.trim();
+  const colon = raw.indexOf(":");
+  if (colon === -1) return badItem(ITEM_GRAMMAR);
+  const head = raw.slice(0, colon).trim();
+  const textRaw = raw.slice(colon + 1);
+  if (/[\x00-\x1f\x7f-\x9f]/.test(textRaw)) return badItem(ITEM_GRAMMAR);
+  const text = textRaw.replace(/\s+/g, " ").trim();
+  if (text === "" || text.length > ITEM_TEXT_MAX) return badItem(ITEM_GRAMMAR);
+  const at = head.indexOf("@");
+  let kind: string;
+  let repo: string | null = null;
+  if (at === -1) kind = head;
+  else {
+    kind = head.slice(0, at);
+    repo = head.slice(at + 1);
+    if (!REPO_NAME.test(repo)) return badItem(ITEM_GRAMMAR);
+  }
+  if (!(ITEM_KINDS as readonly string[]).includes(kind)) return badItem(ITEM_GRAMMAR);
+  const k = kind as ItemKind;
+  if (repo !== null && k !== "pr" && k !== "ci") return badItem(ITEM_GRAMMAR);
+  if ((k === "pr" || k === "ci") && repo === null) return badItem(ITEM_GRAMMAR);
+  const spec = `${k}${repo !== null ? `@${repo}` : ""}: ${text}`;
+  return ok({ spec, kind: k, repo, text });
+}
+
+// B17: the list that still counts — folded from `proof_listed` events in rev order; not staled by a brief going away.
+export function currentList(events: readonly TaskEvent[]): ProofItem[] {
+  const sorted = [...events].sort((a, b) => a.rev - b.rev);
+  const list: ProofItem[] = [];
+  const bySpec = new Map<string, ProofItem>();
+  for (const e of sorted) {
+    if (e.change.kind !== "proof_listed") continue;
+    const who: ProofItem["by"] = e.actor.kind === "worker" ? "lane" : "assigner";
+    for (const drop of e.change.drop) {
+      const item = bySpec.get(drop);
+      if (item !== undefined) {
+        bySpec.delete(drop);
+        const i = list.findIndex(x => x.spec === drop);
+        if (i !== -1) list.splice(i, 1);
+      }
+    }
+    for (const add of e.change.add) {
+      if (bySpec.has(add)) continue;
+      const parsed = parseItemSpec(add);
+      if (!parsed.ok) continue;
+      const item = { ...parsed.value, by: who };
+      list.push(item);
+      bySpec.set(add, item);
+    }
+  }
+  return list;
+}
+
+// B17: each list item against the brief that still counts and the hub's rows for it.
+export function coverageOf(list: readonly ProofItem[], brief: ProofBrief | null, results: readonly RefResult[]): CoverageItem[] {
+  const latest = new Map<string, RefResult>();
+  for (const row of results) {
+    const kept = latest.get(row.ref);
+    if (kept === undefined || row.checkedAt > kept.checkedAt) latest.set(row.ref, row);
+  }
+  const out: CoverageItem[] = [];
+  for (const item of list) {
+    if (brief === null) { out.push({ ...item, status: "not_covered" }); continue; }
+    if (item.kind === "pr" || item.kind === "ci") {
+      if (brief.noCode !== "") { out.push({ ...item, status: "not_covered" }); continue; }
+      const wantRepo = item.repo!.toLowerCase();
+      const refs: string[] = [];
+      for (const raw of brief.refs) {
+        const r = parseProofRef(raw);
+        if (!r.ok || r.value.kind !== item.kind || r.value.repo.toLowerCase() !== wantRepo) continue;
+        refs.push(refString(r.value));
+      }
+      if (refs.length === 0) { out.push({ ...item, status: "not_covered" }); continue; }
+      const states = refs.map(ref => latest.get(ref)?.state ?? "pending");
+      if (states.some(s => s === "green")) out.push({ ...item, status: "covered" });
+      else out.push({ ...item, status: "open" });
+      continue;
+    }
+    if (brief.attested.some(a => a.kind === item.kind)) out.push({ ...item, status: "told" });
+    else out.push({ ...item, status: "not_covered" });
+  }
+  return out;
+}
+
+const overlayList = (base: ProofState, list: readonly ProofItem[], brief: ProofBrief | null, results: readonly RefResult[]): ProofState => {
+  const uncovered = coverageOf(list, brief, results).filter(i => i.status === "not_covered");
+  if (uncovered.length === 0) return base;
+  const suffix = uncovered.map(i => ` · ◇ not covered: ${i.spec}`).join("");
+  const whole = `${base.line}${suffix}`;
+  const line = whole.length > 600 ? `${cutText(whole, 599)}…` : whole;
+  const keepKind = base.kind === "failing" || base.kind === "unfetchable" || base.kind === "pending" || base.kind === "not_checked"
+    || base.kind === "no_brief" || base.kind === "unchecked";
+  return { ...base, kind: keepKind ? base.kind : "not_covered", accepts: false, line };
+};
+
 export const NO_BRIEF_LINE = "proof: no brief";   // proofOf's own line for no brief, for readers that skip it
-export function proofOf(brief: ProofBrief | null, results: readonly RefResult[], merges: readonly { repo: string; sha: string }[] = []): ProofState {
-  if (brief === null) return { kind: "no_brief", green: 0, total: 0, accepts: false, line: NO_BRIEF_LINE };
+export function proofOf(brief: ProofBrief | null, results: readonly RefResult[], merges: readonly { repo: string; sha: string }[] = [], list: readonly ProofItem[] = []): ProofState {
+  if (brief === null) return overlayList({ kind: "no_brief", green: 0, total: 0, accepts: false, line: NO_BRIEF_LINE }, list, brief, results);
   if (brief.refs.length === 0) {
     if (brief.noCode !== "" && merges.length > 0)
-      return { kind: "unchecked", green: 0, total: 0, accepts: false, line: `proof: no code change claimed, but the task has a merge record (${merges[0]!.repo})` };
-    if (brief.noCode !== "") return { kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" };
-    return { kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" };
+      return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: `proof: no code change claimed, but the task has a merge record (${merges[0]!.repo})` }, list, brief, results);
+    if (brief.noCode !== "") return overlayList({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" }, list, brief, results);
+    return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" }, list, brief, results);
   }
   // The merge record's repository, re-applied at every reading (not only when the brief was filed): a merge recorded
   // after the brief leaves a brief whose references sit elsewhere unverified, however green they are.
@@ -200,7 +311,7 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
     if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {
       const rows = new Map(results.map(r => [r.ref, r] as const));
       const green = brief.refs.filter(ref => rows.get(ref)?.state === "green").length;
-      return { kind: "unchecked", green, total: brief.refs.length, accepts: false, line: `proof: the task records a merge in ${merges[0]!.repo}; no reference in that repository` };
+      return overlayList({ kind: "unchecked", green, total: brief.refs.length, accepts: false, line: `proof: the task records a merge in ${merges[0]!.repo}; no reference in that repository` }, list, brief, results);
     }
   }
   const latest = new Map<string, RefResult>();
@@ -216,7 +327,8 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
     : states.some(s => s === "not_checked") ? "not_checked" : "verified";
   const parts = brief.refs.map((ref, i) => states[i] === "green" ? "" : ` · ${MARK[states[i]!]} ${ref} ${latest.get(ref)?.detail ?? WORD[states[i]!]}`);
   const whole = `proof: ${green} of ${brief.refs.length} green${parts.join("")}`;
-  return { kind, green, total: brief.refs.length, accepts: kind === "verified", line: whole.length > 600 ? `${cutText(whole, 599)}…` : whole };
+  const base = { kind, green, total: brief.refs.length, accepts: kind === "verified", line: whole.length > 600 ? `${cutText(whole, 599)}…` : whole };
+  return overlayList(base, list, brief, results);
 }
 
 // B13: the brief that still counts — the newest `briefed` event, unless the task has left review since (any review →
@@ -337,4 +449,4 @@ export function judgeCi(ref: Extract<ProofRef, { kind: "ci" }>, runs: readonly C
 // What applyAction judges a Done against (B16): the brief as filed, the results the hub read for its references, and
 // the mode the gate runs in (off: the gate is not there; warn: the Done is accepted with what was seen recorded; on:
 // not green refuses). `allowedRepos` absent: MORNDO_REPO plus the task's merge records, as checkBrief is told there.
-export type ProofGate = { mode: ProofMode; brief: ProofBrief | null; results: readonly RefResult[]; allowedRepos?: readonly string[] };
+export type ProofGate = { mode: ProofMode; brief: ProofBrief | null; results: readonly RefResult[]; allowedRepos?: readonly string[]; list?: readonly ProofItem[] };

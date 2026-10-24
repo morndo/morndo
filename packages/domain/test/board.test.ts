@@ -2,7 +2,7 @@
 // work and never to Done, one task in progress per lane, every change an event with provenance and a revision.
 import { describe, expect, it } from "vitest";
 import {
-  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MAX_MERGES, MORNDO_REPO, PRINCIPAL_NOT_LIVE, PRINCIPAL_PROOF_ACCEPT, TITLE_MAX, applyAction, boardChanged, deriveRun, boardOrder, createTask, derivedMove, endpointId, isOrphan, keyMismatch, livenessOf, mayMove, mergeLabel, mergedView, parseTaskKey, proofOf, sessionId, taskKey, unregisteredMove, workingOn,
+  BACKGROUND_REASON, DONE_SHOWN_MS, GONE_REASON, MAX_MERGES, MORNDO_REPO, PRINCIPAL_NOT_LIVE, PRINCIPAL_PROOF_ACCEPT, TITLE_MAX, applyAction, boardChanged, deriveRun, boardOrder, createTask, derivedMove, endpointId, isOrphan, keyMismatch, livenessOf, mayMove, mergeLabel, mergedView, parseItemSpec, parseTaskKey, proofOf, sessionId, taskKey, unregisteredMove, workingOn,
   type AncestryAnswer, type BoardActor, type BriefInput, type DoneGate, type Liveness, type MergeRecord, type NodeBuild, type ProofBrief, type ProofGate, type ProofMode, type RefResult, type RefState, type Run, type RunWait, type Task, type TaskAction, type TaskActor,
 } from "../src/index.ts";
 
@@ -19,6 +19,9 @@ const value = <T>(r: { ok: true; value: T } | { ok: false; error: unknown }): T 
 const problem = (r: { ok: boolean; error?: unknown }) => (r.ok ? "ok" : (r.error as { problem: string }).problem);
 const make = (n: number, o: Partial<Parameters<typeof createTask>[0]> = {}, by: BoardActor = manager) =>
   value(createTask({ title: `Task ${n}`, ...o }, by, n, NOW)).task;
+const brief = (o: Partial<ProofBrief> = {}): ProofBrief => ({
+  summary: "Totals row rounds to cents", decisions: "", leftOut: "nothing", limits: "none known", refs: [], attested: [], noCode: "", ...o,
+});
 const apply = (t: Task, a: TaskAction, by: TaskActor, board: Task[] = [t], at = NOW + 1) => applyAction(t, a, by, at, board);
 
 describe("keys (B7)", () => {
@@ -697,5 +700,89 @@ describe("brief and proof (B13 to B16)", () => {
     const r = act(inReview(), { action: "move", to: "done", reason: "x" }, manager, gate(proof({ mode: "off" })));
     expect(value(r).task.status).toBe("done");
     expect(value(r).event.change).not.toHaveProperty("proofSeen");
+  });
+});
+
+describe("the proof list (B17)", () => {
+  const PR_SPEC = "pr@acme/shop: the pull request";
+  const DATA_SPEC = "data: a sample of 30 rows";
+  const LANE_SPEC = "ui: the totals row";
+  const item = (spec: string, by: "assigner" | "lane") => {
+    const p = parseItemSpec(spec);
+    if (!p.ok) throw new Error(JSON.stringify(p.error));
+    return { ...p.value, by };
+  };
+  const proofGate = (o: Partial<ProofGate> = {}): DoneGate => ({
+    merges: [],
+    liveness: (): Liveness => ({ live: true }),
+    proof: { mode: "on", brief: null, results: [], list: [], ...o },
+  });
+  const act = (t: Task, a: TaskAction, by: TaskActor, g: DoneGate, board: Task[] = [t]) => applyAction(t, a, by, NOW + 1, board, g);
+  const boardActor = (lane = "builder"): TaskActor => ({ kind: "board", rule: "D1", lane });
+  const consoleActor: TaskActor = { kind: "console" };
+
+  it("the manager files a list on a task in any state but done: no state change, rev up by one, no ifRev", () => {
+    const todo = make(1, { assignee: "builder" });
+    const before = { ...todo };
+    const g = proofGate();
+    const r = act(todo, { action: "proof_list", add: [PR_SPEC, DATA_SPEC] }, manager, g);
+    expect(value(r).task).toMatchObject({ status: before.status, assignee: before.assignee, stateChangedAt: before.stateChangedAt, rev: before.rev + 1 });
+    expect(value(r).event.change).toEqual({ kind: "proof_listed", add: [PR_SPEC, DATA_SPEC], drop: [] });
+    expect(value(r).event).not.toHaveProperty("ifRev");
+    const doing = value(apply(todo, { action: "move", to: "doing" }, builder)).task;
+    expect(act(doing, { action: "proof_list", add: ["ci@acme/shop: CI green"] }, manager, proofGate()).ok).toBe(true);
+  });
+
+  it("a lane adds items to its own task and cannot drop the manager's; it drops its own", () => {
+    let t = make(1, { assignee: "builder" });
+    t = value(apply(t, { action: "move", to: "doing" }, builder)).task;
+    let list = [item(PR_SPEC, "assigner")];
+    let g = proofGate({ list });
+    const added = act(t, { action: "proof_list", add: [LANE_SPEC] }, builder, g);
+    expect(value(added).event.change).toEqual({ kind: "proof_listed", add: [LANE_SPEC], drop: [] });
+    list = [...list, item(LANE_SPEC, "lane")];
+    g = proofGate({ list });
+    expect(act(t, { action: "proof_list", drop: [PR_SPEC] }, builder, g)).toMatchObject({ ok: false, error: { problem: "not_allowed" } });
+    const dropped = act(t, { action: "proof_list", drop: [LANE_SPEC] }, builder, g);
+    expect(value(dropped).event.change).toEqual({ kind: "proof_listed", add: [], drop: [LANE_SPEC] });
+  });
+
+  it("the board itself, another lane and a task that is done are refused", () => {
+    const t = make(1, { assignee: "builder" });
+    expect(act(t, { action: "proof_list", add: [PR_SPEC] }, boardActor(), proofGate())).toEqual({ ok: false, error: { problem: "not_allowed" } });
+    expect(act(t, { action: "proof_list", add: [PR_SPEC] }, reviewer, proofGate())).toEqual({ ok: false, error: { problem: "not_yours" } });
+    let offered = make(1, { assignee: "builder" });
+    offered = value(apply(offered, { action: "move", to: "doing" }, builder)).task;
+    offered = value(apply(offered, { action: "move", to: "review" }, builder)).task;
+    const done = value(apply(offered, { action: "move", to: "done", reason: "x" }, manager)).task;
+    expect(problem(act(done, { action: "proof_list", add: [PR_SPEC] }, manager, proofGate()))).toBe("bad_transition");
+  });
+
+  it("twelve items at most, a bad spec, an unknown drop and a repeated add behave as stated", () => {
+    const specs = Array.from({ length: 12 }, (_, i) => `tests: case ${i + 1}`);
+    const t = make(1, { assignee: "builder" });
+    expect(act(t, { action: "proof_list", add: ["not a spec"] }, manager, proofGate())).toMatchObject({ ok: false, error: { problem: "bad_item" } });
+    expect(act(t, { action: "proof_list", drop: [DATA_SPEC] }, manager, proofGate())).toEqual({ ok: false, error: { problem: "no_item", detail: DATA_SPEC } });
+    expect(act(t, { action: "proof_list", add: [PR_SPEC] }, manager, proofGate()).ok).toBe(true);
+    expect(act(t, { action: "proof_list", add: [PR_SPEC] }, manager, proofGate({ list: [item(PR_SPEC, "assigner")] }))).toEqual({ ok: false, error: { problem: "same" } });
+    const full = make(2, { assignee: "builder" });
+    expect(act(full, { action: "proof_list", add: specs }, manager, proofGate()).ok).toBe(true);
+    const list = specs.map(s => item(s, "assigner"));
+    expect(act(full, { action: "proof_list", add: ["infra: deploy notes"] }, manager, proofGate({ list }))).toMatchObject({ ok: false, error: { problem: "too_many", detail: "proof list" } });
+    expect(act(full, { action: "proof_list", add: [], drop: [] }, manager, proofGate({ list }))).toMatchObject({ ok: false, error: { problem: "empty" } });
+    expect(act(full, { action: "proof_list", add: [PR_SPEC] }, consoleActor, proofGate({ list: list.slice(0, 11) })).ok).toBe(true);
+  });
+
+  it("a done is refused in on mode while an item is not covered, naming it, and accepted once the brief covers it", () => {
+    const PR = "acme/shop#42@3e9d1a7";
+    const list = [item(PR_SPEC, "assigner"), item(DATA_SPEC, "assigner")];
+    const briefBody = brief({ refs: [PR] });
+    const seen = (ref: string, state: RefState): RefResult => ({ ref, state, detail: null, checkedAt: NOW + 5 });
+    const inReview = () => ({ ...make(1, { assignee: "builder" }), status: "review" as const });
+    const heldLine = `proof: 1 of 1 green · ◇ not covered: ${DATA_SPEC}`;
+    expect(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, proofGate({ brief: briefBody, results: [seen(PR, "green")], list })))
+      .toEqual({ ok: false, error: { problem: "proof_not_green", detail: heldLine } });
+    const answered = brief({ refs: [PR], attested: [{ kind: "data", how: "30 rows read by hand" }] });
+    expect(act(inReview(), { action: "move", to: "done", reason: "x" }, manager, proofGate({ brief: answered, results: [seen(PR, "green")], list })).ok).toBe(true);
   });
 });

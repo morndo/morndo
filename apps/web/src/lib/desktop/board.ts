@@ -166,6 +166,10 @@ export function eventLine(e: TaskEvent): { who: string; text: string; comment: s
     case "briefed": return { who: w, text: "filed a brief", comment: null };   // B13; the later round words this
     case "merged": return { who: w, text: `recorded its merge in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };   // B11; the later round words this
     case "unmerged": return { who: w, text: `cleared its merge record in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };
+    case "proof_listed": {
+      const lines = [...c.add.map(s => `+ ${s}`), ...c.drop.map(s => `- ${s}`)];
+      return { who: w, text: "set the proof list", comment: lines.length > 0 ? lines.join("\n") : null };
+    }
   }
 }
 export const ago = (t: number, now: number) => {

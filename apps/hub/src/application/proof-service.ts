@@ -7,7 +7,7 @@
 // credential), judges the answer with the domain's pure functions, and stores the row. Triggers ride on the board's own
 // events (a move to review, a brief filed), a timer pass re-reads what is still pending or was rate-limited, and a Done
 // attempt re-reads first whatever has gone stale — all through `record`, so none of it ever writes a task or an event.
-import { MORNDO_REPO, YOUNG_MS, currentBrief, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type Task, type TaskActor, type TaskEvent } from "@morndo/domain";
+import { MORNDO_REPO, YOUNG_MS, coverageOf, currentBrief, currentList, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type CoverageItem, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type Task, type TaskActor, type TaskEvent } from "@morndo/domain";
 import { redactKeyMaterial } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import { RETRYABLE_DETAIL, type ForgeChecks, type ForgeFailure } from "./ports.ts";
@@ -16,7 +16,7 @@ import type { BoardResult, BoardService } from "./board-service.ts";
 // What the card shows of one task's proof (B15): the brief that still counts, its rows and the one line. No brief:
 // `rev` and `brief` null, the no_brief line.
 // `mode`: the gate's mode, so a reader (the panel's Accept button) says only what the gate would do.
-export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; mode: ProofMode; standIn: boolean; state: ProofState };
+export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; mode: ProofMode; standIn: boolean; coverage: CoverageItem[]; state: ProofState };
 
 export class ProofService {
   #store: Store;
@@ -47,9 +47,11 @@ export class ProofService {
   // The gate the domain judges a Done and a brief against (B14, B16): the mode, the brief that still counts with its
   // rows, and the repositories the board checks.
   gate(key: string): ProofGate {
-    const current = currentBrief(this.#store.taskEvents(key));
-    if (current === null) return { mode: this.#mode, brief: null, results: [], allowedRepos: this.#allowedRepos };
-    return { mode: this.#mode, brief: current.brief, results: this.#store.proofResultsOf(key, current.rev), allowedRepos: this.#allowedRepos };
+    const events = this.#store.taskEvents(key);
+    const list = currentList(events);
+    const current = currentBrief(events);
+    if (current === null) return { mode: this.#mode, brief: null, results: [], allowedRepos: this.#allowedRepos, list };
+    return { mode: this.#mode, brief: current.brief, results: this.#store.proofResultsOf(key, current.rev), allowedRepos: this.#allowedRepos, list };
   }
 
   // A brief, filed as its own board action (B13): the board judges who may file it, its words and its references, so a
@@ -79,11 +81,17 @@ export class ProofService {
   // last review-to-doing move is stale) with its rows and its one line.
   view(key: string): ProofView | null {
     if (this.#store.task(key) === null) return null;
-    const current = currentBrief(this.#store.taskEvents(key));
-    if (current === null) return { rev: null, brief: null, results: [], mode: this.#mode, standIn: this.#standIn, state: proofOf(null, []) };
-    const results = this.#store.proofResultsOf(key, current.rev);
+    const events = this.#store.taskEvents(key);
+    const list = currentList(events);
+    const current = currentBrief(events);
     const merges = this.#mergesAsOf(key);
-    return { rev: current.rev, brief: current.brief, results, mode: this.#mode, standIn: this.#standIn, state: proofOf(current.brief, results, merges) };
+    if (current === null) {
+      const coverage = coverageOf(list, null, []);
+      return { rev: null, brief: null, results: [], mode: this.#mode, standIn: this.#standIn, coverage, state: proofOf(null, [], merges, list) };
+    }
+    const results = this.#store.proofResultsOf(key, current.rev);
+    const coverage = coverageOf(list, current.brief, results);
+    return { rev: current.rev, brief: current.brief, results, mode: this.#mode, standIn: this.#standIn, coverage, state: proofOf(current.brief, results, merges, list) };
   }
 
   // The one line per task in review (B15), for the board view the agents read: keyed by task, `no brief` included, so

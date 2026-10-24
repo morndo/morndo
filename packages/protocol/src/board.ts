@@ -2,7 +2,8 @@
 // agents' CLI, and the bodies a change is sent with, from the app (a Command, AC7) or from an agent (a bearer token).
 // Types are the domain's own; a task this build can't read is dropped from the list, never guessed.
 import type { EndpointId, MergeRecord, MergedView, ProofBrief, ProofState, RefResult, SessionId, Task, TaskActor, TaskChange, TaskEvent, TASK_PRIORITIES, TASK_STATUSES } from "@morndo/domain";
-import { ATTESTED_KINDS, PROOF_KINDS, PROOF_MODES, REF_STATES } from "@morndo/domain";
+import type { CoverageItem } from "@morndo/domain";
+import { ATTESTED_KINDS, COVERAGE_STATUSES, ITEM_KINDS, PROOF_KINDS, PROOF_MODES, REF_STATES } from "@morndo/domain";
 import * as z from "./z.ts";
 
 const str = (max: number) => z.string().check(z.maxLength(max));
@@ -22,8 +23,12 @@ export const ProofBriefSchema = z.object({
   attested: z.array(z.object({ kind: z.enum(ATTESTED_KINDS), how: text() })), noCode: text(),
 });
 export const RefResultSchema = z.object({ ref: text(), state: z.enum(REF_STATES), detail: z.nullable(text()), checkedAt: count() });
+export const CoverageItemSchema = z.object({
+  spec: text(), kind: z.enum(ITEM_KINDS), repo: z.nullable(text()), text: text(), by: z.enum(["assigner", "lane"]), status: z.enum(COVERAGE_STATUSES),
+});
 export const ProofViewSchema = z.object({
   rev: z.nullable(z.int().check(z.gte(1))), brief: z.nullable(ProofBriefSchema), results: z.array(RefResultSchema), mode: z.enum(PROOF_MODES), standIn: z.boolean(),
+  coverage: z.array(CoverageItemSchema),
   state: z.object({ kind: z.enum(PROOF_KINDS), green: count(), total: count(), accepts: z.boolean(), line: text() }),
 });
 export type ProofView = z.output<typeof ProofViewSchema>;
@@ -55,6 +60,7 @@ export const TaskChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("briefed"), brief: ProofBriefSchema }),
   z.object({ kind: z.literal("merged"), repo: text(), sha: text() }),
   z.object({ kind: z.literal("unmerged"), repo: text(), sha: text() }),
+  z.object({ kind: z.literal("proof_listed"), add: z.array(text()), drop: z.array(text()) }),
 ]);
 export const TaskEventSchema = z.object({ key: taskKey(), rev: z.int().check(z.gte(1)), at: count(), actor: TaskActorSchema, change: TaskChangeSchema });
 
@@ -100,6 +106,7 @@ export const BoardActionBody = z.discriminatedUnion("action", [
   // comment): neither changes state, so each races with nothing.
   z.object({ action: z.literal("merged"), sha: str(100), repo: z.exactOptional(str(300)) }),
   z.object({ action: z.literal("unmerged"), sha: str(100), repo: z.exactOptional(str(300)) }),
+  z.object({ action: z.literal("proof_list"), add: z.exactOptional(z.array(str(400)).check(z.maxLength(12))), drop: z.exactOptional(z.array(str(400)).check(z.maxLength(12))) }),
 ]);
 export type BoardCreateBody = z.output<typeof BoardCreateBody>;
 export type BoardActionBody = z.output<typeof BoardActionBody>;
@@ -116,3 +123,4 @@ check<Same<z.output<typeof MergedViewSchema>, MergedView>>(true);
 check<Same<z.output<typeof ProofBriefSchema>, ProofBrief>>(true);
 check<Same<z.output<typeof RefResultSchema>, RefResult>>(true);
 check<Same<z.output<typeof ProofViewSchema>["state"], ProofState>>(true);
+check<Same<z.output<typeof CoverageItemSchema>, CoverageItem>>(true);

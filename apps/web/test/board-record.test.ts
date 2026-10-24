@@ -102,6 +102,7 @@ describe("proof in the board app (ADR-0035 step 5)", () => {
       results: [{ ref: "acme/shop#42@3e9d1a7", state: "green", detail: null, checkedAt: 1 }],
       mode: "on",
       standIn: false,
+      coverage: [],
       state: { kind: "verified", green: 1, total: 1, accepts: true, line: "proof: 1 of 1 green" },
     };
     const view = parseBody(ProofViewSchema, raw);
@@ -122,6 +123,7 @@ describe("proof in the board app (ADR-0035 step 5)", () => {
       results: [{ ref: "acme/shop@3e9d1a7:ci,lint", state: "red", detail: "\"lint\" failed", checkedAt: 1 }],
       mode: "on",
       standIn: false,
+      coverage: [],
       state: { kind: "failing", green: 0, total: 1, accepts: false, line: "proof: 0 of 1 green · ✗ acme/shop@3e9d1a7:ci,lint \"lint\" failed" },
     };
     const liveMerge: MergedView = { key: "T-1" as Task["key"], merges: [], live: true, label: "merged, live" };
@@ -144,6 +146,7 @@ describe("proof in the board app (ADR-0035 step 5)", () => {
       results: [{ ref: "acme/shop@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: 1 }],
       mode: "on",
       standIn: false,
+      coverage: [],
       state: { kind: "verified", green: 1, total: 1, accepts: true, line: "proof: 1 of 1 green" },
     };
     expect(acceptLabel(verified, liveMerge)).toEqual({ label: "Accept as done", title: undefined });

@@ -2,7 +2,7 @@
 // lines `show` and `brief --show` print of a proof view, and the one warning a done's reason earns for each commit or
 // pull request it names that the board did not verify. Table-tested without a hub; the states' words are the domain's.
 import { describe, expect, it } from "vitest";
-import { proofOf, type MergeRecord, type ProofBrief, type RefResult, type RefState } from "@morndo/domain";
+import { coverageOf, proofOf, type MergeRecord, type ProofBrief, type ProofItem, type RefResult, type RefState } from "@morndo/domain";
 import { lintWhy, proofBlock } from "../src/proof-text.ts";
 
 const NOW = 1_700_000_000_000;
@@ -13,10 +13,14 @@ const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
 const brief = (o: Partial<ProofBrief> = {}): ProofBrief => ({ summary: "Totals row rounds to cents", decisions: "", leftOut: "nothing", limits: "none known", refs: [], attested: [], noCode: "", ...o });
 const seen = (ref: string, state: RefState, detail: string | null = null): RefResult => ({ ref, state, detail, checkedAt: NOW });
 // A proof view as the hub sends it (proof-service's ProofView), its state computed by the domain from the same rows.
-const view = (o: { brief?: ProofBrief | null; results?: RefResult[] } = {}) => {
+const view = (o: { brief?: ProofBrief | null; results?: RefResult[]; list?: ProofItem[]; coverage?: ReturnType<typeof coverageOf> } = {}) => {
   const b = o.brief === undefined ? brief() : o.brief;
   const results = o.results ?? [];
-  return { rev: b === null ? null : 4, brief: b, results, state: proofOf(b, results) };
+  const list = o.list ?? [];
+  const proofOfList = proofOf as (b: ProofBrief | null, r: readonly RefResult[], m?: readonly { repo: string; sha: string }[], l?: readonly ProofItem[]) => ReturnType<typeof proofOf>;
+  const coverage = o.coverage ?? [];
+  const state = list.length > 0 ? proofOfList(b, results, [], list) : proofOf(b, results);
+  return { rev: b === null ? null : 4, brief: b, results, coverage, state };
 };
 const merge = (sha: string): MergeRecord => ({ repo: "morndo/morndo", sha, at: NOW, by: "manager", override: null });
 
@@ -78,6 +82,30 @@ describe("proofBlock", () => {
     expect(briefLines).toHaveLength(1);
     expect(briefLines[0]).toContain(forged.replace(/\s+/g, " ").trim());
     expect(lines.some(l => /^\s+✓/.test(l) && !l.includes("Proof:"))).toBe(false);
+  });
+});
+
+describe("the proof list in proofBlock (B17)", () => {
+  const PR_SPEC = "pr@morndo/morndo: the pull request";
+  const DATA_SPEC = "data: a sample of 30 rows";
+  const list: ProofItem[] = [
+    { spec: PR_SPEC, kind: "pr", repo: "morndo/morndo", text: "the pull request", by: "assigner" },
+    { spec: DATA_SPEC, kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner" },
+    { spec: "ui: the totals row", kind: "ui", repo: null, text: "the totals row", by: "lane" },
+  ];
+
+  it("the coverage lines", () => {
+    const PR = "morndo/morndo#42@3e9d1a7";
+    const b = brief({ refs: [PR], attested: [{ kind: "ui", how: "the totals row" }] });
+    const results = [seen(PR, "green")];
+    const coverage = coverageOf(list, b, results);
+    const lines = proofBlock({ rev: 4, brief: b, results, coverage, state: proofOf(b, results, [], list) });
+    expect(lines).toContain("  Proof list (set by the manager):");
+    expect(lines).toContain(`    [covered] ${PR_SPEC}`);
+    expect(lines).toContain(`    [not covered] ${DATA_SPEC}`);
+    expect(lines).toContain(`    [the lane's word] ui: the totals row  (added by the lane)`);
+    const openCi = coverageOf([{ spec: "ci@morndo/morndo: CI green", kind: "ci", repo: "morndo/morndo", text: "CI green", by: "assigner" }], brief({ refs: [PR, CI] }), [seen(PR, "green")]);
+    expect(proofBlock({ rev: 4, brief: b, results, coverage: openCi, state: proofOf(b, results, [], list) })).toContain("    [open] ci@morndo/morndo: CI green");
   });
 });
 

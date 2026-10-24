@@ -78,6 +78,7 @@ describe("the proof view on the wire (ADR-0035 step 5)", () => {
     ],
     mode: "on",
     standIn: false,
+    coverage: [],
     state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" },
   };
 
@@ -95,12 +96,58 @@ describe("the proof view on the wire (ADR-0035 step 5)", () => {
       rev: null, brief: null, results: [],
       mode: "on",
       standIn: false,
+      coverage: [],
       state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" },
     })).toEqual({
       rev: null, brief: null, results: [],
       mode: "on",
       standIn: false,
+      coverage: [],
       state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" },
     });
+  });
+});
+
+describe("the proof list on the wire (B17)", () => {
+  const DATA_SPEC = "data: a sample of 30 rows";
+  const coverageRow = {
+    spec: DATA_SPEC,
+    kind: "data" as const,
+    repo: null,
+    text: "a sample of 30 rows",
+    by: "assigner" as const,
+    status: "not_covered" as const,
+  };
+
+  it("the proof_list body parses (and a body with a 13th item does not)", () => {
+    expect(parseBody(BoardActionBody, { action: "proof_list", add: [DATA_SPEC] })).toEqual({ action: "proof_list", add: [DATA_SPEC] });
+    expect(parseBody(BoardActionBody, { action: "proof_list", drop: [DATA_SPEC] })).toEqual({ action: "proof_list", drop: [DATA_SPEC] });
+    const many = Array.from({ length: 13 }, (_, i) => `tests: row ${i + 1}`);
+    expect(parseBody(BoardActionBody, { action: "proof_list", add: many })).toBeNull();
+  });
+
+  it("a proof_listed event round-trips", () => {
+    const worker = { kind: "worker", name: "builder", token: "tok-w" };
+    expect(parseBody(TaskEventSchema, {
+      key: "T-12", rev: 2, at: 5, actor: worker,
+      change: { kind: "proof_listed", add: ["pr@acme/shop: the pull request"], drop: [] },
+    })).toEqual({
+      key: "T-12", rev: 2, at: 5, actor: worker,
+      change: { kind: "proof_listed", add: ["pr@acme/shop: the pull request"], drop: [] },
+    });
+  });
+
+  it("a view with coverage parses and one with an unknown status does not", () => {
+    const base = {
+      rev: 4,
+      brief: null,
+      results: [],
+      mode: "on",
+      standIn: false,
+      coverage: [coverageRow],
+      state: { kind: "not_covered", green: 0, total: 0, accepts: false, line: `proof: no brief · ◇ not covered: ${DATA_SPEC}` },
+    };
+    expect(parseBody(ProofViewSchema, base)).toEqual(base);
+    expect(parseBody(ProofViewSchema, { ...base, coverage: [{ ...coverageRow, status: "maybe" }] })).toBeNull();
   });
 });

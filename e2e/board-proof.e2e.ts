@@ -116,6 +116,36 @@ try {
     await page.screenshot({ path: join(OUT, "board-proof-done.png") });
   });
 
+  await check("the manager's proof list shows as not covered until the lane answers it, and holds the Done", async () => {
+    assert(manager("new", "Ship proof list", "--assign", "builder", "--proof", "pr@morndo/morndo: the pull request", "--proof", "data: a sample of 30 rows").code === 0, "new with proof failed");
+    assert(builder("start", "T-2").code === 0, "start T-2 failed");
+    assert(builder("brief", "T-2",
+      "--pr", PR,
+      "--summary", "Totals row rounds to cents",
+      "--left-out", "nothing",
+      "--limit", "none known",
+    ).code === 0, "brief failed");
+    assert(builder("review", "T-2").code === 0, "review failed");
+
+    await page.locator(".rail").getByRole("button", { name: "Board" }).click();
+    await column(page, "review").locator('[data-task="T-2"]').waitFor({ timeout: 10_000 });
+    await cardOf(page, "T-2").click();
+    const panel = page.locator('[data-task-panel="T-2"]');
+    await panel.locator('[data-proof-need][data-status="not_covered"]').waitFor({ timeout: 10_000 });
+    assert((await panel.locator('[data-proof-need][data-status="not_covered"]').innerText()).includes("data: a sample of 30 rows"), "data item should show not covered");
+    const refused = manager("done", "T-2", "--why", "read the diff");
+    assert(refused.code === 1 && refused.out.includes("not covered: data: a sample of 30 rows"), `done refused: ${refused.out}`);
+    assert(builder("brief", "T-2",
+      "--pr", PR,
+      "--data", "30 rows read by hand",
+      "--summary", "Totals row rounds to cents",
+      "--left-out", "nothing",
+      "--limit", "none known",
+    ).code === 0, "re-brief failed");
+    await panel.locator('[data-proof-need][data-status="told"]').waitFor({ timeout: 10_000 });
+    assert(manager("done", "T-2", "--why", "read the diff").code === 0, "done should pass once data is told");
+  });
+
   code = finish();
 } catch (e) {
   console.log(`FAIL  setup: ${(e as Error).message}`);

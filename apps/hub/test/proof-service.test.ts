@@ -723,3 +723,65 @@ describe("a Done task is a snapshot (B13, B16)", () => {
   });
 });
 
+describe("the assigner's proof list (B17)", () => {
+  const PR = "morndo/morndo#42@3e9d1a7";
+  const PR_SPEC = "pr@morndo/morndo: the pull request";
+  const DATA_SPEC = "data: a sample of 30 rows";
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  let fake: FakeForge;
+
+  beforeEach(async () => { fake = await startFakeForge(); });
+  afterEach(async () => { await fake.close(); });
+
+  const withGate = () => {
+    const store = new Store(tempDir());
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
+    const proof = new ProofService({
+      store, board, now: () => NOW,
+      forge: new GithubChecks({ baseUrl: fake.base, now: () => NOW }),
+      mode: "on",
+    });
+    return { store, board, proof };
+  };
+
+  it("the view carries the coverage and the gate holds the done for an item not covered", async () => {
+    fake.pr("morndo/morndo", 42, { head: FULL });
+    fake.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    const { store, board, proof } = withGate();
+    atReview(board);
+    expect(board.act("T-1", { action: "proof_list", add: [PR_SPEC, DATA_SPEC] }, manager).ok).toBe(true);
+    await proof.file("T-1", { summary: "Totals row rounds to cents", leftOut: "nothing", limits: "none known", refs: [PR] }, lane);
+    await proof.idle();
+    const view = proof.view("T-1");
+    expect(view?.coverage).toEqual([
+      { spec: PR_SPEC, kind: "pr", repo: "morndo/morndo", text: "the pull request", by: "assigner", status: "covered" },
+      { spec: DATA_SPEC, kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner", status: "not_covered" },
+    ]);
+    expect(await board.actChecked("T-1", { action: "move", to: "done", reason: "read the diff" }, manager)).toEqual({
+      ok: false, problem: "proof_not_green", detail: `proof: 1 of 1 green · ◇ not covered: ${DATA_SPEC}`,
+    });
+    await proof.file("T-1", {
+      summary: "Totals row rounds to cents", leftOut: "nothing", limits: "none known",
+      refs: [PR], attested: [{ kind: "data", how: "30 rows read by hand" }],
+    }, lane);
+    await proof.idle();
+    expect(proof.view("T-1")?.coverage?.find(c => c.spec === DATA_SPEC)?.status).toBe("told");
+    expect((await board.actChecked("T-1", { action: "move", to: "done", reason: "read the diff" }, manager)).ok).toBe(true);
+    store.close();
+  });
+
+  it("a list survives a round of work: the task returns to doing and the list still stands", async () => {
+    const { store, board, proof } = withGate();
+    atReview(board);
+    expect(board.act("T-1", { action: "proof_list", add: [DATA_SPEC] }, manager).ok).toBe(true);
+    board.act("T-1", { action: "move", to: "doing" }, lane);
+    expect(proof.view("T-1")?.coverage).toEqual([
+      { spec: DATA_SPEC, kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner", status: "not_covered" },
+    ]);
+    store.close();
+  });
+});
+

@@ -29,6 +29,7 @@
     ],
     mode: "on",
     standIn: false,
+    coverage: [],
     state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" },
   };
 
@@ -42,6 +43,7 @@
     ],
     mode: "on",
     standIn: false,
+    coverage: [],
     state: {
       kind: "failing",
       green: 1,
@@ -57,6 +59,7 @@
     results: [],
     mode: "on",
     standIn: false,
+    coverage: [],
     state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" },
   };
 
@@ -66,6 +69,7 @@
     results: [{ ref: PRIVATE, state: "not_checked", detail: "private repo: not checked", checkedAt: 1 }],
     mode: "on",
     standIn: false,
+    coverage: [],
     state: { kind: "not_checked", green: 0, total: 1, accepts: false, line: `proof: 0 of 1 green · ○ ${PRIVATE} not checked` },
   };
 
@@ -75,7 +79,29 @@
     results: [{ ref: PR, state: "green", detail: null, checkedAt: 1 }],
     mode: "on",
     standIn: false,
+    coverage: [],
     state: { kind: "pending", green: 1, total: 2, accepts: false, line: `proof: 1 of 2 green · … ${CI} pending` },
+  };
+
+  const needsList: ProofView = {
+    rev: 8,
+    brief: brief([PR]),
+    results: [{ ref: PR, state: "green", detail: null, checkedAt: 1 }],
+    mode: "on",
+    standIn: false,
+    coverage: [
+      { spec: "pr@acme/shop: the pull request", kind: "pr", repo: "acme/shop", text: "the pull request", by: "assigner", status: "covered" },
+      { spec: "data: a sample of 30 rows", kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner", status: "not_covered" },
+      { spec: "ci@acme/shop: CI green", kind: "ci", repo: "acme/shop", text: "CI green", by: "assigner", status: "open" },
+      { spec: "tests: npm test passed", kind: "tests", repo: null, text: "npm test passed", by: "lane", status: "told" },
+    ],
+    state: {
+      kind: "not_covered",
+      green: 1,
+      total: 1,
+      accepts: false,
+      line: "proof: 1 of 1 green · ◇ not covered: data: a sample of 30 rows",
+    },
   };
 
   const cell = (name: string, proof: ProofView, status: TaskStatus) => ({ name, proof, status });
@@ -87,6 +113,7 @@
     cell("doing-empty", noBrief, "doing"),
     cell("pending-ref", pendingRef, "review"),
     cell("stand-in", { ...verified, standIn: true }, "review"),
+    cell("needs-list", needsList, "review"),
   ];
 </script>
 
@@ -101,4 +128,5 @@
 <style>
   .row { display: flex; flex-wrap: wrap; }
   .cell { width: 400px; min-height: 320px; padding: 8px; border: 1px solid var(--border); }
+  .cell[data-cell="needs-list-narrow"] { width: 390px; max-width: 390px; }
 </style>

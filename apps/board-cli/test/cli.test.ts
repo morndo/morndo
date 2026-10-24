@@ -540,3 +540,113 @@ describe("the brief and the proof (B13 to B16)", () => {
     expect(bare.err).toContain("--proof-override takes the reason");
   });
 });
+
+describe("the proof list (B17)", () => {
+  const PR = "morndo/morndo#42@3e9d1a7";
+  const PR_SPEC = "pr@morndo/morndo: the pull request";
+  const DATA_SPEC = "data: a sample of 30 rows";
+  const LANE_SPEC = "ui: the totals row";
+  const ITEM_GRAMMAR = "an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra";
+  let proofHub: InProcessHub;
+  let fakeForge: FakeForge;
+  let proofManager: string;
+  let proofBuilder: string;
+
+  beforeEach(async () => {
+    fakeForge = await startFakeForge();
+    fakeForge.pr("morndo/morndo", 42, { head: "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01" });
+    fakeForge.runs("morndo/morndo", "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01", [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    proofHub = await startInProcessHub({ forge: new GithubChecks({ baseUrl: fakeForge.base }), proofMode: "on" });
+    proofManager = proofHub.agents.issue("manager", "manager").secret;
+    proofBuilder = proofHub.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await proofHub.proof.idle(); await proofHub.close(); await fakeForge.close(); });
+
+  const proofCli = (argv: string[], token: string, laneName: string | null) => {
+    const out: string[] = [], err: string[] = [];
+    const codePromise = run(argv, { MORNDO_HUB: proofHub.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => laneName, out: l => out.push(l), err: l => err.push(l) });
+    return codePromise.then(code => ({ code, out: out.join("\n"), err: err.join("\n") }));
+  };
+  const managerSays = (...argv: string[]) => proofCli(argv, proofManager, null);
+  const builderSays = (...argv: string[]) => proofCli(argv, proofBuilder, "builder");
+  const atReview = async (key = "T-1") => {
+    await managerSays("new", "Ship the totals row", "--assign", "builder");
+    await builderSays("start", key);
+    await builderSays("review", key);
+  };
+  const briefGreen = async (key: string, extra: string[] = []) => {
+    await builderSays("brief", key, "--summary", "Totals row rounds to cents", "--left-out", "nothing", "--limit", "none known", "--pr", PR, ...extra);
+    await proofHub.proof.idle();
+  };
+
+  it("new --proof files the list with the task and proof prints it", async () => {
+    const made = await managerSays("new", "Ship the totals row", "--assign", "builder", "--proof", PR_SPEC, "--proof", DATA_SPEC);
+    expect(made.code).toBe(0);
+    const shown = await managerSays("proof", "T-1");
+    expect(shown.out).toContain("Proof list (set by the manager):");
+    expect(shown.out).toContain(`[not covered] ${PR_SPEC}`);
+    expect(shown.out).toContain(`[not covered] ${DATA_SPEC}`);
+  });
+
+  it("assign --proof", async () => {
+    await managerSays("new", "Found later");
+    const assigned = await managerSays("assign", "T-1", "builder", "--proof", DATA_SPEC);
+    expect(assigned.code).toBe(0);
+    expect((await managerSays("proof", "T-1")).out).toContain(`[not covered] ${DATA_SPEC}`);
+  });
+
+  it("proof --add and --drop N", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC, "--add", DATA_SPEC);
+    await builderSays("proof", "T-1", "--add", LANE_SPEC);
+    const before = await managerSays("proof", "T-1");
+    expect(before.out).toContain(`[not covered] ${LANE_SPEC}  (added by the lane)`);
+    const updated = await builderSays("proof", "T-1", "--drop", "3");
+    expect(updated.code).toBe(0);
+    expect(updated.out).toContain("T-1 proof list updated");
+    expect(updated.out).not.toContain(LANE_SPEC);
+  });
+
+  it("a lane adds an item and cannot drop the manager's (exit 1)", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC);
+    expect((await builderSays("proof", "T-1", "--add", LANE_SPEC)).code).toBe(0);
+    const refused = await builderSays("proof", "T-1", "--drop", PR_SPEC);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("only the manager");
+  });
+
+  it("a bad item exits 1 with the grammar", async () => {
+    await atReview();
+    const bad = await managerSays("proof", "T-1", "--add", "not a spec");
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain(ITEM_GRAMMAR);
+  });
+
+  it("show prints the list and list names the item not covered", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC, "--add", DATA_SPEC);
+    await briefGreen("T-1");
+    const listed = await managerSays("list");
+    expect(listed.out).toContain(`not covered: ${DATA_SPEC}`);
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("Proof list (set by the manager):");
+    expect(shown.out).toContain(`[covered] ${PR_SPEC}`);
+    expect(shown.out).toContain(`[not covered] ${DATA_SPEC}`);
+  });
+
+  it("done is held for an item not covered and goes through once the lane answers it", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC, "--add", DATA_SPEC);
+    await briefGreen("T-1");
+    const held = await managerSays("done", "T-1", "--why", "read the diff");
+    expect(held.code).toBe(1);
+    expect(held.err).toContain(`not covered: ${DATA_SPEC}`);
+    await briefGreen("T-1", ["--data", "30 rows read by hand"]);
+    expect((await managerSays("done", "T-1", "--why", "read the diff")).code).toBe(0);
+  });
+});

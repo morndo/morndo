@@ -423,7 +423,27 @@ describe("the brief on the agents' route (B13)", () => {
     const r = await agent(workerToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief: { ...brief, refs: ["not a ref"] } });
     expect(r.status).toBe(400);                                // bad_ref falls through boardProblemStatus's default
     expect(await json(r)).toEqual({ error: "bad_ref", detail: "not a ref: a reference is owner/repo#PR@sha or owner/repo@sha:check,check" });
-    expect(hub.proof.view("T-1")).toEqual({ rev: null, brief: null, results: [], mode: "off", standIn: false, state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" } });
+    expect(hub.proof.view("T-1")).toEqual({ rev: null, brief: null, results: [], mode: "off", standIn: false, coverage: [], state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" } });
+  });
+});
+
+describe("the proof list on the routes (B17)", () => {
+  const PR_SPEC = "pr@morndo/morndo: the pull request";
+  const DATA_SPEC = "data: a sample of 30 rows";
+
+  it("the proof list on the routes", async () => {
+    await agent(managerToken).post("/api/agent/board/tasks", { title: "Ship the totals row", assignee: "builder" });
+    const agents = agent(managerToken);
+    expect((await agents.post("/api/agent/board/tasks/T-1", { action: "proof_list", add: [PR_SPEC, DATA_SPEC] })).status).toBe(200);
+    const cookie = await hub.cookie();
+    const principal = (body: unknown) => hub.post("/api/board/tasks/T-1", body, { cookie: `__Host-morndo=${cookie}` });
+    expect((await principal({ action: "proof_list", add: ["ui: the totals row"] })).status).toBe(200);
+    const task = await json(await agent(workerToken, "builder").get("/api/agent/board/tasks/T-1")) as { proof?: { coverage: unknown[] } };
+    expect(task.proof?.coverage).toEqual([
+      { spec: PR_SPEC, kind: "pr", repo: "morndo/morndo", text: "the pull request", by: "assigner", status: "not_covered" },
+      { spec: DATA_SPEC, kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner", status: "not_covered" },
+      { spec: "ui: the totals row", kind: "ui", repo: null, text: "the totals row", by: "assigner", status: "not_covered" },
+    ]);
   });
 });
 
@@ -484,6 +504,7 @@ describe("the proof on the agents' reads", () => {
       ],
       mode: "on",
       standIn: false,
+      coverage: [],
       state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" },
     });
     const board = await json(await m.get("/api/agent/board"));

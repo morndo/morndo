@@ -20,8 +20,9 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
 
   list [--mine] [--status S] [--json]   the board (In progress, Blocked, In review, To do, Backlog, Done this week)
   show T-12 [--json]                    one task with its history and comments
-  new "<title>" [--desc "…"] [--assign <lane>] [--priority high|normal|low] [--status todo|backlog|doing]
-  assign T-12 <lane>|none               (manager only)
+  new "<title>" [--desc "…"] [--assign <lane>] [--proof "<kind[@owner/repo]: text>"]… [--priority high|normal|low] [--status todo|backlog|doing]
+  assign T-12 <lane>|none [--proof "<kind[@owner/repo]: text>"]…   (manager only)
+  proof T-12 [--add "<spec>"]… [--drop "<spec>"|<N>]…   the proof list the work must answer (manager sets it; the lane may add)
   start T-12                            in progress (one per lane at a time)
   block T-12 --why "…"                  blocked, with the reason
   resume T-12                           back in progress
@@ -79,6 +80,8 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "too_many": return `a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>${detail ? ` (${detail})` : ""}`;
     case "no_commit": return "the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout";
     case "no_merge": return "that merge isn't recorded on this task (see show)";
+    case "bad_item": return `an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra${detail ? detail.startsWith("an item is") ? ` (${detail})` : `: ${detail}` : ""}`;
+    case "no_item": return `that item is not on the list (${detail ?? ""})`;
     default: return error;
   }
 }
@@ -99,6 +102,10 @@ function changeText(e: TaskEvent): string {
     case "briefed": return `filed a brief: ${c.brief.summary.slice(0, 80)}`;
     case "merged": return `recorded its merge: ${c.repo} ${c.sha.slice(0, 7)}`;
     case "unmerged": return `cleared its merge record: ${c.repo} ${c.sha.slice(0, 7)}`;
+    case "proof_listed": {
+      const parts = [...c.add.map(s => `+ ${s}`), ...c.drop.map(s => `- ${s}`)];
+      return parts.length ? `updated the proof list:\n      ${parts.join("\n      ")}` : "updated the proof list";
+    }
   }
 }
 const line = (t: Task) =>
@@ -201,6 +208,8 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       const proof = d.proof as ProofView | undefined;
       if (proof !== undefined && (proof.brief !== null || t.status === "review" || t.status === "done"))
         for (const l of proofBlock(proof)) io.out(l);
+      else if (proof !== undefined && (proof.coverage?.length ?? 0) > 0)
+        for (const l of proofBlock(proof).filter(l => l.startsWith("  Proof list") || l.startsWith("    ["))) io.out(l);
       if (t.description) io.out(`  ${t.description.replace(/\n/g, "\n  ")}`);
       const events = (d.events as TaskEvent[] | undefined) ?? [];
       if (events.length) io.out("  History:");
@@ -210,6 +219,12 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       if (event && !events.length) io.out(`  ${who(event.actor)} ${changeText(event)}`);
     };
     const act = async (k: string, action: Record<string, unknown>) => showTask(await call("POST", `/api/agent/board/tasks/${k}`, action));
+    const printProofList = (proof: ProofView | undefined) => {
+      if (proof === undefined) { io.out("no proof list"); return; }
+      const coverage = proof.coverage ?? [];
+      if (coverage.length === 0) { io.out("no proof list"); return; }
+      for (const l of proofBlock(proof).filter(l => l.startsWith("  Proof list") || l.startsWith("    ["))) io.out(l);
+    };
 
     switch (cmd) {
       case "whoami": {
@@ -266,15 +281,53 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         if (priority !== undefined && !PRIORITIES.has(priority)) throw new Usage("--priority takes high, normal or low");
         const status = text("status");
         if (status !== undefined && !STATUSES.has(status)) throw new Usage(`--status takes one of ${LIST_ORDER.join(", ")}`);
+        const proofSpecs = valuesOf(argv, "proof");
         const body = { title, ...(text("desc") !== undefined ? { description: text("desc") } : {}), ...(text("assign") !== undefined ? { assignee: text("assign") } : {}), ...(priority ? { priority } : {}), ...(status ? { status } : {}) };
-        showTask(await call("POST", "/api/agent/board/tasks", body));
+        const created = await call("POST", "/api/agent/board/tasks", body);
+        const k = (created.task as Task).key;
+        if (proofSpecs.length > 0) {
+          await call("POST", `/api/agent/board/tasks/${k}`, { action: "proof_list", add: proofSpecs });   // a refusal here leaves the task as filed
+          showTask(await call("GET", `/api/agent/board/tasks/${k}`));
+        } else showTask(created);
         return 0;
       }
       case "assign": {
         const k = key(rest[0]);
         const to = rest[1];
         if (!to) throw new Usage("usage: morndo-board assign T-12 <lane>|none");
+        const proofSpecs = valuesOf(argv, "proof");
         await act(k, { action: "assign", to: to === "none" ? null : to });
+        if (proofSpecs.length > 0) {
+          await call("POST", `/api/agent/board/tasks/${k}`, { action: "proof_list", add: proofSpecs });   // a refusal here leaves the task as filed
+          showTask(await call("GET", `/api/agent/board/tasks/${k}`));
+        }
+        return 0;
+      }
+      case "proof": {
+        const k = key(rest[0]);
+        const adds = valuesOf(argv, "add");
+        const dropsRaw = valuesOf(argv, "drop");
+        if (adds.length === 0 && dropsRaw.length === 0) {
+          const d = await call("GET", `/api/agent/board/tasks/${k}`);
+          if (flags.json === true) { io.out(JSON.stringify((d.proof as ProofView | undefined)?.coverage ?? [])); return 0; }
+          printProofList(d.proof as ProofView | undefined);
+          return 0;
+        }
+        const drops: string[] = [];
+        for (const raw of dropsRaw) {
+          if (/^\d+$/.test(raw)) {
+            const d = await call("GET", `/api/agent/board/tasks/${k}`);
+            const coverage = (d.proof as ProofView | undefined)?.coverage ?? [];
+            const n = Number(raw);
+            const item = coverage[n - 1];
+            if (item === undefined) throw new Usage(`--drop ${raw}: no such item on the proof list`);
+            drops.push(item.spec);
+          } else drops.push(raw);
+        }
+        await call("POST", `/api/agent/board/tasks/${k}`, { action: "proof_list", ...(adds.length > 0 ? { add: adds } : {}), ...(drops.length > 0 ? { drop: drops } : {}) });
+        io.out(`${k} proof list updated`);
+        const d = await call("GET", `/api/agent/board/tasks/${k}`);
+        printProofList(d.proof as ProofView | undefined);
         return 0;
       }
       case "start": await act(key(rest[0]), { action: "move", to: "doing" }); return 0;

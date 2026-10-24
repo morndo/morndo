@@ -3,9 +3,11 @@
 // the brief that still counts once the task has been back in progress. Pure: results are the caller's, never fetched.
 import { describe, expect, it } from "vitest";
 import {
-  ATTESTED_KINDS, BRIEF_LIMITS, checkBrief, currentBrief, judgeCi, judgePr, parseProofRef, proofOf, refString, taskKey, YOUNG_MS,
-  type BriefInput, type PrFacts, type ProofBrief, type RefResult, type RefState, type CheckRunFacts, type TaskChange, type TaskEvent,
+  ATTESTED_KINDS, BRIEF_LIMITS, checkBrief, coverageOf, currentBrief, currentList, ITEM_TEXT_MAX, judgeCi, judgePr, NO_BRIEF_LINE, parseItemSpec, parseProofRef, proofOf, refString, taskKey, YOUNG_MS,
+  type BriefInput, type PrFacts, type ProofBrief, type RefResult, type RefState, type CheckRunFacts, type TaskActor, type TaskChange, type TaskEvent,
 } from "../src/index.ts";
+
+const ITEM_GRAMMAR = "an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra";
 
 const NOW = 1_700_000_000_000;
 const SHA = "3e9d1a7";
@@ -382,6 +384,121 @@ describe("the merge record's repository, re-applied at every reading (B14)", () 
     expect(proofOf(brief({ refs: [PR, "Acme/Vault#9@3e9d1a7"] }), [seen(PR, "green"), seen("Acme/Vault#9@3e9d1a7", "green")], merges).accepts).toBe(true);
     // a red reference in the right repository is still failing, not hidden by the rule
     expect(proofOf(brief({ refs: [PR, VAULT] }), [seen(PR, "green"), seen(VAULT, "red", "lint")], merges).kind).toBe("failing");
+  });
+});
+
+describe("the assigner's proof list (B17)", () => {
+  const manager = { kind: "manager", name: "manager", token: "tok-m" } as const;
+  const builder = { kind: "worker", name: "builder", token: "tok-w" } as const;
+  const ev = (rev: number, actor: TaskActor, change: TaskChange): TaskEvent => ({ key: taskKey(12), rev, at: NOW + rev, actor, change });
+  const listed = (rev: number, actor: TaskActor, add: string[], drop: string[] = []) =>
+    ev(rev, actor, { kind: "proof_listed", add, drop });
+  const DATA_SPEC = "data: a sample of 30 rows";
+  const PR_SPEC = "pr@acme/shop: the pull request";
+  const CI_SPEC = "ci@acme/shop: CI green";
+
+  it("parseItemSpec reads kind, optional repository and text, and refuses the rest", () => {
+    expect(parseItemSpec("pr@acme/shop: the pull request")).toEqual({
+      ok: true,
+      value: { spec: PR_SPEC, kind: "pr", repo: "acme/shop", text: "the pull request" },
+    });
+    expect(parseItemSpec("  data:   a   sample  of 30 rows  ")).toEqual({
+      ok: true,
+      value: { spec: DATA_SPEC, kind: "data", repo: null, text: "a sample of 30 rows" },
+    });
+    expect(parseItemSpec("ui: a screenshot of the totals row")).toEqual({
+      ok: true,
+      value: { spec: "ui: a screenshot of the totals row", kind: "ui", repo: null, text: "a screenshot of the totals row" },
+    });
+    expect(refusal(parseItemSpec("data@acme/shop: rows"))?.problem).toBe("bad_item");
+    expect(refusal(parseItemSpec("pr: no repo"))?.problem).toBe("bad_item");
+    expect(refusal(parseItemSpec("quick: had a look"))?.detail).toContain(ITEM_GRAMMAR);
+    expect(refusal(parseItemSpec("data: "))?.problem).toBe("bad_item");
+    expect(refusal(parseItemSpec(`data: ${"x".repeat(ITEM_TEXT_MAX + 1)}`))?.problem).toBe("bad_item");
+    expect(refusal(parseItemSpec("data: a\u0007b"))?.problem).toBe("bad_item");
+  });
+
+  it("currentList folds events in order: adds, drops, repeats and who added each", () => {
+    const events = [
+      listed(2, manager, [PR_SPEC, DATA_SPEC]),
+      listed(4, builder, ["ui: the totals row"], []),
+      listed(3, manager, [CI_SPEC], []),                                              // out of rev order in the array
+      listed(5, builder, [], [DATA_SPEC]),
+      listed(6, manager, [DATA_SPEC], []),                                             // add again after drop
+      listed(7, manager, [PR_SPEC], []),                                               // duplicate add ignored
+    ];
+    expect(currentList(events)).toEqual([
+      { ...value(parseItemSpec(PR_SPEC)), by: "assigner" },
+      { ...value(parseItemSpec(CI_SPEC)), by: "assigner" },
+      { ...value(parseItemSpec("ui: the totals row")), by: "lane" },
+      { ...value(parseItemSpec(DATA_SPEC)), by: "assigner" },
+    ]);
+  });
+
+  it("currentList stands across rounds: a brief going stale does not drop the list", () => {
+    const worker = builder;
+    const events = [
+      listed(1, manager, [PR_SPEC]),
+      ev(2, worker, { kind: "briefed", brief: brief() }),
+      ev(3, worker, { kind: "moved", from: "review", to: "doing", reason: null }),
+      listed(4, manager, [DATA_SPEC]),
+    ];
+    expect(currentList(events).map(i => i.spec)).toEqual([PR_SPEC, DATA_SPEC]);
+    expect(currentBrief(events)).toBeNull();
+  });
+
+  it("coverageOf: a pr item is covered by a green pr reference in its repository, open while that reference is not green, not covered with none", () => {
+    const item = value(parseItemSpec(PR_SPEC));
+    const list = [{ ...item, by: "assigner" as const }];
+    const none = coverageOf(list, null, []);
+    expect(none).toEqual([{ ...item, by: "assigner", status: "not_covered" }]);
+    const open = coverageOf(list, brief({ refs: [PR] }), [seen(PR, "red", "lint")]);
+    expect(open[0]?.status).toBe("open");
+    const covered = coverageOf(list, brief({ refs: [PR] }), [seen(PR, "green")]);
+    expect(covered[0]?.status).toBe("covered");
+    expect(coverageOf(list, brief({ refs: [PR] }), [])).toEqual([{ ...item, by: "assigner", status: "open" }]);
+  });
+
+  it("coverageOf: a ci item the same way, and an attested kind is told by an attested item of that kind", () => {
+    const ciItem = { ...value(parseItemSpec(CI_SPEC)), by: "assigner" as const };
+    expect(coverageOf([ciItem], brief({ refs: [CI] }), [seen(CI, "green")])[0]?.status).toBe("covered");
+    expect(coverageOf([ciItem], brief({ refs: [CI] }), [seen(CI, "pending")])[0]?.status).toBe("open");
+    const dataItem = { ...value(parseItemSpec(DATA_SPEC)), by: "assigner" as const };
+    expect(coverageOf([dataItem], brief({ attested: [{ kind: "data", how: "30 rows read by hand" }] }), [])[0]?.status).toBe("told");
+    expect(coverageOf([dataItem], brief(), [])[0]?.status).toBe("not_covered");
+  });
+
+  it("coverageOf: an item with a repository is not covered by a reference in another repository", () => {
+    const vaultPr = "acme/vault#9@3e9d1a7";
+    const item = { ...value(parseItemSpec(PR_SPEC)), by: "assigner" as const };
+    expect(coverageOf([item], brief({ refs: [vaultPr] }), [seen(vaultPr, "green")])[0]?.status).toBe("not_covered");
+  });
+
+  it("proofOf: a verified brief with an item not covered is not accepted, and its line names the item", () => {
+    const list = [{ ...value(parseItemSpec(DATA_SPEC)), by: "assigner" as const }];
+    const base = proofOf(brief({ refs: [PR] }), [seen(PR, "green")]);
+    expect(base.kind).toBe("verified");
+    const withList = proofOf(brief({ refs: [PR] }), [seen(PR, "green")], [], list);
+    expect(withList.accepts).toBe(false);
+    expect(withList.kind).toBe("not_covered");
+    expect(withList.line).toBe(`proof: 1 of 1 green · ◇ not covered: ${DATA_SPEC}`);
+  });
+
+  it("proofOf: no brief with a list names the items too", () => {
+    const list = [{ ...value(parseItemSpec(DATA_SPEC)), by: "assigner" as const }];
+    const s = proofOf(null, [], [], list);
+    expect(s.accepts).toBe(false);
+    expect(s.line).toBe(`${NO_BRIEF_LINE} · ◇ not covered: ${DATA_SPEC}`);
+  });
+
+  it("proofOf: a list that is all covered changes nothing, and no code change does not cover a pr item", () => {
+    const list = [{ ...value(parseItemSpec(PR_SPEC)), by: "assigner" as const }];
+    const without = proofOf(brief({ refs: [PR] }), [seen(PR, "green")]);
+    const withList = proofOf(brief({ refs: [PR] }), [seen(PR, "green")], [], list);
+    expect(withList).toEqual(without);
+    const noCode = brief({ refs: [], noCode: "an analysis, no code changed" });
+    expect(coverageOf(list, noCode, [])[0]?.status).toBe("not_covered");
+    expect(proofOf(noCode, [], [], list).accepts).toBe(false);
   });
 });
 

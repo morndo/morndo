@@ -2,11 +2,15 @@
 // print of a proof view, and the one warning a done's reason earns for each commit or pull request it names that the
 // board did not verify. Pure functions of what the hub answered, so they are table-tested without a hub; the marks and
 // the words of a reference's state are the domain's own, the ones its one line is worded with.
-import { MARK, WORD, parseProofRef, type MergeRecord, type ProofBrief, type RefResult, type RefState } from "@morndo/domain";
+import { MARK, WORD, parseProofRef, type CoverageItem, type MergeRecord, type ProofBrief, type RefResult, type RefState } from "@morndo/domain";
 
 // What the hub answers a read with (proof-service's view), as this CLI reads it: the state's line is all the text
 // needs, so a newer hub's extra fields pass through unheard.
-export type ProofView = { rev: number | null; brief: ProofBrief | null; results: readonly RefResult[]; standIn?: boolean; state: { line: string } };
+export type ProofView = { rev: number | null; brief: ProofBrief | null; results: readonly RefResult[]; coverage?: readonly CoverageItem[]; standIn?: boolean; state: { line: string } };
+
+const COVERAGE_TAG: Record<CoverageItem["status"], string> = {
+  covered: "[covered]", told: "[the lane's word]", open: "[open]", not_covered: "[not covered]",
+};
 
 // One line of brief text: newlines and runs of whitespace collapse so a lane cannot start its own line.
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -30,11 +34,23 @@ export function proofBlock(view: ProofView): string[] {
   return view.standIn === true ? ["  (read from a stand-in forge, not GitHub)", ...body] : body;
 }
 
+const listLines = (coverage: readonly CoverageItem[]): string[] => {
+  if (coverage.length === 0) return [];
+  const out = ["  Proof list (set by the manager):"];
+  for (const item of coverage) {
+    const lane = item.by === "lane" ? "  (added by the lane)" : "";
+    out.push(`    ${COVERAGE_TAG[item.status]} ${item.spec}${lane}`);
+  }
+  return out;
+};
+
 function proofLines(view: ProofView): string[] {
-  if (view.brief === null) return [`  Proof: ${view.state.line}`];
+  const coverage = view.coverage ?? [];
+  const list = listLines(coverage);
+  if (view.brief === null) return [`  Proof: ${view.state.line}`, ...list];
   const b = view.brief;
   const rows = rowsBy(view.results);
-  const lines = [`  Proof: ${view.state.line}`, `    Brief (rev ${view.rev}): ${oneLine(b.summary)}`];
+  const lines = [`  Proof: ${view.state.line}`, ...list, `    Brief (rev ${view.rev}): ${oneLine(b.summary)}`];
   if (b.decisions !== "") lines.push(`    Decisions: ${oneLine(b.decisions)}`);
   if (b.leftOut !== "") lines.push(`    Left out: ${oneLine(b.leftOut)}`);
   if (b.limits !== "") lines.push(`    Limits: ${oneLine(b.limits)}`);

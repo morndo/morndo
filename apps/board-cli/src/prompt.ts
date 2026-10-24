@@ -14,6 +14,7 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - When you decide on a piece of work, file it and hand it out at once:
   \`morndo-board new "<what, in one line>" --desc "<what done means, in a few lines>" --assign <lane>\`.
   One task is one outcome a lane can finish on its own. Put the acceptance check in the description.
+- When you assign a task, say what proof it needs: \`morndo-board new "<title>" --assign <lane> --proof "pr@owner/repo: the pull request" --proof "ci@owner/repo: CI green" --proof "data: a sample of 30 rows"\`, or later \`morndo-board proof T-12 --add "<kind[@owner/repo]: text>"\`. Kinds pr and ci the board checks itself; tests, manual, ui, data and infra are the lane's word. An item nothing in the brief answers shows \`not covered\` and holds the done when the gate is on.
 - Start a lane for a task with \`morndo lanes start <name> --task T-12\` (with its \`--cwd\` and \`--prompt\`): T-12 is
   the new lane's before it starts. When a lane that runs needs a task, assign it: \`morndo-board assign T-12 <lane>\`.
 - The board moves tasks itself as lanes work, and its record names the rule (\`board (D1, <lane>)\`): into progress
@@ -61,6 +62,7 @@ your turns. The principal reads the board instead of asking you.
   \`morndo-board new "<what>" --desc "<why>"\`. It lands in the backlog for the manager; don't start it yourself.
 - Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;
   the manager does, after checking. Don't claim it is done elsewhere before the board says so.
+- The manager may list the proof your task needs (\`morndo-board proof T-12\`). Answer every item in your brief: a \`--pr\` or \`--ci\` reference in that repository for pr and ci items, a \`--test\`, \`--manual\`, \`--ui\`, \`--data\` or \`--infra\` line of the same kind for the rest. You may add items of your own (\`morndo-board proof T-12 --add "…"\`); you cannot remove the manager's.
 - File your brief before you end the turn, at the latest when the task is in review: \`morndo-board brief T-12
   --summary "<what changed, for whom>" --left-out nothing --limit "none known" --pr owner/repo#42@<sha> --ci
   owner/repo@<sha>:ci,lint --test "<command: result>"\`. A reference is whole (repository, number, sha) and the board

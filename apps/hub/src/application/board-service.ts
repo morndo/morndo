@@ -140,7 +140,7 @@ export class BoardService {
       } : action;
       // B5 needs only the tasks in progress, not the whole board. B11: Done is judged against the task's merges. B16:
       // the proof is in the gate only where the domain reads it — a brief (its repositories) and a move to Done.
-      const proof = this.#proof !== null && (action.action === "brief" || (action.action === "move" && action.to === "done"))
+      const proof = this.#proof !== null && (action.action === "brief" || action.action === "proof_list" || (action.action === "move" && action.to === "done"))
         ? this.#proof.gate(key) : undefined;
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
         { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}) });

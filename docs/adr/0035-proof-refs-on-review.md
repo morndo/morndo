@@ -34,6 +34,13 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
    verified, so a Done is held for it like for any reference that is not green, and the override is recorded.
 7. **The mode starts at `warn`.** The first week records what the gate would have refused, with every override and its
    reason, before `MORNDO_PROOF_GATE=on` is set.
+8. **The assigner's proof list** (added 2026-10-23, built in the same pull request). A checker of the worker's own list
+   cannot catch what the worker left off, so whoever assigns a task may list the proof it needs: items of a kind
+   (`pr`, `ci`, `tests`, `manual`, `ui`, `data`, `infra`), an optional repository and a text. The list is its own action
+   and event, changes no state, stands across rounds, and the lane may add items but drop only its own. The brief is
+   matched to it by kind and repository: a green reference covers a `pr` or `ci` item, an attested check of the same
+   kind "tells" any other, and an item with nothing against it is `not covered`: shown on the card and in the CLI, and it
+   holds the Done like any proof that is not green (override and mode as for B16).
 
 ## Consequences
 

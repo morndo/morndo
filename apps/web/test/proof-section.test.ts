@@ -111,6 +111,42 @@ describe("the panel's proof section (ADR-0035)", () => {
     } finally { await tab.close(); }
   });
 
+  it("the needs list marks each item and colours the one not covered", { timeout: 30_000 }, async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await tab.goto(web.url);
+      const box = cell(tab, "needs-list");
+      const needs = box.locator("[data-proof-needs]");
+      await needs.waitFor();
+      expect(await needs.locator("li").count()).toBe(4);
+      expect(await needs.locator('[data-proof-need][data-status="covered"]').locator(".mark").innerText()).toBe("✓");
+      expect(await needs.locator('[data-proof-need][data-status="told"]').locator(".mark").innerText()).toBe("~");
+      expect(await needs.locator('[data-proof-need][data-status="open"]').locator(".mark").innerText()).toBe("…");
+      const bad = needs.locator('[data-proof-need][data-status="not_covered"]');
+      expect(await bad.locator(".mark").innerText()).toBe("◇");
+      expect(await bad.evaluate(el => el.classList.contains("bad"))).toBe(true);
+      expect(await needs.locator('[data-proof-need][data-status="told"]').innerText()).toContain("added by the lane");
+    } finally { await tab.close(); }
+  });
+
+  it("at 390 px the section does not overflow", { timeout: 30_000 }, async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 390, height: 900 } });
+    try {
+      await tab.goto(web.url);
+      const box = cell(tab, "needs-list");
+      const needs = box.locator("[data-proof-needs]");
+      await needs.waitFor();
+      const longSpec = "pr@acme/shop: " + "x".repeat(120);
+      const overflow = await needs.evaluate((el, spec) => {
+        const li = el.querySelector("li");
+        if (li) li.textContent = spec;
+        return el.scrollWidth > el.clientWidth;
+      }, longSpec);
+      expect(overflow).toBe(false);
+      expect(await needs.evaluate(el => getComputedStyle(el).overflowWrap)).toBe("anywhere");
+    } finally { await tab.close(); }
+  });
+
   it("a stand-in forge is marked, and a real one is not", { timeout: 30_000 }, async () => {
     const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
     try {
