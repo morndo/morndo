@@ -67,6 +67,7 @@ import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
 import { readCodeLine, runMemory } from "./console/memory.ts";
 import { runUpdaterProgram } from "./console/update.ts";
 import { AUDIT_SYNOPSIS, AUDIT_USAGE, parseAuditArgs } from "./console/audit.ts";
+import { agentTokenLine } from "./console/agent-token.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -508,7 +509,7 @@ switch (cmd) {
       print(`${secret}`);
       print(`Token ${token.id} (${token.name}, ${token.role}${token.scopes.length > 0 ? `, ${[...token.scopes].join(", ")}` : ""}). Shown once: put it in MORNDO_AGENT_TOKEN for ${role === "manager" ? "the manager's lane" : "the worker lanes"}, with MORNDO_HUB=${config.origin}.`);
     } else if (sub === "list") {
-      for (const t of agents.list()) print(`${t.id}  ${t.name.padEnd(20)}  ${t.role.padEnd(7)}  ${[...t.scopes].join(",") || "-"}  made ${when(t.createdAt)}  last used ${when(t.lastUsedAt)}  ${t.revokedAt ? `REVOKED ${when(t.revokedAt)}` : "active"}`);
+      for (const t of agents.list()) print(agentTokenLine(t, when));
     } else if (sub === "revoke") {
       const id = rest[0];
       if (!id) { process.stderr.write("usage: morndo agent-token revoke <id>\n"); store.close(); throw await exitAfterOutput(2); }

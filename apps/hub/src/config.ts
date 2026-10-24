@@ -48,6 +48,9 @@ export type Config = {
   // MORNDO_WORKER_ASK_GRACE_MS: how long a worker's question or menu waits before it is the principal's Ask (N2), for
   // tests only (the e2e offices); the default is WORKER_ASK_GRACE_MS (10 minutes). Never an app setting.
   workerAskGraceMs?: number;
+  // MORNDO_USAGE_READINGS_GATE: a usage reading from a plain worker token. "warn" (default) accepts it and counts it
+  // on the token; "enforce" refuses it. Unset or empty is warn.
+  usageReadingsGate?: "warn" | "enforce";
 };
 
 const bool = (v: string | undefined) => v === "1" || v === "true";
@@ -55,6 +58,14 @@ const bool = (v: string | undefined) => v === "1" || v === "true";
 // MORNDO_WORKER_ASK_GRACE_MS (tests only): a string of digits only — so "0" is accepted, and the grace is off — is that
 // many milliseconds; anything else (unset, empty, negative, decimals, text) is the default, WORKER_ASK_GRACE_MS.
 const graceOf = (v: string | undefined) => (/^\d+$/.test(v ?? "") ? Number(v) : WORKER_ASK_GRACE_MS);
+
+// MORNDO_USAGE_READINGS_GATE: unset or empty is warn. A word that is neither warn nor enforce is refused — a typo must
+// not leave the gate open.
+const readingsGate = (v: string | undefined): "warn" | "enforce" => {
+  if (v === undefined || v === "") return "warn";
+  if (v === "warn" || v === "enforce") return v;
+  throw new Error("MORNDO_USAGE_READINGS_GATE must be one of: warn, enforce");
+};
 
 // The contact a push service sees in the VAPID token (RFC 8292 section 2.1: a mailto or https URI). The project's own
 // address by default, never the hub's.
@@ -133,6 +144,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pushContact: env.MORNDO_PUSH_CONTACT || DEFAULT_PUSH_CONTACT,
     pushExtraOrigins: (env.MORNDO_PUSH_EXTRA_ORIGINS ?? "").split(",").map(s => s.trim()).filter(Boolean),
     workerAskGraceMs: graceOf(env.MORNDO_WORKER_ASK_GRACE_MS),
+    usageReadingsGate: readingsGate(env.MORNDO_USAGE_READINGS_GATE),
   };
 }
 

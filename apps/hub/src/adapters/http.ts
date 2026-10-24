@@ -459,6 +459,13 @@ export function startHttp(p: {
     // has its own route above; a reading that names it is refused.
     if (path === "/api/agent/usage/readings" && method === "POST") {
       if (!p.usage) return json(res, 404, { error: "usage_off" });
+      // A plain worker token is counted once, before the body is read. warn (the default) still accepts the reading;
+      // enforce refuses it and stores nothing.
+      const unbound = who.token.role !== "manager" && !who.token.scopes.includes("usage-pool");
+      if (unbound) p.board.agents.noteUnbound(who.token.id);
+      if (unbound && (p.config.usageReadingsGate ?? "warn") === "enforce") {
+        return json(res, 403, { error: "scope_required", message: "usage readings need a manager token or a worker token with the usage-pool scope (morndo agent-token new <name> --role worker --scope usage-pool)" });
+      }
       const accountHeader = req.headers["x-morndo-account"];
       const r = p.usage.reading(await readBody(req, UsageReadingsBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
       return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });

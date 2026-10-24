@@ -296,6 +296,17 @@ export const MIGRATIONS: readonly Migration[] = [
       if (!hasColumn(db, "lane_accounts", "conflict_until")) db.exec("ALTER TABLE lane_accounts ADD COLUMN conflict_until INTEGER");
     },
   },
+  {
+    // A plain worker token's usage readings: how many, and when the last one was. A manager token, or a worker token
+    // with the usage-pool scope, is not counted.
+    version: 28,
+    name: "usage (T-430 slice 1): per-token count of readings posted with a plain worker token",
+    compat: "additive",
+    up: db => {
+      if (!hasColumn(db, "agent_tokens", "unbound_count")) db.exec("ALTER TABLE agent_tokens ADD COLUMN unbound_count INTEGER NOT NULL DEFAULT 0");
+      if (!hasColumn(db, "agent_tokens", "last_unbound_at")) db.exec("ALTER TABLE agent_tokens ADD COLUMN last_unbound_at INTEGER");
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

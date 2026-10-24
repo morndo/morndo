@@ -76,6 +76,9 @@ export async function startInProcessHub(o: {
   profiles?: () => ReadonlyMap<string, AccountProfile>;
   // S3 (plan 4.5 item 4): where a lane runs, as main.ts reads it from the fleet's lane list (a test's own).
   laneNode?: (lane: string) => string | null;
+  // `readingsGate`: MORNDO_USAGE_READINGS_GATE for this hub. warn accepts a plain worker token's reading and counts
+  // it; enforce refuses it. Absent: the hub's default, warn.
+  readingsGate?: "warn" | "enforce";
   engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
   locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
   queue?: (store: Store) => ManagerQueue; manager?: string; typed?: string[]; alerts?: AlertsService;
@@ -102,6 +105,7 @@ export async function startInProcessHub(o: {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo",
     requireProxyIdentity: false, principalLogin: null, tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 1000,
     managerWindow: "manager", ledgerPath: null, poolUsageFile: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    ...(o.readingsGate ? { usageReadingsGate: o.readingsGate } : {}),
   };
   let n = 0;
   const passkeys: Passkeys = {

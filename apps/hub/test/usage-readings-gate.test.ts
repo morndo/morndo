@@ -138,7 +138,7 @@ describe("the setting", () => {
 });
 
 describe("agent-token list", () => {
-  const token = { id: "tok-1", name: "lanes", role: "worker" as const, scopes: [] as string[], createdAt: 1, lastUsedAt: 2, revokedAt: null, unboundCount: 0, lastUnboundAt: null as number | null };
+  const token = { id: "tok-1", name: "lanes", role: "worker" as const, scopes: [] as string[], secretHash: "h", createdAt: 1, lastUsedAt: 2, revokedAt: null, unboundCount: 0, lastUnboundAt: null as number | null };
   it("says nothing extra for a token that never posted a plain reading", () => {
     expect(agentTokenLine(token, when)).not.toMatch(/unbound/);
   });
