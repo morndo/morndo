@@ -3,7 +3,10 @@
 # Checks the two unsigned feeds in site/ against the feed branch as it stands and against the release:
 # the numbers rise by one (a publish leaves stable as it was), the lists change only as they should,
 # the key-set version is the shipped one, and the new entry names the published Manifest's size and digest.
-# MODE is publish or resign. A publish also needs VERSION. GH may name another gh for a test.
+# MODE is publish, resign or withdraw. A publish or a withdrawal also needs VERSION.
+# A withdrawal reads ALLOW_EMPTY_CHANNEL (true or false, default false) and refuses to sign when a channel
+# offered something before and offers nothing afterwards, unless that value is true.
+# GH may name another gh for a test.
 set -eu
 PATH=/usr/bin:/bin
 : "${MODE:?}"
@@ -19,10 +22,18 @@ fail() {
 }
 
 case $MODE in
-  publish) : "${VERSION:?}" ;;
+  publish|withdraw) : "${VERSION:?}" ;;
   resign) ;;
   *) fail "unknown mode $MODE" ;;
 esac
+
+if [ "$MODE" = withdraw ]; then
+  ALLOW_EMPTY_CHANNEL=${ALLOW_EMPTY_CHANNEL:-false}
+  case "$ALLOW_EMPTY_CHANNEL" in
+    true|false) ;;
+    *) fail "ALLOW_EMPTY_CHANNEL must be true or false" ;;
+  esac
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -62,7 +73,7 @@ for channel in latest stable; do
   [ -f "$new" ] || fail "$new is missing"
   jq -e --arg ch "$channel" '.schema == 1 and .channel == $ch and ((.expiresAt | fromdateiso8601) - (.issuedAt | fromdateiso8601) == 1209600)' "$new" > /dev/null || fail "$channel.json is not a 14-day $channel feed"
   # Only a feed written now is fresh. A publish carries stable.json over as it was, hours or days old.
-  if [ "$MODE" = resign ] || [ "$channel" = latest ] || [ -z "$head" ]; then
+  if [ "$MODE" = resign ] || [ "$MODE" = withdraw ] || [ "$channel" = latest ] || [ -z "$head" ]; then
     issued=$(jq -r '.issuedAt | fromdateiso8601' "$new")
     delta=$((issued - now))
     # The feed environment may hold the job for an approval, so a feed prepared up to MAX_AGE ago (a day) is fresh.
@@ -85,16 +96,33 @@ for channel in latest stable; do
     fi
     if [ "$MODE" = publish ]; then
       [ "$(jq -r .keySetVersion "$new")" = "$keys_version" ] || fail "$channel.json names another key set than $TRUST/keys.json"
+    elif [ "$MODE" = withdraw ]; then
+      [ "$(jq -r .keySetVersion "$new")" = "$(jq -r .keySetVersion "$prev")" ] || fail "$channel.json changed the key set"
     else
       [ "$(jq -r .keySetVersion "$new")" = "$(jq -r .keySetVersion "$prev")" ] || fail "a re-sign changed the key set"
     fi
   else
+    if [ "$MODE" = withdraw ]; then
+      fail "a withdrawal needs a feed branch"
+    fi
     [ "$MODE" = publish ] || fail "a re-sign needs a feed branch"
     [ "$seq" = 1 ] || fail "$channel.json starts at $seq, not 1"
     [ "$(jq -r .keySetVersion "$new")" = "$keys_version" ] || fail "$channel.json names another key set than $TRUST/keys.json"
     printf 'null' > "$prev"
   fi
-  if [ "$MODE" = resign ] || [ "$channel" = latest ]; then
+  if [ "$MODE" = withdraw ]; then
+    jq -e --slurpfile p "$prev" '.releases == ($p[0].releases // [])' "$new" > /dev/null || fail "$channel.json changed a release"
+    jq -e --slurpfile p "$prev" --arg v "$VERSION" '($p[0].withdrawn // [] | index($v)) == null' "$new" > /dev/null || fail "$VERSION is already withdrawn in the $channel feed"
+    jq -e --slurpfile p "$prev" --arg v "$VERSION" '.withdrawn == (($p[0].withdrawn // []) + [$v])' "$new" > /dev/null || fail "$channel.json withdrawn list is not the previous list plus the version"
+    if [ "$channel" = latest ]; then
+      jq -e --slurpfile p "$prev" --arg v "$VERSION" '($p[0].releases // [] | map(.version) | index($v)) != null' "$new" > /dev/null || fail "the latest feed does not list $VERSION"
+    fi
+    if [ "$ALLOW_EMPTY_CHANNEL" != true ]; then
+      before=$(jq -r '(.releases // [] | map(.version)) - (.withdrawn // []) | length' "$prev")
+      after=$(jq -r '(.releases // [] | map(.version)) - (.withdrawn // []) | length' "$new")
+      [ "$before" -eq 0 ] || [ "$after" -gt 0 ] || fail "withdrawing $VERSION would leave the $channel feed offering nothing; set allow_empty_channel to true to do it"
+    fi
+  elif [ "$MODE" = resign ] || [ "$channel" = latest ]; then
     # Entries that were already published are carried over whole (version, URL, size, digest), not by version.
     jq -e --slurpfile p "$prev" --arg v "${VERSION:-}" --arg mode "$MODE" '
       ($p[0].releases // []) as $old

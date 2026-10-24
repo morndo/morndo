@@ -1,6 +1,7 @@
 // Channel feeds (design §9.5, §9.6). Publishing adds a release and raises the number. A re-sign
 // raises the number, sets the issue time, and sets the expiry 14 days later. The release list,
-// the withdrawals, the channel and the key-set version stay as they were.
+// the withdrawals, the channel and the key-set version stay as they were. A withdrawal appends
+// the version and raises the number; the release list stays.
 import { compareVersions, parseVersion, type Channel, type FeedEntry } from "@morndo/domain";
 import { ChannelFeedSchema } from "@morndo/protocol";
 import { canonicalJson, isoUtc } from "./json.ts";
@@ -33,6 +34,17 @@ export function resignFeed(existing: string, now: number): string {
   return writeFeed({
     channel: prev.channel, seq: prev.seq + 1, issuedAt: now, keySetVersion: prev.keySetVersion,
     releases: prev.releases, withdrawn: [...prev.withdrawn],
+  });
+}
+
+export function withdrawRelease(existing: string, version: string, now: number): string {
+  const prev = ChannelFeedSchema.parse(JSON.parse(existing));
+  const listed = prev.releases.find(release => release.version === version);
+  const text = listed === undefined ? version : listed.version;
+  if (prev.withdrawn.includes(text)) throw new Error(`${version} is already withdrawn in the ${prev.channel} feed`);
+  return writeFeed({
+    channel: prev.channel, seq: prev.seq + 1, issuedAt: now, keySetVersion: prev.keySetVersion,
+    releases: prev.releases, withdrawn: [...prev.withdrawn, text],
   });
 }
 
