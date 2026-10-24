@@ -1,7 +1,7 @@
 // The release pipeline's shape (design §9, ADR-0019). These read the workflow files; they do not
 // call GitHub. A private scratch repository still has to run the real tag once the owner adds keys.
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -376,6 +376,38 @@ describe("release pipeline files", () => {
     const unguarded = Object.entries(jobs).filter(([, j]) => !j.needs && !j.if).map(([name]) => name);
     expect(unguarded).toEqual(["resign-prepare"]);
     expect(job(feed, "resign-prepare")).toContain("skipping re-sign:");
+  });
+
+  it("the release-please job reads the App's secrets from an environment of its own, and the environment is not a key environment", () => {
+    const environment = (parse(release) as { jobs: Record<string, { environment?: unknown }> }).jobs["release-please"]?.environment;
+    expect(environment).toBe("release-please");
+    // release, feed, promote and withdraw are the keys' environments: the settings check treats them as holding signing keys.
+    expect(["release", "feed", "promote", "withdraw"]).not.toContain(environment);
+    const text = job(release, "release-please");
+    expect(text).toContain("secrets.RELEASE_APP_ID");
+    expect(text).toContain("secrets.RELEASE_APP_PRIVATE_KEY");
+  });
+
+  it("no job reads the App's secrets except release-please", () => {
+    const workflows = readdirSync(".github/workflows").filter(name => name.endsWith(".yml")).sort();
+    expect(workflows.length).toBeGreaterThan(1);
+    const please = job(release, "release-please");
+    // A new job that read either secret would fail here, so the environment's reach stays this one job.
+    for (const secret of ["secrets.RELEASE_APP_ID", "secrets.RELEASE_APP_PRIVATE_KEY"]) {
+      for (const name of workflows) {
+        const text = readFileSync(join(".github/workflows", name), "utf8");
+        const hits = text.split(secret).length - 1;
+        expect(hits, `${name} ${secret}`).toBe(name === "release.yml" ? please.split(secret).length - 1 : 0);
+      }
+      expect(please.split(secret).length - 1).toBeGreaterThan(0);
+    }
+  });
+
+  it("the release-please job's environment names no url and no extra keys", () => {
+    const environment = (parse(release) as { jobs: Record<string, { environment?: unknown }> }).jobs["release-please"]?.environment;
+    // A plain string: an expression, a mapping or a url cannot slip in without this test changing.
+    expect(typeof environment).toBe("string");
+    expect(environment).toBe("release-please");
   });
 });
 
