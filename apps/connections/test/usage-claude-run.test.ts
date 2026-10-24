@@ -173,23 +173,45 @@ describe("rationed on one node (AT-32, AT-41's lock)", () => {
     expect(r.count("spawn.log")).toBe(1);        // still the one spawn of the stale case
   });
 
-  // The fix round (2026-10-24, finding 4): the lock also records the child's pgid, and taking over a stale lock kills
-  // that group if it is alive, so a collector that died mid-read leaves nothing running. Red against the code before
-  // the fix: the lock names no group and a takeover kills nothing.
-  it("taking over a stale lock kills the group its pgid names, when that group is alive", async () => {
-    const kid = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", detached: true });
+  // The fix round (2026-10-24, finding 4, and md-rev6's re-check, finding 1): the lock also records the child's pgid, and
+  // taking over a stale lock kills that group, but only when it is still our read: the lock is less than twice the
+  // lease TTL old AND the group leader's command line is the headless /usage run. A pgid a day later may belong to
+  // an unrelated group (a lane's tmux): that group is never signalled, the stale lock is only taken over.
+  const READ_ARGV = ["-e", "setTimeout(() => {}, 60000)", "--", "-p", "/usage", "--tools", ""];   // what the read's leader looks like
+  const takeover = async (argv: string[], ageMs: number): Promise<{ survived: boolean; ok: boolean }> => {
+    const kid = spawn(process.execPath, argv, { stdio: "ignore", detached: true });
     const kidPid = kid.pid ?? -1;
     if (kidPid <= 0) throw new Error("the grandchild never started");
     try {
+      await new Promise(resolve => setTimeout(resolve, 200));         // its command line is readable once it has exec'd
       const at = Date.now();
-      writeFileSync(join(r.dir, "claude-usage-seat-a.lock"), `${JSON.stringify({ pid: process.pid, pgid: kidPid, startedAt: at - 211_000 })}\n`);
+      writeFileSync(join(r.dir, "claude-usage-seat-a.lock"), `${JSON.stringify({ pid: process.pid, pgid: kidPid, startedAt: at - ageMs })}\n`);
       const out = await readClaude({ account: "seat-a", configDir: "/cfg", bin: r.bin, now: () => at, lockDir: r.dir });
-      expect(out.ok).toBe(true);                     // the stale lock was taken over all the same
       await new Promise(resolve => setTimeout(resolve, 500));
-      expect(() => process.kill(kidPid, 0)).toThrow();   // the group the stale lock named died with the takeover
+      let survived = true;
+      try { process.kill(kidPid, 0); } catch { survived = false; }
+      return { survived, ok: out.ok };
     } finally {
       try { process.kill(-kidPid, "SIGKILL"); } catch { /* already gone, or never the leader */ }
     }
+  };
+
+  it("taking over a stale lock kills the group its pgid names, when it is still the headless read", async () => {
+    const out = await takeover(READ_ARGV, 211_000);
+    expect(out.ok).toBe(true);                       // the stale lock was taken over all the same
+    expect(out.survived).toBe(false);                // the group the stale lock named died with the takeover
+  });
+
+  it("a group whose command line is not the read is left alone, and the lock is still taken over", async () => {
+    const out = await takeover(["-e", "setTimeout(() => {}, 60000)"], 211_000);
+    expect(out.ok).toBe(true);
+    expect(out.survived).toBe(true);                 // a reused pgid of somebody else's group: never signalled
+  });
+
+  it("a lock older than twice the lease TTL names a group nobody may kill, even one that looks like the read", async () => {
+    const out = await takeover(READ_ARGV, 2 * 210_000 + 1_000);
+    expect(out.ok).toBe(true);
+    expect(out.survived).toBe(true);
   });
 
   it("after signed_out no spawn until the fake's auth status says signed in", async () => {
