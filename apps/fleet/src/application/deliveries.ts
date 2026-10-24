@@ -88,7 +88,7 @@ export class Deliveries {
 
   stop(): void { for (const t of this.#timers.splice(0)) clearInterval(t); }
 
-  async post(req: DeliveryRequest, client: string): Promise<Answer> {
+  async post(req: DeliveryRequest, client: string, actor = "client"): Promise<Answer> {
     const target: DeliveryTarget = "lane" in req ? { lane: req.lane, sticky: this.#stickyLanes.includes(req.lane) } : { workerId: req.workerId };
     const args = { id: req.id, target, text: req.text, ...(req.ttlMs === undefined ? {} : { ttlMs: req.ttlMs }) };
     let node: string | null = null;
@@ -111,12 +111,12 @@ export class Deliveries {
         }
       }
     }
-    this.#audited("delivery.post", node, { id: req.id, target: "lane" in req ? { lane: req.lane } : { workerId: req.workerId }, client, outcome: answer.ok ? answer.delivery.state : answer.error.code });
+    this.#audited("delivery.post", node, { id: req.id, target: "lane" in req ? { lane: req.lane } : { workerId: req.workerId }, client, outcome: answer.ok ? answer.delivery.state : answer.error.code }, actor);
     return answer;
   }
 
   // null: no delivery of that id is known to the fleet (GET /v1/deliveries/<id> would be 404 too).
-  async cancel(id: string, client: string): Promise<Answer | null> {
+  async cancel(id: string, client: string, actor = "client"): Promise<Answer | null> {
     const row = this.#store.get(id);
     if (!row) return null;
     const out = await this.#connections.request(row.node, "delivery.cancel", { id }, { timeoutMs: DELIVERY_OP_TIMEOUT_MS });
@@ -130,7 +130,7 @@ export class Deliveries {
         answer = { ok: true, delivery };
       }
     }
-    this.#audited("delivery.cancel", row.node, { id, client, outcome: answer.ok ? answer.delivery.state : answer.error.code });
+    this.#audited("delivery.cancel", row.node, { id, client, outcome: answer.ok ? answer.delivery.state : answer.error.code }, actor);
     return answer;
   }
 
@@ -234,8 +234,8 @@ export class Deliveries {
   #stale(node: string): boolean { return this.#connections.status(node) !== "online"; }
 
   // The outcome is the client's whatever the audit can take (fleet.db busy or full): logged instead, never the text.
-  #audited(action: string, node: string | null, detail: Record<string, unknown>): void {
-    try { this.#audit.record("client", action, node, detail); }
+  #audited(action: string, node: string | null, detail: Record<string, unknown>, actor = "client"): void {
+    try { this.#audit.record(actor, action, node, detail); }
     catch (e) { this.#log.error(`audit: ${action} could not be recorded (fleet.db busy or full?): ${JSON.stringify(detail)}`, e); }
   }
 

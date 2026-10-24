@@ -1,5 +1,7 @@
 // The fleet service, wired (ADR-0012): its key, fleet.db, the node registry, the audit, the live connections, the
-// lane registry and router, the hook bus, the agent endpoint, the client API, and each lane's Run (ADR-0032). `morndo-fleet serve` runs it; tests
+// lane registry and router, the hook bus, the agent endpoint, the client API, and each lane's Run (ADR-0032). A second
+// socket, fleet-worker.sock, serves that API to a caller that reaches the fleet through a forward, on the worker scope.
+// `morndo-fleet serve` runs it; tests
 // start it on port 0 with temporary paths. The socket directory is checked first, so an unsafe one stops the service
 // before it opens anything. Every alert the audit records is also an `alert` event. Audit rows older than 90 days go on start
 // and daily. A revoked node's lanes go whichever way it was revoked (the client API, or the console writing fleet.db).
@@ -9,7 +11,7 @@ import { dirname, join } from "node:path";
 import { DEFAULT_SOAK_MINUTES } from "@morndo/domain";
 import type { Delivery, Health, Pane } from "@morndo/protocol";
 import { Flight, HoldWatch, RevocationJournal, assertLocalDisk, holdFile, productBuild } from "@morndo/service-kit";
-import type { FleetConfig } from "./config.ts";
+import { workerSocketOf, type FleetConfig } from "./config.ts";
 import { Audit } from "./adapters/audit.ts";
 import { startClientApi } from "./adapters/client-api.ts";
 import { fleetTransactions, openFleetDb } from "./adapters/db.ts";
@@ -43,6 +45,7 @@ import type { RolloutAuthority } from "./adapters/client-api.ts";
 import { decodePrincipalKey, hubFilePrincipalAuthority, hubIdentityPubFile, principalAuthority } from "./adapters/principal-check.ts";
 import { UpdaterStateWatch, updaterStateFile } from "./adapters/updater-state-watch.ts";
 import { applyRevocationJournal } from "./application/revocations.ts";
+import { ProtectedIdentity } from "./application/protected-identity.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
 
@@ -79,8 +82,11 @@ export type Fleet = {
 export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Promise<Fleet> {
   const log = o.log ?? defaultLog;
   const now = o.now ?? Date.now;
+  const worker = workerSocketOf(config);
   prepareSocketDir(config.socketPath);
+  prepareSocketDir(worker.path);
   await clearStaleSocket(config.socketPath);        // a live service owns fleet.db: refuse before touching it
+  await clearStaleSocket(worker.path);
   assertLocalDisk(dirname(config.dbPath));          // before the key file too, which lives beside it by default
   const key = loadOrCreateFleetKey(config.keyPath);
   const db = openFleetDb(config.dbPath);
@@ -104,6 +110,8 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   pruneAudit();
   const active = nodes.list().filter(n => n.revokedAt === null).map(n => n.name);
   const lanes = new LaneRegistry({ store: new LanesStore(db), events, audit, activeNodes: active, now });
+  const identity = new ProtectedIdentity(new Set(worker.protectedLanes));
+  identity.seed(lanes.list());
   // The build this fleet runs (updates §7): the control plane's own Version, the only one it may commit and the
   // ceiling for every node's (RL11). The Rollouts service is made after the connections (it pushes to them); the
   // connections reach it through these closures, so the gate in Connections.request answers from the service.
@@ -152,6 +160,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   events.subscribe(e => {
     if (e.t !== "inventory") return;
     const panes = (e.body as { panes: Pane[] }).panes;
+    identity.observe(panes);
     lanes.inventory(e.node, panes);
     deliveries.inventory(e.node, panes);
     const running = new Map<string, string | null>();
@@ -248,6 +257,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     await agents.ready;
     api = await startClientApi(config.socketPath, {
       router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, rollouts,
+      worker: { socketPath: worker.path, scope: { protectedLanes: new Set(worker.protectedLanes), startNodes: new Set(worker.startNodes) }, identity },
       rolloutAuthority: o.rolloutAuthority
         ?? (config.principalKey !== undefined
           ? principalAuthority(decodePrincipalKey(config.principalKey), { now })
