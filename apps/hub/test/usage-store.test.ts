@@ -51,4 +51,13 @@ describe("the usage store (fix round, PR #125)", () => {
     expect(kept.some(n => n.id === "old")).toBe(false);       // older than 30 days
     expect(kept.some(n => n.id === "n99")).toBe(false);       // only the newest 500 remain
   });
+  it("a notice older than 30 days goes even when fewer than 500 are kept (finding 5c)", () => {
+    const now = 1_700_000_000_000;
+    const svc = new UsageService({ store, now: () => now });
+    store.saveUsageNotice({ id: "old", kind: "plan", account: "seat-a", at: now - 31 * 24 * 3_600_000, text: "old" }, "old");
+    store.saveUsageNotice({ id: "edge", kind: "plan", account: "seat-a", at: now - 29 * 24 * 3_600_000, text: "edge" }, "edge");
+    store.saveUsageNotice({ id: "new", kind: "plan", account: "seat-a", at: now, text: "new" }, "new");
+    svc.sweep();
+    expect(store.usageNotices(10).map(n => n.id)).toEqual(["new", "edge"]);
+  });
 });
