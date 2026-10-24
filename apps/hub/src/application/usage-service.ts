@@ -306,10 +306,12 @@ export class UsageService {
     const sessions: FreshSession[] = [];
     for (const a of this.#accounts.values()) for (const s of pruneSessions(a.sessions, now)) sessions.push({ account: a.account, sessionId: s.sessionId, lane: s.lane });
     const records: readonly LaneRecord[] = this.#store.laneAccounts();
-    // The hook's own word is passed on only for an account this node is known to run (PR #127, finding 1): KNOWN to the
-    // hub at all, and SEEN ON THIS NODE. Anything else is dropped, and resolution goes on without it — a failure naming
-    // an account nobody knows creates nothing, and one node's word never marks another node's account.
-    const hook = typeof tap.account === "string" && this.#knownAccount(tap.account, records) && this.#seenOnNode(tap.account, node, records, sessions) ? tap.account : null;
+    // The hook's own word is passed on only for an account this node is seen to run (PR #127, finding 1): a lane record
+    // of this node names it, or a fresh session of it sits on a lane of this node. Either one means the hub knows the
+    // account (a record or a session is how it learns one), so no separate "known" test is left to fail alone. Anything
+    // else is dropped and resolution goes on without it: a failure naming an account nobody knows creates nothing, and
+    // one node's word never marks another node's account.
+    const hook = typeof tap.account === "string" && this.#seenOnNode(tap.account, node, records, sessions) ? tap.account : null;
     const resolved = resolveAccount({
       hookAccount: hook, node, lane: tap.lane, sessionId: tap.sessionId ?? null, now,
       records, sessions, laneNode: this.#laneNode,
@@ -321,15 +323,6 @@ export class UsageService {
     const pool = this.#store.usagePoolSeats().find(s => s.account === resolved.account)?.record ?? null;
     if (pool !== null && (pool.state === "retired" || pool.state === "logged-out")) return;
     this.noteLimit({ account: resolved.account, kind, backAt: null, by: tap.lane ?? "a lane", at });
-  }
-
-  // Whether the hub knows an account at all (PR #127, finding 1): a status line's own row, a reading source's, the
-  // pool's seat for it, or a lane record naming it. Never a failure's own word alone.
-  #knownAccount(account: string, records: readonly LaneRecord[]): boolean {
-    return this.#accounts.has(account)
-      || this.#store.usageSourcesOf(account).length > 0
-      || this.#store.usagePoolSeats().some(s => s.account === account)
-      || records.some(r => r.account === account);
   }
 
   // Whether this node runs the account (PR #127, finding 1): a lane record of this node naming it, or a fresh session
