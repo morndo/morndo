@@ -250,7 +250,7 @@ export interface ApplyingMarker {
 export interface Sleeper { sleep(ms: number): Promise<void> }
 export type AlertKind =
   | "update_rolled_back" | "update_rollback_failed" | "update_rollback_waiting" | "update_deferred"
-  | "update_unknown_record" | "update_check_already_failing";
+  | "update_unknown_record" | "update_check_already_failing" | "update_origin_not_judged";
 export interface AlertSink { raise(kind: AlertKind, detail: string): void }
 
 // RL10, before the journals arrive (PR 5c): a restore must not undo a revocation. During a probation that may restore,

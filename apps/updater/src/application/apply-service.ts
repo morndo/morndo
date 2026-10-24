@@ -198,6 +198,14 @@ export class ApplyService {
           .map(f => `${f.service}: ${f.check} was already failing before the update to ${staged.version}; it is not held against it`)
           .join(" "));
       }
+      // Once per update, before the swap: the owner path is configured and no origin was, so probation cannot
+      // judge the https address. A node's report never names the owner path, and a named origin check says nothing.
+      if (before.originNotJudged) {
+        alerts.raise(
+          "update_origin_not_judged",
+          "MORNDO_ORIGIN is not set for the updater: the https address is not judged by probation",
+        );
+      }
 
       // Step 4: the services stop, in the one order that never half-shuts-down twice.
       mark(ctx, "stopping");

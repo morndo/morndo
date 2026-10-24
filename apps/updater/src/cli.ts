@@ -515,7 +515,15 @@ export async function runUpdater(
     if (parsed.cmd === "status") {
       // Even an install that is not ours is an answer, never a failure: the reader asked what this machine believes.
       const s = readStatus({ installer, store, settings });
-      io.out(json ? `${JSON.stringify(UpdateStatusSchema.parse(s))}\n` : `${formatStatus(s)}\n`);
+      if (json) {
+        io.out(`${JSON.stringify(UpdateStatusSchema.parse(s))}\n`);
+        return EXIT_OK;
+      }
+      // The owner-path line is text only, and only where the hub runs: a node has no owner path to judge.
+      const m = await manager();
+      const runsHub = m !== null && m.services().includes("hub");
+      const ownerOrigin = runsHub ? (env.MORNDO_ORIGIN === undefined ? "unset" : "set") : null;
+      io.out(`${formatStatus(s, { ownerOrigin })}\n`);
       return EXIT_OK;
     }
 
