@@ -4,8 +4,8 @@
 // unit 6 is weeks), never by array order or a sort on the reset: the weekly and the 5-hour entries swap order near
 // the end of a week. The credit windows refresh after use, so every window this reader maps is rolling. Made-up
 // shapes only in tests and fixtures.
-import type { UsageReason } from "@morndo/domain";
-import type { ReadingWindow } from "./usage-claude.ts";
+import { takePercent, type UsageReason } from "@morndo/domain";
+import { hintOf, type ReadingWindow } from "./usage-claude.ts";
 
 // One quota answer as the collector hands it over: the HTTP status, the Retry-After header verbatim (whole seconds
 // only; an HTTP date is not supported), and the parsed body.
@@ -28,12 +28,103 @@ export type ZaiReadingBody = {
   windows: ReadingWindow[];
 };
 
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// The hint of an unknown shape (the usage-claude rule): the fixed shape `unknown shape ${hash}` and nothing else —
+// the hash the first 8 hex characters of the sha256 of the body's first 120 characters as JSON, enough to tell two
+// broken shapes apart, never enough to repeat a word the provider printed.
+const shapeHint = (body: unknown): string => hintOf(JSON.stringify(body) ?? "");
+
+// The Retry-After header as whole seconds: only a non-negative integer counts, anything else (an HTTP date, a word)
+// is no number at all.
+const retrySeconds = (v: string | null): number | null => {
+  if (v === null || !/^\d+$/.test(v)) return null;
+  return Number(v);
+};
+
+// The used percent of one limit: `percentage` when the entry carries a number, else `currentValue * 100 / usage`
+// when `usage` is a positive number — then through the domain's takePercent, so an out-of-range or epoch-like value
+// is no number (that window is dropped, never shown as 0%).
+const percentOf = (entry: Record<string, unknown>): number | null => {
+  if (typeof entry.percentage === "number") return takePercent(entry.percentage);
+  const current = entry.currentValue;
+  const usage = entry.usage;
+  if (typeof current === "number" && Number.isFinite(current) && typeof usage === "number" && Number.isFinite(usage) && usage > 0)
+    return takePercent((current * 100) / usage);
+  return null;
+};
+
+// The two named windows (plan 4.1): 300 minutes is the 5-hour one and 10080 the weekly one, whatever the entry's own
+// numbers; any other length names the window by its minutes; no length at all is the plain `Limit` id, with
+// `unit<u>/<n>` appended when the entry gave both numbers. Cut to the wire's own 40 characters.
+const FIVE_HOURS = 300;
+const SEVEN_DAYS = 10_080;
+const ID_LIMIT = 40;
+const idOf = (unit: number, n: number): { id: string; lengthMins: number | null } => {
+  const lengthMins = unit === 3 ? n * 60 : unit === 6 ? n * 10080 : null;
+  if (lengthMins === FIVE_HOURS) return { id: "five_hour", lengthMins };
+  if (lengthMins === SEVEN_DAYS) return { id: "seven_day", lengthMins };
+  if (lengthMins !== null) return { id: `Window ${lengthMins} min`, lengthMins };
+  return { id: `Limit unit${unit}/${n}`.slice(0, ID_LIMIT), lengthMins: null };
+};
+
 export function parseZaiQuota(answer: ZaiQuotaAnswer): ZaiReadResult {
-  void answer;
-  throw new Error("not implemented");
+  const { status, retryAfter, body } = answer;
+  // The failure classes, in their order: the sign-in ones first (an HTTP 200 carrying `code: 401` is one), then the
+  // rate limit with the provider's own retry word, then the unreachable ones, and only then the shape.
+  if (status === 401 || status === 403 || (isObject(body) && body.code === 401))
+    return { ok: false, reason: "signed_out", retryAfterS: null, hint: null };
+  if (status === 429)
+    return { ok: false, reason: "rate_limited", retryAfterS: retrySeconds(retryAfter), hint: null };
+  if ((isObject(body) && body.success === false) || status >= 500)
+    return { ok: false, reason: "unreachable", retryAfterS: null, hint: null };
+  const limits = isObject(body) && isObject(body.data) && Array.isArray(body.data.limits) ? body.data.limits : null;
+  if (limits === null || limits.length === 0)
+    return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: shapeHint(body) };
+  const windows: ReadingWindow[] = [];
+  const claimed = new Set<string>();
+  const missing: string[] = [];
+  let recognised = false;
+  for (const entry of limits) {
+    if (!isObject(entry)) continue;
+    // CREDIT_LIMIT is accepted wherever TOKENS_LIMIT was; anything else is no limit this reader knows.
+    if (entry.type !== "CREDIT_LIMIT" && entry.type !== "TOKENS_LIMIT") continue;
+    recognised = true;
+    const unit = typeof entry.unit === "number" && Number.isFinite(entry.unit) ? entry.unit : null;
+    const n = typeof entry.number === "number" && Number.isFinite(entry.number) ? entry.number : null;
+    let id: string;
+    let lengthMins: number | null;
+    if (unit === null && n === null) {
+      // The legacy shape: a tokens limit with neither unit nor number is the 5-hour window.
+      id = "five_hour";
+      lengthMins = FIVE_HOURS;
+    } else if (unit !== null && n !== null) {
+      ({ id, lengthMins } = idOf(unit, n));
+    } else {
+      // A missing unit or number: no length of its own, the plain `Limit` id.
+      id = "Limit";
+      lengthMins = null;
+    }
+    // Two entries claiming one id: the first by array order wins and the other is dropped, never both.
+    if (claimed.has(id)) continue;
+    claimed.add(id);
+    const usedPercent = percentOf(entry);
+    if (usedPercent === null) {
+      missing.push(id);                        // dropped, never shown as 0%; the hub shows it as missing
+      continue;
+    }
+    // A reset in the past is read as it is: the hub's staleness rules judge it, not the parser.
+    const resets = typeof entry.nextResetTime === "number" && Number.isFinite(entry.nextResetTime) ? Math.floor(entry.nextResetTime / 1000) : null;
+    windows.push({ id, used_percent: usedPercent, resets_at: resets, length_mins: lengthMins, rolling: true, note: null });
+  }
+  // Limits but none of them a limit this reader knows: nothing was read, the screen is not in a shape it knows.
+  if (!recognised) return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: shapeHint(body) };
+  // The named ids no entry gave are missing, never a failure (the hub shows a missing weekly entry as missing).
+  for (const named of ["five_hour", "seven_day"]) if (!claimed.has(named) && !missing.includes(named)) missing.push(named);
+  return { ok: true, windows, missing };
 }
 
 export function zaiReadingBody(parsed: Extract<ZaiReadResult, { ok: true }>, o: { node: string | null; now: number }): ZaiReadingBody {
-  void parsed; void o;
-  throw new Error("not implemented");
+  // A pure mapping of an ok result, no lease: the collector's own token and timing drive the read, never this.
+  return { source: "vendor-api", node: o.node, captured_at: Math.floor(o.now / 1000), every_s: 300, plan: null, windows: parsed.windows };
 }

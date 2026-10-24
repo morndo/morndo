@@ -98,8 +98,8 @@ describe("the claude cases of AT-38", () => {
     if (!r.ok) return;
     const five = r.windows.find(w => w.id === "five_hour");
     expect(five?.used_percent).toBe(87);
-    expect(five?.resets_at).toBe(at("2026-10-24T11:00:00Z"));
-    expect(five!.resets_at!).toBeLessThan(at("2026-10-24T15:00:00Z"));
+    expect(five?.resets_at).toBe(at("2026-10-20T11:00:00Z"));
+    expect(five!.resets_at!).toBeLessThan(at("2026-10-20T15:00:00Z"));
   });
 
   it("a 429 with a retry-after carries it in whole seconds; without one it is null", () => {

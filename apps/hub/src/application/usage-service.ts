@@ -7,7 +7,7 @@ import {
   ACCOUNT_NAME, DEFAULT_ACCOUNT, FORGET_MS, NOTICE_KEEP, SESSION_FRESH_MS,
   accountNow, applyLimit, applyReport, backNoticeText, cadenceInput, cadenceOf, changeSignature, cleanHint, cleanLength,
   cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, limitKindOfError, markExpired, mergeWindow, noCycleBook,
-  noHealth, noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, pruneSessions, reasonOf, resolveAccount,
+  noHealth, noPlanWatch, noThresholdWatch, observeCycle, okRead, planFamilyOf, planNoticeText, pruneSessions, reasonOf, resolveAccount,
   seatClearedNoticeText, seatExpiredNoticeText, seatNoticeText,
   seatResetNoticeText, shownSeat, sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince,
   watchPlan, watchThreshold, windowTitle,
@@ -208,6 +208,22 @@ export class UsageService {
     return { account, reportedAt, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: null, sessions: [] };
   }
 
+  // The plan name the account's newest reading that carries one named (plan 4.1 item 3, S7): the family a window with
+  // no length of its own is titled from. The stored source readings the service already loads decide it — newest
+  // capturedAt with a non-null plan wins; none -> null.
+  #planNameOf(account: string, rows?: readonly UsageSourceRow[]): string | null {
+    const list = rows ?? this.#store.usageSourcesOf(account);
+    let plan: string | null = null;
+    let at = -1;
+    for (const r of list) {
+      const reading = r.body.reading;
+      if (reading === null || reading.plan === null || reading.capturedAt <= at) continue;
+      plan = reading.plan;
+      at = reading.capturedAt;
+    }
+    return plan;
+  }
+
   // The windows one account shows, merged across its sources (plan 4.3 item 5), and the capture time of the candidate
   // that showed each (fix round on PR #125, finding 4b): one function for the principal's view and for the thresholds,
   // so a watch always counts what the merge of every source shows, never one source's raw numbers.
@@ -262,6 +278,9 @@ export class UsageService {
     }
     if (named.size > 0) {
       const watches = this.#watchMap(base.account);
+      // S7 (plan 4.1 item 3): the plan's own family titles a window with no length and no observed gap — the newest
+      // reading that named a plan says which, never a caption the poster printed.
+      const family = planFamilyOf(this.#planNameOf(base.account, rows));
       for (const [id, cands] of named) {
         const m = mergeWindow(cands.map(c => c.cand));
         if (m.disagree !== null) disagree.push({ window: id, a: side(m.disagree.a), b: side(m.disagree.b) });
@@ -274,7 +293,7 @@ export class UsageService {
           label: id, usedPercentage: m.shown.usedPercent, resetsAt: m.shown.resetsAt,
           resetsOn: at !== -1 ? limits[at]!.resetsOn : null,
           lengthMins: win.lengthMins, rolling: win.rolling, note: win.note,
-          title: windowTitle(cadenceOf({ lengthMins: win.lengthMins, ...cadenceInput(book), family: null }), win.resetsAt, now),
+          title: windowTitle(cadenceOf({ lengthMins: win.lengthMins, ...cadenceInput(book), family }), win.resetsAt, now),
         };
         if (at !== -1) limits[at] = row; else limits.push(row);
         namedAt.set(id, m.shown.capturedAt);
@@ -722,9 +741,11 @@ export class UsageService {
   // window's own id titles the notice, as the readings that observed the cycle left it.
   #thresholds(account: string, m: MergedView, now: number): void {
     const watches = this.#watchMap(account);
+    // S7 (plan 4.1 item 3): the plan's family titles the notice the same way it titles the row the principal sees.
+    const plan = this.#planNameOf(account);
     for (const w of m.shown) {
       const book = (watches.get(`cycle|${w.cycleKey}`) as CycleBook | undefined) ?? noCycleBook;
-      this.#threshold(account, w.key, w.usedPercent, w.resetsAt, w.lengthMins, watches, now, book, w.capturedAt);
+      this.#threshold(account, w.key, w.usedPercent, w.resetsAt, w.lengthMins, watches, now, book, w.capturedAt, plan);
     }
   }
 
@@ -732,7 +753,7 @@ export class UsageService {
   // stores the capture time of the shown candidate it last counted (PR #125, finding 4b): a value whose time is not
   // later than that is a retried duplicate post or a stale echo, and counts nothing. A body stored in the old shape
   // (the watch alone) reads as time 0, so every fresh reading counts.
-  #threshold(account: string, key: string, usedPercent: number | null, resetsAt: number | null, lengthMins: number | null, watches: Map<string, unknown>, now: number, book: CycleBook = noCycleBook, at: number = 0): void {
+  #threshold(account: string, key: string, usedPercent: number | null, resetsAt: number | null, lengthMins: number | null, watches: Map<string, unknown>, now: number, book: CycleBook = noCycleBook, at: number = 0, plan: string | null = null): void {
     const storedRaw = watches.get(`threshold|${key}`);
     const held = storedRaw != null && typeof storedRaw === "object" && "watch" in storedRaw
       ? { watch: (storedRaw as { watch: ThresholdWatch }).watch ?? noThresholdWatch, at: typeof (storedRaw as { at?: unknown }).at === "number" ? (storedRaw as { at?: unknown }).at as number : 0 }
@@ -743,7 +764,7 @@ export class UsageService {
     this.#tx(() => {
       this.#store.saveUsageWatch(account, "threshold", key, body);
       if (r.told !== null) {
-        const title = windowTitle(cadenceOf({ lengthMins, ...cadenceInput(book), family: null }), resetsAt, now);
+        const title = windowTitle(cadenceOf({ lengthMins, ...cadenceInput(book), family: planFamilyOf(plan) }), resetsAt, now);
         this.#note(account, "threshold", `threshold|${key}|${r.told}|${now}`, thresholdNoticeText(account, title, r.told));
       }
     });
