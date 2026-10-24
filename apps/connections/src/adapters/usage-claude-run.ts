@@ -117,11 +117,24 @@ function lockHeld(path: string, now: number): boolean {
   const { pid, startedAt } = readLock(path);
   return pid > 0 && now - startedAt < CLAUDE_LOCK_MS && pidAlive(pid);
 }
-// Kills the process group a lock names, if it names one and the group is alive (finding 4). Errors are ignored: the
-// group may be gone already, or never have been the caller's to kill.
-function killLockGroup(path: string): void {
-  const { pgid } = readLock(path);
-  if (pgid > 0) { try { process.kill(-pgid, "SIGKILL"); } catch { /* already gone */ } }
+// Whether a process group's leader still runs the headless usage read (md-rev6's re-check, finding 1): its command
+// line, read from /proc where there is one, carries the `-p` and `/usage` arguments of CLAUDE_USAGE_ARGS. Anywhere
+// the command line cannot be read, the answer is no: a group nobody can identify is never signalled.
+function isUsageRead(pgid: number): boolean {
+  try {
+    const argv = readFileSync(`/proc/${pgid}/cmdline`, "utf8").split("\0");
+    return argv.includes("/usage") && argv.includes("-p");
+  } catch { return false; }
+}
+
+// Kills the process group a lock names (finding 4), but only when it is still our read: the lock is less than twice
+// the lease TTL old (a read outlives its collector by at most its own timeout, so an older group is not it) AND the
+// group's leader runs the headless /usage. A pgid a day later may belong to an unrelated group (a lane's tmux): that
+// group is never signalled, and the stale lock is only taken over. Errors are ignored: the group may be gone already.
+function killLockGroup(path: string, now: number): void {
+  const { pgid, startedAt } = readLock(path);
+  if (pgid <= 0 || now - startedAt >= 2 * CLAUDE_LOCK_MS || !isUsageRead(pgid)) return;
+  try { process.kill(-pgid, "SIGKILL"); } catch { /* already gone */ }
 }
 
 // `<bin> auth status`: local, no network. Exit 0 means signed in.
@@ -172,7 +185,7 @@ export async function readClaude(opts: {
   mkdirSync(opts.lockDir, { recursive: true });
   const lockPath = lockPathOf(opts.lockDir, opts.account);
   if (lockHeld(lockPath, now)) return { ok: false, reason: "unreachable", retryAfterS: null, hint: null };
-  killLockGroup(lockPath);                 // a stale holder's read may still run: its group dies with the takeover
+  killLockGroup(lockPath, now);            // a stale holder's read may still run: its group dies with the takeover
   writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, startedAt: now })}\n`);
   const release = () => writeFileSync(lockPath, `${JSON.stringify({ pid: 0, startedAt: 0 })}\n`);
 

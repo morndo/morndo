@@ -92,6 +92,21 @@ describe("no read without a viewer or a mark (AT-45)", () => {
     await denied("seat-a", "no_demand");
   });
 
+  // The look's staleness rule (md-rev6's second re-check, finding 3): a silent status line alone does not want a read; the
+  // best reading of any other source must also be 15 minutes old. Red against LOOK_STALE_MS = 0.
+  it("a silent status line is not enough: a reading younger than 15 minutes keeps the account unwanted until it is 15 minutes old", async () => {
+    await report("seat-a");
+    now += 60_000;
+    await reading("seat-a", { windows: [{ id: "five_hour", used_percent: 42, resets_at: sec(now + 3 * 3_600_000), length_mins: 300 }] });
+    now += 12 * 60_000;                            // the status line has been silent 13 minutes, the reading is 12 minutes old
+    hub.usage.look();
+    await denied("seat-a", "no_demand");
+    now += 4 * 60_000;                             // the reading is now 16 minutes old (and the cache has lapsed)
+    hub.usage.look();
+    const r = await ask("seat-a");
+    expect(((await r.json()) as Record<string, unknown>).status).toBe("granted");
+  });
+
   it("after a derived mark's backAt a confirming lease is granted with no viewer", async () => {
     await report("seat-a");
     const r = await limit("seat-a", now + 60_000);
