@@ -282,14 +282,18 @@ export const MIGRATIONS: readonly Migration[] = [
     // Usage detection S3 (plan 4.5 item 4, U15, U17): an agent token's scopes (comma-separated names of the closed
     // list, empty: none) and the seat records the accounts pool owns — the derived ones stay in usage_seats (S2). The
     // fix round on PR #127 (finding 4b) adds how a lane record was written: 'start' by a lane_account tap, 'report' by
-    // a status-line report; every row before the column is a report.
+    // a status-line report; every row before the column is a report. Fix round 2 on PR #127 (finding 1) adds which
+    // token wrote or last confirmed a lane record (null for a hub-issued start) and until when a disagreement between
+    // two tokens makes the record ambiguous; both null on every earlier row.
     version: 27,
-    name: "usage (S3): agent token scopes, the pool-owned seat records and how a lane record was written (plan 4.5 item 4, U15, U17)",
+    name: "usage (S3): agent token scopes, the pool-owned seat records, how a lane record was written and by which token (plan 4.5 item 4, U15, U17)",
     compat: "additive",
     up: db => {
       if (!hasColumn(db, "agent_tokens", "scopes")) db.exec("ALTER TABLE agent_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT ''");
       db.exec("CREATE TABLE IF NOT EXISTS usage_pool_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL)");
       if (!hasColumn(db, "lane_accounts", "source")) db.exec("ALTER TABLE lane_accounts ADD COLUMN source TEXT NOT NULL DEFAULT 'report'");
+      if (!hasColumn(db, "lane_accounts", "token")) db.exec("ALTER TABLE lane_accounts ADD COLUMN token TEXT");
+      if (!hasColumn(db, "lane_accounts", "conflict_until")) db.exec("ALTER TABLE lane_accounts ADD COLUMN conflict_until INTEGER");
     },
   },
 ];

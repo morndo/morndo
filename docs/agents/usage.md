@@ -63,6 +63,17 @@ this order:
 A failure that resolves to no account is kept as nothing: no seat changes (U9). A failure older than five minutes is a
 replayed event and marks nothing.
 
+A lane's record is bound to the worker token that reported for it (the tokens are trusted to report, R3). Another
+token reporting the same account for the lane only refreshes the record's stamp, but two tokens reporting different
+accounts for one lane make its record ambiguous for an hour: a failure of that lane then marks nothing unless its hook
+word names an account this node runs. Giving each lane — or each node — its own worker token is what makes that
+protection bite.
+
+An account first heard of through a hub-issued `lane.start` is the principal's own act, so its account is known from
+that moment: it appears on Home as soon as a failure names it, and Forget (the principal's) removes it — the account,
+its seat and its lane records together, so a later failure of one of its lanes marks nothing until a start or a report
+names the account again.
+
 ## Pool seats
 
 The accounts pool can set a seat by hand, with a token that carries the `usage-pool` scope:
@@ -85,5 +96,7 @@ either owner's seat with `POST /api/usage/seat/clear` (`{ "account": "max-1", "o
 
 A limit post (`POST /api/agent/usage/limit`) is for a manager token or a token with the `usage-pool` scope; it always
 speaks for the hub's own derived seat, never the pool's. Until the headless reader arrives, a derived mark ends when
-the plan or account changes, when the principal clears it, or when it expires: an out mark whose back time passed more
-than six hours ago, with no newer hit to push it out, is dropped.
+the plan or account changes, when the principal clears it, or when it expires: an out mark is dropped six hours after
+the later of its back time and the cycle's own reset (the cycle the limit hit is the clock, so a weekly window that
+resets days later is not shown as fine while it still reads 100%), with no newer hit to push either out. A retired or
+logged-out derived mark never expires by time: it ends by a leased read, a plan or account change, or the principal.

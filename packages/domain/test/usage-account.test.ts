@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 import { RECORD_FRESH_MS, limitKindOfError, resolveAccount, type FreshSession, type LaneRecord, type ResolveInput } from "../src/index.ts";
 
 const T = 1_700_000_000_000;      // 10:00
+const HOUR = 3_600_000;
 const DAY = 86_400_000;
 const record = (o: Partial<LaneRecord> = {}): LaneRecord =>
   ({ node: "pc", lane: "w1", account: "seat-a", at: T - 60_000, ...o });
@@ -54,6 +55,19 @@ describe("which account a lane's failure belongs to (plan 4.5 item 4)", () => {
       .toEqual({ account: "seat-b", by: "record" });       // two start records: the newest stamp wins
     expect(resolveAccount(input({ records: [record({ account: "seat-b", at: T - 30_000, source: "report" }), record({ account: "seat-a", at: T - 60_000, source: "report" })] })))
       .toEqual({ account: "seat-b", by: "record" });       // two report records: the newest stamp wins
+  });
+
+  // Fix round 2 on PR #127, finding 1: two tokens reporting different accounts for one lane make its record ambiguous,
+  // and an ambiguous record is as good as none — for the lane's own step and the node's-only-account step alike.
+  it("a record whose conflict window is still open is ignored by the record step and the node's-only-account step; a past one is not (fix round 2, finding 1)", () => {
+    const conflicted = record({ account: "seat-a", conflictUntil: T + HOUR });
+    expect(resolveAccount(input({ records: [conflicted] }))).toEqual({ account: null, by: null });
+    expect(resolveAccount(input({ lane: null, records: [conflicted] }))).toEqual({ account: null, by: null });
+    // the sessions still count while the record is ambiguous: they are nobody's word but the session's own
+    expect(resolveAccount(input({ records: [conflicted], sessionId: "sid-1", sessions: [session()] }))).toEqual({ account: "seat-a", by: "session" });
+    const past = record({ account: "seat-a", conflictUntil: T - 1 });
+    expect(resolveAccount(input({ records: [past] }))).toEqual({ account: "seat-a", by: "record" });
+    expect(resolveAccount(input({ lane: null, records: [past] }))).toEqual({ account: "seat-a", by: "node" });
   });
 
   it("the session of the session id, when it is fresh; another session's id is not it", () => {

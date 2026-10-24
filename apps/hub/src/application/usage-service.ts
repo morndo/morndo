@@ -265,7 +265,9 @@ export class UsageService {
     const lane = actor.kind === "principal" ? null : actor.name;
     if (lane !== null && lane !== "") {
       const laneNodeOf = this.#laneNode(lane);
-      if (laneNodeOf !== null) this.#store.saveLaneAccount(laneNodeOf, lane, account, now, "report");
+      // Fix round 2 on PR #127 (finding 1): the record carries the id of the token that reported it, so another token's
+      // word for the same lane is a disagreement, never a silent replacement.
+      if (laneNodeOf !== null) this.#store.saveLaneAccount(laneNodeOf, lane, account, now, "report", actor.kind === "principal" ? null : actor.token);
     }
     const next = applyReport(this.#accounts.get(account) ?? null, reportFrom(body, account, actor, now), now);
     this.#accounts.set(account, next);
@@ -554,12 +556,16 @@ export class UsageService {
     if (!ACCOUNT_NAME.test(account)) return false;
     const rows = this.#store.usageSourcesOf(account);
     if (source === undefined) {
-      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeat(account) !== null || this.#store.usagePoolSeats().some(s => s.account === account);
+      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeat(account) !== null || this.#store.usagePoolSeats().some(s => s.account === account)
+        || this.#store.laneAccounts().some(r => r.account === account);
       this.#store.deleteUsageSources(account);
       this.#store.deleteUsageWatches(account);
       this.#store.deleteUsageSeat(account);
       this.#store.deleteUsagePoolSeat(account);
       this.#store.deleteUsageAccount(account);
+      // The account's lane records go with it (fix round 2 on PR #127, finding 4): a later failure of one of its lanes
+      // resolves nothing until a start or a report names the account again.
+      this.#store.deleteLaneAccountsOf(account);
       this.#accounts.delete(account);
       if (had) this.#tellIfChanged();
       return had;
