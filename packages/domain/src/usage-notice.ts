@@ -7,7 +7,8 @@ import type { ThresholdLevel } from "./usage-threshold.ts";
 import type { UsageFix, UsageSource } from "./usage-reading.ts";
 import type { SeatRecord } from "./usage-seatbook.ts";
 
-export type NoticeKind = "plan" | "seat" | "back" | "threshold" | "forgotten";
+export const NOTICE_KINDS = ["plan", "seat", "back", "threshold", "forgotten"] as const;
+export type NoticeKind = (typeof NOTICE_KINDS)[number];
 export type UsageNotice = { id: string; kind: NoticeKind; account: string; at: number; text: string };
 export const NOTICE_KEEP = 50;
 
@@ -48,6 +49,10 @@ export function seatNoticeText(account: string, s: SeatRecord): string {
 
 export function backNoticeText(account: string, by: string): string {
   return `${account}: back in use (${by} shows a new cycle).`;
+}
+// A limit mark ended by someone's own word, not by a reading: the pool's, or the principal's.
+export function seatClearedNoticeText(account: string, by: string): string {
+  return `${account}: its limit mark was cleared by ${by}.`;
 }
 
 // A derived seat dropped because the plan or the account behind it changed (fix round on PR #125, finding 3a).

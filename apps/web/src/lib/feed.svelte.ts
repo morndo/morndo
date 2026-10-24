@@ -1,12 +1,12 @@
 // The live feed (Observation). Snapshot first, then sequenced events; a gap or a new hub run means resync (O1, O2).
 // Screens arrive only for the watched worker, latest state only (O3).
 // Every frame is decoded with the shared protocol (ADR-0008, A2): a malformed one is dropped, an unknown type ignored.
-import { unreachable, type FeedEvent, type Message, type RosterEntry } from "@morndo/domain";
+import { unreachable, type FeedEvent, type Message, type RosterEntry, type UsageNotice } from "@morndo/domain";
 import { ServerFeedFrames, decode, decodeEvent, onDropped, type AlertWire, type CatchUpConversationWire, type ChatRowWire, type QueuedCommand, type ServerFeedFrame, type SessionInfoWire } from "@morndo/protocol";
 import type { DecisionItem, LedgerState } from "./desktop/decisions.ts";
 import { decodeMerged, decodeRuns, decodeTasks, type MergedView, type Run, type Task } from "./desktop/board.ts";
 import { decodeJobs, type JobCount, type ShownJob } from "./desktop/jobs.ts";
-import { decodeAccounts, type AccountUsage } from "./desktop/usage.ts";
+import { decodeAccounts, decodeNotices, type AccountUsage } from "./desktop/usage.ts";
 import { FeedConnection, PROBE_AFTER_MS, type SocketLike } from "./connection.ts";
 import { AttendingTracker } from "./attending.ts";
 import { ABSENT_MANAGER, MANAGER, absentManager } from "./manager.ts";
@@ -52,6 +52,9 @@ export class LiveFeed {
   // ADR-0016: every connected account's usage, as the hub last sent it. A hub without it never sends: Home says so.
   usage = $state<AccountUsage[]>([]);
   usageAt = $state<number | null>(null);
+  // S4 (plan 4.4): the hub's own usage notices, newest first (the `usage` frame's `notices`, decoded). A reconnect
+  // replaces them, as it replaces the accounts.
+  usageNotices = $state<UsageNotice[]>([]);
   // The fleet's job mirror (design §7): the list and the counts beside each node. A hub without it never sends.
   jobs = $state<ShownJob[]>([]);
   jobCounts = $state<JobCount[]>([]);
@@ -407,8 +410,13 @@ export class LiveFeed {
       case "usage": {
         const { accounts, dropped } = decodeAccounts(m.accounts);
         if (dropped) console.warn(`morndo: dropped ${dropped} account(s) the hub sent that this app can't read`);
+        // S4 (plan 4.4): the hub's own notices ride the same frame; an older hub sends none. Newest first, at most 20,
+        // and replaced whole by the next frame, as the accounts are.
+        const { notices, dropped: droppedNotices } = decodeNotices(m.notices ?? []);
+        if (droppedNotices) console.warn(`morndo: dropped ${droppedNotices} usage notice(s) the hub sent that this app can't read`);
         this.usage = accounts;
         this.usageAt = m.at;
+        this.usageNotices = [...notices].sort((a, b) => b.at - a.at).slice(0, 20);
         break;
       }
       case "board": {
