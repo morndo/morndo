@@ -180,11 +180,21 @@ export class Store {
 
   transaction<T>(fn: () => T): T { return this.db.transaction(fn)(); }
 
-  // Fix round on PR #125: the usage writes that must stand or fall together (finding 4c), one row by key instead of a
-  // scan (finding 5a) and notice retention (finding 5c). This round only writes the red tests: all three throw.
-  atomically<T>(fn: () => T): T { throw new Error("not implemented"); }
-  usageSource(account: string, source: string, node: string): UsageSourceRow | null { throw new Error("not implemented"); }
-  pruneUsageNotices(keep: number, olderThanMs: number, now: number): number { throw new Error("not implemented"); }
+  // The usage writes that must stand or fall together (fix round on PR #125, finding 4c): a watch and the notice that
+  // goes with it commit as one, over better-sqlite3's transaction as `transaction` above (nested calls become savepoints).
+  atomically<T>(fn: () => T): T { return this.db.transaction(fn)(); }
+
+  // One usage source row by its key (finding 5a): what a report or a reading reads, instead of scanning every row.
+  usageSource(account: string, source: string, node: string): UsageSourceRow | null {
+    const r = this.db.prepare("SELECT account, source, node, body FROM usage_sources WHERE account = ? AND source = ? AND node = ?").get(account, source, node) as Row | undefined;
+    return r ? { account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody } : null;
+  }
+
+  // Notice retention (finding 5c): notices older than `olderThanMs` go, and all but the newest `keep`; how many went.
+  pruneUsageNotices(keep: number, olderThanMs: number, now: number): number {
+    const stale = this.db.prepare("DELETE FROM usage_notices WHERE at < ?").run(now - olderThanMs).changes;
+    return stale + this.db.prepare("DELETE FROM usage_notices WHERE id NOT IN (SELECT id FROM usage_notices ORDER BY at DESC, rowid DESC LIMIT ?)").run(keep).changes;
+  }
 
   setting<T>(key: string): T | null {
     const r = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;

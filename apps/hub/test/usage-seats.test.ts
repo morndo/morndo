@@ -150,7 +150,7 @@ describe("seats (plan 4.5)", () => {
   });
 
   it("by is untrusted display text: cleaned before it is stored, and never raw in a notice (PR #125 finding 3b)", async () => {
-    const raw = `\u0001see https://evil.example/x mail a@b.example ${"k".repeat(200)}`;
+    const raw = `\u0001see https://evil.example/x mail a@b.example ${"k".repeat(155)}`;      // 200 characters: the wire's cap, before the hub cleans it to 40
     const told = await limit({ kind: "usage_limit", by: raw, account: "seat-a", at: Math.floor(now / 1000) });
     expect(await told.json()).toEqual({ ok: true });
     const v = await viewOf();

@@ -7,8 +7,9 @@ import {
   ACCOUNT_NAME, DEFAULT_ACCOUNT, FORGET_MS, NOTICE_KEEP, SESSION_FRESH_MS,
   accountNow, applyLimit, applyReport, backNoticeText, cadenceInput, cadenceOf, changeSignature, cleanHint, cleanLength,
   cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, mergeWindow, noCycleBook, noHealth,
-  noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, reasonOf, seatNoticeText, sourceState,
-  shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince, watchPlan, watchThreshold, windowTitle,
+  noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, reasonOf, seatNoticeText, seatResetNoticeText,
+  sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince, watchPlan, watchThreshold,
+  windowTitle,
   type AccountProfile, type AccountUsage, type BoardActor, type Candidate, type CycleBook, type DisagreeView,
   type FreshRead, type LimitHit, type LimitKind, type NamedWindow, type PlanFact, type PlanWatch, type SeatRecord,
   type SeatView, type SourceView, type ThresholdWatch, type UsageNotice, type UsageReport, type UsageSource,
@@ -64,10 +65,20 @@ function namedLimits(raw: UsageReportBody["limits"]): NamedWindow[] | null {
 const num = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 // How far ahead of the hub's clock a source's own stamp may run before the hub caps it (two machines' clocks differ).
 export const CLOCK_SKEW_MS = 5 * 60_000;
+// Fix round on PR #125. The hint the hub itself writes when a reading carried no readable window at all (finding 4a),
+// how often the status line's health row may be rewritten (finding 5a) and what notice retention keeps (finding 5c).
+const UNREADABLE_HINT = "the reading had no readable window";
+const STATUS_LINE_HEALTH_MS = 60_000;
+const NOTICE_KEEP_ROWS = 500;
+const NOTICE_KEEP_MS = 30 * 24 * 3_600_000;
 const EMPTY_PROFILES: ReadonlyMap<string, AccountProfile> = new Map();
 // A source row that carries a reading (the sameAsPrevious rule's memory of the one before lives in the same row).
 type ReadRow = UsageSourceRow & { body: UsageSourceBody & { reading: NonNullable<UsageSourceBody["reading"]> } };
 const hasReading = (r: UsageSourceRow): r is ReadRow => r.body.reading !== null;
+// One window as the merge shows it, with the capture time of the candidate that showed it and the keys its threshold
+// watch and cycle book sit under (fix round on PR #125, finding 4b): what a threshold counts, never a source's raw numbers.
+type ShownWindow = { key: string; cycleKey: string; usedPercent: number; resetsAt: number | null; lengthMins: number | null; capturedAt: number };
+type MergedView = { fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; limits: NamedWindow[] | null; disagree: DisagreeView[]; shown: readonly ShownWindow[] };
 
 export class UsageService {
   #store: Store;
@@ -121,25 +132,15 @@ export class UsageService {
     return { account, reportedAt, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: null, sessions: [] };
   }
 
-  // One account as the principal sees it (plan 4.4): every source's health, the windows the sources read under the
-  // 5-hour and weekly rows the status line owns, the windows a source names itself, the account's seat, and any two
-  // sources that disagree about one window. All of it is computed here, never stored.
-  #accountView(base: AccountUsage, rows: readonly UsageSourceRow[], seat: SeatRecord | null, now: number): AccountUsage {
+  // The windows one account shows, merged across its sources (plan 4.3 item 5), and the capture time of the candidate
+  // that showed each (fix round on PR #125, finding 4b): one function for the principal's view and for the thresholds,
+  // so a watch always counts what the merge of every source shows, never one source's raw numbers.
+  #mergedWindows(base: AccountUsage, rows: readonly UsageSourceRow[], now: number): MergedView {
     const stateOf = (r: UsageSourceRow) => sourceState(r.body.health, now);
-    const sources: SourceView[] = rows.map(r => {
-      const state = stateOf(r);
-      // A source that reads well says nothing about why it cannot; a hint is the last failure's, cleaned before it was stored.
-      const reason = state === "available" || state === "missing" ? null : r.body.health.reason;
-      return {
-        source: r.source as UsageSource, node: r.node === "" ? null : r.node, state,
-        since: unavailableSince(r.body.health, now), asOf: r.body.health.lastOkAt, reason,
-        fix: reason === null ? null : fixForReason(reason),
-        hint: state === "available" || state === "missing" ? null : r.body.hint,
-      };
-    });
     // The reading sources that still count (plan 4.3 item 5): an unavailable source's meters are gone, not dimmed.
     const readings = rows.filter((r): r is ReadRow => r.source !== "status-line" && stateOf(r) !== "unavailable" && hasReading(r));
-    // A window of a reading that says exactly what the source's last reading said of it is last-known data (F28).
+    // A window of a reading that says exactly what the source's last reading said of it is last-known data (F28), as
+    // old as the read it repeats unless no status line spoke since then (PR #125, finding 1).
     const echo = (r: ReadRow, w: WindowReading): boolean => {
       const p = r.body.previous?.windows.find(x => x.id === w.id);
       return p !== undefined && p.usedPercent === w.usedPercent && p.resetsAt === w.resetsAt;
@@ -149,7 +150,7 @@ export class UsageService {
     for (const r of readings) for (const w of r.body.reading.windows) {
       if (w.usedPercent === null || !alive(w)) continue;
       const list = found.get(w.id) ?? [];
-      list.push({ cand: { source: r.source as UsageSource, node: r.node === "" ? null : r.node, capturedAt: r.body.reading.capturedAt, usedPercent: w.usedPercent, resetsAt: w.resetsAt, sameAsPrevious: echo(r, w) }, win: w });
+      list.push({ cand: { source: r.source as UsageSource, node: r.node === "" ? null : r.node, capturedAt: r.body.reading.capturedAt, usedPercent: w.usedPercent, resetsAt: w.resetsAt, sameAsPrevious: echo(r, w), previousCapturedAt: r.body.previous?.capturedAt ?? null }, win: w });
       found.set(w.id, list);
     }
     // The status line's own windows stand as its readings of the 5-hour and weekly rows — unless it went unavailable,
@@ -159,18 +160,24 @@ export class UsageService {
       ({ cand: { source: "status-line", node: null, capturedAt: base.reportedAt, usedPercent, resetsAt, sameAsPrevious: false }, win: null });
     const side = (c: Candidate): DisagreeView["a"] => ({ source: c.source, usedPercent: c.usedPercent, capturedAt: c.capturedAt });
     const disagree: DisagreeView[] = [];
+    const shown: ShownWindow[] = [];
+    // A source's window counts by when its reading was taken; the status line's own row by when the account last reported.
+    const atOf = (cand: Candidate | null): number => cand !== null && cand.source !== "status-line" ? cand.capturedAt : base.reportedAt;
     const overlay = (id: "five_hour" | "seven_day"): UsageWindow | null => {
       const own = id === "five_hour" ? base.fiveHour : base.sevenDay;
       const cands = [...(own !== null && statusLive ? [statusCand(own.usedPercentage, own.resetsAt)] : []), ...(found.get(id) ?? [])];
       const m = mergeWindow(cands.map(c => c.cand));
       if (m.disagree !== null) disagree.push({ window: id, a: side(m.disagree.a), b: side(m.disagree.b) });
-      if (m.shown === null || m.shown.source === "status-line") return own;
-      return { usedPercentage: m.shown.usedPercent, resetsAt: m.shown.resetsAt };
+      const win = m.shown === null || m.shown.source === "status-line" ? own : { usedPercentage: m.shown.usedPercent, resetsAt: m.shown.resetsAt };
+      if (win !== null) shown.push({ key: id, cycleKey: id, usedPercent: win.usedPercentage, resetsAt: win.resetsAt, lengthMins: id === "five_hour" ? 300 : 10080, capturedAt: atOf(m.shown) });
+      return win;
     };
     const fiveHour = overlay("five_hour");
     const sevenDay = overlay("seven_day");
     // A window a source names itself (plan 4.1): titled from its own numbers, never from a caption the provider printed.
     const limits: NamedWindow[] = base.limits === null ? [] : [...base.limits];
+    const namedAt = new Map<string, number>();
+    if (base.limits !== null) for (const w of base.limits) namedAt.set(w.label, base.reportedAt);
     const named = new Map<string, { cand: Candidate; win: WindowReading | null }[]>();
     if (base.limits !== null) for (const w of base.limits) named.set(w.label, [statusCand(w.usedPercentage, w.resetsAt)]);
     for (const [id, cands] of found) {
@@ -194,13 +201,35 @@ export class UsageService {
           title: windowTitle(cadenceOf({ lengthMins: win.lengthMins, ...cadenceInput(book), family: null }), win.resetsAt, now),
         };
         if (at !== -1) limits[at] = row; else limits.push(row);
+        namedAt.set(id, m.shown.capturedAt);
       }
     }
+    for (const row of limits) shown.push({ key: `named:${row.label}`, cycleKey: row.label, usedPercent: row.usedPercentage, resetsAt: row.resetsAt, lengthMins: row.lengthMins ?? null, capturedAt: namedAt.get(row.label) ?? base.reportedAt });
+    return { fiveHour, sevenDay, limits: limits.length > 0 ? limits : null, disagree, shown };
+  }
+
+  // One account as the principal sees it (plan 4.4): every source's health, the windows the sources read under the
+  // 5-hour and weekly rows the status line owns, the windows a source names itself, the account's seat, and any two
+  // sources that disagree about one window. All of it is computed here, never stored.
+  #accountView(base: AccountUsage, rows: readonly UsageSourceRow[], seat: SeatRecord | null, now: number): AccountUsage {
+    const stateOf = (r: UsageSourceRow) => sourceState(r.body.health, now);
+    const sources: SourceView[] = rows.map(r => {
+      const state = stateOf(r);
+      // A source that reads well says nothing about why it cannot; a hint is the last failure's, cleaned before it was stored.
+      const reason = state === "available" || state === "missing" ? null : r.body.health.reason;
+      return {
+        source: r.source as UsageSource, node: r.node === "" ? null : r.node, state,
+        since: unavailableSince(r.body.health, now), asOf: r.body.health.lastOkAt, reason,
+        fix: reason === null ? null : fixForReason(reason),
+        hint: state === "available" || state === "missing" ? null : r.body.hint,
+      };
+    });
+    const { fiveHour, sevenDay, limits, disagree } = this.#mergedWindows(base, rows, now);
     const seatView: SeatView | null = seat === null ? null
       : { state: seat.state, why: seat.why, since: seat.since, backAt: seat.backAt, owner: seat.owner, by: seat.by, fix: fixFor(seat.state, seat.why) };
     return {
       account: base.account, reportedAt: base.reportedAt, fiveHour, sevenDay, spend: base.spend,
-      limits: limits.length > 0 ? limits : null, onDemand: base.onDemand, profile: base.profile, sessions: base.sessions,
+      limits, onDemand: base.onDemand, profile: base.profile, sessions: base.sessions,
       sources, disagree, ...(seatView !== null ? { seat: seatView } : {}),
     };
   }
@@ -215,15 +244,18 @@ export class UsageService {
     const next = applyReport(this.#accounts.get(account) ?? null, reportFrom(body, account, actor, now), now);
     this.#accounts.set(account, next);
     this.#store.saveUsageAccount(next);
-    const row = this.#store.usageSources().find(r => r.account === account && r.source === "status-line" && r.node === "");
-    const health = okRead(row?.body.health ?? noHealth("status-line"), now, null);
-    this.#store.saveUsageSource(account, "status-line", "", { health, reading: null, previous: null, hint: null });
-    // The thresholds (U12) watch the status line's own windows too, with the lengths their documented names carry.
+    // The status line's health row is rewritten at most once a minute of the hub clock (PR #125, finding 5a): a lane
+    // reports after every turn of every session, and the row says only when it last spoke.
+    const row = this.#store.usageSource(account, "status-line", "");
+    const lastOk = row?.body.health.lastOkAt ?? null;
+    if (lastOk === null || now - lastOk >= STATUS_LINE_HEALTH_MS) {
+      const health = okRead(row?.body.health ?? noHealth("status-line"), now, null);
+      this.#store.saveUsageSource(account, "status-line", "", { health, reading: null, previous: null, hint: null });
+    }
+    // The thresholds (U12) watch the merged shown windows — the status line's own rows and whatever a reading source
+    // shows of them — each with the capture time of the candidate that showed it (PR #125, finding 4b).
     const shown = accountNow(next, now);
-    const watches = this.#watchMap(account);
-    if (shown.fiveHour !== null) this.#threshold(account, "five_hour", shown.fiveHour.usedPercentage, shown.fiveHour.resetsAt, 300, watches, now);
-    if (shown.sevenDay !== null) this.#threshold(account, "seven_day", shown.sevenDay.usedPercentage, shown.sevenDay.resetsAt, 10080, watches, now);
-    for (const w of shown.limits ?? []) this.#threshold(account, `named:${w.label}`, w.usedPercentage, w.resetsAt, w.lengthMins ?? null, watches, now);
+    this.#thresholds(account, this.#mergedWindows(shown, this.#store.usageSources().filter(r => r.account === account), now), now);
     this.#tellIfChanged();
     return { ok: true, account: shown };
   }
@@ -242,8 +274,12 @@ export class UsageService {
     const node = body.node ?? "";
     // A reading is stamped when its source took it: never later than the hub's clock plus the skew two machines may have.
     const capturedAt = Math.min(body.captured_at * 1000, now + CLOCK_SKEW_MS);
-    const row = this.#store.usageSources().find(r => r.account === account && r.source === body.source && r.node === node);
+    const row = this.#store.usageSource(account, body.source, node);
     const prev: UsageSourceBody = row?.body ?? { health: noHealth(body.source), reading: null, previous: null, hint: null };
+    // The ordering guard (PR #125, finding 2): a reading, good or bad, older than the newest stamp the source ever
+    // gave is a late replay. It changes nothing — health, reading, watches, seats and notices all stand — and is answered ok.
+    const stamps = [prev.health.lastOkAt, prev.health.lastFailAt, prev.reading?.capturedAt ?? null].filter((s): s is number => s !== null);
+    if (stamps.length > 0 && capturedAt < Math.max(...stamps)) return { ok: true };
     if (body.failure != null) {
       // A failure keeps the last good reading and its memory; what it says of itself is cleaned before it is stored.
       const health = failedRead(prev.health, capturedAt, reasonOf(body.failure.reason), body.every_s);
@@ -265,18 +301,35 @@ export class UsageService {
       });
     }
     const list = [...windows.values()];
-    if (list.length === 0) return { ok: false, problem: "bad_reading" };      // nothing readable: a source with nothing to say posts a failure
+    if (list.length === 0) {
+      // Nothing readable is a failure the principal sees, not silence (PR #125, finding 4a): the source cannot read
+      // its screen, and the hub's own hint says so. The last good reading is kept, as any failure keeps it.
+      const health = failedRead(prev.health, capturedAt, "unknown_screen", body.every_s);
+      this.#store.saveUsageSource(account, body.source, node, { health, reading: prev.reading, previous: prev.previous, hint: UNREADABLE_HINT });
+      this.#tellIfChanged();
+      return { ok: false, problem: "bad_reading" };
+    }
     const health = okRead(prev.health, capturedAt, body.every_s);
-    // `previous` is the sameAsPrevious rule's memory (plan 4.3 item 5): the reading before this one.
-    const previous = prev.reading === null ? null : { windows: prev.reading.windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt })) };
+    // `previous` is the sameAsPrevious rule's memory (plan 4.3 item 5): the reading before this one, and when it was
+    // taken — the echo rule's line to draw against a status line's last word (PR #125, finding 1).
+    const previous = prev.reading === null ? null : { capturedAt: prev.reading.capturedAt, windows: prev.reading.windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt })) };
     this.#store.saveUsageSource(account, body.source, node, { health, reading: { capturedAt, plan: body.plan ?? null, windows: list }, previous, hint: null });
-    this.#observe(account, list, capturedAt, now, body.source, body.plan ?? null, body.lease_id);
+    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id);
+    this.#thresholds(account, this.#mergedWindows(this.#baseOf(account, now), this.#store.usageSources().filter(r => r.account === account), now), now);
     this.#tellIfChanged();
     return { ok: true };
   }
 
-  // What one good reading changes: the plan watch, the cycle books, the thresholds, and a seat mark it may end.
-  #observe(account: string, windows: readonly WindowReading[], capturedAt: number, now: number, source: UsageSource, plan: string | null, leaseId: unknown): void {
+  // An account's own state for a merged pass outside view(): the status line's last word, or the skeleton of an
+  // account only sources speak of.
+  #baseOf(account: string, now: number): AccountUsage {
+    const own = this.#accounts.get(account);
+    return own !== undefined ? accountNow(own, now) : this.#skeleton(account, this.#store.usageSources().filter(r => r.account === account));
+  }
+
+  // What one good reading changes: the plan watch, the cycle books, and a seat mark it may end or drop. The
+  // thresholds no longer run here: they watch the merged shown windows, after the reading is stored (finding 4b).
+  #observe(account: string, windows: readonly WindowReading[], capturedAt: number, source: UsageSource, plan: string | null, leaseId: unknown): void {
     const watches = this.#watchMap(account);
     // The plan watch (plan 4.2): a difference is held, and told only once a later reading agrees with it.
     const fact: PlanFact = {
@@ -287,27 +340,42 @@ export class UsageService {
     };
     const planWatch = (watches.get("plan|") as PlanWatch | undefined) ?? noPlanWatch;
     const seen = watchPlan(planWatch, fact, capturedAt);
-    if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", "", seen.watch);
-    for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
+    this.#store.atomically(() => {
+      if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", "", seen.watch);
+      for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
+    });
+    // A plan or account change the plan watch tells drops the seat the old plan's limit marked (PR #125, finding 3a):
+    // a mark from a plan that is gone no longer applies. A pool-owned seat is the pool's, never a reading's.
+    if (seen.told.some(c => c.kind === "name" || c.kind === "account")) {
+      const marked = this.#store.usageSeats().find(s => s.account === account)?.record ?? null;
+      if (marked !== null && marked.owner === "derived") {
+        this.#store.atomically(() => {
+          this.#store.deleteUsageSeat(account);
+          this.#note(account, "back", `reset|${capturedAt}`, seatResetNoticeText(account));
+        });
+      }
+    }
     for (const w of windows) {
       const bookPrev = (watches.get(`cycle|${w.id}`) as CycleBook | undefined) ?? noCycleBook;
       const book = observeCycle(bookPrev, w.resetsAt, capturedAt);
       if (book !== bookPrev) this.#store.saveUsageWatch(account, "cycle", w.id, book);
-      this.#threshold(account, w.id, w.usedPercent, w.resetsAt, w.lengthMins, watches, now, book);
     }
     // A fresh leased reading of a new cycle is the one thing that ends a seat mark (plan 4.5, U13).
     const seat = this.#store.usageSeats().find(s => s.account === account)?.record ?? null;
     if (seat !== null) {
       const read: FreshRead = { capturedAt, leased: this.#leaseBook.valid(leaseId, account, source), windows: windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt, lengthMins: w.lengthMins })) };
       if (clearSeat(seat, read).cleared) {
-        this.#store.deleteUsageSeat(account);
-        this.#note(account, "back", `back|${seat.markedAt}`, backNoticeText(account, "a fresh reading"));
+        this.#store.atomically(() => {
+          this.#store.deleteUsageSeat(account);
+          this.#note(account, "back", `back|${seat.markedAt}`, backNoticeText(account, "a fresh reading"));
+        });
       }
     }
   }
 
   // A seat's limit hit as any source reports it (plan 4.5, U9): one seat record per account, one notice per change.
-  // `fix` and `hint` are ignored — the Fix shown always comes from the domain's closed list.
+  // `fix` and `hint` are ignored — the Fix shown always comes from the domain's closed list — and `by` is untrusted
+  // display text, cleaned before it is stored (PR #125, finding 3b): nothing an agent token wrote is ever shown raw.
   noteLimit(l: { account: string | null; kind: LimitKind; backAt: number | null; by: string; at: number | null; fix?: unknown; hint?: unknown }): { ok: true; resolved: boolean } | { ok: false; problem: "bad_account" } {
     void l.fix; void l.hint;
     const account = l.account === null ? null : l.account.trim();
@@ -315,15 +383,18 @@ export class UsageService {
     if (!ACCOUNT_NAME.test(account)) return { ok: false, problem: "bad_account" };
     if (l.kind === "unknown") return { ok: true, resolved: true };      // the account is known, the kind is not: no seat changes (U9)
     const now = this.#now();
+    const by = cleanNote(l.by) ?? "a source";       // control characters, links and addresses gone, 40 characters
     // The cycle the hit limited, if any reading of the account names one: the 5-hour window with a reset, else the
     // fullest window shown.
     const a = this.view().accounts.find(x => x.account === account) ?? null;
     const cycle = this.#cycleOf(a);
     const prev = this.#store.usageSeats().find(s => s.account === account)?.record ?? null;
-    const r = applyLimit(prev, { kind: l.kind, at: l.at ?? now, backAt: l.backAt, by: l.by, cycle });
-    if (r.seat !== null && r.seat !== prev) this.#store.saveUsageSeat(account, r.seat);
-    if (r.changed && r.seat !== null)
-      this.#note(account, "seat", `${r.seat.state}|${r.seat.why}|${r.seat.markedAt}`, seatNoticeText(account, r.seat));
+    const r = applyLimit(prev, { kind: l.kind, at: l.at ?? now, backAt: l.backAt, by, cycle });
+    this.#store.atomically(() => {
+      if (r.seat !== null && r.seat !== prev) this.#store.saveUsageSeat(account, r.seat);
+      if (r.changed && r.seat !== null)
+        this.#note(account, "seat", `${r.seat.state}|${r.seat.why}|${r.seat.markedAt}`, seatNoticeText(account, r.seat));
+    });
     this.#tellIfChanged();
     return { ok: true, resolved: true };
   }
@@ -371,6 +442,7 @@ export class UsageService {
   // with one notice; an account with no sources, no seat and nothing said for two weeks goes too.
   sweep(): void {
     const now = this.#now();
+    this.#store.pruneUsageNotices(NOTICE_KEEP_ROWS, NOTICE_KEEP_MS, now);      // retention (PR #125, finding 5c)
     const byAccount = new Map<string, UsageSourceRow[]>();
     for (const r of this.#store.usageSources()) {
       const mine = byAccount.get(r.account) ?? [];
@@ -400,15 +472,36 @@ export class UsageService {
     this.#tellIfChanged();
   }
 
-  // One window's threshold watch (U12): told once per crossing, after two readings at or above the line.
-  #threshold(account: string, key: string, usedPercent: number | null, resetsAt: number | null, lengthMins: number | null, watches: Map<string, unknown>, now: number, book: CycleBook = noCycleBook): void {
-    const prev = (watches.get(`threshold|${key}`) as ThresholdWatch | undefined) ?? noThresholdWatch;
-    const r = watchThreshold(prev, usedPercent, resetsAt);
-    if (r.watch !== prev) { this.#store.saveUsageWatch(account, "threshold", key, r.watch); watches.set(`threshold|${key}`, r.watch); }
-    if (r.told !== null) {
-      const title = windowTitle(cadenceOf({ lengthMins, ...cadenceInput(book), family: null }), resetsAt, now);
-      this.#note(account, "threshold", `threshold|${key}|${r.told}|${now}`, thresholdNoticeText(account, title, r.told));
+  // Every merged shown window of one account fed to its threshold watch (PR #125, finding 4b). The cycle book of the
+  // window's own id titles the notice, as the readings that observed the cycle left it.
+  #thresholds(account: string, m: MergedView, now: number): void {
+    const watches = this.#watchMap(account);
+    for (const w of m.shown) {
+      const book = (watches.get(`cycle|${w.cycleKey}`) as CycleBook | undefined) ?? noCycleBook;
+      this.#threshold(account, w.key, w.usedPercent, w.resetsAt, w.lengthMins, watches, now, book, w.capturedAt);
     }
+  }
+
+  // One window's threshold watch (U12): told once per crossing, after two readings at or above the line. The watch
+  // stores the capture time of the shown candidate it last counted (PR #125, finding 4b): a value whose time is not
+  // later than that is a retried duplicate post or a stale echo, and counts nothing. A body stored in the old shape
+  // (the watch alone) reads as time 0, so every fresh reading counts.
+  #threshold(account: string, key: string, usedPercent: number | null, resetsAt: number | null, lengthMins: number | null, watches: Map<string, unknown>, now: number, book: CycleBook = noCycleBook, at: number = 0): void {
+    const storedRaw = watches.get(`threshold|${key}`);
+    const held = storedRaw != null && typeof storedRaw === "object" && "watch" in storedRaw
+      ? { watch: (storedRaw as { watch: ThresholdWatch }).watch ?? noThresholdWatch, at: typeof (storedRaw as { at?: unknown }).at === "number" ? (storedRaw as { at?: unknown }).at as number : 0 }
+      : { watch: (storedRaw as ThresholdWatch | undefined) ?? noThresholdWatch, at: 0 };
+    if (at <= held.at) return;
+    const r = watchThreshold(held.watch, usedPercent, resetsAt);
+    const body = { watch: r.watch, at };
+    this.#store.atomically(() => {
+      this.#store.saveUsageWatch(account, "threshold", key, body);
+      if (r.told !== null) {
+        const title = windowTitle(cadenceOf({ lengthMins, ...cadenceInput(book), family: null }), resetsAt, now);
+        this.#note(account, "threshold", `threshold|${key}|${r.told}|${now}`, thresholdNoticeText(account, title, r.told));
+      }
+    });
+    watches.set(`threshold|${key}`, body);
   }
 
   #watchMap(account: string): Map<string, unknown> {
@@ -422,6 +515,9 @@ export class UsageService {
   }
 
   #tellIfChanged() {
+    // No feed is open: nothing to tell and no view to rebuild (PR #125, finding 5b) — a hub nobody watches keeps its
+    // clock for view().
+    if (this.#listeners.size === 0) return;
     const v = this.view();
     // What is shown, minus how long ago it was said: a newer timestamp alone never tells anybody anything.
     const shown = JSON.stringify({

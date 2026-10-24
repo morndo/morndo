@@ -117,11 +117,12 @@ export const UsageForgetBody = z.looseObject({
 export type UsageForgetBody = z.output<typeof UsageForgetBody>;
 
 // A seat's limit hit as the source reports it (U9): the kind is one closed list, the words around it are free. The
-// fix is free text here too; the hub only ever shows a fix from the domain's closed list.
+// fix is free text here too; the hub only ever shows a fix from the domain's closed list. `by` is untrusted display
+// text, wide enough on the wire (200) for the hub to clean it to 40 itself (fix round on PR #125).
 export const UsageLimitBody = z.looseObject({
   kind: z.enum(["usage_limit", "refused", "signed_out", "billing", "unknown"]),
   back_at: z.exactOptional(z.nullable(num())),
-  by: z.string().check(z.minLength(1), z.maxLength(80)),
+  by: z.string().check(z.minLength(1), z.maxLength(200)),
   at: z.exactOptional(z.nullable(num())),
   fix: z.exactOptional(z.nullable(z.string().check(z.maxLength(200)))),
   hint: z.exactOptional(z.nullable(z.string().check(z.maxLength(2000)))),

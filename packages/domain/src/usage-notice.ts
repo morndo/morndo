@@ -51,9 +51,8 @@ export function backNoticeText(account: string, by: string): string {
 }
 
 // A derived seat dropped because the plan or the account behind it changed (fix round on PR #125, finding 3a).
-// Not implemented yet: this round only writes the red tests.
 export function seatResetNoticeText(account: string): string {
-  throw new Error("not implemented");
+  return `${account}: the plan or account changed, so its earlier limit mark is dropped.`;
 }
 
 export function thresholdNoticeText(account: string, windowTitle: string, level: ThresholdLevel): string {
