@@ -7,11 +7,14 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import Database from "better-sqlite3";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { PROBATION_MS } from "@morndo/domain";
 import { RevocationJournal, readHold, writeFloor } from "@morndo/service-kit";
+import { ApplyInterrupted } from "../src/application/apply-steps.ts";
 import { NodesStore } from "../../fleet/src/adapters/nodes-store.ts";
 import { applyRevocationJournal } from "../../fleet/src/application/revocations.ts";
 import {
-  A, B, buildApplyWorld, breakBackups, dbFingerprint, holdText, SCHEMAS_A, SCHEMAS_B_FLEET_FLOOR, STALE,
+  A, B, buildApplyWorld, breakBackups, dbFingerprint, holdText, NOW, SCHEMAS_A, SCHEMAS_B_FLEET_FLOOR, STALE,
+  versionFixture,
 } from "./helpers/apply-fakes.ts";
 import { wipe } from "./helpers/fakes.ts";
 
@@ -618,6 +621,262 @@ describe("the apply service (§6.2–§6.5)", () => {
     const renders = w.tape.filter(t => t.startsWith("renderUnits:"));
     expect(renders.length, "the swap's render and the rollback's").toBe(2);
     for (const r of renders) expect(r, "every render names the machine's services: node only").toMatch(/\(node\)$/);
+  });
+
+  // ---- the owner path (C4-6): three checks on the control plane's hub, judged against the before-baseline
+
+  const withOwner = (
+    w: Awaited<ReturnType<typeof buildApplyWorld>>,
+    owner: (current: string | null) => Record<string, boolean>,
+  ): void => {
+    w.probe.healthScript = (s) => ({
+      service: s, version: w.current() ?? A,
+      checks: { ready: true, database: true, ...(s === "hub" ? owner(w.current()) : {}) },
+    });
+  };
+
+  it("probation fails a control plane whose hub answers 503 for the app", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, current => ({ owner_app_served: current !== B, owner_origin_ready: true, owner_manager_lane: true }));
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_app_served");
+  });
+
+  it("probation fails when the https origin does not answer", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, current => ({ owner_app_served: true, owner_origin_ready: current !== B, owner_manager_lane: true }));
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_origin_ready");
+  });
+
+  it("probation fails when the manager is unreachable through the hub", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, current => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: current !== B }));
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_manager_lane");
+  });
+
+  it("a control plane that passes all three commits", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: true }));
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(w.alerts.raised.some(a => a.kind === "update_check_already_failing")).toBe(false);
+  });
+
+  it("a check that already failed before the update began is reported as \"was already failing\" and does not roll the update back; a check that passes before and fails after does", async () => {
+    const already = await buildApplyWorld(scratch);
+    withOwner(already, () => ({ owner_app_served: false, owner_origin_ready: true, owner_manager_lane: true }));
+    expect(await already.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    const alerts = already.alerts.raised.filter(a => a.kind === "update_check_already_failing");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.detail).toBe(
+      `hub: owner_app_served was already failing before the update to ${B}; it is not held against it`,
+    );
+
+    const regressed = await buildApplyWorld(scratch);
+    withOwner(regressed, current => ({ owner_app_served: current !== B, owner_origin_ready: true, owner_manager_lane: true }));
+    const out = await regressed.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toContain("hub: owner_app_served");
+    expect(regressed.alerts.raised.filter(a => a.kind === "update_check_already_failing")).toHaveLength(0);
+  });
+
+  it("a node's probation does not run the control plane's checks", async () => {
+    const w = await buildApplyWorld(scratch, { running: ["node"] });
+    const reports: { checks: Record<string, boolean> }[] = [];
+    w.probe.healthScript = (s) => {
+      const report = { service: s, version: w.current() ?? A, checks: { ready: true, database: true } };
+      reports.push(report);
+      return report;
+    };
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(w.probe.healthCalls.length).toBeGreaterThan(0);
+    expect(w.probe.healthCalls.every(c => c.service === "node")).toBe(true);
+    expect(reports.every(r => Object.keys(r.checks).every(name => !name.startsWith("owner_")))).toBe(true);
+  });
+
+  it("a recovery does not judge the owner path", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: false }));
+    w.die.on = { op: "start", call: 1 };
+    let interrupted = false;
+    try { await w.apply().apply({ now: false }); } catch (error) { interrupted = error instanceof ApplyInterrupted; }
+    w.die.on = null;
+    expect(interrupted, "the apply died after the swap, before a before-baseline was stored").toBe(true);
+    expect(w.store.openUpdate()?.judgeBaseline, "recovery has no before").toBeNull();
+    expect(await w.recover().recover()).toEqual({ kind: "committed", version: B });
+    const judged = w.store.commitBaseline();
+    expect(judged).not.toBeNull();
+    for (const names of Object.values(judged ?? {})) expect(names.some(name => name.startsWith("owner_"))).toBe(false);
+  });
+
+  // The world's health wall (apply-fakes TIMING.healthMs). A late read is one after probation has run.
+  const HEALTH_MS = 400;
+  const late = (w: Awaited<ReturnType<typeof buildApplyWorld>>): boolean => w.timeline.now() >= NOW + PROBATION_MS;
+
+  const stageNext = async (w: Awaited<ReturnType<typeof buildApplyWorld>>, version: string): Promise<void> => {
+    const fixture = versionFixture({ version, schemas: SCHEMAS_A });
+    const archive = join(w.home, `${version}.tar.gz`);
+    writeFileSync(archive, fixture.archive);
+    const unpacked = await w.installer.unpack(archive, version, { filesSha256: fixture.filesSha256, maxBytes: 1 << 20 });
+    expect(unpacked.ok).toBe(true);
+    w.installer.promote(version, { manifestSha256: fixture.manifestSha256, filesSha256: fixture.filesSha256, at: w.timeline.now() });
+    rmSync(archive, { force: true });
+    w.store.recordStaged({
+      version, manifestSha256: fixture.manifestSha256, filesSha256: fixture.filesSha256,
+      at: w.timeline.now(), manifest: fixture.manifestText,
+    });
+  };
+
+  it("a boot apply after a commit does not judge the owner path", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: true }));
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    await stageNext(w, "0.3.0");
+    withOwner(w, () => ({ owner_app_served: false, owner_origin_ready: false, owner_manager_lane: false }));
+    expect(await w.apply().apply({ now: false, boot: true })).toEqual({ kind: "boot_started", version: "0.3.0" });
+    expect(await w.recover().recover()).toEqual({ kind: "committed", version: "0.3.0" });
+    expect(w.alerts.raised.some(a => a.kind === "update_rolled_back")).toBe(false);
+  });
+
+  it("the committed baseline never carries an owner_ name", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: true }));
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    const judged = w.store.commitBaseline();
+    expect(judged).not.toBeNull();
+    const names = Object.values(judged ?? {}).flat();
+    expect(names).toContain("ready");
+    expect(names.some(name => name.startsWith("owner_"))).toBe(false);
+  });
+
+  it("a recovery that finishes an apply from the record does not judge the owner path", async () => {
+    // Dies on the first health read after the swap, which is the first read after the record stored its baseline.
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: true }));
+    w.die.on = { op: "health", call: 4 };
+    let interrupted = false;
+    try { await w.apply().apply({ now: false }); } catch (error) { interrupted = error instanceof ApplyInterrupted; }
+    w.die.on = null;
+    expect(interrupted, "the apply died after the baseline was stored").toBe(true);
+    const recorded = w.store.openUpdate()?.judgeBaseline ?? null;
+    expect(recorded, "the record carries the baseline").not.toBeNull();
+    expect(recorded?.hub).toContain("ready");
+    for (const names of Object.values(recorded ?? {})) expect(names.some(name => name.startsWith("owner_"))).toBe(false);
+    withOwner(w, () => ({ owner_app_served: false, owner_origin_ready: false, owner_manager_lane: false }));
+    expect(await w.recover().recover()).toEqual({ kind: "committed", version: B });
+  });
+
+  it("probation retries an owner check at its end for the health window", async () => {
+    const passes = await buildApplyWorld(scratch);
+    let finals = 0;
+    passes.probe.healthScript = (s) => {
+      const end = s === "hub" && passes.current() === B && late(passes);
+      if (end) finals += 1;
+      return {
+        service: s, version: passes.current() ?? A,
+        checks: {
+          ready: true, database: true,
+          ...(s === "hub" ? { owner_app_served: !(end && finals <= 2), owner_origin_ready: true, owner_manager_lane: true } : {}),
+        },
+      };
+    };
+    expect(await passes.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(finals, "the first two end reads failed, the third passed").toBe(3);
+
+    const fails = await buildApplyWorld(scratch);
+    let began = -1;
+    let lateHub = 0;
+    fails.probe.healthScript = (s) => {
+      const end = s === "hub" && fails.current() === B && late(fails);
+      if (end) {
+        lateHub += 1;
+        if (began < 0) began = fails.timeline.now();
+      }
+      return {
+        service: s, version: fails.current() ?? A,
+        checks: {
+          ready: true, database: true,
+          ...(s === "hub" ? { owner_app_served: !end, owner_origin_ready: true, owner_manager_lane: true } : {}),
+        },
+      };
+    };
+    let ended = -1;
+    fails.services.onStop = (s, current) => {
+      if (s === "hub" && current === B && ended < 0) ended = fails.timeline.now();
+    };
+    const out = await fails.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toBe("at the end of probation, hub: owner_app_served");
+    expect(lateHub, "the owner check was read again through the window").toBeGreaterThan(1);
+    expect(ended - began, "the window is the health wait").toBeGreaterThanOrEqual(HEALTH_MS);
+  });
+
+  it("a service's own check failing at the end of probation is not retried", async () => {
+    const w = await buildApplyWorld(scratch);
+    let lateHub = 0;
+    let sleptAtFail = -1;
+    w.probe.healthScript = (s) => {
+      const end = s === "hub" && w.current() === B && late(w);
+      if (end) {
+        lateHub += 1;
+        if (sleptAtFail < 0) sleptAtFail = w.timeline.slept.length;
+      }
+      return { service: s, version: w.current() ?? A, checks: { ready: !end, database: true } };
+    };
+    let sleptAtStop = -1;
+    w.services.onStop = (s, current) => {
+      if (s === "hub" && current === B && sleptAtStop < 0) sleptAtStop = w.timeline.slept.length;
+    };
+    const out = await w.apply().apply({ now: false });
+    expect(out).toMatchObject({ kind: "rolled_back", version: A });
+    if (out.kind !== "rolled_back") throw new Error("unreachable");
+    expect(out.reason).toBe("at the end of probation, hub: ready");
+    expect(lateHub, "the probe was not polled again").toBe(1);
+    expect(sleptAtStop, "no extra sleep").toBe(sleptAtFail);
+  });
+
+  it("an origin that is not configured is said once, in one alert, before the swap", async () => {
+    const w = await buildApplyWorld(scratch);
+    withOwner(w, () => ({ owner_app_served: true, owner_manager_lane: true }));
+    let markAtAlert: string | null = null;
+    let doneAtAlert: string[] = [];
+    const raise = w.alerts.raise.bind(w.alerts);
+    w.alerts.raise = (kind, detail) => {
+      if (kind === "update_origin_not_judged") {
+        const open = w.store.openUpdate();
+        markAtAlert = open?.mark ?? null;
+        doneAtAlert = [...(open?.doneMarks ?? [])];
+      }
+      raise(kind, detail);
+    };
+    expect(await w.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    const alerts = w.alerts.raised.filter(a => a.kind === "update_origin_not_judged");
+    expect(alerts).toHaveLength(1);
+    expect(alerts[0]!.detail).toBe(
+      "MORNDO_ORIGIN is not set for the updater: the https address is not judged by probation",
+    );
+    expect(["draining", "stopping", "backing_up"]).toContain(markAtAlert);
+    expect(doneAtAlert).not.toContain("swapping");
+  });
+
+  it("no origin alert when the origin check is named, or for a node's report", async () => {
+    const named = await buildApplyWorld(scratch);
+    withOwner(named, () => ({ owner_app_served: true, owner_origin_ready: true, owner_manager_lane: true }));
+    expect(await named.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(named.alerts.raised.filter(a => a.kind === "update_origin_not_judged")).toHaveLength(0);
+
+    const node = await buildApplyWorld(scratch, { running: ["node"] });
+    expect(await node.apply().apply({ now: false })).toEqual({ kind: "committed", version: B });
+    expect(node.alerts.raised.filter(a => a.kind === "update_origin_not_judged")).toHaveLength(0);
   });
 
 });

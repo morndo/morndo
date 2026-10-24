@@ -5,7 +5,8 @@
 // vouch for is never guessed quiet, and a health answer without the version is no judgement at all (§6.4). The
 // hub's URL must be loopback: through the network proxy its answer carries `ready` only, and this probe exists to
 // read the machine's own word.
-import { request, type RequestOptions } from "node:http";
+import { request as httpRequest, type RequestOptions } from "node:http";
+import { request as httpsRequest } from "node:https";
 import { readFileSync, statSync } from "node:fs";
 import type { HealthReport, SafePointReport, UpdateService } from "@morndo/domain";
 import {
@@ -35,7 +36,9 @@ export const pidAlive = (pid: number): boolean => {
 
 // One HTTP exchange, whole and inside `timeoutMs`, or null: a service that does not answer within the wall has
 // not answered (§6.4), and a probe never throws on a service that is down — that is what null is for.
-const exchange = (o: RequestOptions, timeoutMs: number): Promise<{ status: number; body: string } | null> =>
+// `secure` selects node:https with Node's own certificate checks (rejectUnauthorized stays true). A caller never
+// turns them off: a TLS failure is an answer of null, the same as a timeout.
+const exchange = (o: RequestOptions & { secure?: boolean }, timeoutMs: number): Promise<{ status: number; body: string } | null> =>
   new Promise(resolve => {
     let settled = false;
     let overdue: ReturnType<typeof setTimeout> | null = null;
@@ -45,29 +48,47 @@ const exchange = (o: RequestOptions, timeoutMs: number): Promise<{ status: numbe
       if (overdue !== null) clearTimeout(overdue);
       resolve(r);
     };
-    const req = request(o, res => {
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      res.on("data", (chunk: Uint8Array) => {
-        size += chunk.byteLength;
-        if (size > ANSWER_CAP) { answer(null); req.destroy(); return; }
-        chunks.push(chunk);
-      });
-      res.on("end", () => answer({ status: res.statusCode ?? 0, body: decodeText.decode(Buffer.concat(chunks)) }));
-      res.on("error", () => answer(null));
-    });
+    const { secure, ...options } = o;
+    const req = (secure === true ? httpsRequest : httpRequest)(
+      secure === true ? { ...options, rejectUnauthorized: true } : options,
+      res => {
+        const chunks: Uint8Array[] = [];
+        let size = 0;
+        res.on("data", (chunk: Uint8Array) => {
+          size += chunk.byteLength;
+          if (size > ANSWER_CAP) { answer(null); req.destroy(); return; }
+          chunks.push(chunk);
+        });
+        res.on("end", () => answer({ status: res.statusCode ?? 0, body: decodeText.decode(Buffer.concat(chunks)) }));
+        res.on("error", () => answer(null));
+      },
+    );
     overdue = setTimeout(() => { answer(null); req.destroy(); }, timeoutMs);
     req.on("error", () => answer(null));
     req.end();
   });
+
+// The owner path (C4-6), named on the hub's report only, and only when the probe was built with it. `origin` is
+// the https address MORNDO_ORIGIN names (http solely for localhost or 127.0.0.1). No origin: that check is not named.
+export type OwnerPath = { origin?: string; managerLane?: boolean };
+
+// https, or http on localhost or 127.0.0.1. Anything else is refused before a probe dials it.
+export const ownerOriginAllowed = (origin: string): boolean => {
+  let url: URL;
+  try { url = new URL(origin); } catch { return false; }
+  if (url.hostname === "") return false;
+  if (url.protocol === "https:") return true;
+  return url.protocol === "http:" && (url.hostname === "localhost" || url.hostname === "127.0.0.1");
+};
 
 export class ServiceProbes implements RoleProbe {
   readonly #hub: URL;
   readonly #fleetSocket: string;
   readonly #agentStatusPath: string;
   readonly #timeoutMs: number;
+  readonly #owner: { origin: URL | null; managerLane: boolean } | null;
 
-  constructor(o: { hubUrl: string; fleetSocket: string; nodeStatus: string; timeoutMs?: number }) {
+  constructor(o: { hubUrl: string; fleetSocket: string; nodeStatus: string; timeoutMs?: number; ownerPath?: OwnerPath }) {
     const hub = new URL(o.hubUrl);
     // §6.4 reads the hub on this machine; a URL anywhere else is a wiring mistake, refused before anything dials.
     if (hub.hostname !== "127.0.0.1" && hub.hostname !== "localhost") {
@@ -77,6 +98,16 @@ export class ServiceProbes implements RoleProbe {
     this.#fleetSocket = o.fleetSocket;
     this.#agentStatusPath = o.nodeStatus;
     this.#timeoutMs = o.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    if (o.ownerPath === undefined) {
+      this.#owner = null;
+    } else if (o.ownerPath.origin !== undefined && !ownerOriginAllowed(o.ownerPath.origin)) {
+      throw new Error(`${o.ownerPath.origin}: an origin is https, or http on localhost or 127.0.0.1`);
+    } else {
+      this.#owner = {
+        origin: o.ownerPath.origin === undefined ? null : new URL(o.ownerPath.origin),
+        managerLane: o.ownerPath.managerLane !== false,
+      };
+    }
   }
 
   // The service's word that it has seen hold.json (`held`, from its HoldWatch). A service from before that word says
@@ -105,7 +136,75 @@ export class ServiceProbes implements RoleProbe {
         : { service: s, version: status.version, checks: { ready: status.ready, fleet_online: status.state === "online" } };
     }
     const health = await this.#serviceHealth(s);
-    return health === null ? null : { service: s, version: health.version, checks: { ready: health.ready } };
+    if (health === null) return null;
+    const checks: Record<string, boolean> = { ready: health.ready };
+    // The owner path is the hub's, and only after the hub itself answered: no report is still no_report (§6.4).
+    if (s === "hub" && this.#owner !== null) {
+      checks.owner_app_served = await this.#ownerAppServed();
+      if (this.#owner.origin !== null) checks.owner_origin_ready = await this.#ownerOriginReady(this.#owner.origin);
+      if (this.#owner.managerLane) checks.owner_manager_lane = await this.#ownerManagerLane();
+    }
+    return { service: s, version: health.version, checks };
+  }
+
+  // GET / on the hub's own loopback host and port. 200 with a body is the app; 503 (not built), anything else,
+  // a timeout or a hub that is gone is a failed check — never a throw.
+  async #ownerAppServed(): Promise<boolean> {
+    try {
+      const answer = await exchange({
+        hostname: this.#hub.hostname,
+        port: this.#hub.port === "" ? 80 : Number(this.#hub.port),
+        path: "/",
+        method: "GET",
+      }, this.#timeoutMs);
+      return answer !== null && answer.status === 200 && answer.body.length > 0;
+    } catch { return false; }
+  }
+
+  // GET <origin>/api/health on the origin's own scheme. `ready: true` at 200 is the only pass.
+  async #ownerOriginReady(origin: URL): Promise<boolean> {
+    try {
+      const secure = origin.protocol === "https:";
+      const answer = await exchange({
+        protocol: origin.protocol,
+        hostname: origin.hostname,
+        port: origin.port === "" ? (secure ? 443 : 80) : Number(origin.port),
+        path: "/api/health",
+        method: "GET",
+        secure,
+      }, this.#timeoutMs);
+      if (answer === null || answer.status !== 200) return false;
+      const value: unknown = JSON.parse(answer.body);
+      return typeof value === "object" && value !== null && (value as { ready?: unknown }).ready === true;
+    } catch { return false; }
+  }
+
+  // The manager's window: the lane exists and is not in conflict, and its node is online (§5.1 status).
+  async #ownerManagerLane(): Promise<boolean> {
+    try {
+      const lane = await this.#fleetGet("/v1/lanes/manager");
+      if (lane === null || lane.status !== 200) return false;
+      const doc: unknown = JSON.parse(lane.body);
+      if (typeof doc !== "object" || doc === null) return false;
+      const { conflict, node } = doc as { conflict?: unknown; node?: unknown };
+      if (conflict !== false || typeof node !== "string" || node === "") return false;
+      const nodes = await this.#fleetGet("/v1/nodes");
+      if (nodes === null || nodes.status !== 200) return false;
+      const rows: unknown = JSON.parse(nodes.body);
+      if (!Array.isArray(rows)) return false;
+      const listed = rows.find(row =>
+        typeof row === "object" && row !== null && (row as { name?: unknown }).name === node);
+      return listed !== undefined && (listed as { status?: unknown }).status === "online";
+    } catch { return false; }
+  }
+
+  #fleetGet(path: string): Promise<{ status: number; body: string } | null> {
+    return exchange({
+      socketPath: this.#fleetSocket,
+      path,
+      method: "GET",
+      headers: { "x-morndo-client": "updater" },
+    }, this.#timeoutMs);
   }
 
   // The hub's and the fleet's own answer, decoded by the strict schema: a ready-only shape (the proxy's) or any

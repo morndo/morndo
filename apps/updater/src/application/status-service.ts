@@ -65,8 +65,10 @@ const orNone = (text: string | null): string => text ?? NONE;
 const windowWord = (text: string | null): string => text ?? "any hour";
 
 // One fact per line, no colour: a terminal, a tmux pane, a log file all read it the same way.
-export function formatStatus(s: Status): string {
-  return [
+// `ownerOrigin` is the text line for a machine that runs the hub: "unset" when MORNDO_ORIGIN is not set, "set"
+// when it is, and null on a node (no line). The JSON status does not carry it.
+export function formatStatus(s: Status, o?: { ownerOrigin?: "unset" | "set" | null }): string {
+  const lines = [
     `install: ${s.installMethod}`,
     `channel: ${s.channel} · mode: ${s.mode} · pin: ${orNone(s.pin)} · window: ${windowWord(s.window)}`,
     `current: ${orNone(s.current)} · previous: ${orNone(s.previous)} · good: ${orNone(s.good)} · staged: ${orNone(s.staged)}`,
@@ -74,5 +76,11 @@ export function formatStatus(s: Status): string {
     `feed: ${s.feed === null ? NONE : `${s.feed.channel} ${s.feed.seq} (expires ${s.feed.expiresAt})`}`,
     `last check: ${s.lastCheck === null ? "never" : `${s.lastCheck.outcome}${s.lastCheck.version === null ? "" : ` ${s.lastCheck.version}`} at ${s.lastCheck.at}`}`,
     `updates: ${(s.updates ?? []).length === 0 ? NONE : (s.updates ?? []).map(row => `${row.state} ${row.target}`).join(" · ")}`,
-  ].join("\n");
+  ];
+  if (o?.ownerOrigin === "unset") {
+    lines.push("owner path: the https address is not judged (MORNDO_ORIGIN is not set for the updater)");
+  } else if (o?.ownerOrigin === "set") {
+    lines.push("owner path: https address judged (MORNDO_ORIGIN)");
+  }
+  return lines.join("\n");
 }
