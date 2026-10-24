@@ -309,8 +309,24 @@ fi
 # The release App's two secrets are used by a job with no environment, so they are repository secrets by necessity:
 # the known exposure of decision 10. Any other secret such a job uses is only reported.
 awk -F'\t' '$1 == "secret" && $4 == "-" { print $5 "\t" $3 "\t" $2 }' "$tmp/facts" | sort -t "$(printf '\t')" -k1,1 -u >"$tmp/open-uses"
+# A key is a secret a job reads in release, feed, promote or withdraw, or one those environments hold: it lives in its
+# main-only environment, so a job with no environment must not read it by name (it would get nothing, or a repository
+# secret of that name, which the check above already fails). Every such job is a FAIL, not an INFO.
+{
+  cut -f1 "$tmp/key-uses"
+  for env in release feed promote withdraw; do
+    if [ -f "$tmp/secrets-$env" ]; then jq -r '.secrets[]?.name' "$tmp/secrets-$env"; fi
+  done
+} | sort -u >"$tmp/key-names"
+awk -F'\t' '$1 == "secret" && $4 == "-" { print $5 "\t" $3 "\t" $2 }' "$tmp/facts" | sort -u >"$tmp/open-uses-all"
+while IFS="$(printf '\t')" read -r name job file; do
+  if grep -qxF -- "$name" "$tmp/key-names"; then
+    fail "job $job of $file reads key secret $name without an environment (a key is a secret of its own main-only environment; a job outside it must not read it)"
+  fi
+done <"$tmp/open-uses-all"
 app_known=0
 while IFS="$(printf '\t')" read -r name job file; do
+  grep -qxF -- "$name" "$tmp/key-names" && continue
   case $name in
     RELEASE_APP_ID|RELEASE_APP_PRIVATE_KEY) app_known=1 ;;
     *) info "job $job of $file uses repository secret $name (no environment)" ;;

@@ -580,6 +580,41 @@ describe("check-release-settings.sh", () => {
     expect(r.stdout.split("\n").filter(line => line.startsWith("KNOWN:"))).toHaveLength(1);
   });
 
+  it("a key secret read by a job with no environment fails", () => {
+    const outside = (name: string, extra: string[] = []) => ["jobs:", "  build:", "    runs-on: ubuntu-24.04", ...extra, "    steps:", `      - run: echo \${{ secrets.${name} }}`, ""].join("\n");
+    const cases: [string, string, (w: World) => void][] = [
+      // a key by placement: it is a secret of the release environment
+      ["the release key", "RELEASE_SSH_KEY", w => w.workflow("build.yml", outside("RELEASE_SSH_KEY"))],
+      ["the feed key", "FEED_SSH_KEY", w => w.workflow("build.yml", outside("FEED_SSH_KEY"))],
+      // a key by use alone: a promote job reads it, so it is a key even before the environment holds it
+      ["a key a promote job reads, not yet held", "PROMOTE_SIGNING", w => {
+        w.workflow("promote.yml", "jobs:\n  promote:\n    environment: promote\n    steps:\n      - run: echo ${{ secrets.PROMOTE_SIGNING }}\n");
+        w.workflow("build.yml", outside("PROMOTE_SIGNING"));
+      }],
+      // a key by placement alone: an environment holds it and no key job reads it (a leftover)
+      ["a key the release environment holds that no job reads", "LEFTOVER_KEY", w => {
+        w.edit(`repos/${REPO}/environments/release/secrets`, d => ({ ...d, secrets: [...d.secrets, secret("LEFTOVER_KEY")] }));
+        w.workflow("build.yml", outside("LEFTOVER_KEY"));
+      }],
+      // the same job, with the environment written as an expression: the check cannot see one, so it is none
+      ["an environment given as an expression", "RELEASE_SSH_KEY", w => w.workflow("build.yml", outside("RELEASE_SSH_KEY", ["    environment: ${{ inputs.target }}"]))],
+    ];
+    for (const [what, key, change] of cases) {
+      const w = world();
+      change(w);
+      const r = w.run();
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(r.stdout, what).toContain(`FAIL: job build of build.yml reads key secret ${key} without an environment`);
+      expect(r.stdout, what).not.toContain(`INFO: job build of build.yml uses repository secret ${key}`);
+    }
+    // the App's two secrets are not keys (no key environment holds or uses them), and another secret stays an INFO
+    const w = world();
+    w.workflow("build.yml", outside("RELEASE_APP_ID"));
+    const r = w.run();
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+    expect(failLines(r.stdout)).toEqual([]);
+  });
+
   it("organisation secrets that cannot be read fail unless --no-org-secrets, which says they were not checked", () => {
     const w = world();
     w.remove("orgs/acme/actions/secrets");
