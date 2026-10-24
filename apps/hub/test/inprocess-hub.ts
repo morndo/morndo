@@ -2,7 +2,7 @@
 // and a synthetic terminal for pane %1. For tests that need the HTTP and WebSocket edges but no crash isolation
 // (crash tests use http-crash-fixture.ts). Synthetic data only.
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import type { AccountProfile, Task } from "@morndo/domain";
+import { type AccountProfile, type ProofMode, type Task } from "@morndo/domain";
 import type { RunView, Transcriber, TranscriberProbe } from "@morndo/protocol";
 import type { Liveness } from "@morndo/domain";
 import { tmpdir } from "node:os";
@@ -31,12 +31,13 @@ import { loadOrCreateVapid } from "../src/adapters/webpush.ts";
 import { enginesCli } from "../src/adapters/engines-cli.ts";
 import { EnginesService } from "../src/application/engines-service.ts";
 import { BoardService } from "../src/application/board-service.ts";
+import { ProofService } from "../src/application/proof-service.ts";
 import { AgentAccess } from "../src/application/agent-access.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
 import { fileOnDisk, TranscriptionService } from "../src/application/transcription-service.ts";
 import type { LedgerRead } from "../src/adapters/ledger.ts";
-import type { SendOutcome } from "../src/application/ports.ts";
+import type { ForgeChecks, SendOutcome } from "../src/application/ports.ts";
 import type { Config } from "../src/config.ts";
 import type { ManagerQueue } from "../src/application/manager-queue.ts";
 import { productStamp } from "@morndo/service-kit";
@@ -47,6 +48,7 @@ export type InProcessHub = {
   base: string; store: Store; access: AccessService; dir: string; identity: HubIdentity;
   notifications: NotificationService;
   board: BoardService;
+  proof: ProofService;
   agents: AgentAccess;
   briefs: BriefService;
   escalations: EscalationService;
@@ -86,6 +88,13 @@ export async function startInProcessHub(o: {
   liveness?: (sha: string) => Liveness;
   knows?: (sha: string) => Promise<"yes" | "no" | "unknown">;
   orphans?: (tasks: readonly Task[], now: number) => string[];
+  // `forge`: the proof checks' port (a test's fake); without one the checks answer nothing, as a hub without a forge.
+  // `proofMode`, `proofRepos`: the gate's mode and the repositories it reads, as MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS
+  // would give them.
+  forge?: ForgeChecks;
+  standIn?: boolean;                                       // the hub reads a stand-in forge: the board view says so
+  proofMode?: ProofMode;
+  proofRepos?: string[];
   // `identity`: the hub's identity key (a test's own pair; default: one made in the temp dir) — it signs the
   // principal's assertions (updates §5.4). `updates`: the fleet and the updater CLI to run (a test's fakes); absent,
   // the updates routes answer 404 as with no fleet and no CLI wired.
@@ -142,7 +151,12 @@ export async function startInProcessHub(o: {
   const vapid = loadOrCreateVapid(dir, "mailto:test@example.test");
   // ADR-0015: the board, with the lanes a test's observation lists (none by default). `liveness`: a merge's liveness as
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
-  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}) });
+  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}), ...(o.standIn ? { standIn: true } : {}) });
+  // ADR-0035: the proof of work, over the same store, wired as main.ts wires it.
+  const proof = new ProofService({
+    store, board, ...(o.now ? { now: o.now } : {}), ...(o.forge ? { forge: o.forge } : {}),
+    ...(o.proofMode ? { mode: o.proofMode } : {}), ...(o.proofRepos ? { allowedRepos: o.proofRepos } : {}),
+  });
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}), ...(o.laneNode ? { laneNode: o.laneNode } : {}) });
   const queue = o.queue ? o.queue(store) : null;
@@ -169,7 +183,7 @@ export async function startInProcessHub(o: {
       queue ? { queue, isManager: id => id === o.manager } : null, () => o.manager ?? null),
     escalations, remote, inbox, reading: new ReadingService(store), presence: new PresenceService(store, o.now), queue, ...(o.alerts ? { alerts: o.alerts } : {}),
     push: { publicKey: vapid.publicKey, notifications },
-    board: { service: board, agents }, usage, jobs, briefs,
+    board: { service: board, agents, proof }, usage, jobs, briefs,
     engines: o.engines ? new EnginesService({ cli: enginesCli(o.engines.bin, o.engines.env), store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}) }) : null,
     updatesService: o.updates ? new UpdatesService({
       fleet: o.updates.fleet, cli: o.updates.cli, sign: principalSigner(identity), store,
@@ -183,7 +197,7 @@ export async function startInProcessHub(o: {
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
   const cookieSessions: { secret: string; endpointId: string }[] = [];
   return {
-    base, store, access, dir, identity, notifications, board, agents, briefs, escalations, usage, jobs, pushes,
+    base, store, access, dir, identity, notifications, board, proof, agents, briefs, escalations, usage, jobs, pushes,
     async cookie() {
       // Each call pairs a fresh device, as the linking tests count on — but a device whose session the test's fake
       // clock has since expired is revoked first, so a test that looks at the principal's side many times across
