@@ -3,12 +3,8 @@
 // provider: only a granted lease spawns a read, and the reading or failure carries the lease id. The token is read
 // from its file and never printed. Synthetic data only.
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-<<<<<<< HEAD
-=======
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
->>>>>>> origin/feat/usage-s5
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
