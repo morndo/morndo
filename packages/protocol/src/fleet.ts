@@ -275,8 +275,9 @@ export type HookEvent = { streamId: string; seq: number; at: number;
 // `seq` is the fleet's own (lane_events), so a client reads on with GET /v1/lane-events?since=<seq>.
 // Reliable lanes (design §3.1, §3.2): a `finished` whose status line says WAITING carries `waitingOn` and `until` (ms, the
 // lease's end); `stale` is the fleet's own, made when a lane's last turn passed its deadline with nothing since: `reason`
-// says which deadline (`waiting`: a wait or background work; `no_status`: no status line), `since` is that turn's end
-// and `stalls` how many stale events the lane had since it last ended DONE, BLOCKED or NEEDS DECISION.
+// says which deadline (`waiting`: a wait or background work; `no_status`: no status line; `no_turn_end`: the session went
+// from working to idle and no turn end reached the fleet), `since` is that turn's end and `stalls` how many stale events
+// the lane had since it last ended DONE, BLOCKED or NEEDS DECISION.
 // A lane's last turn as the fleet's lane watch holds it (GET /v1/lane-watch, reliable lanes §3.2): when it ended, its
 // status, its deadline (null: none, the orchestrator's to act on), why it has one, what it waits on, whether a stale event
 // was made for it, and the stale events since the lane last settled.
@@ -288,7 +289,7 @@ export type LaneEventName = "finished" | "needs_input" | "answered" | "stop_fail
 export type LaneEvent = { v: 1; t: "lane"; seq: number; event: LaneEventName; node: string;
   window: string | null; lane: string | null; sessionId?: string; at: number;
   status?: "done" | "blocked" | "needs_decision" | "waiting" | null; firstLine?: string; bg?: number; crons?: number; question?: string; error?: string;
-  waitingOn?: string; until?: number; reason?: "waiting" | "no_status"; since?: number; stalls?: number;
+  waitingOn?: string; until?: number; reason?: "waiting" | "no_status" | "no_turn_end"; since?: number; stalls?: number;
   // ADR-0032 (R6): what a `finished` left pending, at most 8 of each: a background task by its type and a redacted
   // description of at most 80 characters, a wake-up by its schedule. Never a command or a prompt.
   tasks?: PendingTask[]; wakes?: PendingWake[] };
@@ -595,7 +596,7 @@ export const LaneEventSchema = z.object({
   node: nodeName(), window: z.nullable(text()), lane: z.nullable(text()), sessionId: z.exactOptional(text()), at: z.number(),
   status: z.exactOptional(z.nullable(z.enum(["done", "blocked", "needs_decision", "waiting"]))), firstLine: z.exactOptional(text()),
   bg: z.exactOptional(count()), crons: z.exactOptional(count()), question: z.exactOptional(text()), error: z.exactOptional(text()),
-  waitingOn: z.exactOptional(text()), until: z.exactOptional(z.number()), reason: z.exactOptional(z.enum(["waiting", "no_status"])),
+  waitingOn: z.exactOptional(text()), until: z.exactOptional(z.number()), reason: z.exactOptional(z.enum(["waiting", "no_status", "no_turn_end"])),
   since: z.exactOptional(z.number()), stalls: z.exactOptional(count()),
   tasks: z.exactOptional(z.array(PendingTaskSchema).check(z.maxLength(8))), wakes: z.exactOptional(z.array(PendingWakeSchema).check(z.maxLength(8))),
 });

@@ -475,16 +475,39 @@ describe("the Rollout the fleet carries (updates §4.2, §7)", () => {
     await vi.waitFor(async () => expect(await node(again)).toMatchObject({ status: "offline", proto: [1] }), { timeout: 5000 });
   });
 
-  it("a node running above the control plane is listed as ahead, and no update.apply reaches it until that ends", async () => {
+  // A node is ahead when its Version is above the control plane's by SemVer precedence, whichever part is higher: the
+  // test builds each Version from V, so it holds at 0.0.0, at 0.1.0 and at any later V.
+  const [vMajor = 0, vMinor = 0, vPatch = 0] = V.split(/[.+-]/).map(Number);
+  const above = { major: `${vMajor + 1}.0.0`, minor: `${vMajor}.${vMinor + 1}.0`, patch: `${vMajor}.${vMinor}.${vPatch + 1}` };
+  for (const [step, version] of Object.entries(above)) {
+    it(`a node running a ${step} above the control plane is listed as ahead, and no update.apply reaches it until that ends`, async () => {
+      const fleet = await startTestFleet({ rolloutAuthority: OPEN });
+      const api = client(fleet.config.socketPath);
+      const b = await fleet.online("n2", { caps: [CAP_UPDATE] });
+      b.health(health({ update: { state: "current", version } }));   // n2 runs `version`, a ${step} step above V
+      await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.nodesAhead).toEqual(["n2"]));
+      const op = await api.post("/v1/op", { node: "n2", op: "update.apply", args: { version: V }, key: "hub:u-ahead" });
+      expect(op?.body).toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no" } });
+      expect(((op?.body ?? {}) as Body).error.message).toContain("above the control plane");
+      expect(b.reqs.filter(r => r.op === "update.apply")).toHaveLength(0);
+    });
+  }
+
+  it("a node on the control plane's own Version, or below it, is not ahead", async () => {
     const fleet = await startTestFleet({ rolloutAuthority: OPEN });
     const api = client(fleet.config.socketPath);
-    const b = await fleet.online("n2", { caps: [CAP_UPDATE] });
-    b.health(health({ update: { state: "current", version: "0.1.0" } }));   // V is 0.0.0: n2 runs above it
-    await vi.waitFor(async () => expect((await bodyOf(api.get("/v1/rollout")))?.nodesAhead).toEqual(["n2"]));
-    const op = await api.post("/v1/op", { node: "n2", op: "update.apply", args: { version: V }, key: "hub:u-ahead" });
-    expect(op?.body).toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no" } });
-    expect(((op?.body ?? {}) as Body).error.message).toContain("above the control plane");
-    expect(b.reqs.filter(r => r.op === "update.apply")).toHaveLength(0);
+    const same = await fleet.online("n2", { caps: [CAP_UPDATE] });
+    same.health(health({ update: { state: "current", version: V } }));
+    const lower = vPatch > 0 ? `${vMajor}.${vMinor}.${vPatch - 1}` : vMinor > 0 ? `${vMajor}.${vMinor - 1}.9` : vMajor > 0 ? `${vMajor - 1}.9.9` : null;
+    const below = lower === null ? null : await fleet.online("n3", { caps: [CAP_UPDATE] });
+    if (lower !== null) below?.health(health({ update: { state: "current", version: lower } }));
+    // n2's report has landed once the nodes list shows its update state; only then can "not ahead" mean something
+    await vi.waitFor(async () => {
+      const nodes = (await bodyOf(client(fleet.config.socketPath).get("/v1/nodes"))) as { name: string; update: { version: string } | null }[] | undefined;
+      expect(nodes?.find(n => n.name === "n2")?.update?.version).toBe(V);
+      if (lower !== null) expect(nodes?.find(n => n.name === "n3")?.update?.version).toBe(lower);
+    });
+    expect((await bodyOf(api.get("/v1/rollout")))?.nodesAhead).toEqual([]);
   });
 });
 

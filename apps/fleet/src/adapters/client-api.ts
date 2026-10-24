@@ -33,7 +33,7 @@
 //                                      Version the control plane doesn't run itself
 //   POST /v1/rollout/halt              { version, machine, reason } → { ok: true, rollout }
 //   POST /v1/rollout/resume            { version } → { ok: true, rollout }; 409 not_halted when nothing is halted
-//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run" | "rollout", node, body };
+//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run" | "rollout" | "usage", node, body };
 //                                      a client more than eventsBufferBytes behind is closed with 1013 (it reconnects
 //                                      and gets the current state first)
 // The path is split on "/" before any segment is decoded, so a name or path holding "/" (as %2F) stays one segment

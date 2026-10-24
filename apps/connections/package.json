@@ -11,7 +11,8 @@
   },
   "bin": {
     "morndo-keys": "./src/main.ts",
-    "morndo-secrets": "./src/secrets-main.ts"
+    "morndo-secrets": "./src/secrets-main.ts",
+    "morndo-usage-claude": "./src/adapters/usage-claude-main.ts"
   },
   "exports": {
     "./compose": "./src/compose.ts",

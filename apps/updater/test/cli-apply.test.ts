@@ -682,4 +682,45 @@ describe("`morndo update --status` — the last updates (§8.1)", () => {
     const text = await w.run(["update", "--status"]);
     expect(text.out).toMatch(/probation/);
   });
+
+  const OWNER_UNSET = "owner path: the https address is not judged (MORNDO_ORIGIN is not set for the updater)";
+  const OWNER_SET = "owner path: https address judged (MORNDO_ORIGIN)";
+
+  it("--status says when MORNDO_ORIGIN is not set on a machine that runs the hub", async () => {
+    const w = await world();
+    const r = await w.run(["update", "--status"]);
+    expect(r.code, r.err).toBe(0);
+    const lines = r.out.trimEnd().split("\n");
+    expect(lines.at(-1)).toBe(OWNER_UNSET);
+    expect(lines.filter(line => line.startsWith("owner path:"))).toEqual([OWNER_UNSET]);
+  });
+
+  it("--status says the https address is judged when MORNDO_ORIGIN is set", async () => {
+    const w = await world();
+    const r = await w.run(["update", "--status"], { MORNDO_ORIGIN: "https://mirror.example.invalid" });
+    expect(r.code, r.err).toBe(0);
+    const lines = r.out.trimEnd().split("\n");
+    expect(lines.at(-1)).toBe(OWNER_SET);
+    expect(lines.filter(line => line.startsWith("owner path:"))).toEqual([OWNER_SET]);
+  });
+
+  it("--status says nothing about the owner path on a node", async () => {
+    const w = await world({ running: ["node"] });
+    const unset = await w.run(["update", "--status"]);
+    expect(unset.code, unset.err).toBe(0);
+    expect(unset.out).not.toContain("owner path:");
+    const set = await w.run(["update", "--status"], { MORNDO_ORIGIN: "https://mirror.example.invalid" });
+    expect(set.out).not.toContain("owner path:");
+  });
+
+  it("--status --json is unchanged by the owner path", async () => {
+    const w = await world();
+    const unset = await w.run(["update", "--status", "--json"]);
+    const set = await w.run(["update", "--status", "--json"], { MORNDO_ORIGIN: "https://mirror.example.invalid" });
+    expect(set.code, set.err).toBe(0);
+    expect(set.out).toBe(unset.out);
+    const parsed = JSON.parse(set.out) as Record<string, unknown>;
+    expect(Object.keys(parsed).some(key => key.toLowerCase().includes("owner"))).toBe(false);
+    expect(UpdateStatusSchema.parse(parsed)).toEqual(parsed);
+  });
 });

@@ -3,6 +3,7 @@
 // fetch, the environment and, inside tmux, the window's name as this lane's name (`tmux display-message -p '#W'`,
 // the name the hub lists the lane under).
 import { execFile } from "node:child_process";
+import { readFile } from "node:fs/promises";
 import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
 import { run } from "./cli.ts";
 
@@ -18,7 +19,7 @@ const laneFromTmux = () => new Promise<string | null>(resolve => {
 });
 
 const code = await run(process.argv.slice(2), process.env, {
-  fetch, lane: laneFromTmux,
+  fetch, lane: laneFromTmux, readFile: p => readFile(p, "utf8"),
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });
