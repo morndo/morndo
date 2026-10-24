@@ -625,6 +625,7 @@ describe("the proof list (B17)", () => {
     const bad = await managerSays("proof", "T-1", "--add", "not a spec");
     expect(bad.code).toBe(1);
     expect(bad.err).toContain(ITEM_GRAMMAR);
+    expect(bad.err.split(ITEM_GRAMMAR).length - 1).toBe(1);        // said once, not repeated as its own detail
   });
 
   it("show prints the list and list names the item not covered", async () => {

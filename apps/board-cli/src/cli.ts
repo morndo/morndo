@@ -80,7 +80,7 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "too_many": return `a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>${detail ? ` (${detail})` : ""}`;
     case "no_commit": return "the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout";
     case "no_merge": return "that merge isn't recorded on this task (see show)";
-    case "bad_item": return `an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra${detail ? detail.startsWith("an item is") ? ` (${detail})` : `: ${detail}` : ""}`;
+    case "bad_item": return `an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra${detail && !detail.startsWith("an item is") ? `: ${detail}` : ""}`;
     case "no_item": return `that item is not on the list (${detail ?? ""})`;
     default: return error;
   }
