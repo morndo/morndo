@@ -166,10 +166,11 @@ and the reading or the failure carries the lease id. How often it reads adapts t
 every 15 minutes while it idles below 75%, every 5 from 75%, every 2 from 90%, once a minute from 99% — never faster
 than once a minute. The hub, not the collector, holds that rhythm through its lease.
 
-Two things only a leased reading may say. The identity digest feeds the plan watch, and only on a leased reading (an
-unleased reading's identity is ignored, so no token can tell a change or poison the baseline): a changed identity
-between two agreeing readings is an account change ("the account behind it changed"), told once, and it drops a
-derived seat mark as a plan change does. And Codex's own limit flags — `ordinary_usage_allowed` false, or any `rate_limit_reached_type`
+Two things only a leased reading may say. The plan watch (a changed plan name or identity, told once after two
+agreeing readings) sees leased readings only: an unleased reading never tells a change, never drops a derived seat
+mark and never moves the baseline the next leased reading is compared with, so no token can tell a change or poison
+it by posting readings of its own. A changed identity between two agreeing leased readings is an account change ("the
+account behind it changed"), and like a plan change it drops a derived seat mark. And Codex's own limit flags — `ordinary_usage_allowed` false, or any `rate_limit_reached_type`
 — mark the seat out at the soonest reset of a window at 100%; flags that say all is well end a derived mark again. A
 reading without a valid lease never marks and never clears from its flags, and the type string itself is never shown
 and never stored.

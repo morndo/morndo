@@ -172,3 +172,47 @@ describe("identity counts only on a leased reading (review finding 2)", () => {
   });
 });
 
+// The slice 6 re-check (rev-120w, 2026-10-24 09:35): the plan watch is fed by leased readings only, so no token can tell
+// a change, drop a derived mark or move the baseline by posting readings of its own.
+describe("an unleased reading never touches the plan watch (re-check findings 1 and 2)", () => {
+  const post = (o: { plan?: string; identity?: string; leased?: boolean }) => {
+    now += 16 * MIN;                                  // past the cache and the look's staleness: a lease can be granted
+    const leaseId = o.leased === true ? leaseFor("seat-a") : null;
+    return hub.usage.reading({
+      ...winBody([win("five_hour", 20, 300, 2 * HOUR)], { identity: o.identity ?? null, leaseId }),
+      ...(o.plan !== undefined ? { plan: o.plan } : {}),
+    }, "seat-a", { kind: "worker", name: "usage-claude", token: "t" }).ok;
+  };
+
+  it("an unleased plan X then Y twice tells no change and drops no derived mark", () => {
+    expect(post({ plan: "plus" })).toBe(true);
+    expect(post({ plan: "plus" })).toBe(true);
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: now + 6 * HOUR, by: "worker-one", at: now }).ok).toBe(true);
+    expect(seatOf("seat-a")?.state).toBe("out");
+    expect(post({ plan: "pro" })).toBe(true);
+    expect(post({ plan: "pro" })).toBe(true);
+    expect(noticeTexts().filter(t => t.includes("plan changed"))).toEqual([]);
+    expect(noticeTexts().filter(t => t.includes("plan or account changed"))).toEqual([]);
+    expect(seatOf("seat-a")?.state).toBe("out");        // the mark stands
+  });
+
+  it("leased A, an unleased reading in between, then leased B twice: the account change is still told", () => {
+    expect(post({ identity: "aaa111aaa111", leased: true })).toBe(true);
+    expect(post({ identity: "aaa111aaa111", leased: true })).toBe(true);     // the baseline
+    expect(post({ identity: "ccc333ccc333" })).toBe(true);                   // an unleased one: the watch does not see it
+    expect(post({ identity: "bbb222bbb222", leased: true })).toBe(true);
+    expect(post({ identity: "bbb222bbb222", leased: true })).toBe(true);
+    expect(noticeTexts().filter(t => t.includes("the account behind it changed"))).toEqual(["seat-a: the account behind it changed. Readings start fresh."]);
+  });
+
+  it("a leased plan change is still told once and drops a derived mark (slice 2's rule, for the reader's own readings)", () => {
+    expect(post({ plan: "plus", leased: true })).toBe(true);
+    expect(post({ plan: "plus", leased: true })).toBe(true);
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: now + 6 * HOUR, by: "worker-one", at: now }).ok).toBe(true);
+    expect(post({ plan: "pro", leased: true })).toBe(true);
+    expect(post({ plan: "pro", leased: true })).toBe(true);
+    expect(noticeTexts().filter(t => t.includes("plan changed"))).toEqual(['seat-a: plan changed from "plus" to "pro".']);
+    expect(seatOf("seat-a")).toBeNull();
+  });
+});
+
