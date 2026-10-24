@@ -544,7 +544,7 @@ export class UsageService {
     // free-string type is never shown and never stored beyond this boolean effect.
     const leased = this.#leaseBook.valid(body.lease_id, account, body.source, tokenId);
     const allowed = body.ordinary_usage_allowed === true && (body.rate_limit_reached_type ?? null) === null;
-    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id, tokenId, leased ? body.identity ?? null : null, leased && allowed);
+    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id, tokenId, body.identity ?? null, leased && allowed);
     if (leased && (body.ordinary_usage_allowed === false || (body.rate_limit_reached_type ?? null) !== null)) {
       // The soonest reset of a window at or above 100%, else no word on when it is back.
       const back = list.filter(w => w.usedPercent !== null && w.usedPercent >= 100 && w.resetsAt !== null).map(w => w.resetsAt as number);
@@ -576,30 +576,35 @@ export class UsageService {
   // path of clearsMark can end a derived mark.
   #observe(account: string, windows: readonly WindowReading[], capturedAt: number, source: UsageSource, plan: string | null, leaseId: unknown, tokenId: string | null, identity: string | null, flagsAllowed: boolean): void {
     const watches = this.#watchMap(account);
-    // The plan watch (plan 4.2): a difference is held, and told only once a later reading agrees with it.
-    const fact: PlanFact = {
-      plan, identity,
-      windows: windows.map(w => ({ id: w.id, lengthMins: w.lengthMins, usedPercent: w.usedPercent, resetsAt: w.resetsAt, rolling: w.rolling })),
-      // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
-      ...(source === "claude-usage" ? { complete: true } : {}),
-    };
-    const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
-    const seen = watchPlan(planWatch, fact, capturedAt);
-    this.#tx(() => {
-      if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", source, seen.watch);
-      for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
-    });
-    // A plan or account change the plan watch tells drops the seat the old plan's limit marked (PR #125, finding 3a):
-    // a mark from a plan that is gone no longer applies. A pool-owned seat is the pool's, never a reading's, and a
-    // mark made after the telling reading was taken stands (PR #125 fix round 2, finding 1a): the change was already
-    // observed when the mark landed, so it cannot be what the mark was made under.
-    if (seen.told.some(c => c.kind === "name" || c.kind === "account")) {
-      const marked = this.#store.usageSeat(account)?.record ?? null;
-      if (marked !== null && marked.owner === "derived" && marked.markedAt <= capturedAt) {
-        this.#tx(() => {
-          this.#store.deleteUsageSeat(account);
-          this.#note(account, "back", `reset|${capturedAt}`, seatResetNoticeText(account));
-        });
+    // The plan watch (plan 4.2): a difference is held, and told only once a later reading agrees with it. It sees
+    // leased readings only (slice 6 re-check): the readings route is open to any agent token, so an unleased reading
+    // must neither tell a change, nor drop a derived mark, nor move the baseline a leased reading is compared with.
+    const leased = this.#leaseBook.valid(leaseId, account, source, tokenId);
+    if (leased) {
+      const fact: PlanFact = {
+        plan, identity,
+        windows: windows.map(w => ({ id: w.id, lengthMins: w.lengthMins, usedPercent: w.usedPercent, resetsAt: w.resetsAt, rolling: w.rolling })),
+        // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
+        ...(source === "claude-usage" ? { complete: true } : {}),
+      };
+      const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
+      const seen = watchPlan(planWatch, fact, capturedAt);
+      this.#tx(() => {
+        if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", source, seen.watch);
+        for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
+      });
+      // A plan or account change the plan watch tells drops the seat the old plan's limit marked (PR #125, finding 3a):
+      // a mark from a plan that is gone no longer applies. A pool-owned seat is the pool's, never a reading's, and a
+      // mark made after the telling reading was taken stands (PR #125 fix round 2, finding 1a): the change was already
+      // observed when the mark landed, so it cannot be what the mark was made under.
+      if (seen.told.some(c => c.kind === "name" || c.kind === "account")) {
+        const marked = this.#store.usageSeat(account)?.record ?? null;
+        if (marked !== null && marked.owner === "derived" && marked.markedAt <= capturedAt) {
+          this.#tx(() => {
+            this.#store.deleteUsageSeat(account);
+            this.#note(account, "back", `reset|${capturedAt}`, seatResetNoticeText(account));
+          });
+        }
       }
     }
     for (const w of windows) {
