@@ -179,6 +179,12 @@ Anything but POST on the four kept paths is 405 and an unknown path 404. A reque
 
 Each event gets this node's name and the window it finds through `TMUX_PANE` or `session_id`, else the body's own `window` (a `notify` sent from outside any pane), then flows in order to the fleet (`streamId`, `seq`) and is replayed after a reconnect, before anything new. A spool write that fails while the fleet acknowledges events (a full disk) is logged; it never takes the agent down. Hook entries in `settings.json` get `"timeout": 5` (sub-project 3): an HTTP hook failure doesn't block Claude Code, but a slow hook stalls the session.
 
+## The Stop hook script
+
+The script is `hooks/lane-notify-stop` in the release. `settings.json`'s Stop hook command points at its installed path. It posts the turn end first, and looks up the tmux window and git facts in parallel with a 2 s bound each, so the post goes out within about 2 s. The post is bound to 8 s and the fallback `lanes notify` to 4 s, so the hook always ends in under 15 s, well inside Claude Code's 20 s. Git facts that miss their bound are left out of the post.
+
+`MORNDO_RELAY_PORT` (default 8787), `MORNDO_RELAY_URL` and `MORNDO_LANES` choose the relay and the fallback. `MORNDO_HOOK_LOOKUP_S`, `MORNDO_HOOK_POST_S` and `MORNDO_HOOK_NOTIFY_S` shorten those bounds (tests only).
+
 ## Security model
 
 What it protects:

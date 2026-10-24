@@ -1,0 +1,102 @@
+#!/usr/bin/env bash
+# Claude Code Stop hook: hand this turn's final answer to the node's hook relay (127.0.0.1:8787), which sends it on to
+# the fleet's lane events (and kira, the lane's Telegram topic).
+# Input on stdin is the hook JSON (session_id, cwd, last_assistant_message, background_tasks, session_crons,
+# stop_hook_active, ...). It is posted as it is, with this machine's facts added (window, branch, changed, ahead) and
+# the older fields (text, background, crons), so the relay can read Claude Code's own fields.
+# The relay may answer {"decision":"block","reason":...}: the lane's answer had no status line, and Claude Code is asked once
+# to add one (Morndo's status ask, morndo/morndo#49). That answer is printed for Claude Code to read, so this hook runs
+# synchronously (settings.json: no "async"). Sessions outside tmux are not lanes and are skipped.
+#
+# T-422: Claude Code kills a Stop hook after its timeout (20 s in settings.json) and a killed hook posts nothing, so the
+# turn end is lost. Every step here is therefore bound: the tmux window and the git facts are looked up in parallel, each
+# for at most LOOKUP_S (2 s) in the background, and then the post goes out FIRST with whatever was found; a fact that
+# missed its bound is left out of the post. The post is bound to POST_S (8 s), the fallback notice to NOTIFY_S (4 s):
+# 2 + 8 + 4 = 14 s at the very worst. Do not add an unbound step before the post.
+set -uo pipefail
+
+RELAY="${MORNDO_RELAY_URL:-http://127.0.0.1:${MORNDO_RELAY_PORT:-8787}}"
+LANES="${MORNDO_LANES:-$HOME/.local/bin/lanes}"
+LOOKUP_S="${MORNDO_HOOK_LOOKUP_S:-2}"
+POST_S="${MORNDO_HOOK_POST_S:-8}"
+NOTIFY_S="${MORNDO_HOOK_NOTIFY_S:-4}"
+export GIT_OPTIONAL_LOCKS=0
+
+# bounded SECONDS OUTFILE CMD...: runs CMD with its stdout in OUTFILE and kills it after SECONDS. Returns CMD's status, or
+# 137 when it was killed. The output goes to a file, never a pipe, so a child that outlives the kill can't hold this
+# script's stdout open. (macOS has no timeout(1); this works the same there.)
+bounded() {
+  local secs=$1 out=$2
+  shift 2
+  "$@" >"$out" 2>/dev/null &
+  local pid=$!
+  ( sleep "$secs"; kill -KILL "$pid" ) >/dev/null 2>&1 &
+  local timer=$!
+  wait "$pid" 2>/dev/null
+  local rc=$?
+  kill "$timer" >/dev/null 2>&1
+  wait "$timer" 2>/dev/null
+  return "$rc"
+}
+
+# fact NAME CMD...: bounded lookup whose status is kept in $tmp/NAME.rc and its output in $tmp/NAME.
+fact() {
+  local name=$1
+  shift
+  bounded "$LOOKUP_S" "$tmp/$name" "$@"
+  echo "$?" >"$tmp/$name.rc"
+}
+
+in=$(cat)
+[ -n "${TMUX_PANE:-}" ] || exit 0
+cwd=$(jq -r '.cwd // ""' <<<"$in")
+
+tmp=$(mktemp -d 2>/dev/null) || tmp=""
+if [ -n "$tmp" ]; then
+  trap 'rm -rf -- "${tmp:?}"' EXIT
+  fact win tmux display-message -p -t "$TMUX_PANE" '#{window_name}' &
+  fact branch git -C "$cwd" rev-parse --abbrev-ref HEAD &
+  fact status git -C "$cwd" status --porcelain &
+  fact ahead git -C "$cwd" rev-list --count '@{u}..HEAD' &
+  wait
+fi
+
+# A lookup that finished gives its value (a failed one, the old script's default: empty, 0); one that was killed (137)
+# or never ran gives nothing, and the field is left out.
+rc_of() { cat "$tmp/$1.rc" 2>/dev/null || echo 137; }
+win=""
+[ -n "$tmp" ] && [ "$(rc_of win)" = 0 ] && win=$(head -n 1 "$tmp/win")
+facts='{}'
+if [ -n "$tmp" ]; then
+  case "$(rc_of branch)" in
+    0) branch=$(head -n 1 "$tmp/branch"); facts=$(jq -c --arg v "$branch" '. + {branch: $v}' <<<"$facts") ;;
+    137) branch="" ;;
+    *) branch=""; facts=$(jq -c '. + {branch: ""}' <<<"$facts") ;;
+  esac
+  case "$(rc_of status)" in
+    0) facts=$(jq -c --argjson v "$(wc -l <"$tmp/status" | tr -d ' ')" '. + {changed: $v}' <<<"$facts") ;;
+    137) ;;
+    *) facts=$(jq -c '. + {changed: 0}' <<<"$facts") ;;
+  esac
+  case "$(rc_of ahead)" in
+    0) facts=$(jq -c --argjson v "$(head -n 1 "$tmp/ahead" | tr -d ' ')" '. + {ahead: $v}' <<<"$facts") ;;
+    137) ;;
+    *) facts=$(jq -c '. + {ahead: 0}' <<<"$facts") ;;
+  esac
+else
+  branch=""
+fi
+
+body=$(jq -c --arg window "$win" --argjson facts "$facts" \
+  '. + $facts + {window: $window, text: (.last_assistant_message // ""),
+    background: ((.background_tasks // []) | length), crons: ((.session_crons // []) | length)}' <<<"$in")
+if out=$(curl -sf --connect-timeout 2 -m "$POST_S" -H 'content-type: application/json' -d "$body" "$RELAY/hook/stop" 2>/dev/null); then
+  [ "$(jq -r '.decision // empty' <<<"$out" 2>/dev/null)" = block ] && printf '%s\n' "$out"
+  exit 0
+fi
+
+# The relay is down: fall back to a plain DM with the start of the answer
+said=$(jq -r '.last_assistant_message // ""' <<<"$in" | tr -s '[:space:]' ' ' | cut -c1-300)
+bounded "$NOTIFY_S" /dev/null "$LANES" notify "$win finished${branch:+ @$branch}
+$said"
+exit 0

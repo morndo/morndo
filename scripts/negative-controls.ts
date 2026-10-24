@@ -3994,6 +3994,13 @@ export const CONTROLS: Control[] = [
   { id: "t398-job-wait-begins-at-the-turn-end", task: "T-398", file: "packages/domain/src/run.ts",
     find: `t !== null && "outcome" in said ? Math.max(firstJob, t.at) : firstJob`, replace: `firstJob`,
     run: ["packages/domain/test/run.test.ts", "packages/domain/test/board.test.ts"], expect: "began at the turn's end" },
+  // ---- T-422: the Stop hook posts before a slow lookup or a hung relay can use up Claude Code's timeout.
+  { id: "t422-hook-git-unbounded", task: "422", file: "apps/node-agent/hooks/lane-notify-stop",
+    find: "bounded \"$LOOKUP_S\" \"$tmp/$name\" \"$@\"", replace: "bounded 3600 \"$tmp/$name\" \"$@\"",
+    run: ["apps/node-agent/test/lane-notify-stop.test.ts"], expect: "posts first and within the budget when git hangs" },
+  { id: "t422-hook-post-unbounded", task: "422", file: "apps/node-agent/hooks/lane-notify-stop",
+    find: "-m \"$POST_S\"", replace: "-m 3600",
+    run: ["apps/node-agent/test/lane-notify-stop.test.ts"], expect: "ends inside its budget" },
 ];
 
 // ---- the runner
