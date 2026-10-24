@@ -230,7 +230,7 @@ jobs:
           ref: ${{ needs.release-please.outputs.sha }}
           persist-credentials: false
           fetch-depth: 0   # the downgrade-contract tests read an earlier commit
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: ${{ env.BUNDLED_NODE }}
       - name: tmux and ffmpeg
@@ -257,7 +257,7 @@ jobs:
           ref: ${{ needs.release-please.outputs.sha }}
           persist-credentials: false
           fetch-depth: 0
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
           cache: npm
@@ -507,7 +507,7 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
           cache: npm
@@ -606,7 +606,7 @@ jobs:
         with:
           ref: ${{ needs.release-please.outputs.sha }}
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
           cache: npm
@@ -645,7 +645,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version-file: package.json
       - name: Rebuild the site from the feed head
