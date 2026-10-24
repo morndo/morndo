@@ -67,6 +67,7 @@ import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
 import { readCodeLine, runMemory } from "./console/memory.ts";
 import { runUpdaterProgram } from "./console/update.ts";
+import { AUDIT_SYNOPSIS, AUDIT_USAGE, parseAuditArgs } from "./console/audit.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -77,7 +78,7 @@ const HELP = `morndo: your agents, on your phone.
   morndo pair             show a one-time QR (10 minutes) to pair a phone or laptop
   morndo devices          list paired devices
   morndo revoke <id>      revoke a device; its sessions end at once (morndo revoke --help)
-  morndo audit            the latest device and session events
+  morndo audit [count]    the latest device and session events (morndo audit --help)
   morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
                           events (morndo lanes --help)
   morndo agent-token new <name> --role manager|worker
@@ -124,6 +125,10 @@ if (consoleArgs.kind === "refused") { process.stderr.write(`morndo ${consoleArgs
 // hub runs the updater's program, as it runs the engines CLI, and leaves with its exit code.
 if (process.argv[2] === "update" || process.argv[2] === "doctor" || process.argv[2] === "install")
   await exitAfterOutput(await runUpdaterProgram(process.argv.slice(2)));
+// `morndo audit`'s arguments are read here too: `--help` and a bad count need no hub (T-423, console/audit.ts).
+const auditArgs = process.argv[2] === "audit" ? parseAuditArgs(process.argv.slice(3)) : null;
+if (auditArgs?.kind === "help") { process.stdout.write(`${AUDIT_USAGE}\n`); await exitAfterOutput(0); }
+if (auditArgs?.kind === "refused") { process.stderr.write(`morndo audit: ${auditArgs.why} ${AUDIT_SYNOPSIS}\n`); await exitAfterOutput(2); }
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
 const config = loadConfig();
@@ -471,7 +476,7 @@ switch (cmd) {
     break;
   }
   case "audit": {
-    for (const a of store.audit(Number(args[0] ?? 30)).reverse()) print(`${when(a.at)}  ${a.type}  ${JSON.stringify(a.body)}`);
+    for (const a of store.audit(auditArgs?.kind === "list" ? auditArgs.limit : 30).reverse()) print(`${when(a.at)}  ${a.type}  ${JSON.stringify(a.body)}`);
     store.close();
     break;
   }
