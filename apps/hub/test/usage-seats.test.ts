@@ -147,6 +147,11 @@ describe("seats (plan 4.5)", () => {
     // Sticky: a lane's limit failure under the pool's word changes nothing of what is shown.
     hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now + MIN });
     expect(await seatOf()).toMatchObject({ state: "retired", owner: "pool" });
+    // A limit post that says "pool" on the limit route speaks only for the hub's own derived seat (PR #127, finding 2):
+    // the pool's retired word still stands above whatever it derived underneath.
+    const poolWord = await limit({ kind: "usage_limit", by: "pool", account: "seat-a", at: Math.floor((now + 2 * MIN) / 1000) });
+    expect(poolWord.status).toBe(200);
+    expect(await seatOf()).toMatchObject({ state: "retired", owner: "pool", by: "pool-bot" });
     // A derived one clears: a fresh leased read of a new cycle (AT-18's rule).
     expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
     now += 65 * MIN;
@@ -227,6 +232,59 @@ describe("seats (plan 4.5)", () => {
     const taken = await limit({ kind: "usage_limit", by: "manager-one", account: "seat-a", at: Math.floor(now / 1000) });
     expect(taken.status).toBe(200);
     expect(await seatOf()).toMatchObject({ state: "out", owner: "derived" });
+  });
+
+  it("the limit route is the pool's too: a worker token with the usage-pool scope is taken, one without it stays refused (PR #127, finding 2)", async () => {
+    const poolWorker = hub.agents.issue("pool-bot", "worker", ["usage-pool"]).secret;
+    const taken = await limit({ kind: "usage_limit", by: "pool-bot", account: "seat-a", at: Math.floor(now / 1000) }, poolWorker);
+    expect(taken.status).toBe(200);
+    expect(await taken.json()).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived", by: "pool-bot" });
+    const refused = await limit({ kind: "usage_limit", by: "worker-one", account: "seat-b", at: Math.floor(now / 1000) }, workerToken);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "not_allowed" });
+    expect(await seatOf("seat-b")).toBeUndefined();
+  });
+
+  it("a limit post speaks only for the hub's own derived seat: a pool-style cleared action changes nothing, a retired post by \"pool\" is derived (PR #127, finding 2)", async () => {
+    // A pool-style clear posted to the limit route: the route has no clear, and the body names no limit kind.
+    const cleared = await limit({ action: "cleared", by: "pool", account: "seat-a" });
+    expect(cleared.status).toBe(400);
+    expect(await seatOf()).toBeUndefined();
+    expect(await noticesOf("seat")).toEqual([]);
+    // A retired post with by "pool" from a manager token: the hub's own derived seat, shown as such.
+    const retired = await limit({ kind: "refused", by: "pool", account: "seat-a", at: Math.floor(now / 1000) });
+    expect(retired.status).toBe(200);
+    expect(await seatOf()).toEqual({ state: "retired", why: "refused", since: now, backAt: null, owner: "derived", by: "pool", fix: "use_another_account" });
+  });
+
+  it("a derived out mark expires six hours past its back time, with one notice, and a newer limit post pushes that out (PR #127, finding 3b)", async () => {
+    const t0 = now;
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: t0 + HOUR, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    expect(await seatOf()).toMatchObject({ state: "out", backAt: t0 + HOUR });
+    now = t0 + HOUR + 6 * HOUR - MIN;      // six hours less a minute past the back time: not yet
+    hub.usage.sweep();
+    expect(await seatOf()).toMatchObject({ state: "out" });
+    expect((await noticesOf("back")).filter(n => n.account === "seat-a")).toEqual([]);
+    now = t0 + HOUR + 6 * HOUR + MIN;      // a minute past the six hours: dropped, with one notice
+    hub.usage.sweep();
+    expect(await seatOf()).toBeUndefined();
+    expect((await noticesOf("back")).filter(n => n.account === "seat-a")).toEqual([
+      { id: expect.stringMatching(/^seat-a\|back\|expired\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: its limit mark expired, the back time passed with no newer hit." },
+    ]);
+    // A newer limit post in between extends the back time, so the mark lives as long as its newest word says.
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: t0 + HOUR, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: t0 + 2 * HOUR, by: "worker-one", at: t0 + 30 * MIN })).toEqual({ ok: true, resolved: true });
+    now = t0 + HOUR + 6 * HOUR + MIN;      // past the first back time, before the extended one: the mark stays
+    hub.usage.sweep();
+    expect(await seatOf("seat-b")).toMatchObject({ state: "out", backAt: t0 + 2 * HOUR });
+    expect((await noticesOf("back")).filter(n => n.account === "seat-b")).toEqual([]);
+    now = t0 + 2 * HOUR + 6 * HOUR + MIN;
+    hub.usage.sweep();
+    expect(await seatOf("seat-b")).toBeUndefined();
+    expect((await noticesOf("back")).filter(n => n.account === "seat-b")).toEqual([
+      { id: expect.stringMatching(/^seat-b\|back\|expired\|\d+$/), kind: "back", account: "seat-b", at: expect.any(Number), text: "seat-b: its limit mark expired, the back time passed with no newer hit." },
+    ]);
   });
 
   it("a plan change told by readings stamped after the mark drops it (PR #125 fix round 2, finding 1a)", async () => {

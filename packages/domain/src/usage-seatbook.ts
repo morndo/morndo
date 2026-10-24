@@ -11,6 +11,10 @@ export type LimitHit = { kind: LimitKind; at: number; backAt: number | null; by:
 export const DEFAULT_MARK_MS = 60 * 60_000;
 export const MIN_MARK_MS = 60_000;
 export const MAX_MARK_MS = 168 * 3_600_000;
+// Fix round on PR #127, finding 3b: a derived out mark whose back time passed, with no newer hit to push it out, is
+// dropped after six hours. A pool seat never expires, and neither does a retired or logged-out derived one: only an
+// out mark carries a back time that can pass.
+export const MARK_EXPIRY_MS = 6 * 3_600_000;
 
 export function applyLimit(prev: SeatRecord | null, hit: LimitHit): { seat: SeatRecord | null; changed: boolean } {
   if (hit.kind === "unknown") return { seat: prev, changed: false };
@@ -49,6 +53,13 @@ export function shownSeat(pool: SeatRecord | null, derived: SeatRecord | null): 
   if (pool === null) return derived;
   if (derived === null) return pool;
   return worseSeatState(pool.state, derived.state) === derived.state && pool.state !== derived.state ? derived : pool;
+}
+
+// True only for a derived seat in state "out" whose back time passed more than MARK_EXPIRY_MS ago (PR #127, finding
+// 3b): the sweep drops such a mark with one notice. Everything else — a pool seat, a retired or logged-out derived
+// seat, an out mark with no back time, one whose back time is not past the six hours — stays.
+export function markExpired(seat: SeatRecord, now: number): boolean {
+  throw new Error("not implemented");
 }
 
 export function clearSeat(prev: SeatRecord, read: FreshRead): { seat: SeatRecord | null; cleared: boolean } {

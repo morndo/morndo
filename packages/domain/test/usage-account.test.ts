@@ -47,6 +47,15 @@ describe("which account a lane's failure belongs to (plan 4.5 item 4)", () => {
     expect(RECORD_FRESH_MS).toBe(7 * DAY);
   });
 
+  it("a start record outranks a report record for the lane, whatever their stamps; two of a kind go by the newest (PR #127, finding 4b)", () => {
+    expect(resolveAccount(input({ records: [record({ account: "seat-b", at: T - 30_000, source: "report" }), record({ account: "seat-a", at: T - 60_000, source: "start" })] })))
+      .toEqual({ account: "seat-a", by: "record" });       // the start record wins though its stamp is the older
+    expect(resolveAccount(input({ records: [record({ account: "seat-b", at: T - 30_000, source: "start" }), record({ account: "seat-a", at: T - 60_000, source: "start" })] })))
+      .toEqual({ account: "seat-b", by: "record" });       // two start records: the newest stamp wins
+    expect(resolveAccount(input({ records: [record({ account: "seat-b", at: T - 30_000, source: "report" }), record({ account: "seat-a", at: T - 60_000, source: "report" })] })))
+      .toEqual({ account: "seat-b", by: "record" });       // two report records: the newest stamp wins
+  });
+
   it("the session of the session id, when it is fresh; another session's id is not it", () => {
     expect(resolveAccount(input({ sessionId: "sid-1", sessions: [session()] }))).toEqual({ account: "seat-a", by: "session" });
     expect(resolveAccount(input({ sessionId: "sid-2", sessions: [session()] }))).toEqual({ account: null, by: null });

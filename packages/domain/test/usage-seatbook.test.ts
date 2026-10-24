@@ -2,7 +2,7 @@
 // same state and why only extends the back time, and a mark clears only the way usage-seat's clearsMark says. A
 // seat the pool set by hand is never cleared by a reading.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MARK_MS, MAX_MARK_MS, MIN_MARK_MS, applyLimit, clearSeat, poolSeat, shownSeat, type FreshRead, type LimitHit, type SeatRecord } from "../src/index.ts";
+import { DEFAULT_MARK_MS, MARK_EXPIRY_MS, MAX_MARK_MS, MIN_MARK_MS, applyLimit, clearSeat, markExpired, poolSeat, shownSeat, type FreshRead, type LimitHit, type SeatRecord } from "../src/index.ts";
 
 const T = 1_700_000_000_000;      // 10:00
 const MIN = 60_000, HOUR = 3_600_000;
@@ -72,6 +72,19 @@ describe("one seat state per account (plan 4.5)", () => {
   it("a seat the pool set by hand is never cleared here", () => {
     const pooled = out({ owner: "pool", by: "hand" });
     expect(clearSeat(pooled, read())).toEqual({ seat: pooled, cleared: false });
+  });
+
+  it("a derived out mark expires six hours past its back time, and nothing else does (PR #127, finding 3b)", () => {
+    expect(MARK_EXPIRY_MS).toBe(6 * HOUR);
+    expect(markExpired(out({ backAt: T }), T + 6 * HOUR)).toBe(false);        // exactly six hours: not yet
+    expect(markExpired(out({ backAt: T }), T + 6 * HOUR + 1)).toBe(true);     // a millisecond past: expired
+    expect(markExpired(out({ backAt: T }), T + 5 * HOUR)).toBe(false);        // the back time not six hours past
+    expect(markExpired(out({ backAt: null }), T + 8 * HOUR)).toBe(false);     // no back time to pass
+    expect(markExpired(out({ owner: "pool" }), T + 8 * HOUR)).toBe(false);    // the pool's word never expires by time
+    const retired: SeatRecord = { ...out(), state: "retired", why: "refused", backAt: null, cycleReset: null, windowId: null };
+    expect(markExpired(retired, T + 8 * HOUR)).toBe(false);                   // a retired derived seat stays
+    const signedOut: SeatRecord = { ...out(), state: "logged-out", why: "signed_out", backAt: null, cycleReset: null, windowId: null };
+    expect(markExpired(signedOut, T + 8 * HOUR)).toBe(false);                 // a logged-out derived seat stays
   });
 
   it("the pool's own record: owner pool, its own times, no cycle and no window, the back time as given (U15)", () => {
