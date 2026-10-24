@@ -144,6 +144,14 @@ leases on the whole hub. A failure cools the account down on every machine at on
 when it gave one (never shorter than a minute), else 5 minutes, doubling on consecutive failures to half an hour,
 reset by a good reading.
 
+**Known limits of the token model (said plainly).** The hub has no node configuration, so it cannot tell which
+accounts a node really reads. (1) The unknown-name budget is five new names per token per hour, not per node: a pool
+token that holds both lease slots can still spend its budget on invented names five times an hour. (2) Any token
+may post an *unleased* reading for any account. Such a reading cannot end a mark and cannot set the cache (only a
+lease does either), but it does change the windows Home shows and the thresholds that watch them. Worker tokens are
+shared by lanes, so the token binding only detects a second, different token. The fix is per-lane worker tokens and
+leases bound to the accounts a node actually reports; it is a follow-up on the board, not part of this change.
+
 ## Reading Codex usage
 
 The same collector reads a Codex subscription: an account entry with `"kind": "codex"` and `"codexHome"` (its
