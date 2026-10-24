@@ -153,8 +153,10 @@ export class BoardService {
       // the proof is in the gate only where the domain reads it — a brief (its repositories) and a move to Done.
       const proof = this.#proof !== null && (action.action === "brief" || action.action === "proof_list" || (action.action === "move" && action.to === "done"))
         ? this.#proof.gate(key) : undefined;
-      // Bounded: each change of a proof list is an event, so a task takes at most PROOF_LIST_CHANGES_MAX of them.
-      if (action.action === "proof_list" && this.#store.taskEvents(key).filter(e => e.change.kind === "proof_listed").length >= PROOF_LIST_CHANGES_MAX)
+      // Bounded: each change of a proof list is an event, so a lane takes at most PROOF_LIST_CHANGES_MAX of them on a task.
+      // Only the lane's own changes count and only the lane is held to it: it cannot spend a limit that locks the assigner out.
+      if (action.action === "proof_list" && actor.kind === "worker"
+        && this.#store.taskEvents(key).filter(e => e.change.kind === "proof_listed" && e.actor.kind === "worker").length >= PROOF_LIST_CHANGES_MAX)
         return { ok: false as const, error: { problem: "too_many" as const, detail: "proof list changes" } };
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
         { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}) });

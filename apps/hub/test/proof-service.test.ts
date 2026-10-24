@@ -628,14 +628,14 @@ describe("verifying (B14, B15)", () => {
       store.close();
     });
 
-    it("briefs per task and changes of a proof list are bounded", async () => {
-      const { store, board, proof } = withForge();
+    it("a lane's proof list changes are bounded, and the assigner is never locked out by them", async () => {
+      const { store, board } = withForge();
       atReview(board);
-      for (let i = 0; i < 20; i++) expect((await proof.file("T-1", one, lane)).ok).toBe(true);
-      await proof.idle();
-      expect(await proof.file("T-1", one, lane)).toEqual({ ok: false, problem: "too_many", detail: "briefs on this task" });
-      for (let i = 0; i < 100; i++) expect(board.act("T-1", { action: "proof_list", add: [`data: item ${i % 2}`], drop: i % 2 === 0 ? [] : [`data: item ${(i - 1) % 2}`] }, manager).ok, String(i)).toBe(true);
-      expect(board.act("T-1", { action: "proof_list", add: ["data: one more"] }, manager)).toMatchObject({ ok: false, problem: "too_many", detail: "proof list changes" });
+      for (let i = 0; i < 100; i++) expect(board.act("T-1", { action: "proof_list", ...(i % 2 === 0 ? { add: ["data: lane junk"] } : { drop: ["data: lane junk"] }) }, lane).ok, String(i)).toBe(true);
+      expect(board.act("T-1", { action: "proof_list", add: ["data: one more"] }, lane)).toMatchObject({ ok: false, problem: "too_many", detail: "proof list changes" });
+      // the assigner still lists what it needs, and may drop what the lane left
+      expect(board.act("T-1", { action: "proof_list", add: ["data: a sample of 30 rows"] }, manager).ok).toBe(true);
+      expect(board.act("T-1", { action: "proof_list", add: ["tests: the suite"], drop: ["data: a sample of 30 rows"] }, manager).ok).toBe(true);
       store.close();
     });
   });
