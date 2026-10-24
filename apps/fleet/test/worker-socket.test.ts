@@ -153,7 +153,7 @@ describe("worker socket: what a forwarded caller is refused", () => {
     await w.worker.post("/v1/nodes/edge/revoke");
     await w.worker.post("/v1/rollout/halt", { version: "1.2.3", machine: "pc", reason: "SECRET-REASON" });
     const rows = audit(w).filter(r => r.actor === "worker" && r.action === "refused");
-    expect(rows.map(r => r.detail.what).sort()).toEqual(["node.revoke", "op.lane.start", "op.pane.send", "rollout.halt"]);
+    expect(rows.map(r => String(r.detail.what)).sort((a, b) => a.localeCompare(b))).toEqual(["node.revoke", "op.lane.start", "op.pane.send", "rollout.halt"]);
     for (const r of rows) expect(r.detail).toMatchObject({ client: "lanes", reason: expect.any(String) });
     const all = JSON.stringify(audit(w));
     expect(all).not.toContain("SECRET-TEXT");
@@ -166,7 +166,7 @@ describe("worker socket: what a forwarded caller still does", () => {
   it("worker socket: reads, peeks of a protected pane and the events stream work", async () => {
     const w = await world();
     expect((await w.worker.get("/v1/caps"))?.status).toBe(200);
-    expect(((await w.worker.get("/v1/lanes"))?.body as unknown[]).length).toBe(4);
+    expect((await w.worker.get("/v1/lanes"))?.body).toHaveLength(4);
     expect((await w.worker.get("/v1/nodes"))?.status).toBe(200);
     expect((await w.worker.get("/v1/alerts"))?.status).toBe(200);
     expect((await w.worker.get("/v1/jobs"))?.status).toBe(200);
