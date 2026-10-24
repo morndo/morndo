@@ -283,8 +283,13 @@ describe("judging a reference against what the forge said (B14)", () => {
     expect(judgePr(ref, prFacts({ merged: true, headSha: MOVED, mergeSha: FULL }), [{ repo: "acme/shop", sha: FULL }]))
       .toEqual({ state: "green", detail: null });
     expect(judgePr(ref, prFacts())).toEqual({ state: "green", detail: null });
+    // a merge record in another repository says nothing about this pull request: its sha is compared all the same
     expect(judgePr(ref, prFacts({ merged: true, headSha: MOVED, mergeSha: otherMerge }), [{ repo: "acme/vault", sha: recorded }]))
-      .toEqual({ state: "green", detail: null });
+      .toEqual({ state: "mismatch", detail: `head is ${MOVED.slice(0, 7)}, ref says ${SHA}` });
+    const made = value(parseProofRef("acme/shop#5@0000000"));        // a made-up sha on a real, merged pull request
+    if (made.kind !== "pr") throw new Error("not a pr ref");
+    for (const merges of [undefined, [], [{ repo: "acme/vault", sha: recorded }], [{ repo: "acme/shop", sha: otherMerge }]])
+      expect(judgePr(made, prFacts({ merged: true, headSha: MOVED, mergeSha: otherMerge }), merges).state, JSON.stringify(merges)).toBe("mismatch");
   });
 
   it("judgeCi: control characters in a check name are replaced and the detail is cut", () => {

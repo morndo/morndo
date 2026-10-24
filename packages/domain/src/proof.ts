@@ -364,8 +364,6 @@ export type Judged = { state: RefState; detail: string | null };
 export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts, merges?: readonly { repo: string; sha: string }[]): Judged {
   if (facts.state === "closed" && !facts.merged) return { state: "red", detail: "closed without merge" };
   const taskMerges = (merges ?? []).filter(m => m.repo.toLowerCase() === ref.repo.toLowerCase());
-  if (facts.merged && merges !== undefined && merges.length > 0 && taskMerges.length === 0)
-    return { state: "green", detail: null };
   if (facts.merged && facts.mergeSha !== null && taskMerges.length > 0) {
     const mergeSha = facts.mergeSha.toLowerCase();
     const matches = taskMerges.some(m => {
