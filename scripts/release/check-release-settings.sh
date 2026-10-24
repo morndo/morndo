@@ -12,7 +12,11 @@
 # does not wall off main. The workflows are read from main through the API, not from a checkout, and every environment
 # they name must already exist, because a workflow that names a missing one creates it with no reviewer and no branch
 # rule. A tag ruleset must hold refs/tags/v* with only the release App, by its id (--app-id), as its bypass actor, so
-# nobody else, administrators included, can create or move a release tag. A key secret is a secret a job uses in one of
+# nobody else, administrators included, can create or move a release tag. The feed branch needs its own ruleset: active,
+# include exactly refs/heads/feed with an empty exclude, the non_fast_forward and deletion rules, and no bypass actor,
+# so nobody, administrators included, can force-push or delete it. .github/CODEOWNERS on main must have an entry for
+# the trust files (a pattern /trust/ or /trust/* or trust/ or trust/*, with at least one @owner); a line for * does not
+# count. A key secret is a secret a job uses in one of
 # the four environments (a `secrets.NAME` of that job in the workflows on main, not a name pattern): it must be a secret
 # of that environment and of no other, and neither a repository nor an organisation secret, because a repository secret
 # is readable by any workflow from any branch. RELEASE_SSH_KEY, FEED_SSH_KEY, RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY
@@ -24,8 +28,10 @@
 # machine provides. Endpoints and response shapes, read 2026-10-24:
 # https://docs.github.com/en/rest/deployments/environments,
 # https://docs.github.com/en/rest/deployments/branch-policies,
-# https://docs.github.com/en/rest/repos/rules, https://docs.github.com/en/rest/actions/secrets and
-# https://docs.github.com/en/rest/repos/contents (the raw media type). can_admins_bypass is in the live response of
+# https://docs.github.com/en/rest/repos/rules, https://docs.github.com/en/rest/actions/secrets,
+# https://docs.github.com/en/rest/repos/contents (the raw media type, for the workflows and for CODEOWNERS) and
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# (CODEOWNERS). can_admins_bypass is in the live response of
 # the environments endpoints (read 2026-10-24) but not in the REST description.
 set -eu
 
@@ -222,6 +228,14 @@ tag_ruleset_problems() { # <ruleset file>: one line per unmet condition of the t
        else "must have exactly one bypass actor, the release App (Integration:\($app))" end)' "$1"
 }
 
+feed_ruleset_problems() { # <ruleset file>: one line per unmet condition of a feed-branch candidate (include is already refs/heads/feed)
+  jq -e '.enforcement == "active"' "$1" >/dev/null || echo "is not active"
+  jq -e '((.conditions.ref_name.exclude // []) | length) == 0' "$1" >/dev/null || echo "has an exclude"
+  jq -e '((.rules // []) | map(.type) | index("non_fast_forward")) != null' "$1" >/dev/null || echo "lacks non_fast_forward"
+  jq -e '((.rules // []) | map(.type) | index("deletion")) != null' "$1" >/dev/null || echo "lacks deletion"
+  jq -e '((.bypass_actors // []) | length) == 0' "$1" >/dev/null || jq -r '"has bypass actors: \([.bypass_actors[] | "\(.actor_type):\(.actor_id)"] | join(", "))"' "$1"
+}
+
 if [ "$have_rulesets" = 1 ]; then
   # The branch rulesets' bypass actors, printed for the owner to read: the account the lanes run as is a repository
   # administrator and bypasses the review rule (decision 9), so he decides knowing who else can.
@@ -257,6 +271,54 @@ if [ "$have_rulesets" = 1 ]; then
       done
     fi
   fi
+  # The feed branch. The detail calls above already read every branch ruleset. A candidate includes exactly
+  # refs/heads/feed; one that meets every condition is enough, so a disabled one beside a passing one is fine.
+  feed_ok=0
+  feed_seen=0
+  for id in $(jq -r '.[]? | select(.target == "branch") | .id' "$tmp/rulesets"); do
+    [ -f "$tmp/ruleset-$id" ] || continue
+    include=$(jq -c '.conditions.ref_name.include // []' "$tmp/ruleset-$id")
+    [ "$include" = '["refs/heads/feed"]' ] || continue
+    feed_seen=1
+    feed_ruleset_problems "$tmp/ruleset-$id" >"$tmp/feed-$id.problems"
+    if [ ! -s "$tmp/feed-$id.problems" ]; then feed_ok=1; fi
+  done
+  [ "$feed_ok" = 1 ] || [ "$feed_seen" = 1 ] || fail "no ruleset protects the feed branch (it needs an active branch ruleset on refs/heads/feed with non_fast_forward and deletion rules and no bypass actor)"
+  if [ "$feed_ok" = 0 ] && [ "$feed_seen" = 1 ]; then
+    for id in $(jq -r '.[]? | select(.target == "branch") | .id' "$tmp/rulesets"); do
+      [ -s "$tmp/feed-$id.problems" ] || continue
+      name=$(jq -r '.name // "?"' "$tmp/ruleset-$id")
+      while IFS= read -r line; do fail "feed ruleset '$name' $line"; done <"$tmp/feed-$id.problems"
+    done
+  fi
+fi
+
+# .github/CODEOWNERS on main, through the contents API with the raw media type, the same call the workflows use. A
+# comment is not an entry even when the words after "#" name /trust/ and an owner: those words are read and then
+# refused because the line is a comment. A line for * does not count, and the pattern must be followed by an @owner.
+if gh api "repos/$repo/contents/.github/CODEOWNERS?ref=main" -H "Accept: application/vnd.github.raw+json" >"$tmp/codeowners" 2>/dev/null; then
+  if ! awk '
+    BEGIN { found = 0 }
+    /^[ \t]*$/ { next }
+    {
+      comment = ($0 ~ /^[ \t]*#/)
+      line = $0
+      sub(/^[ \t]*#[ \t]+/, "", line)
+      n = split(line, f)
+      if (comment) next
+      if (f[1] !~ /^\/?trust\/\*?$/) next
+      owned = 0
+      for (i = 2; i <= n; i++) if (f[i] ~ /^@/) owned = 1
+      if (!owned) next
+      found = 1
+    }
+    END { exit (found ? 0 : 1) }
+  ' "$tmp/codeowners"; then
+    fail "CODEOWNERS has no entry for /trust/ with an owner"
+  fi
+else
+  rm -f "$tmp/codeowners"
+  fail "cannot read repos/$repo/contents/.github/CODEOWNERS?ref=main"
 fi
 
 # Where the secrets live, by name only (never a value). The environment secrets of an environment that already failed
@@ -366,4 +428,4 @@ if [ "$problems" -gt 0 ]; then
   printf 'check-release-settings: %d problem(s)\n' "$problems"
   exit 1
 fi
-echo "check-release-settings: ok ($repo: release, feed, promote and withdraw have the one reviewer, no administrator bypass and allow the branch main only, github-pages allows main only, release-please allows the branch main only and has no required reviewer, the tag ruleset holds refs/tags/v* for the release App, the signing keys are secrets of the environments that use them and the App's secrets are secrets of release-please)"
+echo "check-release-settings: ok ($repo: release, feed, promote and withdraw have the one reviewer, no administrator bypass and allow the branch main only, github-pages allows main only, release-please allows the branch main only and has no required reviewer, the tag ruleset holds refs/tags/v* for the release App, the feed branch ruleset blocks force pushes and deletion with nobody bypassing it, CODEOWNERS names an owner for /trust/, the signing keys are secrets of the environments that use them and the App's secrets are secrets of release-please)"

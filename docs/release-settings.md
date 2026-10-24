@@ -1,7 +1,8 @@
 # Release settings: the one-time setup, and the check that proves it
 
-A release signs with two keys that live as environment secrets; the reviewers, the main-only branch rules and the tag
-ruleset are what keep a pushed tag or an edited workflow from reaching a key unattended. Every command on this page is
+A release signs with two keys that live as environment secrets; the reviewers, the main-only branch rules, the tag
+ruleset, the feed-branch ruleset and the CODEOWNERS entry for the trust files are what keep a pushed tag, a rewritten
+feed branch or an edited workflow from reaching a key unattended. Every command on this page is
 run by hand, once, by the owner, from the Mac or any machine whose `gh` holds a token with administrator rights to the
 repository: no workflow and no script of this repository changes a setting, and
 `scripts/release/check-release-settings.sh` only reads.
@@ -21,9 +22,11 @@ read-only and printing secret names only, never values:
 | `release-please` | exists; deployments from the branch `main` only; no required reviewer (the job that uses it runs on every push to `main`, so a reviewer would stop every push). A `branch_policy` rule alone, or no protection rules, is fine; Prevent self-review and `can_admins_bypass` are not required |
 | the workflows | read from `main` through the API, never from a checkout, so a workflow change that is not merged yet is not checked; every environment a `.github/workflows/*.yml` names with `environment:` exists (a workflow naming a missing one creates it with no reviewer and no branch rule); `${{ ... }}` expressions are skipped; `environment:` may be a name, a `name:` entry below it, or a flow mapping such as `{ name: release }` |
 | the tag ruleset | one ruleset targeting tags that is active, covers exactly `refs/tags/v*`, holds the `creation`, `update` and `deletion` rules, and has exactly one bypass actor: an `Integration` whose id is `--app-id` |
+| the feed branch | one ruleset targeting a branch that is active, whose `include` is exactly `["refs/heads/feed"]` with an empty `exclude`, that holds the `non_fast_forward` and `deletion` rules, and whose `bypass_actors` is empty (nobody, administrators included, may bypass it). One passing ruleset is enough |
 | key secrets | derived from the workflows, not from a name pattern: every `secrets.<NAME>` a job uses in `release`, `feed`, `promote` or `withdraw` must be a secret of exactly that environment, of no other environment, and neither a repository nor an organisation secret; a job with no environment that reads a key (`RELEASE_SSH_KEY`, `FEED_SSH_KEY`, `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` by name, a secret a key job reads, or one a key environment holds) fails |
 | the App's secrets | `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are environment secrets of `release-please` only: not a repository secret, not an organisation secret, and not a secret of any other environment (step 6). Any other secret a job with no environment uses is an `INFO:` line, and so is every repository or organisation secret that no workflow on `main` uses (a stray key kept as a backup shows up there; it is listed, not judged by its name) |
 | the `main` rulesets | their bypass actors are printed as `INFO:` lines for the owner to read |
+| CODEOWNERS | `.github/CODEOWNERS` on `main`, read through the contents API with the raw media type, has a non-comment, non-blank line whose pattern is `/trust/`, `/trust/*`, `trust/` or `trust/*`, followed by at least one owner starting with `@` (a `*` line does not count; who the owner is is not judged) |
 
 Two exposures were named so they are decided with open eyes (the release plan's section 1, decisions 9 and 10).
 Decision 9 stays open: the account the lanes run as is a repository administrator that can merge a changed workflow
@@ -147,7 +150,39 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
 
       Expected: the `secret delete` commands remove the two repository secrets.
 
-7. **Run the check and keep its output.** It needs the second account's user id (the number `gh api users/<login>
+7. **Protect the `feed` branch with a ruleset nobody can bypass.** The commit jobs of `withdraw.yml`, `promote.yml` and
+   `feed.yml` write the `feed` branch with `contents: write` and no environment, and are guarded only by an `if` in
+   their own file, so a user with write access could run a copy of the workflow from another branch. The feed key is
+   the second gate (the sign job is behind the `feed` environment, and that environment allows `main` only). This
+   ruleset keeps the branch's history from being rewritten and the branch from being deleted. Creating the branch and
+   fast-forward updates, which is what those workflows do, are not blocked by these two rules
+   (https://docs.github.com/en/rest/repos/rules, read 2026-10-24):
+
+   ```sh
+   gh api -X POST repos/morndo/morndo/rulesets --input - <<'EOF'
+   {"name":"feed branch: no force push, no deletion","target":"branch","enforcement":"active",
+    "conditions":{"ref_name":{"include":["refs/heads/feed"],"exclude":[]}},
+    "rules":[{"type":"non_fast_forward"},{"type":"deletion"}],
+    "bypass_actors":[]}
+   EOF
+   ```
+
+   Expected: the ruleset object, with `"enforcement":"active"` and `"bypass_actors":[]` among its fields.
+
+8. **Name an owner for the trust files in `.github/CODEOWNERS`.** Add this line, with the maintainer's own handle in
+   place of `@owner-account`:
+
+   ```
+   /trust/ @owner-account
+   ```
+
+   The existing main ruleset `main: pull request and code owners` is what turns that line into a required review
+   (https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners,
+   read 2026-10-24). With one maintainer account that the lanes also use, the `/trust/` entry names the same owner as
+   `*`, so it is explicit but not yet a second review. It becomes one once the lanes get a GitHub account of their own
+   without administrator rights (the plan's decision 9, "the real fix"). The check requires the entry either way.
+
+9. **Run the check and keep its output.** It needs the second account's user id (the number `gh api users/<login>
    --jq .id` printed in step 1) and the release App's id (the `app_id` step 5 listed):
 
    ```sh
@@ -161,18 +196,30 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    check runs before every release and every Monday (the manager's Monday card), never inside Actions (the Actions
    token cannot read environment secrets, rulesets or reviewers), and its output is kept as evidence in the run book.
 
+## Running a withdrawal or a promotion
+
+`withdraw.yml` and `promote.yml` are manual. Each run needs two taps: the `withdraw` or `promote` environment, then
+`feed`. Reject or cancel a run left unapproved the same day. Its preparation job read the `feed` branch at that
+moment, and the commit job refuses ("the feed branch moved; run this job again") if a re-sign ran meanwhile.
+`feed.yml`'s Monday re-sign holds the `morndo-feed` concurrency group while it waits for its approval, and the feed
+expires after 14 days: a missed week is safe, two are not. The withdraw workflow takes `morndo-feed` only in its
+commit job. Withdrawing the last Version a channel offers needs the `allow_empty_channel` input.
+
 ## Endpoints used
 
 - https://docs.github.com/en/rest/deployments/environments — environments, protection rules, deployment branch policy
 - https://docs.github.com/en/rest/deployments/branch-policies — list, add and delete deployment branch policies
 - https://docs.github.com/en/rest/repos/rules — rulesets, their conditions, rules and bypass actors
 - https://docs.github.com/en/rest/actions/secrets — repository, environment and organisation secret names
-- https://docs.github.com/en/rest/repos/contents — the workflow files on `main`, read with the raw media type
+- https://docs.github.com/en/rest/repos/contents — the workflow files and `.github/CODEOWNERS` on `main`, read with the raw media type
+- https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners — a CODEOWNERS line is a pattern followed by one or more `@` owners
 
-All read 2026-10-23. What the pages say that these steps rely on: the environment `PUT` takes `reviewers` (up to six,
-`type` and `id`), `prevent_self_review` and a `deployment_branch_policy` whose two booleans are both required and must
-differ; a branch policy takes `name` and `type` (`branch` or `tag`); a ruleset takes `target` `tag`, `enforcement`
-`active`, `conditions.ref_name.include`/`exclude`, rules `creation`, `update` (with `update_allows_fetch_and_merge`) and
-`deletion`, and bypass actors of type `Integration` with `bypass_mode` `always`. The check's own run against the live
-settings (2026-10-24, read-only) is how the shapes it parses were confirmed. Not run: the steps themselves, which
-change settings and belong to the owner or the Mac.
+All read 2026-10-23, and the rules and code owners pages again on 2026-10-24. What the pages say that these steps rely
+on: the environment `PUT` takes `reviewers` (up to six, `type` and `id`), `prevent_self_review` and a
+`deployment_branch_policy` whose two booleans are both required and must differ; a branch policy takes `name` and
+`type` (`branch` or `tag`); a ruleset takes `target` `tag` or `branch`, `enforcement` `active`,
+`conditions.ref_name.include`/`exclude`, rules `creation`, `update` (with `update_allows_fetch_and_merge`), `deletion`
+and `non_fast_forward`, and bypass actors (an empty list means nobody bypasses it; a tag ruleset's actor is an
+`Integration` with `bypass_mode` `always`). A CODEOWNERS pattern such as `/trust/` followed by `@` owners is what the
+code owners rule reviews. The check's own run against the live settings (2026-10-24, read-only) is how the shapes it
+parses were confirmed. Not run: the steps themselves, which change settings and belong to the owner or the Mac.

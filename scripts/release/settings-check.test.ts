@@ -1,11 +1,11 @@
 // scripts/release/check-release-settings.sh proves, read-only, the GitHub settings a release depends on: the
 // environments, their one reviewer (by id) and that administrators cannot bypass them, the main-only branch rules, the
-// tag ruleset on v* that only the release App (by id) can bypass, and where each signing key lives (names only, never a
-// value). The workflows it reads are the ones on main, through the API, and the key secrets are the ones those
-// workflows use in the release, feed, promote and withdraw jobs. These tests run it against a fake gh whose every
-// answer is a JSON fixture shaped as the GitHub API answered it on 2026-10-24, break one setting at a time and expect
-// a FAIL line naming it — or, when two are broken, both lines at once: the check reports every problem, not only the
-// first.
+// tag ruleset on v* that only the release App (by id) can bypass, a feed-branch ruleset nobody can bypass, a CODEOWNERS
+// owner for /trust/, and where each signing key lives (names only, never a value). The workflows and CODEOWNERS it
+// reads are the ones on main, through the API, and the key secrets are the ones those workflows use in the release,
+// feed, promote and withdraw jobs. These tests run it against a fake gh whose every answer is a JSON fixture shaped as
+// the GitHub API answered it on 2026-10-24, break one setting at a time and expect a FAIL line naming it — or, when
+// two are broken, both lines at once: the check reports every problem, not only the first.
 import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -115,7 +115,8 @@ const PAGES_YML = [
 // The good settings set: four environments with exactly the one reviewer (by id), Prevent self-review on and
 // administrator bypass off, every environment allowing the branch main only, release-please with no required reviewer
 // and the branch main only, a tag ruleset only the release App (by id) can bypass, a main ruleset whose bypass the
-// owner can read, the two signing keys as secrets of exactly the environments whose jobs use them, the App's two
+// owner can read, a feed-branch ruleset with no bypass that blocks force pushes and deletion, CODEOWNERS naming an
+// owner for /trust/, the two signing keys as secrets of exactly the environments whose jobs use them, the App's two
 // secrets as secrets of release-please only, and the workflows on main using them.
 function world() {
   const dir = mkdtempSync(join(tmpdir(), "morndo-settings-"));
@@ -127,6 +128,8 @@ function world() {
   writeFileSync(join(bin, "gh"), FAKE_GH, { mode: 0o755 });
   const file = (path: string) => join(ghDir, `${path.split("/").join("__")}.json`);
   const put = (path: string, data: unknown) => writeFileSync(file(path), `${JSON.stringify(data, null, 1)}\n`);
+  // Raw bodies (the workflows, CODEOWNERS) are the file the contents API returns for the raw media type, not JSON.
+  const raw = (path: string, text: string) => writeFileSync(file(path), text);
 
   const environments = [reviewed("release"), reviewed("feed"), reviewed("promote"), reviewed("withdraw"), PAGES, RELEASE_PLEASE];
   put(`repos/${REPO}/environments`, { total_count: environments.length, environments });
@@ -142,6 +145,7 @@ function world() {
   put(`repos/${REPO}/rulesets`, [
     { id: 10, name: "main: pull request and code owners", target: "branch", enforcement: "active" },
     { id: 20, name: "v* tags: only the release App", target: "tag", enforcement: "active" },
+    { id: 30, name: "feed branch: no force push, no deletion", target: "branch", enforcement: "active" },
   ]);
   put(`repos/${REPO}/rulesets/10`, {
     id: 10, name: "main: pull request and code owners", target: "branch", enforcement: "active",
@@ -155,12 +159,19 @@ function world() {
     conditions: { ref_name: { include: ["refs/tags/v*"], exclude: [] } },
     rules: [{ type: "creation" }, { type: "update" }, { type: "deletion" }],
   });
+  put(`repos/${REPO}/rulesets/30`, {
+    id: 30, name: "feed branch: no force push, no deletion", target: "branch", enforcement: "active",
+    bypass_actors: [],
+    conditions: { ref_name: { include: ["refs/heads/feed"], exclude: [] } },
+    rules: [{ type: "non_fast_forward" }, { type: "deletion" }],
+  });
+  raw(`repos/${REPO}/contents/.github/CODEOWNERS?ref=main`, "# one maintainer\n* @owner-account\n/trust/ @owner-account\n");
 
   // The workflows on main, as the contents API answers: the directory listing, then each file as raw text.
   const workflows: Record<string, string> = { "release.yml": RELEASE_YML, "pages.yml": PAGES_YML };
   const publishWorkflows = () => {
     put(`${WORKFLOWS}?ref=main`, Object.keys(workflows).map(name => ({ name, path: `.github/workflows/${name}`, type: "file" })));
-    for (const [name, text] of Object.entries(workflows)) writeFileSync(file(`${WORKFLOWS}/${name}?ref=main`), text);
+    for (const [name, text] of Object.entries(workflows)) raw(`${WORKFLOWS}/${name}?ref=main`, text);
   };
   publishWorkflows();
   const workflow = (name: string, text: string | null) => {
@@ -182,7 +193,7 @@ function world() {
     });
   const run = (args: string[] = [], cwd?: string) =>
     runRaw(["--repo", REPO, "--reviewer-id", String(REVIEWER_ID), "--app-id", String(APP_ID), ...args], cwd);
-  return { dir, edit, remove, run, runRaw, workflow };
+  return { dir, edit, remove, run, runRaw, workflow, put, raw };
 }
 type World = ReturnType<typeof world>;
 
@@ -803,6 +814,85 @@ describe("check-release-settings.sh", () => {
       expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(1);
       expect(r.stdout, name).toContain(`FAIL: job build of build.yml reads key secret ${name} without an environment`);
       expect(r.stdout, name).not.toContain("KNOWN");
+    }
+  });
+
+  it("the feed branch needs an active ruleset with no force push, no deletion and no bypass", () => {
+    const name = "feed branch: no force push, no deletion";
+    const none = "FAIL: no ruleset protects the feed branch (it needs an active branch ruleset on refs/heads/feed with non_fast_forward and deletion rules and no bypass actor)";
+    const line = (what: string) => `FAIL: feed ruleset '${name}' ${what}`;
+    const cases: [string, string, (w: World) => void][] = [
+      ["no feed ruleset", none, w => {
+        w.edit(`repos/${REPO}/rulesets`, (d: { id: number }[]) => d.filter(r => r.id !== 30));
+      }],
+      ["not active", line("is not active"), w => {
+        w.edit(`repos/${REPO}/rulesets/30`, d => ({ ...d, enforcement: "disabled" }));
+      }],
+      ["lacks non_fast_forward", line("lacks non_fast_forward"), w => {
+        w.edit(`repos/${REPO}/rulesets/30`, d => ({ ...d, rules: d.rules.filter((r: { type: string }) => r.type !== "non_fast_forward") }));
+      }],
+      ["lacks deletion", line("lacks deletion"), w => {
+        w.edit(`repos/${REPO}/rulesets/30`, d => ({ ...d, rules: d.rules.filter((r: { type: string }) => r.type !== "deletion") }));
+      }],
+      ["a bypass actor", line("has bypass actors: RepositoryRole:5"), w => {
+        w.edit(`repos/${REPO}/rulesets/30`, d => ({ ...d, bypass_actors: [{ actor_id: 5, actor_type: "RepositoryRole", bypass_mode: "always" }] }));
+      }],
+      ["include refs/heads/*", none, w => {
+        w.edit(`repos/${REPO}/rulesets/30`, d => ({ ...d, conditions: { ref_name: { include: ["refs/heads/*"], exclude: [] } } }));
+      }],
+      ["an exclude entry", line("has an exclude"), w => {
+        w.edit(`repos/${REPO}/rulesets/30`, d => ({ ...d, conditions: { ref_name: { include: ["refs/heads/feed"], exclude: ["refs/heads/other"] } } }));
+      }],
+    ];
+    for (const [what, message, change] of cases) {
+      const w = world();
+      change(w);
+      const r = w.run();
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(failLines(r.stdout), what).toEqual([message]);
+    }
+    const beside = world();
+    beside.edit(`repos/${REPO}/rulesets`, (d: { id: number }[]) => [...d, { id: 31, name: "feed branch: retired", target: "branch", enforcement: "disabled" }]);
+    beside.put(`repos/${REPO}/rulesets/31`, {
+      id: 31, name: "feed branch: retired", target: "branch", enforcement: "disabled",
+      bypass_actors: [],
+      conditions: { ref_name: { include: ["refs/heads/feed"], exclude: [] } },
+      rules: [{ type: "non_fast_forward" }, { type: "deletion" }],
+    });
+    const b = beside.run();
+    expect(b.status, b.stdout + b.stderr).toBe(0);
+    expect(failLines(b.stdout)).toEqual([]);
+    const ok = world().run();
+    expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+    expect(failLines(ok.stdout)).toEqual([]);
+  });
+
+  it("CODEOWNERS must name an owner for /trust/", () => {
+    const path = `repos/${REPO}/contents/.github/CODEOWNERS?ref=main`;
+    const missing = world();
+    missing.remove(path);
+    const a = missing.run();
+    expect(a.status, a.stdout + a.stderr).toBe(1);
+    expect(failLines(a.stdout)).toEqual([`FAIL: cannot read ${path}`]);
+    const noEntry = "FAIL: CODEOWNERS has no entry for /trust/ with an owner";
+    const rejects: [string, string][] = [
+      ["only *", "* @owner\n"],
+      ["no owner", "/trust/\n"],
+      ["commented out", "# /trust/ @owner\n"],
+    ];
+    for (const [what, text] of rejects) {
+      const w = world();
+      w.raw(path, text);
+      const r = w.run();
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(failLines(r.stdout), what).toEqual([noEntry]);
+    }
+    for (const text of ["trust/ @a @b\n", "/trust/* @a\n", "/trust/ @a\n"]) {
+      const w = world();
+      w.raw(path, text);
+      const r = w.run();
+      expect(r.status, `${JSON.stringify(text)}: ${r.stdout}${r.stderr}`).toBe(0);
+      expect(failLines(r.stdout), text).toEqual([]);
     }
   });
 
