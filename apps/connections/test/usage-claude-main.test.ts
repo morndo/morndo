@@ -145,8 +145,11 @@ describe("the collector's one pass (plan 4.4)", () => {
 
 // S6 (plan 4.6): a codex account in the same config. The fake app server a test writes stands in for the binary
 // (selected by MORNDO_CODEX_BIN), its CODEX_HOME is the directory it and its answer live in. Never the real codex.
+const codexDirs: string[] = [];        // every fake app server's directory, removed after each test (CI's temp-dir guard)
+afterEach(() => { for (const d of codexDirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
 function codexServer(mode = "ok", limits: unknown = CODEX_PLUS): { bin: string; dir: string } {
   const dir = mkdtempSync(join(tmpdir(), "morndo-codex-collector-"));
+  codexDirs.push(dir);
   const bin = join(dir, "codex.mjs");
   copyFileSync(FAKE_APP_SERVER, bin);
   writeFileSync(join(dir, "limits.json"), JSON.stringify(limits));
