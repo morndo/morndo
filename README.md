@@ -83,7 +83,7 @@ sh install.sh --role node --channel latest --signers morndo.allowed_signers
 
 `https://github.com/morndo/morndo/releases/latest/download/` is GitHub's newest published release. That is the newest Version of the `latest` channel, not of `stable`, and a withdrawn Release is still there until a newer one is published (a withdrawal marks the Feed; it does not change what GitHub calls latest). To install an exact Version, download both files from `https://github.com/morndo/morndo/releases/download/v<version>/` instead.
 
-The key line above and the one in SECURITY.md are served from the same repository, so their agreement shows that the two copies match, not that the key is genuine. `gh attestation verify install.sh --repo morndo/morndo` is the independent check, because it is GitHub's own build provenance for the file: for a machine you rely on, run it too; it is not optional.
+The key line above and the one in SECURITY.md are served from the same repository, so their agreement shows that the two copies match, not that the key is genuine. `gh attestation verify install.sh --repo morndo/morndo --signer-workflow morndo/morndo/.github/workflows/release.yml@refs/heads/main` is the independent check, because it is GitHub's own build provenance for the file (`--signer-workflow` pins the release workflow on `main`; without it `gh` accepts an attestation made by any workflow of the repository): for a machine you rely on, run it too; it is not optional.
 
 ### Update
 

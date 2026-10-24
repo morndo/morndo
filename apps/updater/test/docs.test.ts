@@ -124,7 +124,24 @@ describe("install and update documentation", () => {
     expect(readme).toMatch(/withdrawn Release is still there until a newer one is published/);
     expect(readme).not.toContain("installs the Channel's Version");
     expect(readme).toMatch(/independent check[^.]*not optional/);
-    expect(read("SECURITY.md")).toMatch(/gh attestation verify install\.sh[^.]*independent check[^.]*not optional/);
+    expect(read("SECURITY.md")).toMatch(/gh attestation verify install\.sh[\s\S]*?independent check[^.]*not optional/);
+  });
+
+  it("every gh attestation verify in the docs pins the workflow the release job uses", () => {
+    const release = read(".github/workflows/release.yml");
+    const tail = /--signer-workflow "\$\{GITHUB_REPOSITORY\}(\/\.github\/workflows\/release\.yml@[^"]+)"/.exec(release)?.[1];
+    expect(tail, "release.yml verifies with --signer-workflow").toBeDefined();
+    const signer = `--signer-workflow morndo/morndo${tail}`;
+    let seen = 0;
+    for (const file of ["README.md", "SECURITY.md", "docs/design/updates/manual-qa.md"]) {
+      for (const line of read(file).split("\n")) {
+        for (const part of line.split("gh attestation verify").slice(1)) {
+          seen += 1;
+          expect(part.slice(0, part.indexOf("`") === -1 ? undefined : part.indexOf("`")), `${file}: ${line}`).toContain(signer);
+        }
+      }
+    }
+    expect(seen).toBeGreaterThanOrEqual(4);
   });
 
   it("the README's Status line does not call release verification unbuilt", () => {
