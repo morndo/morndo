@@ -56,7 +56,7 @@ import type { LaneRegistry } from "../application/lane-registry.ts";
 import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
 import type { Router, Target } from "../application/router.ts";
 import type { ProtectedIdentity } from "../application/protected-identity.ts";
-import { redactEvent, redactPanes, visibleLaneEvents, visibleLaneWatch, visibleRuns, workerDeliveryCancelVerdict, workerDeliveryVerdict, workerOpVerdict, type Hide, type WorkerLook, type WorkerScope } from "../application/worker-scope.ts";
+import { redactAlert, redactDelivery, redactEvent, redactPanes, visibleLaneEvents, visibleLaneWatch, visibleRuns, workerDeliveryCancelVerdict, workerDeliveryVerdict, workerOpVerdict, type Hide, type WorkerLook, type WorkerScope } from "../application/worker-scope.ts";
 import type { Rollouts } from "../application/rollouts.ts";
 import type { Runs } from "../application/runs.ts";
 import type { Audit } from "./audit.ts";
@@ -266,7 +266,10 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const lane = d.lanes.get(second ?? "");
       return lane ? json(res, 200, lane) : json(res, 404, { error: "no_such_lane" });
     }
-    if (method === "GET" && s.length === 1 && first === "alerts") return json(res, 200, d.audit.recentAlerts());
+    if (method === "GET" && s.length === 1 && first === "alerts") {
+      const alerts = d.audit.recentAlerts();
+      return json(res, 200, scope.kind === "worker" ? alerts.map(a => redactAlert(a, hide)) : alerts);
+    }
     if (method === "GET" && s.length === 1 && first === "jobs") {
       const q = jobsQuery(req.url);
       const jobs = d.jobs.list(q);
@@ -433,11 +436,13 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const lane = q.get("lane") || undefined;
       const state = q.get("state") || undefined;
       if (state !== undefined && !STATES.has(state)) throw new HttpError(400, `state must be one of ${[...STATES].join(", ")}`);
-      return json(res, 200, { deliveries: d.deliveries.list({ ...(lane === undefined ? {} : { lane }), ...(state === undefined ? {} : { state: state as DeliveryState }) }) });
+      const deliveries = d.deliveries.list({ ...(lane === undefined ? {} : { lane }), ...(state === undefined ? {} : { state: state as DeliveryState }) });
+      return json(res, 200, { deliveries: scope.kind === "worker" ? deliveries.map(x => redactDelivery(x, hide)) : deliveries });
     }
     if (method === "GET" && s.length === 2 && first === "deliveries") {
       const one = d.deliveries.get(second ?? "");
-      return one ? json(res, 200, one) : json(res, 404, { error: "no_such_delivery" });
+      if (!one) return json(res, 404, { error: "no_such_delivery" });
+      return json(res, 200, scope.kind === "worker" ? { ...one, delivery: redactDelivery(one.delivery, hide) } : one);
     }
     if (method === "POST" && s.length === 3 && first === "deliveries" && third === "cancel") {
       if (scope.kind === "worker") {

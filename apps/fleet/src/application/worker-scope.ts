@@ -200,13 +200,54 @@ export function redactPanes<T extends Pane>(panes: readonly T[], hide: Hide): T[
   });
 }
 
-// An inventory event loses the protected panes' words. A run or lane event of a protected lane is dropped. Every other
-// event is the same object.
+// A delivery to a protected lane (named, by worker ID, or by a protected session) keeps its id, node, target and state
+// and loses the session it bound and the draft it stashed. Any other delivery is the same object.
+export function redactDelivery<T extends { target: { lane: string } | { workerId: string }; sessionId?: string; stashed?: unknown }>(d: T, hide: Hide): T {
+  const target = d.target;
+  const protectedTarget = "lane" in target ? hide.lane(target.lane) : hide.worker(target.workerId);
+  if (!protectedTarget && !sessionHidden(d.sessionId, hide)) return d;
+  const out: Record<string, unknown> = { ...d };
+  delete out.sessionId;
+  delete out.stashed;
+  return out as T;
+}
+
+// The alert a stashed draft raised carries the path of its copy and its length: for a protected lane they go. Any other
+// alert is the same object.
+export function redactAlert<T extends { kind: string; detail: Record<string, unknown> }>(a: T, hide: Hide): T {
+  if (a.kind !== "draft_stashed") return a;
+  const lane = named(a.detail.lane);
+  const workerId = named(a.detail.workerId);
+  if (!((lane !== null && hide.lane(lane)) || (workerId !== null && hide.worker(workerId)))) return a;
+  const detail = { ...a.detail };
+  delete detail.copy;
+  delete detail.chars;
+  return { ...a, detail };
+}
+
+// An inventory event loses the protected panes' words. A run, lane or usage event of a protected lane is dropped, a
+// delivery or a stash alert of one loses its session and its draft. Every other event is the same object.
 export function redactEvent<E extends { t: string; node: string; body: unknown }>(e: E, hide: Hide): E | null {
   if (e.t === "inventory") {
     const body = asRecord(e.body);
     if (body === null || !Array.isArray(body.panes)) return e;
     return { ...e, body: { ...body, panes: redactPanes(body.panes as Pane[], hide) } };
+  }
+  if (e.t === "delivery") {
+    const body = asRecord(e.body);
+    if (body === null || typeof body.target !== "object" || body.target === null) return e;
+    return { ...e, body: redactDelivery(body as { target: { lane: string } | { workerId: string } }, hide) };
+  }
+  if (e.t === "alert") {
+    const body = asRecord(e.body);
+    if (body === null || typeof body.kind !== "string") return e;
+    const detail = asRecord(body.detail);
+    return detail === null ? e : { ...e, body: redactAlert({ ...body, kind: body.kind, detail }, hide) };
+  }
+  if (e.t === "usage") {
+    const body = asRecord(e.body);
+    if (body !== null && (hide.lane(named(body.lane)) || hide.lane(named(body.window)) || sessionHidden(body.sessionId, hide))) return null;
+    return e;
   }
   if (e.t === "run" || e.t === "lane") {
     const body = asRecord(e.body);
