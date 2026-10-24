@@ -24,7 +24,7 @@ describe("board proofs (migration 28)", () => {
     migrate(db, MIGRATIONS.filter(m => m.version <= 27));       // a hub with usage detection, before proofs
     expect(version(db)).toBe(27);
     const before = tables(db);
-    migrate(db);                                                // the newer hub opens it as it is
+    migrate(db, MIGRATIONS.filter(m => m.version <= 28));       // the newer hub opens it as it is
     expect(version(db)).toBe(28);
     expect(tables(db)).toEqual([...before, "board_proofs"].sort());
     const info = db.prepare("PRAGMA table_info(board_proofs)").all() as { name: string; pk: number }[];
