@@ -8,7 +8,7 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { dirname, isAbsolute, join } from "node:path";
 import {
   compareVersions, formatVersion, parseVersion, rollbackRestores, DEFAULT_SOAK_MINUTES,
-  type Channel, type Platform, type ProtocolRange, type UpdateService, type Version,
+  type Channel, type Platform, type ProtocolRange, type UpdateService, type Version, type Window,
 } from "@morndo/domain";
 import { ATTEMPT_ID, KeySetSchema, ManifestSchema, UpdateStatusSchema } from "@morndo/protocol";
 import { ApplyService, type ApplyOutcome } from "./application/apply-service.ts";
@@ -18,11 +18,13 @@ import { doctor } from "./application/doctor-service.ts";
 import { FEED_CHECK_MS, FRESH_VIEW_MS, applyUnitGate, controlPlaneSkew, deferSentence, nodeGate, nodeToGate } from "./application/fleet-follow.ts";
 import type { RecoverOutcome } from "./application/recovery-service.ts";
 import { RecoveryService } from "./application/recovery-service.ts";
+import { planSettings } from "./application/settings-commands.ts";
 import { formatStatus, readStatus } from "./application/status-service.ts";
 import type {
-  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, UpdateHistory,
+  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, SettingsChange,
+  UpdateHistory,
 } from "./application/ports.ts";
-import { ConfigFile, ConfigInvalid } from "./adapters/config-file.ts";
+import { ConfigBusy, ConfigFile, ConfigInvalid, ConfigWriteFailed } from "./adapters/config-file.ts";
 import { ApplyingFileMarker } from "./adapters/applying-file.ts";
 import { HttpsArtifacts } from "./adapters/artifacts-https.ts";
 import { SqliteBackup } from "./adapters/backup-sqlite.ts";
@@ -65,8 +67,32 @@ const USAGE = `usage: morndo-update update [--yes] [--now] [--detach] [--staged 
        morndo-update update --rollback --preview --json   what a rollback would drop, as JSON; writes and starts nothing
        morndo-update update apply --version <v> [--attempt <id>]   one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
+       morndo-update update --channel stable|latest set the channel
+       morndo-update update auto apply|stage|off    set the mode
+       morndo-update update pin <version>           hold this machine at a Version
+       morndo-update update unpin                   remove the pin
+       morndo-update update window <HH:MM-HH:MM>|any   local hours for automatic applies, or any
        morndo-update install --role control-plane|node [--channel stable|latest] [--force]
        morndo-update doctor [--json]                re-verify the installed tree`;
+
+// A settings write's own failures (§8.4): a file that is not the settings shape, a permission to fix, or a lock
+// another command still holds. Anything else propagates. null: this error is not one of those.
+const settingsWriteCode = (error: unknown, io: { err(s: string): void }): number | null => {
+  if (error instanceof ConfigInvalid) { io.err(`${error.message}\n`); return EXIT_CONFIG; }
+  if (error instanceof ConfigWriteFailed) {
+    io.err(`${error.message}\n`);
+    return error.code === "EACCES" || error.code === "EPERM" || error.code === "EROFS" ? EXIT_CONFIG : EXIT_TEMPFAIL;
+  }
+  if (error instanceof ConfigBusy) { io.err(`${error.message}\n`); return EXIT_TEMPFAIL; }
+  return null;
+};
+// UpdateConfigSchema's window (§8.3): 24-hour, zero-padded. A window past midnight (22:00-06:00) matches.
+const WINDOW_TEXT = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+const windowOf = (text: string): Window => {
+  const [start, end] = text.split("-");
+  const minutes = (clock: string): number => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
+  return { start: minutes(start!), end: minutes(end!) };
+};
 // §4.7: a machine whose services no manager runs — no systemd user manager, no launchd — stages only (§6.1's
 // step 1 without step 2): --check works, nothing applies, nothing runs.
 const NO_MANAGER = "no service manager runs here (neither systemd nor launchd): this machine stages only; --check still works";
@@ -234,6 +260,7 @@ export async function runUpdater(
     | { cmd: "rollback"; yes: boolean; detach: boolean; preview: boolean; typed?: string }
     | { cmd: "apply-unit"; version: string; attempt?: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
+    | { cmd: "settings"; change: SettingsChange }
     | { cmd: "install"; role: "control-plane" | "node"; channel: Channel; force: boolean };
   const usage = (): number => { io.err(`${USAGE}\n`); return EXIT_USAGE; };
   let parsed: Parsed;
@@ -352,7 +379,34 @@ export async function runUpdater(
         // "${FOO}" is one argument), so an empty value reaches here as "--attempt=" and is judged below, by name
         parsed = { cmd: "apply-unit", version: flags[2]!, attempt: flags[3]!.slice("--attempt=".length) };
       } else return usage();
-    } else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
+    } else if (flags[0] === "--channel" && flags.length === 2 && (flags[1] === "stable" || flags[1] === "latest")) {
+      parsed = { cmd: "settings", change: { kind: "channel", channel: flags[1] } };
+    } else if (flags[0] === "--channel") return usage();
+    else if (flags[0] === "auto" && flags.length === 2 && (flags[1] === "apply" || flags[1] === "stage" || flags[1] === "off")) {
+      parsed = { cmd: "settings", change: { kind: "mode", mode: flags[1] } };
+    } else if (flags[0] === "auto") return usage();
+    else if (flags[0] === "pin" && flags.length === 2) {
+      const version = parseVersion(flags[1] ?? "");
+      if (version === null) {
+        io.err(`${JSON.stringify(flags[1])} is not a Version\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "settings", change: { kind: "pin", version } };
+    } else if (flags[0] === "pin") return usage();
+    else if (flags[0] === "unpin" && flags.length === 1) parsed = { cmd: "settings", change: { kind: "unpin" } };
+    else if (flags[0] === "unpin") return usage();
+    else if (flags[0] === "window" && flags.length === 2 && flags[1] === "any") {
+      parsed = { cmd: "settings", change: { kind: "windowAny" } };
+    } else if (flags[0] === "window" && flags.length === 2 && WINDOW_TEXT.test(flags[1] ?? "")) {
+      const window = windowOf(flags[1]!);
+      // Equal ends wrap, in the domain, to every minute of the day (windowContains). That is `window any`.
+      if (window.start === window.end) {
+        io.err(`a window whose start equals its end is ambiguous (the domain reads it as all day); use "window any" for any hour\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "settings", change: { kind: "window", window } };
+    } else if (flags[0] === "window") return usage();
+    else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
     else if (flags.includes("--status") && flags.every(f => f === "--status" || f === "--json")) parsed = { cmd: "status" };
     else return usage();
   }
@@ -379,6 +433,26 @@ export async function runUpdater(
     if (!(error instanceof ConfigInvalid)) throw error;
     io.err(`${error.message}\n`);
     return EXIT_CONFIG;
+  }
+
+  // The settings commands (§8.1, §8.3): the file was read once, above. They edit that file and nothing else — no
+  // service manager, no feed, no store. A switch stops updates, not this edit; the sentence says it still holds.
+  if (parsed.cmd === "settings") {
+    // Read-only: the current link, when this updater owns the install. No store, no manager, no feed.
+    const currentText = new DirsInstaller({ releases: paths.releases }).layout().current;
+    const running = currentText === null ? null : parseVersion(currentText);
+    const plan = planSettings(settings.read(), parsed.change, {
+      disableUpdates: env.MORNDO_DISABLE_UPDATES === "1",
+      disableAutoUpdate: env.MORNDO_DISABLE_AUTOUPDATE === "1",
+    }, running);
+    try { settings.change(plan.change); }
+    catch (error) {
+      const code = settingsWriteCode(error, io);
+      if (code === null) throw error;
+      return code;
+    }
+    io.out(`${plan.sentence}\n`);
+    return EXIT_OK;
   }
 
   // The store is every command's (§5): the state directory is the store's own, private before anything lands in it.
@@ -1101,12 +1175,17 @@ export async function runUpdater(
     installer.swap({ current: versionText, previous: null });
     installer.setGood(versionText);
     // The store's first words: this Version committed, the tree's key set trusted. The channel goes into the
-    // settings only when the file is absent — a user's config is never rewritten (§11.6).
+    // settings only when the file is absent — a user's config is never rewritten (§11.6) — through the same
+    // locked write a settings command uses.
     store.recordCommitted(versionText, systemClock.now(), null);
     store.saveTrust({ keySet: keySet.data, highestFeedSeq: { stable: 0, latest: 0 } });
     if (!existsSync(paths.config)) {
-      mkdirSync(dirname(paths.config), { recursive: true, mode: 0o700 });
-      writeFileSync(paths.config, `${JSON.stringify({ channel: parsed.channel }, null, 2)}\n`, { mode: 0o600 });
+      try { settings.change({ kind: "channel", channel: parsed.channel }); }
+      catch (error) {
+        const code = settingsWriteCode(error, io);
+        if (code === null) throw error;
+        return code;
+      }
     }
     // The launchers the tree ships, linked into ~/.local/bin through `current`, so an update moves them too.
     for (const name of launchers) {

@@ -95,17 +95,6 @@ describe("the command line (§8.1, §8.4)", () => {
     }
   });
 
-  it("the settings step's words — --channel, pin, auto — are usage and exit 64 (§8.1)", async () => {
-    for (const argv of [
-      ["update", "--channel", "latest"], ["update", "pin", "0.2.0"], ["update", "auto", "apply"],
-    ]) {
-      const r = await run(argv);
-      expect(r.code, JSON.stringify(argv)).toBe(64);
-      expect(r.err, JSON.stringify(argv)).toMatch(/usage:/);
-      expect(r.err, JSON.stringify(argv)).not.toMatch(/arrive with the settings step/);
-    }
-  });
-
   it("the apply commands answer on a checkout as the check does: not_ours, exit 78 (RL14)", async () => {
     for (const argv of [["update"], ["update", "--now"], ["update", "--rollback"]]) {
       const r = await run(argv);
