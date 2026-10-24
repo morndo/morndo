@@ -251,7 +251,6 @@ export class CheckService {
 
       // Already staged and installed: nothing is fetched (§6.1's step 1 decides before step 2 downloads).
       if (store.versionRecord(best.text) !== null && installer.has(best.text)) {
-        if (ask?.to !== undefined) store.retireStagedAbove(best.text);
         state.write({ state: "staged", version: layout.current, target: best.text, at: clock.now() });
         return finish({ kind: "staged", version: best.text, already: true }, "already staged", best.text);
       }
@@ -304,7 +303,6 @@ export class CheckService {
         const findings = await installer.verifyTree(best.text, artifact.filesSha256);
         if (findings.length === 0) {
           store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now(), manifest: manifestText });
-          if (ask?.to !== undefined) store.retireStagedAbove(best.text);
           state.write({ state: "staged", version: layout.current, target: best.text, at: clock.now() });
           return finish({ kind: "staged", version: best.text, already: true },
             "adopted a verified directory left without its record", best.text);
@@ -344,7 +342,6 @@ export class CheckService {
       // §6.1 step 6: promote, remember, and let the download go.
       installer.promote(best.text, { manifestSha256, filesSha256: artifact.filesSha256, at: clock.now() });
       store.recordStaged({ version: best.text, manifestSha256, filesSha256: artifact.filesSha256, at: clock.now(), manifest: manifestText });
-      if (ask?.to !== undefined) store.retireStagedAbove(best.text);
       state.write({ state: "staged", version: layout.current, target: best.text, at: clock.now() });
       return finish({ kind: "staged", version: best.text, already: false }, "verified and staged");
     } catch (error) {

@@ -195,7 +195,9 @@ export function admit(p: {
   if (machine.badVersions.some(bad => equalVersions(bad, target))) return err("bad_here");
   // The feed's word and the holds — a pin (RL14), a withdrawal, a halt (RL12) — guard moving TO a Version. They
   // never guard moving away from one: the principal's `--rollback` (§8.1) is the escape from exactly a halted,
-  // pinned or withdrawn Version, back to the one already on disk, and RL12 halts automatic applies only.
+  // pinned or withdrawn Version, back to the one already on disk. A named `--to` is refused for a halted
+  // Version, because RL12's halt is lifted by the principal resuming the Rollout on the control plane, not by
+  // one machine naming the Version; `--rollback` (moving away) is never held by it.
   if (ask.kind !== "rollback") {
     if (machine.settings.pin !== null && !equalVersions(target, machine.settings.pin)) return err("pinned");
     if (p.offered !== null && p.offered.feed.withdrawn.some(w => { const q = parseVersion(w); return q !== null && equalVersions(q, target); }))

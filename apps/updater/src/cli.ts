@@ -118,7 +118,7 @@ const toSentence = (o: CheckOutcome & { kind: "skipped" }, ctx: ToLine): string 
     case "bad_here": return `${v} failed on this machine before and is not tried again`;
     case "downgrade_refused": return `${v} is lower than the running ${ctx.current}; morndo update --rollback goes back to the previous Version`;
     case "below_committed": return `${v} is at or below ${ctx.highestCommitted ?? ""}, the highest Version this machine has run; an apply never takes one (RL2); morndo update --rollback goes back one Version`;
-    case "halted": return `the rollout of ${v} is halted`;
+    case "halted": return `the rollout of ${v} is halted (RL12): it is resumed on the control plane, not by naming it here`;
     case "not_newer": return `Up to date: ${v} is already running.`;
     default: return `Skipped: ${o.reason}. Nothing was staged.`;
   }
@@ -731,15 +731,13 @@ export async function runUpdater(
       if (code !== EXIT_OK) return printOutcome(line, code);           // refused, unreachable, not ours: as the check answered
       if (json) io.out(`${JSON.stringify({ outcome })}\n`);
       else io.out(`${line}\n`);
-      const staged = store.staged();
+      let staged = store.staged();
       // Already running, or a skip that exits 0: nothing of some other Version starts.
       if (parsed.to !== undefined && outcome.kind !== "staged") return EXIT_OK;
-      // The pressed Version (R3), and `--to`'s own: what stands staged must be the named one, or nothing starts.
-      // The check above may have staged a newer Release between the screen's look and the press; a `--to` that
-      // named another Version retires that newer record as it stages, and this guard says both if it did not.
-      const pressed = parsed.staged ?? (parsed.to !== undefined && outcome.kind === "staged" ? outcome.version : undefined);
-      if (pressed !== undefined && (staged === null || staged.version !== pressed)) {
-        io.err(`what stands staged is ${staged?.version ?? "nothing"}, not ${pressed}: nothing was started (--staged names the Version the screen pressed)\n`);
+      // The pressed Version (R3): what stands staged must be the one the screen named, or nothing starts.
+      // The check above may have staged a newer Release between the screen's look and the press.
+      if (parsed.staged !== undefined && (staged === null || staged.version !== parsed.staged)) {
+        io.err(`what stands staged is ${staged?.version ?? "nothing"}, not ${parsed.staged}: nothing was started (--staged names the Version the screen pressed)\n`);
         return EXIT_TEMPFAIL;
       }
       if (staged === null || !installer.has(staged.version)) return EXIT_OK;   // up to date: nothing to apply
@@ -755,6 +753,17 @@ export async function runUpdater(
         if (answer !== "y" && answer !== "yes") {
           io.out("Not applying. The staged Version stays; morndo update --yes applies it, or the tick's window does.\n");
           return EXIT_OK;
+        }
+      }
+      // Retiring a newer staged record is part of applying the named Version: it waits until the principal has
+      // confirmed (`--yes`, or yes at the prompt). A `--check`, and a no above, leave that record where it stood.
+      // What stands staged must then be the named one, or nothing starts.
+      if (parsed.to !== undefined && outcome.kind === "staged") {
+        store.retireStagedAbove(outcome.version);
+        staged = store.staged();
+        if (staged === null || staged.version !== outcome.version) {
+          io.err(`what stands staged is ${staged?.version ?? "nothing"}, not ${outcome.version}: nothing was started (--staged names the Version the screen pressed)\n`);
+          return EXIT_TEMPFAIL;
         }
       }
       // The attempt the unit runs under (§5.4): the control plane mints its own; a node takes the one the fleet

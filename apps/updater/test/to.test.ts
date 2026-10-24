@@ -35,7 +35,7 @@ type World = {
   feed: FakeFeed;
   artifacts: FakeArtifacts;
   fleet: FakeFleetView;
-  run(argv: string[], env?: Record<string, string | undefined>): Promise<{ code: number; out: string; err: string }>;
+  run(argv: string[], env?: Record<string, string | undefined>, io?: { tty?: boolean; answer?: string }): Promise<{ code: number; out: string; err: string }>;
 };
 
 // Version A installed and current; the channel feed lists `versions` (signed, served). A control plane unless
@@ -82,10 +82,11 @@ async function world(o: { versions: string[]; running?: UpdateService[]; withdra
   const probe = new FakeProbe({ tape, die: new Die(), currentOf: () => installer.layout().current });
   return {
     home, paths, store, services, feed, artifacts, fleet,
-    run: async (argv, env = {}) => {
+    run: async (argv, env = {}, ioOpts?: { tty?: boolean; answer?: string }) => {
       const out: string[] = [], err: string[] = [];
       const code = await runUpdater(argv, { HOME: home, PATH: process.env.PATH, ...env }, {
         out: s => out.push(s), err: s => err.push(s),
+        ...(ioOpts?.tty === true ? { tty: true, ask: async () => ioOpts.answer ?? "" } : {}),
       }, { services, probe, feed, artifacts, fleet });
       return { code, out: out.join(""), err: err.join("") };
     },
@@ -210,6 +211,8 @@ describe("morndo update --to <version> (§8.1, §8.4, RL11)", () => {
     const r = await w.run(["update", "--to", "0.2.0", "--check"]);
     expect(r.code).toBe(75);
     expect(r.err).toContain("the rollout of 0.2.0 is halted");
+    expect(r.err).toContain("RL12");
+    expect(r.err).toContain("resumed on the control plane");
     expect(w.store.staged()).toBeNull();
   });
 
@@ -261,6 +264,28 @@ describe("morndo update --to <version> (§8.1, §8.4, RL11)", () => {
     expect(r.err).toContain("MORNDO_DISABLE_UPDATES");
     expect(r.err).not.toMatch(/RL11|above the control plane/);
     expect(node.store.staged()).toBeNull();
+  });
+
+  it("--to --check stages the named Version and leaves a newer staged record where it was", async () => {
+    const w = await world({ versions: ["0.2.0", "0.3.0"] });
+    const earlier = await w.run(["update", "--check"]);
+    expect(earlier.code, earlier.err).toBe(0);
+    expect(w.store.staged()?.version).toBe("0.3.0");
+    const to = await w.run(["update", "--to", "0.2.0", "--check"]);
+    expect(to.code, to.err).toBe(0);
+    expect(w.store.versionRecord("0.2.0")).not.toBeNull();
+    expect(w.store.staged()?.version).toBe("0.3.0");
+  });
+
+  it("a --to run answered no leaves a newer staged record where it was", async () => {
+    const w = await world({ versions: ["0.2.0", "0.3.0"] });
+    const earlier = await w.run(["update", "--check"]);
+    expect(earlier.code, earlier.err).toBe(0);
+    expect(w.store.staged()?.version).toBe("0.3.0");
+    const r = await w.run(["update", "--to", "0.2.0"], {}, { tty: true, answer: "n" });
+    expect(r.code, r.err).toBe(0);
+    expect(w.store.staged()?.version).toBe("0.3.0");
+    expect(w.services.calls.filter(c => c.op === "runApply")).toEqual([]);
   });
 
   it("a --to run applies only the Version it names, even when a higher one stood staged", async () => {
