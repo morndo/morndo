@@ -316,12 +316,14 @@
     }
   }
 
-  // Where a notification's click opens the app (phase F): ?view=decisions or ?view=activity, then a clean address. The
-  // service worker navigates an open window there too, which loads the page again.
+  // Where a notification's click opens the app (phase F): ?view=decisions, ?view=activity or ?view=dashboard (Home's
+  // own name, where a usage push goes), then a clean address. The service worker navigates an open window there too,
+  // which loads the page again.
   function openFromAddress() {
     const v = new URLSearchParams(location.search).get("view");
     if (v === "decisions") showRight();
     else if (v === "activity" || v === "alerts") view = "activity";            // the fleet's alerts are on Activity
+    else if (v === "dashboard") view = "dashboard";
     if (v) history.replaceState(history.state, "", location.pathname);
   }
 
@@ -396,8 +398,8 @@
               alerts={feed.alerts} seenAt={feed.reads[SEEN_MARK] ?? 0} onSeen={at => feed.markRead(SEEN_MARK, at)} />
           {:else if view === "dashboard"}
             <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane}
-              notices={feed.usageNotices} onForget={(account, source, node) => void forgetSource(account, source, node).catch(() => {})}
-              onClearSeat={account => void clearSeat(account).catch(() => {})} />
+              notices={feed.usageNotices} onForget={(account, source, node) => forgetSource(account, source, node)}
+              onClearSeat={account => clearSeat(account)} />
           {:else if view === "board"}
             <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} merged={feed.boardMerged} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
               onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />

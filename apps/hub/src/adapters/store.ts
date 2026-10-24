@@ -687,8 +687,9 @@ export class Store {
       .map(r => JSON.parse(r.text as string) as UsageNotice);
   }
   saveUsageNotice(n: UsageNotice, signature: string) {
-    this.db.prepare("INSERT OR IGNORE INTO usage_notices (id, account, kind, signature, at, text) VALUES (?, ?, ?, ?, ?, ?)")
+    const r = this.db.prepare("INSERT OR IGNORE INTO usage_notices (id, account, kind, signature, at, text) VALUES (?, ?, ?, ?, ?, ?)")
       .run(n.id, n.account, n.kind, signature, n.at, JSON.stringify(n));
+    return r.changes === 1;             // false: a repeat the signature already covered (S4, who hears of a notice)
   }
   lastUsageNoticeSignature(account: string, kind: string): string | null {
     const r = this.db.prepare("SELECT signature FROM usage_notices WHERE account = ? AND kind = ? ORDER BY at DESC, rowid DESC LIMIT 1").get(account, kind) as Row | undefined;

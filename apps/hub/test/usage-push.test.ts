@@ -29,7 +29,9 @@ const reading = (o: { plan?: string; capturedAt?: number; windows?: { id: string
     ...(o.failure === undefined ? {} : { failure: o.failure }),
   }, "seat-a", { kind: "worker", name: "builder", token: "t-1" });
 const fiveHour = (n: number, at = now + 2 * HOUR) => ({ id: "five_hour", used_percent: n, resets_at: Math.floor(at / 1000), length_mins: 300 });
-const settle = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); await notifications.settled(); };
+// The hub's clock goes with the fake timers: the NotificationService's debounce only hands a raise to the sender once
+// its own clock is past the second (a fixed `now` would starve it for ever).
+const settle = async (ms: number) => { now += ms; await vi.advanceTimersByTimeAsync(ms); await notifications.settled(); };
 
 beforeEach(() => {
   vi.useFakeTimers();

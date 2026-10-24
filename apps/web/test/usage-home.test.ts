@@ -13,7 +13,7 @@ const src = (o: Partial<SourceView> = {}): SourceView => ({
   source: "app-server", node: null, state: "available", since: null, asOf: null, reason: null, fix: null, hint: null, ...o,
 });
 const acc = (sources?: SourceView[]): AccountUsage => ({
-  account: "seat-a", reportedAt: T, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, sessions: [],
+  account: "seat-a", reportedAt: T, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: null, sessions: [],
   ...(sources === undefined ? {} : { sources }),
 });
 const seat = (o: Partial<SeatView> = {}): SeatView => ({ state: "out", why: "usage_limit", since: T, backAt: T + 30 * MIN, owner: "derived", by: "a source", fix: null, ...o });

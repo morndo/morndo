@@ -103,7 +103,8 @@ export class NotificationService {
   // A usage notice the hub itself wrote (S4, plan 4.4): one more is counted, and one Notification is raised — the
   // debounce and the reset-on-send work as `linked` does.
   usage() {
-    throw new Error("not implemented");               // S4 round 2
+    this.#usageNotices++;
+    if (raises({ kind: "usage" })) this.#raise("usage");
   }
 
   // What each device's app says about the principal using it (N3); a connection that closes says nothing any more.

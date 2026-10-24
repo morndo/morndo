@@ -41,8 +41,12 @@ export function notificationFor(data: unknown): PushView {
       tag: "morndo-linked", url: "/devices",
     };
     case 4:
-      // S4 (plan 4.4): a count of usage notices. Round 1 stub: the unreadable-payload view, until the words land.
-      return { title: "Morndo", body: "Something needs you.", tag: "morndo", url: "/" };
+      // S4 (plan 4.4): a count of usage notices, Home's own view. A hub from before the count sends none: one.
+      return {
+        title: many(Math.max(p.usage, 1), "Usage needs a look", "# usage changes need a look"),
+        body: "Open Morndo to see what changed.",
+        tag: "morndo-usage", url: "/?view=dashboard",
+      };
     default: return {
       title: many(p.alerts, "Your fleet has an alert", "Your fleet has # alerts"),
       body: "Open Morndo to see what happened.",

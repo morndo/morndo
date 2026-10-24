@@ -95,6 +95,9 @@ export class UsageService {
   #leaseBook: LeaseBook;
   #laneNode: (lane: string) => string | null;
   #onNotice: ((kind: NoticeKind) => void) | null;
+  // Notices newly written inside a transaction that has not committed yet (S4): told only once the commit is a fact,
+  // and dropped whole if the transaction rolls back.
+  #told: NoticeKind[] = [];
 
   constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile>; leases?: LeaseBook; laneNode?: (lane: string) => string | null; onNotice?: (kind: NoticeKind) => void }) {
     this.#store = p.store;
@@ -342,7 +345,7 @@ export class UsageService {
     if (a.action === "cleared") {
       const prev = this.#store.usagePoolSeats().find(s => s.account === a.account)?.record ?? null;
       if (prev === null) return { ok: true };
-      this.#store.atomically(() => {
+      this.#tx(() => {
         this.#store.deleteUsagePoolSeat(a.account);
         this.#note(a.account, "back", `pool|back|${prev.markedAt}`, backNoticeText(a.account, "the pool"));
       });
@@ -357,7 +360,7 @@ export class UsageService {
     const prev = this.#store.usagePoolSeats().find(s => s.account === a.account)?.record ?? null;
     // One seat notice when the state or the why differs from what is already there; no seat yet is a change too.
     const changed = prev === null || prev.state !== record.state || prev.why !== record.why;
-    this.#store.atomically(() => {
+    this.#tx(() => {
       this.#store.saveUsagePoolSeat(a.account, record);
       if (changed) this.#note(a.account, "seat", `pool|${record.state}|${record.why}|${at}`, seatNoticeText(a.account, record));
     });
@@ -373,7 +376,7 @@ export class UsageService {
     const derived = owner === undefined || owner === "derived" ? this.#store.usageSeats().find(s => s.account === account)?.record ?? null : null;
     if (pool === null && derived === null) return false;
     const now = this.#now();
-    this.#store.atomically(() => {
+    this.#tx(() => {
       if (pool !== null) this.#store.deleteUsagePoolSeat(account);
       if (derived !== null) this.#store.deleteUsageSeat(account);
       this.#note(account, "back", `cleared|${now}`, backNoticeText(account, "the principal"));
@@ -467,7 +470,7 @@ export class UsageService {
     };
     const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
     const seen = watchPlan(planWatch, fact, capturedAt);
-    this.#store.atomically(() => {
+    this.#tx(() => {
       if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", source, seen.watch);
       for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
     });
@@ -478,7 +481,7 @@ export class UsageService {
     if (seen.told.some(c => c.kind === "name" || c.kind === "account")) {
       const marked = this.#store.usageSeat(account)?.record ?? null;
       if (marked !== null && marked.owner === "derived" && marked.markedAt <= capturedAt) {
-        this.#store.atomically(() => {
+        this.#tx(() => {
           this.#store.deleteUsageSeat(account);
           this.#note(account, "back", `reset|${capturedAt}`, seatResetNoticeText(account));
         });
@@ -494,7 +497,7 @@ export class UsageService {
     if (seat !== null) {
       const read: FreshRead = { capturedAt, leased: this.#leaseBook.valid(leaseId, account, source), windows: windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt, lengthMins: w.lengthMins })) };
       if (clearSeat(seat, read).cleared) {
-        this.#store.atomically(() => {
+        this.#tx(() => {
           this.#store.deleteUsageSeat(account);
           this.#note(account, "back", `back|${seat.markedAt}`, backNoticeText(account, "a fresh reading"));
         });
@@ -520,7 +523,7 @@ export class UsageService {
     const cycle = this.#cycleOf(a);
     const prev = this.#store.usageSeat(account)?.record ?? null;
     const r = applyLimit(prev, { kind: l.kind, at: l.at ?? now, backAt: l.backAt, by, cycle });
-    this.#store.atomically(() => {
+    this.#tx(() => {
       if (r.seat !== null && r.seat !== prev) this.#store.saveUsageSeat(account, r.seat);
       if (r.changed && r.seat !== null)
         this.#note(account, "seat", `${r.seat.state}|${r.seat.why}|${r.seat.markedAt}`, seatNoticeText(account, r.seat));
@@ -608,7 +611,7 @@ export class UsageService {
     // elsewhere and never expire by time; neither does a retired or logged-out derived one.
     for (const s of this.#store.usageSeats()) {
       if (!markExpired(s.record, now)) continue;
-      this.#store.atomically(() => {
+      this.#tx(() => {
         this.#store.deleteUsageSeat(s.account);
         this.#note(s.account, "back", `expired|${s.record.markedAt}`, seatExpiredNoticeText(s.account));
       });
@@ -638,7 +641,7 @@ export class UsageService {
     if (at <= held.at) return;
     const r = watchThreshold(held.watch, usedPercent, resetsAt);
     const body = { watch: r.watch, at };
-    this.#store.atomically(() => {
+    this.#tx(() => {
       this.#store.saveUsageWatch(account, "threshold", key, body);
       if (r.told !== null) {
         const title = windowTitle(cadenceOf({ lengthMins, ...cadenceInput(book), family: null }), resetsAt, now);
@@ -652,13 +655,27 @@ export class UsageService {
     return new Map(this.#store.usageWatches(account).map(w => [`${w.kind}|${w.key}`, w.body]));
   }
 
+  // One transaction of the usage store (S4): what it wrote is only a fact once it committed, so the notices it newly
+  // wrote are told after it — and never when it rolled back, since their rows went with it.
+  #tx<T>(fn: () => T): T {
+    const mark = this.#told.length;
+    try {
+      const r = this.#store.atomically(fn);
+      for (const kind of this.#told.splice(mark)) this.#onNotice?.(kind);
+      return r;
+    } catch (e) {
+      this.#told.length = mark;
+      throw e;
+    }
+  }
+
   // The notices the hub itself writes (plan 4.4): the signature is the once-only key, so the same event told twice —
   // across a restart too — tells nobody. Every word of one comes from the domain, never from an agent token.
   #note(account: string, kind: NoticeKind, signature: string, text: string): void {
-    this.#store.saveUsageNotice({ id: `${account}|${kind}|${signature}`, kind, account, at: this.#now(), text }, signature);
-    // S4: told once per notice newly inserted (a repeat the store ignored tells nobody), after the write, and never
-    // for "forgotten". The exact once-only and kind rules land with the push (round 2).
-    this.#onNotice?.(kind);
+    const inserted = this.#store.saveUsageNotice({ id: `${account}|${kind}|${signature}`, kind, account, at: this.#now(), text }, signature);
+    // S4: told once per notice newly inserted (a repeat the store ignored tells nobody), once the write's transaction
+    // commits (#tx), and never for "forgotten" — forgetting is housekeeping, not news.
+    if (inserted && kind !== "forgotten") this.#told.push(kind);
   }
 
   #tellIfChanged() {

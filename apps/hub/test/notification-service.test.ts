@@ -300,9 +300,9 @@ describe("a device linked goes even while he is attending (review M2)", () => {
 describe("a usage notice the hub wrote (S4, plan 4.4)", () => {
   it("counts one more per notice, debounced, and the count resets once it went; the payload is the count, no text", async () => {
     svc.usage();
+    svc.usage();                                                       // a second before the second is over: one push, both counted
     await tick(999);
     expect(sent).toEqual([]);
-    svc.usage();                                                       // a second before the second is over: one push, both counted
     await tick(1);
     expect(sent.map(s => s.payload)).toEqual([{ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }, { kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }]);
     expect(sent[0]?.options).toEqual({ ttlSeconds: 6 * 3600, topic: "usage", urgency: "normal" });
