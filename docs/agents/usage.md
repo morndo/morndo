@@ -150,7 +150,7 @@ token that holds both lease slots can still spend its budget on invented names f
 may post an *unleased* reading for any account. Such a reading cannot end a mark and cannot set the cache (only a
 lease does either), but it does change the windows Home shows and the thresholds that watch them. Worker tokens are
 shared by lanes, so the token binding only detects a second, different token. The fix is per-lane worker tokens and
-leases bound to the accounts a node actually reports; it is a follow-up on the board, not part of this change.
+leases bound to the accounts a node actually reports; it is the follow-up T-430 on the board, not part of this change.
 
 ## Reading Codex usage
 
