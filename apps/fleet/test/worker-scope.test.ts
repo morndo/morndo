@@ -3,7 +3,7 @@
 import { OP_NAMES, type OpName, type Pane } from "@morndo/protocol";
 import { describe, expect, it } from "vitest";
 import {
-  redactEvent, redactPanes, visibleLaneEvents, visibleLaneWatch, visibleRuns, workerOpVerdict,
+  redactAlert, redactDelivery, redactEvent, redactPanes, visibleLaneEvents, visibleLaneWatch, visibleRuns, workerOpVerdict,
   type Hide, type WorkerLook, type WorkerScope,
 } from "../src/application/worker-scope.ts";
 
@@ -88,5 +88,52 @@ describe("worker socket redaction", () => {
     expect(visibleRuns([{ lane: "manager" }, { lane: "worker-a" }, { lane: "x", sessionId: SID }], hide)).toEqual([{ lane: "worker-a" }]);
     expect(visibleLaneWatch([{ window: "manager" }, { window: "worker-a" }], hide)).toEqual([{ window: "worker-a" }]);
     expect(visibleLaneEvents([{ lane: "manager", window: "manager" }, { lane: "worker-a", window: "worker-a" }, { lane: null, window: "w", sessionId: SID }], hide)).toEqual([{ lane: "worker-a", window: "worker-a" }]);
+  });
+});
+
+describe("worker socket redaction of deliveries, usage and alerts", () => {
+  const stash = { at: 5, since: 4, chars: 7, copy: "/tmp/draft-copy" };
+  const delivery = (target: { lane: string } | { workerId: string }, extra: Record<string, unknown> = {}) =>
+    ({ id: "lanes:d1", node: "ctl", target, state: "typed", queuedAt: 1, notAfter: 9, typedAt: 2, note: "n", stale: false, sessionId: SID, stashed: stash, ...extra });
+
+  it("a delivery to a protected lane loses its session and its stashed draft, whichever way the target names it", () => {
+    for (const target of [{ lane: "manager" }, { workerId: "ctl.3fa2c1d0.0" }]) {
+      const out = redactDelivery(delivery(target), hide);
+      expect(out, JSON.stringify(target)).toEqual({ id: "lanes:d1", node: "ctl", target, state: "typed", queuedAt: 1, notAfter: 9, typedAt: 2, note: "n", stale: false });
+    }
+    const bySession = redactDelivery(delivery({ lane: "boss" }), hide);          // a renamed window: its session is a protected one
+    expect(bySession.sessionId).toBeUndefined();
+    expect(bySession.stashed).toBeUndefined();
+  });
+
+  it("a delivery to another lane is the same object, session and stash included", () => {
+    const own = delivery({ lane: "worker-a" }, { sessionId: "22222222-2222-4222-8222-222222222222" });
+    expect(redactDelivery(own, hide)).toBe(own);
+  });
+
+  it("a delivery event is redacted the same way; a usage event of a protected lane is dropped", () => {
+    const ev = redactEvent({ t: "delivery", node: "ctl", body: delivery({ lane: "manager" }) }, hide);
+    expect(ev).toMatchObject({ t: "delivery", body: { id: "lanes:d1", state: "typed" } });
+    const shown = (ev ? ev.body : {}) as Record<string, unknown>;
+    expect(shown.stashed).toBeUndefined();
+    expect(shown.sessionId).toBeUndefined();
+    expect(redactEvent({ t: "usage", node: "ctl", body: { kind: "lane_account", lane: "manager", account: "acct-x", at: 1 } }, hide)).toBeNull();
+    expect(redactEvent({ t: "usage", node: "ctl", body: { kind: "failure", lane: null, window: "boss", sessionId: SID, error: "e", account: "acct-x", at: 1 } }, hide)).toBeNull();
+    expect(redactEvent({ t: "usage", node: "ctl", body: { kind: "failure", lane: null, window: "manager", error: "e", account: "acct-x", at: 1 } }, hide)).toBeNull();
+    const own = { t: "usage" as const, node: "ctl", body: { kind: "lane_account", lane: "worker-a", account: "acct-y", at: 1 } };
+    expect(redactEvent(own, hide)).toBe(own);
+  });
+
+  it("a draft_stashed alert of a protected lane loses the copy's path; other alerts are the same object", () => {
+    const stashed = { id: 1, at: 1, node: "ctl", kind: "draft_stashed", detail: { id: "lanes:d1", lane: "manager", since: 4, at: 5, chars: 7, copy: "/tmp/draft-copy" } };
+    const out = redactAlert(stashed, hide);
+    expect(out.detail).toEqual({ id: "lanes:d1", lane: "manager", since: 4, at: 5 });
+    const byWorker = redactAlert({ ...stashed, detail: { ...stashed.detail, lane: undefined, workerId: "ctl.3fa2c1d0.0" } }, hide);
+    expect(byWorker.detail.copy).toBeUndefined();
+    const own = { ...stashed, detail: { ...stashed.detail, lane: "worker-a" } };
+    expect(redactAlert(own, hide)).toBe(own);
+    const other = { id: 2, at: 1, node: "ctl", kind: "lane_conflict", detail: { name: "manager" } };
+    expect(redactAlert(other, hide)).toBe(other);
+    expect(redactEvent({ t: "alert", node: "ctl", body: stashed }, hide)?.body).toEqual(out);
   });
 });

@@ -8,7 +8,7 @@ import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { startTestFleet, type TestFleet } from "./helpers/fleet.ts";
 import type { FakeAgent } from "./helpers/fake-agent.ts";
-import { nodeQueue } from "./helpers/node-queue.ts";
+import { deliveryOf, nodeQueue } from "./helpers/node-queue.ts";
 import { client } from "./helpers/socket-client.ts";
 import { tempDir } from "./helpers/temp.ts";
 import type { FleetOptions } from "../src/serve.ts";
@@ -404,6 +404,75 @@ describe("worker socket: a protected lane's words, identity and files", () => {
     const w = await world({}, { protectedLanes: ["pc-lane"] });
     refused(await w.worker.post("/v1/op", op({ workerId: "edge.3fa2c1d0.0" }, "pane.send", { text: "x", expect: { server: "3fa2c1d0", window: "pc-lane" } }, "lanes:g4")));
     expect(sent(w.srv, "pane.send")).toHaveLength(0);
+  });
+});
+
+describe("worker socket: deliveries, usage and alerts of a protected lane", () => {
+  const stash = { at: 5, since: 4, chars: 7, copy: "/tmp/draft-copy" };
+  const one = (r: { body: unknown } | null) => ((r ? r.body : {}) as { delivery: Record<string, unknown> }).delivery;
+
+  it("worker socket: a protected lane's deliveries show no session and no stashed draft, in the list, by id, in the events and in the alerts", async () => {
+    const w = await world();
+    expect((await w.owner.post("/v1/deliveries", { id: "lanes:sm", lane: "manager", text: "x" }))?.body).toMatchObject({ ok: true });
+    expect((await w.worker.post("/v1/deliveries", { id: "lanes:sp", lane: "pc-lane", text: "x" }))?.body).toMatchObject({ ok: true });
+    const events = await w.worker.events();
+    const ownerEvents = await w.owner.events();
+    w.ctl.delivery(deliveryOf("ctl", "lanes:sm", { target: { lane: "manager" }, state: "typed", sessionId: SID, stashed: stash }));
+    w.pc.delivery(deliveryOf("pc", "lanes:sp", { target: { lane: "pc-lane" }, state: "typed", sessionId: SID2, stashed: stash }));
+    await vi.waitFor(async () => expect(one(await w.owner.get("/v1/deliveries/lanes%3Asm")).sessionId).toBe(SID));
+    await vi.waitFor(async () => expect(one(await w.owner.get("/v1/deliveries/lanes%3Asp")).sessionId).toBe(SID2));
+    // by id
+    expect(one(await w.worker.get("/v1/deliveries/lanes%3Asm"))).toMatchObject({ id: "lanes:sm", state: "typed", target: { lane: "manager" } });
+    expect(one(await w.worker.get("/v1/deliveries/lanes%3Asm")).sessionId).toBeUndefined();
+    expect(one(await w.worker.get("/v1/deliveries/lanes%3Asm")).stashed).toBeUndefined();
+    expect(one(await w.worker.get("/v1/deliveries/lanes%3Asp"))).toMatchObject({ sessionId: SID2, stashed: stash });
+    // the list
+    const got = await w.worker.get("/v1/deliveries");
+    const list = ((got ? got.body : {}) as { deliveries: Record<string, unknown>[] }).deliveries;
+    expect(list.find(d => d.id === "lanes:sm")).toMatchObject({ state: "typed" });
+    expect(list.find(d => d.id === "lanes:sm")?.sessionId).toBeUndefined();
+    expect(list.find(d => d.id === "lanes:sm")?.stashed).toBeUndefined();
+    expect(list.find(d => d.id === "lanes:sp")).toMatchObject({ sessionId: SID2, stashed: stash });
+    // the events stream
+    const inEvents = (e: { body: unknown }) => e.body as Record<string, unknown>;
+    await events.when(() => events.received.some(e => e.t === "delivery" && inEvents(e).id === "lanes:sm" && inEvents(e).state === "typed")
+      && events.received.some(e => e.t === "delivery" && inEvents(e).id === "lanes:sp" && inEvents(e).state === "typed"));
+    await ownerEvents.when(() => ownerEvents.received.some(e => e.t === "delivery" && inEvents(e).id === "lanes:sm" && inEvents(e).state === "typed"));
+    const seen = (id: string) => events.received.filter(e => e.t === "delivery" && inEvents(e).id === id).map(inEvents).at(-1) ?? {};
+    expect(seen("lanes:sm").sessionId).toBeUndefined();
+    expect(seen("lanes:sm").stashed).toBeUndefined();
+    expect(seen("lanes:sp")).toMatchObject({ sessionId: SID2, stashed: stash });
+    expect(ownerEvents.received.filter(e => e.t === "delivery" && inEvents(e).id === "lanes:sm").map(inEvents).at(-1)).toMatchObject({ sessionId: SID, stashed: stash });
+    // the alert the stash raised: the copy's path is the lane's, so it stays with the owner
+    const alertsOf = async (c: typeof w.worker) => {
+      const r = await c.get("/v1/alerts");
+      return ((r ? r.body : []) as { kind: string; detail: Record<string, unknown> }[]).filter(a => a.kind === "draft_stashed");
+    };
+    expect((await alertsOf(w.owner)).map(a => a.detail.copy)).toEqual(["/tmp/draft-copy", "/tmp/draft-copy"]);
+    const shown = await alertsOf(w.worker);
+    expect(shown.find(a => a.detail.id === "lanes:sm")?.detail.copy).toBeUndefined();
+    expect(shown.find(a => a.detail.id === "lanes:sp")?.detail.copy).toBe("/tmp/draft-copy");
+    await events.when(() => events.received.some(e => e.t === "alert" && (inEvents(e).kind === "draft_stashed")));
+    const alertEvents = events.received.filter(e => e.t === "alert" && inEvents(e).kind === "draft_stashed").map(e => (inEvents(e).detail as Record<string, unknown>));
+    expect(alertEvents.find(d => d.id === "lanes:sm")?.copy).toBeUndefined();
+    events.close();
+    ownerEvents.close();
+  });
+
+  it("worker socket: the account a protected lane was started with is not in the usage events; another lane's is", async () => {
+    const w = await world({}, { protectedLanes: ["secret-lane"] });
+    const events = await w.worker.events();
+    const ownerEvents = await w.owner.events();
+    expect((await w.owner.post("/v1/op", op({ node: "pc" }, "lane.start", { name: "secret-lane", cwd: "/work", account: "acct-secret" }, "lanes:ua1")))?.body).toMatchObject({ ok: true });
+    expect((await w.worker.post("/v1/op", op({ node: "pc" }, "lane.start", { name: "open-lane", cwd: "/work", account: "acct-open" }, "lanes:ua2")))?.body).toMatchObject({ ok: true });
+    const usage = (e: { t: string; body: unknown }) => e.t === "usage" ? (e.body as { lane?: string; account?: string }) : null;
+    await ownerEvents.when(() => ownerEvents.received.filter(e => usage(e)?.lane === "secret-lane" || usage(e)?.lane === "open-lane").length === 2);
+    await events.when(() => events.received.some(e => usage(e)?.lane === "open-lane"));
+    expect(events.received.filter(e => e.t === "usage").map(e => usage(e)?.account)).toEqual(["acct-open"]);
+    expect(JSON.stringify(events.received)).not.toContain("acct-secret");
+    expect(JSON.stringify(ownerEvents.received)).toContain("acct-secret");
+    events.close();
+    ownerEvents.close();
   });
 });
 
