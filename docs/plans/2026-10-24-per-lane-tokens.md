@@ -2,7 +2,7 @@
 
 **Question.** Worker tokens are shared, so one lane can steer the usage detection of another. How do we tie a reading, a lease, a limit post and a pool post to the accounts a node really runs?
 
-**Answer in short.** Close it in three layers, cheapest first. (1) Say who may post at all and which names are real. (2) Bind pool tokens and lane reports to a node and to the accounts that node runs. (3) Only then, and only if the owner wants it, give each lane a secret of its own. Per-lane tokens alone do not close the hole on a node whose lanes share one OS user (see [§2](#2-what-a-per-lane-token-can-and-cannot-do)). Estimate: about 6 lane-days for layers 1 and 2; 4 to 5 more for layer 3.
+**Answer in short.** Close it in three layers, cheapest first. (1) Say who may post at all and which names are real. (2) Bind pool tokens and lane reports to a node and to the accounts that node runs. (3) Only then, and only if the owner wants it, give each lane a secret of its own. Per-lane tokens alone do not close the hole on a node whose lanes share one OS user (see [§2](#2-what-a-per-lane-token-can-and-cannot-do)). Estimate: about 9 lane-days for layers 1 and 2; 4 to 5 more for layer 3. Revision 2 (after the review of this plan, [§10](#10-review-of-this-plan-and-how-it-was-answered)) says plainly what each layer does and does not stop.
 
 Code references are to branch `feat/usage-s7` at `1cbd738a` (the head of T-415, PR #138). None of it is on `main` yet, so line numbers move when the stack merges. `docs/adr/0036-usage-reading-health.md` is on the branches `docs/usage-detection-plan` and `docs/usage-pool-brief`, not on `main`. Names below (nodes `n1`, `n2`, lanes `w1`, accounts `acct-a`) are made up.
 
@@ -66,8 +66,8 @@ The hub mints a worker token bound to `(node, lane, account)` when it issues `la
 The token carries a node (`morndo agent-token new <name> --role worker --node n1`). A call names its lane in `X-Morndo-Lane`, as now, and the hub checks the claim: the lane must run on the token's node (fleet observation) and, for an account-carrying call, the account must be the lane's recorded start account, or for a hand-started lane one that the node runs.
 
 - **Delivery** changes little: the token is as shared as today, but it is minted per node, so a copy on `n1` is worthless on `n2`.
-- **Closes:** every cross-node case (finding 2, 3 and the pool token posting as another node); a lane claiming a lane of another node; a report under an account that lane was not started with (finding 4, with a start record); a pool token speaking for an account its node does not run.
-- **Does not close:** a lane on `n1` claiming another lane of `n1` that runs a different account (the secret is shared on the node). That needs A, or a node-derived lane identity (D5 below).
+- **Closes:** a pool token posting as another node or for an account its node does not run; a *node-bound* worker token reporting as a lane of another node (the token's node differs from the lane's node by observation); a report for a name the lane's node does not run.
+- **Does not close:** the claim is checked, the claimant is not. The lane is named by the caller's own header on a token every lane of the node shares (`agent-access.ts:50-66`), so a lane on `n1` can claim another lane of `n1`, and a lane holding an *unbound* (legacy) token can claim a lane of any node. Only A (a secret per lane) or D5 (the node's relay vouches for the lane) closes that.
 - **Cost:** about 3 lane-days on top of C (column, console flag, claim checks, collector configs).
 
 ### C. Keep shared tokens; bind by node and by the account set the node runs
@@ -86,35 +86,70 @@ No token change. The hub keeps, per node, the set of accounts that node runs (`n
 | Invented names (`/lease`, `/limit`, `/pool`) | no | partly | **yes** |
 | Unleased readings for any account | partly | **yes** | partly |
 | Pool token posts as another node | no | **yes** | no |
-| Lane A reports as lane B, other node | **yes** | **yes** | no |
+| Lane A reports as lane B, other node | **yes** | **yes**, with node-bound tokens only | no |
 | Lane A reports as lane B, same node | **yes** (not vs a hostile user) | no | no |
-| Report under an account the lane was not started with | **yes** | **yes** | partly |
+| Report under an account outside the lane's node set | **yes** | **yes** | **yes** |
+| Report under another account *of the same node* (a move looks the same) | **yes** (the lane's own secret still moves it) | no | no |
 | Token changes for existing lanes | yes, all | none for lanes, new pool tokens | none |
 | Launcher change on the machine | yes | no | no |
 
 ## 4. Recommendation
 
-Do C's account set and B's node binding, in the order below, and leave A for after the owner's answer to D1.
+Do C's account set and B's node binding, in the order below, and leave A for after the owner's answer to D1. Each step ships first in `warn` (accept and count), then in `enforce` ([§5](#5-migration-old-lanes-keep-working)).
 
-1. **Gate by role first (a one-line check).** The readings route needs a manager token or the `usage-pool` scope, like the lease and limit routes. A lane has no business posting a reading: the collectors do, and they already hold a pool token. This alone closes finding 1 for lanes.
-2. **Make names real.** `node_accounts(node, account, via, at)` with `via` of `start`, `source` or `principal`. All five routes refuse a name that no node's set holds (`unknown_account`). The lease path's unknown-name budget stays as a guard, but it no longer lets anything through. The principal's `lane.start` and the console add names; nothing else does.
-3. **Bind the pool token to a node** (`--node`). `body.node` must equal the token's node; the account must be in that node's set; the lease is bound to the node too.
-4. **Bind a lane report to its lane.** A report whose account differs from the lane's start record is refused (`account_mismatch`) and writes no record. A lane without a start record may report only accounts in its node's set, and the first report becomes its record.
+1. **Gate readings by role, after the callers are moved.** The readings route needs a manager token or the `usage-pool` scope, like the lease and limit routes. What changes, exactly, and in this order so nothing goes dark:
+   1. Hub code ships with the gate in `warn`: a reading from a plain worker token is accepted and counted on the token (`unbound_count`, [§5](#5-migration-old-lanes-keep-working)).
+   2. Callers that post readings with a plain worker token are moved to a token with the `usage-pool` scope (or the manager token): the e2e helper at `e2e/home.e2e.ts:60` (it posts readings with the plain worker token `token`, while the same file already mints `managerToken` for the limit route); the unit-test helper in `apps/hub/test/usage-health.test.ts:17` and the other tests that build a reading through a plain worker actor; `e2e/usage-claude.e2e.ts:49` already mints a scoped token. Tests that post a reading on purpose with an unscoped token become the refusal tests (1, 2).
+   3. Outside collectors (Cursor and Z.ai: `docs/agents/usage.md` §Cursor, §Z.ai; they name no token) get a `usage-pool` token each. Reading Cursor periods already requires them to lease (the S7 review), and the lease route already needs that scope, so the ones that work today hold one; any that post unleased with a plain worker token show in `morndo agent-token list` (count and last use) during the `warn` week.
+   4. The docs say it: the Cursor and Z.ai sections name the token (`--role worker --scope usage-pool`, later `--node`).
+   5. Flip to `enforce` only when `agent-token list` shows no plain token posting readings for 7 days (D3).
+2. **Make names real, with a bootstrap.** `node_accounts(node, account, via, at)` with `via` of `start`, `pool`, `source`, `principal`, `legacy`. The five routes refuse a name that no node's set holds (`unknown_account`), except through the bootstrap below. The lease path's unknown-name budget stays as a guard on the pool's declarations.
+3. **Bind tokens to a node** (`--node`, for a pool/collector token and for a worker token a node's lanes hold). `body.node` must equal the token's node; the account must be in that node's set; the lease is bound to the node; a report for a lane of another node is refused for a node-bound token.
+4. **Keep moves, bound the account.** A lane report may move the lane's record to another account as it does today, but only to an account in the lane's node set ([§4.1](#41-moved-lanes)). A name outside the set writes nothing.
 5. **Then decide A** (D1). If yes, it reuses everything above: the per-lane token is B's token with a lane and an account on it.
+
+### 4.1 Moved lanes
+
+`report()` replaces the `(node, lane)` record when a lane has moved account (`usage-service.ts:339-349`, and the pool brief's item 7 on moved lanes); the pool's `move()` and slice 3 R3 rely on it. The first revision refused a report that differed from the start record, which would break a moved lane: under `enforce` its next failure would retire the old seat. The rule now:
+
+- a report under an account **in the lane's node set** replaces the record, as today (source `report`, the 12-hour rule of a start record against a report for failure resolution is unchanged);
+- a report under a name **outside** the set writes no record and changes no account (`unknown_account`, or `pending` in the bootstrap);
+- a move the pool or `lane.start` made is already in the set (`via` `pool` or `start`), so it passes.
+
+What this does not stop: a lane steering another lane's record to a different *real* account of the same node. It needs A or D5 (§3). Tests 8 and 9 are rewritten accordingly ([§6](#6-named-tests-red-today)).
+
+### 4.2 Bootstrap: how a name first becomes known
+
+Today a status-line report is how an account first appears, and a lease ask is a collector-only account's first word. With `unknown_account` on all five routes those would be refused until someone declares the name. The smallest bootstrap, so that only one case needs the principal:
+
+| Case | How the name is declared | Principal needed |
+|---|---|---|
+| Lane started by the hub with an account | `lane.start` tap writes the `start` row (`connections.ts:283-286`, `usage-service.ts:382`) | no |
+| A new seat the pool manages | the pool token (scoped, node-bound) may **declare** a name for its own node through a new `action: "declare"` on `/pool`, within the existing budget of 5 new names an hour per token; the principal sees `via = pool` and can undeclare | no |
+| Hand-started lane on a seat nobody declared | its first status-line report is kept as **pending** (node, name, lane, first seen, count), not stored as an account and not lost; `morndo usage accounts approve <node> <name>` declares it | once per seat, on the principal's word |
+| Collector off the fleet (a laptop; no `lane.start`, no fleet node) | the principal declares `morndo usage accounts add --node <node> <name>`, or its own scoped, node-bound pool token declares it like the pool | once per account |
+| Account the hub already shows | backfilled by the migration ([§5](#5-migration-old-lanes-keep-working)) | no |
+
+"Unknown" stays what it is in `#unknown()` (`usage-service.ts:158`): a name with no account row, no source and no seat. A *declared* name with no reading yet is therefore still wanted once for a first read, which is what the lease's first word was for. D7 is no longer circular: a hand-started lane's first report is a pending item, not a refusal.
 
 ## 5. Migration (old lanes keep working)
 
-Everything ships in three modes per gate: `off`, `warn`, `enforce`, set in the hub's settings, default `warn` on release, flipped to `enforce` by the principal after the grace period (D3).
+Everything ships in three modes per gate: `off`, `warn`, `enforce`. The gates are `readings` (step 1, the role), `names` (step 2 and §4.2, the set), `node` (step 3, token binding) and `lane` (step 4 and §4.1, the report). Default `warn` on release; the principal flips each to `enforce` after the grace period (D3).
 
-- **`warn`** accepts what is refused in `enforce`, counts it per token in `agent_tokens` (new `last_unbound_at`, `unbound_count`), and shows the count in `morndo agent-token list` and in `whoami`. A lane keeps working on its old shared token in this mode.
-- **Backfill in the migration** (hub migration 28 or the next free one; no table is renamed, no row is deleted): `node_accounts` from `lane_accounts` rows and from `usage_sources` rows whose node is not empty. Accounts of the hub-local status line (node `""`) go to a hub-local set that every node may use until the principal narrows it.
-- **Lane reports need no new token.** The hub finds the lane's node by observation, so existing shared tokens carry on. Only a pool or collector token must be re-issued with `--node`; its old token keeps working in `warn` and is refused for the readings, lease, limit and pool routes in `enforce`.
+- **Where the mode lives.** A new table `usage_bind(gate TEXT PRIMARY KEY, mode TEXT, at INTEGER)` in the same migration, read by `UsageService` on each call (a row read, not config), and a console command: `morndo usage-bind show` and `morndo usage-bind set <gate> off|warn|enforce`, parsed before the database opens like the other console commands (T-434's pattern). It is the principal's only: no agent route reads or writes it. (`hub_store` is the store-id row and is not a settings table.)
+- **`warn`** accepts what `enforce` refuses and counts it per token in `agent_tokens` (new `unbound_count`, `last_unbound_at`), shown in `morndo agent-token list` and in `whoami`. A lane keeps working on its old shared token.
+- **Backfill in the migration** (hub migration 28 or the next free one; nothing is renamed or deleted), into `node_accounts` with `via = 'legacy'`:
+  - each `lane_accounts` row: `(node, account)`;
+  - each `usage_sources` row with a node: `(node, account)`;
+  - each status-line account (`usage_accounts`, the rows a status-line report made): `(node "", account)`, the hub-local set. A lane report is checked against its node's set **or** the hub-local set until the principal narrows it (`morndo usage accounts move <name> --node n1`), so a status-line account is not lost to a lane whose node never reported it.
+  - each seat with no other row (`usage_seats`, `usage_pool_seats`): `(node "", account)`.
+- **Lane reports need no new token.** The hub finds the lane's node by observation, so existing shared tokens carry on. A pool or collector token must be re-issued with `--node`; the old token works in `warn` and is refused on the readings, lease, limit and pool routes in `enforce`.
 - **Rollback** is the mode switch. No migration step is destructive.
-- **Order across machines:** hub first (modes `warn`), then re-issue pool tokens one node at a time (their config has a `tokenFile`, `docs/agents/usage.md:111`), then flip each gate.
+- **Order across machines:** hub first (all gates `warn`), then move the callers of §4 step 1 (e2e/test helpers, the Cursor and Z.ai collectors), then re-issue pool tokens one node at a time (their config has a `tokenFile`, `docs/agents/usage.md:111`), then flip each gate when `agent-token list` shows it quiet.
 
 ## 6. Named tests (red today)
 
-Hub tests in `apps/hub/test/` unless said otherwise. Each of the spoof cases from the reviews is one test; "red today" is the verdict on `1cbd738a`.
+Hub tests in `apps/hub/test/` unless said otherwise. "Red today" is the verdict on `1cbd738a`. Rows changed after the review are marked (r2).
 
 | # | Test | Spoof case (review) | Red today |
 |---|---|---|---|
@@ -125,49 +160,66 @@ Hub tests in `apps/hub/test/` unless said otherwise. Each of the spoof cases fro
 | 5 | `usage-bind: a lease for an unknown name is denied and spends no budget` | invented names hold both slots (slice 5) | granted, 5 an hour |
 | 6 | `usage-bind: a pool token bound to n1 cannot lease, read or post as n2` | self-declared node (slice 5, slice 3) | accepted |
 | 7 | `usage-bind: a pool token for n1 cannot name an account only n2 runs` | token binding to accounts | accepted |
-| 8 | `usage-bind: a report under an account other than the lane's start record is refused` | lane `w1` started on `acct-a`, report as `acct-c` (slice 3 R2) | writes the account, shown windows change |
-| 9 | `usage-bind: same token, second account, does not retarget a lane's failure` | slice 3 R3: one token id replaces its own word | `acct-b` retired |
-| 10 | `usage-bind: a hand-started lane may report only an account its node runs` | slice 3 R2: lane without a start record | any name accepted |
-| 11 | `usage-bind: a report claiming a lane of another node is refused` | lane header names a lane on `n2` | accepted |
+| 8 (r2) | `usage-bind: a report under a name outside the lane's node set writes no record and no account` | slice 3 R2: lane `w1` on `acct-a`, report as an invented name | name stored, record written |
+| 9 (r2) | `usage-bind: a moved lane keeps working: a report under another account of its node moves the record and the next failure marks the new seat` | pool `move()`, slice 3 R3 (must stay **green**: the guard against breaking moves) | green today, red if the first revision's rule were built |
+| 9b (r2) | `usage-bind: a move to a name outside the set is refused, the old record stands` | slice 3 R3 | record moves to the invented name |
+| 10 (r2) | `usage-bind: a hand-started lane's first report under an undeclared name is pending, not an account` | slice 3 R2, D7 bootstrap | account created |
+| 11 (r2) | `usage-bind: a node-bound worker token cannot report as a lane of another node` | lane header names a lane on `n2` while the token is for `n1` | accepted. (The first revision's test, "a report claiming a lane of another node is refused" for any token, cannot be built: a legacy shared token has no node. This one can, because the token has.) |
+| 11b (r2) | `usage-bind: a shared legacy token can still claim another lane (pinned limit)` | the claim is checked, not the claimant (§3 B) | green; pins the gap, so closing it (A or D5) turns it red on purpose |
 | 12 | `usage-bind-migration: legacy shared token keeps reporting in warn mode and is counted` | migration | not written yet |
-| 13 | `usage-bind-migration: backfill gives each node the accounts it already shows` | migration | not written yet |
-| 14 | `usage-bind-migration: enforce refuses an unbound pool token on the four routes, warn does not` | migration | not written yet |
+| 13 (r2) | `usage-bind-migration: backfill gives each node the accounts it already shows, and the status-line accounts go to the hub-local set` | migration | not written yet |
+| 14 (r2) | `usage-bind-migration: enforce refuses an unbound pool token on the four routes, warn does not; the mode is read from usage_bind` | migration | not written yet |
 | 15 | `fleet lane-account-event: a node's tap cannot add an account to another node's set` | cross-node | not written yet |
-| 16 | `usage-bind: the forged failure hook word stays limited to accounts its node runs` | slice 3 caveat, unchanged (a lane on the node can still mark an account the node runs) | green; kept as the pinned known limit, so a change shows |
+| 16 | `usage-bind: the forged failure hook word stays limited to accounts its node runs` | slice 3 caveat, unchanged | green; pinned known limit |
+| 17 (r2) | `usage-bind-bootstrap: lane.start declares; the pool declares a seat within its budget; an off-fleet name needs the principal; a declared name with no reading is wanted once` | finding 4 | not written yet |
+| 18 (r2) | `e2e home: readings are posted with a scoped token (the helper at e2e/home.e2e.ts:60)` | finding 1: the caller moved before the gate | not written yet |
 
-Each ends with a negative control (the repo's `--only` flow): remove the check, the named test goes red. Tests 12 to 15 need the new code to exist, so they are red by absence, not by a spoof.
+Each ends with a negative control (the repo's `--only` flow): remove the check and the named test goes red. Tests 12 to 15, 17 and 18 need new code, so they are red by absence, not by a spoof.
 
 ## 7. Estimate
 
 | Slice | Work | Lane-days |
 |---|---|---|
-| 1 | Role gate on readings; tests 1, 2; docs line | 0.5 |
-| 2 | `node_accounts`, migration and backfill, console to add/list/remove, the `unknown_account` gate on the five routes in `warn`/`enforce`; tests 3, 4, 5, 12, 13, 15 | 2.5 |
-| 3 | `--node` on tokens, node check on pool routes, lease bound to node; tests 6, 7, 14 | 1.5 |
-| 4 | Report binding to the lane's start record; tests 8 to 11, 16 | 1.0 |
+| 1 | Role gate on readings in `warn`; move the callers (e2e and unit helpers, Cursor and Z.ai docs and collector tokens); `agent-token list` counts; tests 1, 2, 18 | 1.0 |
+| 2 | `node_accounts`, migration and backfill (lanes, sources, status-line, seats), `usage_bind` table and console command, `unknown_account` gate on the five routes, the bootstrap (pending list, pool `declare`, console add/approve/list/remove); tests 3, 4, 5, 10, 12, 13, 15, 17 | 3.0 |
+| 3 | `--node` on tokens, node check on pool routes, lease bound to node, node-bound worker tokens; tests 6, 7, 11, 11b, 14 | 1.8 |
+| 4 | Moves bound to the node set; tests 8, 9, 9b, 16 | 0.7 |
 | 5 | Docs (`docs/agents/usage.md` known-limits section rewritten), flip to `enforce` | 0.5 |
-| | Review rounds (about 20%) | 1.2 |
-| | **Layers 1 and 2** | **about 6** |
+| | Review rounds (about 20%) | 1.4 |
+| | **Layers 1 and 2** | **about 9** |
 | 6 (only if D1 = yes) | Option A on top: mint at `lane.start`, delivery through the node, revoke at stop and sweep, launcher change, tests | 4 to 5 |
 
-Slice 1 can ship alone and first: it is the smallest change that stops a lane posting readings.
+Slice 1 ships alone and first, in `warn`, so it stops nothing until its callers are moved.
 
 ## 8. Owner decisions
 
 | # | Decision | Recommended |
 |---|---|---|
 | D1 | Do we defend against a hostile lane on the same OS user, or against mistakes, injected text and other nodes? | The second. Agents are trusted but fallible; one OS user per lane is a larger project. This puts A last. |
-| D2 | Who declares the accounts a node runs that no lane started? (collector-only accounts) | The principal, from the console, one command per node and account; the node's own inventory (hello field) later. Backfill covers what the hub already shows. |
-| D3 | How long do the gates stay in `warn`? | 7 days, then the principal flips each gate to `enforce`. |
-| D4 | After the grace period, may an unbound (legacy) pool token still post readings, leases, limits and pool words? | No. Lane reports stay allowed on a shared token (checked by observation), everything pool-side needs a node-bound token. |
-| D5 | Should the node agent, not the lane, vouch for a lane's identity (the lane posts to the node relay; the relay resolves the lane from the connection's process, as the failure hook path does, and forwards over the fleet link)? | Yes, as the follow-up to this plan instead of A. It closes same-node lane-vs-lane without a secret in an environment, and fits `lane.start`'s existing tap. Needs its own design. |
-| D6 | Are a pool token and a collector one token per node, or per account? | Per node (`--node`). Per account multiplies tokens for no extra protection. |
-| D7 | Lanes started by hand or by the manager: allowed a first report under an account their node runs? | Yes, the node's set bounds it; the first report becomes the record. |
+| D2 | Who declares the accounts a node runs that no lane started? | `lane.start` and the pool declare their own; the principal only for off-fleet collectors and for hand-started seats (approve from the pending list). The node's own inventory (a hello field) is later. |
+| D3 | How long do the gates stay in `warn`? | 7 days, and a gate flips only when `agent-token list` shows it quiet for 7 days. |
+| D4 | After the grace period, may an unbound (legacy) pool token still post readings, leases, limits and pool words? | No. Lane reports stay allowed on a shared token (checked by observation); everything pool-side needs a node-bound token. |
+| D5 | Should the node agent, not the lane, vouch for a lane's identity (the lane posts to the node relay; the relay resolves the lane from the connection's process, as the failure hook path does, and forwards over the fleet link)? | Yes, as the follow-up to this plan instead of A. It is the only cheap way to close lane-vs-lane on one node without a secret in an environment. Needs its own design. |
+| D6 | Is a pool/collector token one per node, or per account? | Per node (`--node`). Per account multiplies tokens for no extra protection. |
+| D7 | Hand-started lanes on an undeclared seat: what happens to the first report? | It is kept as pending and the principal approves it once; the lane's report is not lost and not an account. |
 | D8 | Should the board, memory and jobs routes get the same lane identity? | Not in T-430. Note it on the board when A or D5 is picked. |
-| D9 | Merge order: this work needs T-415's stack on `main` first. | Yes. Start slice 1 on `feat/usage-s7`'s successor once PR #138 has merged, to avoid a second rebase. |
+| D9 | Merge order: this work needs T-415's stack on `main` first. | Yes. Start slice 1 once PR #138 has merged, to avoid a second rebase. |
+| D10 | May the pool declare new names for its own node (§4.2), within 5 new names an hour per token? | Yes. The pool manages the seats; a stolen pool token can invent only that, for one node, visibly (`via = pool`), and the principal can undeclare. |
 
 ## 9. Not covered
 
 - The failure hook word is posted by the lane to the node relay; the node attributes it to the node, not to a token. A lane can mark an account its own node runs (test 16 pins this). Only D5 closes it.
 - The `usage_report` format and the collectors' reading of provider data are untouched.
 - Rate limits on the usage routes beyond what exists (`agentCalls`, `agentRefusals` buckets).
+
+## 10. Review of this plan, and how it was answered
+
+The review of revision 1 (md-rev6 on T-430, 4 MED, 1 LOW).
+
+| # | Finding | Answer in the text |
+|---|---|---|
+| 1 (MED) | The role gate breaks `e2e/home.e2e.ts:60` and any outside collector posting unleased with a plain worker token | §4 step 1 names the changes and their order: gate in `warn`, move the e2e helper, the unit helpers and the Cursor and Z.ai collectors to a scoped token, docs, then flip when `agent-token list` shows nothing left. Tests 1, 2, 18; slice 1 is `warn` only |
+| 2 (MED) | Binding a report to the start record breaks moved lanes (`usage-service.ts:341-349`) | §4.1: a move to another account of the lane's node set still replaces the record; only a name outside the set is refused. Tests 8, 9, 9b rewritten; 9 stays green on purpose |
+| 3 (MED) | Step 4 binds the claim, not the claimant | §3 B and the comparison table say what is and is not closed: node-bound tokens close cross-node claims; same-node claims and a legacy token's claims need A or D5. Test 11 rewritten to what can be built (node-bound token); 11b pins the gap |
+| 4 (MED) | `unknown_account` on all five routes leaves a new seat, a hand-started lane and an off-fleet collector refused | §4.2: `lane.start` declares, the pool declares its seats (new `declare`, budgeted, D10), a hand-started lane's first report is pending until the principal approves, only an off-fleet collector needs the principal. D7 is no longer circular. Test 17 |
+| 5 (LOW) | The backfill misses the status-line accounts; the `warn`/`enforce` setting has no home | §5: status-line accounts (and seats with no other row) go to the node-`""` hub-local set; the mode is a row of a new `usage_bind` table, set by `morndo usage-bind set <gate> <mode>`, principal only. Test 13, 14 |
