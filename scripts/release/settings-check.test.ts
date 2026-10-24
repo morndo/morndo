@@ -607,6 +607,20 @@ describe("check-release-settings.sh", () => {
       expect(r.stdout, what).toContain(`FAIL: job build of build.yml reads key secret ${key} without an environment`);
       expect(r.stdout, what).not.toContain(`INFO: job build of build.yml uses repository secret ${key}`);
     }
+    // the two signing keys are keys by name, whatever else is set: with no key job reading them under an environment
+    // and no environment holding them, a job that reads one without an environment is still a failure — the original
+    // misconfiguration, a sign job that lost its `environment:` line while the key sits as a repository secret
+    for (const key of ["RELEASE_SSH_KEY", "FEED_SSH_KEY"]) {
+      const bare = world();
+      bare.workflow("release.yml", ["name: release", "jobs:", "  sign:", "    runs-on: ubuntu-24.04", "    steps:", "      - uses: example/sign@v1", "        with:", `          key: \${{ secrets.${key} }}`, ""].join("\n"));
+      bare.edit(`repos/${REPO}/environments/release/secrets`, d => ({ ...d, secrets: [] }));
+      bare.edit(`repos/${REPO}/environments/feed/secrets`, d => ({ ...d, secrets: [] }));
+      bare.edit(`repos/${REPO}/actions/secrets`, d => ({ ...d, secrets: [...d.secrets, secret(key)] }));
+      const k = bare.run();
+      expect(k.status, `${key}: ${k.stdout}${k.stderr}`).toBe(1);
+      expect(k.stdout, key).toContain(`FAIL: job sign of release.yml reads key secret ${key} without an environment`);
+      expect(k.stdout, key).not.toContain(`INFO: job sign of release.yml uses repository secret ${key}`);
+    }
     // the App's two secrets are not keys (no key environment holds or uses them), and another secret stays an INFO
     const w = world();
     w.workflow("build.yml", outside("RELEASE_APP_ID"));

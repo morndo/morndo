@@ -309,10 +309,14 @@ fi
 # The release App's two secrets are used by a job with no environment, so they are repository secrets by necessity:
 # the known exposure of decision 10. Any other secret such a job uses is only reported.
 awk -F'\t' '$1 == "secret" && $4 == "-" { print $5 "\t" $3 "\t" $2 }' "$tmp/facts" | sort -t "$(printf '\t')" -k1,1 -u >"$tmp/open-uses"
-# A key is a secret a job reads in release, feed, promote or withdraw, or one those environments hold: it lives in its
-# main-only environment, so a job with no environment must not read it by name (it would get nothing, or a repository
-# secret of that name, which the check above already fails). Every such job is a FAIL, not an INFO.
+# A key is RELEASE_SSH_KEY or FEED_SSH_KEY, a secret a job reads in release, feed, promote or withdraw, or one those
+# environments hold: it lives in its main-only environment, so a job with no environment must not read it by name (it
+# would get nothing, or a repository secret of that name, which the check above already fails). Every such job is a
+# FAIL, not an INFO.
 {
+  # The two signing keys are keys by name, whatever the settings and the workflows say: a sign job that lost its
+  # `environment:` line while the key sits as a repository secret must not look like a job with no key at all.
+  printf '%s\n' RELEASE_SSH_KEY FEED_SSH_KEY
   cut -f1 "$tmp/key-uses"
   for env in release feed promote withdraw; do
     if [ -f "$tmp/secrets-$env" ]; then jq -r '.secrets[]?.name' "$tmp/secrets-$env"; fi
