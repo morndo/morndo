@@ -129,11 +129,17 @@ export class ProofService {
   // ignored and writes nothing, so a slow check cannot judge a round it was not asked about. The rows of a round that
   // is over stay as that round's history.
   record(key: string, briefRev: number, result: RefResult): boolean {
-    if (this.#store.task(key)?.status === "done") return false;        // a Done task is a snapshot: a check in flight at the Done writes nothing
-    const current = currentBrief(this.#store.taskEvents(key));
-    if (current === null || current.rev !== briefRev || !current.brief.refs.includes(result.ref)) return false;
+    if (!this.#writable(key, briefRev, result.ref)) return false;
     this.#store.saveProofResult(key, briefRev, result);
     return true;
+  }
+
+  // Whether a row may be written at all: not for a Done task (a snapshot: a check in flight at the Done writes nothing),
+  // and only for the brief that still counts and a reference it holds. Every write to a proof row goes through this.
+  #writable(key: string, briefRev: number, ref: string): boolean {
+    if (this.#store.task(key)?.status === "done") return false;
+    const current = currentBrief(this.#store.taskEvents(key));
+    return current !== null && current.rev === briefRev && current.brief.refs.includes(ref);
   }
 
   // Every reference of the current brief, checked now (no forge: returns at once). Never rejects: a check that throws
@@ -231,6 +237,7 @@ export class ProofService {
     // must not be able to turn true greens into unfetchable ones at the Done.
     const held = this.#store.proofResultsOf(key, briefRev).find(r => r.ref === ref);
     if (held?.state === "green" && judged.state === "unfetchable" && RETRYABLE_DETAIL.test(judged.detail ?? "") && this.#now() - held.checkedAt < GREEN_HOLD_MS) {
+      if (!this.#writable(key, briefRev, ref)) return;               // the same guards as record(): a Done task's row is not touched
       // Held, not refreshed: checkedAt stays the last real read (so it ages and is asked again), and the row says so.
       const at = new Date(held.checkedAt).toISOString().slice(11, 16);
       this.#store.saveProofResult(key, briefRev, { ...held, detail: `last read ${at} UTC; the forge could not be reached since` });

@@ -779,6 +779,38 @@ describe("a stand-in forge is shown, not hidden (B14)", () => {
   });
 });
 
+describe("a held green is a snapshot too (B13, B16)", () => {
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  it("a check in flight at the Done that fails to reach the forge does not rewrite a Done task's green row", async () => {
+    const store = new Store(tempDir());
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    let asked = 0;
+    const forge: ForgeChecks = {
+      pullRequest: async () => {
+        if (++asked === 1) return { ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null } };
+        await held;                                                 // the second read is still out when the Done lands
+        return { ok: false, failure: { reason: "rate_limited", detail: "rate limit, retry 00:10 UTC" } };
+      },
+      checkRuns: async () => ({ ok: true, value: [] }),
+    };
+    const proof = new ProofService({ store, board, now: () => NOW + 5_000, forge, mode: "off" });
+    atReview(board);
+    await proof.file("T-1", { ...brief, refs: ["morndo/morndo#42@3e9d1a7"] }, lane);
+    await proof.idle();
+    const before = store.proofResultsOf("T-1", 4);
+    expect(before[0]).toMatchObject({ state: "green", detail: null });
+    const again = proof.verify("T-1");                              // a second read starts
+    await Promise.resolve();
+    expect(board.act("T-1", { action: "move", to: "done", reason: "read the diff" }, manager).ok).toBe(true);   // the Done lands first
+    release();
+    await again;
+    expect(store.proofResultsOf("T-1", 4)).toEqual(before);        // not even the held row's detail was rewritten
+    store.close();
+  });
+});
+
 describe("a stand-in forge is hub-wide, not only per task (B14)", () => {
   it("the board view says so when the hub reads a stand-in forge, and says nothing otherwise", () => {
     const store = new Store(tempDir());
