@@ -191,6 +191,139 @@ The app server also pushes `account/rateLimits/updated` notifications; Morndo ma
 push needs no lease — it is nobody's rationed read). The long-lived app-server client that would receive those
 pushes is **not built yet**: until it is, Codex is read by the leased poll alone.
 
+## The readings contract
+
+Every source except the status line (which has its own route) posts one body to `POST /api/agent/usage/readings`,
+under the account named in the `X-Morndo-Account` header. **Seconds on the wire** everywhere (`captured_at`,
+`resets_at`, `retry_after_s`); the hub's own memory works in milliseconds. The body:
+
+**Who may post.** The route takes any agent token, with no scope: only the lease route and the limit and pool routes
+need a manager token or the `usage-pool` scope. So any lane's token can post a reading for any account. What it can do
+depends on the lease (below): an *unleased* reading changes the windows Home shows and the thresholds that watch
+them, and nothing else; only a *leased* reading, from the token that took the lease, counts for the identity, the
+plan watch, the limit flags and the end of a derived mark. Binding leases and tokens to the accounts a node really
+reports is the follow-up T-430.
+
+
+```json
+{
+  "source": "cli-screen", "node": "mac", "captured_at": 1760000000, "every_s": 300,
+  "plan": "Super", "identity": "a1b2c3d4e5f6",
+  "windows": [
+    { "id": "Cursor models", "used_percent": 72, "resets_at": 1760600000, "length_mins": null, "rolling": false, "note": "shared with Grok" }
+  ],
+  "lease_id": "..."
+}
+```
+
+- **`source`** — one closed list: `status-line` (never posted here), `claude-usage`, `app-server`, `cli-screen`,
+  `vendor-api`. The body's own source says who read it; the hub keys rows by account, source and node.
+- **`node`** — the machine that read (≤ 80 characters), so one account can be read on the machine that holds its
+  login while its sessions run elsewhere.
+- **`captured_at`** — when the source took the reading, never later than the hub's clock plus a five-minute skew. A
+  reading older than the newest stamp the source ever gave is a late replay: answered ok, changes nothing.
+- **`every_s`** — how often the source may be read; kept between one minute and six hours.
+- **`plan`** — the plan's own name (≤ 80). Its words also title a window with no length of its own (see Cursor
+  below); a caption the provider printed is never read as a title.
+- **`identity`** — a digest of who is behind the account, never an id. It feeds the plan watch: a changed identity
+  between two agreeing readings is an account change.
+- **`windows`** — each with `id` (≤ 40 characters; 300 minutes is titled `five_hour` and 10080 `seven_day`,
+  whatever the source called them), `used_percent` (0 to 100, and a value above 100 up to 101 is read as 100; outside 0..101
+  is not a reading of that window — dropped, never clamped to 0), `resets_at` (epoch seconds or null), `length_mins` (whole minutes when the source knows the
+  window's length, else null — never a guess), `rolling`, and `note` (the provider's own words about the window,
+  ≤ 40 after cleaning).
+- **`ordinary_usage_allowed`, `rate_limit_reached_type`** — the provider's own limit flags (Codex's). They count
+  only on a leased reading: flags that say the account cannot use its plan mark the seat; flags that say all is
+  well end a derived mark. The type string is never shown and never stored beyond that boolean effect.
+- **`lease_id`** — the lease this read consumed, when it had one. A lease belongs to the token that took it.
+- **`failure`** — instead of `windows`, when the source cannot read: `{ reason, hint, retry_after_s }` — one closed
+  reason (below), a free-text hint cleaned of links and addresses before it is stored, and the provider's own retry
+  word in whole seconds when it gave one. A failure keeps the last good reading.
+
+A reading whose windows are all unreadable is a failure the principal sees, not silence. The hub merges what the
+sources show across one account, treats a window a source repeats verbatim as last-known data, and forgets a source
+that has been silent for two weeks.
+
+## Reason classes
+
+A read fails for exactly one closed-list reason. Transient ones are worth retrying (a source in them stays merely
+stale for its grace hour before it is called unavailable); permanent ones are not fixed by waiting. The Fix shown
+comes from the domain's closed fix list — a reason with no fix of its own shows none.
+
+| Reason | Class | What it means | Fix |
+| --- | --- | --- | --- |
+| `unknown_screen` | permanent | its screen was not in a shape Morndo knows | check the source |
+| `signed_out` | permanent | it is signed out | sign in again |
+| `refused` | permanent | its organization refused it | use another account |
+| `no_usage_for_plan` | permanent | this plan has no usage to read | — |
+| `plan_ended` | permanent | the plan has ended | reactivate the seat |
+| `no_scope` | permanent | this sign-in cannot read usage | sign in fully on this machine |
+| `rate_limited` | transient | the provider is limiting reads | — |
+| `unreachable` | transient | the provider could not be reached | — |
+| `timeout` | transient | the read took too long | — |
+
+## Z.ai
+
+A Z.ai subscription's quota is read by the operator's own collector, which makes the HTTP call and hands the answer
+— status, `Retry-After` header and parsed body — to the pure parser in this repository
+(`apps/connections/src/adapters/usage-zai.ts`). Driving the HTTP call stays in the operator's collector, outside
+this repository: the parser never reaches the network. It accepts the answer's `data.limits` entries (made-up
+example):
+
+```json
+{
+  "code": 0, "success": true,
+  "data": { "limits": [
+    { "type": "CREDIT_LIMIT", "unit": 3, "number": 5, "percentage": 42, "nextResetTime": 1793460000000 },
+    { "type": "CREDIT_LIMIT", "unit": 6, "number": 1, "currentValue": 30, "usage": 200, "nextResetTime": 1793620000000 }
+  ] }
+}
+```
+
+A limit is told by its `unit` and `number` alone — unit 3 is hours (`number` × 60 minutes), unit 6 is weeks
+(`number` × 10080) — never by array order: the weekly and the 5-hour entries swap order near the end of a week.
+300 minutes becomes the `five_hour` window, 10080 the `seven_day` one, any other length a window named by its
+minutes, an unknown unit a window with no length. `CREDIT_LIMIT` is accepted wherever `TOKENS_LIMIT` was, and a
+tokens limit with neither unit nor number is the legacy 5-hour window. The used percent is `percentage`, or
+`currentValue × 100 / usage` when `usage` is a positive number — out of range or epoch-like is no number, and that
+window is dropped and shown as missing, never as 0%. Every Z.ai window is rolling (the credit windows refresh after
+use). A missing weekly entry is missing, not a failure. A tokens limit with no unit or number only fills an id no explicit
+entry claims, so it never shadows the explicit 5-hour entry, whichever comes first; of two explicit entries claiming
+one id the first wins. An answer whose limits are all unreadable (a percent that is a string, say) is `unknown_screen`,
+not an ok read with nothing in it. The failure classes, in their order: HTTP 401/403, or a body `code` of 401, 403,
+1000, 1001, 1003 or 1005 (Z.ai's authentication codes), is `signed_out`; a 429 or the code 1302 is `rate_limited`
+with `Retry-After` as whole seconds (an HTTP date is not supported); a 404 is `unknown_screen`; the codes 1309 and
+1314 (an expired package) are `plan_ended`; `success: false` with any other code, or a 5xx, is `unreachable` (a
+transient fault, never a guess at a cause); anything else unreadable is `unknown_screen`, whose hint is only the
+fixed shape `unknown shape <hash>` — never a word of the answer. The codes are from Z.ai's error table
+(https://docs.z.ai/api-reference/api-code, read 2026-10-24), which is the model API's: that the quota call shares it is
+unverified. The ok result maps to a reading with source
+`vendor-api`, posted under the readings contract above.
+
+A Z.ai window carries its own length (unit and number say it), so its windows and their titles need no plan, and a
+collector that posts unleased readings still shows them. What an unleased reading cannot do is feed the plan watch: a
+change of the window set, of a cadence, or a drop of points on this source is told only from leased readings, so a
+collector that wants those notices takes a lease (`usage-pool` scope, source `vendor-api`) like the headless reader does.
+
+## Cursor
+
+The hub never drives the Cursor CLI. A collector outside the repository reads the screen and posts named windows as
+readings with source `cli-screen`, under the readings contract above: `length_mins` when the collector knows the
+window's length, a `note` for what the provider said about it (a pool shared with another product carries
+`"shared with Grok"`), prepaid credit as a line of its own, and a `failure` with the fixed-shape hint when the
+screen is unknown. Which period a Cursor plan is on is the hub's own call, never the caption the poster printed: a
+window with a length is titled by it; with none, the gap between two observed resets titles it; with only one reset
+seen, the reset horizon does — within 8 days and a weekly-family plan name (the plan the plan watch has *confirmed*:
+a change waits for a second agreeing leased reading, so one odd or forged plan string flips no title) (`free`, `plus`, `premium`, `super`)
+"about weekly", further out "about monthly", and a name on both periods (`ultra`) "plan period" until the second
+reset is observed.
+
+**The collector must take a lease for period titles.** The plan family comes from the plan the plan watch has
+confirmed, and only a *leased* reading (a lease taken from `POST /api/agent/usage/lease` with a token that carries
+the `usage-pool` scope, source `cli-screen`, and posted with its `lease_id`) reaches the watch. A collector that posts
+readings with no lease still shows its windows, but a window with no length falls back to "resets in …" with no
+cadence word, whatever plan the reading names. A leased reading that names no plan keeps the plan already confirmed.
+
 ## Pool seats
 
 The accounts pool can set a seat by hand, with a token that carries the `usage-pool` scope:
