@@ -48,6 +48,21 @@ export function refUpdateResult(ok: boolean, stderr: string): "ok" | "moved" {
 const PREPARED = "feed-prepared.json";
 export const MOVED = "the feed branch moved; run this job again";
 
+// The command line's word for the decision: absent is false, and only the two words are accepted.
+export function parseAllowEmptyChannel(value: string | string[] | boolean | undefined): boolean {
+  if (value === undefined) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error("--allow-empty-channel must be true or false");
+}
+
+// A channel offers the releases it lists that are not withdrawn.
+function offeredCount(feed: string): number {
+  const doc = JSON.parse(feed) as { releases: { version: string }[]; withdrawn: string[] };
+  const withdrawn = new Set(doc.withdrawn);
+  return doc.releases.filter(release => !withdrawn.has(release.version)).length;
+}
+
 export type Prepared = { head: string | null; message: string };
 
 export type PrepareIo = { head: () => string | null; read: (sha: string, file: string) => string | null };
@@ -56,7 +71,7 @@ export type PrepareIo = { head: () => string | null; read: (sha: string, file: s
 // at 1: machines that saw a higher number would reject every later feed (design §9.5).
 export function prepareFeeds(p: {
   repository: string; dir: string; signers: string; scratch: string; now: number;
-} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" } | { mode: "withdraw"; version: string }),
+} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" } | { mode: "withdraw"; version: string; allowEmptyChannel?: boolean }),
 io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => readAt(p.repository, sha, file) }): "absent" | "ready" {
   if (p.mode === "withdraw" && parseVersion(p.version) === null) throw new Error(`not a version: ${p.version}`);
   mkdirSync(p.dir, { recursive: true });
@@ -87,6 +102,13 @@ io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => r
       if (!listed.releases.some(release => release.version === p.version)) throw new Error(`${p.version} is not in the latest feed`);
       const nextLatest = withdrawRelease(latest, p.version, p.now);
       const nextStable = withdrawRelease(stable, p.version, p.now);
+      if (p.allowEmptyChannel !== true) {
+        for (const [channel, before, after] of [["latest", latest, nextLatest], ["stable", stable, nextStable]] as const) {
+          if (offeredCount(before) > 0 && offeredCount(after) === 0) {
+            throw new Error(`withdrawing ${p.version} would leave the ${channel} feed offering nothing; set allow_empty_channel to true to do it`);
+          }
+        }
+      }
       writeFileSync(join(p.dir, "latest.json"), nextLatest);
       writeFileSync(join(p.dir, "stable.json"), nextStable);
     } else {

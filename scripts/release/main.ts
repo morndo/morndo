@@ -12,7 +12,7 @@ import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
 import { materialiseFeed } from "./feed-site.ts";
 import { keySetVersion } from "./key-set.ts";
-import { commitFeeds, prepareFeeds } from "./feed-sync.ts";
+import { commitFeeds, parseAllowEmptyChannel, prepareFeeds } from "./feed-sync.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange, type ArtifactInput } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24 } from "./node-pin.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
@@ -73,7 +73,7 @@ function main(argv: string[]): void {
       in: { type: "string" }, key: { type: "string" }, namespace: { type: "string" },
       channel: { type: "string" }, existing: { type: "string" }, manifest: { type: "string" },
       "manifest-url": { type: "string" }, now: { type: "string" }, "key-set": { type: "string" },
-      dir: { type: "string" }, signers: { type: "string" }, scratch: { type: "string" },
+      dir: { type: "string" }, signers: { type: "string" }, scratch: { type: "string" }, "allow-empty-channel": { type: "string" },
       index: { type: "string" }, keys: { type: "string" },
     },
     strict: true,
@@ -157,6 +157,7 @@ function main(argv: string[]): void {
       const outcome = prepareFeeds({
         mode: "withdraw", version: flag(values, "version"), repository: flag(values, "repository"), dir: flag(values, "dir"),
         now: Number(flag(values, "now")), signers: flag(values, "signers"), scratch: flag(values, "scratch"),
+        allowEmptyChannel: parseAllowEmptyChannel(values["allow-empty-channel"]),
       });
       process.stdout.write(`${outcome}\n`);
       return;

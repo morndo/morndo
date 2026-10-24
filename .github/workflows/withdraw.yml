@@ -17,13 +17,14 @@ on:
         description: Version to mark withdrawn in both feeds
         required: true
         type: string
+      allow_empty_channel:
+        description: Allow withdrawing the last Version a channel offers (the channel then offers nothing)
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
-
-concurrency:
-  group: morndo-feed
-  cancel-in-progress: false
 
 jobs:
   # Prepare runs npm and holds no key (the withdraw environment is the first approval). Sign holds the feed key and
@@ -49,6 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ inputs.version }}
+          ALLOW_EMPTY: ${{ inputs.allow_empty_channel }}
         run: |
           set -euo pipefail
           now=$(node -e "process.stdout.write(String(Date.now()))")
@@ -60,7 +62,7 @@ jobs:
           node scripts/release/main.ts feed-withdraw-prepare \
             --repository "$GITHUB_REPOSITORY" --dir site --now "$now" \
             --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP" \
-            --version "$VERSION"
+            --version "$VERSION" --allow-empty-channel "$ALLOW_EMPTY"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: feed-unsigned
@@ -92,6 +94,7 @@ jobs:
           MODE: withdraw
           VERSION: ${{ inputs.version }}
           REPOSITORY: ${{ github.repository }}
+          ALLOW_EMPTY_CHANNEL: ${{ inputs.allow_empty_channel }}
         run: /bin/sh scripts/release/check-signing-feed.sh
       # The only step that holds the feed key.
       - name: Sign the feeds
@@ -122,6 +125,13 @@ jobs:
   withdraw:
     needs: withdraw-sign
     if: github.ref == 'refs/heads/main'
+    # Preparation and signing wait for approvals and write nothing, so they do not take this group.
+    # A withdrawal can wait up to 30 days, and the feed expires after 14, so feed.yml's Monday re-sign must still run.
+    # This job writes the feed. It verifies that the feed branch still points at the commit the preparation read
+    # and fails safe, "the feed branch moved; run this job again", if a re-sign ran meanwhile.
+    concurrency:
+      group: morndo-feed
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     outputs:
       present: ${{ steps.commit.outputs.present }}
