@@ -14,9 +14,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CLIENT_API, ChannelFeedSchema, FileListSchema, FLEET_PROTO, ManifestSchema } from "@morndo/protocol";
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
-import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed } from "./feed.ts";
+import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed, withdrawRelease } from "./feed.ts";
 import { deployedSeq, writeVerifiedSite } from "./feed-site.ts";
-import { commitFeeds, feedTree, MOVED, prepareFeeds, refUpdateResult } from "./feed-sync.ts";
+import { commitFeeds, feedTree, MOVED, parseAllowEmptyChannel, prepareFeeds, refUpdateResult } from "./feed-sync.ts";
 import { readSchemaJson } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
@@ -515,6 +515,228 @@ describe("feed", () => {
     expect(out.keySetVersion).toBe(before.keySetVersion);
     expect(out.releases).toEqual(before.releases);
     expect(out.withdrawn).toEqual(before.withdrawn);
+  });
+
+  function signedFeeds(latest: string, stable: string) {
+    const dir = temp();
+    const key = join(dir, "feed");
+    expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "feed-test", "-q"]).status).toBe(0);
+    const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" });
+    const signers = join(dir, "allowed");
+    writeFileSync(signers, `${allowedSignerLine({ identity: FEED_NAMESPACE, namespace: FEED_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
+    const bodies: Record<string, string> = { "latest.json": latest, "stable.json": stable };
+    for (const name of ["latest.json", "stable.json"] as const) {
+      const path = join(dir, name);
+      const body = bodies[name];
+      if (body === undefined) throw new Error(`${name} was not staged`);
+      writeFileSync(path, body);
+      expect(spawnSync("ssh-keygen", ["-Y", "sign", "-f", key, "-n", FEED_NAMESPACE, path]).status).toBe(0);
+      bodies[`${name}.sig`] = readFileSync(`${path}.sig`, "utf8");
+    }
+    return {
+      dir, signers,
+      io: { head: () => "aaa", read: (_sha: string, file: string) => bodies[file] ?? null },
+    };
+  }
+  const withdraw = (latest: string, stable: string, version: string, allowEmptyChannel = false) => {
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    const outcome = prepareFeeds({
+      mode: "withdraw", version, repository: "o/r", dir: site, signers, scratch: dir, now: WHEN + 1000,
+      ...(allowEmptyChannel ? { allowEmptyChannel: true } : {}),
+    }, io);
+    return { dir, site, signers, outcome };
+  };
+
+  it("withdraw marks the Version in both feeds and raises both numbers", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = publishRelease(null, { channel: "stable", entry, now: WHEN, keySetVersion: 1 });
+    const { site } = withdraw(latest, stable, "0.1.0", true);
+    const nextLatest = ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "latest.json"), "utf8")));
+    const nextStable = ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "stable.json"), "utf8")));
+    expect(nextLatest.seq).toBe(2);
+    expect(nextStable.seq).toBe(2);
+    expect(nextLatest.withdrawn).toEqual(["0.1.0"]);
+    expect(nextStable.withdrawn).toEqual(["0.1.0"]);
+    expect(nextLatest.channel).toBe("latest");
+    expect(nextStable.channel).toBe("stable");
+  });
+
+  it("a withdrawn Release stays in the Feed, marked, and is never removed", () => {
+    const base = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const second = publishRelease(base, { channel: "latest", entry: later, now: WHEN + 1000, keySetVersion: 1 })
+      .replace('"withdrawn": []', '"withdrawn": ["0.0.9"]');
+    const before = JSON.parse(second) as { releases: unknown; withdrawn: string[]; seq: number; issuedAt: string; expiresAt: string; schema: number; channel: string; keySetVersion: number };
+    const raw = withdrawRelease(second, "0.1.0", WHEN + 2000);
+    const out = JSON.parse(raw) as typeof before;
+    const between = (text: string) => text.slice(text.indexOf('"releases":'), text.indexOf('"withdrawn":'));
+    expect(between(raw)).toBe(between(second));
+    expect(out.releases).toEqual(before.releases);
+    expect(out.withdrawn).toEqual(["0.0.9", "0.1.0"]);
+    expect(out.seq).toBe(before.seq + 1);
+    expect(out.issuedAt).not.toBe(before.issuedAt);
+    expect(out.expiresAt).not.toBe(before.expiresAt);
+    expect(Date.parse(out.expiresAt) - Date.parse(out.issuedAt)).toBe(FEED_TTL_MS);
+    expect(out.schema).toBe(before.schema);
+    expect(out.channel).toBe(before.channel);
+    expect(out.keySetVersion).toBe(before.keySetVersion);
+  });
+
+  it("the Feed number goes up and the Feed is signed", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const { dir, site, signers } = withdraw(latest, stable, "0.1.0", true);
+    expect(ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "latest.json"), "utf8"))).seq).toBe(2);
+    expect(ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "stable.json"), "utf8"))).seq).toBe(2);
+    const io = { head: () => "aaa", write: () => "ok" as const };
+    expect(() => commitFeeds({ repository: "o/r", dir: site, signers, scratch: dir }, io)).toThrow(/not signed/);
+    writeFileSync(join(site, "latest.json.sig"), "nope\n");
+    writeFileSync(join(site, "stable.json.sig"), "nope\n");
+    expect(() => commitFeeds({ repository: "o/r", dir: site, signers, scratch: dir }, io)).toThrow(/signature/i);
+  });
+
+  it("withdraw refuses a version that is not in the Feed", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    expect(() => prepareFeeds({
+      mode: "withdraw", version: "0.2.0", repository: "o/r", dir: site, signers, scratch: dir, now: WHEN + 1000,
+    }, io)).toThrow("0.2.0 is not in the latest feed");
+    expect(existsSync(join(site, "latest.json"))).toBe(false);
+    expect(existsSync(join(site, "stable.json"))).toBe(false);
+    expect(existsSync(join(site, "feed-prepared.json"))).toBe(false);
+  });
+
+  it("withdraw refuses a version that is already withdrawn", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 })
+      .replace('"withdrawn": []', '"withdrawn": ["0.1.0"]');
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    expect(() => withdrawRelease(latest, "0.1.0", WHEN + 1000)).toThrow("0.1.0 is already withdrawn in the latest feed");
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    expect(() => prepareFeeds({
+      mode: "withdraw", version: "0.1.0", repository: "o/r", dir: site, signers, scratch: dir, now: WHEN + 1000,
+    }, io)).toThrow("0.1.0 is already withdrawn in the latest feed");
+    expect(existsSync(join(site, "latest.json"))).toBe(false);
+  });
+
+  it("withdraw refuses the last Version a channel offers unless it is allowed", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const attempt = (body: string, other: string, version: string, allowEmptyChannel?: boolean) => {
+      const { dir, signers, io } = signedFeeds(body, other);
+      const site = join(dir, "site");
+      const run = () => prepareFeeds({
+        mode: "withdraw", version, repository: "o/r", dir: site, signers, scratch: dir, now: WHEN + 1000,
+        ...(allowEmptyChannel === undefined ? {} : { allowEmptyChannel }),
+      }, io);
+      return { site, run };
+    };
+    const only = attempt(latest, stable, "0.1.0");
+    expect(only.run).toThrow("withdrawing 0.1.0 would leave the latest feed offering nothing; set allow_empty_channel to true to do it");
+    expect(existsSync(join(only.site, "latest.json"))).toBe(false);
+    expect(existsSync(join(only.site, "stable.json"))).toBe(false);
+    expect(existsSync(join(only.site, "feed-prepared.json"))).toBe(false);
+
+    const allowed = attempt(latest, stable, "0.1.0", true);
+    expect(allowed.run()).toBe("ready");
+    expect(JSON.parse(readFileSync(join(allowed.site, "latest.json"), "utf8")).withdrawn).toEqual(["0.1.0"]);
+
+    const two = publishRelease(latest, { channel: "latest", entry: later, now: WHEN + 500, keySetVersion: 1 });
+    const kept = attempt(two, stable, "0.1.0");
+    expect(kept.run()).toBe("ready");
+    expect(JSON.parse(readFileSync(join(kept.site, "latest.json"), "utf8")).withdrawn).toEqual(["0.1.0"]);
+
+    const stableOnly = publishRelease(null, { channel: "stable", entry, now: WHEN, keySetVersion: 1 });
+    const stableLast = attempt(two, stableOnly, "0.1.0");
+    expect(stableLast.run).toThrow("withdrawing 0.1.0 would leave the stable feed offering nothing; set allow_empty_channel to true to do it");
+    expect(existsSync(join(stableLast.site, "latest.json"))).toBe(false);
+    expect(existsSync(join(stableLast.site, "stable.json"))).toBe(false);
+    expect(existsSync(join(stableLast.site, "feed-prepared.json"))).toBe(false);
+
+    const emptyStable = attempt(two, stable, "0.2.0");
+    expect(emptyStable.run()).toBe("ready");
+    const nextStable = JSON.parse(readFileSync(join(emptyStable.site, "stable.json"), "utf8")) as { releases: unknown[]; withdrawn: string[] };
+    expect(nextStable.releases).toEqual([]);
+    expect(nextStable.withdrawn).toEqual(["0.2.0"]);
+  });
+
+  it("the empty-channel decision is read from the command line as true or false only", () => {
+    expect(parseAllowEmptyChannel(undefined)).toBe(false);
+    expect(parseAllowEmptyChannel("false")).toBe(false);
+    expect(parseAllowEmptyChannel("true")).toBe(true);
+    for (const word of ["yes", "TRUE", "1", "", "True "]) {
+      expect(() => parseAllowEmptyChannel(word), word).toThrow(/--allow-empty-channel must be true or false/);
+    }
+  });
+
+  it("withdraw leaves a channel that already offered nothing alone", () => {
+    const latest = publishRelease(
+      publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 }),
+      { channel: "latest", entry: later, now: WHEN + 500, keySetVersion: 1 },
+    );
+    const stable = publishRelease(null, { channel: "stable", entry, now: WHEN, keySetVersion: 1 })
+      .replace('"withdrawn": []', '"withdrawn": ["0.1.0"]');
+    const { site } = withdraw(latest, stable, "0.2.0");
+    const nextStable = JSON.parse(readFileSync(join(site, "stable.json"), "utf8")) as { releases: { version: string }[]; withdrawn: string[] };
+    const nextLatest = JSON.parse(readFileSync(join(site, "latest.json"), "utf8")) as { releases: { version: string }[]; withdrawn: string[] };
+    expect(nextStable.releases.map(release => release.version)).toEqual(["0.1.0"]);
+    expect(nextStable.withdrawn).toEqual(["0.1.0", "0.2.0"]);
+    expect(nextStable.releases.filter(release => !nextStable.withdrawn.includes(release.version))).toEqual([]);
+    expect(nextLatest.releases.filter(release => !nextLatest.withdrawn.includes(release.version)).map(release => release.version)).toEqual(["0.1.0"]);
+  });
+
+  it("withdraw refuses a word that is not a Version, before any feed is read", () => {
+    const dir = temp();
+    let reads = 0;
+    let heads = 0;
+    expect(() => prepareFeeds({
+      mode: "withdraw", version: "not-a-version", repository: "o/r", dir: join(dir, "site"),
+      signers: join(dir, "none"), scratch: dir, now: WHEN,
+    }, {
+      head: () => { heads += 1; return "aaa"; },
+      read: () => { reads += 1; return null; },
+    })).toThrow("not a version: not-a-version");
+    expect(heads).toBe(0);
+    expect(reads).toBe(0);
+  });
+
+  it("withdraw needs a feed branch", () => {
+    const dir = temp();
+    let reads = 0;
+    expect(() => prepareFeeds({
+      mode: "withdraw", version: "0.1.0", repository: "o/r", dir: join(dir, "site"),
+      signers: join(dir, "none"), scratch: dir, now: WHEN,
+    }, { head: () => null, read: () => { reads += 1; return null; } })).toThrow("no feed branch to withdraw from");
+    expect(reads).toBe(0);
+    expect(existsSync(join(dir, "site/latest.json"))).toBe(false);
+    expect(existsSync(join(dir, "site/feed-prepared.json"))).toBe(false);
+  });
+
+  it("withdraw also marks stable when stable does not list the Version", () => {
+    const latest = publishRelease(
+      publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 }),
+      { channel: "latest", entry: later, now: WHEN + 500, keySetVersion: 1 },
+    );
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const { site } = withdraw(latest, stable, "0.2.0");
+    const nextStable = JSON.parse(readFileSync(join(site, "stable.json"), "utf8")) as { releases: unknown[]; withdrawn: string[]; seq: number };
+    const nextLatest = JSON.parse(readFileSync(join(site, "latest.json"), "utf8")) as { withdrawn: string[] };
+    expect(nextStable.releases).toEqual([]);
+    expect(nextStable.withdrawn).toEqual(["0.2.0"]);
+    expect(nextStable.seq).toBe(2);
+    expect(nextLatest.withdrawn).toEqual(["0.2.0"]);
+  });
+
+  it("the prepared message names the Version", () => {
+    const latest = publishRelease(
+      publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 }),
+      { channel: "latest", entry: later, now: WHEN + 500, keySetVersion: 1 },
+    );
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const { site } = withdraw(latest, stable, "0.1.0");
+    expect(JSON.parse(readFileSync(join(site, "feed-prepared.json"), "utf8"))).toEqual({ head: "aaa", message: "Withdraw 0.1.0" });
   });
 
   it("an empty stable feed is seq 1 with no releases", () => {

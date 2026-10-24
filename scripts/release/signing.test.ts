@@ -307,6 +307,146 @@ describe("check-signing-feed.sh", () => {
     expect(check(first, { MODE: "publish", VERSION }).status).toBe(1);
     expect(check(first, { MODE: "resign" }).stderr).toMatch(/needs a feed branch/);
   });
+
+  const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const bump = (text: string, now: number, withdrawn: string[], change?: (doc: { seq: number; keySetVersion: number; releases: { manifestSha256: string }[] }) => void) => {
+    const doc = JSON.parse(text) as { seq: number; issuedAt: string; expiresAt: string; withdrawn: string[]; keySetVersion: number; releases: { manifestSha256: string }[] };
+    doc.seq += 1;
+    doc.issuedAt = iso(now);
+    doc.expiresAt = iso(now + 14 * 86_400_000);
+    doc.withdrawn = withdrawn;
+    change?.(doc);
+    return JSON.stringify(doc);
+  };
+
+  it("passes a withdrawal: both feeds +1, the lists as they were, the Version appended to withdrawn", () => {
+    const w = world({ branch: true });
+    const latest = publishRelease(w.latest, { channel: "latest", entry: entry("0.2.0"), now: NOW - 4000, keySetVersion: 1 });
+    writeFileSync(join(w.dir, "prev/latest.json"), latest);
+    put(w, bump(latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+    const done = check(w, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(done.status, done.stderr).toBe(0);
+  });
+
+  it("refuses a withdrawal that removes or edits a release", () => {
+    const removed = world({ branch: true });
+    put(removed, bump(removed.latest, NOW, ["0.1.0"], doc => { doc.releases = []; }), bump(removed.stable, NOW, ["0.1.0"]));
+    const gone = check(removed, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(gone.status).toBe(1);
+    expect(gone.stderr).toMatch(/refusing to sign/);
+    expect(gone.stderr).toMatch(/changed a release/);
+    const edited = world({ branch: true });
+    put(edited, bump(edited.latest, NOW, ["0.1.0"], doc => { doc.releases[0]!.manifestSha256 = "ef".repeat(32); }), bump(edited.stable, NOW, ["0.1.0"]));
+    const changed = check(edited, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(changed.status).toBe(1);
+    expect(changed.stderr).toMatch(/changed a release/);
+  });
+
+  it("refuses a withdrawal that appends anything but the Version, or two entries, or a Version already withdrawn", () => {
+    const other = world({ branch: true });
+    put(other, bump(other.latest, NOW, ["0.9.9"]), bump(other.stable, NOW, ["0.1.0"]));
+    const wrong = check(other, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(wrong.status).toBe(1);
+    expect(wrong.stderr).toMatch(/refusing to sign/);
+    expect(wrong.stderr).toMatch(/withdrawn/);
+    const two = world({ branch: true });
+    put(two, bump(two.latest, NOW, ["0.1.0", "0.9.9"]), bump(two.stable, NOW, ["0.1.0"]));
+    const extra = check(two, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(extra.status).toBe(1);
+    expect(extra.stderr).toMatch(/withdrawn/);
+    const again = world({ branch: true });
+    const prev = JSON.parse(readFileSync(join(again.dir, "prev/latest.json"), "utf8")) as { withdrawn: string[] };
+    prev.withdrawn = ["0.1.0"];
+    writeFileSync(join(again.dir, "prev/latest.json"), JSON.stringify(prev));
+    put(again, bump(again.latest, NOW, ["0.1.0", "0.1.0"]), bump(again.stable, NOW, ["0.1.0"]));
+    const held = check(again, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(held.status).toBe(1);
+    expect(held.stderr).toMatch(/already withdrawn/);
+  });
+
+  it("refuses a withdrawal of a Version the latest feed does not list", () => {
+    const w = world({ branch: true });
+    put(w, bump(w.latest, NOW, [VERSION]), bump(w.stable, NOW, [VERSION]));
+    const done = check(w, { MODE: "withdraw", VERSION });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/refusing to sign/);
+    expect(done.stderr).toMatch(/does not list/);
+  });
+
+  it("refuses a withdrawal with the wrong number, a changed key set, a stale issue time or an existing signature", () => {
+    const number = world({ branch: true });
+    put(number, bump(number.latest, NOW, ["0.1.0"], doc => { doc.seq = 9; }), bump(number.stable, NOW, ["0.1.0"]));
+    expect(check(number, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/expected/);
+    const keysChanged = world({ branch: true });
+    put(keysChanged, bump(keysChanged.latest, NOW, ["0.1.0"], doc => { doc.keySetVersion = 2; }), bump(keysChanged.stable, NOW, ["0.1.0"]));
+    expect(check(keysChanged, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/key set/);
+    const stale = world({ branch: true });
+    const old = NOW - 2 * 86_400_000;
+    put(stale, bump(stale.latest, old, ["0.1.0"]), bump(stale.stable, old, ["0.1.0"]));
+    expect(check(stale, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/issued/);
+    // stable is held to the same freshness as latest: a withdrawal writes both feeds now
+    const staleStable = world({ branch: true });
+    const stillOffered = publishRelease(staleStable.latest, { channel: "latest", entry: entry("0.2.0"), now: NOW - 4000, keySetVersion: 1 });
+    writeFileSync(join(staleStable.dir, "prev/latest.json"), stillOffered);
+    put(staleStable, bump(stillOffered, NOW, ["0.1.0"]), bump(staleStable.stable, old, ["0.1.0"]));
+    const staleStableDone = check(staleStable, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(staleStableDone.status).toBe(1);
+    expect(staleStableDone.stderr).toMatch(/stable\.json was issued/);
+    const signed = world({ branch: true });
+    put(signed, bump(signed.latest, NOW, ["0.1.0"]), bump(signed.stable, NOW, ["0.1.0"]));
+    writeFileSync(join(signed.dir, "site/latest.json.sig"), "old");
+    expect(check(signed, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/already exists/);
+  });
+
+  it("refuses a withdrawal without VERSION or with no feed branch", () => {
+    const w = world({ branch: true });
+    put(w, bump(w.latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+    expect(check(w, { MODE: "withdraw" }).status).not.toBe(0);
+    const missing = world({ branch: false });
+    put(missing, bump(missing.latest, NOW, ["0.1.0"]), bump(missing.stable, NOW, ["0.1.0"]));
+    const done = check(missing, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/a withdrawal needs a feed branch/);
+  });
+
+  it("refuses a withdrawal that leaves a channel offering nothing unless ALLOW_EMPTY_CHANNEL is true", () => {
+    const sentence = (channel: string) => `refusing to sign: withdrawing 0.1.0 would leave the ${channel} feed offering nothing; set allow_empty_channel to true to do it`;
+    const latestOnly = () => {
+      const w = world({ branch: true });
+      put(w, bump(w.latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+      return w;
+    };
+    const stableOnly = () => {
+      const w = world({ branch: true });
+      const latest = publishRelease(w.latest, { channel: "latest", entry: entry("0.2.0"), now: NOW - 4000, keySetVersion: 1 });
+      const stable = publishRelease(w.stable, { channel: "stable", entry: entry("0.1.0"), now: NOW - 4000, keySetVersion: 1 });
+      writeFileSync(join(w.dir, "prev/latest.json"), latest);
+      writeFileSync(join(w.dir, "prev/stable.json"), stable);
+      put(w, bump(latest, NOW, ["0.1.0"]), bump(stable, NOW, ["0.1.0"]));
+      return w;
+    };
+    for (const [channel, build] of [["latest", latestOnly], ["stable", stableOnly]] as const) {
+      for (const value of ["false", "true"]) {
+        const done = check(build(), { MODE: "withdraw", VERSION: "0.1.0", ALLOW_EMPTY_CHANNEL: value });
+        if (value === "true") expect(done.status, `${channel}: ${done.stderr}`).toBe(0);
+        else {
+          expect(done.status, done.stderr).toBe(1);
+          expect(done.stderr).toContain(sentence(channel));
+        }
+      }
+    }
+    const unset = check(latestOnly(), { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(unset.status, unset.stderr).toBe(1);
+    expect(unset.stderr).toContain(sentence("latest"));
+  });
+
+  it("refuses an ALLOW_EMPTY_CHANNEL that is not true or false", () => {
+    const w = world({ branch: true });
+    put(w, bump(w.latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+    const done = check(w, { MODE: "withdraw", VERSION: "0.1.0", ALLOW_EMPTY_CHANNEL: "yes" });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toContain("refusing to sign: ALLOW_EMPTY_CHANNEL must be true or false");
+  });
 });
 
 // The Sign steps themselves: the `run` text is taken from the workflow and run with a throwaway key.

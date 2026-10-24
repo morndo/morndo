@@ -7,7 +7,9 @@
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
+import { parseVersion } from "@morndo/domain";
+import { ChannelFeedSchema } from "@morndo/protocol";
+import { emptyFeed, publishRelease, resignFeed, withdrawRelease } from "./feed.ts";
 import { FEED_FILES, gh, must, readAt, readFeedHead, verifyFeed } from "./feed-site.ts";
 
 // The trees API writes the blob when the entry carries content, so the feed push
@@ -46,6 +48,21 @@ export function refUpdateResult(ok: boolean, stderr: string): "ok" | "moved" {
 const PREPARED = "feed-prepared.json";
 export const MOVED = "the feed branch moved; run this job again";
 
+// The command line's word for the decision: absent is false, and only the two words are accepted.
+export function parseAllowEmptyChannel(value: string | string[] | boolean | undefined): boolean {
+  if (value === undefined) return false;
+  if (value === "true") return true;
+  if (value === "false") return false;
+  throw new Error("--allow-empty-channel must be true or false");
+}
+
+// A channel offers the releases it lists that are not withdrawn.
+function offeredCount(feed: string): number {
+  const doc = JSON.parse(feed) as { releases: { version: string }[]; withdrawn: string[] };
+  const withdrawn = new Set(doc.withdrawn);
+  return doc.releases.filter(release => !withdrawn.has(release.version)).length;
+}
+
 export type Prepared = { head: string | null; message: string };
 
 export type PrepareIo = { head: () => string | null; read: (sha: string, file: string) => string | null };
@@ -54,12 +71,14 @@ export type PrepareIo = { head: () => string | null; read: (sha: string, file: s
 // at 1: machines that saw a higher number would reject every later feed (design §9.5).
 export function prepareFeeds(p: {
   repository: string; dir: string; signers: string; scratch: string; now: number;
-} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" }),
+} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" } | { mode: "withdraw"; version: string; allowEmptyChannel?: boolean }),
 io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => readAt(p.repository, sha, file) }): "absent" | "ready" {
+  if (p.mode === "withdraw" && parseVersion(p.version) === null) throw new Error(`not a version: ${p.version}`);
   mkdirSync(p.dir, { recursive: true });
   for (const file of [...FEED_FILES, PREPARED]) rmSync(join(p.dir, file), { force: true });
   const head = io.head();
   if (p.mode === "resign" && head === null) return "absent";
+  if (p.mode === "withdraw" && head === null) throw new Error("no feed branch to withdraw from");
   // Both feeds and both signatures are looked for before any is checked, so a missing file is the first error.
   const found = head === null ? null : Object.fromEntries(FEED_FILES.map(file => [file, io.read(head, file)])) as Record<(typeof FEED_FILES)[number], string | null>;
   if (found !== null) {
@@ -76,10 +95,26 @@ io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => r
   };
   const latest = verified("latest.json");
   const stable = verified("stable.json");
-  if (p.mode === "resign") {
+  if (p.mode === "resign" || p.mode === "withdraw") {
     if (latest === null || stable === null) throw new Error(`feed ${latest === null ? "latest" : "stable"} is missing at ${head}`);
-    writeFileSync(join(p.dir, "latest.json"), resignFeed(latest, p.now));
-    writeFileSync(join(p.dir, "stable.json"), resignFeed(stable, p.now));
+    if (p.mode === "withdraw") {
+      const listed = ChannelFeedSchema.parse(JSON.parse(latest));
+      if (!listed.releases.some(release => release.version === p.version)) throw new Error(`${p.version} is not in the latest feed`);
+      const nextLatest = withdrawRelease(latest, p.version, p.now);
+      const nextStable = withdrawRelease(stable, p.version, p.now);
+      if (p.allowEmptyChannel !== true) {
+        for (const [channel, before, after] of [["latest", latest, nextLatest], ["stable", stable, nextStable]] as const) {
+          if (offeredCount(before) > 0 && offeredCount(after) === 0) {
+            throw new Error(`withdrawing ${p.version} would leave the ${channel} feed offering nothing; set allow_empty_channel to true to do it`);
+          }
+        }
+      }
+      writeFileSync(join(p.dir, "latest.json"), nextLatest);
+      writeFileSync(join(p.dir, "stable.json"), nextStable);
+    } else {
+      writeFileSync(join(p.dir, "latest.json"), resignFeed(latest, p.now));
+      writeFileSync(join(p.dir, "stable.json"), resignFeed(stable, p.now));
+    }
   } else {
     const manifest = readFileSync(p.manifestPath);
     writeFileSync(join(p.dir, "latest.json"), publishRelease(latest, {
@@ -91,7 +126,10 @@ io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => r
     }));
     writeFileSync(join(p.dir, "stable.json"), stable ?? emptyFeed({ channel: "stable", now: p.now, keySetVersion: p.keySetVersion }));
   }
-  const prepared: Prepared = { head, message: p.mode === "publish" ? "Publish the channel feeds" : "Re-sign the channel feeds" };
+  const prepared: Prepared = {
+    head,
+    message: p.mode === "publish" ? "Publish the channel feeds" : p.mode === "resign" ? "Re-sign the channel feeds" : `Withdraw ${p.version}`,
+  };
   writeFileSync(join(p.dir, PREPARED), JSON.stringify(prepared));
   return "ready";
 }
