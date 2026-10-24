@@ -137,6 +137,26 @@ describe("the fleet client (spec §5.6)", () => {
     expect(seen.filter(e => e.t === "alert")).toEqual([{ t: "alert", node: "pc", body: first }, { t: "alert", node: "", body: second }]);
   });
 
+  // S3, plan 4.5 item 4: the fleet's usage taps. A body the wire schema takes arrives typed; one it refuses is left
+  // out, like every other kind the client doesn't know.
+  it("delivers a usage tap, and leaves out one whose body the wire schema refuses", async () => {
+    const c = new FleetClient(fleet.socketPath);
+    const seen: FleetEvent[] = [];
+    stops.push(c.events(e => seen.push(e)));
+    await until(() => seen.some(e => e.t === "inventory" && e.node === "pc"));
+    const tap = { kind: "failure", lane: "w1", window: "w1", sessionId: "s-1", error: "rate_limit", account: null, at: 1_791_000_000 };
+    const laneAccount = { kind: "lane_account", lane: "w1", account: "seat-a", at: 1_791_000_000 };
+    fleet.usage("pc", tap);
+    fleet.usage("pc", laneAccount);
+    fleet.usage("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", at: 1_791_000_000, extra: "x" });   // strict: refused
+    fleet.usage("pc", { kind: "other", lane: "w1", at: 1_791_000_000 });
+    fleet.usage("pc", { kind: "failure", lane: "w1", window: "w1", sessionId: null, error: "rate_limit", account: null, at: 1_791_000_000 });   // sessionId is a string or absent
+    await until(() => seen.filter(e => e.t === "usage").length === 2);
+    expect(seen.filter(e => e.t === "usage")).toEqual([
+      { t: "usage", node: "pc", body: tap }, { t: "usage", node: "pc", body: laneAccount },
+    ]);
+  });
+
   it("delivers events, the state first, and subscribes again after the fleet restarts", async () => {
     const c = new FleetClient(fleet.socketPath);
     const seen: FleetEvent[] = [];

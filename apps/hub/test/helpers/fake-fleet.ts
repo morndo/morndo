@@ -376,6 +376,7 @@ export type FakeFleet = {
   delayCancels(ms: number): void;
   readonly deliveryReads: { id: string; at: number }[];
   laneEvent(e: LaneEvent): void;                            // kept for GET /v1/lane-events, and sent as a `lane` event
+  usage(node: string, body: unknown): void;                 // sent as a `usage` event, as the fleet's taps would be (S3)
   setLaneWatch(entries: LaneWatchEntry[]): void;            // served by GET /v1/lane-watch from now on
   subscriberCount(): number;                                // events WebSockets open now
   close(): Promise<void>;
@@ -667,6 +668,7 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
     delayCancels(ms) { cancelDelayMs = ms; },
     deliveryReads,
     laneEvent(e) { laneEvents.push(e); broadcast({ t: "lane", node: e.node, body: e }); },
+    usage(node, body) { broadcast({ t: "usage", node, body }); },
     setLaneWatch(entries) { laneWatch = entries; },
     subscriberCount: () => subscribers.size,
     async close() {

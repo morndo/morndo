@@ -26,6 +26,7 @@ import { queuedCommand, type ManagerQueue } from "../application/manager-queue.t
 import type { EnginesService } from "../application/engines-service.ts";
 import type { ConnectionsPageService } from "../application/connections-page.ts";
 import type { BoardService } from "../application/board-service.ts";
+import type { ProofService } from "../application/proof-service.ts";
 import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
 import type { AlertsService } from "../application/alerts-service.ts";
@@ -42,7 +43,7 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageReportBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLeaseBody, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -219,7 +220,7 @@ export function startHttp(p: {
   engines?: EnginesService | null;                                          // ADR-0013: the Engines page; null: not connected
   updatesService?: UpdatesService | null;                                   // updates §8.1 (PR 6c): every machine's Version; null: no fleet and no CLI
   connections?: ConnectionsPageService | null;                              // ADR-0018: LLM connections; null: no home set
-  board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
+  board?: { service: BoardService; agents: AgentAccess; proof?: ProofService } | null;   // ADR-0015: the board (proof: ADR-0035, B13; absent: briefs are not seeded); null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
   queue?: ManagerQueue | null;                                              // the manager's delivery queue (fleet-clients §9.1); null without a fleet
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
@@ -323,7 +324,7 @@ export function startHttp(p: {
   // console is the whole identity (agent-access.ts), and a worker token says which lane it acts as (X-Morndo-Lane).
   // A refusal spends the caller's refusal bucket; a call spends the token's.
   const boardProblemStatus = (problem: string) =>
-    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
+    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "proof_not_green" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
     r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}), ...(r.detail ? { detail: r.detail } : {}) });
 
@@ -438,7 +439,7 @@ export function startHttp(p: {
     const who = agentCaller(req, res, p.board.agents);
     if (!who) return;
     const { service } = p.board;
-    if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role } });
+    if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role, scopes: who.token.scopes } });
     if (path.startsWith("/api/agent/decisions")) return agentDecisions(req, res, path, method, who.actor);
     // A job grant (ADR-0017 §6). The body names the lane, the class and a directory hash. It has no command.
     if (path === "/api/agent/jobs/grant" && method === "POST") {
@@ -455,14 +456,83 @@ export function startHttp(p: {
       const r = p.usage.report(await readBody(req, UsageReportBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
       return r.ok ? json(res, 200, { account: r.account }) : json(res, 400, { error: r.problem });
     }
-    if (path === "/api/agent/board" && method === "GET") return json(res, 200, service.view());
+    // A usage reading a source posts (U14): the windows it can see now, or the one reason it cannot. The status line
+    // has its own route above; a reading that names it is refused.
+    if (path === "/api/agent/usage/readings" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      const accountHeader = req.headers["x-morndo-account"];
+      const r = p.usage.reading(await readBody(req, UsageReadingsBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    // A node's ask for a lease before a rationed read (S5, plan 4.4, U16): granted with an opaque id and its expiry,
+    // fresh with the capture time the caller may use instead of spawning, or denied with one reason and a wait. The
+    // answer leaks nothing else — not which node holds a live lease, not why a reading is fresh. The route is a
+    // manager's or the pool's (fix round 2026-10-24, finding 1, the limit route's rule): a worker token without the
+    // usage-pool scope is refused, and the lease granted is bound to the asking token's id.
+    if (path === "/api/agent/usage/lease" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (who.token.role !== "manager" && !who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "not_allowed" });
+      const body = await readBody(req, UsageLeaseBody);
+      const g = p.usage.leases.grant(body.account, body.source, body.node ?? null, who.token.id);
+      if (g.status === "granted") return json(res, 200, { status: "granted", lease_id: g.id, expires_at: Math.floor(g.expiresAt / 1000) });
+      if (g.status === "fresh") return json(res, 200, { status: "fresh", captured_at: Math.floor(g.capturedAt / 1000) });
+      return json(res, 200, { status: "denied", reason: g.reason, retry_after_s: Math.ceil(g.retryAfterMs / 1000) });
+    }
+    // A seat's limit hit as any source reports it (U9). The reply says only that it was taken: the agent door leaks
+    // nothing of the seat or any state. The route is a manager's or the pool's (PR #127, finding 2): a manager-role
+    // token, or one holding the usage-pool scope. A worker token without the scope stays refused — a lane's own
+    // failures reach the hub through the fleet tap, which needs no token.
+    if (path === "/api/agent/usage/limit" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (who.token.role !== "manager" && !who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "not_allowed" });
+      const body = await readBody(req, UsageLimitBody);
+      const accountHeader = req.headers["x-morndo-account"];
+      const account = body.account ?? (typeof accountHeader === "string" ? accountHeader : null);
+      const r = p.usage.noteLimit({
+        account,
+        kind: body.kind,
+        backAt: typeof body.back_at === "number" ? body.back_at * 1000 : null,
+        by: body.by,
+        at: typeof body.at === "number" ? body.at * 1000 : null,
+        fix: body.fix, hint: body.hint,
+      });
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    // The pool's own word on a seat (U15): a token with the usage-pool scope only — a role is not the scope, so the
+    // manager's token is refused without it too. The reply says only that it was taken.
+    if (path === "/api/agent/usage/pool" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (!who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "scope_required" });
+      const body = await readBody(req, UsagePoolBody);
+      const r = p.usage.poolSeat({
+        account: body.account, action: body.action,
+        ...(body.state === undefined ? {} : { state: body.state }),
+        why: body.why ?? null,
+        backAt: typeof body.back_at === "number" ? body.back_at * 1000 : null,
+        at: typeof body.at === "number" ? body.at * 1000 : null,
+        by: body.by,
+      });
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    if (path === "/api/agent/board" && method === "GET") {
+      // ADR-0035 step 4: the agents' board read carries each task in review's proof line beside the board itself; the
+      // principal's own routes answer without it.
+      const v = service.view();
+      return json(res, 200, { ...v, ...(p.board.proof ? { proof: p.board.proof.lines(v.tasks) } : {}) });
+    }
     if (path === "/api/agent/board/tasks" && method === "POST") return boardAnswer(res, service.create(await readBody(req, BoardCreateBody), who.actor));
     const task = /^\/api\/agent\/board\/tasks\/(T-\d{1,9})$/.exec(path);
     if (task && method === "GET") {
       const t = service.task(task[1] ?? "");
-      return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
+      return t ? json(res, 200, { ...t, ...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {}) }) : json(res, 404, { error: "unknown" });
     }
-    if (task && method === "POST") return boardAnswer(res, await service.actChecked(task[1] ?? "", await readBody(req, BoardActionBody), who.actor));
+    if (task && method === "POST") {
+      const body = await readBody(req, BoardActionBody);
+      // B13 (ADR-0035): a brief is filed through the proof service, which seeds its references as rows to check; every
+      // other action is the board's own. Without the service wired, a brief is the board's alone.
+      if (body.action === "brief" && p.board.proof) return boardAnswer(res, await p.board.proof.file(task[1] ?? "", body.brief, who.actor));
+      return boardAnswer(res, await service.actChecked(task[1] ?? "", body, who.actor));
+    }
     throw new HttpError(404, "no such route");
   }
 
@@ -770,6 +840,30 @@ export function startHttp(p: {
     }
     // ADR-0016: the accounts' usage, a look.
     if (path === "/api/usage" && method === "GET") return p.usage ? json(res, 200, p.usage.view()) : json(res, 404, { error: "usage_off" });
+    // The principal's own forget of a usage source (AT-23): the account, and the source to drop; without a source,
+    // the whole account. A Command like the others: limited, and the principal's session only.
+    if (path === "/api/usage/forget" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UsageForgetBody);
+      return json(res, 200, { forgotten: p.usage.forget(body.account, body.source, body.node) });
+    }
+    // The principal looked at usage (S5, AT-45): marks every account somebody now wants read — the same demand a
+    // feed hello raises. A Command like the forget above, limited the same; the reads themselves stay leased.
+    if (path === "/api/usage/look" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      p.usage.look();
+      return json(res, 200, { ok: true });
+    }
+    // The principal's own clear of a seat (U17): the pool's word or the hub's derived one, or both. A Command like
+    // the others: limited, and the principal's session only — an agent token never reaches here.
+    if (path === "/api/usage/seat/clear" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UsageSeatClearBody);
+      return json(res, 200, { cleared: p.usage.clearSeat(body.account, body.owner) });
+    }
     // The fleet's job mirror: the list and the counts beside each node. A look.
     if (path === "/api/jobs" && method === "GET") {
       if (!p.jobs) return json(res, 404, { error: "jobs_off" });
@@ -797,13 +891,17 @@ export function startHttp(p: {
       const task = /^\/api\/board\/tasks\/(T-\d{1,9})$/.exec(path);
       if (task && method === "GET") {
         const t = service.task(task[1] ?? "");
-        return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
+        return t ? json(res, 200, { ...t, ...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {}) }) : json(res, 404, { error: "unknown" });
       }
       if ((path === "/api/board/tasks" || task) && method === "POST") {
         limited(buckets.commands.take(a.endpoint.id));
         const actor = service.principal(a);
         if ("problem" in actor) return json(res, 403, { error: actor.problem });
-        if (task) return boardAnswer(res, service.act(task[1] ?? "", await readBody(req, BoardActionBody), actor));
+        if (task) {
+          const body = await readBody(req, BoardActionBody);
+          if (body.action === "brief" && p.board.proof) return boardAnswer(res, await p.board.proof.file(task[1] ?? "", body.brief, actor));
+          return boardAnswer(res, await service.actChecked(task[1] ?? "", body, actor));
+        }
         return boardAnswer(res, service.create(await readBody(req, BoardCreateBody), actor));
       }
       throw new HttpError(404, "no such route");
@@ -965,6 +1063,7 @@ export function startHttp(p: {
             send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id) });
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
+            p.usage?.look();                                                // S5 (AT-45): somebody is looking — mark the demand
             if (p.queue) send({ t: "deliveries", items: p.queue.commandsOf(conn.auth.endpoint.id) });   // all of the last day
             send({ t: "manager", queue: steering.managerQueue });           // whether a message waits for it while it has no window
             if (p.alerts) send({ t: "alerts", ...p.alerts.view() });        // the fleet's latest alerts, after every hello

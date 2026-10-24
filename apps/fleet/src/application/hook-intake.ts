@@ -13,11 +13,12 @@
 // mark also makes its lane event in the same transaction (fleet clients spec §7), published once the commit is on disk.
 // `onCommitted` runs after every stored batch's commit, lane events or none: the fleet's Runs read the hooks' activity
 // (ADR-0032) only once it is on the disk.
-import { LIMITS, type HookEvent, type LaneEvent } from "@morndo/protocol";
+import { LIMITS, type HookEvent, type LaneEvent, type UsageTapFailure } from "@morndo/protocol";
 import type { HookPath, Subscriber } from "../config.ts";
 import type { Audit } from "../adapters/audit.ts";
 import type { OutboxStore } from "../adapters/outbox-store.ts";
 import type { Transactions } from "./hook-sink.ts";
+import type { EventHub } from "./events.ts";
 import type { LaneEvents } from "./lane-events.ts";
 
 // One connection's batch, stored in the caller's transaction: the stream's mark, and what to do once it committed.
@@ -40,12 +41,13 @@ export class HookIntake {
   #onCommitted: () => void;
   #tx: Transactions | null;
   #lanes: Pick<LaneEvents, "take" | "committed"> | null;
+  #events: EventHub | null;
   #overflowing = new Set<string>();
   #unroutedAlerted = new Set<string>();                 // script paths alerted in this process
 
   constructor(p: {
     store: OutboxStore; subscribers: Subscriber[]; audit: Audit; now?: () => number; cap?: number; onStored?: () => void; tx?: Transactions;
-    lanes?: Pick<LaneEvents, "take" | "committed">; onCommitted?: () => void;
+    lanes?: Pick<LaneEvents, "take" | "committed">; events?: EventHub; onCommitted?: () => void;
   }) {
     this.#store = p.store;
     this.#subscribers = p.subscribers;
@@ -56,6 +58,7 @@ export class HookIntake {
     this.#onCommitted = p.onCommitted ?? (() => {});
     this.#tx = p.tx ?? null;
     this.#lanes = p.lanes ?? null;
+    this.#events = p.events ?? null;
   }
 
   known(node: string, streamId: string): { seq: number; known: boolean } {
@@ -66,8 +69,14 @@ export class HookIntake {
   store(node: string, streamId: string, events: HookEvent[]): Stored {
     const route = (e: HookEvent) => this.#subscribers.filter(s => s.paths.includes(e.path)).map(s => s.name);
     const fresh: LaneEvent[] = [];
+    const taps: { node: string; tap: UsageTapFailure }[] = [];
     const lanes = this.#lanes;
-    const taken = lanes ? (e: HookEvent) => { const t = lanes.take(e); if (t.event) fresh.push(t.event); return t.own; } : undefined;
+    const taken = lanes ? (e: HookEvent) => {
+      const t = lanes.take(e);
+      if (t.event) fresh.push(t.event);
+      if (t.limit !== null) taps.push({ node: e.node, tap: t.limit });
+      return t.own;
+    } : undefined;
     const r = this.#store.accept(node, streamId, events, route, { now: this.#now(), cap: this.#cap, ...(taken ? { taken } : {}) });
     return {
       seq: r.seq,
@@ -85,6 +94,9 @@ export class HookIntake {
         }
         if (r.stored > 0) this.#onStored();
         if (fresh.length > 0) lanes?.committed(fresh);
+        // Each batch's usage taps (plan 4.5 item 4), published like its lane events: only once the commit is on the
+        // disk, so a batch that rolled back told nothing.
+        for (const { node, tap } of taps) this.#events?.emit({ t: "usage", node, body: tap });
         if (events.length > 0) this.#onCommitted();
       },
     };

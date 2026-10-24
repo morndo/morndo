@@ -11,6 +11,17 @@ import { join } from "node:path";
 import { chromium } from "playwright";
 import { HUB_MAIN, assert, checks, outDir, pairedPage, startOffice } from "./harness.ts";
 
+// Polls a read until it satisfies `ok` (what Playwright's expect.poll does in its own test runner, which this script does not use).
+async function eventually<T>(read: () => Promise<T>, ok: (v: T) => boolean, what: string, timeout = 8000): Promise<T> {
+  const end = Date.now() + timeout;
+  for (;;) {
+    const v = await read();
+    if (ok(v)) return v;
+    if (Date.now() > end) throw new Error(`${what}: last read ${JSON.stringify(v)}`);
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
+
 const OUT = outDir("home");
 const { check, watch, finish } = checks(OUT);
 let code = 1;
@@ -25,8 +36,8 @@ const poolLines = [
   { name: "max-2", email: "lin@example.test", org: "personal_org", orgId: "org-0002", plan: "max", tier: "default_claude_max_20x" },
 ].map(l => JSON.stringify(l)).join("\n") + "\n";
 
-const mint = (env: NodeJS.ProcessEnv) =>
-  execFileSync(process.execPath, ["--no-warnings", HUB_MAIN, "agent-token", "new", "lanes", "--role", "worker"], { env, encoding: "utf8" }).split("\n")[0]?.trim() ?? "";
+const mint = (env: NodeJS.ProcessEnv, role: "worker" | "manager" = "worker") =>
+  execFileSync(process.execPath, ["--no-warnings", HUB_MAIN, "agent-token", "new", role === "manager" ? "manager" : "lanes", "--role", role], { env, encoding: "utf8" }).split("\n")[0]?.trim() ?? "";
 // A status line's JSON as Claude Code gives it (resets_at in epoch seconds), posted as a lane's status line would.
 const statusLine = (session: string, five: number | null, week: number | null, ctx: number) => ({
   cwd: "/w", session_id: session, model: { id: "claude-opus-5-5", display_name: "Opus" }, version: "2.1.295", context_window: { used_percentage: ctx },
@@ -40,9 +51,20 @@ try {
   office = await startOffice("home", { MORNDO_POOL_USAGE: poolFile });
   const token = mint(office.env);
   assert(token.startsWith("mat_"), "the console didn't print the token");
+  const managerToken = mint(office.env, "manager");
+  assert(managerToken.startsWith("mat_"), "the console didn't print the manager token");
   const post = (account: string, lane: string, body: unknown) => fetch(`${office!.base}/api/agent/usage`, {
     method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": lane, "x-morndo-account": account }, body: JSON.stringify(body),
   });
+  // A usage reading a source posts (U14), epoch seconds on the wire; and a seat's limit hit (a manager's route).
+  const readings = (account: string, body: unknown) => fetch(`${office!.base}/api/agent/usage/readings`, {
+    method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": "collector", "x-morndo-account": account }, body: JSON.stringify(body),
+  });
+  const limit = (account: string, body: unknown) => fetch(`${office!.base}/api/agent/usage/limit`, {
+    method: "POST", headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json", "x-morndo-lane": "collector" }, body: JSON.stringify({ account, ...body }),
+  });
+  const SEC = 1000;
+  const fiveHour = (n: number) => ({ id: "five_hour", used_percent: n, resets_at: Math.floor((Date.now() + 2 * HOUR) / SEC), length_mins: 300 });
 
   const paired = await pairedPage(browser, office);
   const { page } = paired;
@@ -149,6 +171,128 @@ try {
     await page.reload();
     await page.locator('[data-account="max-2"]').waitFor({ timeout: 15_000 });
     assert(paired.errors.length === 0, `console errors: ${paired.errors.join(" | ")}`);
+  });
+
+  await check("shows the four states and a title from the cadence (AT-12): available, stale, unavailable", async () => {
+    // (a) `fresh`: a fresh app-server reading — available, meters as usual.
+    assert((await readings("fresh", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [fiveHour(42)] })).status === 200, "post failed");
+    const fresh = page.locator('[data-account="fresh"]');
+    await fresh.waitFor({ timeout: 8000 });
+    await fresh.getByRole("group", { name: "5-hour window: 42% used, Fine" }).waitFor({ timeout: 8000 });
+    // (b) `old`: a reading stamped 20 minutes ago (the hub accepts a past stamp) — stale, dimmed, "As of".
+    assert((await readings("old", { source: "app-server", node: null, captured_at: Math.floor((Date.now() - 20 * 60_000) / SEC), windows: [fiveHour(30)] })).status === 200, "post failed");
+    const old = page.locator('[data-account="old"]');
+    await old.waitFor({ timeout: 8000 });
+    await old.getByRole("group", { name: "5-hour window: 30% used, Fine" }).waitFor({ timeout: 8000 });
+    assert((await old.locator(".meter.stale").count()) > 0, "the stale meters are not dimmed");
+    assert((await old.innerText()).includes("As of"), "the stale card doesn't say since when");
+    // (c) `dead`: a first post that is a failure with reason signed_out — the meters are replaced by the words.
+    assert((await readings("dead", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), failure: { reason: "signed_out", hint: "<b>x</b> https://x.example/" } })).status === 200, "post failed");
+    const dead = page.locator('[data-account="dead"]');
+    await dead.waitFor({ timeout: 8000 });
+    await dead.getByRole("status").waitFor({ timeout: 8000 });
+    const deadText = (await dead.innerText()).replace(/\s+/g, " ");
+    assert(deadText.includes("Can't read since"), `the dead card doesn't say since when: ${deadText}`);
+    assert(deadText.includes("Fix: sign in again"), `the dead card doesn't say the fix: ${deadText}`);
+    assert(deadText.includes("the source says:"), `the dead card doesn't quote the source: ${deadText}`);
+    assert(deadText.includes("<b>x</b>"), `the hint is not shown as text: ${deadText}`);
+    assert(!deadText.includes("https://x.example"), `a link in the hint reached the page: ${deadText}`);
+    assert(!/reported \d+ d ago/.test(deadText), `an account nothing was reported for says it was long ago: ${deadText}`);
+    assert(await dead.locator(".meter").count() === 0, "an unavailable source still shows meters");
+    assert(await dead.locator("b, a[href]").count() === 0, "the hint created markup or a link");
+    // (d) a window the poster calls "Monthly" whose length is a week is the weekly window (the hub names a window by its length,
+    // never by the poster's word); an account whose only window has another length keeps its own label with the title its cadence gives it.
+    assert((await readings("fresh", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [
+      fiveHour(42),
+      { id: "Monthly", used_percent: 61, resets_at: Math.floor((Date.now() + 7 * 24 * HOUR) / SEC), length_mins: 10080 },
+    ] })).status === 200, "post failed");
+    await eventually(async () => (await fresh.innerText()).replace(/\s+/g, " "), v => v.includes("Weekly window") && v.includes("61%"), "the week-long window");
+    const freshText = (await fresh.innerText()).replace(/\s+/g, " ");
+    assert(!/monthly/i.test(freshText), `the poster's word named a window: ${freshText}`);
+    assert((await readings("burst", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [
+      { id: "Burst", used_percent: 33, resets_at: Math.floor((Date.now() + 3 * 24 * HOUR) / SEC), length_mins: 4320 },
+    ] })).status === 200, "post failed");
+    const burst = page.locator('[data-account="burst"]');
+    await eventually(async () => (await burst.innerText().catch(() => "")).replace(/\s+/g, " "), v => v.includes("Burst · 3-day"), "the titled window's title");
+    await page.screenshot({ path: join(OUT, "6-states-desktop.png") });
+    // (d, S6) the same account with a fixed pair and a named window beside them: the card shows the fixed rows first
+    // and the named one after them under "Other limits".
+    assert((await readings("fresh", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [
+      fiveHour(42),
+      { id: "seven_day", used_percent: 61, resets_at: Math.floor((Date.now() + 7 * 24 * HOUR) / SEC), length_mins: 10080 },
+      { id: "Burst", used_percent: 33, resets_at: Math.floor((Date.now() + 3 * 24 * HOUR) / SEC), length_mins: 4320 },
+    ] })).status === 200, "post failed");
+    await eventually(async () => (await fresh.innerText()).replace(/\s+/g, " "), v => v.includes("Weekly window") && v.includes("5-hour window") && v.includes("Burst · 3-day"), "the mixed card");
+    await page.screenshot({ path: join(OUT, "10-mixed-desktop.png") });
+  });
+
+  await check("the states on a phone (390 px): the tab bar's Home, nothing wider than the screen", async () => {
+    const phone = await pairedPage(browser, office!, { width: 390, height: 844, phone: true, ready: "nav.tabbar" });
+    try {
+      const box = await phone.page.locator("nav.tabbar button", { hasText: "Home" }).boundingBox();
+      assert(box !== null, "no Home tab");
+      await phone.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await phone.page.locator('[data-account="dead"]').waitFor({ timeout: 10_000 });
+      assert(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page scrolls sideways at 390 px");
+      assert(phone.errors.length === 0, `console errors: ${phone.errors.join(" | ")}`);
+      await phone.page.screenshot({ path: join(OUT, "7-states-phone.png") });
+    } finally { await phone.context.close(); }
+  });
+
+  await check("the mixed card on a phone (390 px): fixed rows, Other limits, nothing wider than the screen (S6)", async () => {
+    const phone = await pairedPage(browser, office!, { width: 390, height: 844, phone: true, ready: "nav.tabbar" });
+    try {
+      const box = await phone.page.locator("nav.tabbar button", { hasText: "Home" }).boundingBox();
+      assert(box !== null, "no Home tab");
+      await phone.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      const fresh = phone.page.locator('[data-account="fresh"]');
+      await fresh.waitFor({ timeout: 10_000 });
+      await eventually(async () => (await fresh.innerText().catch(() => "")).replace(/\s+/g, " "), v => v.includes("Burst · 3-day"), "the mixed card on the phone");
+      assert(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page scrolls sideways at 390 px");
+      assert(phone.errors.length === 0, `console errors: ${phone.errors.join(" | ")}`);
+      await fresh.scrollIntoViewIfNeeded();                    // the shot shows the mixed card, not the top of the page
+      await phone.page.screenshot({ path: join(OUT, "11-mixed-phone.png") });
+    } finally { await phone.context.close(); }
+  });
+
+  await check("a seat from a limit hit, the notices panel, and the principal's Clear", async () => {
+    // (e) a manager token's limit post for `fresh`: the badge, the notice, and the Clear that removes it.
+    assert((await limit("fresh", { kind: "usage_limit", by: "worker-one", back_at: Math.floor((Date.now() + HOUR) / SEC), at: Math.floor(Date.now() / SEC) })).status === 200, "limit post failed");
+    const fresh = page.locator('[data-account="fresh"]');
+    const seated = fresh.locator(".seat");
+    await seated.waitFor({ timeout: 8000 });
+    assert((await seated.innerText()).includes("Out until"), `the seat badge doesn't say since when: ${await seated.innerText()}`);
+    const panel = page.locator(".notices");
+    await panel.waitFor({ timeout: 8000 });
+    const panelText = (await panel.innerText()).replace(/\s+/g, " ");
+    assert(/fresh: .*usage limit reached/.test(panelText), `the notices panel doesn't name the seat notice: ${panelText}`);
+    const clear = fresh.getByRole("button", { name: /Clear this mark/ });
+    await clear.click();
+    await eventually(async () => fresh.locator(".seat").count(), v => v === 0, "the seat badge goes");
+    await page.screenshot({ path: join(OUT, "8-seat-and-notices-desktop.png") });
+  });
+
+  await check("the seat and notices on a phone, then the two-tap Forget of a dead source", async () => {
+    const phone = await pairedPage(browser, office!, { width: 390, height: 844, phone: true, ready: "nav.tabbar" });
+    try {
+      const box = await phone.page.locator("nav.tabbar button", { hasText: "Home" }).boundingBox();
+      assert(box !== null, "no Home tab");
+      await phone.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      await phone.page.locator(".notices").waitFor({ timeout: 10_000 });
+      assert(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page scrolls sideways at 390 px");
+      assert(phone.errors.length === 0, `console errors: ${phone.errors.join(" | ")}`);
+      await phone.page.screenshot({ path: join(OUT, "9-seat-and-notices-phone.png") });
+      // (f) the Forget flow: two taps, and the dead account's source line is gone.
+      const dead = phone.page.locator('[data-account="dead"]');
+      await dead.waitFor({ timeout: 10_000 });
+      const forget = dead.getByRole("button", { name: /Forget/ }).first();
+      await forget.click();
+      await eventually(async () => forget.innerText(), v => v.includes("Forget? (this removes it)"), "the second tap asks");
+      await new Promise(r => setTimeout(r, 500));                 // a second tap right on the first is a double click, not a decision
+      await forget.click();
+      await eventually(async () => dead.getByRole("button", { name: /Forget/ }).count(), v => v === 0, "the source line goes");
+      assert((await dead.count()) === 0, "the forgotten account's card is still there");
+    } finally { await phone.context.close(); }
   });
 
   code = finish();
