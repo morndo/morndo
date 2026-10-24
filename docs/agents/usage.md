@@ -147,10 +147,11 @@ reset by a good reading.
 **Known limits of the token model (said plainly).** The hub has no node configuration, so it cannot tell which
 accounts a node really reads. (1) The unknown-name budget is five new names per token per hour, not per node: a pool
 token that holds both lease slots can still spend its budget on invented names five times an hour. (2) Any token
-may post an *unleased* reading for any account. Such a reading cannot end a mark and cannot set the cache (only a
-lease does either), but it does change the windows Home shows and the thresholds that watch them. Worker tokens are
+that holds the `usage-pool` scope, or the manager token, may post an *unleased* reading for any account (a plain
+worker token is counted in warn and refused in enforce, see "Who may post"). Such a reading cannot end a mark and
+cannot set the cache (only a lease does either), but it does change the windows Home shows and the thresholds that watch them. Worker tokens are
 shared by lanes, so the token binding only detects a second, different token. The fix is per-lane worker tokens and
-leases bound to the accounts a node actually reports; it is the follow-up T-430 on the board, not part of this change.
+leases bound to the accounts a node actually reports; it is the follow-up T-430 on the board (slices 2 to 6), not part of this change.
 
 ## Reading Codex usage
 
@@ -197,12 +198,18 @@ Every source except the status line (which has its own route) posts one body to 
 under the account named in the `X-Morndo-Account` header. **Seconds on the wire** everywhere (`captured_at`,
 `resets_at`, `retry_after_s`); the hub's own memory works in milliseconds. The body:
 
-**Who may post.** The route takes any agent token, with no scope: only the lease route and the limit and pool routes
-need a manager token or the `usage-pool` scope. So any lane's token can post a reading for any account. What it can do
-depends on the lease (below): an *unleased* reading changes the windows Home shows and the thresholds that watch
-them, and nothing else; only a *leased* reading, from the token that took the lease, counts for the identity, the
-plan watch, the limit flags and the end of a derived mark. Binding leases and tokens to the accounts a node really
-reports is the follow-up T-430.
+**Who may post.** The route takes a manager token or a worker token with the `usage-pool` scope, like the lease and
+limit routes (T-430, slice 1). A collector's token is made with
+`morndo agent-token new <name> --role worker --scope usage-pool`. The hub ships the gate in **warn**: a reading from a
+plain worker token (no scope) is still accepted, and the hub counts it on that token. `morndo agent-token list` shows
+`unbound readings N, last <time>` for every token that posted one, so you can see which collector still holds a plain
+token. Set `MORNDO_USAGE_READINGS_GATE=enforce` on the hub (default `warn`) to refuse such a reading with `403`
+`{"error":"scope_required"}`; do that only after the list has shown no plain token posting for 7 days. The status-line
+route is not part of the gate: a lane's own token still posts there. What a reading can do depends on the lease
+(below): an *unleased* reading changes the windows Home shows and the thresholds that watch them, and nothing else;
+only a *leased* reading, from the token that took the lease, counts for the identity, the plan watch, the limit flags
+and the end of a derived mark. Binding leases and tokens to the accounts a node really reports is the follow-up T-430
+(slices 2 to 6).
 
 
 ```json
@@ -267,8 +274,9 @@ comes from the domain's closed fix list — a reason with no fix of its own show
 A Z.ai subscription's quota is read by the operator's own collector, which makes the HTTP call and hands the answer
 — status, `Retry-After` header and parsed body — to the pure parser in this repository
 (`apps/connections/src/adapters/usage-zai.ts`). Driving the HTTP call stays in the operator's collector, outside
-this repository: the parser never reaches the network. It accepts the answer's `data.limits` entries (made-up
-example):
+this repository: the parser never reaches the network. The collector posts its readings with a worker token that
+carries the `usage-pool` scope (`morndo agent-token new <name> --role worker --scope usage-pool`, see "Who may
+post"). The parser accepts the answer's `data.limits` entries (made-up example):
 
 ```json
 {
@@ -308,7 +316,8 @@ collector that wants those notices takes a lease (`usage-pool` scope, source `ve
 ## Cursor
 
 The hub never drives the Cursor CLI. A collector outside the repository reads the screen and posts named windows as
-readings with source `cli-screen`, under the readings contract above: `length_mins` when the collector knows the
+readings with source `cli-screen`, under the readings contract above, with a worker token that carries the
+`usage-pool` scope (`morndo agent-token new <name> --role worker --scope usage-pool`): `length_mins` when the collector knows the
 window's length, a `note` for what the provider said about it (a pool shared with another product carries
 `"shared with Grok"`), prepaid credit as a line of its own, and a `failure` with the fixed-shape hint when the
 screen is unknown. Which period a Cursor plan is on is the hub's own call, never the caption the poster printed: a
