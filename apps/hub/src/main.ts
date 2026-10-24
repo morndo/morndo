@@ -34,6 +34,7 @@ import { RemoteService } from "./application/remote-service.ts";
 import { ManagerQueue } from "./application/manager-queue.ts";
 import { fleetDeliveries } from "./adapters/fleet-deliveries.ts";
 import { fileStore } from "./adapters/files.ts";
+import { parseConsoleArgs } from "./console/args.ts";
 import { processIo, runLanes } from "./console/lanes.ts";
 import { noteMissingFfmpeg, uploadInbox } from "./adapters/uploads.ts";
 import { desktopTarget, legacyPorts } from "./adapters/local-ports.ts";
@@ -75,7 +76,7 @@ const HELP = `morndo: your agents, on your phone.
   morndo serve            run the hub on 127.0.0.1:$MORNDO_PORT (default 8790)
   morndo pair             show a one-time QR (10 minutes) to pair a phone or laptop
   morndo devices          list paired devices
-  morndo revoke <id>      revoke a device; its sessions end at once
+  morndo revoke <id>      revoke a device; its sessions end at once (morndo revoke --help)
   morndo audit            the latest device and session events
   morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
                           events (morndo lanes --help)
@@ -113,6 +114,11 @@ const crash = exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
 if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
+// `serve`, `pair`, `devices`, `revoke` and `agent-token` answer `--help` here too, before settings and the database
+// are read: `revoke --help` is usage, not a device named "--help" (console/args.ts).
+const consoleArgs = parseConsoleArgs(process.argv.slice(2));
+if (consoleArgs.kind === "help") { process.stdout.write(`${consoleArgs.usage}\n`); await exitAfterOutput(0); }
+if (consoleArgs.kind === "refused") { process.stderr.write(`morndo ${consoleArgs.command}: ${consoleArgs.why} ${consoleArgs.synopsis}\n`); await exitAfterOutput(2); }
 // `morndo update`, `morndo doctor` and `morndo install` (design §4.8, §10.3) run here too, before the hub's
 // settings and database are read: they need neither, and a machine with no hub still updates and installs. The
 // hub runs the updater's program, as it runs the engines CLI, and leaves with its exit code.
