@@ -31,7 +31,7 @@ const log = (name, text) => appendFileSync(join(dir, name), text + "\\n");
 if (process.argv[2] === "auth") process.exit(existsSync(join(dir, "signed-in")) ? 0 : 1);
 const tokens = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"].filter(k => k in process.env);
 log("env.jsonl", JSON.stringify({ tokens, configDir: process.env.CLAUDE_CONFIG_DIR ?? null }));
-log("spawn.log", process.argv.slice(2).join(" "));
+log("spawn.log", JSON.stringify(process.argv.slice(2)));
 if (existsSync(join(dir, "group"))) {
   const kid = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
   log("group.pid", String(kid.pid));
@@ -83,6 +83,12 @@ describe("reads through the CLI's own /usage (AT-32)", () => {
     } finally {
       if (saved === undefined) delete process.env.MORNDO_CLAUDE_BIN; else process.env.MORNDO_CLAUDE_BIN = saved;
     }
+  });
+
+  it("runs the CLI headless with no tools at all: --tools followed by an empty argument (fix round, finding 4)", async () => {
+    await readClaude({ account: "seat-a", configDir: "/cfg/seat-a", bin: r.bin, now: Date.now, lockDir: r.dir });
+    const argv = JSON.parse(r.lines("spawn.log")[0]!) as string[];
+    expect(argv.slice(0, 4)).toEqual(["-p", "/usage", "--tools", ""]);
   });
 
   it("no token variable reaches the child; the config directory does", async () => {
