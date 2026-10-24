@@ -596,7 +596,7 @@ export class UsageService {
         this.#store.deleteUsageSources(account, r.source as UsageSource, r.node);
         gone.add(r.source);
       }
-      for (const source of gone) this.#note(account, "forgotten", `${source}|${now}`, forgottenNoticeText(account, source as UsageSource));
+      for (const source of gone) this.#tx(() => this.#note(account, "forgotten", `${source}|${now}`, forgottenNoticeText(account, source as UsageSource)));
       if (gone.size > 0 && !this.#store.usageSources().some(r => r.account === account)) this.#store.deleteUsageWatches(account);
     }
     const remaining = new Set(this.#store.usageSources().map(r => r.account));
@@ -610,7 +610,7 @@ export class UsageService {
       // The pool's seat goes with the whole account (U15): the pool sets it again if its word still stands.
       this.#store.deleteUsagePoolSeat(a.account);
       this.#accounts.delete(a.account);
-      this.#note(a.account, "forgotten", `|${now}`, forgottenNoticeText(a.account, null));
+      this.#tx(() => this.#note(a.account, "forgotten", `|${now}`, forgottenNoticeText(a.account, null)));
     }
     // A derived out mark whose back time passed more than six hours ago, with no newer limit post to push it out
     // (applyLimit extends backAt), is dropped with one notice (PR #127, finding 3b). The pool's seats are kept
