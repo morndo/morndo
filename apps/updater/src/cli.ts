@@ -8,21 +8,23 @@ import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSy
 import { dirname, isAbsolute, join } from "node:path";
 import {
   compareVersions, formatVersion, parseVersion, rollbackRestores, DEFAULT_SOAK_MINUTES,
-  type Channel, type Platform, type ProtocolRange, type UpdateService,
+  type Channel, type Platform, type ProtocolRange, type UpdateService, type Version, type Window,
 } from "@morndo/domain";
 import { ATTEMPT_ID, KeySetSchema, ManifestSchema, UpdateStatusSchema } from "@morndo/protocol";
 import { ApplyService, type ApplyOutcome } from "./application/apply-service.ts";
 import { planOf, type ApplyTiming } from "./application/apply-steps.ts";
 import { CHECKOUT_SENTENCE, CheckService, type CheckOutcome } from "./application/check-service.ts";
 import { doctor } from "./application/doctor-service.ts";
-import { FEED_CHECK_MS, FRESH_VIEW_MS, applyUnitGate, controlPlaneSkew, deferSentence, nodeGate } from "./application/fleet-follow.ts";
+import { FEED_CHECK_MS, FRESH_VIEW_MS, applyUnitGate, controlPlaneSkew, deferSentence, nodeGate, nodeToGate } from "./application/fleet-follow.ts";
 import type { RecoverOutcome } from "./application/recovery-service.ts";
 import { RecoveryService } from "./application/recovery-service.ts";
+import { planSettings } from "./application/settings-commands.ts";
 import { formatStatus, readStatus } from "./application/status-service.ts";
 import type {
-  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, UpdateHistory,
+  AlertSink, ArtifactStore, FleetNode, FleetView, ReleaseFeed, RoleProbe, ServiceManager, SettingsChange,
+  UpdateHistory,
 } from "./application/ports.ts";
-import { ConfigFile, ConfigInvalid } from "./adapters/config-file.ts";
+import { ConfigBusy, ConfigFile, ConfigInvalid, ConfigWriteFailed } from "./adapters/config-file.ts";
 import { ApplyingFileMarker } from "./adapters/applying-file.ts";
 import { HttpsArtifacts } from "./adapters/artifacts-https.ts";
 import { SqliteBackup } from "./adapters/backup-sqlite.ts";
@@ -32,7 +34,7 @@ import { HttpsFeed } from "./adapters/feed-https.ts";
 import { HoldFileWriter } from "./adapters/hold-file.ts";
 import { DirsInstaller } from "./adapters/installer-dirs.ts";
 import { LaunchdServices } from "./adapters/services-launchd.ts";
-import { ServiceProbes } from "./adapters/probes.ts";
+import { ServiceProbes, ownerOriginAllowed } from "./adapters/probes.ts";
 import { SqliteRevocations } from "./adapters/revocations-sqlite.ts";
 import { SqliteSchemas } from "./adapters/schema-sqlite.ts";
 import { StateFileWriter } from "./adapters/state-file.ts";
@@ -57,17 +59,40 @@ const EXIT_TEMPFAIL = 75;
 const EXIT_CONFIG = 78;
 
 const USAGE = `usage: morndo-update update [--yes] [--now] [--detach] [--staged <v>]   check, then apply what stands staged (asks first on a terminal; --staged applies only <v>)
+       morndo-update update --to <version> [--yes] [--now] [--detach] [--json]   check, stage exactly <version>, then ask and apply as update does
+       morndo-update update --to <version> --check [--json]   stage exactly <version>; apply nothing
        morndo-update update --check [--json]        check the channel feed, verify, and stage what passes
        morndo-update update --status [--json]       what this machine believes, the last updates included
        morndo-update update --rollback [--yes] [--detach] [--typed rollback]   back to the previous Version (a restore asks for the typed word; --typed carries it under --yes)
        morndo-update update --rollback --preview --json   what a rollback would drop, as JSON; writes and starts nothing
        morndo-update update apply --version <v> [--attempt <id>]   one apply, as the apply unit runs it
        morndo-update update tick | boot | recover   the timer's, the boot unit's and the recovery unit's commands
+       morndo-update update --channel stable|latest set the channel
+       morndo-update update auto apply|stage|off    set the mode
+       morndo-update update pin <version>           hold this machine at a Version
+       morndo-update update unpin                   remove the pin
+       morndo-update update window <HH:MM-HH:MM>|any   local hours for automatic applies, or any
        morndo-update install --role control-plane|node [--channel stable|latest] [--force]
-       morndo-update doctor [--json]                re-verify the installed tree
-morndo update --to, --channel, pin and auto arrive with the settings step.`;
+       morndo-update doctor [--json]                re-verify the installed tree`;
 
-const NOT_YET_SENTENCE = "morndo update --to, --channel, pin and auto arrive with the settings step.";
+// A settings write's own failures (§8.4): a file that is not the settings shape, a permission to fix, or a lock
+// another command still holds. Anything else propagates. null: this error is not one of those.
+const settingsWriteCode = (error: unknown, io: { err(s: string): void }): number | null => {
+  if (error instanceof ConfigInvalid) { io.err(`${error.message}\n`); return EXIT_CONFIG; }
+  if (error instanceof ConfigWriteFailed) {
+    io.err(`${error.message}\n`);
+    return error.code === "EACCES" || error.code === "EPERM" || error.code === "EROFS" ? EXIT_CONFIG : EXIT_TEMPFAIL;
+  }
+  if (error instanceof ConfigBusy) { io.err(`${error.message}\n`); return EXIT_TEMPFAIL; }
+  return null;
+};
+// UpdateConfigSchema's window (§8.3): 24-hour, zero-padded. A window past midnight (22:00-06:00) matches.
+const WINDOW_TEXT = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+const windowOf = (text: string): Window => {
+  const [start, end] = text.split("-");
+  const minutes = (clock: string): number => Number(clock.slice(0, 2)) * 60 + Number(clock.slice(3));
+  return { start: minutes(start!), end: minutes(end!) };
+};
 // §4.7: a machine whose services no manager runs — no systemd user manager, no launchd — stages only (§6.1's
 // step 1 without step 2): --check works, nothing applies, nothing runs.
 const NO_MANAGER = "no service manager runs here (neither systemd nor launchd): this machine stages only; --check still works";
@@ -81,8 +106,25 @@ export function platformWord(platform: NodeJS.Platform, arch: string): Platform 
 }
 
 // One line per check outcome (§8.1), the sentence a phone or a terminal reads alike. The JSON carries the outcome
-// itself; this is its prose.
-const checkLine = (o: CheckOutcome): string => {
+// itself; this is its prose. A `--to` refusal names the Version in the domain's own words; a plain check's skip
+// stays the one sentence it always was.
+type ToLine = { to: true; channel: string; pin: string | null; current: string; highestCommitted: string | null };
+const toSentence = (o: CheckOutcome & { kind: "skipped" }, ctx: ToLine): string => {
+  const v = o.version ?? "";
+  switch (o.reason) {
+    case "no_entry": return `${v} is not in the ${ctx.channel} feed (--to takes a Version the machine's own channel lists; switch with --channel first)`;
+    case "withdrawn": return `${v} was withdrawn; it is not offered`;
+    case "pinned": return `this machine is pinned to ${ctx.pin ?? ""}; morndo update unpin first`;
+    case "bad_here": return `${v} failed on this machine before and is not tried again`;
+    case "downgrade_refused": return `${v} is lower than the running ${ctx.current}; morndo update --rollback goes back to the previous Version`;
+    case "below_committed": return `${v} is at or below ${ctx.highestCommitted ?? ""}, the highest Version this machine has run; an apply never takes one (RL2); morndo update --rollback goes back one Version`;
+    case "halted": return `the rollout of ${v} is halted (RL12): it is resumed on the control plane, not by naming it here`;
+    case "not_newer": return `Up to date: ${v} is already running.`;
+    default: return `Skipped: ${o.reason}. Nothing was staged.`;
+  }
+};
+const checkLine = (o: CheckOutcome, to?: ToLine): string => {
+  if (to !== undefined && o.kind === "skipped") return toSentence(o, to);
   switch (o.kind) {
     case "staged": return `Staged ${o.version}. It applies at the next update --yes, the tick's window, or the next boot.`;
     case "up_to_date": return `Up to date: ${o.current}.`;
@@ -94,11 +136,20 @@ const checkLine = (o: CheckOutcome): string => {
     case "not_ours": return o.detail;
   }
 };
-export const checkCode = (o: CheckOutcome): number =>
-  o.kind === "refused" ? EXIT_DATAERR
-  : o.kind === "busy" || o.kind === "unreachable" || o.kind === "failed" ? EXIT_TEMPFAIL
-  : o.kind === "not_ours" ? EXIT_CONFIG
-  : EXIT_OK;
+// A plain check's skip exits 0. A `--to` refusal exits by what the named Version is: not one this machine may
+// take (64), a pin to lift (78), a halt or a control plane to wait on (75), or the Version already running (0).
+export const checkCode = (o: CheckOutcome, toAsk = false): number => {
+  if (toAsk && o.kind === "skipped") {
+    if (o.reason === "not_newer") return EXIT_OK;
+    if (o.reason === "pinned") return EXIT_CONFIG;
+    if (o.reason === "halted") return EXIT_TEMPFAIL;
+    if (o.reason === "no_entry" || o.reason === "withdrawn" || o.reason === "bad_here" || o.reason === "downgrade_refused" || o.reason === "below_committed") return EXIT_USAGE;
+  }
+  return o.kind === "refused" ? EXIT_DATAERR
+    : o.kind === "busy" || o.kind === "unreachable" || o.kind === "failed" ? EXIT_TEMPFAIL
+    : o.kind === "not_ours" ? EXIT_CONFIG
+    : EXIT_OK;
+};
 
 // One line per apply outcome (§8.1), and its exit (§8.4): committed 0, rolled back 1, rollback failed 70, and
 // 75 for everything that asks to be tried again — deferred, busy, an attempt that never finished.
@@ -200,22 +251,16 @@ export async function runUpdater(
   const [command = "", ...flags] = argv;
   if (command !== "update" && command !== "doctor" && command !== "install") { io.err(`${USAGE}\n`); return EXIT_USAGE; }
   const json = flags.includes("--json");
-  // `--to`, `--channel`, pin and auto are named so a script written against the design's table meets one
-  // sentence, not silence (§8.1). They are `update`'s missing settings step, not `install`'s words: install's
-  // own --channel is here today.
-  if (command === "update" && flags.some(f => ["--to", "--channel", "pin", "auto"].includes(f))) {
-    io.err(`${NOT_YET_SENTENCE}\n`);
-    return EXIT_USAGE;
-  }
 
   type Parsed
-    = { cmd: "check" }
+    = { cmd: "check"; to?: Version }
     | { cmd: "status" }
     | { cmd: "doctor" }
-    | { cmd: "update"; yes: boolean; now: boolean; detach: boolean; staged?: string }
+    | { cmd: "update"; yes: boolean; now: boolean; detach: boolean; staged?: string; to?: Version }
     | { cmd: "rollback"; yes: boolean; detach: boolean; preview: boolean; typed?: string }
     | { cmd: "apply-unit"; version: string; attempt?: string }
     | { cmd: "tick" } | { cmd: "boot" } | { cmd: "recover" }
+    | { cmd: "settings"; change: SettingsChange }
     | { cmd: "install"; role: "control-plane" | "node"; channel: Channel; force: boolean };
   const usage = (): number => { io.err(`${USAGE}\n`); return EXIT_USAGE; };
   let parsed: Parsed;
@@ -236,8 +281,32 @@ export async function runUpdater(
     parsed = { cmd: "install", role, channel: channel ?? "stable", force };
   } else {
     // update: one subcommand, or one flag set — never two asks in one line. Bare `update` is the ask itself.
-    // The rollback is read before the update's own set so `--rollback --yes` and `--yes --rollback` are one ask.
-    if (flags.includes("--rollback")) {
+    // `--to <version>` is its own ask (§8.1): stage that Version, then apply as bare update does, or `--check`
+    // to stage only. Anything else riding `--to` is usage, before a feed is fetched or a file is written.
+    const toAt = flags.flatMap((flag, index) => flag === "--to" ? [index] : []);
+    if (toAt.length > 0) {
+      if (toAt.length !== 1) return usage();
+      const at = toAt[0]!;
+      const raw = flags[at + 1];
+      const version = raw === undefined || raw.startsWith("--") ? null : parseVersion(raw);
+      if (version === null) return usage();
+      const rest = flags.filter((_, index) => index !== at && index !== at + 1);
+      if (rest.includes("--check")) {
+        if (!rest.every(flag => flag === "--check" || flag === "--json")) return usage();
+        parsed = { cmd: "check", to: version };
+      } else {
+        let yes = false, now = false, detach = false;
+        for (const flag of rest) {
+          if (flag === "--yes") yes = true;
+          else if (flag === "--now") now = true;
+          else if (flag === "--detach") detach = true;
+          else if (flag === "--json") continue;
+          else return usage();
+        }
+        if (detach && now) return usage();
+        parsed = { cmd: "update", yes, now, detach, to: version };
+      }
+    } else if (flags.includes("--rollback")) {
       // The ask's own words: --yes answers it, --detach hands the walk to §5's unit (PR 6c), --preview --json is
       // the hub's read-only look, and --typed carries the word a restore demands even under --yes (§11.4, review
       // round 1) — the hub's --yes must not skip what a terminal would make a person type.
@@ -310,7 +379,34 @@ export async function runUpdater(
         // "${FOO}" is one argument), so an empty value reaches here as "--attempt=" and is judged below, by name
         parsed = { cmd: "apply-unit", version: flags[2]!, attempt: flags[3]!.slice("--attempt=".length) };
       } else return usage();
-    } else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
+    } else if (flags[0] === "--channel" && flags.length === 2 && (flags[1] === "stable" || flags[1] === "latest")) {
+      parsed = { cmd: "settings", change: { kind: "channel", channel: flags[1] } };
+    } else if (flags[0] === "--channel") return usage();
+    else if (flags[0] === "auto" && flags.length === 2 && (flags[1] === "apply" || flags[1] === "stage" || flags[1] === "off")) {
+      parsed = { cmd: "settings", change: { kind: "mode", mode: flags[1] } };
+    } else if (flags[0] === "auto") return usage();
+    else if (flags[0] === "pin" && flags.length === 2) {
+      const version = parseVersion(flags[1] ?? "");
+      if (version === null) {
+        io.err(`${JSON.stringify(flags[1])} is not a Version\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "settings", change: { kind: "pin", version } };
+    } else if (flags[0] === "pin") return usage();
+    else if (flags[0] === "unpin" && flags.length === 1) parsed = { cmd: "settings", change: { kind: "unpin" } };
+    else if (flags[0] === "unpin") return usage();
+    else if (flags[0] === "window" && flags.length === 2 && flags[1] === "any") {
+      parsed = { cmd: "settings", change: { kind: "windowAny" } };
+    } else if (flags[0] === "window" && flags.length === 2 && WINDOW_TEXT.test(flags[1] ?? "")) {
+      const window = windowOf(flags[1]!);
+      // Equal ends wrap, in the domain, to every minute of the day (windowContains). That is `window any`.
+      if (window.start === window.end) {
+        io.err(`a window whose start equals its end is ambiguous (the domain reads it as all day); use "window any" for any hour\n`);
+        return EXIT_USAGE;
+      }
+      parsed = { cmd: "settings", change: { kind: "window", window } };
+    } else if (flags[0] === "window") return usage();
+    else if (flags.includes("--check") && flags.every(f => f === "--check" || f === "--json")) parsed = { cmd: "check" };
     else if (flags.includes("--status") && flags.every(f => f === "--status" || f === "--json")) parsed = { cmd: "status" };
     else return usage();
   }
@@ -325,6 +421,10 @@ export async function runUpdater(
     }
     feedBase = env.MORNDO_UPDATE_FEED.endsWith("/") ? env.MORNDO_UPDATE_FEED : `${env.MORNDO_UPDATE_FEED}/`;
   }
+  if (env.MORNDO_ORIGIN !== undefined && !ownerOriginAllowed(env.MORNDO_ORIGIN)) {
+    io.err(`MORNDO_ORIGIN must be https, or http on localhost or 127.0.0.1, not ${JSON.stringify(env.MORNDO_ORIGIN)}\n`);
+    return EXIT_CONFIG;
+  }
   const platform = platformWord(process.platform, process.arch);
   if (platform === null) {
     io.err(`no Morndo build for ${process.platform}-${process.arch}: nothing to update with\n`);
@@ -337,6 +437,26 @@ export async function runUpdater(
     if (!(error instanceof ConfigInvalid)) throw error;
     io.err(`${error.message}\n`);
     return EXIT_CONFIG;
+  }
+
+  // The settings commands (§8.1, §8.3): the file was read once, above. They edit that file and nothing else — no
+  // service manager, no feed, no store. A switch stops updates, not this edit; the sentence says it still holds.
+  if (parsed.cmd === "settings") {
+    // Read-only: the current link, when this updater owns the install. No store, no manager, no feed.
+    const currentText = new DirsInstaller({ releases: paths.releases }).layout().current;
+    const running = currentText === null ? null : parseVersion(currentText);
+    const plan = planSettings(settings.read(), parsed.change, {
+      disableUpdates: env.MORNDO_DISABLE_UPDATES === "1",
+      disableAutoUpdate: env.MORNDO_DISABLE_AUTOUPDATE === "1",
+    }, running);
+    try { settings.change(plan.change); }
+    catch (error) {
+      const code = settingsWriteCode(error, io);
+      if (code === null) throw error;
+      return code;
+    }
+    io.out(`${plan.sentence}\n`);
+    return EXIT_OK;
   }
 
   // The store is every command's (§5): the state directory is the store's own, private before anything lands in it.
@@ -369,6 +489,10 @@ export async function runUpdater(
       hubUrl: `http://127.0.0.1:${env.MORNDO_PORT ?? 8790}`,
       fleetSocket: env.MORNDO_FLEET_SOCKET || join(home, ".local/state/morndo-fleet/fleet.sock"),
       nodeStatus: join(home, ".local/state/morndo-node/status.json"),
+      ownerPath: {
+        ...(env.MORNDO_ORIGIN !== undefined ? { origin: env.MORNDO_ORIGIN } : {}),
+        managerLane: true,
+      },
     });
     const alerts: AlertSink = {
       raise: (kind, detail) => { io.err(`${kind}: ${detail}\n`); },
@@ -473,13 +597,36 @@ export async function runUpdater(
         return parsed.success ? parsed.data.protocol : null;
       } catch { return null; }
     };
-    const checkOnce = async (switches: { disableUpdates: boolean }): Promise<CheckOutcome> =>
+    const checkOnce = async (switches: { disableUpdates: boolean }, ask?: { to: Version }): Promise<CheckOutcome> =>
       await new CheckService({
         feed: deps.feed ?? new HttpsFeed({ base: feedBase }),
         artifacts: deps.artifacts ?? new HttpsArtifacts({ dir: paths.downloads }),
         verifier, installer, store, settings, clock: systemClock, platform, switches,
         fleet: await fleetOf(), state: stateSink,
-      }).check();
+      }).check(ask);
+    // The sentences a `--to` refusal prints: the channel and the pin are the settings', the running Version the
+    // installer's. Absent when this run did not name a Version.
+    const toLine = (to: Version | undefined): ToLine | undefined => {
+      if (to === undefined) return undefined;
+      const pin = settings.read().pin;
+      return { to: true, channel: settings.read().channel, pin: pin === null ? null : formatVersion(pin), current: installer.layout().current ?? "", highestCommitted: store.highestCommitted() };
+    };
+    // RL11, before any check: a node never takes a Version above its control plane. A checkout, a disabled
+    // updater and a control plane are not this gate's — the check answers the first two, and a control plane
+    // has no control plane above it.
+    const toGate = async (target: Version): Promise<number | null> => {
+      if (env.MORNDO_DISABLE_UPDATES === "1") return null;
+      const layout = installer.layout();
+      if (layout.method !== "updater" || layout.current === null || parseVersion(layout.current) === null) return null;
+      const m = await manager();
+      const running = m === null ? [] : m.services();
+      if (running.includes("hub") && running.includes("fleet")) return null;
+      const word = await (await fleetOf()).view().catch(() => null);
+      const gate = nodeToGate({ word, now: systemClock.now(), target });
+      if (gate.ok) return null;
+      io.err(`${gate.sentence}\n`);
+      return EXIT_TEMPFAIL;
+    };
     const applyWith = async (services: ServiceManager): Promise<ApplyService> => new ApplyService({
       services, probe,
       schemas: new SqliteSchemas({ paths: dbPaths }),
@@ -498,16 +645,32 @@ export async function runUpdater(
     };
 
     if (parsed.cmd === "check") {
-      const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" });
+      if (parsed.to !== undefined) {
+        const held = await toGate(parsed.to);
+        if (held !== null) return held;
+      }
+      const outcome = await checkOnce(
+        { disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" },
+        parsed.to === undefined ? undefined : { to: parsed.to },
+      );
+      const code = checkCode(outcome, parsed.to !== undefined);
       if (json) io.out(`${JSON.stringify({ outcome })}\n`);            // the hub and the tests read this shape
-      else return printOutcome(checkLine(outcome), checkCode(outcome));
-      return checkCode(outcome);
+      else return printOutcome(checkLine(outcome, toLine(parsed.to)), code);
+      return code;
     }
 
     if (parsed.cmd === "status") {
       // Even an install that is not ours is an answer, never a failure: the reader asked what this machine believes.
       const s = readStatus({ installer, store, settings });
-      io.out(json ? `${JSON.stringify(UpdateStatusSchema.parse(s))}\n` : `${formatStatus(s)}\n`);
+      if (json) {
+        io.out(`${JSON.stringify(UpdateStatusSchema.parse(s))}\n`);
+        return EXIT_OK;
+      }
+      // The owner-path line is text only, and only where the hub runs: a node has no owner path to judge.
+      const m = await manager();
+      const runsHub = m !== null && m.services().includes("hub");
+      const ownerOrigin = runsHub ? (env.MORNDO_ORIGIN === undefined ? "unset" : "set") : null;
+      io.out(`${formatStatus(s, { ownerOrigin })}\n`);
       return EXIT_OK;
     }
 
@@ -570,16 +733,25 @@ export async function runUpdater(
 
     if (parsed.cmd === "update") {
       // §8.1's update: the check first, printed exactly as --check prints it; then the ask, then the apply unit.
-      const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" });
-      const line = checkLine(outcome);
-      const code = checkCode(outcome);
+      // `--to` is the same walk of the Version it names. A node above its control plane never reaches the check.
+      if (parsed.to !== undefined) {
+        const held = await toGate(parsed.to);
+        if (held !== null) return held;
+      }
+      const outcome = await checkOnce(
+        { disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" },
+        parsed.to === undefined ? undefined : { to: parsed.to },
+      );
+      const line = checkLine(outcome, toLine(parsed.to));
+      const code = checkCode(outcome, parsed.to !== undefined);
       if (code !== EXIT_OK) return printOutcome(line, code);           // refused, unreachable, not ours: as the check answered
       if (json) io.out(`${JSON.stringify({ outcome })}\n`);
       else io.out(`${line}\n`);
-      const staged = store.staged();
-      // The pressed Version (R3): when --staged named one and what stands staged is not it, nothing starts. The
-      // check above may have staged a newer Release between the screen's look and the press; this run moves the
-      // machine only under the name the principal pressed, and says both when they differ.
+      let staged = store.staged();
+      // Already running, or a skip that exits 0: nothing of some other Version starts.
+      if (parsed.to !== undefined && outcome.kind !== "staged") return EXIT_OK;
+      // The pressed Version (R3): what stands staged must be the one the screen named, or nothing starts.
+      // The check above may have staged a newer Release between the screen's look and the press.
       if (parsed.staged !== undefined && (staged === null || staged.version !== parsed.staged)) {
         io.err(`what stands staged is ${staged?.version ?? "nothing"}, not ${parsed.staged}: nothing was started (--staged names the Version the screen pressed)\n`);
         return EXIT_TEMPFAIL;
@@ -597,6 +769,17 @@ export async function runUpdater(
         if (answer !== "y" && answer !== "yes") {
           io.out("Not applying. The staged Version stays; morndo update --yes applies it, or the tick's window does.\n");
           return EXIT_OK;
+        }
+      }
+      // Retiring a newer staged record is part of applying the named Version: it waits until the principal has
+      // confirmed (`--yes`, or yes at the prompt). A `--check`, and a no above, leave that record where it stood.
+      // What stands staged must then be the named one, or nothing starts.
+      if (parsed.to !== undefined && outcome.kind === "staged") {
+        store.retireStagedAbove(outcome.version);
+        staged = store.staged();
+        if (staged === null || staged.version !== outcome.version) {
+          io.err(`what stands staged is ${staged?.version ?? "nothing"}, not ${outcome.version}: nothing was started (--staged names the Version the screen pressed)\n`);
+          return EXIT_TEMPFAIL;
         }
       }
       // The attempt the unit runs under (§5.4): the control plane mints its own; a node takes the one the fleet
@@ -1017,12 +1200,17 @@ export async function runUpdater(
     installer.swap({ current: versionText, previous: null });
     installer.setGood(versionText);
     // The store's first words: this Version committed, the tree's key set trusted. The channel goes into the
-    // settings only when the file is absent — a user's config is never rewritten (§11.6).
+    // settings only when the file is absent — a user's config is never rewritten (§11.6) — through the same
+    // locked write a settings command uses.
     store.recordCommitted(versionText, systemClock.now(), null);
     store.saveTrust({ keySet: keySet.data, highestFeedSeq: { stable: 0, latest: 0 } });
     if (!existsSync(paths.config)) {
-      mkdirSync(dirname(paths.config), { recursive: true, mode: 0o700 });
-      writeFileSync(paths.config, `${JSON.stringify({ channel: parsed.channel }, null, 2)}\n`, { mode: 0o600 });
+      try { settings.change({ kind: "channel", channel: parsed.channel }); }
+      catch (error) {
+        const code = settingsWriteCode(error, io);
+        if (code === null) throw error;
+        return code;
+      }
     }
     // The launchers the tree ships, linked into ~/.local/bin through `current`, so an update moves them too.
     for (const name of launchers) {

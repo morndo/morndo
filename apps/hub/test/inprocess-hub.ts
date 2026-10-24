@@ -76,6 +76,8 @@ export type InProcessHub = {
 export async function startInProcessHub(o: {
   limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
   profiles?: () => ReadonlyMap<string, AccountProfile>;
+  // S3 (plan 4.5 item 4): where a lane runs, as main.ts reads it from the fleet's lane list (a test's own).
+  laneNode?: (lane: string) => string | null;
   engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
   locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
   queue?: (store: Store) => ManagerQueue; manager?: string; typed?: string[]; alerts?: AlertsService;
@@ -156,7 +158,7 @@ export async function startInProcessHub(o: {
     ...(o.proofMode ? { mode: o.proofMode } : {}), ...(o.proofRepos ? { allowedRepos: o.proofRepos } : {}),
   });
   const agents = new AgentAccess(store, "manager", o.now);
-  const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}) });
+  const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}), ...(o.laneNode ? { laneNode: o.laneNode } : {}) });
   const queue = o.queue ? o.queue(store) : null;
   const jobs = new JobsService({ store, board, ...(o.now ? { now: o.now } : {}) });
   // Wired as production main.ts wires it: the service is always constructed, with the plugin's answer when there is
@@ -193,13 +195,19 @@ export async function startInProcessHub(o: {
   });
   await http.ready;
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
+  const cookieSessions: { secret: string; endpointId: string }[] = [];
   return {
     base, store, access, dir, identity, notifications, board, proof, agents, briefs, escalations, usage, jobs, pushes,
     async cookie() {
+      // Each call pairs a fresh device, as the linking tests count on — but a device whose session the test's fake
+      // clock has since expired is revoked first, so a test that looks at the principal's side many times across
+      // long clock jumps never runs into the device cap.
+      for (const c of cookieSessions) if (access.authenticate(c.secret, false) === null) access.revoke(c.endpointId);
       const opts = await access.pairOptions(access.issueConsoleToken().secret, "phone");
       if (!("flowId" in opts)) throw new Error(opts.refused);
       const r = await access.pairVerify(opts.flowId, {} as never);
       if (!("cookieSecret" in r)) throw new Error(r.refused);
+      cookieSessions.push({ secret: r.cookieSecret, endpointId: r.endpoint.id });
       return r.cookieSecret;
     },
     post: (path, body, headers = {}) => fetch(base + path, {

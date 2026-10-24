@@ -8,9 +8,10 @@ import { log } from "./log.ts";
 import { migrate } from "./migrations.ts";
 import type { DeliveryState } from "@morndo/protocol";
 import {
-  endpointId, pairingTokenId, sessionId, REF_STATES,
+  endpointId, pairingTokenId, sessionId, REF_STATES, START_RECORD_HOLD_MS, RECORD_CONFLICT_MS,
   type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
   type RefResult, type Session, type Task, type TaskEvent, type TaskStatus, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
+  type SourceHealth, type UsageNotice, type SeatRecord, type WindowReading, type LaneRecord,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
@@ -33,8 +34,26 @@ export type BriefRecord = {
 };
 
 // An agent token (ADR-0015, B1): the credential the manager's lane or a worker's changes the board with. Only its hash
-// is kept; `role` says whether it acts as the manager or as the worker lane it names on each call.
-export type AgentToken = { id: string; name: string; role: "manager" | "worker"; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null };
+// is kept; `role` says whether it acts as the manager or as the worker lane it names on each call, and `scopes` (U15)
+// the closed list's words of what it may do beyond its role — none for every token minted before the list.
+export type AgentToken = { id: string; name: string; role: "manager" | "worker"; scopes: readonly string[]; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null };
+
+// Usage S2 (plan 4.2 to 4.5): what one row of usage_sources holds — the source's health, its last reading and the one
+// before it (the sameAsPrevious rule's memory), and the cleaned hint of its last failure. `previous` keeps only what
+// that rule needs of each window.
+export type UsageSourceBody = {
+  health: SourceHealth;
+  reading: { capturedAt: number; plan: string | null; windows: WindowReading[] } | null;
+  previous: { capturedAt?: number | null; windows: { id: string; usedPercent: number | null; resetsAt: number | null }[] } | null;
+  hint: string | null;
+  // The newest stamp this source gave, each capped at the hub's clock WHEN IT WAS RECEIVED (R3 on PR #125): what a later
+  // reading's stamp is ordered against. A stamp from a clock that runs ahead is stored as the receipt time, so it never
+  // outranks an honest reading that arrives after it. A row stored without it falls back to its other stamps.
+  orderedAt?: number;
+};
+export type UsageSourceRow = { account: string; source: string; node: string; body: UsageSourceBody };
+export type UsageWatchKind = "plan" | "threshold" | "cycle";
+export type UsageWatchRow = { account: string; kind: UsageWatchKind; key: string; body: unknown };
 
 type Row = Record<string, unknown>;
 
@@ -165,6 +184,22 @@ export class Store {
   }
 
   transaction<T>(fn: () => T): T { return this.db.transaction(fn)(); }
+
+  // The usage writes that must stand or fall together (fix round on PR #125, finding 4c): a watch and the notice that
+  // goes with it commit as one, over better-sqlite3's transaction as `transaction` above (nested calls become savepoints).
+  atomically<T>(fn: () => T): T { return this.db.transaction(fn)(); }
+
+  // One usage source row by its key (finding 5a): what a report or a reading reads, instead of scanning every row.
+  usageSource(account: string, source: string, node: string): UsageSourceRow | null {
+    const r = this.db.prepare("SELECT account, source, node, body FROM usage_sources WHERE account = ? AND source = ? AND node = ?").get(account, source, node) as Row | undefined;
+    return r ? { account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody } : null;
+  }
+
+  // Notice retention (finding 5c): notices older than `olderThanMs` go, and all but the newest `keep`; how many went.
+  pruneUsageNotices(keep: number, olderThanMs: number, now: number): number {
+    const stale = this.db.prepare("DELETE FROM usage_notices WHERE at < ?").run(now - olderThanMs).changes;
+    return stale + this.db.prepare("DELETE FROM usage_notices WHERE id NOT IN (SELECT id FROM usage_notices ORDER BY at DESC, rowid DESC LIMIT ?)").run(keep).changes;
+  }
 
   setting<T>(key: string): T | null {
     const r = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
@@ -618,10 +653,11 @@ export class Store {
         : { ref: r.ref as string, state: "unfetchable", detail: "unknown state", checkedAt: r.checked_at as number });
   }
 
-  // Agent tokens (ADR-0015, B1).
+  // Agent tokens (ADR-0015, B1). `scopes` (U15): the closed list's names, comma-separated in the row, empty: none.
   saveAgentToken(t: AgentToken) {
-    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @createdAt, @lastUsedAt, @revokedAt)
-      ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at`).run(t);
+    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, scopes, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @scopes, @createdAt, @lastUsedAt, @revokedAt)
+      ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at, scopes = excluded.scopes`)
+      .run({ ...t, scopes: [...t.scopes].join(",") });
   }
   agentTokenBySecretHash(hash: string): AgentToken | null {
     const r = this.db.prepare("SELECT * FROM agent_tokens WHERE secret_hash = ?").get(hash) as Row | undefined;
@@ -646,6 +682,147 @@ export class Store {
   saveUsageAccount(a: AccountUsage) {
     this.db.prepare("INSERT INTO usage_accounts (account, body, reported_at) VALUES (?, ?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body, reported_at = excluded.reported_at")
       .run(a.account, JSON.stringify(a), a.reportedAt);
+  }
+  deleteUsageAccount(account: string) {
+    this.db.prepare("DELETE FROM usage_accounts WHERE account = ?").run(account);
+  }
+
+  // Usage S2 (plan 4.2 to 4.5): one row per account, source and node — its health, its last reading and the one
+  // before it, for the sameAsPrevious rule. `node` is "" when a source has none.
+  usageSources(): UsageSourceRow[] {
+    return (this.db.prepare("SELECT account, source, node, body FROM usage_sources ORDER BY account, source, node").all() as Row[])
+      .map(r => ({ account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody }));
+  }
+  saveUsageSource(account: string, source: string, node: string, body: UsageSourceBody) {
+    this.db.prepare("INSERT INTO usage_sources (account, source, node, body) VALUES (?, ?, ?, ?) ON CONFLICT(account, source, node) DO UPDATE SET body = excluded.body")
+      .run(account, source, node, JSON.stringify(body));
+  }
+  deleteUsageSources(account: string, source?: string, node?: string | null) {
+    if (source === undefined) this.db.prepare("DELETE FROM usage_sources WHERE account = ?").run(account);
+    else if (node === undefined || node === null) this.db.prepare("DELETE FROM usage_sources WHERE account = ? AND source = ?").run(account, source);
+    else this.db.prepare("DELETE FROM usage_sources WHERE account = ? AND source = ? AND node = ?").run(account, source, node);
+  }
+
+  // One account's source rows, without scanning every row and filtering (PR #125 fix round 2, finding 3c).
+  usageSourcesOf(account: string): UsageSourceRow[] {
+    return (this.db.prepare("SELECT account, source, node, body FROM usage_sources WHERE account = ? ORDER BY source, node").all(account) as Row[])
+      .map(r => ({ account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody }));
+  }
+
+  // The notices the hub itself wrote (plan 4.4), newest first, at most `limit`. The signature is the once-only key:
+  // a notice with the same signature is never told again.
+  usageNotices(limit: number): UsageNotice[] {
+    return (this.db.prepare("SELECT text FROM usage_notices ORDER BY at DESC, rowid DESC LIMIT ?").all(limit) as Row[])
+      .map(r => JSON.parse(r.text as string) as UsageNotice);
+  }
+  saveUsageNotice(n: UsageNotice, signature: string) {
+    const r = this.db.prepare("INSERT OR IGNORE INTO usage_notices (id, account, kind, signature, at, text) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(n.id, n.account, n.kind, signature, n.at, JSON.stringify(n));
+    return r.changes === 1;             // false: a repeat the signature already covered (S4, who hears of a notice)
+  }
+  lastUsageNoticeSignature(account: string, kind: string): string | null {
+    const r = this.db.prepare("SELECT signature FROM usage_notices WHERE account = ? AND kind = ? ORDER BY at DESC, rowid DESC LIMIT 1").get(account, kind) as Row | undefined;
+    return r ? (r.signature as string) : null;
+  }
+
+  // The watches (plan 4.1 and 4.2): a plan watch per source (kind "plan", key the source name; PR #125 fix round 2,
+  // finding 1b — a row of the old shape, key "", is never read again), a threshold watch per window (kind
+  // "threshold", key the canonical window id) and a cycle book per window (kind "cycle", key the window id).
+  usageWatches(account?: string): UsageWatchRow[] {
+    const rows = account === undefined
+      ? this.db.prepare("SELECT account, kind, key, body FROM usage_watch ORDER BY account, kind, key").all() as Row[]
+      : this.db.prepare("SELECT account, kind, key, body FROM usage_watch WHERE account = ? ORDER BY kind, key").all(account) as Row[];
+    return rows.map(r => ({ account: r.account as string, kind: r.kind as UsageWatchKind, key: r.key as string, body: JSON.parse(r.body as string) as unknown }));
+  }
+  saveUsageWatch(account: string, kind: UsageWatchKind, key: string, body: unknown) {
+    this.db.prepare("INSERT INTO usage_watch (account, kind, key, body) VALUES (?, ?, ?, ?) ON CONFLICT(account, kind, key) DO UPDATE SET body = excluded.body")
+      .run(account, kind, key, JSON.stringify(body));
+  }
+  deleteUsageWatches(account: string) {
+    this.db.prepare("DELETE FROM usage_watch WHERE account = ?").run(account);
+  }
+
+  // The seat record (plan 4.5): one per account, whatever reported the limit.
+  usageSeats(): { account: string; record: SeatRecord }[] {
+    return (this.db.prepare("SELECT account, body FROM usage_seats ORDER BY account").all() as Row[])
+      .map(r => ({ account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord }));
+  }
+  // The one seat row of one account, or null when it has none (PR #125 fix round 2, finding 3c).
+  usageSeat(account: string): { account: string; record: SeatRecord } | null {
+    const r = this.db.prepare("SELECT account, body FROM usage_seats WHERE account = ?").get(account) as Row | undefined;
+    return r ? { account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord } : null;
+  }
+  saveUsageSeat(account: string, record: SeatRecord) {
+    this.db.prepare("INSERT INTO usage_seats (account, body) VALUES (?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body")
+      .run(account, JSON.stringify(record));
+  }
+  deleteUsageSeat(account: string) {
+    this.db.prepare("DELETE FROM usage_seats WHERE account = ?").run(account);
+  }
+
+  // The pool-owned seat records (S3, U15): one per account, beside the derived ones in usage_seats.
+  usagePoolSeats(): { account: string; record: SeatRecord }[] {
+    return (this.db.prepare("SELECT account, body FROM usage_pool_seats ORDER BY account").all() as Row[])
+      .map(r => ({ account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord }));
+  }
+  saveUsagePoolSeat(account: string, record: SeatRecord) {
+    this.db.prepare("INSERT INTO usage_pool_seats (account, body) VALUES (?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body")
+      .run(account, JSON.stringify(record));
+  }
+  deleteUsagePoolSeat(account: string) {
+    this.db.prepare("DELETE FROM usage_pool_seats WHERE account = ?").run(account);
+  }
+
+  // Which lane of which node is signed in as which account (plan 4.5 item 4): a lane's reports and starts write it,
+  // its failures resolve from it. `source` says how the record was written (PR #127, finding 4b): "start" by a
+  // lane_account tap, "report" by a status-line report; every row from before the column is a report. `token` and
+  // `conflictUntil` (fix round 2, finding 1) say which agent token wrote or last confirmed it, and until when a
+  // disagreement between two tokens makes it ambiguous; null on every row from before those columns.
+  laneAccount(node: string, lane: string): LaneRecord | null {
+    const r = this.db.prepare("SELECT node, lane, account, at, source, token, conflict_until FROM lane_accounts WHERE node = ? AND lane = ?").get(node, lane) as Row | undefined;
+    return r ? { node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report", token: (r.token as string | null) ?? null, conflictUntil: (r.conflict_until as number | null) ?? null } : null;
+  }
+  laneAccounts(): LaneRecord[] {
+    return (this.db.prepare("SELECT node, lane, account, at, source, token, conflict_until FROM lane_accounts ORDER BY node, lane").all() as Row[])
+      .map(r => ({ node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report", token: (r.token as string | null) ?? null, conflictUntil: (r.conflict_until as number | null) ?? null }));
+  }
+  // A start record always replaces and clears any conflict, with no token bound (a hub-issued start is the principal's
+  // own act). A report follows the token-bound rule (fix round 2, finding 1): a record belongs to the token that wrote
+  // or last confirmed it — the same token replaces its own word, another token's same account only refreshes the stamp,
+  // and another token's different account replaces nothing: while the record is fresher than RECORD_CONFLICT_MS it
+  // turns the lane ambiguous for an hour instead, and past that it gives way. A start record younger than
+  // START_RECORD_HOLD_MS stands against another token's report (PR #127, finding 4b): a first report of its own
+  // account binds the token to it, its own bound token may move it, and any other word is ignored or ambiguous.
+  saveLaneAccount(node: string, lane: string, account: string, at: number, source: "start" | "report", token: string | null = null, conflictUntil: number | null = null) {
+    const write = () =>
+      this.db.prepare(`INSERT INTO lane_accounts (node, lane, account, at, source, token, conflict_until) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(node, lane) DO UPDATE SET account = excluded.account, at = excluded.at, source = excluded.source, token = excluded.token, conflict_until = excluded.conflict_until`)
+        .run(node, lane, account, at, source, token, conflictUntil);
+    if (source === "start") { write(); return; }
+    const held = this.laneAccount(node, lane);
+    const conflict = () => this.db.prepare("UPDATE lane_accounts SET conflict_until = ? WHERE node = ? AND lane = ?").run(at + RECORD_CONFLICT_MS, node, lane);
+    if (held === null) { write(); return; }
+    if (held.source === "start" && at - held.at < START_RECORD_HOLD_MS) {
+      if (held.token == null) {
+        if (account === held.account) this.db.prepare("UPDATE lane_accounts SET token = ? WHERE node = ? AND lane = ?").run(token, node, lane);   // binds the token, nothing else moves
+        return;                                                                                                                                    // a different account: ignored, the hold stands
+      }
+      if (held.token === token) { write(); return; }               // its own reporter moved: the record follows, hold and conflict gone
+      if (account !== held.account) conflict();                    // another token's different account: ambiguous, never replaced
+      return;
+    }
+    if (held.token == null || held.token === token) { write(); return; }
+    if (account === held.account) {
+      this.db.prepare("UPDATE lane_accounts SET at = ? WHERE node = ? AND lane = ?").run(at, node, lane);   // the same word from another token: only the stamp
+      return;
+    }
+    if (at - held.at < RECORD_CONFLICT_MS) { conflict(); return; }
+    write();
+  }
+  // Fix round 2 on PR #127 (finding 4): forgetting a whole account takes its lane records with it, so a later failure
+  // of one of its lanes resolves nothing until a start or a report names the account again.
+  deleteLaneAccountsOf(account: string) {
+    this.db.prepare("DELETE FROM lane_accounts WHERE account = ?").run(account);
   }
 
   // One comment per job id. `open` is a claim this process still has to finish. A settled row is not taken again.
@@ -733,6 +910,7 @@ const taskFrom = (r: Row): Task => ({
 });
 const agentTokenFrom = (r: Row): AgentToken => ({
   id: r.id as string, name: r.name as string, role: r.role as AgentToken["role"], secretHash: r.secret_hash as string,
+  scopes: ((r.scopes as string | null) ?? "").split(",").filter(s => s !== ""),
   createdAt: r.created_at as number, lastUsedAt: (r.last_used_at as number | null) ?? null, revokedAt: (r.revoked_at as number | null) ?? null,
 });
 const mergeFrom = (r: Row): MergeRecord => ({

@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -14,7 +14,8 @@ const hold = (over: Record<string, unknown> = {}) => JSON.stringify({
 
 describe("productVersion", () => {
   it("is the root package.json version", () => {
-    expect(productVersion()).toBe("0.0.0");
+    const root = JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "..", "package.json"), "utf8")) as { version: string };
+    expect(productVersion()).toBe(root.version);
   });
 });
 

@@ -76,11 +76,19 @@ describe("reports under an agent token (U1)", () => {
     expect(a).toMatchObject({ fiveHour: { usedPercentage: 23.5 }, sevenDay: { usedPercentage: 41.2 } });
     expect((a.sessions as Body[]).map(s => s.sessionId)).toEqual(["s2", "s1"]);
   });
+  it("a window with an epoch value in its percentage is unknown, not the old number shown as fresh (U14)", async () => {
+    await post(statusLine({ session: "s1", five: 60, week: 40 }), "max-1");
+    now += 10 * 60_000;
+    const a = (await json(await post(statusLine({ session: "s1", five: 1_700_000_000, week: 41 }), "max-1"))).account as Body;
+    expect(a.fiveHour).toBeNull();
+    expect(a.sevenDay).toMatchObject({ usedPercentage: 41 });
+    expect(a.reportedAt).toBe(now);
+  });
   it("a report that names its windows keeps those bars and does not invent a 5-hour window", async () => {
     const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
     const body = {
       session_id: "cursor-plan", model: { display_name: "Cursor Ultra" },
-      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "included usage, monthly" } },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
       limits: [
         { label: "Cursor models", used_percentage: 88, resets_at: resets, resets_on: "2026-11-07" },
         { label: "Other models", used_percentage: 45, resets_at: resets, resets_on: "2026-11-07" },
@@ -101,7 +109,7 @@ describe("reports under an agent token (U1)", () => {
     const limits = [{ label: "", used_percentage: 1 }, ...Array.from({ length: 8 }, (_, i) => ({ label: `W${i}`, used_percentage: 10 + i, resets_at: resets }))];
     const posted = await post({
       session_id: "cursor-plan",
-      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "monthly" } },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
       limits, on_demand: "off",
     }, "cursor");
     expect(posted.status).toBe(200);

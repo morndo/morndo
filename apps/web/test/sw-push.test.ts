@@ -41,6 +41,16 @@ describe("what a notification says (N1)", () => {
       expect(notificationFor(junk)).toEqual({ title: "Morndo", body: "Something needs you.", tag: "morndo", url: "/" });
     }
   });
+  it("usage notices (S4, plan 4.4): counted, a tag of its own, Home; a hub from before sends no count (one)", () => {
+    expect(notificationFor({ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 })).toEqual({
+      title: "2 usage changes need a look", body: "Open Morndo to see what changed.", tag: "morndo-usage", url: "/?view=dashboard",
+    });
+    expect(notificationFor({ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 1 }).title).toBe("Usage needs a look");
+    expect(notificationFor({ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0 }).title).toBe("Usage needs a look");
+  });
+  it("a kind this code doesn't know still shows a notification (the round before, kind 4 read that way)", () => {
+    expect(notificationFor({ kind: 5, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 })).toEqual({ title: "Morndo", body: "Something needs you.", tag: "morndo", url: "/" });
+  });
 });
 
 describe("the push handler", () => {

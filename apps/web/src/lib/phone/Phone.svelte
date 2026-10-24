@@ -37,6 +37,7 @@
   import Conversation from "./chat/Conversation.svelte";
   import Status from "./chat/Status.svelte";
   import { SEEN_MARK, unseen } from "../alerts.ts";
+  import { clearSeat, forgetSource } from "../usage-api.ts";
   import Digest from "./chat/Digest.svelte";
   import SettingsSheet from "./chat/SettingsSheet.svelte";
   import { Away } from "./chat/away.svelte.ts";
@@ -109,6 +110,7 @@
     else if (v === "decisions") { deciding = true; want = { decisions: true }; }
     else if (v === "activity") tab = "chats";
     else if (v === "alerts") tab = "status";                                    // the fleet's alerts are on Status
+    else if (v === "dashboard") tab = "home";                                   // Home's own view name: where a usage push goes
     if (linked || v) history.replaceState(history.state, "", location.pathname);
   }
   $effect(() => {
@@ -391,7 +393,9 @@
     </div>
   {:else}
     <div class="phone-wide">
-      <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
+      <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane}
+        notices={feed.usageNotices} onForget={(account, source, node) => forgetSource(account, source, node)}
+        onClearSeat={account => clearSeat(account)} />
     </div>
   {/if}
   {#if !deciding}<TabBar {tab} chats={unreadChats} decisions={feed.primed ? session.count : 0} blocked={blockedTasks} alerts={newAlerts} onTab={go} />{/if}

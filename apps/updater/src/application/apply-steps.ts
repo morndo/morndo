@@ -180,27 +180,61 @@ export async function waitHoldSeen(ctx: StepCtx, running: readonly UpdateService
 
 // ---- the baselines (§6.4), twice over
 
-// Before the update: what passed is what must pass after — what already failed is not held against the target. A
-// recovery has no before, so its baseline (baselineNow) is every check each service names right now: a service
-// sick at the Version being judged stays a failure instead of forgiving itself. A service that answers nothing
-// gets its entry either way — silence after the swap is no_report, never a pass by omission.
-export async function baselineBefore(deps: ApplyDeps, running: readonly UpdateService[]): Promise<Record<string, string[]>> {
-  const baseline: Record<string, string[]> = {};
+// An owner-path check that was already false. It is reported and left out of `passed`, so the target is not held to it.
+export type FailingOwnerCheck = { service: string; check: string };
+
+// Before the update: what passed is what must pass after — what already failed is not held against the target.
+// `alreadyFailing` lists the owner_ checks that were false, one entry per check, for the single alert the apply
+// raises. `originNotJudged` is true when the hub's report names `owner_app_served` and does not name
+// `owner_origin_ready`: the owner path is configured, and no origin was, so the https address is not judged.
+// A recovery has no before, so its baseline (baselineNow) is every check each service names right now
+// except the owner path: a service sick at the Version being judged stays a failure instead of forgiving itself.
+// A service that answers nothing gets its entry either way — silence after the swap is no_report, never a pass
+// by omission.
+export async function baselineBefore(deps: ApplyDeps, running: readonly UpdateService[]): Promise<{
+  passed: Record<string, string[]>;
+  alreadyFailing: FailingOwnerCheck[];
+  originNotJudged: boolean;
+}> {
+  const passed: Record<string, string[]> = {};
+  const alreadyFailing: FailingOwnerCheck[] = [];
+  let originNotJudged = false;
   for (const s of running) {
     const report = await deps.probe.health(s);
-    baseline[s] = report === null ? []
-      : Object.entries(report.checks).filter(([, passed]) => passed === true).map(([name]) => name);
+    if (report === null) { passed[s] = []; continue; }
+    const reported = Object.keys(report.checks);
+    if (s === "hub" && reported.includes("owner_app_served") && !reported.includes("owner_origin_ready")) {
+      originNotJudged = true;
+    }
+    const names: string[] = [];
+    for (const [name, passedCheck] of Object.entries(report.checks)) {
+      if (passedCheck === true) names.push(name);
+      else if (name.startsWith("owner_")) alreadyFailing.push({ service: s, check: name });
+    }
+    passed[s] = names;
   }
-  return baseline;
+  return { passed, alreadyFailing, originNotJudged };
+}
+
+// The baseline a commit writes and a record carries. A boot apply and a recovery judge this, and an owner-path
+// check must not be in it: a proxy that is not up yet would roll a good update back. The live apply still judges
+// the full list in its own health and probation waits.
+export function withoutOwnerPath(baseline: Record<string, string[]>): Record<string, string[]> {
+  const kept: Record<string, string[]> = {};
+  for (const [service, names] of Object.entries(baseline)) {
+    kept[service] = names.filter(name => !name.startsWith("owner_"));
+  }
+  return kept;
 }
 
 export async function baselineNow(deps: ApplyDeps, running: readonly UpdateService[]): Promise<Record<string, string[]>> {
   const baseline: Record<string, string[]> = {};
   for (const s of running) {
     const report = await deps.probe.health(s);
+    // No before-baseline: a network or a reverse proxy that is not up yet at boot would roll a good update back.
     baseline[s] = report === null ? [] : Object.keys(report.checks);
   }
-  return baseline;
+  return withoutOwnerPath(baseline);
 }
 
 // ---- health and probation (§6.4, RL7)
@@ -240,13 +274,23 @@ export async function waitProbation(
   for (const s of running) restarts += await ctx.deps.services.restarts(s);
   const judged = judgeProbation({ upMs: ctx.deps.clock.now() - o.healthyAt, restarts });
   if (!judged.ok) return { ok: false, reason: judged.error };
-  const after: HealthReport[] = [];
-  for (const s of running) {
-    const report = await ctx.deps.probe.health(s);
-    if (report !== null) after.push(report);
+  // The last read. An owner_ check that fails here is retried for the health window: the proxy may still be
+  // coming up. Any other check fails at once — a service that went down inside the minute is not given that window.
+  const began = ctx.deps.clock.now();
+  for (;;) {
+    const after: HealthReport[] = [];
+    for (const s of running) {
+      const report = await ctx.deps.probe.health(s);
+      if (report !== null) after.push(report);
+    }
+    const still = judgeHealth({ baseline: o.baseline, after, target: ctx.u.target });
+    if (still.ok) return { ok: true };
+    const owner = still.error.check.startsWith("owner_");
+    if (!owner || ctx.deps.clock.now() - began >= ctx.timing.healthMs) {
+      return { ok: false, reason: `at the end of probation, ${healthLine(still.error)}` };
+    }
+    await ctx.deps.sleeper.sleep(ctx.timing.pollMs);
   }
-  const still = judgeHealth({ baseline: o.baseline, after, target: ctx.u.target });
-  return still.ok ? { ok: true } : { ok: false, reason: `at the end of probation, ${healthLine(still.error)}` };
 }
 
 // ---- the backups (§6.2 step 5, RL5)
@@ -439,6 +483,7 @@ export async function runCommit(ctx: StepCtx): Promise<{ kind: "committed"; vers
   deps.installer.setGood(targetText);
   // §6.7: the baseline this attempt was judged against goes down with the commit, so the next boot apply judges
   // the services against what passed here — a machine that was already sick at this Version is not held to it.
+  // judgeBaseline already has the owner path taken out, so that boot apply does not judge it.
   deps.store.recordCommitted(targetText, deps.clock.now(), ctx.u.judgeBaseline ?? null);
   done(ctx, "committing");
   finish(ctx, "committed");
@@ -475,8 +520,9 @@ export async function continueAfterSwap(ctx: StepCtx, o: {
     moveTo(ctx, "probation");
     const baseline = o.baseline ?? await baselineNow(deps, o.running);
     // What this attempt is judged against travels in the record (§6.7): the commit writes it down, and a recovery
-    // that finishes the walk still knows it.
-    ctx.u = { ...ctx.u, judgeBaseline: baseline };
+    // that finishes the walk still knows it. The copy in the record never names an owner_ check; the waits below
+    // keep the full baseline, so a live apply still fails when an owner check that passed before fails after.
+    ctx.u = { ...ctx.u, judgeBaseline: withoutOwnerPath(baseline) };
     deps.store.saveUpdate(ctx.u);
     const healthy = await waitHealthy(ctx, o.running, { baseline, target: ctx.u.target });
     if (!healthy.ok) {
