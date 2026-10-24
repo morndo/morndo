@@ -16,7 +16,9 @@ let worker = "";
 let manager = "";
 beforeEach(async () => {
   hub = await startInProcessHub({ now: () => now });
-  worker = hub.agents.issue("lanes", "worker").secret;
+  // The fix round (2026-10-24, finding 1): the lease route is a manager's or the usage-pool scope's, so the lane's
+  // own token carries the scope. A pin changed with the finding: this was a bare worker token.
+  worker = hub.agents.issue("lanes", "worker", ["usage-pool"]).secret;
   manager = hub.agents.issue("manager", "manager").secret;
 });
 afterEach(async () => { await hub.close(); });
@@ -134,5 +136,61 @@ describe("the leased confirming read ends a derived mark (U13, end to end)", () 
     expect(seat("seat-a")).toBeNull();              // a new cycle, read under a lease, after the back time: back
     const notices = hub.usage.view().notices.filter(n => n.account === "seat-a" && n.kind === "back");
     expect(notices).toHaveLength(1);
+  });
+
+  // The fix round (2026-10-24, finding 1): the lease belongs to the token that took it, so another token's confirming
+  // read with that lease id clears no mark. Red against the code before the fix: any token's reading ends the lease.
+  it("another token's confirming read with the holder's lease does not clear the mark; the holder's own does", async () => {
+    await limit("seat-x", now + 60_000);
+    now += 61_000;
+    const g = await ask("seat-x");
+    const grant = await g.json() as Record<string, unknown>;
+    expect(grant.status).toBe("granted");
+    const other = hub.agents.issue("another-lane", "worker").secret;
+    const windows = [{ id: "five_hour", used_percent: 10, resets_at: sec(now + 6 * 3_600_000), length_mins: 300 }];
+    const theirs = await hub.post("/api/agent/usage/readings", { source: "claude-usage", node: "pc", captured_at: sec(now), lease_id: grant.lease_id, windows },
+      { authorization: `Bearer ${other}`, "x-morndo-lane": "usage-claude", "x-morndo-account": "seat-x" });
+    expect(theirs.status).toBe(200);
+    expect(seat("seat-x")?.state).toBe("out");      // not the holder's word: the mark stands
+    now += 1_000;
+    const mine = await reading("seat-x", { lease_id: grant.lease_id, windows: [{ id: "five_hour", used_percent: 10, resets_at: sec(now + 6 * 3_600_000), length_mins: 300 }] });
+    expect(mine.status).toBe(200);
+    expect(seat("seat-x")).toBeNull();              // the holder's own reading, under its own lease: back
+  });
+});
+
+// The fix round (2026-10-24, finding 2): an account the hub has never heard of is still wanted once per name, but one
+// token may start at most five NEW unknown names an hour; a sixth inside the hour is denied no_demand. Red against the
+// code before the fix: every unknown name is granted.
+describe("unknown names: five new ones per token per hour (finding 2)", () => {
+  // One unknown name the token starts and finishes: a grant, then the reading that completes it.
+  const start = async (account: string): Promise<void> => {
+    const g = await ask(account);
+    const grant = await g.json() as Record<string, unknown>;
+    expect(grant.status).toBe("granted");
+    const r = await reading(account, { lease_id: grant.lease_id, windows: [{ id: "five_hour", used_percent: 42, resets_at: sec(now + 3 * 3_600_000), length_mins: 300 }] });
+    expect(r.status).toBe(200);
+  };
+
+  it("six invented names in an hour from one token: five granted, the sixth denied no_demand", async () => {
+    for (let i = 1; i <= 5; i++) await start(`fresh-${i}`);
+    await denied("fresh-6", "no_demand");
+  });
+
+  it("after an hour the same token may start another unknown name", async () => {
+    for (let i = 1; i <= 5; i++) await start(`fresh-${i}`);
+    await denied("fresh-6", "no_demand");
+    now += 3_601_000;                               // the budget's hour rolled over
+    const later = await ask("fresh-7");
+    expect(((await later.json()) as Record<string, unknown>).status).toBe("granted");
+  });
+
+  it("a known account is not spent against the token's unknown-name budget", async () => {
+    for (let i = 1; i <= 5; i++) await start(`fresh-${i}`);
+    await denied("fresh-6", "no_demand");           // the token's budget is spent on unknown names
+    await limit("seat-a", now + 60_000);            // a known account: its seat is the hub's own word
+    now += 61_000;
+    const asked = await ask("seat-a");
+    expect(((await asked.json()) as Record<string, unknown>).status).toBe("granted");
   });
 });

@@ -46,7 +46,7 @@ chmodSync(fakeCli, 0o755);
 const runs = () => { try { return readFileSync(join(work, "runs"), "utf8").split("\n").filter(Boolean).length; } catch { return 0; } };
 
 const mint = (env: NodeJS.ProcessEnv) =>
-  execFileSync(process.execPath, ["--no-warnings", HUB_MAIN, "agent-token", "new", "usage-claude", "--role", "worker"], { env, encoding: "utf8" }).split("\n")[0]?.trim() ?? "";
+  execFileSync(process.execPath, ["--no-warnings", HUB_MAIN, "agent-token", "new", "usage-claude", "--role", "worker", "--scope", "usage-pool"], { env, encoding: "utf8" }).split("\n")[0]?.trim() ?? "";
 
 try {
   office = await startOffice("usage-claude");

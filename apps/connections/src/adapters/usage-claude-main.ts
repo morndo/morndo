@@ -10,8 +10,8 @@ import { dirname, join } from "node:path";
 import { productVersion } from "@morndo/service-kit";
 import type { UsageReason } from "@morndo/domain";
 import { childEnv } from "./runtime-claude.ts";
-import { redactHead } from "./usage-claude.ts";
-import { readClaude } from "./usage-claude-run.ts";
+import { hintOf } from "./usage-claude.ts";
+import { killActiveReads, readClaude } from "./usage-claude-run.ts";
 import { codexReadingBody, everyFor, readCodexLimits } from "./usage-codex.ts";
 
 export type UsageClaudeAccount = { configDir: string };
@@ -111,7 +111,7 @@ function codexReasonOf(problem: string): UsageReason {
 }
 // Only an unknown shape carries a hint, and only its redacted head.
 function codexHintOf(problem: string): string | null {
-  return codexReasonOf(problem) === "unknown_screen" ? redactHead(problem) : null;
+  return codexReasonOf(problem) === "unknown_screen" ? hintOf(problem) : null;
 }
 
 // One POST to the hub, with the agent token in the header — never in a body and never in a line of output. The
@@ -184,6 +184,12 @@ export async function runCollector(argv: readonly string[], env: NodeJS.ProcessE
 
 // Runs only when executed as the bin (node …/usage-claude-main.ts [--once]), never when a test imports this module.
 if (process.argv[1]?.endsWith("usage-claude-main.ts")) {
+  // The collector dies with its reads (fix round 2026-10-24, finding 4): SIGTERM, SIGINT and exit each kill every
+  // active read's whole process group, so a collector stopped mid-read leaves no child running.
+  const die = (): never => { killActiveReads(); process.exit(1); };
+  process.on("SIGTERM", die);
+  process.on("SIGINT", die);
+  process.on("exit", killActiveReads);
   const code = await runCollector(process.argv.slice(2), process.env, {
     stdout: text => process.stdout.write(text),
     stderr: text => process.stderr.write(text),

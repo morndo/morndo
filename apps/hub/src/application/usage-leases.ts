@@ -11,6 +11,12 @@ export const CACHE_MS = 240_000;         // 4 minutes: the minimum gap between g
 export const CAP = 2;                    // live leases the whole hub may hold
 const COOLDOWN_BASE_MS = 300_000;        // a failure with no retry word of its own: 5 minutes
 const COOLDOWN_CAP_MS = 1_800_000;       // however many failures in a row: half an hour at most
+// The fix round (2026-10-24, finding 3): the floor under a provider retry word — retry_after_s 0 is a cooldown of a
+// minute, not "no cooldown".
+const COOLDOWN_FLOOR_MS = 60_000;
+// The fix round (2026-10-24, finding 2): a token may start at most this many NEW unknown names an hour.
+const UNKNOWN_NEW_NAMES = 5;
+const UNKNOWN_HOUR_MS = 3_600_000;
 
 // What a lease ends with (plan 4.4): the capture time of a good reading, or the cooldown it failed with.
 export type LeaseOutcome = { ok: true; capturedAt: number } | { ok: false; retryAfterS: number | null };
@@ -20,7 +26,7 @@ export type GrantAnswer =
   | { status: "fresh"; capturedAt: number }
   | { status: "denied"; reason: "busy" | "cooldown" | "capacity" | "no_demand"; retryAfterMs: number };
 
-type Lease = { id: string; account: string; source: UsageSource; expiresAt: number; done: boolean };
+type Lease = { id: string; account: string; source: UsageSource; tokenId: string | null; expiresAt: number; done: boolean };
 type Cooldown = { until: number; failures: number };
 
 export class LeaseBook {
@@ -32,15 +38,22 @@ export class LeaseBook {
   // Whether anybody wants the account read just now (AT-45): the UsageService's demand set, injected so the policy
   // code stays free of the service. Without one, every account counts as wanted (tests, older callers).
   #wanted: ((account: string, now: number) => boolean) | null;
+  // Whether the hub has never heard of an account (fix round 2026-10-24, finding 2): the service's own knowledge,
+  // injected like #wanted. Without one, no account counts as unknown (tests, older callers).
+  #unknown: ((account: string) => boolean) | null;
+  // The NEW unknown names a token started, each until its hour rolls over (finding 2): token → account → when started.
+  #startedNames = new Map<string, Map<string, number>>();
 
-  constructor(now: () => number, wanted?: (account: string, now: number) => boolean) {
+  constructor(now: () => number, wanted?: (account: string, now: number) => boolean, unknown?: (account: string) => boolean) {
     this.#now = now;
     this.#wanted = wanted ?? null;
+    this.#unknown = unknown ?? null;
   }
 
   // The policy, in order (plan 4.4): the cache, the shared cooldown, the one live lease per account and source, the
-  // hub-wide cap, and the demand. Which node asks is not part of any key — the rationing is across all nodes.
-  grant(account: string, source: UsageSource, node: string | null): GrantAnswer {
+  // hub-wide cap, and the demand. Which node asks is not part of any key — the rationing is across all nodes. The
+  // lease is the asking token's (finding 1): only its own readings complete it.
+  grant(account: string, source: UsageSource, node: string | null, tokenId: string | null = null): GrantAnswer {
     void node;      // the lease is per account and source; which node asked is for the record only
     const now = this.#now();
     const key = `${account}|${source}`;
@@ -59,9 +72,25 @@ export class LeaseBook {
     // 5. Nobody wants the account read: no lease. The book asks only when it would grant, so a yes here consumes
     //    the demand it answered.
     if (this.#wanted !== null && !this.#wanted(account, now)) return { status: "denied", reason: "no_demand", retryAfterMs: 0 };
+    // 6. An account the hub has never heard of is wanted once per name (finding 2), but one token may start at most
+    //    5 NEW unknown names an hour — a name this token already started inside the hour is not new again.
+    if (!this.#mayStartUnknown(account, tokenId, now)) return { status: "denied", reason: "no_demand", retryAfterMs: 0 };
     const id = this.#nextId();
-    this.#leases.set(id, { id, account, source, expiresAt: now + LEASE_TTL_MS, done: false });
+    this.#leases.set(id, { id, account, source, tokenId, expiresAt: now + LEASE_TTL_MS, done: false });
     return { status: "granted", id, expiresAt: now + LEASE_TTL_MS };
+  }
+
+  // Whether the token may start this unknown name now (finding 2): true when the account is known (no budget spent),
+  // when no token is named, or when the name is not new; a name counts once, for an hour.
+  #mayStartUnknown(account: string, tokenId: string | null, now: number): boolean {
+    if (tokenId === null || this.#unknown === null || !this.#unknown(account)) return true;
+    const started = this.#startedNames.get(tokenId) ?? new Map<string, number>();
+    for (const [name, at] of started) if (now - at >= UNKNOWN_HOUR_MS) started.delete(name);   // the hour rolled over
+    if (started.has(account)) { this.#startedNames.set(tokenId, started); return true; }
+    if (started.size >= UNKNOWN_NEW_NAMES) { this.#startedNames.set(tokenId, started); return false; }
+    started.set(account, now);
+    this.#startedNames.set(tokenId, started);
+    return true;
   }
 
   // Ends the lease and sets what the next grant asks: the cache (a good reading, which also resets the failure
@@ -77,14 +106,18 @@ export class LeaseBook {
       return;
     }
     const failures = (this.#cooldown.get(key)?.failures ?? 0) + 1;
-    const base = (outcome.retryAfterS !== null ? outcome.retryAfterS * 1000 : COOLDOWN_BASE_MS) * 2 ** (failures - 1);
+    // The fix round (2026-10-24, finding 3): the provider's own retry word is floored at a minute — retry_after_s 0 is
+    // a cooldown of 60 s, not "no cooldown" — before the doubling.
+    const base = (outcome.retryAfterS !== null ? Math.max(outcome.retryAfterS * 1000, COOLDOWN_FLOOR_MS) : COOLDOWN_BASE_MS) * 2 ** (failures - 1);
     this.#cooldown.set(key, { until: this.#now() + Math.min(base, COOLDOWN_CAP_MS), failures });
   }
 
-  valid(id: unknown, account: string, source: UsageSource): boolean {
+  // The lease is the token's that took it (finding 1): valid only for that token, that account and that source. A
+  // reading that carries another token's lease id is unleased — it completes nothing, clears nothing.
+  valid(id: unknown, account: string, source: UsageSource, tokenId: string | null = null): boolean {
     if (typeof id !== "string") return false;
     const l = this.#leases.get(id);
-    return l !== undefined && !l.done && l.account === account && l.source === source && l.expiresAt > this.#now();
+    return l !== undefined && !l.done && l.tokenId === tokenId && l.account === account && l.source === source && l.expiresAt > this.#now();
   }
 
   // The id the hub hands out: a counter plus random bytes, so it is unique and unguessable on the wire.

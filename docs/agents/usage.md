@@ -82,7 +82,7 @@ the `morndo-usage-claude` collector. Nothing else is ever read: not the OAuth us
 credentials file, no web dashboard. The collector spawns
 
 ```sh
-claude -p /usage --output-format stream-json --verbose --no-session-persistence
+claude -p /usage --tools "" --output-format stream-json --verbose --no-session-persistence
 ```
 
 under the account's own config directory (`CLAUDE_CONFIG_DIR`), with every token variable (`CLAUDE_CODE_OAUTH_TOKEN`,
@@ -108,8 +108,15 @@ The collector reads `~/.config/morndo/usage-claude.json` (path from `MORNDO_USAG
 }
 ```
 
-`node` is the machine's own name; `tokenFile` holds a worker agent token, read from the file and never printed. A
-systemd user unit runs the collector in the background:
+`node` is the machine's own name; `tokenFile` holds the collector's own agent token, read from the file and never
+printed. The lease route answers a manager token or a worker token with the `usage-pool` scope (the limit route's
+rule), so the collector's token must carry that scope:
+
+```sh
+morndo agent-token new <name> --role worker --scope usage-pool
+```
+
+A systemd user unit runs the collector in the background:
 
 ```ini
 # ~/.config/systemd/user/morndo-usage-claude.service
@@ -128,11 +135,14 @@ WantedBy=default.target
 
 **It reads on demand, never on a timer.** Every 30 s the collector asks the hub — never the provider — for a lease
 (`POST /api/agent/usage/lease`), and only a granted lease spawns a read. The hub grants one only when somebody is
-looking (a feed hello — the principal opened Home — or the look route) and the account's own word is old, or when a
-derived out mark's back time passed and a confirming read is due. With a grant in hand: at most one read per account
+looking (a feed hello — the principal opened Home — or the look route) and the account's own word is old, when a
+derived out mark's back time passed and a confirming read is due, or for an account the hub has never heard of —
+wanted once per name, and at most five new unknown names an hour per token. A lease belongs to the token that took
+it: only that token's reading completes it. With a grant in hand: at most one read per account
 per 4 minutes across all machines, one live lease per account and source across all nodes, and at most two live
 leases on the whole hub. A failure cools the account down on every machine at once — the provider's own retry word
-when it gave one, else 5 minutes, doubling on consecutive failures to half an hour, reset by a good reading.
+when it gave one (never shorter than a minute), else 5 minutes, doubling on consecutive failures to half an hour,
+reset by a good reading.
 
 ## Reading Codex usage
 

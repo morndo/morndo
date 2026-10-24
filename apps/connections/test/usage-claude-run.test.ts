@@ -2,7 +2,7 @@
 // the account's config directory, with no token variable in the child, its own process group killed at the timeout,
 // one read at a time on the node, and a per-account lock file a stale holder loses. The CLI here is a fake a test
 // writes into a temp directory (never the real claude binary), controlled by files beside it.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,7 +31,7 @@ const log = (name, text) => appendFileSync(join(dir, name), text + "\\n");
 if (process.argv[2] === "auth") process.exit(existsSync(join(dir, "signed-in")) ? 0 : 1);
 const tokens = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"].filter(k => k in process.env);
 log("env.jsonl", JSON.stringify({ tokens, configDir: process.env.CLAUDE_CONFIG_DIR ?? null }));
-log("spawn.log", process.argv.slice(2).join(" "));
+log("spawn.log", JSON.stringify(process.argv.slice(2)));
 if (existsSync(join(dir, "group"))) {
   const kid = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
   log("group.pid", String(kid.pid));
@@ -83,6 +83,12 @@ describe("reads through the CLI's own /usage (AT-32)", () => {
     } finally {
       if (saved === undefined) delete process.env.MORNDO_CLAUDE_BIN; else process.env.MORNDO_CLAUDE_BIN = saved;
     }
+  });
+
+  it("runs the CLI headless with no tools at all: --tools followed by an empty argument (fix round, finding 4)", async () => {
+    await readClaude({ account: "seat-a", configDir: "/cfg/seat-a", bin: r.bin, now: Date.now, lockDir: r.dir });
+    const argv = JSON.parse(r.lines("spawn.log")[0]!) as string[];
+    expect(argv.slice(0, 4)).toEqual(["-p", "/usage", "--tools", ""]);
   });
 
   it("no token variable reaches the child; the config directory does", async () => {
@@ -165,6 +171,25 @@ describe("rationed on one node (AT-32, AT-41's lock)", () => {
     const refused = await readClaude({ account: "seat-a", configDir: "/cfg", bin: r.bin, now: () => at, lockDir: r.dir });
     expect(refused).toEqual({ ok: false, reason: "unreachable", retryAfterS: null, hint: null });
     expect(r.count("spawn.log")).toBe(1);        // still the one spawn of the stale case
+  });
+
+  // The fix round (2026-10-24, finding 4): the lock also records the child's pgid, and taking over a stale lock kills
+  // that group if it is alive, so a collector that died mid-read leaves nothing running. Red against the code before
+  // the fix: the lock names no group and a takeover kills nothing.
+  it("taking over a stale lock kills the group its pgid names, when that group is alive", async () => {
+    const kid = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", detached: true });
+    const kidPid = kid.pid ?? -1;
+    if (kidPid <= 0) throw new Error("the grandchild never started");
+    try {
+      const at = Date.now();
+      writeFileSync(join(r.dir, "claude-usage-seat-a.lock"), `${JSON.stringify({ pid: process.pid, pgid: kidPid, startedAt: at - 211_000 })}\n`);
+      const out = await readClaude({ account: "seat-a", configDir: "/cfg", bin: r.bin, now: () => at, lockDir: r.dir });
+      expect(out.ok).toBe(true);                     // the stale lock was taken over all the same
+      await new Promise(resolve => setTimeout(resolve, 500));
+      expect(() => process.kill(kidPid, 0)).toThrow();   // the group the stale lock named died with the takeover
+    } finally {
+      try { process.kill(-kidPid, "SIGKILL"); } catch { /* already gone, or never the leader */ }
+    }
   });
 
   it("after signed_out no spawn until the fake's auth status says signed in", async () => {

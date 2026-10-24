@@ -17,7 +17,9 @@ import { parseClaudeReport, type ClaudeReadResult } from "./usage-claude.ts";
 export const CLAUDE_USAGE_TIMEOUT_MS = 180_000;
 export const CLAUDE_LOCK_MS = 210_000;
 export const SIGNED_OUT_GATE_MS = 6 * 3_600_000;
-export const CLAUDE_USAGE_ARGS = ["-p", "/usage", "--output-format", "stream-json", "--verbose", "--no-session-persistence"] as const;
+// `--tools ""` runs the read with no tools at all (fix round 2026-10-24, finding 4): the lane confirmed the real CLI
+// still prints the usage report with it, and a reader that cannot be talked into a tool is a reader that can only read.
+export const CLAUDE_USAGE_ARGS = ["-p", "/usage", "--tools", "", "--output-format", "stream-json", "--verbose", "--no-session-persistence"] as const;
 // The token variables never passed to the child (plan 4.4): the read is the account's own login under its config
 // directory, never a token this process holds.
 export const TOKEN_ENV = ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN"] as const;
@@ -41,6 +43,17 @@ export type Spawner = (bin: string, args: readonly string[], o: {
 // The node's own rationing, shared by every read this process starts.
 const semaphore: { tail: Promise<unknown> } = { tail: Promise.resolve() };      // one headless read at a time on the node
 const signedOutUntil = new Map<string, number>();                              // per account: when the auth gate opens again
+// Every headless read this process has running (fix round 2026-10-24, finding 4): the collector kills them all —
+// each by its whole process group — on SIGTERM, SIGINT and exit, so a collector that dies mid-read leaves nothing
+// running. Cleared as each read ends.
+const activeReads = new Set<Spawned>();
+
+// Kills every active read's whole process group (finding 4). Safe to call at any time, and from an exit handler.
+export function killActiveReads(): void {
+  for (const proc of [...activeReads]) {
+    try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+  }
+}
 
 // The spawner this reader uses unless a test hands it its own: the CLI as its own process group, stdin and stderr
 // thrown away, stdout a pipe. A bin that is itself a JS file (the fake CLI a test selects with MORNDO_CLAUDE_BIN)
@@ -80,19 +93,32 @@ function pidAlive(pid: number): boolean {
   catch (e) { return (e as NodeJS.ErrnoException).code === "EPERM"; }
 }
 
-// One account's lock file: a holder writes its pid and when it started; a finished read leaves the file with no
-// holder, so the next read of the account takes it again. A pid that is gone, or a start older than CLAUDE_LOCK_MS,
-// is a stale holder anybody may take over.
+// One account's lock file: a holder writes its pid and when it started, and — once its read is running — the read's
+// own process group id; a finished read leaves the file with no holder, so the next read of the account takes it
+// again. A pid that is gone, or a start older than CLAUDE_LOCK_MS, is a stale holder anybody may take over, and the
+// group a stale lock names dies with the takeover (finding 4): a collector that died mid-read leaves nothing running.
 function lockPathOf(lockDir: string, account: string): string {
   return join(lockDir, `claude-usage-${account}.lock`);
 }
+function readLock(path: string): { pid: number; startedAt: number; pgid: number } {
+  try {
+    const lock = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown; startedAt?: unknown; pgid?: unknown };
+    return {
+      pid: typeof lock.pid === "number" && Number.isInteger(lock.pid) && lock.pid > 0 ? lock.pid : 0,
+      startedAt: typeof lock.startedAt === "number" ? lock.startedAt : 0,
+      pgid: typeof lock.pgid === "number" && Number.isInteger(lock.pgid) && lock.pgid > 0 ? lock.pgid : 0,
+    };
+  } catch { return { pid: 0, startedAt: 0, pgid: 0 }; }                // no lock, or not JSON: nobody holds it
+}
 function lockHeld(path: string, now: number): boolean {
-  let lock: { pid?: unknown; startedAt?: unknown };
-  try { lock = JSON.parse(readFileSync(path, "utf8")) as { pid?: unknown; startedAt?: unknown }; }
-  catch { return false; }                                              // no lock, or not JSON: nobody holds it
-  const pid = typeof lock.pid === "number" && Number.isInteger(lock.pid) && lock.pid > 0 ? lock.pid : 0;
-  const startedAt = typeof lock.startedAt === "number" ? lock.startedAt : 0;
+  const { pid, startedAt } = readLock(path);
   return pid > 0 && now - startedAt < CLAUDE_LOCK_MS && pidAlive(pid);
+}
+// Kills the process group a lock names, if it names one and the group is alive (finding 4). Errors are ignored: the
+// group may be gone already, or never have been the caller's to kill.
+function killLockGroup(path: string): void {
+  const { pgid } = readLock(path);
+  if (pgid > 0) { try { process.kill(-pgid, "SIGKILL"); } catch { /* already gone */ } }
 }
 
 // `<bin> auth status`: local, no network. Exit 0 means signed in.
@@ -143,6 +169,7 @@ export async function readClaude(opts: {
   mkdirSync(opts.lockDir, { recursive: true });
   const lockPath = lockPathOf(opts.lockDir, opts.account);
   if (lockHeld(lockPath, now)) return { ok: false, reason: "unreachable", retryAfterS: null, hint: null };
+  killLockGroup(lockPath);                 // a stale holder's read may still run: its group dies with the takeover
   writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, startedAt: now })}\n`);
   const release = () => writeFileSync(lockPath, `${JSON.stringify({ pid: 0, startedAt: 0 })}\n`);
 
@@ -151,6 +178,8 @@ export async function readClaude(opts: {
     const cwd = mkdtempSync(join(tmpdir(), "morndo-usage-claude-"));
     try {
       const proc = spawn(bin, CLAUDE_USAGE_ARGS, { env: childEnv, cwd, stdin: "ignore", stderr: "ignore", detached: true });
+      activeReads.add(proc);               // the collector's death kills this whole group (finding 4)
+      if (proc.pid > 0) writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, pgid: proc.pid, startedAt: now })}\n`);
       const chunks: Uint8Array[] = [];
       const collect = (async () => { try { for await (const chunk of proc.stdout) chunks.push(chunk); } catch { /* a killed run's pipe */ } })();
       let timer: NodeJS.Timeout | undefined;
@@ -173,7 +202,10 @@ export async function readClaude(opts: {
         if (result.ok) signedOutUntil.delete(opts.account);
         else if (result.reason === "signed_out") signedOutUntil.set(opts.account, opts.now() + SIGNED_OUT_GATE_MS);
         return result;
-      } finally { if (timer !== undefined) clearTimeout(timer); }
+      } finally {
+        if (timer !== undefined) clearTimeout(timer);
+        activeReads.delete(proc);
+      }
     } finally { rmSync(cwd, { recursive: true, force: true }); }
   });
   semaphore.tail = run.then(() => undefined, () => undefined);

@@ -22,7 +22,7 @@ afterEach(async () => { await hub.close(); });
 // tests space their readings that far apart.
 const leaseFor = (account: string): string => {
   hub.usage.look();
-  const g = hub.usage.leases.grant(account, "app-server", "pc");
+  const g = hub.usage.leases.grant(account, "app-server", "pc", "t");   // bound to the token the reading below posts as
   if (g.status !== "granted") throw new Error(`the hub did not grant a lease (${g.status})`);
   return g.id;
 };
