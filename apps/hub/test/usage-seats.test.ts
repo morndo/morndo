@@ -10,7 +10,7 @@ let hub: InProcessHub;
 let now: number;
 let workerToken: string;
 let managerToken: string;
-const HOUR = 3_600_000, MIN = 60_000;
+const HOUR = 3_600_000, MIN = 60_000, DAY = 86_400_000;
 type Body = Record<string, unknown>;
 
 // PR #125 fix round 2, finding 2: the limit route is a manager's. Every seat test posts it with a manager token; the
@@ -18,6 +18,11 @@ type Body = Record<string, unknown>;
 const limit = (body: unknown, token = managerToken) => fetch(`${hub.base}/api/agent/usage/limit`, {
   method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": "builder" }, body: JSON.stringify(body),
 });
+// The pool's own word (U15): a manager-role token with the usage-pool scope, as the pool bot would hold.
+const pool = (body: unknown, token: string) => fetch(`${hub.base}/api/agent/usage/pool`, {
+  method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+});
+
 // A reading through the route, as the collector posts it, with the plan name it read (finding 3a's cases).
 const postReading = (o: { account?: string; source?: string; plan: string | null; capturedAt: number; windows: unknown[] }) =>
   fetch(`${hub.base}/api/agent/usage/readings`, {
@@ -115,12 +120,110 @@ describe("seats (plan 4.5)", () => {
     expect(await seatOf("seat-b")).toMatchObject({ state: "out" });
   });
 
+  it("a full weekly window beside a low 5-hour window sets the mark's clock: it waits for the weekly reset (re-check R3)", async () => {
+    const DAY = 24 * HOUR;
+    const t0 = now;
+    const body: UsageReadingsBody = {
+      source: "app-server", node: null, captured_at: Math.floor(t0 / 1000),
+      windows: [
+        { id: "five_hour", used_percent: 30, resets_at: Math.floor((t0 + 2 * HOUR) / 1000), length_mins: 300 },
+        { id: "seven_day", used_percent: 100, resets_at: Math.floor((t0 + 3 * DAY) / 1000), length_mins: 10080 },
+      ],
+    };
+    expect(hub.usage.reading(body, "seat-a", actor)).toEqual({ ok: true });
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    const seat = () => hub.usage.view().accounts.find(a => a.account === "seat-a")?.seat;
+    now = t0 + 10 * HOUR;                                   // far past the default back time and the 5-hour reset
+    hub.usage.sweep();
+    expect(seat()).toMatchObject({ state: "out", why: "usage_limit" });          // the full weekly window is still limited
+    now = t0 + 3 * DAY + 6 * HOUR - MIN;
+    hub.usage.sweep();
+    expect(seat()).toMatchObject({ state: "out" });
+    now = t0 + 3 * DAY + 6 * HOUR + MIN;                    // six hours after the weekly reset
+    hub.usage.sweep();
+    expect(seat()).toBeUndefined();
+  });
+
+  it("when both windows read 100% the mark waits for the later reset (re-check R3)", async () => {
+    const DAY = 24 * HOUR;
+    const t0 = now;
+    const body: UsageReadingsBody = {
+      source: "app-server", node: null, captured_at: Math.floor(t0 / 1000),
+      windows: [
+        { id: "five_hour", used_percent: 100, resets_at: Math.floor((t0 + 2 * HOUR) / 1000), length_mins: 300 },
+        { id: "seven_day", used_percent: 100, resets_at: Math.floor((t0 + 3 * DAY) / 1000), length_mins: 10080 },
+      ],
+    };
+    expect(hub.usage.reading(body, "seat-b", actor)).toEqual({ ok: true });
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    const seat = () => hub.usage.view().accounts.find(a => a.account === "seat-b")?.seat;
+    now = t0 + 2 * DAY;
+    hub.usage.sweep();
+    expect(seat()).toMatchObject({ state: "out" });
+    now = t0 + 3 * DAY + 6 * HOUR + MIN;
+    hub.usage.sweep();
+    expect(seat()).toBeUndefined();
+  });
+
   it("an unknown limit changes no seat", async () => {
     expect(await limit({ kind: "unknown", by: "worker-one", account: "seat-a" })).toMatchObject({ status: 200 });
     expect(await limit({ kind: "usage_limit", by: "worker-one" })).toMatchObject({ status: 200 });      // no account at all
     const v = await viewOf();
     expect((v.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
     expect(await noticesOf("seat")).toEqual([]);
+  });
+
+  // S3 (plan 4.5 item 4): the fleet's taps and the pool's word.
+  it("a lane's failure and a manager's limit post set the same seat state (AT-15)", async () => {
+    hub.usage.fromFleet("pc", { kind: "lane_account", lane: "w1", account: "seat-a", at: now });   // PR #127, finding 1: the account is known and seen on the node before the hook's word counts
+    hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived" });
+    const managerToken = hub.agents.issue("manager", "manager").secret;
+    const r = await limit({ kind: "usage_limit", by: "manager-one", account: "seat-a", at: Math.floor(now / 1000) }, managerToken);
+    expect(await r.json()).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit" });      // one seat, whatever reported it
+    expect(await noticesOf("seat")).toHaveLength(1);
+  });
+
+  it("a pool-set state is sticky, a derived one clears, and authority is the token's (AT-43)", async () => {
+    const poolToken = hub.agents.issue("pool", "manager", ["usage-pool"]).secret;
+    const set = await pool({ account: "seat-a", action: "set", state: "retired", why: "refused", by: "pool-bot", at: Math.floor(now / 1000) }, poolToken);
+    expect(await set.json()).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "retired", why: "refused", owner: "pool", by: "pool-bot" });
+    // Sticky: a lane's limit failure under the pool's word changes nothing of what is shown. PR #127, finding 1: the
+    // lane_account tap first, so seat-a is known and seen on the node and the failure's own word reaches resolution.
+    hub.usage.fromFleet("pc", { kind: "lane_account", lane: "w1", account: "seat-a", at: now });
+    hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now + MIN });
+    expect(await seatOf()).toMatchObject({ state: "retired", owner: "pool" });
+    // A limit post that says "pool" on the limit route speaks only for the hub's own derived seat (PR #127, finding 2):
+    // the pool's retired word still stands above whatever it derived underneath.
+    const poolWord = await limit({ kind: "usage_limit", by: "pool", account: "seat-a", at: Math.floor((now + 2 * MIN) / 1000) });
+    expect(poolWord.status).toBe(200);
+    expect(await seatOf()).toMatchObject({ state: "retired", owner: "pool", by: "pool-bot" });
+    // A derived one clears: a fresh leased read of a new cycle (AT-18's rule).
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
+    now += 65 * MIN;
+    const lease = hub.usage.leases.grant("seat-b", "app-server", null);
+    // A cycle begun at or after the mark (AT-18's rule): the read is 65 min past it, its 5-hour window reset 4 h out.
+    expect(read({ account: "seat-b", capturedAt: now, usedPercent: 20, resetsAt: now + 4 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    expect(await seatOf("seat-b")).toBeUndefined();
+    // Authority is the token's: the scope, not the role — the manager's own token is refused without it.
+    const managerToken = hub.agents.issue("manager", "manager").secret;
+    const refused = await pool({ account: "seat-a", action: "cleared", by: "manager-one" }, managerToken);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "scope_required" });
+  });
+
+  it("the pool's state wins on Home (AT-44)", async () => {
+    const poolToken = hub.agents.issue("pool", "manager", ["usage-pool"]).secret;
+    const set = await pool({ account: "seat-a", action: "set", state: "out", why: "usage_limit", back_at: Math.floor((now + HOUR) / 1000), by: "pool-bot", at: Math.floor(now / 1000) }, poolToken);
+    expect(await set.json()).toEqual({ ok: true });
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });   // the hub's own derived mark
+    expect(await seatOf()).toMatchObject({ state: "out", owner: "pool" });           // an equal state: the pool's
+    now += 65 * MIN;
+    const lease = hub.usage.leases.grant("seat-a", "app-server", null);
+    expect(read({ capturedAt: now, usedPercent: 20, resetsAt: now + 3 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "out", owner: "pool" });           // the derived one cleared; the pool's stands
   });
 
   it("a plan change the plan watch tells drops the derived seat, with one reset notice; an unchanged plan leaves it (PR #125 finding 3a)", async () => {
@@ -177,6 +280,86 @@ describe("seats (plan 4.5)", () => {
     const taken = await limit({ kind: "usage_limit", by: "manager-one", account: "seat-a", at: Math.floor(now / 1000) });
     expect(taken.status).toBe(200);
     expect(await seatOf()).toMatchObject({ state: "out", owner: "derived" });
+  });
+
+  it("the limit route is the pool's too: a worker token with the usage-pool scope is taken, one without it stays refused (PR #127, finding 2)", async () => {
+    const poolWorker = hub.agents.issue("pool-bot", "worker", ["usage-pool"]).secret;
+    const taken = await limit({ kind: "usage_limit", by: "pool-bot", account: "seat-a", at: Math.floor(now / 1000) }, poolWorker);
+    expect(taken.status).toBe(200);
+    expect(await taken.json()).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived", by: "pool-bot" });
+    const refused = await limit({ kind: "usage_limit", by: "worker-one", account: "seat-b", at: Math.floor(now / 1000) }, workerToken);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "not_allowed" });
+    expect(await seatOf("seat-b")).toBeUndefined();
+  });
+
+  it("a limit post speaks only for the hub's own derived seat: a pool-style cleared action changes nothing, a retired post by \"pool\" is derived (PR #127, finding 2)", async () => {
+    // A pool-style clear posted to the limit route: the route has no clear, and the body names no limit kind.
+    const cleared = await limit({ action: "cleared", by: "pool", account: "seat-a" });
+    expect(cleared.status).toBe(400);
+    expect(await seatOf()).toBeUndefined();
+    expect(await noticesOf("seat")).toEqual([]);
+    // A retired post with by "pool" from a manager token: the hub's own derived seat, shown as such.
+    const retired = await limit({ kind: "refused", by: "pool", account: "seat-a", at: Math.floor(now / 1000) });
+    expect(retired.status).toBe(200);
+    expect(await seatOf()).toEqual({ state: "retired", why: "refused", since: now, backAt: null, owner: "derived", by: "pool", fix: "use_another_account" });
+  });
+
+  it("a derived out mark expires six hours past its back time, with one notice, and a newer limit post pushes that out (PR #127, finding 3b)", async () => {
+    // One view per checkpoint: each cookie() call pairs a fresh device, and the default policy's sessions outlive
+    // every clock jump here, so a view per seat and per notice list would hit the hub's six-device cap mid-test.
+    const t0 = now;
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: t0 + HOUR, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    expect(await seatOf()).toMatchObject({ state: "out", backAt: t0 + HOUR });
+    now = t0 + HOUR + 6 * HOUR - MIN;      // six hours less a minute past the back time: not yet
+    hub.usage.sweep();
+    const held = await viewOf();
+    expect((held.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toMatchObject({ state: "out" });
+    expect((held.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-a")).toEqual([]);
+    now = t0 + HOUR + 6 * HOUR + MIN;      // a minute past the six hours: dropped, with one notice
+    hub.usage.sweep();
+    const dropped = await viewOf();
+    expect((dropped.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
+    expect((dropped.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-a")).toEqual([
+      { id: expect.stringMatching(/^seat-a\|back\|expired\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: its limit mark expired, the back time passed with no newer hit." },
+    ]);
+    // A newer limit post in between extends the back time, so the mark lives as long as its newest word says.
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: t0 + HOUR, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: t0 + 2 * HOUR, by: "worker-one", at: t0 + 30 * MIN })).toEqual({ ok: true, resolved: true });
+    now = t0 + HOUR + 6 * HOUR + MIN;      // past the first back time, before the extended one: the mark stays
+    hub.usage.sweep();
+    const kept = await viewOf();
+    expect((kept.accounts as Body[]).find(a => a.account === "seat-b")?.seat).toMatchObject({ state: "out", backAt: t0 + 2 * HOUR });
+    expect((kept.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-b")).toEqual([]);
+    now = t0 + 2 * HOUR + 6 * HOUR + MIN;
+    hub.usage.sweep();
+    const gone = await viewOf();
+    expect((gone.accounts as Body[]).find(a => a.account === "seat-b")?.seat).toBeUndefined();
+    expect((gone.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-b")).toEqual([
+      { id: expect.stringMatching(/^seat-b\|back\|expired\|\d+$/), kind: "back", account: "seat-b", at: expect.any(Number), text: "seat-b: its limit mark expired, the back time passed with no newer hit." },
+    ]);
+  });
+
+  // Fix round 2 on PR #127, finding 2: the cycle the limit hit is the clock the sweep expires a derived out mark by.
+  // A weekly window resets days later than the default one-hour back time; the mark is not dropped while that window
+  // still reads 100%, only six hours after its own reset.
+  it("a derived out mark whose cycle resets days after its back time waits for the cycle's own reset (fix round 2, finding 2)", async () => {
+    const t0 = now;
+    // A reading of a five-hour-shaped weekly window at 100%, resetting three days out.
+    expect((await postReading({ plan: "Max 5x", capturedAt: t0, windows: [fiveHour(100, t0 + 3 * DAY)] })).status).toBe(200);
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: t0 + HOUR, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    expect(hub.store.usageSeat("seat-a")?.record).toMatchObject({ state: "out", backAt: t0 + HOUR, cycleReset: t0 + 3 * DAY, windowId: "five_hour" });
+    now = t0 + HOUR + 6 * HOUR + MIN;      // seven hours past the back time: the weekly window has not reset
+    hub.usage.sweep();
+    expect(await seatOf()).toMatchObject({ state: "out" });      // the mark stays: the window still reads 100%
+    now = t0 + 3 * DAY + 6 * HOUR + MIN;   // six hours and a minute past the cycle's own reset: dropped, with one notice
+    hub.usage.sweep();
+    const dropped = await viewOf();
+    expect((dropped.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
+    expect((dropped.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-a")).toEqual([
+      { id: expect.stringMatching(/^seat-a\|back\|expired\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: its limit mark expired, the back time passed with no newer hit." },
+    ]);
   });
 
   it("a plan change told by readings stamped after the mark drops it (PR #125 fix round 2, finding 1a)", async () => {

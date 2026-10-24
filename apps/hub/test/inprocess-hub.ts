@@ -74,6 +74,8 @@ export type InProcessHub = {
 export async function startInProcessHub(o: {
   limits?: Limits; heartbeatMs?: number; now?: () => number; observation?: ObservationService;
   profiles?: () => ReadonlyMap<string, AccountProfile>;
+  // S3 (plan 4.5 item 4): where a lane runs, as main.ts reads it from the fleet's lane list (a test's own).
+  laneNode?: (lane: string) => string | null;
   engines?: { bin: string; env: NodeJS.ProcessEnv }; transcriber?: Transcriber | null;
   locate?: () => { transcriber: Transcriber | null; unavailable: TranscriberProbe | null } | null;
   queue?: (store: Store) => ManagerQueue; manager?: string; typed?: string[]; alerts?: AlertsService;
@@ -142,7 +144,7 @@ export async function startInProcessHub(o: {
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
   const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}) });
   const agents = new AgentAccess(store, "manager", o.now);
-  const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}) });
+  const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}), ...(o.laneNode ? { laneNode: o.laneNode } : {}) });
   const queue = o.queue ? o.queue(store) : null;
   const jobs = new JobsService({ store, board, ...(o.now ? { now: o.now } : {}) });
   // Wired as production main.ts wires it: the service is always constructed, with the plugin's answer when there is

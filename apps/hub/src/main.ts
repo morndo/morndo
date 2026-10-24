@@ -21,7 +21,7 @@ import { updaterCli } from "./adapters/updater-cli.ts";
 import { UpdatesService } from "./application/updates-service.ts";
 import { passkeys } from "./adapters/passkeys.ts";
 import { denyConfigFromEnv, denyConfigWithClaudeDir, denyRoots, paneLock } from "@morndo/node-ops";
-import { CLIENT_API } from "@morndo/protocol";
+import { AGENT_SCOPES, CLIENT_API } from "@morndo/protocol";
 import type { HubPorts, Tmux } from "./application/ports.ts";
 import { startHttp } from "./adapters/http.ts";
 import { AccessService } from "./application/access-service.ts";
@@ -80,7 +80,7 @@ const HELP = `morndo: your agents, on your phone.
   morndo audit [count]    the latest device and session events (morndo audit --help)
   morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
                           events (morndo lanes --help)
-  morndo agent-token new <name> --role manager|worker
+  morndo agent-token new <name> --role manager|worker [--scope usage-pool]
                           a token for the manager's lane, or one the worker lanes share (shown once)
   morndo agent-token list
   morndo agent-token revoke <id>
@@ -349,7 +349,13 @@ switch (cmd) {
     // principal's view only. The file can change with every lane quiet, so it is looked at again every minute (never
     // blocking: ADR-0034).
     const pool = poolProfiles(config.poolUsageFile ?? null, log);
-    const usage = new UsageService({ store, profiles: pool.current });
+    // S3 (plan 4.5 item 4): a lane's node, from the observation loop's synchronous roster, for the lane records a
+    // report writes and a failure resolves through. Without a fleet the hub knows no lane's node: nothing changes.
+    const laneNode = fleet ? (lane: string) => observation.snapshot().workers.find(w => w.name === lane)?.node ?? null : undefined;
+    const usage = new UsageService({ store, profiles: pool.current, ...(laneNode ? { laneNode } : {}) });
+    // The fleet's usage taps (plan 4.5 item 4): a lane's start with an account, and its limit failures.
+    const stopUsageEvents = fleet ? fleet.client.events(e => { if (e.t !== "usage") return; try { usage.fromFleet(e.node, e.body); } catch (err) { log.warn("a usage tap from the fleet could not be taken", err); } }) : null;
+    if (stopUsageEvents) shutdown.onStop(stopUsageEvents);
     const lookAtPool = () => { void pool.refresh().then(changed => { if (changed) usage.refreshProfiles(); }, e => log.warn("the pool's usage file could not be looked at", e)); };
     lookAtPool();
     const poolRefresh = setInterval(lookAtPool, 60_000);
@@ -484,22 +490,29 @@ switch (cmd) {
     // `agents` is the one the start already made, with the revocation journal (RL10).
     const [sub, ...rest] = args;
     if (sub === "new") {
-      // `--role R` and the name, in either order: the role's value is never taken as the name.
+      // `--role R`, any number of `--scope S` (U15: the closed list's words), and the name, in any order: a flag's
+      // value is never taken as the name.
       const roleAt = rest.indexOf("--role");
       const role = roleAt >= 0 ? rest[roleAt + 1] : undefined;
-      const name = rest.filter((a, i) => i !== roleAt && i !== roleAt + 1).find(a => !a.startsWith("--")) ?? "";
-      if (!name || (role !== "manager" && role !== "worker")) { process.stderr.write("usage: morndo agent-token new <name> --role manager|worker\n"); store.close(); throw await exitAfterOutput(2); }
-      const { token, secret } = agents.issue(name, role);
+      const scopeAt = rest.map((a, i) => [a, i] as const).filter(([a]) => a === "--scope").map(([, i]) => i);
+      const scopes = scopeAt.map(i => rest[i + 1]);
+      const used = new Set<number>([...(roleAt >= 0 ? [roleAt, roleAt + 1] : []), ...scopeAt, ...scopeAt.map(i => i + 1)]);
+      const name = rest.filter((a, i) => !used.has(i)).find(a => !a.startsWith("--")) ?? "";
+      if (!name || (role !== "manager" && role !== "worker") || scopes.some(s => !(AGENT_SCOPES as readonly string[]).includes(s ?? ""))) {
+        process.stderr.write(`usage: morndo agent-token new <name> --role manager|worker [--scope ${AGENT_SCOPES.join("|--scope ")}]\n`);
+        store.close(); throw await exitAfterOutput(2);
+      }
+      const { token, secret } = agents.issue(name, role, scopes as string[]);
       print(`${secret}`);
-      print(`Token ${token.id} (${token.name}, ${token.role}). Shown once: put it in MORNDO_AGENT_TOKEN for ${role === "manager" ? "the manager's lane" : "the worker lanes"}, with MORNDO_HUB=${config.origin}.`);
+      print(`Token ${token.id} (${token.name}, ${token.role}${token.scopes.length > 0 ? `, ${[...token.scopes].join(", ")}` : ""}). Shown once: put it in MORNDO_AGENT_TOKEN for ${role === "manager" ? "the manager's lane" : "the worker lanes"}, with MORNDO_HUB=${config.origin}.`);
     } else if (sub === "list") {
-      for (const t of agents.list()) print(`${t.id}  ${t.name.padEnd(20)}  ${t.role.padEnd(7)}  made ${when(t.createdAt)}  last used ${when(t.lastUsedAt)}  ${t.revokedAt ? `REVOKED ${when(t.revokedAt)}` : "active"}`);
+      for (const t of agents.list()) print(`${t.id}  ${t.name.padEnd(20)}  ${t.role.padEnd(7)}  ${[...t.scopes].join(",") || "-"}  made ${when(t.createdAt)}  last used ${when(t.lastUsedAt)}  ${t.revokedAt ? `REVOKED ${when(t.revokedAt)}` : "active"}`);
     } else if (sub === "revoke") {
       const id = rest[0];
       if (!id) { process.stderr.write("usage: morndo agent-token revoke <id>\n"); store.close(); throw await exitAfterOutput(2); }
       print(agents.revoke(id) ? `revoked ${id}` : `no active agent token ${id}`);
     } else {
-      process.stderr.write("usage: morndo agent-token new <name> --role manager|worker | list | revoke <id>\n");
+      process.stderr.write("usage: morndo agent-token new <name> --role manager|worker [--scope usage-pool] | list | revoke <id>\n");
       store.close();
       await exitAfterOutput(2);
     }

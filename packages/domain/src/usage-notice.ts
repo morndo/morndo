@@ -55,6 +55,11 @@ export function seatResetNoticeText(account: string): string {
   return `${account}: the plan or account changed, so its earlier limit mark is dropped.`;
 }
 
+// A derived out mark dropped because its back time passed with no newer hit (fix round on PR #127, finding 3b).
+export function seatExpiredNoticeText(account: string): string {
+  return `${account}: its limit mark expired, the back time passed with no newer hit.`;
+}
+
 export function thresholdNoticeText(account: string, windowTitle: string, level: ThresholdLevel): string {
   return `${account}: the ${windowTitle} window passed ${level === "critical" ? 90 : 75}%.`;
 }

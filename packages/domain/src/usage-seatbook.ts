@@ -11,6 +11,10 @@ export type LimitHit = { kind: LimitKind; at: number; backAt: number | null; by:
 export const DEFAULT_MARK_MS = 60 * 60_000;
 export const MIN_MARK_MS = 60_000;
 export const MAX_MARK_MS = 168 * 3_600_000;
+// Fix round on PR #127, finding 3b: a derived out mark whose back time passed, with no newer hit to push it out, is
+// dropped after six hours. A pool seat never expires, and neither does a retired or logged-out derived one: only an
+// out mark carries a back time that can pass.
+export const MARK_EXPIRY_MS = 6 * 3_600_000;
 
 export function applyLimit(prev: SeatRecord | null, hit: LimitHit): { seat: SeatRecord | null; changed: boolean } {
   if (hit.kind === "unknown") return { seat: prev, changed: false };
@@ -36,6 +40,30 @@ export function applyLimit(prev: SeatRecord | null, hit: LimitHit): { seat: Seat
     }
   }
   return { seat: next, changed: true };
+}
+
+// The pool-owned seat (U15, U17): what the accounts pool set by hand. The pool's own record, never a reading's to end.
+export function poolSeat(hit: { state: SeatState; why: SeatWhy | null; backAt: number | null; at: number; by: string }): SeatRecord {
+  return { state: hit.state, why: hit.why, since: hit.at, markedAt: hit.at, backAt: hit.backAt, cycleReset: null, windowId: null, owner: "pool", by: hit.by };
+}
+
+// The seat the principal is shown (U17): the worse of the pool's and the hub's derived one by worseSeatState; on an
+// equal state, the pool's. Either null: the other; both null: null.
+export function shownSeat(pool: SeatRecord | null, derived: SeatRecord | null): SeatRecord | null {
+  if (pool === null) return derived;
+  if (derived === null) return pool;
+  return worseSeatState(pool.state, derived.state) === derived.state && pool.state !== derived.state ? derived : pool;
+}
+
+// True only for a derived seat in state "out" whose own clock passed more than MARK_EXPIRY_MS ago (PR #127, finding
+// 3b): the later of its back time and the cycle's own reset (fix round 2, finding 2) — the cycle the limit hit is the
+// clock, so a weekly window that resets days after the default one-hour back time is not shown as fine while it still
+// reads 100%. The sweep drops such a mark with one notice. Everything else — a pool seat, a retired or logged-out
+// derived seat, an out mark with no back time, one whose clock is not past the six hours — stays.
+export function markExpired(seat: SeatRecord, now: number): boolean {
+  if (seat.owner !== "derived" || seat.state !== "out" || seat.backAt === null) return false;
+  const clock = Math.max(seat.backAt, seat.cycleReset ?? seat.backAt);
+  return now - clock > MARK_EXPIRY_MS;
 }
 
 export function clearSeat(prev: SeatRecord, read: FreshRead): { seat: SeatRecord | null; cleared: boolean } {
