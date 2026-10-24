@@ -1,12 +1,14 @@
 // Channel feeds (design §9.5, §9.6). Publishing adds a release and raises the number. A re-sign
 // raises the number, sets the issue time, and sets the expiry 14 days later. The release list,
 // the withdrawals, the channel and the key-set version stay as they were. A withdrawal appends
-// the version and raises the number; the release list stays.
+// the version and raises the number; the release list stays. A promotion copies one release
+// from latest onto stable and raises the number; the release is not rebuilt.
 import { compareVersions, parseVersion, type Channel, type FeedEntry } from "@morndo/domain";
 import { ChannelFeedSchema } from "@morndo/protocol";
 import { canonicalJson, isoUtc } from "./json.ts";
 
 export const FEED_TTL_MS = 14 * 24 * 60 * 60 * 1000;
+export const PROMOTION_WAIT_MS = 7 * 24 * 60 * 60 * 1000;
 
 export function emptyFeed(p: { channel: Channel; now: number; keySetVersion: number }): string {
   return writeFeed({ channel: p.channel, seq: 1, issuedAt: p.now, keySetVersion: p.keySetVersion, releases: [], withdrawn: [] });
@@ -34,6 +36,30 @@ export function resignFeed(existing: string, now: number): string {
   return writeFeed({
     channel: prev.channel, seq: prev.seq + 1, issuedAt: now, keySetVersion: prev.keySetVersion,
     releases: prev.releases, withdrawn: [...prev.withdrawn],
+  });
+}
+
+export function promoteRelease(existingStable: string, latest: string, version: string, now: number): string {
+  const stable = ChannelFeedSchema.parse(JSON.parse(existingStable));
+  const from = ChannelFeedSchema.parse(JSON.parse(latest));
+  if (stable.channel !== "stable") throw new Error(`feed is ${stable.channel}, not stable`);
+  if (from.channel !== "latest") throw new Error(`feed is ${from.channel}, not latest`);
+  const entry = from.releases.find(release => release.version === version);
+  if (entry === undefined) throw new Error(`${version} is not in the latest feed`);
+  if (stable.releases.some(release => release.version === version)) throw new Error(`${version} is already in the stable feed`);
+  if (from.withdrawn.includes(version) || stable.withdrawn.includes(version)) throw new Error(`${version} is withdrawn`);
+  const promoted = mustVersion(version);
+  let newest: string | null = null;
+  for (const release of stable.releases) {
+    if (newest === null || compareVersions(mustVersion(release.version), mustVersion(newest)) > 0) newest = release.version;
+  }
+  if (newest !== null && compareVersions(promoted, mustVersion(newest)) < 0) {
+    throw new Error(`${version} is lower than ${newest}, the newest in the stable feed; stable only moves forward`);
+  }
+  const releases = [...stable.releases, entry].sort((a, b) => compareVersions(mustVersion(b.version), mustVersion(a.version)));
+  return writeFeed({
+    channel: stable.channel, seq: stable.seq + 1, issuedAt: now, keySetVersion: stable.keySetVersion,
+    releases, withdrawn: [...stable.withdrawn],
   });
 }
 
