@@ -3,7 +3,7 @@
 // policy (grant answers granted/fresh/denied; complete takes an outcome): the slice-2 cases the policy contradicts
 // moved with it. Synthetic data only. Round 1: the policy itself is stubbed, so these are red.
 import { describe, expect, it } from "vitest";
-import { CACHE_MS, CAP, LEASE_TTL_MS, LeaseBook } from "../src/application/usage-leases.ts";
+import { CAP, LEASE_TTL_MS, LeaseBook } from "../src/application/usage-leases.ts";
 
 let now = 1_700_000_000_000;      // 10:00
 const book = () => new LeaseBook(() => now);

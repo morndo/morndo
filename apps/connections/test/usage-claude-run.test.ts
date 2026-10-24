@@ -2,7 +2,7 @@
 // the account's config directory, with no token variable in the child, its own process group killed at the timeout,
 // one read at a time on the node, and a per-account lock file a stale holder loses. The CLI here is a fake a test
 // writes into a temp directory (never the real claude binary), controlled by files beside it.
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";

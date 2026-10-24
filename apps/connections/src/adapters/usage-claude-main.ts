@@ -92,7 +92,7 @@ export async function collectOnce(p: {
 // The bin's own entry: `--once` for a single pass, else the loop every 30 s.
 export async function runCollector(argv: readonly string[], env: NodeJS.ProcessEnv, io: { stdout(text: string): void; stderr(text: string): void }): Promise<number> {
   for (;;) {
-    const code = await collectOnce({ env, stdout: io.stdout, stderr: io.stderr });
+    const code = await collectOnce({ env, stdout: (s: string) => { io.stdout(s); }, stderr: (s: string) => { io.stderr(s); } });
     if (argv.includes("--once")) return code;
     await new Promise(resolve => setTimeout(resolve, LOOP_MS));
   }
