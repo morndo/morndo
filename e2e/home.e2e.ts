@@ -250,6 +250,7 @@ try {
       await eventually(async () => (await fresh.innerText().catch(() => "")).replace(/\s+/g, " "), v => v.includes("Burst · 3-day"), "the mixed card on the phone");
       assert(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page scrolls sideways at 390 px");
       assert(phone.errors.length === 0, `console errors: ${phone.errors.join(" | ")}`);
+      await fresh.scrollIntoViewIfNeeded();                    // the shot shows the mixed card, not the top of the page
       await phone.page.screenshot({ path: join(OUT, "11-mixed-phone.png") });
     } finally { await phone.context.close(); }
   });
