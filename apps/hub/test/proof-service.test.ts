@@ -11,6 +11,7 @@ import { Store } from "../src/adapters/store.ts";
 import { GithubChecks } from "../src/adapters/github-checks.ts";
 import { BoardService } from "../src/application/board-service.ts";
 import { ProofService } from "../src/application/proof-service.ts";
+import type { ForgeChecks } from "../src/application/ports.ts";
 import { startFakeForge, type FakeForge } from "./fake-forge.ts";
 
 const dirs: string[] = [];
@@ -656,3 +657,55 @@ describe("verifying (B14, B15)", () => {
     });
   });
 });
+
+describe("a Done task is a snapshot (B13, B16)", () => {
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  const greenForge = (): ForgeChecks => ({
+    pullRequest: async () => ({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null } }),
+    checkRuns: async () => ({ ok: true, value: [{ id: 1, name: "ci", status: "completed", conclusion: "success", url: null }, { id: 2, name: "lint", status: "completed", conclusion: "success", url: null }] }),
+  });
+
+  it("a merge recorded after the Done changes neither the card's line nor its rows, and asks the forge nothing", async () => {
+    const store = new Store(tempDir());
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
+    const calls: string[] = [];
+    const forge: ForgeChecks = { pullRequest: (...a) => { calls.push("pr"); return greenForge().pullRequest(...a); }, checkRuns: (...a) => { calls.push("ci"); return greenForge().checkRuns(...a); } };
+    const proof = new ProofService({ store, board, now: () => NOW, forge, mode: "on" });
+    atReview(board);
+    await proof.file("T-1", brief, lane);
+    await proof.idle();
+    expect((await board.actChecked("T-1", { action: "move", to: "done", reason: "read the diff" }, manager)).ok).toBe(true);
+    const before = { view: proof.view("T-1"), rows: store.proofResultsOf("T-1", 4), calls: calls.length };
+    expect(before.view?.state.line).toBe("proof: 2 of 2 green");
+    // a merge of the task recorded in another repository afterwards: the live rule would unverify the brief
+    expect(board.act("T-1", { action: "merged", sha: "1111111", repo: "acme/vault" }, manager).ok).toBe(true);
+    await proof.idle();
+    expect(proof.view("T-1")).toEqual(before.view);
+    expect(store.proofResultsOf("T-1", 4)).toEqual(before.rows);
+    expect(calls.length).toBe(before.calls);
+    store.close();
+  });
+
+  it("a check in flight when the Done lands writes nothing", async () => {
+    const store = new Store(tempDir());
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    const slow: ForgeChecks = {
+      pullRequest: async (...a) => { await held; return greenForge().pullRequest(...a); },
+      checkRuns: async (...a) => { await held; return greenForge().checkRuns(...a); },
+    };
+    const proof = new ProofService({ store, board, now: () => NOW + 5_000, forge: slow, mode: "off" });
+    atReview(board);
+    await proof.file("T-1", brief, lane);                 // the checks start and wait on the forge
+    expect(board.act("T-1", { action: "move", to: "done", reason: "read the diff" }, manager).ok).toBe(true);   // the Done lands first
+    release();
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 4)).toEqual([      // the seeds stand: the late answers were dropped
+      { ref: "morndo/morndo#42@3e9d1a7", state: "pending", detail: null, checkedAt: NOW + 5_000 },
+      { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "pending", detail: null, checkedAt: NOW + 5_000 },
+    ]);
+    store.close();
+  });
+});
+

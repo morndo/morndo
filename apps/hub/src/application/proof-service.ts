@@ -80,7 +80,7 @@ export class ProofService {
     const current = currentBrief(this.#store.taskEvents(key));
     if (current === null) return { rev: null, brief: null, results: [], mode: this.#mode, state: proofOf(null, []) };
     const results = this.#store.proofResultsOf(key, current.rev);
-    const merges = this.#store.mergesOf(key).map(m => ({ repo: m.repo, sha: m.sha }));
+    const merges = this.#mergesAsOf(key);
     return { rev: current.rev, brief: current.brief, results, mode: this.#mode, state: proofOf(current.brief, results, merges) };
   }
 
@@ -101,6 +101,7 @@ export class ProofService {
   // ignored and writes nothing, so a slow check cannot judge a round it was not asked about. The rows of a round that
   // is over stay as that round's history.
   record(key: string, briefRev: number, result: RefResult): boolean {
+    if (this.#store.task(key)?.status === "done") return false;        // a Done task is a snapshot: a check in flight at the Done writes nothing
     const current = currentBrief(this.#store.taskEvents(key));
     if (current === null || current.rev !== briefRev || !current.brief.refs.includes(result.ref)) return false;
     this.#store.saveProofResult(key, briefRev, result);
@@ -177,6 +178,7 @@ export class ProofService {
   // asks out at once — an unauthenticated forge answers 60 an hour), each answer a row through `record`.
   async #check(key: string, pick: (brief: { brief: ProofBrief; rev: number; at: number }, rows: ReadonlyMap<string, RefResult>) => readonly string[]): Promise<void> {
     if (this.#forge === null) return;
+    if (this.#store.task(key)?.status === "done") return;              // a Done task is a snapshot: no check, no new row
     const events = this.#store.taskEvents(key);
     const current = currentBrief(events);
     if (current === null) return;
@@ -185,7 +187,7 @@ export class ProofService {
     const young = this.#now() - briefAt < YOUNG_MS;
     // Task data never widens what the hub may read: only configured repositories are asked, not merge records.
     const allowed = new Set(this.#allowedRepos.map(r => r.toLowerCase()));
-    const merges = this.#store.mergesOf(key).map(m => ({ repo: m.repo, sha: m.sha }));
+    const merges = this.#mergesAsOf(key);
     const refs = pick({ brief: current.brief, rev: current.rev, at: briefAt }, rows);
     if (refs.length === 0) return;
     let next = 0;
@@ -215,6 +217,23 @@ export class ProofService {
     } catch {
       return { state: "unfetchable", detail: "network error" };
     }
+  }
+
+  // The task's merge records as the rules read them: live while the task is open, and as they stood at the Done once it
+  // is done, so a merge recorded afterwards cannot change the card of what was accepted.
+  #mergesAsOf(key: string): { repo: string; sha: string }[] {
+    const task = this.#store.task(key);
+    if (task?.status !== "done") return this.#store.mergesOf(key).map(m => ({ repo: m.repo, sha: m.sha }));
+    // Done: replay the record up to the Done event (the table holds what stands now, a clock cannot order same-moment events).
+    const events = this.#store.taskEvents(key);
+    const doneRev = events.reduce((n, e) => (e.change.kind === "moved" && e.change.to === "done" && e.rev > n ? e.rev : n), 0);
+    const held = new Map<string, { repo: string; sha: string }>();
+    for (const e of events) {
+      if (e.rev >= doneRev) break;
+      if (e.change.kind === "merged") held.set(`${e.change.repo.toLowerCase()}|${e.change.sha}`, { repo: e.change.repo, sha: e.change.sha });
+      if (e.change.kind === "unmerged") held.delete(`${e.change.repo.toLowerCase()}|${e.change.sha}`);
+    }
+    return [...held.values()];
   }
 
   // A forge failure as a row. Without a credential the forge answers 404 for a private repository as it does for one that
