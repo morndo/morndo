@@ -46,6 +46,10 @@ export type UsageSourceBody = {
   reading: { capturedAt: number; plan: string | null; windows: WindowReading[] } | null;
   previous: { capturedAt?: number | null; windows: { id: string; usedPercent: number | null; resetsAt: number | null }[] } | null;
   hint: string | null;
+  // The newest stamp this source gave, each capped at the hub's clock WHEN IT WAS RECEIVED (R3 on PR #125): what a later
+  // reading's stamp is ordered against. A stamp from a clock that runs ahead is stored as the receipt time, so it never
+  // outranks an honest reading that arrives after it. A row stored without it falls back to its other stamps.
+  orderedAt?: number;
 };
 export type UsageSourceRow = { account: string; source: string; node: string; body: UsageSourceBody };
 export type UsageWatchKind = "plan" | "threshold" | "cycle";

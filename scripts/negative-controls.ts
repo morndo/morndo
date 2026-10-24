@@ -4136,7 +4136,7 @@ export const CONTROLS: Control[] = [
     find: "return line.some(t => t > prevAt) ? 0 : c.capturedAt;", replace: "return c.capturedAt;",
     run: ["packages/domain/test/usage-merge.test.ts"] },
   { id: "t415s2fix-no-ordering-guard", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
-    find: "if (stamps.length > 0 && orderingAt < Math.max(...stamps)) return { ok: true };", replace: "",
+    find: "if (prevOrdered !== null && orderingAt < prevOrdered) return { ok: true };", replace: "",
     run: ["apps/hub/test/usage-health.test.ts"] },
   { id: "t415s2fix-previous-forgets-its-time", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "{ capturedAt: prev.reading.capturedAt, windows: prev.reading.windows.map", replace: "{ windows: prev.reading.windows.map",
@@ -4210,9 +4210,6 @@ export const CONTROLS: Control[] = [
   { id: "t415s2r2-limit-route-open-to-workers", task: "T-415", file: "apps/hub/src/adapters/http.ts",
     find: "if (who.token.role !== \"manager\" && !who.token.scopes.includes(\"usage-pool\")) return json(res, 403, { error: \"not_allowed\" });", replace: "",
     run: ["apps/hub/test/usage-seats.test.ts"] },
-  { id: "t415s2r2-stored-stamp-unclamped", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
-    find: ".filter((s): s is number => s !== null).map(s => Math.min(s, now));", replace: ".filter((s): s is number => s !== null);",
-    run: ["apps/hub/test/usage-health.test.ts"] },
   { id: "t415s2r2-report-scans-every-row", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "this.#mergedWindows(shown, this.#store.usageSourcesOf(account), now)", replace: "this.#mergedWindows(shown, this.#store.usageSources().filter(r => r.account === account), now)",
     run: ["apps/hub/test/usage-store.test.ts"] },
@@ -4243,6 +4240,9 @@ export const CONTROLS: Control[] = [
   { id: "t415s3fix-pool-seats-expire", task: "T-415", file: "packages/domain/src/usage-seatbook.ts",
     find: "return seat.owner === \"derived\" && seat.state === \"out\"", replace: "return seat.state === \"out\"",
     run: ["packages/domain/test/usage-seatbook.test.ts"] },
+  { id: "t415s2r3-future-stamp-locks-out", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "const prevOrdered = prev.orderedAt ?? (legacy.length > 0 ? Math.max(...legacy) : null);", replace: "const prevOrdered = legacy.length > 0 ? Math.max(...legacy) : null;",
+    run: ["apps/hub/test/usage-health.test.ts"] },
 ];
 
 // ---- the runner

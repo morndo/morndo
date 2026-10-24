@@ -221,6 +221,19 @@ describe("source health (plan 4.3)", () => {
     expect(((a as Body).fiveHour as Body).usedPercentage).toBe(90);                                      // still ignored
   });
 
+  it("a future stamp locks nobody out: honest stamps a few seconds before receipt are taken right after it (PR #125 R3)", async () => {
+    const reset = now + 2 * HOUR;
+    expect((await reading({ windows: [fiveHour(31, reset)], capturedAt: now + 5 * MIN })).status).toBe(200);     // stamped five minutes ahead
+    for (const [seconds, percent] of [[30, 55], [120, 70], [200, 90]] as const) {
+      now += seconds === 30 ? 30_000 : (seconds - (seconds === 120 ? 30 : 120)) * 1000;
+      expect((await reading({ windows: [fiveHour(percent, reset)], capturedAt: now - 3000 })).status).toBe(200);   // honest: three seconds before receipt
+      expect((((await accountOf()) as Body).fiveHour as Body).usedPercentage, `after ${seconds} s`).toBe(percent);
+    }
+    // a true late replay (older than the newest ordering stamp seen) is still ignored
+    expect((await reading({ windows: [fiveHour(5, reset)], capturedAt: now - 120_000 })).status).toBe(200);
+    expect((((await accountOf()) as Body).fiveHour as Body).usedPercentage).toBe(90);
+  });
+
   it("an all-unreadable reading is a failure the principal sees, and a good reading clears it (PR #125 finding 4a)", async () => {
     const at = now;
     const r = await reading({ windows: [{ id: "five_hour", used_percent: 1_700_000_000, resets_at: Math.floor((now + HOUR) / 1000) }], capturedAt: at });
