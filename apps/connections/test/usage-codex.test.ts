@@ -4,8 +4,9 @@ import { copyFileSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { UsageReportBody } from "@morndo/protocol";
-import { limitsFromResult, readCodexLimits, usageReport, windowLabel } from "../src/adapters/usage-codex.ts";
+import { UsageReadingsBody, UsageReportBody } from "@morndo/protocol";
+import type { CodexLimits } from "../src/adapters/usage-codex.ts";
+import { codexPushedReading, codexReadingBody, everyFor, limitsFromResult, readCodexLimits, usageReport, windowLabel } from "../src/adapters/usage-codex.ts";
 
 const FIXTURES = join(import.meta.dirname, "fixtures");
 const PLUS: unknown = JSON.parse(readFileSync(join(FIXTURES, "codex", "rate-limits-plus.json"), "utf8"));
@@ -92,6 +93,85 @@ describe("codex usage: the status-line report", () => {
     expect(body.model).toEqual({ display_name: "Codex" });
     expect(UsageReportBody.safeParse(body).success).toBe(true);
     expect([windowLabel(120), windowLabel(45), windowLabel(null)]).toEqual(["2-hour window", "45-minute window", "Window"]);
+  });
+});
+
+describe("codex usage: the reading body (S6, plan 4.6)", () => {
+  const limits = (o: Partial<CodexLimits> = {}): CodexLimits => ({ primary: win(42, 300), secondary: win(17, 10_080, 1_893_888_000), planType: "plus", others: [], ...o });
+  const flags = { identity: "a1b2c3d4e5f6", ordinaryUsageAllowed: true, rateLimitReachedType: null, now: 1_700_000_012_345, node: "pc" };
+  const noFlags = { identity: null, ordinaryUsageAllowed: null, rateLimitReachedType: null, now: 1_700_000_000_000, node: "pc" };
+
+  it("maps a primary and secondary pair onto the hub's two windows, with the flags, and the wire accepts it", () => {
+    const body = codexReadingBody(limits(), flags);
+    expect(body).toEqual({
+      source: "app-server", node: "pc", captured_at: 1_700_000_012, every_s: 900,
+      plan: "plus", identity: "a1b2c3d4e5f6",
+      windows: [
+        { id: "five_hour", used_percent: 42, resets_at: 1_893_456_000, length_mins: 300, rolling: false, note: null },
+        { id: "seven_day", used_percent: 17, resets_at: 1_893_888_000, length_mins: 10_080, rolling: false, note: null },
+      ],
+      ordinary_usage_allowed: true,
+    });
+    expect(UsageReadingsBody.safeParse(body).success).toBe(true);
+  });
+
+  it("maps each other limit's windows under its own name, cut to 40 characters, with their lengths", () => {
+    const body = codexReadingBody(limits({
+      others: [
+        { limitId: "codex-big", name: "Big model", primary: win(100, 300, 1_893_459_600), secondary: null },
+        { limitId: "codex-long", name: "A limit name long enough to overflow the cap", primary: win(5, 720, null), secondary: null },
+      ],
+    }), noFlags);
+    expect(body.windows).toEqual([
+      { id: "five_hour", used_percent: 42, resets_at: 1_893_456_000, length_mins: 300, rolling: false, note: null },
+      { id: "seven_day", used_percent: 17, resets_at: 1_893_888_000, length_mins: 10_080, rolling: false, note: null },
+      { id: "Big model: 5-hour window", used_percent: 100, resets_at: 1_893_459_600, length_mins: 300, rolling: false, note: null },
+      { id: "A limit name long enough to overflow the", used_percent: 5, resets_at: null, length_mins: 720, rolling: false, note: null },
+    ]);
+    expect(body.every_s).toBe(60);        // the fullest window (100%) holds the read at once a minute
+    expect(body.node).toBe("pc");
+    expect(body.plan).toBe("plus");
+    expect("ordinary_usage_allowed" in body).toBe(false);        // the reader had no word on the flags: no key at all
+    expect("rate_limit_reached_type" in body).toBe(false);
+  });
+
+  it("an unknown duration sends null, not a failure; another duration names the window by its minutes (AT-14)", () => {
+    const unknown = codexReadingBody({ primary: win(30, null), secondary: null, planType: null, others: [] }, { ...noFlags, node: null });
+    expect(unknown.windows).toEqual([{ id: "Window", used_percent: 30, resets_at: 1_893_456_000, length_mins: null, rolling: false, note: null }]);
+    expect(unknown.plan).toBeNull();
+    expect(unknown.node).toBeNull();
+    const mins = codexReadingBody({ primary: win(30, 1440), secondary: null, planType: null, others: [] }, noFlags);
+    expect(mins.windows[0]?.id).toBe("Window 1440 min");
+  });
+});
+
+describe("codex usage: the adaptive interval (AT-42)", () => {
+  it("idles at 15 minutes and quickens as a window fills, never faster than once a minute", () => {
+    expect(everyFor(null)).toBe(900);
+    expect(everyFor(0)).toBe(900);
+    expect(everyFor(74.9)).toBe(900);
+    expect(everyFor(75)).toBe(300);
+    expect(everyFor(89.9)).toBe(300);
+    expect(everyFor(90)).toBe(120);
+    expect(everyFor(98.9)).toBe(120);
+    expect(everyFor(99)).toBe(60);
+    expect(everyFor(100)).toBe(60);
+    for (const p of [null, 0, 25, 74.9, 75, 80, 90, 95, 99, 100]) expect(everyFor(p)).toBeGreaterThanOrEqual(60);
+  });
+});
+
+describe("codex usage: a pushed update (S6)", () => {
+  it("maps a rate-limits snapshot to the same body, flagged pushed, with no lease", () => {
+    const body = codexPushedReading(PLUS, { identity: null, now: 1_700_000_000_000, node: "pc" });
+    expect(body).toEqual({
+      source: "app-server", node: "pc", captured_at: 1_700_000_000, every_s: 900,
+      plan: "plus", identity: null,
+      windows: [
+        { id: "five_hour", used_percent: 42, resets_at: 1_893_456_000, length_mins: 300, rolling: false, note: null },
+        { id: "seven_day", used_percent: 17, resets_at: 1_893_888_000, length_mins: 10_080, rolling: false, note: null },
+      ],
+      pushed: true,
+    });
   });
 });
 

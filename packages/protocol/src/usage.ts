@@ -108,6 +108,11 @@ export const UsageReadingsBody = z.looseObject({
   captured_at: num(),
   every_s: z.exactOptional(z.nullable(num())),
   plan: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
+  // S6 (plan 4.6): who the reading says is behind the account — a digest, never an id — and Codex's own limit flags.
+  // The flags count only on a leased reading, and the free-string type is kept for its boolean effect alone.
+  identity: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
+  ordinary_usage_allowed: z.exactOptional(z.nullable(z.boolean())),
+  rate_limit_reached_type: z.exactOptional(z.nullable(z.string().check(z.maxLength(40)))),
   lease_id: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
   windows: z.exactOptional(z.array(readingsWindow)),
   failure: z.exactOptional(z.nullable(z.looseObject({
