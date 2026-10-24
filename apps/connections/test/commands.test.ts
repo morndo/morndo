@@ -89,6 +89,67 @@ describe("page commands", () => {
     expect(mem.store.policy.roles.find(item => item.role === "implement")?.override).toBe("follow");
   });
 
+  it("turns global auto on through the priority command and records the switch", async () => {
+    const mem = memory();
+    mem.catalog.rows = [preset()];
+    mem.vault.put("ref-a", "0123456789ab");
+    const connections = new ConnectionsService(mem.deps);
+    expect((await connections.addKey({ name: "key-a", vendor: "vendor-a", runtime: "runtime-a", ref: "ref-a", billing: "metered", budget: { kind: "capped", amount: 10 }, expiry: null }, who)).ok).toBe(true);
+    const bound = bindCommands(mem.deps);
+    const switched = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: true }, "hub");
+    expect(switched.ok).toBe(true);
+    expect(mem.store.policy.priority.auto).toBe(true);
+    expect(mem.store.policy.events.some(event => event.type === "AutoSwitched" && event.on)).toBe(true);
+  });
+
+  it("switching auto through the priority command writes nothing: no event, no pending chain (R16)", async () => {
+    const mem = memory();
+    mem.catalog.rows = [preset()];
+    mem.vault.put("ref-a", "0123456789ab");
+    const connections = new ConnectionsService(mem.deps);
+    const routing = new RoutingService(mem.deps);
+    expect((await connections.addKey({ name: "key-a", vendor: "vendor-a", runtime: "runtime-a", ref: "ref-a", billing: "metered", budget: { kind: "capped", amount: 10 }, expiry: null }, who)).ok).toBe(true);
+    expect(routing.setOverride("implement", "follow", null, "c1").ok).toBe(true);
+    expect(routing.setPriority("keys-only", ["key-a"], "c1").ok).toBe(true);
+    expect(routing.setPicks("implement", ["key-a:m@high"], null, "c1").ok).toBe(true);
+    const before = mem.store.policy;
+    expect(before.roles.find(item => item.role === "implement")?.written).toBeNull();
+    const writes = mem.engines.writes.length;
+    const bound = bindCommands(mem.deps);
+    const switched = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: true }, "hub");
+    expect(switched.ok).toBe(true);
+    const after = mem.store.policy;
+    expect(after.priority.auto).toBe(true);
+    expect(mem.engines.writes.length).toBe(writes);
+    expect(after.roles).toEqual(before.roles);
+    expect(after.events.slice(before.events.length).map(event => event.type)).toEqual(["AutoSwitched"]);
+    const off = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: false }, "hub");
+    expect(off.ok).toBe(true);
+    expect(mem.engines.writes.length).toBe(writes);
+    expect(mem.store.policy.roles).toEqual(before.roles);
+  });
+
+  it("a same-order priority save with auto unchanged still writes the pending chains", async () => {
+    const mem = memory();
+    mem.catalog.rows = [preset()];
+    mem.vault.put("ref-a", "0123456789ab");
+    const connections = new ConnectionsService(mem.deps);
+    const routing = new RoutingService(mem.deps);
+    expect((await connections.addKey({ name: "key-a", vendor: "vendor-a", runtime: "runtime-a", ref: "ref-a", billing: "metered", budget: { kind: "capped", amount: 10 }, expiry: null }, who)).ok).toBe(true);
+    expect(routing.setOverride("implement", "follow", null, "c1").ok).toBe(true);
+    expect(routing.setPriority("keys-only", ["key-a"], "c1").ok).toBe(true);
+    expect(routing.setPicks("implement", ["key-a:m@high"], null, "c1").ok).toBe(true);
+    const writes = mem.engines.writes.length;
+    const bound = bindCommands(mem.deps);
+    const saved = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: false }, "hub");
+    expect(saved.ok).toBe(true);
+    expect(mem.engines.writes.length).toBeGreaterThan(writes);
+    expect(mem.store.policy.roles.find(item => item.role === "implement")?.written).toEqual(["key-a:m@high"]);
+    const types = mem.store.policy.events.map(event => event.type);
+    expect(types).toContain("PriorityChanged");
+    expect(types).not.toContain("AutoSwitched");
+  });
+
   it("checks the saved order and picks together, and names risk picks that no longer fit", async () => {
     const mem = memory();
     mem.catalog.rows = [preset()];

@@ -2,10 +2,11 @@
 // derived from its Picks. Pure. Availability never reorders a chain. No vendor is named here.
 import { MAX_CHAIN, engineText, type Engine } from "./engines.ts";
 import type { Kind } from "./connections.ts";
+import { changeEffect, dailyCapFor, DEFAULT_AUTO_SETTINGS, reserveFor, routingRoleGroup, type AutoChange, type AutoSettings } from "./auto-routing.ts";
 import { err, ok, type Result } from "./shared.ts";
 
 export type Mode = "subscriptions-first" | "keys-first" | "subscriptions-only" | "keys-only" | "custom";
-export type Priority = { mode: Mode; order: readonly string[] };
+export type Priority = { mode: Mode; order: readonly string[]; auto?: boolean };
 export type Override = "follow" | "own" | "hand";
 export type Listed = { name: string; kind: Kind; models: readonly string[]; efforts: readonly string[] | null };
 
@@ -19,6 +20,7 @@ export type RoleRoute = {
   writtenRisk: readonly string[] | null;
   seenChain: readonly string[] | null;
   seenRisk: readonly string[] | null;
+  auto: boolean;
 };
 
 export type RouteEvent =
@@ -27,12 +29,19 @@ export type RouteEvent =
   | { type: "PicksChanged"; role: string; at: number; command: string | null }
   | { type: "ChainProjected"; role: string; at: number; chain: readonly string[] }
   | { type: "ChainDrifted"; role: string; at: number }
-  | { type: "ChainKept"; role: string; at: number };
+  | { type: "ChainKept"; role: string; at: number }
+  | { type: "AutoSwitched"; scope: "global" | "role"; role: string | null; on: boolean; at: number; command: string }
+  | { type: "AutoSettingsChanged"; setting: "task-ceiling" | "save-line" | "daily-cap" | "reserve"; name: string | null; from: number; to: number; at: number; command: string };
 
-export type Policy = { priority: Priority; roles: readonly RoleRoute[]; events: readonly RouteEvent[] };
-export const emptyPolicy = (): Policy => ({ priority: { mode: "subscriptions-first", order: [] }, roles: [], events: [] });
+export type Policy = { priority: Priority; roles: readonly RoleRoute[]; events: readonly RouteEvent[]; autoSettings: AutoSettings };
+export const emptyPolicy = (): Policy => ({
+  priority: { mode: "subscriptions-first", order: [], auto: false },
+  roles: [],
+  events: [],
+  autoSettings: { ...DEFAULT_AUTO_SETTINGS, dailyCaps: {}, reserves: {} },
+});
 
-export type RouteProblem = "duplicate" | "unknown" | "empty" | "too_long" | "fit" | "principal" | "missing" | "same" | "copied";
+export type RouteProblem = "duplicate" | "unknown" | "empty" | "too_long" | "fit" | "principal" | "missing" | "same" | "copied" | "step-up";
 
 const fail = (problem: RouteProblem, role?: string, name?: string): Result<never, { problem: RouteProblem; role?: string; name?: string }> =>
   err({ problem, ...(role ? { role } : {}), ...(name ? { name } : {}) });
@@ -138,12 +147,37 @@ function derivedProblem(policy: Policy, row: RoleRoute, listed: readonly Listed[
   return null;
 }
 
-export function setPriority(policy: Policy, priority: Priority, listed: readonly Listed[], command: string, at: number): Result<Policy, { problem: RouteProblem; role?: string; name?: string }> {
+// True when a Priority command changes neither the mode nor the order, so only Auto's switch could differ.
+export function sameOrder(current: Priority, mode: Mode, order: readonly string[]): boolean {
+  return current.mode === mode && current.order.length === order.length && current.order.every((name, i) => name === order[i]);
+}
+
+// True when a Priority command carries an Auto value that differs from the policy's.
+export function switchesAuto(policy: Policy, priority: Priority): boolean {
+  return priority.auto !== undefined && priority.auto !== (policy.priority.auto ?? false);
+}
+
+export function setPriority(policy: Policy, priority: Priority, listed: readonly Listed[], command: string, at: number, authority: AutoAuthority = "session"): Result<Policy, { problem: RouteProblem; role?: string; name?: string }> {
   const who = principal(command);
   if (!who.ok) return who;
   const order = checkOrder(priority.order, listed.map(l => l.name));
   if (!order.ok) return order;
-  const next: Policy = { ...policy, priority: { ...priority, order: order.value }, events: [...policy.events, { type: "PriorityChanged", at, command }] };
+  const auto = priority.auto ?? (policy.priority.auto ?? false);
+  const switching = switchesAuto(policy, priority);
+  // R16: turning Auto on or off changes no derived chain and writes nothing, so an auto-only change is not a Priority change.
+  if (switching && sameOrder(policy.priority, priority.mode, order.value)) {
+    const allowed = allow(changeEffect({ kind: "global-auto", on: auto }), authority, command);
+    if (!allowed.ok) return fail(allowed.error.problem === "principal" ? "principal" : "step-up");
+    const event: RouteEvent = { type: "AutoSwitched", scope: "global", role: null, on: auto, at, command };
+    return ok({ ...policy, priority: { ...policy.priority, auto }, events: [...policy.events, event] });
+  }
+  const events: RouteEvent[] = [...policy.events, { type: "PriorityChanged", at, command }];
+  if (switching) {
+    const allowed = allow(changeEffect({ kind: "global-auto", on: auto }), authority, command);
+    if (!allowed.ok) return fail(allowed.error.problem === "principal" ? "principal" : "step-up");
+    events.push({ type: "AutoSwitched", scope: "global", role: null, on: auto, at, command });
+  }
+  const next: Policy = { ...policy, priority: { mode: priority.mode, order: order.value, auto }, events };
   for (const row of next.roles) {
     const usesGlobal = row.override === "follow" || (row.override === "own" && row.priority === null);
     if (!usesGlobal) continue;
@@ -229,7 +263,10 @@ export function setRole(
 
 export function ensureRole(policy: Policy, role: string): Policy {
   if (policy.roles.some(r => r.role === role)) return policy;
-  const row: RoleRoute = { role, override: "hand", priority: null, picks: [], riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null };
+  const row: RoleRoute = {
+    role, override: "hand", priority: null, picks: [], riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null,
+    auto: routingRoleGroup(role) === "implement",
+  };
   return { ...policy, roles: [...policy.roles, row] };
 }
 
@@ -396,6 +433,160 @@ function alreadyKept(policy: Policy, role: string): boolean {
     if (event.type === "ChainProjected" || event.type === "PicksChanged") return false;
   }
   return false;
+}
+
+export type AutoAuthority = "session" | "step-up";
+export type AutoProblem = { problem: "step-up" | "principal" | "missing" | "range" };
+
+function amountOk(to: number): boolean {
+  return Number.isFinite(to) && to >= 0;
+}
+
+function allow(effect: "session" | "step-up", authority: AutoAuthority, command: string): Result<true, AutoProblem> {
+  if (!command) return err({ problem: "principal" });
+  if (effect === "step-up" && authority !== "step-up") return err({ problem: "step-up" });
+  return ok(true);
+}
+
+export function setGlobalAuto(policy: Policy, on: boolean, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if ((policy.priority.auto ?? false) === on) return ok(policy);
+  const allowed = allow(changeEffect({ kind: "global-auto", on }), authority, command);
+  if (!allowed.ok) return allowed;
+  const event: RouteEvent = { type: "AutoSwitched", scope: "global", role: null, on, at, command };
+  return ok({ ...policy, priority: { ...policy.priority, auto: on }, events: [...policy.events, event] });
+}
+
+export function setRoleAuto(policy: Policy, role: string, on: boolean, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  const row = policy.roles.find(item => item.role === role);
+  if (!row) return err({ problem: "missing" });
+  if (row.auto === on) return ok(policy);
+  const allowed = allow(changeEffect({ kind: "role-auto", on, plainStartsOnKey: false }), authority, command);
+  if (!allowed.ok) return allowed;
+  const event: RouteEvent = { type: "AutoSwitched", scope: "role", role, on, at, command };
+  const roles = policy.roles.map(item => item.role === role ? { ...item, auto: on } : item);
+  return ok({ ...policy, roles, events: [...policy.events, event] });
+}
+
+function putSetting(
+  policy: Policy, change: AutoChange, authority: AutoAuthority, command: string, at: number,
+  apply: (settings: AutoSettings) => AutoSettings, event: RouteEvent,
+): Result<Policy, AutoProblem> {
+  const allowed = allow(changeEffect(change), authority, command);
+  if (!allowed.ok) return allowed;
+  return ok({ ...policy, autoSettings: apply(policy.autoSettings), events: [...policy.events, event] });
+}
+
+export function setTaskCeiling(policy: Policy, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
+  const from = policy.autoSettings.taskCeiling;
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "task-ceiling", from, to }, authority, command, at,
+    settings => ({ ...settings, taskCeiling: to }),
+    { type: "AutoSettingsChanged", setting: "task-ceiling", name: null, from, to, at, command });
+}
+
+export function setSaveLine(policy: Policy, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
+  const from = policy.autoSettings.saveLine;
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "save-line", from, to }, authority, command, at,
+    settings => ({ ...settings, saveLine: to }),
+    { type: "AutoSettingsChanged", setting: "save-line", name: null, from, to, at, command });
+}
+
+export function setDailyCap(policy: Policy, name: string, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
+  const from = dailyCapFor(policy.autoSettings, name);
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "daily-cap", from, to }, authority, command, at,
+    settings => ({ ...settings, dailyCaps: { ...settings.dailyCaps, [name]: to } }),
+    { type: "AutoSettingsChanged", setting: "daily-cap", name, from, to, at, command });
+}
+
+export function setReserve(policy: Policy, role: string, to: number, authority: AutoAuthority, command: string, at: number): Result<Policy, AutoProblem> {
+  if (!amountOk(to)) return err({ problem: "range" });
+  const from = reserveFor(policy.autoSettings, role);
+  if (from === to) return ok(policy);
+  return putSetting(policy, { kind: "reserve", from, to }, authority, command, at,
+    settings => ({ ...settings, reserves: { ...settings.reserves, [role]: to } }),
+    { type: "AutoSettingsChanged", setting: "reserve", name: role, from, to, at, command });
+}
+
+const MODES: readonly Mode[] = ["subscriptions-first", "keys-first", "subscriptions-only", "keys-only", "custom"];
+
+function isMode(value: unknown): value is Mode {
+  return typeof value === "string" && (MODES as readonly string[]).includes(value);
+}
+
+function isEngine(value: unknown): value is Engine {
+  if (typeof value !== "object" || value === null) return false;
+  const row = value as Record<string, unknown>;
+  return typeof row.provider === "string" && typeof row.model === "string" && typeof row.effort === "string";
+}
+
+function stringList(value: unknown): readonly string[] | null | undefined {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.some(item => typeof item !== "string")) return undefined;
+  return value;
+}
+
+function finiteOr(value: unknown, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : fallback;
+}
+
+function numberMap(value: unknown): Record<string, number> {
+  if (typeof value !== "object" || value === null) return {};
+  const out: Record<string, number> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "number" && Number.isFinite(item) && item >= 0) out[key] = item;
+  }
+  return out;
+}
+
+// A policy saved before Auto has no switch and no settings. Missing fields take the design defaults.
+export function parsePolicy(raw: unknown): Policy | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const body = raw as Record<string, unknown>;
+  if (typeof body.priority !== "object" || body.priority === null || !Array.isArray(body.roles) || !Array.isArray(body.events)) return null;
+  const priority = body.priority as Record<string, unknown>;
+  if (!isMode(priority.mode) || !Array.isArray(priority.order) || priority.order.some(name => typeof name !== "string")) return null;
+  const roles: RoleRoute[] = [];
+  for (const item of body.roles) {
+    if (typeof item !== "object" || item === null) return null;
+    const row = item as Record<string, unknown>;
+    if (typeof row.role !== "string" || (row.override !== "follow" && row.override !== "own" && row.override !== "hand")) return null;
+    if (!Array.isArray(row.picks) || !row.picks.every(isEngine)) return null;
+    if (row.riskPicks !== null && (!Array.isArray(row.riskPicks) || !row.riskPicks.every(isEngine))) return null;
+    let rolePriority: Priority | null = null;
+    if (row.priority !== null && row.priority !== undefined) {
+      if (typeof row.priority !== "object") return null;
+      const inner = row.priority as Record<string, unknown>;
+      if (!isMode(inner.mode) || !Array.isArray(inner.order) || inner.order.some(name => typeof name !== "string")) return null;
+      rolePriority = { mode: inner.mode, order: inner.order, ...(typeof inner.auto === "boolean" ? { auto: inner.auto } : {}) };
+    }
+    const written = stringList(row.written);
+    const writtenRisk = stringList(row.writtenRisk);
+    const seenChain = stringList(row.seenChain);
+    const seenRisk = stringList(row.seenRisk);
+    if (written === undefined || writtenRisk === undefined || seenChain === undefined || seenRisk === undefined) return null;
+    roles.push({
+      role: row.role, override: row.override, priority: rolePriority, picks: row.picks, riskPicks: row.riskPicks as Engine[] | null,
+      written, writtenRisk, seenChain, seenRisk,
+      auto: typeof row.auto === "boolean" ? row.auto : routingRoleGroup(row.role) === "implement",
+    });
+  }
+  const settings = typeof body.autoSettings === "object" && body.autoSettings !== null ? body.autoSettings as Record<string, unknown> : {};
+  return {
+    priority: { mode: priority.mode, order: priority.order, auto: typeof priority.auto === "boolean" ? priority.auto : false },
+    roles,
+    events: body.events as RouteEvent[],
+    autoSettings: {
+      taskCeiling: finiteOr(settings.taskCeiling, DEFAULT_AUTO_SETTINGS.taskCeiling),
+      saveLine: finiteOr(settings.saveLine, DEFAULT_AUTO_SETTINGS.saveLine),
+      dailyCaps: numberMap(settings.dailyCaps),
+      reserves: numberMap(settings.reserves),
+    },
+  };
 }
 
 export function stillNamed(policy: Policy, name: string): boolean {
