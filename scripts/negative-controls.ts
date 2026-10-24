@@ -4022,7 +4022,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/fleet/test/lane-watch.test.ts"], expect: "no resume nudge" },
   { id: "t422-lost-turn-not-wired", task: "422", file: "apps/fleet/src/serve.ts",
     find: "laneWatch.panes(e.node,", replace: "void (e.node,",
-    run: ["apps/fleet/test/lane-watch-intake.test.ts"], expect: "never received its end" },
+    run: ["apps/fleet/test/lane-watch-intake.test.ts"], expect: "sends no resume nudge" },
 ];
 
 // ---- the runner
