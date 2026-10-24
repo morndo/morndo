@@ -7,7 +7,7 @@
 // parse searches the event's JSON for that key. The type is experimental, so an answer outside the shape is
 // "unknown_screen", never a guess, and `rate_limits: null` (a setup-token login has no usage scope) is "no_scope",
 // never 0%. `extra_usage` is ignored in this slice. Made-up shapes only in tests and fixtures.
-import type { UsageReason } from "@morndo/domain";
+import { takePercent, type UsageReason } from "@morndo/domain";
 
 // One window of the report, as a reading posts it (U14): epoch seconds here, milliseconds in the domain. `session`
 // is the 5-hour window (300 minutes), `weekly_all` the weekly one (10080); a `weekly_scoped` window is titled with
@@ -28,12 +28,129 @@ export type ClaudeReadResult =
   | { ok: true; windows: ReadingWindow[] }
   | { ok: false; reason: UsageReason; retryAfterS: number | null; hint: string | null };
 
+// The kinds the report names (plan 4.4): what each becomes as a reading window. A `weekly_scoped` window's id is
+// `Weekly (<model>)` cut to 40 characters (the wire's own limit), with no length of its own.
+const KINDS: Record<string, { id: string; lengthMins: number | null } | "scoped"> = {
+  session: { id: "five_hour", lengthMins: 300 },
+  weekly_all: { id: "seven_day", lengthMins: 10_080 },
+  weekly_scoped: "scoped",
+};
+const ID_LIMIT = 40;
+
+const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
+
+// The value of the `usage_report` key anywhere in the event's JSON (the report sits in the assistant message's
+// event, but the type is experimental, so the place it sits is not relied on), or undefined when there is none.
+// Where an event carries more than one, the last in document order is the report.
+function findReport(v: unknown): unknown {
+  let found: unknown;
+  const walk = (node: unknown): void => {
+    if (Array.isArray(node)) { for (const item of node) walk(item); return; }
+    if (!isObject(node)) return;
+    for (const [key, value] of Object.entries(node)) {
+      if (key === "usage_report" && isObject(value)) found = value;
+      else walk(value);
+    }
+  };
+  walk(v);
+  return found;
+}
+
+// What the hint may never show: a link or an address, and anything that looks like a token (a sk-… key, a Bearer
+// credential, a long run of base64 or hex). Redact.ts takes the secrets it is handed; this head is untrusted text
+// nobody listed the secrets of, so the shapes are matched instead.
+const URLISH = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S+/gi;
+const TOKENISH = /\b(?:sk-[A-Za-z0-9_-]{6,}|Bearer\s+[A-Za-z0-9._+/=-]{8,}|[A-Za-z0-9+/]{40,}={0,2}|[0-9a-fA-F]{32,})\b/g;
+const ADDRESSISH = /\S+@\S+/g;
+
+// The first 120 characters of a line, with every link, address and token shape removed: all the hub keeps of a
+// screen this reader does not know. Empty after that is nothing to say.
+function redactHead(text: string): string | null {
+  const head = text.slice(0, HINT_HEAD)
+    .replace(URLISH, "[redacted]")
+    .replace(TOKENISH, "[redacted]")
+    .replace(ADDRESSISH, "[redacted]")
+    .trim();
+  return head === "" ? null : head;
+}
+const HINT_HEAD = 120;
+
+// The report's own window: `percent` goes through the domain's takePercent (out of range or not a number: that
+// window is dropped, never clamped); `resets_at` is ISO 8601 to epoch seconds (unparseable: null).
+function windowOf(row: unknown): ReadingWindow | null {
+  if (!isObject(row)) return null;
+  const kind = KINDS[typeof row.kind === "string" ? row.kind : ""];
+  if (kind === undefined) return null;
+  const usedPercent = takePercent(row.percent);
+  if (usedPercent === null) return null;
+  let id: string;
+  let lengthMins: number | null;
+  if (kind === "scoped") {
+    const model = isObject(row.scope) && typeof row.scope.model === "string" ? row.scope.model.trim() : "";
+    if (model === "") return null;                       // a scoped window with no model names nothing
+    id = `Weekly (${model})`.slice(0, ID_LIMIT);
+    lengthMins = null;
+  } else {
+    id = kind.id;
+    lengthMins = kind.lengthMins;
+  }
+  const resets = typeof row.resets_at === "string" ? Date.parse(row.resets_at) : Number.NaN;
+  return { id, used_percent: usedPercent, resets_at: Number.isFinite(resets) ? Math.floor(resets / 1000) : null, length_mins: lengthMins, rolling: false, note: null };
+}
+
+// An `is_error` result's own words, classified (plan 4.3 item 6): the login words are signed_out, the organization
+// words refused, the rate-limit words rate_limited with the provider's own retry word when it gave one, anything
+// else unknown_screen with the redacted head of the error text.
+function classifyError(text: string): ClaudeReadResult {
+  const words = text.toLowerCase();
+  if (words.includes("login") || words.includes("sign in") || words.includes("401") || words.includes("403") || words.includes("authentication"))
+    return { ok: false, reason: "signed_out", retryAfterS: null, hint: null };
+  if (words.includes("organization") || words.includes("not allowed"))
+    return { ok: false, reason: "refused", retryAfterS: null, hint: null };
+  if (words.includes("429") || words.includes("rate limit")) {
+    const retry = /retry[- ]after\s+(\d+)/.exec(words);
+    return { ok: false, reason: "rate_limited", retryAfterS: retry !== null ? Number(retry[1]) : null, hint: null };
+  }
+  return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: redactHead(text) };
+}
+
 // Maps the report: `percent` goes through the domain's takePercent (out of range or not a number: that window is
 // dropped, never clamped); `resets_at` is ISO 8601 to epoch seconds (unparseable: null). An `is_error` result or
 // error text is classified by its words: login/sign in/401/403/authentication -> signed_out, organization/not
 // allowed -> refused, 429/rate limit -> rate_limited (retryAfterS from a "retry after N" number), anything else
 // unknown_screen with a redacted head of the last stdout line as the hint.
 export function parseClaudeReport(lines: readonly string[]): ClaudeReadResult {
-  void lines;
-  throw new Error("not implemented");
+  let report: unknown;
+  let errorText: string | null = null;
+  for (const line of lines) {
+    let event: unknown;
+    try { event = JSON.parse(line); } catch { continue; }   // a line that is not JSON carries no report and no error
+    if (isObject(event) && event.is_error === true) {
+      const text = typeof event.result === "string" ? event.result : "";
+      errorText = text;                                     // the last error result is the one that ended the run
+    }
+    const found = findReport(event);
+    if (found !== undefined) report = found;                // the last report in the stream is the report
+  }
+  if (errorText !== null) return classifyError(errorText);
+  if (report === undefined) {
+    // Nothing this reader knows: the head of the last line, the CLI's own words when it gave any, redacted.
+    const last = lines.length > 0 ? lines[lines.length - 1]! : "";
+    let text = last;
+    try {
+      const event = JSON.parse(last) as unknown;
+      if (isObject(event) && typeof event.result === "string") text = event.result;
+    } catch { /* not JSON: the line itself is the head */ }
+    return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: redactHead(text) };
+  }
+  const rateLimits = (report as Record<string, unknown>).rate_limits;
+  if (rateLimits === null) return { ok: false, reason: "no_scope", retryAfterS: null, hint: null };
+  if (!isObject(rateLimits) || !Array.isArray(rateLimits.limits))
+    return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: null };
+  const windows: ReadingWindow[] = [];
+  for (const row of rateLimits.limits) {
+    const w = windowOf(row);
+    if (w !== null) windows.push(w);
+  }
+  return { ok: true, windows };
 }

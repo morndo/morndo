@@ -77,6 +77,11 @@ const STATUS_LINE_HEALTH_MS = 60_000;
 const NOTICE_KEEP_ROWS = 500;
 const NOTICE_KEEP_MS = 30 * 24 * 3_600_000;
 const EMPTY_PROFILES: ReadonlyMap<string, AccountProfile> = new Map();
+// S5 (plan 4.4, AT-45): what a look wants — a reading older than this, a status line silent this long — and how long
+// the demand a look raises lives.
+const LOOK_STALE_MS = 15 * 60_000;
+const LOOK_SILENT_MS = 10 * 60_000;
+const DEMAND_MS = 10 * 60_000;
 // A source row that carries a reading (the sameAsPrevious rule's memory of the one before lives in the same row).
 type ReadRow = UsageSourceRow & { body: UsageSourceBody & { reading: NonNullable<UsageSourceBody["reading"]> } };
 const hasReading = (r: UsageSourceRow): r is ReadRow => r.body.reading !== null;
@@ -95,6 +100,8 @@ export class UsageService {
   #leaseBook: LeaseBook;
   #laneNode: (lane: string) => string | null;
   #onNotice: ((kind: NoticeKind) => void) | null;
+  // S5 (AT-45): the accounts a look marked as wanted, each until its demand expires.
+  #demand = new Map<string, number>();
   // Notices newly written inside a transaction that has not committed yet (S4): told only once the commit is a fact,
   // and dropped whole if the transaction rolls back.
   #told: NoticeKind[] = [];
@@ -118,15 +125,46 @@ export class UsageService {
   get leases(): LeaseBook { return this.#leaseBook; }
 
   // S5 (plan 4.4, AT-45, U16): a viewer said somebody is looking — a feed hello (the principal opened Home) or the
-  // look route. It only marks demand; the reads themselves stay leased and rationed (this.leases.grant). Round 2
-  // implements the demand set itself; until then a look marks nothing, so a hub that is only watched spawns no read.
-  look(): void {}
+  // look route. It only marks demand; the reads themselves stay leased and rationed (this.leases.grant).
+  look(): void {
+    const now = this.#now();
+    const names = new Set([...this.#accounts.keys(), ...this.#store.usageSources().map(r => r.account)]);
+    for (const account of names) {
+      if (!this.#lookable(account, now)) continue;
+      this.#demand.set(account, now + DEMAND_MS);
+    }
+  }
 
-  // Whether an account is wanted for a read just now (AT-45): demand the look() above and a derived mark's passed
-  // backAt raise, each for its own ten minutes. Round 2 (S5); the lease book asks through the injected closure.
+  // Whether a look wants this account read (AT-45): its best reading older than 15 minutes (or none, or only an
+  // unavailable source) AND its status line silent for 10 minutes. A look marks only accounts that pass; the demand
+  // it marks expires on its own after 10 minutes.
+  #lookable(account: string, now: number): boolean {
+    const base = this.#baseOf(account, now);
+    if (!(base.reportedAt === 0 || now - base.reportedAt >= LOOK_SILENT_MS)) return false;
+    let best: number | null = null;
+    for (const r of this.#store.usageSourcesOf(account)) {
+      if (r.source === "status-line") continue;               // the status line's own word is the silence above
+      if (sourceState(r.body.health, now) === "unavailable") continue;   // an unavailable source reads nothing
+      const at = r.body.reading?.capturedAt ?? null;
+      if (at !== null && (best === null || at > best)) best = at;
+    }
+    return best === null || now - best >= LOOK_STALE_MS;
+  }
+
+  // Whether an account is wanted for a read just now (AT-45): demand a look raised (the book asks only when it would
+  // grant, so a yes consumes it), or a derived out mark past its back time — which wants a confirming read again at
+  // each cooldown rhythm until one succeeds and clears it. An account the hub has never heard of — no status line,
+  // no source, no seat — is wanted too: it has no reading and no status line at all, and the lease ask is the first
+  // word of it the hub ever hears.
   #wanted(account: string, now: number): boolean {
-    void account; void now;
-    throw new Error("not implemented");
+    if (!this.#accounts.has(account) && this.#store.usageSourcesOf(account).length === 0 && this.#store.usageSeat(account) === null) return true;
+    const until = this.#demand.get(account);
+    if (until !== undefined) {
+      this.#demand.delete(account);
+      if (now < until) return true;
+    }
+    const seat = this.#store.usageSeat(account)?.record ?? null;
+    return seat !== null && seat.state === "out" && seat.backAt !== null && seat.backAt <= now;
   }
 
   subscribe(fn: (v: UsageView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -430,6 +468,7 @@ export class UsageService {
       // A failure keeps the last good reading and its memory; what it says of itself is cleaned before it is stored.
       const health = failedRead(prev.health, capturedAt, reasonOf(body.failure.reason), body.every_s);
       this.#store.saveUsageSource(account, body.source, node, { health, reading: prev.reading, previous: prev.previous, hint: cleanHint(body.failure.hint), orderedAt });
+      this.#completeLease(body.lease_id, account, body.source, { ok: false, retryAfterS: body.failure.retry_after_s ?? null });
       this.#tellIfChanged();
       return { ok: true };
     }
@@ -452,6 +491,7 @@ export class UsageService {
       // its screen, and the hub's own hint says so. The last good reading is kept, as any failure keeps it.
       const health = failedRead(prev.health, capturedAt, "unknown_screen", body.every_s);
       this.#store.saveUsageSource(account, body.source, node, { health, reading: prev.reading, previous: prev.previous, hint: UNREADABLE_HINT, orderedAt });
+      this.#completeLease(body.lease_id, account, body.source, { ok: false, retryAfterS: null });
       this.#tellIfChanged();
       return { ok: false, problem: "bad_reading" };
     }
@@ -462,6 +502,7 @@ export class UsageService {
     this.#store.saveUsageSource(account, body.source, node, { health, reading: { capturedAt, plan: body.plan ?? null, windows: list }, previous, hint: null, orderedAt });
     this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id);
     this.#thresholds(account, this.#mergedWindows(this.#baseOf(account, now), this.#store.usageSourcesOf(account), now), now);
+    this.#completeLease(body.lease_id, account, body.source, { ok: true, capturedAt });
     this.#tellIfChanged();
     return { ok: true };
   }
@@ -471,6 +512,12 @@ export class UsageService {
   #baseOf(account: string, now: number): AccountUsage {
     const own = this.#accounts.get(account);
     return own !== undefined ? accountNow(own, now) : this.#skeleton(account, this.#store.usageSourcesOf(account));
+  }
+
+  // S5 (plan 4.4): a reading or failure that carried a valid lease ends it — the cache or the shared cooldown it
+  // sets is what the next grant asks. An invalid or absent id ends nothing; the lease then lapses on its own.
+  #completeLease(leaseId: unknown, account: string, source: UsageSource, outcome: { ok: true; capturedAt: number } | { ok: false; retryAfterS: number | null }): void {
+    if (this.#leaseBook.valid(leaseId, account, source)) this.#leaseBook.complete(leaseId as string, outcome);
   }
 
   // What one good reading changes: the plan watch, the cycle books, and a seat mark it may end or drop. The

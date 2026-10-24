@@ -101,11 +101,15 @@ describe("no read without a viewer or a mark (AT-45)", () => {
 });
 
 describe("the leased confirming read ends a derived mark (U13, end to end)", () => {
+  // A 5-hour window resetting 6 hours out began an hour ago — after the mark a minute old — so it is a new cycle
+  // (clearsMark, AT-18: a window that began before the mark is the old cycle, whatever its numbers say). Round 2:
+  // these reset 3 hours out, a window that began two hours before the mark; that is not a new cycle, and the
+  // clearing test could only pass by ignoring the cycle rule.
   it("a reading without a lease does not clear it, even of a new cycle past the back time", async () => {
     await report("seat-a");
     await limit("seat-a", now + 60_000);
     now += 61_000;
-    const r = await reading("seat-a", { windows: [{ id: "five_hour", used_percent: 10, resets_at: sec(now + 3 * 3_600_000), length_mins: 300 }] });
+    const r = await reading("seat-a", { windows: [{ id: "five_hour", used_percent: 10, resets_at: sec(now + 6 * 3_600_000), length_mins: 300 }] });
     expect(r.status).toBe(200);
     expect(seat("seat-a")?.state).toBe("out");      // the mark stands: no lease, no clear
   });
@@ -117,7 +121,7 @@ describe("the leased confirming read ends a derived mark (U13, end to end)", () 
     const g = await ask("seat-a");
     const grant = await g.json() as Record<string, unknown>;
     expect(grant.status).toBe("granted");
-    const r = await reading("seat-a", { lease_id: grant.lease_id, windows: [{ id: "five_hour", used_percent: 10, resets_at: sec(now + 3 * 3_600_000), length_mins: 300 }] });
+    const r = await reading("seat-a", { lease_id: grant.lease_id, windows: [{ id: "five_hour", used_percent: 10, resets_at: sec(now + 6 * 3_600_000), length_mins: 300 }] });
     expect(r.status).toBe(200);
     expect(seat("seat-a")).toBeNull();              // a new cycle, read under a lease, after the back time: back
     const notices = hub.usage.view().notices.filter(n => n.account === "seat-a" && n.kind === "back");

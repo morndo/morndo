@@ -3,7 +3,7 @@
 // provider: only a granted lease spawns a read, and the reading or failure carries the lease id. The token is read
 // from its file and never printed. Synthetic data only.
 import { createServer, type Server } from "node:http";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -110,13 +110,16 @@ describe("the collector's one pass (plan 4.4)", () => {
     const { code } = await pass();
     expect(code).toBe(0);
     expect(hub.of("/api/agent/usage/readings")).toHaveLength(0);
-    expect(readFileSync(join(dir, "spawn.log"), "utf8")).toBe("");
+    // Nothing spawned: the fake's log (it appends a line per invocation) was never written. Round 2: this was
+    // readFileSync(...)).toBe("") — a file the fake only ever appends to can never read empty, and never exists
+    // when nothing spawned; the fix keeps the check's intent, no spawn at all.
+    expect(existsSync(join(dir, "spawn.log"))).toBe(false);
     hub.posts = [];
     hub.answerWith({ status: "fresh", captured_at: 4_102_444_000 });
     const again = await pass();
     expect(again.code).toBe(0);
     expect(hub.of("/api/agent/usage/readings")).toHaveLength(0);
-    expect(readFileSync(join(dir, "spawn.log"), "utf8")).toBe("");
+    expect(existsSync(join(dir, "spawn.log"))).toBe(false);
   });
 
   it("a failed read posts its failure with the reason and the lease id", async () => {
