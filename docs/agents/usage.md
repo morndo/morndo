@@ -201,7 +201,7 @@ under the account named in the `X-Morndo-Account` header. **Seconds on the wire*
 **Who may post.** The route takes a manager token or a worker token with the `usage-pool` scope, like the lease and
 limit routes (T-430, slice 1). A collector's token is made with
 `morndo agent-token new <name> --role worker --scope usage-pool`. The hub ships the gate in **warn**: a reading from a
-plain worker token (no scope) is still accepted, and the hub counts it on that token. `morndo agent-token list` shows
+plain worker token (no scope) is still accepted, and the hub counts each accepted one on that token (a body it cannot read is not counted). `morndo agent-token list` shows
 `unbound readings N, last <time>` for every token that posted one, so you can see which collector still holds a plain
 token. Set `MORNDO_USAGE_READINGS_GATE=enforce` on the hub (default `warn`) to refuse such a reading with `403`
 `{"error":"scope_required"}`; do that only after the list has shown no plain token posting for 7 days. The status-line

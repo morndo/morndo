@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { loadConfig } from "../src/config.ts";
 import { MIGRATIONS, migrate } from "../src/adapters/migrations.ts";
-import { agentTokenLine } from "../src/console/agent-token.ts";
+import { agentTokenLine, agentTokenMade } from "../src/console/agent-token.ts";
 import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 
 let hub: InProcessHub;
@@ -85,6 +85,31 @@ describe("readings role gate, warn (the default)", () => {
     expect(unboundOf(t.plain.token.id)?.unboundCount).toBe(0);
   });
 
+  it("only an accepted reading is counted: a malformed body, a bad account and a status-line source (400) are not", async () => {
+    const t = tokens(hub);
+    const raw = (body: string, account = "seat-a") => fetch(`${hub.base}/api/agent/usage/readings`, {
+      method: "POST",
+      headers: { authorization: `Bearer ${t.plain.secret}`, "content-type": "application/json", "x-morndo-lane": "collector", "x-morndo-account": account },
+      body,
+    });
+    expect((await raw("{}")).status).toBe(400);
+    expect((await raw("not json")).status).toBe(400);
+    expect((await raw(JSON.stringify({ source: "app-server", node: null, captured_at: Math.floor(now / 1000), windows: [fiveHour(30)] }), "bad account!")).status).toBe(400);
+    expect((await raw(JSON.stringify({ source: "status-line", node: null, captured_at: Math.floor(now / 1000), windows: [fiveHour(30)] }))).status).toBe(400);
+    expect(unboundOf(t.plain.token.id)).toMatchObject({ unboundCount: 0, lastUnboundAt: null });
+    expect((await reading(t.plain.secret)).status).toBe(200);
+    expect(unboundOf(t.plain.token.id)?.unboundCount).toBe(1);
+  });
+
+  it("a revoked token gets 401 on the readings route and is not counted", async () => {
+    const t = tokens(hub);
+    expect((await reading(t.plain.secret)).status).toBe(200);
+    expect(hub.agents.revoke(t.plain.token.id)).toBe(true);
+    expect((await reading(t.plain.secret)).status).toBe(401);
+    expect(await shownFiveHour("seat-b")).toBeUndefined();
+    expect(unboundOf(t.plain.token.id)?.unboundCount).toBe(1);
+  });
+
   it("the count belongs to the posting token only", async () => {
     const t = tokens(hub);
     const other = hub.agents.issue("other-lanes", "worker");
@@ -97,7 +122,14 @@ describe("readings role gate, warn (the default)", () => {
 describe("readings role gate, enforce", () => {
   beforeEach(() => start("enforce"));
 
-  it("refuses a plain worker token with a clear error, stores nothing, and still counts the attempt", async () => {
+  it("a revoked token gets 401 and is not counted", async () => {
+    const t = tokens(hub);
+    hub.agents.revoke(t.plain.token.id);
+    expect((await reading(t.plain.secret)).status).toBe(401);
+    expect(unboundOf(t.plain.token.id)?.unboundCount).toBe(0);
+  });
+
+  it("refuses a plain worker token with a clear error, stores nothing, and still counts the refusal", async () => {
     const t = tokens(hub);
     const r = await reading(t.plain.secret, "seat-a", 30);
     expect(r.status).toBe(403);
@@ -148,6 +180,20 @@ describe("agent-token list", () => {
     expect(line).toContain("last t99");
     expect(line).toContain("tok-1");
     expect(line).toContain("active");
+  });
+});
+
+describe("agent-token new", () => {
+  const made = (role: "manager" | "worker", scopes: string[]) => ({ id: "tok-1", name: "n", role, scopes, secretHash: "h", createdAt: 1, lastUsedAt: null, revokedAt: null, unboundCount: 0, lastUnboundAt: null });
+  it("sends a usage-pool token to the collector's tokenFile, not to the lanes' variable", () => {
+    const line = agentTokenMade(made("worker", ["usage-pool"]), "https://hub.example.test");
+    expect(line).toContain("tokenFile");
+    expect(line).not.toMatch(/put it in MORNDO_AGENT_TOKEN/);
+    expect(line).toContain("usage-pool");
+  });
+  it("keeps the lanes' wording for the other tokens", () => {
+    expect(agentTokenMade(made("worker", []), "https://hub.example.test")).toContain("MORNDO_AGENT_TOKEN for the worker lanes, with MORNDO_HUB=https://hub.example.test");
+    expect(agentTokenMade(made("manager", []), "https://hub.example.test")).toContain("the manager's lane");
   });
 });
 

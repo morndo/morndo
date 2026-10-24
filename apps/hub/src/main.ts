@@ -70,7 +70,7 @@ import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
 import { readCodeLine, runMemory } from "./console/memory.ts";
 import { runUpdaterProgram } from "./console/update.ts";
 import { AUDIT_SYNOPSIS, AUDIT_USAGE, parseAuditArgs } from "./console/audit.ts";
-import { agentTokenLine } from "./console/agent-token.ts";
+import { agentTokenLine, agentTokenMade } from "./console/agent-token.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -528,7 +528,7 @@ switch (cmd) {
       }
       const { token, secret } = agents.issue(name, role, scopes as string[]);
       print(`${secret}`);
-      print(`Token ${token.id} (${token.name}, ${token.role}${token.scopes.length > 0 ? `, ${[...token.scopes].join(", ")}` : ""}). Shown once: put it in MORNDO_AGENT_TOKEN for ${role === "manager" ? "the manager's lane" : "the worker lanes"}, with MORNDO_HUB=${config.origin}.`);
+      print(agentTokenMade(token, config.origin));
     } else if (sub === "list") {
       for (const t of agents.list()) print(agentTokenLine(t, when));
     } else if (sub === "revoke") {
