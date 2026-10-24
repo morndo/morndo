@@ -39,7 +39,10 @@ const listLines = (coverage: readonly CoverageItem[]): string[] => {
   const out = ["  Proof list (set by the manager):"];
   for (const item of coverage) {
     const lane = item.by === "lane" ? "  (added by the lane)" : "";
-    out.push(`    ${COVERAGE_TAG[item.status]} ${item.spec}${lane}`);
+    // A pr or ci item rests on a reference of its kind in its repository; say which, not that its words were checked.
+    const via = item.via === undefined || item.repo === null ? ""
+      : `  (a ${item.kind} ref in ${item.repo} is ${item.status === "covered" ? "green" : "not green yet"}: ${item.via})`;
+    out.push(`    ${COVERAGE_TAG[item.status]} ${item.spec}${via}${lane}`);
   }
   return out;
 };

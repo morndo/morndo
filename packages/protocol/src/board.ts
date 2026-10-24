@@ -24,7 +24,7 @@ export const ProofBriefSchema = z.object({
 });
 export const RefResultSchema = z.object({ ref: text(), state: z.enum(REF_STATES), detail: z.nullable(text()), checkedAt: count() });
 export const CoverageItemSchema = z.object({
-  spec: text(), kind: z.enum(ITEM_KINDS), repo: z.nullable(text()), text: text(), by: z.enum(["assigner", "lane"]), status: z.enum(COVERAGE_STATUSES),
+  spec: text(), kind: z.enum(ITEM_KINDS), repo: z.nullable(text()), text: text(), by: z.enum(["assigner", "lane"]), status: z.enum(COVERAGE_STATUSES), via: z.exactOptional(text()),
 });
 export const ProofViewSchema = z.object({
   rev: z.nullable(z.int().check(z.gte(1))), brief: z.nullable(ProofBriefSchema), results: z.array(RefResultSchema), mode: z.enum(PROOF_MODES), standIn: z.boolean(),

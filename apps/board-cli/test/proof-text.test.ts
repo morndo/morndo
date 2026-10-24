@@ -101,11 +101,11 @@ describe("the proof list in proofBlock (B17)", () => {
     const coverage = coverageOf(list, b, results);
     const lines = proofBlock({ rev: 4, brief: b, results, coverage, state: proofOf(b, results, [], list) });
     expect(lines).toContain("  Proof list (set by the manager):");
-    expect(lines).toContain(`    [covered] ${PR_SPEC}`);
+    expect(lines).toContain(`    [covered] ${PR_SPEC}  (a pr ref in morndo/morndo is green: ${PR})`);   // says what covered it, not that the words were checked
     expect(lines).toContain(`    [not covered] ${DATA_SPEC}`);
     expect(lines).toContain(`    [the lane's word] ui: the totals row  (added by the lane)`);
     const openCi = coverageOf([{ spec: "ci@morndo/morndo: CI green", kind: "ci", repo: "morndo/morndo", text: "CI green", by: "assigner" }], brief({ refs: [PR, CI] }), [seen(PR, "green")]);
-    expect(proofBlock({ rev: 4, brief: b, results, coverage: openCi, state: proofOf(b, results, [], list) })).toContain("    [open] ci@morndo/morndo: CI green");
+    expect(proofBlock({ rev: 4, brief: b, results, coverage: openCi, state: proofOf(b, results, [], list) })).toContain(`    [open] ci@morndo/morndo: CI green  (a ci ref in morndo/morndo is not green yet: ${CI})`);
   });
 });
 

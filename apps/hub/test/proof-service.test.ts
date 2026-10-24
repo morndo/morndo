@@ -757,7 +757,7 @@ describe("the assigner's proof list (B17)", () => {
     await proof.idle();
     const view = proof.view("T-1");
     expect(view?.coverage).toEqual([
-      { spec: PR_SPEC, kind: "pr", repo: "morndo/morndo", text: "the pull request", by: "assigner", status: "covered" },
+      { spec: PR_SPEC, kind: "pr", repo: "morndo/morndo", text: "the pull request", by: "assigner", status: "covered", via: PR },
       { spec: DATA_SPEC, kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner", status: "not_covered" },
     ]);
     expect(await board.actChecked("T-1", { action: "move", to: "done", reason: "read the diff" }, manager)).toEqual({

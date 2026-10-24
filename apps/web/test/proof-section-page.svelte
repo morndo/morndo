@@ -114,6 +114,11 @@
     cell("pending-ref", pendingRef, "review"),
     cell("stand-in", { ...verified, standIn: true }, "review"),
     cell("needs-list", needsList, "review"),
+    cell("via-need", { ...needsList, coverage: [
+      { spec: "ci@acme/shop: the full suite is green", kind: "ci", repo: "acme/shop", text: "the full suite is green", by: "assigner", status: "covered", via: "acme/shop@3e9d1a7:ci,lint" },
+      { spec: "pr@acme/shop: the pull request", kind: "pr", repo: "acme/shop", text: "the pull request", by: "assigner", status: "open", via: "acme/shop#42@3e9d1a7" },
+      { spec: "data: a sample of 30 rows", kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner", status: "told" },
+    ] }, "review"),
     cell("long-need", { ...needsList, coverage: [{ spec: "data: a very long description of the sample that has to wrap onto more than one line at phone width without pushing the page sideways", kind: "data", repo: null, text: "x", by: "assigner", status: "not_covered" }] }, "review"),
   ];
 </script>

@@ -51,6 +51,7 @@
               <span class="mark" aria-hidden="true">{NEED_MARK[item.status]}</span>
               <span class="sr-only">{NEED_WORD[item.status]}</span>
               <code class="spec">{item.spec}</code>
+              {#if item.via && item.repo}<span class="muted via" data-proof-via>a {item.kind} ref in {item.repo} is {item.status === "covered" ? "green" : "not green yet"}: {item.via}</span>{/if}
               {#if item.by === "lane"}<span class="muted lane-added">added by the lane</span>{/if}
             </li>
           {/each}
@@ -119,7 +120,7 @@
   /* The mark in its own narrow column, the spec beside it however many lines it wraps to; the lane's note under it. */
   .needs li { display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; align-items: baseline; font: 400 13px/20px var(--font); }
   .needs li .spec { grid-column: 2; }
-  .needs li .lane-added { grid-column: 2; margin-left: 0; }
+  .needs li .lane-added, .needs li .via { grid-column: 2; margin-left: 0; overflow-wrap: anywhere; }
   .needs li.bad { color: var(--bad-fg); }
   .spec { font-family: var(--mono); font-size: 12px; overflow-wrap: anywhere; }
   .attested .muted { margin-left: 6px; }

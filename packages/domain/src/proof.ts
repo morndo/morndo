@@ -192,7 +192,9 @@ export type ProofItem = { spec: string; kind: ItemKind; repo: string | null; tex
 export type ItemProblem = { problem: "bad_item"; detail: string };
 export const COVERAGE_STATUSES = ["covered", "told", "open", "not_covered"] as const;
 export type CoverageStatus = (typeof COVERAGE_STATUSES)[number];
-export type CoverageItem = ProofItem & { status: CoverageStatus };
+// `via`: the reference a pr or ci item rests on (the first green one when covered, the first one at all when open). A pr or ci
+// item is matched by kind and repository, never by its words, so the card says what covered it instead of implying more.
+export type CoverageItem = ProofItem & { status: CoverageStatus; via?: string };
 
 const ITEM_GRAMMAR = "an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra";
 const badItem = (detail: string): Result<never, ItemProblem> => err({ problem: "bad_item", detail });
@@ -277,9 +279,9 @@ export function coverageOf(list: readonly ProofItem[], brief: ProofBrief | null,
         refs.push(refString(r.value));
       }
       if (refs.length === 0) { out.push({ ...item, status: "not_covered" }); continue; }
-      const states = refs.map(ref => latest.get(ref)?.state ?? "pending");
-      if (states.some(s => s === "green")) out.push({ ...item, status: "covered" });
-      else out.push({ ...item, status: "open" });
+      const green = refs.find(ref => latest.get(ref)?.state === "green");
+      if (green !== undefined) out.push({ ...item, status: "covered", via: green });
+      else out.push({ ...item, status: "open", via: refs[0]! });
       continue;
     }
     if (brief.attested.some(a => a.kind === item.kind)) out.push({ ...item, status: "told" });

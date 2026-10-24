@@ -467,7 +467,7 @@ describe("the assigner's proof list (B17)", () => {
     expect(open[0]?.status).toBe("open");
     const covered = coverageOf(list, brief({ refs: [PR] }), [seen(PR, "green")]);
     expect(covered[0]?.status).toBe("covered");
-    expect(coverageOf(list, brief({ refs: [PR] }), [])).toEqual([{ ...item, by: "assigner", status: "open" }]);
+    expect(coverageOf(list, brief({ refs: [PR] }), [])).toEqual([{ ...item, by: "assigner", status: "open", via: PR }]);
   });
 
   it("coverageOf: a ci item the same way, and an attested kind is told by an attested item of that kind", () => {
@@ -477,6 +477,16 @@ describe("the assigner's proof list (B17)", () => {
     const dataItem = { ...value(parseItemSpec(DATA_SPEC)), by: "assigner" as const };
     expect(coverageOf([dataItem], brief({ attested: [{ kind: "data", how: "30 rows read by hand" }] }), [])[0]?.status).toBe("told");
     expect(coverageOf([dataItem], brief(), [])[0]?.status).toBe("not_covered");
+  });
+
+  it("coverageOf names the reference behind a covered or open pr or ci item, and nothing else carries one", () => {
+    const CIREF = "acme/shop@3e9d1a7:ci,lint";
+    const ciItem = value(parseItemSpec("ci@acme/shop: the full suite is green"));
+    const items = [{ ...ciItem, by: "assigner" as const }, { ...value(parseItemSpec("data: rows")), by: "assigner" as const }];
+    const green = coverageOf(items, brief({ refs: [CIREF], attested: [{ kind: "data", how: "30 rows" }] }), [seen(CIREF, "green")]);
+    expect(green.map(i => [i.status, i.via])).toEqual([["covered", CIREF], ["told", undefined]]);
+    expect(coverageOf(items, brief({ refs: [CIREF] }), [seen(CIREF, "red", "lint")]).map(i => [i.status, i.via])).toEqual([["open", CIREF], ["not_covered", undefined]]);
+    expect(coverageOf(items, null, []).every(i => i.via === undefined)).toBe(true);
   });
 
   it("coverageOf: an item with a repository is not covered by a reference in another repository", () => {

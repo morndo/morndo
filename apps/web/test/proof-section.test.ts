@@ -147,6 +147,18 @@ describe("the panel's proof section (ADR-0035)", () => {
     } finally { await tab.close(); }
   });
 
+  it("a covered pr or ci item says which reference it rests on, not that its words were checked", { timeout: 30_000 }, async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await tab.goto(web.url);
+      const items = cell(tab, "via-need").locator("[data-proof-need]");
+      await items.first().waitFor();
+      expect(await items.nth(0).locator("[data-proof-via]").innerText()).toBe("a ci ref in acme/shop is green: acme/shop@3e9d1a7:ci,lint");
+      expect(await items.nth(1).locator("[data-proof-via]").innerText()).toBe("a pr ref in acme/shop is not green yet: acme/shop#42@3e9d1a7");
+      expect(await items.nth(2).locator("[data-proof-via]").count()).toBe(0);       // an attested kind has no reference behind it
+    } finally { await tab.close(); }
+  });
+
   it("a long item wraps beside its mark: the mark stays on the item's first line", { timeout: 30_000 }, async () => {
     const tab = await web.browser.newPage({ viewport: { width: 390, height: 900 } });
     try {
