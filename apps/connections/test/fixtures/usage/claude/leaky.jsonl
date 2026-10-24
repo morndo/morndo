@@ -1,0 +1,3 @@
+{"type":"system","subtype":"init","session_id":"fix-leak-1","cwd":"/tmp"}
+{"type":"stream_event","event":{"type":"user_hook_callback","hook_name":"SessionStart","payload":"-"}}
+{"type":"result","subtype":"success","is_error":false,"num_turns":0,"total_cost_usd":0,"duration_ms":121000,"result":"Hi Jack, your key sk-ant-api03-Zm9vYmFyQmFy, details at https://stats.example.test/seat-a and id 123e4567-e89b-12d3-a456-426614174000"}

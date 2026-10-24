@@ -113,9 +113,32 @@ export const UsageReadingsBody = z.looseObject({
   failure: z.exactOptional(z.nullable(z.looseObject({
     reason: z.string().check(z.maxLength(40)),
     hint: z.exactOptional(z.nullable(z.string().check(z.maxLength(2000)))),
+    // S5 (plan 4.4, U16): when the provider's error says how long to wait, the failure carries it in whole seconds,
+    // one day at most. The hub's shared cooldown reads it; nothing else does.
+    retry_after_s: z.exactOptional(z.nullable(num().check(z.gte(0), z.lte(86400)))),
   }))),
 });
 export type UsageReadingsBody = z.output<typeof UsageReadingsBody>;
+
+// A node's ask for a lease before a rationed read (S5, plan 4.4, U16): the account and source it wants to read, and
+// the node that asks (the lease is per account and source across all nodes; the node is named for the record only).
+export const UsageLeaseBody = z.looseObject({
+  account: z.string().check(z.minLength(1), z.maxLength(80)),
+  source: z.enum(USAGE_SOURCES),
+  node: z.exactOptional(z.nullable(z.string().check(z.maxLength(80)))),
+});
+export type UsageLeaseBody = z.output<typeof UsageLeaseBody>;
+// The hub's answer, on the wire: granted with an opaque lease id and its expiry, fresh with the capture time the
+// caller may use instead of spawning, or denied with one reason and how long to wait (whole seconds). Nothing else.
+export const UsageLeaseAnswer = z.looseObject({
+  status: z.enum(["granted", "fresh", "denied"]),
+  lease_id: z.exactOptional(z.string().check(z.maxLength(80))),
+  expires_at: z.exactOptional(num()),          // epoch seconds, granted only
+  captured_at: z.exactOptional(num()),          // epoch seconds, fresh only
+  reason: z.exactOptional(z.enum(["busy", "cooldown", "capacity", "no_demand"])),
+  retry_after_s: z.exactOptional(num()),
+});
+export type UsageLeaseAnswer = z.output<typeof UsageLeaseAnswer>;
 
 // The principal's own forget of a source (plan 4.4, AT-23): the account, and the source (and node) to drop; without
 // a source, the whole account is forgotten.
