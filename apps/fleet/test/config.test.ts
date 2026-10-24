@@ -102,10 +102,17 @@ describe("fleet config", () => {
   it("workerSocket settings: path, protectedLanes and startNodes are taken one by one", () => {
     const home = tempDir();
     const f = withFile({ workerSocket: { path: join(home, "w.sock"), protectedLanes: ["a b", "c"], startNodes: ["pc", "srv01"] } });
-    expect(workerSocketOf(loadConfig(f))).toEqual({ path: join(home, "w.sock"), protectedLanes: ["a b", "c"], startNodes: ["pc", "srv01"] });
+    expect(workerSocketOf(loadConfig(f))).toEqual({ path: join(home, "w.sock"), protectedLanes: ["manager", "a b", "c"], startNodes: ["pc", "srv01"] });   // the file's lanes add to the defaults
     const partial = workerSocketOf(loadConfig(withFile({ workerSocket: { startNodes: ["pc"] } })));
     expect(partial.startNodes).toEqual(["pc"]);
     expect(partial.protectedLanes).toEqual(["manager"]);
+  });
+
+  it("workerSocket.protectedLanes never removes a default: [] and another name leave the sticky and event lanes protected", () => {
+    expect(workerSocketOf(loadConfig(withFile({ workerSocket: { protectedLanes: [] } }))).protectedLanes).toEqual(["manager"]);
+    expect(workerSocketOf(loadConfig(withFile({ workerSocket: { protectedLanes: ["x"] } }))).protectedLanes).toEqual(["manager", "x"]);
+    const own = loadConfig(withFile({ stickyLanes: ["chief"], laneEvents: { deliverTo: "scribe" }, workerSocket: { protectedLanes: ["scribe", "x"] } }));
+    expect(workerSocketOf(own).protectedLanes).toEqual(["chief", "scribe", "x"]);
   });
 
   it("workerSocket refuses unknown keys, relative paths, a path equal to the owner's and bad names", () => {
