@@ -221,10 +221,11 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
 
 // B13: the brief that still counts — the newest `briefed` event, unless the task has left review since (any review →
 // elsewhere move with a higher rev stales every brief before it; a new round of work files a new one). The move to Done
-// is not leaving: a task accepted as done keeps the brief it was accepted on, for its card and its record.
+// is not leaving: a task accepted as done keeps the brief it was accepted on, for its card and its record; but a Done
+// ends that round, so a move out of done (a reopened task) stales it, and a second Done needs a brief of its own.
 export function currentBrief(events: readonly TaskEvent[]): { brief: ProofBrief; rev: number } | null {
   let back = 0;
-  for (const e of events) if (e.change.kind === "moved" && e.change.from === "review" && e.change.to !== "done" && e.rev > back) back = e.rev;
+  for (const e of events) if (e.change.kind === "moved" && ((e.change.from === "review" && e.change.to !== "done") || e.change.from === "done") && e.rev > back) back = e.rev;
   let best: { brief: ProofBrief; rev: number } | null = null;
   for (const e of events) if (e.change.kind === "briefed" && e.rev > back && (best === null || e.rev > best.rev)) best = { brief: e.change.brief, rev: e.rev };
   return best;

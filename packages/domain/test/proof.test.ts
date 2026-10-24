@@ -225,9 +225,16 @@ describe("the brief that counts (B13)", () => {
   it("a brief stays current when the task is accepted as done: the proof it was accepted on", () => {
     const toDone = event(5, { kind: "moved", from: "review", to: "done", reason: "read the diff" });
     expect(currentBrief([filed(3), toDone])).toEqual({ brief: brief(), rev: 3 });
-    // reopened afterwards (done to doing is not a move out of review): still current; a round that leaves review again is stale
-    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "doing", reason: null })])).toEqual({ brief: brief(), rev: 3 });
-    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "review", reason: null }), event(7, { kind: "moved", from: "review", to: "doing", reason: null })])).toBeNull();
+  });
+
+  it("a Done ends the round: a task reopened and offered again needs a new brief", () => {
+    const toDone = event(5, { kind: "moved", from: "review", to: "done", reason: "read the diff" });
+    // any move out of done stales the brief the Done was accepted on, so a second Done cannot pass on the first round's proof
+    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "doing", reason: null })])).toBeNull();
+    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "doing", reason: null }), event(7, { kind: "moved", from: "doing", to: "review", reason: null })])).toBeNull();
+    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "review", reason: null })])).toBeNull();
+    // a brief of the new round counts
+    expect(currentBrief([filed(3), toDone, event(6, { kind: "moved", from: "done", to: "doing", reason: null }), filed(8)])).toEqual({ brief: brief(), rev: 8 });
   });
 
   it("a brief older than the last review to doing move is stale", () => {
