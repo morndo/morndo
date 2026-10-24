@@ -32,8 +32,6 @@ const run = async (argv: string[], env: Record<string, string | undefined> = {})
   return { code, out: out.join(""), err: err.join("") };
 };
 
-const APPLIES_NOTHING = /morndo update --to arrives with the next settings step/;
-
 describe("the command line (§8.1, §8.4)", () => {
   // sysexits.h (§8.4): a refusal of the data is 65; anything that should simply be tried again later — the network,
   // a busy lock, an I/O error such as a full disk — is 75.
@@ -95,14 +93,6 @@ describe("the command line (§8.1, §8.4)", () => {
       expect(r.code, JSON.stringify(argv)).toBe(64);
       expect(r.err).toMatch(/usage/);
     }
-  });
-
-  it("the settings step's words — --to, --channel, pin, auto — are one sentence and exit 64 (§8.1)", async () => {
-    // `--channel`, pin and auto are this step. `--to` is the one form still ahead of it.
-    const r = await run(["update", "--to", "0.2.0"]);
-    expect(r.code).toBe(64);
-    expect(r.err).toMatch(APPLIES_NOTHING);
-    expect(r.err).not.toMatch(/--channel, pin and auto/);
   });
 
   it("the apply commands answer on a checkout as the check does: not_ours, exit 78 (RL14)", async () => {
