@@ -18,22 +18,22 @@ const tables = (db: Database.Database) =>
   (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]).map(r => r.name);
 const pending = (ref: string, checkedAt: number) => ({ ref, state: "pending", detail: null, checkedAt });
 
-describe("board proofs (migration 26)", () => {
-  it("migration 26 adds board_proofs to a database at 25 and leaves the older tables alone", () => {
+describe("board proofs (migration 28)", () => {
+  it("migration 28 adds board_proofs to a database at 27 and leaves the older tables alone", () => {
     const db = new Database(join(tempDir(), "morndo.db"));
-    migrate(db, MIGRATIONS.filter(m => m.version <= 25));       // a hub of the release before
-    expect(version(db)).toBe(25);
+    migrate(db, MIGRATIONS.filter(m => m.version <= 27));       // a hub with usage detection, before proofs
+    expect(version(db)).toBe(27);
     const before = tables(db);
     migrate(db);                                                // the newer hub opens it as it is
-    expect(version(db)).toBe(26);
+    expect(version(db)).toBe(28);
     expect(tables(db)).toEqual([...before, "board_proofs"].sort());
     const info = db.prepare("PRAGMA table_info(board_proofs)").all() as { name: string; pk: number }[];
     expect(info.map(c => c.name)).toEqual(["key", "brief_rev", "ref", "state", "detail", "checked_at"]);
     expect(info.filter(c => c.pk > 0).map(c => c.name)).toEqual(["key", "brief_rev", "ref"]);
-    const m26 = MIGRATIONS.find(m => m.version === 26);         // guarded: the table is there already
-    expect(m26).toBeDefined();
-    expect(() => m26?.up(db)).not.toThrow();
-    expect(() => m26?.up(db)).not.toThrow();
+    const m28 = MIGRATIONS.find(m => m.version === 28);         // guarded: the table is there already
+    expect(m28).toBeDefined();
+    expect(() => m28?.up(db)).not.toThrow();
+    expect(() => m28?.up(db)).not.toThrow();
     db.close();
   });
 
