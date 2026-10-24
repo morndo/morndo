@@ -2,7 +2,7 @@
 // test and no breakage. The outputs are vitest 5.0.3's, as it prints them (colors off). And a control marked for one
 // platform: skipped elsewhere, a fifth outcome that is never a bite or a pass.
 import { describe, expect, it } from "vitest";
-import { CONTROLS, check, classify, needs, verdict, type Control } from "./negative-controls.ts";
+import { CONTROLS, check, classify, installDependencies, needs, spawnOutput, verdict, type Control } from "./negative-controls.ts";
 
 const FAILED_TEST = [
   " RUN  v5.0.3 /repo", "", " FAIL  |units| packages/protocol/test/fleet.test.ts > messages > reads a code",
@@ -98,5 +98,73 @@ describe("a control marked for one platform (platform)", () => {
   });
   it("the Linux-only /proc/self/fd control is marked linux (it still runs on CI's weekly ubuntu run)", () => {
     expect(CONTROLS.find(c => c.id === "t2-openconfined-proc-fd")?.platform).toBe("linux");
+  });
+});
+
+// The setup's error printer (T-433): `(ci.stdout + ci.stderr).trim()` threw "trim is not a function" when npm gave no text
+// (null + null is 0), and that hid why `npm ci --offline` had failed.
+const COLD = "npm error code ENOTCACHED\nnpm error request to https://registry.npmjs.org/zod/-/zod-4.6.5.tgz failed: cache mode is 'only-if-cached' but no cached response is available.\n";
+type Ran = { status: number | null; stdout?: string | Buffer | null; stderr?: string | Buffer | null; error?: Error; signal?: NodeJS.Signals | null };
+const fakeNpm = (...results: Ran[]) => {
+  const calls: string[][] = [];
+  const run = (_cmd: string, args: readonly string[]) => { calls.push([...args]); return (results[calls.length - 1] ?? { status: 1 }) as never; };
+  return { run, calls };
+};
+
+describe("spawnOutput: what a finished process left to read", () => {
+  it("is the last lines of stdout and stderr together", () => {
+    const out = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join("\n");
+    expect(spawnOutput({ stdout: out, stderr: "boom\n" }, 3)).toBe("line 11\nline 12\nboom");
+  });
+  it("reads Buffers as text", () => {
+    expect(spawnOutput({ stdout: Buffer.from("npm error code E404\n"), stderr: Buffer.from("") })).toBe("npm error code E404");
+  });
+  it("does not throw when there is no output at all (null, undefined), and is empty then", () => {
+    expect(spawnOutput({ stdout: null, stderr: null })).toBe("");
+    expect(spawnOutput({})).toBe("");
+    expect(spawnOutput({ stdout: undefined, stderr: "only stderr" })).toBe("only stderr");
+  });
+  it("says why the process never ran, or how it was stopped", () => {
+    expect(spawnOutput({ stdout: null, stderr: null, error: new Error("spawn npm ENOENT") })).toContain("spawn npm ENOENT");
+    expect(spawnOutput({ stdout: null, stderr: null, signal: "SIGKILL" })).toContain("SIGKILL");
+  });
+});
+
+describe("installDependencies: npm ci in the temporary worktree", () => {
+  it("one offline ci when it works", () => {
+    const npm = fakeNpm({ status: 0, stdout: "added 190 packages" });
+    const r = installDependencies("/tmp/tree", npm.run);
+    expect(r).toEqual({ ok: true, notes: [] });
+    expect(npm.calls).toEqual([["ci", "--offline", "--no-audit", "--no-fund"]]);
+  });
+  it("a cold npm cache (ENOTCACHED) falls back to an online ci, and says so in one sentence with the command that warms it", () => {
+    const npm = fakeNpm({ status: 1, stdout: "", stderr: COLD }, { status: 0, stdout: "added 190 packages" });
+    const r = installDependencies("/tmp/tree", npm.run);
+    expect(r.ok).toBe(true);
+    expect(npm.calls).toEqual([["ci", "--offline", "--no-audit", "--no-fund"], ["ci", "--no-audit", "--no-fund"]]);
+    expect(r.ok && r.notes).toHaveLength(1);
+    expect(r.ok && r.notes[0]).toMatch(/cache is cold.*online.*npm ci/);
+    expect(r.ok && r.notes[0]).not.toContain("\n");
+  });
+  it("a cold cache and no network prints the online ci's own error", () => {
+    const npm = fakeNpm({ status: 1, stderr: COLD }, { status: 1, stderr: "npm error code ENOTFOUND\nnpm error network request failed\n" });
+    const r = installDependencies("/tmp/tree", npm.run);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toContain("ENOTFOUND");
+    expect(!r.ok && r.message).toContain("npm ci");
+  });
+  it("any other offline failure is printed as npm said it, with no online retry", () => {
+    const npm = fakeNpm({ status: 1, stdout: "", stderr: "npm error code EACCES\nnpm error permission denied, mkdir '/x'\n" });
+    const r = installDependencies("/tmp/tree", npm.run);
+    expect(npm.calls).toHaveLength(1);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toContain("EACCES");
+    expect(!r.ok && r.message).toContain("/tmp/tree");
+  });
+  it("npm that never ran (no stdout, no stderr) is the error, not a TypeError", () => {
+    const npm = fakeNpm({ status: null, stdout: null, stderr: null, error: new Error("spawn npm ENOENT") });
+    const r = installDependencies("/tmp/tree", npm.run);
+    expect(r.ok).toBe(false);
+    expect(!r.ok && r.message).toContain("spawn npm ENOENT");
   });
 });
