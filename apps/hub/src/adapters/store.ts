@@ -655,8 +655,8 @@ export class Store {
   // The notices the hub itself wrote (plan 4.4), newest first, at most `limit`. The signature is the once-only key:
   // a notice with the same signature is never told again.
   usageNotices(limit: number): UsageNotice[] {
-    return (this.db.prepare("SELECT body FROM usage_notices ORDER BY at DESC, rowid DESC LIMIT ?").all(limit) as Row[])
-      .map(r => JSON.parse(r.body as string) as UsageNotice);
+    return (this.db.prepare("SELECT text FROM usage_notices ORDER BY at DESC, rowid DESC LIMIT ?").all(limit) as Row[])
+      .map(r => JSON.parse(r.text as string) as UsageNotice);
   }
   saveUsageNotice(n: UsageNotice, signature: string) {
     this.db.prepare("INSERT OR IGNORE INTO usage_notices (id, account, kind, signature, at, text) VALUES (?, ?, ?, ?, ?, ?)")

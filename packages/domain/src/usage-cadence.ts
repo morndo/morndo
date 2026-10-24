@@ -8,9 +8,21 @@ export const noCycleBook: CycleBook = { cycleResetsAt: null, furthestMs: null, g
 const SAME_CYCLE_MS = 60_000;
 
 export function observeCycle(b: CycleBook, resetsAt: number | null, now: number): CycleBook {
-  throw new Error("not implemented");
+  // No reset in the reading says nothing; the first one ever starts the book.
+  if (resetsAt === null) return b;
+  if (b.cycleResetsAt === null) return { cycleResetsAt: resetsAt, furthestMs: resetsAt - now, gapMs: null };
+  // The same cycle's reset, seen again (or a few seconds off): only the horizon can widen.
+  if (Math.abs(resetsAt - b.cycleResetsAt) <= SAME_CYCLE_MS)
+    return { ...b, furthestMs: Math.max(b.furthestMs ?? resetsAt - now, resetsAt - now) };
+  // An earlier reset by more than that is an out-of-order reading: ignored.
+  if (resetsAt < b.cycleResetsAt) return b;
+  if (b.cycleResetsAt <= now)
+    // The old cycle had ended: this is the next one, and the gap between the two resets is the cycle's length.
+    return { cycleResetsAt: resetsAt, furthestMs: resetsAt - now, gapMs: resetsAt - b.cycleResetsAt };
+  // The reset slid later while the old cycle was still ahead: a rolling window, never a gap.
+  return { ...b, cycleResetsAt: resetsAt, furthestMs: Math.max(b.furthestMs ?? resetsAt - now, resetsAt - now) };
 }
 
 export function cadenceInput(b: CycleBook): { observedGapMs: number | null; furthestResetMs: number | null } {
-  throw new Error("not implemented");
+  return { observedGapMs: b.gapMs, furthestResetMs: b.furthestMs };
 }

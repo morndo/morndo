@@ -18,15 +18,26 @@ export class LeaseBook {
   }
 
   grant(account: string, source: UsageSource, node: string | null): { ok: true; id: string; expiresAt: number } | { ok: false; retryAfterMs: number } {
-    throw new Error("not implemented");
+    void node;      // the lease is per account and source; which node asked is not part of its key
+    const now = this.#now();
+    for (const l of this.#leases.values()) {
+      if (l.done || l.expiresAt <= now) continue;
+      if (l.account === account && l.source === source) return { ok: false, retryAfterMs: l.expiresAt - now };
+    }
+    const id = this.#nextId();
+    this.#leases.set(id, { id, account, source, expiresAt: now + LEASE_MS, done: false });
+    return { ok: true, id, expiresAt: now + LEASE_MS };
   }
 
   valid(id: unknown, account: string, source: UsageSource): boolean {
-    throw new Error("not implemented");
+    if (typeof id !== "string") return false;
+    const l = this.#leases.get(id);
+    return l !== undefined && !l.done && l.account === account && l.source === source && l.expiresAt > this.#now();
   }
 
   complete(id: string): void {
-    throw new Error("not implemented");
+    const l = this.#leases.get(id);
+    if (l !== undefined) l.done = true;
   }
 
   // The id the hub hands out: a counter plus random bytes, so it is unique and unguessable on the wire.

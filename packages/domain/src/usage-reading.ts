@@ -62,5 +62,10 @@ export function cleanLength(v: unknown): number | null {
 // The fix a failed source's reason names (plan 4.4): one closed list, never free text; a reason with no fix of its
 // own (a meter that will come back, a hub that could not reach it) shows none.
 export function fixForReason(r: UsageReason): UsageFix | null {
-  throw new Error("not implemented");
+  if (r === "signed_out") return "sign_in_again";
+  if (r === "refused") return "use_another_account";
+  if (r === "no_scope") return "sign_in_fully_here";
+  if (r === "unknown_screen") return "check_the_source";
+  if (r === "plan_ended") return "reactivate_the_seat";
+  return null;
 }

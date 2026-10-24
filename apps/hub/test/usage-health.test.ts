@@ -142,14 +142,15 @@ describe("source health (plan 4.3)", () => {
   });
 
   it("the newer reading wins, and a disagreement is shown (AT-30)", async () => {
-    expect((await reading({ windows: [fiveHour(40)], capturedAt: now })).status).toBe(200);                    // 10:00, headless 40%
+    const reset = now + 2 * HOUR;      // the echo below must repeat the first reading's reset, not drift with the clock
+    expect((await reading({ windows: [fiveHour(40, reset)], capturedAt: now })).status).toBe(200);             // 10:00, headless 40%
     now += 3 * MIN;
     expect((await statusLine(70)).status).toBe(200);                                                          // 10:03, the status line moved
     let a = await accountOf();
     expect((a?.fiveHour as Body).usedPercentage).toBe(70);
     expect(a?.disagree).toEqual([{ window: "five_hour", a: { source: "status-line", usedPercent: 70, capturedAt: now }, b: { source: "app-server", usedPercent: 40, capturedAt: now - 3 * MIN } }]);
     now += 7 * MIN;
-    expect((await reading({ windows: [fiveHour(40)], capturedAt: now })).status).toBe(200);                    // 10:10, an echo of its own earlier reading
+    expect((await reading({ windows: [fiveHour(40, reset)], capturedAt: now })).status).toBe(200);             // 10:10, an echo of its own earlier reading
     a = await accountOf();
     expect((a?.fiveHour as Body).usedPercentage).toBe(70);
     expect(a?.disagree).toEqual([]);

