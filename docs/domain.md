@@ -617,7 +617,7 @@ Which member account a session's next turn runs on, and the rules around it. Cod
 
 | Term | Means | Is not |
 |---|---|---|
-| Pool | The subscription Connections of one runtime that lanes on this node share, with their settings. One per runtime. | A Chain; a Priority. |
+| Pool (accounts) | The subscription Connections of one runtime that lanes on this node share, with their settings. One per runtime. | A Chain; a Priority; a **Key pool**. |
 | Member | A Connection in the pool, with `keep`, `expires` and `onlyFor`. | A sign-in token. |
 | Identity | Who a member is signed in to, as a digest of the vendor's account id. Members with one identity are one **seat**. | The member's name; an email. |
 | Reading | One look at a member: signed in or not, identity, plan (paid or not), windows, whether the vendor allows ordinary use, reset credits, and when it was read. | A Usage Report (that belongs to the read model). |
@@ -658,6 +658,48 @@ Which member account a session's next turn runs on, and the rules around it. Cod
 **Events:** MemberAdded, MemberRemoved, MemberSettingsChanged, MemberRetired, MemberActivated, MemberMarkedOut, MarkCleared, SessionPlaced, SessionMoved, ClaimGranted, ClaimReleased, ClaimLost, TurnRefused, ModeChanged, SettingsChanged, MoveByChanged, ResetAdvised, ResetSpent.
 
 Aggregate **Pool**, one per runtime. The clock is the `now` argument; whether a holder is alive is a function argument.
+
+## Key pool: which API key serves the next request ([ADR-0037](adr/0037-key-pools.md))
+
+Several API-key Connections of one provider and runtime behind one name, served in a fixed rotation, opt in. Code in `packages/domain/src/key-pool.ts`, inside the Connections context. A member is a Connection, so the lease gate (CN8) still runs on every key; the pool only decides which Connection a request goes to. It holds Connection **names** and health, never a ref, a fingerprint or a secret (CN1, CN5). The classifier that turns a provider refusal into an Outcome is an adapter; no provider name appears here.
+
+| Term | Means | Is not |
+|---|---|---|
+| Key pool | A named group of API-key Connections of one vendor and runtime, served in a fixed rotation, opt-in. | The account **Pool** (subscriptions, seats, windows). A Connection. |
+| Key member | A key Connection in a key pool, with its health. Referenced by the Connection's name. | A Pool **Member**. |
+| Rotation policy | `round-robin` (default) or `drain`, and the recheck interval (1 hour to 7 days, default 24 hours). | A Priority (which Connection a role uses). |
+| Last pick | The member served last (`lastPick`). It is what makes the order survive a restart. | A lease. |
+| Key health | Active, exhausted, or failing, with a reason word, since and last change. | Availability (terms, expiry, budget). |
+| Exhausted | The provider refused the key for lack of credit, or at a spend limit the owner set. Left by a good Messages answer, a `revive`, or nothing else. | Over budget (Morndo's own estimate). |
+| Failing | The provider refused the key or its account: rejected (401), denied (403), held (account on hold), cap (the tier's monthly cap). Blocks the pool until the principal acts. | Exhausted; rate-limited. |
+| Outcome | The domain's word for what a provider's answer meant: ok, exhausted, failing, limited, unknown. | A status code. |
+| Standing | The pool's state as a whole: ok, empty (no member can serve) or blocked (a member is failing). | A member's health. |
+| Terms acknowledgement | Who read which revision of the catalog's key-pool line, and when. | Connection terms (CN4), which are the provider's. |
+| Own account | The principal's confirmation that a member is a key of an account he holds, recorded as OwnerConfirmed. | A proof of ownership. |
+
+| # | Invariant |
+|---|---|
+| KP1 | A pool name matches `[a-z][a-z0-9-]*` and is unique across pools, Connections (revoked ones included) and deleted pools (a tombstone keeps the name). |
+| KP2 | A pool has one vendor and one runtime. A member is a Connection of kind `api-key`, custody `morndo`, not revoked, with that vendor and runtime, and in at most one key pool. A subscription, an engine-layer Connection or a key of another vendor is refused at join. A member's organization must be one the principal confirmed (`ownedOrgs`), or the principal passes `--confirm-own-account`. |
+| KP3 | A member is never served while exhausted. A failing member is not servable and **blocks the pool**: every pick refuses with `pool_blocked` until the principal revives that member, or its Connection is rotated to a new key. Traffic never moves to another account because one account was refused. |
+| KP4 | Rotation order is deterministic and survives restarts. `round-robin`: the first servable member after the last pick in join order, wrapping. `drain`: the last pick's member while servable, else the next. The last pick is saved with the pick. No randomness, no clock in the choice. |
+| KP5 | A pick that finds no servable member refuses with `pool_empty` (and the earliest time a member may be tried again) or `pool_blocked`, and serves nothing. It never falls back to an exhausted or failing member. |
+| KP6 | An outcome carries when it was observed. One older than the member's last change (any transition) changes nothing, so a request that started before a mark or a recovery cannot undo it. |
+| KP7 | Exhausted is left only by `ok` from a real Messages request, or by the principal's `revive`. Failing is left only by `revive` or by the Connection's rotation to a new key, never by a probe. An `ok` from anything but a Messages request (token counting, a model list) is never recovery. |
+| KP8 | Health is per pool member. Removing a member discards its health. Revoking a Connection ends its membership. A member that left and joins again starts active. |
+| KP9 | A pool grants nothing and gates nothing (CN15). The lease gate runs on the member the pick names; if it refuses, the next servable member is tried, the last pick moves to the member finally leased, and exactly one `MemberPicked` is written, carrying the refused members' gate words. A gate refusal never changes health. |
+| KP10 | Narrowing is anyone's (removing a member, setting `drain`). Widening is the principal's, judged by effect: creating a pool, adding a member, `revive`, and acknowledging the pool's terms. Reordering members is KP14's. |
+| KP11 | `PoolEmpty` and `PoolBlocked` are raised once on the transition and not again until the pool is servable again (`PoolRefilled`); `KeyExhausted` and `KeyFailed` once per transition. |
+| KP12 | Events carry names, reason words, times and the command id. They never carry a key, a fingerprint, a vault ref, a provider message, a status code, a header, a request id or an organization id. |
+| KP13 | Opt-in. Nothing creates a pool by itself; a Connection in no pool behaves as before. A pool of one serves that member and is, for every output, the single Connection's behaviour plus health. |
+| KP14 | Changing the order of members is the principal's. It does not change which member is the last pick. |
+| KP15 | Concurrent picks are serialised by the pool's version: the last pick is saved before the gate runs, so two concurrent picks get different members in round-robin and the same member in drain. A lost save is retried on fresh state; the last pick is never advanced twice for one pick. |
+
+KP16 (a probe is claimed before it is made), KP17 to KP19 (the pooled helper's hand-off, attribution after it, recovery of a half-done swap) arrive with slices 2 and 3 (plan section 1.4).
+
+**Events:** KeyPoolCreated, MemberJoined, MemberLeft, MemberMoved, PolicyChanged, TermsAcknowledged, OwnerConfirmed, MemberPicked, KeyExhausted, KeyFailed, KeyLimited, KeyRecovered, PoolEmpty, PoolBlocked, PoolRefilled. Widening events carry the command id. A deleted pool leaves a tombstone row; its events go with it.
+
+Aggregate **KeyPool**, one per name. The clock is the `now` argument. The service (`apps/connections/src/application/key-pool-service.ts`) loads a pool, applies one domain function, saves on the version it read, and retries a lost save up to 8 times, as the account pool's does.
 
 ## Jobs: work that outlives the turn ([ADR-0017](adr/0017-background-jobs-that-report-back.md))
 
@@ -897,6 +939,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Engines is downstream of Connections* (customer and supplier). A connection name is the provider name the routing policy orders. Connections never reads the routing policy, and no spend figure decides anything but the lease gate (CN15).
 - *Connections stands beside Usage*. Usage shows a subscription's windows. It does not grant a lease.
 - *Pool → Connections* (customer/supplier): the pool reads its members and takes a Lease per turn through the existing gate (on, terms, repo, isolation).
+- *Key pool → Connections* (inside it, ADR-0037): a key pool is an aggregate of the Connections context. Its members are Connections named by name; the lease gate (CN8) runs on the member a pick names, and a pool never reads or holds a key. Names are shared (KP1). A Connection's revocation and rotation reach the pool through a lifecycle hook.
 - *Pool → Usage* (publisher): readings go out as status-line reports through the agents' door. The read model doesn't change.
 - *Engine layer → Pool* (conformist at the edge): the engine layer runs its `codex` provider through the pool's wrapper. The pool never edits a chain.
 - *Access supplies Secrets*: the Session and its fresh verification (SR5).
@@ -926,6 +969,7 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 | Manager's needs-you list (its ledger file, read-only) | open and closed items to Asks with their terms (default, recommendation, deadline, blocking) and resolution; the list decides whether an Ask is still open (E10) |
 | Manager's chat protocol (`[buttons …]`, `[tap …]`) | a buttons line to an Ask's options; a Decision to the tap line the manager reads; a tap seen in its conversation to "answered elsewhere" (E8) — unless it is one the hub itself typed for an answer it holds, which is that answer arriving, recorded for the Endpoint whose request sent it, never an answer from elsewhere (a hand tap of the same option read only after the hub wrote its own: E8's known limit) |
 | Agent CLI status line (its JSON, posted by the lane's status-line script to `/api/agent/usage` with an agent token) | `rate_limits.*` and `context_window.used_percentage` to a Report for the account the call names (U1); everything else in the document is dropped |
+| Provider error dialect (first-party, `adapters/outcome-anthropic.ts`; chosen by the catalog preset's `keyPool.errorDialect`) | a status, an error type, a bounded message, `retry-after` and a date to one Outcome (ok, exhausted, failing, limited, unknown); what Claude Code prints when a run fails to the same signal. Message and status are dropped after the call (KP12) |
 | Agents' board command (`morndo-board`, over `/api/agent/board` with an agent token) | a lane's command line to one change of one Task by one Actor (B1); the hub's refusal to one line the agent can act on |
 | Agents' memory command (`morndo-memory`, over `/api/agent/memory` with an agent token) | a lane's command line to one search, one Note, or one proposal or invalidation with provenance (M3); the git repository it runs in to the default Scope; the hub's refusal to one line the agent can act on |
 | Node's Memory sync (`memory.sync`, `morndo-node`) | Memory's Skill files to the engines' skill folders, each marked as Memory's; a folder of the same name without the mark is another skill's, left alone and reported. Never another skill's. The domain never sees a path |
