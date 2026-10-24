@@ -263,7 +263,41 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
+    // Usage detection S2 (plan 4.2 to 4.5): one row per source and node (its health, its last reading and the one
+    // before it), the notices the hub itself wrote, the plan/threshold/cycle watches, the seat record, and the lane
+    // an account is used from (written by a later slice; the table and its store methods exist now).
     version: 26,
+    name: "usage (S2): per-source health and readings, notices, watches and seat records (plan 4.2 to 4.5)",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS usage_sources (account TEXT NOT NULL, source TEXT NOT NULL, node TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (account, source, node));
+      CREATE TABLE IF NOT EXISTS usage_notices (id TEXT PRIMARY KEY, account TEXT NOT NULL, kind TEXT NOT NULL, signature TEXT NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS usage_notices_at ON usage_notices (at);
+      CREATE TABLE IF NOT EXISTS usage_watch (account TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (account, kind, key));
+      CREATE TABLE IF NOT EXISTS usage_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS lane_accounts (node TEXT NOT NULL, lane TEXT NOT NULL, account TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (node, lane));
+    `),
+  },
+  {
+    // Usage detection S3 (plan 4.5 item 4, U15, U17): an agent token's scopes (comma-separated names of the closed
+    // list, empty: none) and the seat records the accounts pool owns — the derived ones stay in usage_seats (S2). The
+    // fix round on PR #127 (finding 4b) adds how a lane record was written: 'start' by a lane_account tap, 'report' by
+    // a status-line report; every row before the column is a report. Fix round 2 on PR #127 (finding 1) adds which
+    // token wrote or last confirmed a lane record (null for a hub-issued start) and until when a disagreement between
+    // two tokens makes the record ambiguous; both null on every earlier row.
+    version: 27,
+    name: "usage (S3): agent token scopes, the pool-owned seat records, how a lane record was written and by which token (plan 4.5 item 4, U15, U17)",
+    compat: "additive",
+    up: db => {
+      if (!hasColumn(db, "agent_tokens", "scopes")) db.exec("ALTER TABLE agent_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT ''");
+      db.exec("CREATE TABLE IF NOT EXISTS usage_pool_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL)");
+      if (!hasColumn(db, "lane_accounts", "source")) db.exec("ALTER TABLE lane_accounts ADD COLUMN source TEXT NOT NULL DEFAULT 'report'");
+      if (!hasColumn(db, "lane_accounts", "token")) db.exec("ALTER TABLE lane_accounts ADD COLUMN token TEXT");
+      if (!hasColumn(db, "lane_accounts", "conflict_until")) db.exec("ALTER TABLE lane_accounts ADD COLUMN conflict_until INTEGER");
+    },
+  },
+  {
+    version: 28,
     name: "board_proofs (B14): one row per reference of a task's brief, its state as the hub read it, kept in rows of their own so a re-check never touches the task or its events; a new table only, so an older hub opens the database as it is",
     compat: "additive",
     up: db => db.exec(`CREATE TABLE IF NOT EXISTS board_proofs (

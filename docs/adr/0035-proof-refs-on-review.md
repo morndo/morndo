@@ -2,7 +2,7 @@
 
 - **Status:** Accepted, 2026-10-23: the owner chose option B (verified references and a brief) of `docs/plans/2026-10-19-proof-of-work.md` (revision 2). Built in morndo/morndo#120.
 - **Builds on:** ADR-0015 (the board), ADR-0032 (the board follows the fleet), B11 (merge records and the done gate).
-- **Rules:** B13 to B16 in `docs/domain.md`. Migration 26 (`board_proofs`).
+- **Rules:** B13 to B16 in `docs/domain.md`. Migration 28 (`board_proofs`; first numbered 26, renumbered when usage detection took 26 and 27).
 
 ## Context
 
@@ -44,7 +44,7 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 
 ## Consequences
 
-- One new table (migration 26), one adapter, one application service, one domain file; the board's rules D1 to D6 do
+- One new table (migration 28), one adapter, one application service, one domain file; the board's rules D1 to D6 do
   not change.
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
 - A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged), by design and not that its checks passed: that is a `ci` reference's job, which the assigner's proof list can require.
