@@ -365,9 +365,32 @@ describe("a turn end that never arrived (T-422)", () => {
       v: 1, t: "lane", event: "stale", node: "pc", window: "api", lane: "api", at: IDLE + LOST_TURN_GRACE_MS,
       sessionId: "s1", reason: "no_turn_end", since: IDLE, stalls: 1,
     }]);
-    expect(r.nudged).toHaveLength(1);
-    expect(r.nudged[0]).toMatchObject({ id: `fleet:nudge:${WORKER}:${IDLE}`, workerId: WORKER });
-    expect(r.nudged[0]?.text).toContain("never received its end");
+    expect(r.nudged).toEqual([]);
+  });
+
+  it("an interrupted session gets no resume nudge (T-422)", () => {
+    const r = rig({ config: { ...CONFIG, nudge: true } });
+    seed(r);
+    began(r);
+    ended(r);
+    r.at(IDLE + LOST_TURN_GRACE_MS + 10 * MIN);
+    r.watch.sweep();
+    expect(r.raised).toEqual([{
+      v: 1, t: "lane", event: "stale", node: "pc", window: "api", lane: "api", at: IDLE + LOST_TURN_GRACE_MS + 10 * MIN,
+      sessionId: "s1", reason: "no_turn_end", since: IDLE, stalls: 1,
+    }]);
+    expect(r.nudged).toEqual([]);
+    let idleAt = IDLE;
+    for (let i = 2; i <= 3; i++) {
+      const busyAt = idleAt + 10 * MIN;
+      began(r, busyAt);
+      idleAt = busyAt + 30 * MIN;
+      ended(r, idleAt);
+      r.at(idleAt + LOST_TURN_GRACE_MS + 10 * MIN);
+      r.watch.sweep();
+      expect(r.raised.at(-1)).toMatchObject({ reason: "no_turn_end", stalls: i });
+      expect(r.nudged).toEqual([]);
+    }
   });
 
   it("does not flag when the turn end arrives", () => {
@@ -376,6 +399,7 @@ describe("a turn end that never arrived (T-422)", () => {
       seed(r);
       began(r);
       ended(r);
+      r.at(at);                                                                         // the fleet takes it now, after the busy start
       r.watch.turn(r.finished(at, { status: "done", sessionId: "s1" }));
       r.at(IDLE + LOST_TURN_GRACE_MS);
       r.watch.sweep();
@@ -383,22 +407,59 @@ describe("a turn end that never arrived (T-422)", () => {
     }
   });
 
-  it("does not flag a turn end older than the busy start", () => {
+  it("covers a turn end the fleet took at the busy start minus the skew, on its own clock", () => {
     const covered = rig();
-    covered.watch.turn(covered.finished(BUSY - LOST_TURN_SKEW_MS, { status: "blocked", sessionId: "s1" }));
+    covered.at(BUSY - LOST_TURN_SKEW_MS);
+    covered.watch.turn(covered.finished(0, { status: "blocked", sessionId: "s1" }));   // the node's clock is irrelevant
     began(covered);
     ended(covered);
     covered.at(IDLE + LOST_TURN_GRACE_MS);
     covered.watch.sweep();
     expect(covered.raised).toEqual([]);
     const missed = rig();
-    missed.watch.turn(missed.finished(BUSY - LOST_TURN_SKEW_MS - 1, { status: "blocked", sessionId: "s1" }));
+    missed.at(BUSY - LOST_TURN_SKEW_MS - 1);
+    missed.watch.turn(missed.finished(T0 + 24 * 60 * MIN, { status: "blocked", sessionId: "s1" }));
     began(missed);
     ended(missed);
     missed.at(IDLE + LOST_TURN_GRACE_MS);
     missed.watch.sweep();
     expect(missed.raised).toHaveLength(1);
     expect(missed.raised[0]).toMatchObject({ reason: "no_turn_end", since: IDLE });
+  });
+
+  it("a node whose clock is behind does not make short turns look lost (T-422)", () => {
+    const T = T0;
+    const behind = rig();
+    behind.at(T - MIN);                                                                 // a prior turn, taken before the busy start
+    behind.watch.turn(behind.finished(T - 10 * MIN, { status: "blocked", sessionId: "s1" }));
+    began(behind, T);
+    behind.at(T + 30_000);
+    behind.watch.turn(behind.finished(T - 5 * MIN, { status: "done", sessionId: "s1" })); // node 5.5 min behind the fleet
+    ended(behind, T + 30_000);
+    behind.at(T + 30_000 + LOST_TURN_GRACE_MS);
+    behind.watch.sweep();
+    expect(behind.raised).toEqual([]);
+    const lost = rig();
+    lost.at(T - MIN);
+    lost.watch.turn(lost.finished(T - 10 * MIN, { status: "blocked", sessionId: "s1" }));
+    began(lost, T);
+    ended(lost, T + 30_000);
+    lost.at(T + 30_000 + LOST_TURN_GRACE_MS);
+    lost.watch.sweep();
+    expect(lost.raised).toHaveLength(1);
+    expect(lost.raised[0]).toMatchObject({ reason: "no_turn_end" });
+  });
+
+  it("a node whose clock is ahead does not hide a lost turn end", () => {
+    const r = rig();
+    r.at(BUSY - LOST_TURN_SKEW_MS - MIN);
+    r.watch.turn(r.finished(BUSY + 60 * MIN, { status: "blocked", sessionId: "s1" }));  // taken before the busy start
+    began(r);
+    ended(r);
+    r.at(IDLE + LOST_TURN_GRACE_MS);
+    r.watch.sweep();
+    expect(r.raised).toHaveLength(1);
+    expect(r.raised[0]).toMatchObject({ reason: "no_turn_end", since: IDLE });
   });
 
   it("does not judge a lane first seen working (a restart)", () => {
@@ -426,7 +487,8 @@ describe("a turn end that never arrived (T-422)", () => {
     const r = rig();
     seed(r);
     began(r);
-    r.watch.saw(r.hook(IDLE, "/hook/failure", {}));
+    r.at(BUSY + 1_000);                                                                 // the fleet takes the failure after the busy start
+    r.watch.saw(r.hook(T0 - 60 * MIN, "/hook/failure", {}));                            // the hook's own time is far in the past
     ended(r);
     r.at(IDLE + LOST_TURN_GRACE_MS);
     r.watch.sweep();
@@ -479,7 +541,7 @@ describe("a turn end that never arrived (T-422)", () => {
     expect(gone.raised).toEqual([]);
   });
 
-  it("counts stalls for repeated losses and stops nudging after NUDGE_MAX_STALLS; a settled turn resets", () => {
+  it("counts stalls for repeated losses; a settled turn resets the count, and none of them nudge", () => {
     const r = rig();
     seed(r);
     let idleAt = T0;
@@ -492,7 +554,8 @@ describe("a turn end that never arrived (T-422)", () => {
       r.watch.sweep();
       expect(r.raised.at(-1)?.stalls).toBe(i);
     }
-    expect(r.nudged).toHaveLength(NUDGE_MAX_STALLS);
+    expect(r.nudged).toEqual([]);
+    r.at(idleAt + LOST_TURN_GRACE_MS);
     r.watch.turn(r.finished(idleAt + LOST_TURN_GRACE_MS, { status: "done", sessionId: "s1" }));
     const busyAt = idleAt + LOST_TURN_GRACE_MS + 10 * MIN;
     began(r, busyAt);
@@ -501,7 +564,7 @@ describe("a turn end that never arrived (T-422)", () => {
     r.at(idleAt + LOST_TURN_GRACE_MS);
     r.watch.sweep();
     expect(r.raised.at(-1)?.stalls).toBe(1);
-    expect(r.nudged).toHaveLength(NUDGE_MAX_STALLS + 1);
+    expect(r.nudged).toEqual([]);
   });
 
   it("stays quiet when the lane went busy again before the grace", () => {

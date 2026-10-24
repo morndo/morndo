@@ -225,7 +225,7 @@ describe("a turn end the fleet never received (T-422)", () => {
   const taken = () => new Promise(r => setTimeout(r, 50));
   const texts = (reqs: Req[]) => reqs.filter(q => q.op === "lane.deliver").map(q => (q.args as { text: string }).text);
 
-  it("flags a blocked lane that went back to work and idle with no Stop, once, and nudges for a status line", async () => {
+  it("flags a blocked lane that went back to work and idle with no Stop, once, and sends no resume nudge", async () => {
     let clock = T0;
     const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: NUDGING });
     const pc = await fleet.online("pc");
@@ -240,11 +240,15 @@ describe("a turn end the fleet never received (T-422)", () => {
     pc.inventory(api("idle"));
     await taken();
     clock = T0 + 35 * MIN;
-    await vi.waitFor(() => expect(texts(pc.reqs).join("\n")).toContain("never received its end"));
+    await vi.waitFor(() => {
+      const rows = fleet.db.prepare("SELECT event FROM lane_events ORDER BY seq").all() as { event: string }[];
+      expect(rows.map(r => r.event)).toEqual(["finished", "stale"]);
+    });
     const rows = fleet.db.prepare("SELECT event, body FROM lane_events ORDER BY seq").all() as { event: string; body: string }[];
     expect(rows.map(r => r.event)).toEqual(["finished", "stale"]);
     expect(JSON.parse(rows[1]?.body ?? "{}")).toMatchObject({ reason: "no_turn_end", stalls: 1 });
-    expect(texts(pc.reqs)).toHaveLength(1);
+    await new Promise(r => setTimeout(r, 150));
+    expect(pc.reqs.filter(q => q.op === "lane.deliver")).toEqual([]);
   });
 
   it("does not flag when a Stop arrives after the lane went busy", async () => {
@@ -258,6 +262,7 @@ describe("a turn end the fleet never received (T-422)", () => {
     clock = T0 + MIN;
     pc.inventory(api("busy"));
     await taken();
+    // Taken while the fleet clock is still the busy inventory's time. `at` is the node's clock.
     pc.hook(2, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: DONE\nshipped" }, { window: "api", at: clock + 1_000 });
     expect(await pc.acked(2)).toBe(2);
     clock = T0 + 30 * MIN;

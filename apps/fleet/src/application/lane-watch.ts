@@ -13,9 +13,12 @@
 // not ignored ones), and a lane whose window is gone is dropped. A lane whose node is not online is left as it is until
 // the node is back: its silence is the node's, which has its own status.
 // A session the watch saw go from idle to working, and then to idle, ended a turn. When no turn end for that window
-// reached the fleet within 5 min of it going idle (LOST_TURN_GRACE_MS, with LOST_TURN_SKEW_MS of slack for a hook's
-// clock and the node's inventory poll), the watch makes one `stale` event with reason `no_turn_end`. A user interrupt
-// (Esc) also ends a turn with no Stop hook and is flagged the same way. It costs one nudge asking for a status line.
+// reached the fleet within 5 min of it going idle (LOST_TURN_GRACE_MS, with LOST_TURN_SKEW_MS of slack for the node's
+// inventory poll and transit), the watch makes one `stale` event with reason `no_turn_end` and sends no nudge. A user
+// interrupt (Esc) also ends a turn with no Stop hook and is flagged the same way; typing into that lane would restart
+// work the owner stopped, so the orchestrator decides. Turn ends are compared by when the fleet took them, not by the
+// node's clock, so a node with a wrong clock does not make short turns look lost; a turn end replayed late after an
+// outage counts as received then.
 // A lane first seen already working is not judged (after a restart a hook may be replayed with an older time), nor is
 // one that never made a turn end the fleet knows of; a failed turn (/hook/failure) is a turn end. The orchestrator's
 // own lane and ignored windows are left out.
@@ -46,8 +49,8 @@ export const REBUILD_WINDOW_MS = 86_400_000;
 export const NUDGE_TTL_MS = 6 * 3_600_000;
 // The stale events a lane is nudged for; past these it is the orchestrator's to re-plan.
 export const NUDGE_MAX_STALLS = 2;
-// How long a session may sit idle before a missing turn end is lost, and the slack for a hook's clock against the
-// fleet's plus the node's inventory poll (2 s).
+// How long a session may sit idle before a missing turn end is lost, and the slack for the node's inventory poll (2 s)
+// and transit. Both sides of the comparison are the fleet's clock, so this is not slack for the node's clock.
 export const LOST_TURN_GRACE_MS = 5 * 60_000;
 export const LOST_TURN_SKEW_MS = 10_000;
 // What the fleet answered a nudge (Deliveries.post): a refusal is logged, never dropped unseen.
@@ -84,6 +87,7 @@ export type RunTrack = {
 type Track = RunTrack & {
   recent: number[];                // the latest activity times as they came: a hook the fleet took before its turn end
   seenAt: number;                  // the latest sign of this window, by the node's clock
+  receivedAt: number;              // the fleet's clock when the latest turn end was taken
 };
 // The activity times kept per window for a turn end told after them (one intake batch: hooks after the Stop are seen
 // first, the turn on commit). A batch holds far fewer of one lane's hooks than this.
@@ -113,7 +117,7 @@ export class LaneWatch {
   #tracks = new Map<string, Track>();    // every window's Run facts (runOf), the manager's and ignored ones too
   #seen = new Map<string, number>();     // each lane's latest hook, turn or not: the fleet may take it before the Stop it follows
   #open = new Map<string, OpenSession>(); // each watched window's session, from the node's inventory
-  #failed = new Map<string, number>();   // a /hook/failure: a turn that ended on an API error, with no Stop hook
+  #failed = new Map<string, number>();   // a /hook/failure, by the fleet's clock when it was taken: a turn that ended on an API error, with no Stop hook
   #lostStalls = new Map<string, number>(); // stale events for lost turn ends, since the lane last settled
   #config: LaneWatchConfig;
   #raise: (d: LaneEventDraft) => LaneEvent | null;
@@ -155,7 +159,7 @@ export class LaneWatch {
   saw(e: HookEvent): void {
     if (e.window === null || e.path === "/sl" || idleNotice(e.body)) return;
     const key = keyOf(e.node, e.window);
-    if (e.path === "/hook/failure") this.#failed.set(key, e.at);
+    if (e.path === "/hook/failure") this.#failed.set(key, this.#now());
     this.#mark(key, e.at);
     this.#active(key, e.at);
     if (e.path !== "/lane" || typeof e.body !== "object" || e.body === null) return;
@@ -308,8 +312,9 @@ export class LaneWatch {
     prev.working = false;
   }
 
-  // Sessions that went idle with no turn end covering the busy start. A window with no turn end at all is not judged
-  // (an engine lane never ran a Stop hook). A store failure is tried again next sweep.
+  // Sessions that went idle with no turn end covering the busy start, compared by when the fleet took that end.
+  // A window with no turn end at all is not judged (an engine lane never ran a Stop hook). A store failure is tried
+  // again next sweep. A lost turn end is flagged and not nudged.
   #sweepOpen(now: number): void {
     for (const key of this.#lostStalls.keys()) {
       const [node = "", window = ""] = key.split("\u0000");
@@ -321,16 +326,17 @@ export class LaneWatch {
       const [node = "", window = ""] = key.split("\u0000");
       if (!this.#online(node)) continue;
       if (!this.#alive(node, window)) { this.#open.delete(key); this.#lostStalls.delete(key); continue; }
-      const turn = this.#tracks.get(key)?.turn ?? null;
+      const track = this.#tracks.get(key);
       const failedAt = this.#failed.get(key);
-      if ((turn !== null && turn.at >= s.busySince - LOST_TURN_SKEW_MS) || (failedAt !== undefined && failedAt >= s.busySince - LOST_TURN_SKEW_MS) || turn === null) {
+      const covered = track !== undefined && track.turn !== null && track.receivedAt >= s.busySince - LOST_TURN_SKEW_MS;
+      const failed = failedAt !== undefined && failedAt >= s.busySince - LOST_TURN_SKEW_MS;
+      if (covered || failed || track === undefined || track.turn === null) {
         s.reported = true;
         continue;
       }
       const stalls = (this.#lostStalls.get(key) ?? 0) + 1;
-      let made: LaneEvent | null;
       try {
-        made = this.#raise({
+        this.#raise({
           v: 1, t: "lane", event: "stale", node, window, lane: window, at: now,
           sessionId: s.sessionId, reason: "no_turn_end", since: s.idleSince, stalls,
         });
@@ -340,7 +346,6 @@ export class LaneWatch {
       }
       this.#lostStalls.set(key, stalls);
       s.reported = true;
-      if (made) this.#nudgeLane(node, window, stalls, s.idleSince, lostTurnNudgeText(s.idleSince, now));
     }
   }
 
@@ -376,7 +381,10 @@ export class LaneWatch {
 
   #track(key: string): Track {
     let t = this.#tracks.get(key);
-    if (!t) { t = { turn: null, activity: null, needsInput: null, recent: [], seenAt: Number.NEGATIVE_INFINITY }; this.#tracks.set(key, t); }
+    if (!t) {
+      t = { turn: null, activity: null, needsInput: null, recent: [], seenAt: Number.NEGATIVE_INFINITY, receivedAt: Number.NEGATIVE_INFINITY };
+      this.#tracks.set(key, t);
+    }
     return t;
   }
 
@@ -407,6 +415,7 @@ export class LaneWatch {
   #ended(key: string, le: LaneEvent): void {
     const t = this.#track(key);
     if (t.turn !== null && le.at < t.turn.at) return;
+    t.receivedAt = this.#now();
     const end = turnEndOf(le);
     t.turn = end;
     t.seenAt = Math.max(t.seenAt, le.at);
@@ -417,14 +426,6 @@ export class LaneWatch {
       : last !== null ? { first: last, last } : null;
     if (t.needsInput && t.needsInput.at <= end.at) t.needsInput = null;
   }
-}
-
-// What the lane reads when its turn ended and the fleet never got that end: how long ago, and the line to finish with.
-export function lostTurnNudgeText(since: number, now: number): string {
-  const ago = minutes(now - since);
-  return `[fleet] Your last turn ended ${ago} min ago, but the fleet never received its end, so nothing has been reported from it. `
-    + "Check where it stands now and carry on if you can. Then start your answer with one line: "
-    + "STATUS: DONE, STATUS: BLOCKED, STATUS: NEEDS DECISION, or STATUS: WAITING <on what> for <N> min.";
 }
 
 // What the lane reads: when its turn ended and on what it waited, that nothing came since, and the line to end with.
