@@ -81,6 +81,15 @@ describe("proofBlock", () => {
   });
 });
 
+describe("a stand-in forge", () => {
+  it("proofBlock says so when the hub read the references from a stand-in forge", () => {
+    const v = view({ brief: null });
+    expect(proofBlock({ ...v, standIn: true })[0]).toBe("  (read from a stand-in forge, not GitHub)");
+    expect(proofBlock({ ...v, standIn: false }).join("\n")).not.toContain("stand-in");
+    expect(proofBlock(v).join("\n")).not.toContain("stand-in");
+  });
+});
+
 describe("lintWhy", () => {
   it("nothing to warn about with no tokens; a word like defaced is not one, and a token needs a digit", () => {
     expect(lintWhy("read the diff and the tests", view({ brief: null }), [])).toEqual([]);

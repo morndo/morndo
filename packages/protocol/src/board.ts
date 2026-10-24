@@ -23,7 +23,7 @@ export const ProofBriefSchema = z.object({
 });
 export const RefResultSchema = z.object({ ref: text(), state: z.enum(REF_STATES), detail: z.nullable(text()), checkedAt: count() });
 export const ProofViewSchema = z.object({
-  rev: z.nullable(z.int().check(z.gte(1))), brief: z.nullable(ProofBriefSchema), results: z.array(RefResultSchema), mode: z.enum(PROOF_MODES),
+  rev: z.nullable(z.int().check(z.gte(1))), brief: z.nullable(ProofBriefSchema), results: z.array(RefResultSchema), mode: z.enum(PROOF_MODES), standIn: z.boolean(),
   state: z.object({ kind: z.enum(PROOF_KINDS), green: count(), total: count(), accepts: z.boolean(), line: text() }),
 });
 export type ProofView = z.output<typeof ProofViewSchema>;

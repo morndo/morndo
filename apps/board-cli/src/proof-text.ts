@@ -6,7 +6,7 @@ import { MARK, WORD, parseProofRef, type MergeRecord, type ProofBrief, type RefR
 
 // What the hub answers a read with (proof-service's view), as this CLI reads it: the state's line is all the text
 // needs, so a newer hub's extra fields pass through unheard.
-export type ProofView = { rev: number | null; brief: ProofBrief | null; results: readonly RefResult[]; state: { line: string } };
+export type ProofView = { rev: number | null; brief: ProofBrief | null; results: readonly RefResult[]; standIn?: boolean; state: { line: string } };
 
 // One line of brief text: newlines and runs of whitespace collapse so a lane cannot start its own line.
 const oneLine = (text: string) => text.replace(/\s+/g, " ").trim();
@@ -25,6 +25,12 @@ const rowsBy = (results: readonly RefResult[]): ReadonlyMap<string, RefResult> =
 // something, one line per reference with its mark and its detail or its word, the lane's attested checks as its word
 // (never as verified, B14), and `noCode` when the task changed no repository.
 export function proofBlock(view: ProofView): string[] {
+  const body = proofLines(view);
+  // A scratch hub that reads a stand-in forge says so first: its green is not GitHub's.
+  return view.standIn === true ? ["  (read from a stand-in forge, not GitHub)", ...body] : body;
+}
+
+function proofLines(view: ProofView): string[] {
   if (view.brief === null) return [`  Proof: ${view.state.line}`];
   const b = view.brief;
   const rows = rowsBy(view.results);

@@ -1,7 +1,7 @@
 // The proof gate's own settings (ADR-0035 step 3): the mode, the repositories the hub reads, and the forge credential
 // (optional; a value does appear in these assertions, built at runtime so none sits in the source).
 import { describe, expect, it } from "vitest";
-import { loadConfig } from "../src/config.ts";
+import { loadConfig, standInNotice } from "../src/config.ts";
 
 const TOKEN = ["forge", "token", "for", "tests"].join("-");
 
@@ -55,4 +55,13 @@ describe("the proof gate settings", () => {
       MORNDO_GITHUB_TOKEN_FILE: "/run/secrets/forge-read",
     })).toThrow(msg);
   });
+
+  it("a stand-in forge is announced at start: the notice names the address and says it is not GitHub", () => {
+    expect(standInNotice(loadConfig({}))).toBeNull();
+    const notice = standInNotice(loadConfig({ MORNDO_FORGE_URL: "http://127.0.0.1:18999" }));
+    expect(notice).toContain("http://127.0.0.1:18999");
+    expect(notice).toContain("stand-in forge");
+    expect(notice).toContain("not from GitHub");
+  });
 });
+

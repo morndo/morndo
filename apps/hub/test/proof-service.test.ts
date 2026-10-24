@@ -658,6 +658,20 @@ describe("verifying (B14, B15)", () => {
   });
 });
 
+describe("a stand-in forge is shown, not hidden (B14)", () => {
+  it("the proof view says whether its references were read from a stand-in forge", async () => {
+    const store = new Store(tempDir());
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
+    const real = new ProofService({ store, board, now: () => NOW });
+    expect(real.view("T-9")).toBeNull();
+    atReview(board);
+    expect(real.view("T-1")?.standIn).toBe(false);
+    const standIn = new ProofService({ store, board: new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW }), now: () => NOW, standIn: true });
+    expect(standIn.view("T-1")?.standIn).toBe(true);
+    store.close();
+  });
+});
+
 describe("a Done task is a snapshot (B13, B16)", () => {
   const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
   const greenForge = (): ForgeChecks => ({

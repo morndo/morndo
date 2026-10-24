@@ -16,7 +16,7 @@ import type { BoardResult, BoardService } from "./board-service.ts";
 // What the card shows of one task's proof (B15): the brief that still counts, its rows and the one line. No brief:
 // `rev` and `brief` null, the no_brief line.
 // `mode`: the gate's mode, so a reader (the panel's Accept button) says only what the gate would do.
-export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; mode: ProofMode; state: ProofState };
+export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; mode: ProofMode; standIn: boolean; state: ProofState };
 
 export class ProofService {
   #store: Store;
@@ -26,18 +26,20 @@ export class ProofService {
   #mode: ProofMode;
   #allowedRepos: readonly string[];
   #authenticated: boolean;
+  #standIn: boolean;                             // its references are read from a stand-in forge (MORNDO_FORGE_URL), not GitHub
   #chain = new Map<string, Promise<void>>();     // every run for a task, one after another (the timer's included)
   #whole = new Map<string, Promise<void>>();     // a whole-brief check out or waiting: what a refresh joins
   #verifyAll = new Map<string, Promise<void>>(); // the one that re-reads every reference: what a second verify joins
   #running = new Set<Promise<void>>();           // every check begun, for idle()
 
-  constructor(p: { store: Store; board: BoardService; now?: () => number; forge?: ForgeChecks | null; mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean }) {
+  constructor(p: { store: Store; board: BoardService; now?: () => number; forge?: ForgeChecks | null; mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean; standIn?: boolean }) {
     this.#store = p.store; this.#board = p.board; this.#now = p.now ?? Date.now;
     this.#forge = p.forge ?? null; this.#mode = p.mode ?? "off";
     this.#allowedRepos = p.allowedRepos ?? [MORNDO_REPO];
     // `authenticated` only picks the timer's cadence (a hub with a credential may ask the forge more often); the checks
     // themselves are the same either way.
     this.#authenticated = p.authenticated ?? false;
+    this.#standIn = p.standIn ?? false;
     this.#board.attachProof({ gate: key => this.gate(key), refresh: key => this.refresh(key) });
     this.#board.onEvent(e => this.onBoardEvent(e));
   }
@@ -78,10 +80,10 @@ export class ProofService {
   view(key: string): ProofView | null {
     if (this.#store.task(key) === null) return null;
     const current = currentBrief(this.#store.taskEvents(key));
-    if (current === null) return { rev: null, brief: null, results: [], mode: this.#mode, state: proofOf(null, []) };
+    if (current === null) return { rev: null, brief: null, results: [], mode: this.#mode, standIn: this.#standIn, state: proofOf(null, []) };
     const results = this.#store.proofResultsOf(key, current.rev);
     const merges = this.#mergesAsOf(key);
-    return { rev: current.rev, brief: current.brief, results, mode: this.#mode, state: proofOf(current.brief, results, merges) };
+    return { rev: current.rev, brief: current.brief, results, mode: this.#mode, standIn: this.#standIn, state: proofOf(current.brief, results, merges) };
   }
 
   // The one line per task in review (B15), for the board view the agents read: keyed by task, `no brief` included, so

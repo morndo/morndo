@@ -77,6 +77,7 @@ describe("the proof view on the wire (ADR-0035 step 5)", () => {
       { ref: CI, state: "green", detail: null, checkedAt: 2 },
     ],
     mode: "on",
+    standIn: false,
     state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" },
   };
 
@@ -93,10 +94,12 @@ describe("the proof view on the wire (ADR-0035 step 5)", () => {
     expect(parseBody(ProofViewSchema, {
       rev: null, brief: null, results: [],
       mode: "on",
+      standIn: false,
       state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" },
     })).toEqual({
       rev: null, brief: null, results: [],
       mode: "on",
+      standIn: false,
       state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" },
     });
   });

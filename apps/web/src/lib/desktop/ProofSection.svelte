@@ -34,6 +34,7 @@
   <section class="proof" data-proof aria-label="Proof">
     <h3>Proof</h3>
     <p data-proof-line class="line {lineClass}">{proof.state.line}</p>
+    {#if proof.standIn}<p data-proof-standin class="muted standin">Read from a stand-in forge, not GitHub</p>{/if}
     {#if !proof.brief}
       <p class="muted no-brief">No brief yet. The lane files one with morndo-board brief.</p>
     {:else}
@@ -81,6 +82,7 @@
   .line.muted { color: var(--muted); }
   .muted { color: var(--muted); font: 400 12px/18px var(--font); }
   .no-brief { margin: 0; }
+  .standin { margin: 0; }
   [data-proof-summary] { margin: 0; font: 400 14px/21px var(--font); }
   .brief-dl { margin: 0; display: grid; gap: 4px; font: 400 13px/20px var(--font); }
   .brief-dl div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 8px; }

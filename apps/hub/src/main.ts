@@ -2,7 +2,7 @@
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
 import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, type AccessPolicy } from "@morndo/domain";
-import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk } from "./config.ts";
+import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
 import { Store } from "./adapters/store.ts";
 import { GithubChecks } from "./adapters/github-checks.ts";
 import { readTokenFile } from "./adapters/token-file.ts";
@@ -338,12 +338,14 @@ switch (cmd) {
     // pending or was rate-limited; on stop the timer is cleared and the checks in flight are awaited — registered after
     // the store's close, so they end before it runs.
     const githubToken = readTokenFile(config.githubTokenFile ?? null, m => log.warn(m));
+    const standIn = standInNotice(config);
+    if (standIn !== null) log.warn(standIn);
     const proof = new ProofService({
       store, board, forge: new GithubChecks({
         token: githubToken,
         ...(config.forgeUrl ? { baseUrl: config.forgeUrl } : {}),
       }), mode: config.proofGate ?? "warn",
-      allowedRepos: config.proofRepos ?? [MORNDO_REPO], authenticated: githubToken !== null,
+      allowedRepos: config.proofRepos ?? [MORNDO_REPO], authenticated: githubToken !== null, standIn: standIn !== null,
     });
     const proofTimer = setInterval(() => { void proof.tick().catch((e: unknown) => log.error("proof: the timer pass failed", e)); }, 60_000);
     proofTimer.unref();

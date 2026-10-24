@@ -90,6 +90,7 @@ try {
     const panel = page.locator('[data-task-panel="T-1"]');
     await panel.locator("[data-proof-line]").waitFor({ timeout: 10_000 });
     assert((await panel.locator("[data-proof-line]").innerText()) === proofLine, "the panel line differs from the CLI");
+    assert((await panel.locator("[data-proof-standin]").innerText()) === "Read from a stand-in forge, not GitHub", "a stand-in forge should be marked in the panel");
     const refs = panel.locator("[data-proof-ref]");
     assert(await refs.count() === 2, "expected two reference rows");
     assert(await panel.locator('[data-proof-ref][data-state="red"]').count() === 1, "expected one red reference");

@@ -423,7 +423,7 @@ describe("the brief on the agents' route (B13)", () => {
     const r = await agent(workerToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief: { ...brief, refs: ["not a ref"] } });
     expect(r.status).toBe(400);                                // bad_ref falls through boardProblemStatus's default
     expect(await json(r)).toEqual({ error: "bad_ref", detail: "not a ref: a reference is owner/repo#PR@sha or owner/repo@sha:check,check" });
-    expect(hub.proof.view("T-1")).toEqual({ rev: null, brief: null, results: [], mode: "off", state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" } });
+    expect(hub.proof.view("T-1")).toEqual({ rev: null, brief: null, results: [], mode: "off", standIn: false, state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" } });
   });
 });
 
@@ -483,6 +483,7 @@ describe("the proof on the agents' reads", () => {
         { ref: CI, state: "green", detail: null, checkedAt: now },
       ],
       mode: "on",
+      standIn: false,
       state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" },
     });
     const board = await json(await m.get("/api/agent/board"));

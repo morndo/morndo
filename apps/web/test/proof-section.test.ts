@@ -110,4 +110,16 @@ describe("the panel's proof section (ADR-0035)", () => {
       expect(await pending.innerText()).toContain("acme/shop@3e9d1a7:ci,lint");
     } finally { await tab.close(); }
   });
+
+  it("a stand-in forge is marked, and a real one is not", { timeout: 30_000 }, async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
+    try {
+      await tab.goto(web.url);
+      const marked = cell(tab, "stand-in");
+      await marked.locator("[data-proof-line]").waitFor();
+      expect(await marked.locator("[data-proof-standin]").innerText()).toBe("Read from a stand-in forge, not GitHub");
+      expect(await cell(tab, "verified").locator("[data-proof-standin]").count()).toBe(0);
+    } finally { await tab.close(); }
+  });
 });
+

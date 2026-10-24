@@ -160,6 +160,12 @@ function proofGateOf(env: NodeJS.ProcessEnv): ProofMode {
   return v;
 }
 
+// The sentence the hub logs at start when its references are read from a stand-in forge (MORNDO_FORGE_URL): what it
+// reads is not GitHub, so nobody mistakes a scratch hub's green for a real one.
+export function standInNotice(config: Config): string | null {
+  return config.forgeUrl ? `MORNDO_FORGE_URL names a stand-in forge (${config.forgeUrl}): proof references are read from it, not from GitHub` : null;
+}
+
 // MORNDO_FORGE_URL: unset or empty is none; otherwise an http(s) origin with no path beyond "/" and no credentials.
 function forgeUrlOf(env: NodeJS.ProcessEnv): string | null {
   const v = env.MORNDO_FORGE_URL;
