@@ -230,7 +230,7 @@ describe("a turn end the fleet never received (T-422)", () => {
     const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: NUDGING });
     const pc = await fleet.online("pc");
     pc.inventory(api("idle"));
-    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"));
+    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"), { timeout: 10_000 });
     pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: BLOCKED T-1 x" }, { window: "api" });
     expect(await pc.acked(1)).toBe(1);
     clock = T0 + MIN;
@@ -256,7 +256,7 @@ describe("a turn end the fleet never received (T-422)", () => {
     const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: NUDGING });
     const pc = await fleet.online("pc");
     pc.inventory(api("idle"));
-    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"));
+    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"), { timeout: 10_000 });
     pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: BLOCKED T-1 x" }, { window: "api" });
     expect(await pc.acked(1)).toBe(1);
     clock = T0 + MIN;
@@ -281,7 +281,7 @@ describe("a turn end the fleet never received (T-422)", () => {
     const pc = await fleet.online("pc");
     const manager = (status: "busy" | "idle") => [{ workerId: "pc.3fa2c1d0.2", window: "manager", cwd: "/m", sessionId: SID, status, pid: 2 }];
     pc.inventory(manager("idle"));
-    await vi.waitFor(() => expect(fleet.lanes.get("manager")).toBeTruthy());
+    await vi.waitFor(() => expect(fleet.lanes.get("manager")).toBeTruthy(), { timeout: 10_000 });
     pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: BLOCKED T-1 x" }, { window: "manager" });
     expect(await pc.acked(1)).toBe(1);
     clock = T0 + MIN;

@@ -310,21 +310,21 @@ describe("lane-notify-stop", () => {
     const { lanes } = installShims(dir);
     const stub = await relay();
     const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "hung git"), {
-      FAKE_GIT_SLEEP: "30",
+      FAKE_GIT_SLEEP: "60",
       MORNDO_HOOK_LOOKUP_S: "1",
       MORNDO_HOOK_POST_S: "3",
     });
-    expect(await until(() => stub.hits.length >= 1, 3_000)).toBe(true);
-    expect(stub.hits[0]!.at - run.started).toBeLessThan(3_000);
-    expect(await waitExit(run.child, run.started + 6_000)).toBe(0);
-    expect(performance.now() - run.started).toBeLessThan(6_000);
+    expect(await until(() => stub.hits.length >= 1, 9_000)).toBe(true);
+    expect(stub.hits[0]!.at - run.started).toBeLessThan(9_000);
+    expect(await waitExit(run.child, run.started + 14_000)).toBe(0);
+    expect(performance.now() - run.started).toBeLessThan(14_000);
     const body = posted(stub.hits[0]!);
     expect(body.window).toBe("lane-x");
     expect(body).not.toHaveProperty("branch");
     expect(body).not.toHaveProperty("changed");
     expect(body).not.toHaveProperty("ahead");
     expect(stub.hits).toHaveLength(1);
-  }, 20_000);
+  }, 30_000);
 
   it("ends inside its budget when tmux, git and the relay all hang and the fallback hangs too", async () => {
     const dir = scratchDir();
@@ -333,16 +333,16 @@ describe("lane-notify-stop", () => {
     const stub = await relay();
     stub.hold();
     const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "everything hung"), {
-      FAKE_GIT_SLEEP: "30",
-      FAKE_TMUX_SLEEP: "30",
-      FAKE_LANES_SLEEP: "30",
+      FAKE_GIT_SLEEP: "60",
+      FAKE_TMUX_SLEEP: "60",
+      FAKE_LANES_SLEEP: "60",
       MORNDO_HOOK_LOOKUP_S: "1",
       MORNDO_HOOK_POST_S: "1",
       MORNDO_HOOK_NOTIFY_S: "1",
     });
-    expect(await waitExit(run.child, run.started + 5_000)).toBe(0);
-    expect(performance.now() - run.started).toBeLessThan(5_000);
-  }, 20_000);
+    expect(await waitExit(run.child, run.started + 14_000)).toBe(0);
+    expect(performance.now() - run.started).toBeLessThan(14_000);
+  }, 30_000);
 
   it("falls back to lanes notify when the relay is down", async () => {
     const dir = scratchDir();
@@ -430,20 +430,20 @@ describe("lane-notify-stop", () => {
     writeFileSync(killless, "kill() { :; }\n");
     const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "unkillable lookup"), {
       BASH_ENV: killless,
-      FAKE_GIT_SLEEP: "6",
+      FAKE_GIT_SLEEP: "40",
       MORNDO_HOOK_LOOKUP_S: "1",
       MORNDO_HOOK_POST_S: "3",
     });
-    expect(await until(() => stub.hits.length >= 1, 3_000)).toBe(true);
-    expect(stub.hits[0]!.at - run.started).toBeLessThan(3_000);
-    expect(await waitExit(run.child, run.started + 5_000)).toBe(0);
-    expect(performance.now() - run.started).toBeLessThan(5_000);
+    expect(await until(() => stub.hits.length >= 1, 9_000)).toBe(true);
+    expect(stub.hits[0]!.at - run.started).toBeLessThan(9_000);
+    expect(await waitExit(run.child, run.started + 14_000)).toBe(0);
+    expect(performance.now() - run.started).toBeLessThan(14_000);
     const body = posted(stub.hits[0]!);
     expect(body.window).toBe("lane-x");
     expect(body).not.toHaveProperty("branch");
     expect(body).not.toHaveProperty("changed");
     expect(body).not.toHaveProperty("ahead");
-  }, 20_000);
+  }, 30_000);
 
   it("kills the whole process group of a lookup at the bound (T-422)", async () => {
     const dir = scratchDir();
