@@ -28,11 +28,13 @@ export class AgentAccess {
   issue(name: string, role: AgentToken["role"], scopes: readonly string[] = []): { token: AgentToken; secret: string } {
     for (const s of scopes) if (!(AGENT_SCOPES as readonly string[]).includes(s)) throw new TypeError(`an agent token's scope is one of: ${AGENT_SCOPES.join(", ")}`);
     const secret = `${TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
-    const token: AgentToken = { id: randomUUID(), name: name.trim().slice(0, 80) || role, role, scopes: [...new Set(scopes)], secretHash: hash(secret), createdAt: this.#now(), lastUsedAt: null, revokedAt: null };
+    const token: AgentToken = { id: randomUUID(), name: name.trim().slice(0, 80) || role, role, scopes: [...new Set(scopes)], secretHash: hash(secret), createdAt: this.#now(), lastUsedAt: null, revokedAt: null, unboundCount: 0, lastUnboundAt: null };
     this.#store.saveAgentToken(token);
     return { token, secret };
   }
   list(): AgentToken[] { return this.#store.agentTokens(); }
+  // A usage reading posted with a plain worker token, counted once per request.
+  noteUnbound(id: string): void { this.#store.noteUnboundReading(id, this.#now()); }
   revoke(id: string): boolean {
     const t = this.#store.agentToken(id);
     if (!t || t.revokedAt !== null) return false;

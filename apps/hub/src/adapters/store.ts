@@ -36,7 +36,8 @@ export type BriefRecord = {
 // An agent token (ADR-0015, B1): the credential the manager's lane or a worker's changes the board with. Only its hash
 // is kept; `role` says whether it acts as the manager or as the worker lane it names on each call, and `scopes` (U15)
 // the closed list's words of what it may do beyond its role — none for every token minted before the list.
-export type AgentToken = { id: string; name: string; role: "manager" | "worker"; scopes: readonly string[]; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null };
+// `unboundCount` is how many usage readings a plain worker token posted; `lastUnboundAt` is when the last one was.
+export type AgentToken = { id: string; name: string; role: "manager" | "worker"; scopes: readonly string[]; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null; unboundCount: number; lastUnboundAt: number | null };
 
 // Usage S2 (plan 4.2 to 4.5): what one row of usage_sources holds — the source's health, its last reading and the one
 // before it (the sameAsPrevious rule's memory), and the cleaned hint of its last failure. `previous` keeps only what
@@ -654,8 +655,9 @@ export class Store {
   }
 
   // Agent tokens (ADR-0015, B1). `scopes` (U15): the closed list's names, comma-separated in the row, empty: none.
+  // The unbound counters are written for a new row and left alone on conflict: a revoke saves the token again.
   saveAgentToken(t: AgentToken) {
-    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, scopes, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @scopes, @createdAt, @lastUsedAt, @revokedAt)
+    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, scopes, created_at, last_used_at, revoked_at, unbound_count, last_unbound_at) VALUES (@id, @name, @role, @secretHash, @scopes, @createdAt, @lastUsedAt, @revokedAt, @unboundCount, @lastUnboundAt)
       ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at, scopes = excluded.scopes`)
       .run({ ...t, scopes: [...t.scopes].join(",") });
   }
@@ -673,6 +675,10 @@ export class Store {
   // Touched at most once a minute per token: a lane polls the board often.
   touchAgentToken(id: string, at: number) {
     this.db.prepare("UPDATE agent_tokens SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)").run(at, id, at - 60_000);
+  }
+  // One usage reading posted with a plain worker token.
+  noteUnboundReading(id: string, at: number) {
+    this.db.prepare("UPDATE agent_tokens SET unbound_count = unbound_count + 1, last_unbound_at = ? WHERE id = ?").run(at, id);
   }
 
   // Usage (ADR-0016): the latest state of each account, whole, so the dashboard is as it was after a restart.
@@ -912,6 +918,7 @@ const agentTokenFrom = (r: Row): AgentToken => ({
   id: r.id as string, name: r.name as string, role: r.role as AgentToken["role"], secretHash: r.secret_hash as string,
   scopes: ((r.scopes as string | null) ?? "").split(",").filter(s => s !== ""),
   createdAt: r.created_at as number, lastUsedAt: (r.last_used_at as number | null) ?? null, revokedAt: (r.revoked_at as number | null) ?? null,
+  unboundCount: (r.unbound_count as number | null) ?? 0, lastUnboundAt: (r.last_unbound_at as number | null) ?? null,
 });
 const mergeFrom = (r: Row): MergeRecord => ({
   repo: r.repo as string, sha: r.sha as string, at: r.at as number, by: r.by as string, override: (r.override as string | null) ?? null,

@@ -460,8 +460,16 @@ export function startHttp(p: {
     // has its own route above; a reading that names it is refused.
     if (path === "/api/agent/usage/readings" && method === "POST") {
       if (!p.usage) return json(res, 404, { error: "usage_off" });
+      // A plain worker token is counted once per reading it posts that is accepted (warn, the default) or refused for
+      // want of the scope (enforce, which stores nothing). A body the hub cannot read is not counted.
+      const unbound = who.token.role !== "manager" && !who.token.scopes.includes("usage-pool");
+      if (unbound && (p.config.usageReadingsGate ?? "warn") === "enforce") {
+        p.board.agents.noteUnbound(who.token.id);
+        return json(res, 403, { error: "scope_required", message: "usage readings need a manager token or a worker token with the usage-pool scope (morndo agent-token new <name> --role worker --scope usage-pool)" });
+      }
       const accountHeader = req.headers["x-morndo-account"];
       const r = p.usage.reading(await readBody(req, UsageReadingsBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
+      if (unbound && r.ok) p.board.agents.noteUnbound(who.token.id);
       return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
     }
     // A node's ask for a lease before a rationed read (S5, plan 4.4, U16): granted with an opaque id and its expiry,

@@ -36,8 +36,8 @@ const poolLines = [
   { name: "max-2", email: "lin@example.test", org: "personal_org", orgId: "org-0002", plan: "max", tier: "default_claude_max_20x" },
 ].map(l => JSON.stringify(l)).join("\n") + "\n";
 
-const mint = (env: NodeJS.ProcessEnv, role: "worker" | "manager" = "worker") =>
-  execFileSync(process.execPath, ["--no-warnings", HUB_MAIN, "agent-token", "new", role === "manager" ? "manager" : "lanes", "--role", role], { env, encoding: "utf8" }).split("\n")[0]?.trim() ?? "";
+const mint = (env: NodeJS.ProcessEnv, role: "worker" | "manager" = "worker", scopes: string[] = []) =>
+  execFileSync(process.execPath, ["--no-warnings", HUB_MAIN, "agent-token", "new", role === "manager" ? "manager" : scopes.length > 0 ? "collector" : "lanes", "--role", role, ...scopes.flatMap(s => ["--scope", s])], { env, encoding: "utf8" }).split("\n")[0]?.trim() ?? "";
 // A status line's JSON as Claude Code gives it (resets_at in epoch seconds), posted as a lane's status line would.
 const statusLine = (session: string, five: number | null, week: number | null, ctx: number) => ({
   cwd: "/w", session_id: session, model: { id: "claude-opus-5-5", display_name: "Opus" }, version: "2.1.295", context_window: { used_percentage: ctx },
@@ -48,18 +48,22 @@ const statusLine = (session: string, five: number | null, week: number | null, c
 });
 
 try {
-  office = await startOffice("home", { MORNDO_POOL_USAGE: poolFile });
+  // T-430: the readings route is a manager's or the usage-pool scope's; this office runs the gate in enforce.
+  office = await startOffice("home", { MORNDO_POOL_USAGE: poolFile, MORNDO_USAGE_READINGS_GATE: "enforce" });
   const token = mint(office.env);
   assert(token.startsWith("mat_"), "the console didn't print the token");
   const managerToken = mint(office.env, "manager");
   assert(managerToken.startsWith("mat_"), "the console didn't print the manager token");
+  const poolToken = mint(office.env, "worker", ["usage-pool"]);
+  assert(poolToken.startsWith("mat_"), "the console didn't print the usage-pool token");
   const post = (account: string, lane: string, body: unknown) => fetch(`${office!.base}/api/agent/usage`, {
     method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": lane, "x-morndo-account": account }, body: JSON.stringify(body),
   });
   // A usage reading a source posts (U14), epoch seconds on the wire; and a seat's limit hit (a manager's route).
-  const readings = (account: string, body: unknown) => fetch(`${office!.base}/api/agent/usage/readings`, {
-    method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": "collector", "x-morndo-account": account }, body: JSON.stringify(body),
+  const readingsAs = (secret: string, account: string, body: unknown) => fetch(`${office!.base}/api/agent/usage/readings`, {
+    method: "POST", headers: { authorization: `Bearer ${secret}`, "content-type": "application/json", "x-morndo-lane": "collector", "x-morndo-account": account }, body: JSON.stringify(body),
   });
+  const readings = (account: string, body: unknown) => readingsAs(poolToken, account, body);
   const limit = (account: string, body: unknown) => fetch(`${office!.base}/api/agent/usage/limit`, {
     method: "POST", headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json", "x-morndo-lane": "collector" }, body: JSON.stringify({ account, ...body }),
   });
@@ -174,6 +178,9 @@ try {
   });
 
   await check("shows the four states and a title from the cadence (AT-12): available, stale, unavailable", async () => {
+    // A lane's plain worker token is refused on the readings route (T-430, enforce); the collector's usage-pool token is not.
+    const plain = await readingsAs(token, "fresh", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [fiveHour(99)] });
+    assert(plain.status === 403, `a plain worker token's reading was not refused: ${plain.status}`);
     // (a) `fresh`: a fresh app-server reading — available, meters as usual.
     assert((await readings("fresh", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [fiveHour(42)] })).status === 200, "post failed");
     const fresh = page.locator('[data-account="fresh"]');
