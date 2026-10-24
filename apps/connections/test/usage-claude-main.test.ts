@@ -2,8 +2,9 @@
 // random port) and a fake CLI (a node script a test writes, never the real claude). It polls the HUB, never the
 // provider: only a granted lease spawns a read, and the reading or failure carries the lease id. The token is read
 // from its file and never printed. Synthetic data only.
+import { spawn } from "node:child_process";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -135,5 +136,72 @@ describe("the collector's one pass (plan 4.4)", () => {
     const { out, err } = await pass();
     expect(out).not.toContain(TOKEN);
     expect(err).not.toContain(TOKEN);
+  });
+});
+
+// The fix round (2026-10-24, finding 4): the collector dies with its reads — SIGTERM, SIGINT and exit each kill every
+// active child group, so a collector killed mid-read leaves no child running. Red against the code before the fix: a
+// signal ends the collector alone and the detached read (and its grandchild) lives on.
+describe("the collector's death takes its reads with it (finding 4)", () => {
+  // A fake CLI that records its own pid, spawns a grandchild that outlives it, and then sleeps: mid-read, forever.
+  const GROUP_CLI = `
+import { appendFileSync } from "node:fs";
+import { join } from "node:path";
+import { spawn } from "node:child_process";
+const dir = import.meta.dirname;
+appendFileSync(join(dir, "self.pid"), String(process.pid) + "\\n");
+const kid = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+appendFileSync(join(dir, "group.pid"), String(kid.pid) + "\\n");
+await new Promise(r => setTimeout(r, 60000));
+`;
+
+  const waitFor = async (ok: () => boolean, ms: number): Promise<boolean> => {
+    for (let left = ms; left > 0; left -= 100) {
+      if (ok()) return true;
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    return ok();
+  };
+
+  const killedMidRead = async (signal: NodeJS.Signals): Promise<void> => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-usage-collector-death-"));
+    const bin = join(dir, "fake-claude.mjs");
+    writeFileSync(bin, GROUP_CLI);
+    writeFileSync(join(dir, "token"), `${TOKEN}\n`);
+    const config = join(dir, "usage-claude.json");
+    writeFileSync(config, `${JSON.stringify({ hub: hub.base, tokenFile: join(dir, "token"), node: "pc", accounts: { "seat-a": { configDir: "/cfg/seat-a" } } })}\n`);
+    const main = join(import.meta.dirname, "../src/adapters/usage-claude-main.ts");
+    const collector = spawn(process.execPath, [main, "--once"], {
+      env: { ...process.env, MORNDO_USAGE_CLAUDE_CONFIG: config, MORNDO_CLAUDE_BIN: bin },
+      stdio: "ignore",
+    });
+    let self = 0;
+    try {
+      const started = await waitFor(() => existsSync(join(dir, "group.pid")), 15_000);
+      expect(started).toBe(true);                     // the read began, and its grandchild with it
+      self = Number(readFileSync(join(dir, "self.pid"), "utf8").trim());
+      const kid = Number(readFileSync(join(dir, "group.pid"), "utf8").trim());
+      collector.kill(signal);
+      await new Promise<void>(resolve => {
+        const giveUp = setTimeout(resolve, 10_000);
+        collector.once("exit", () => { clearTimeout(giveUp); resolve(); });
+      });
+      const dead = await waitFor(() => {
+        try { process.kill(kid, 0); return false; } catch { return true; }
+      }, 5_000);
+      expect(dead).toBe(true);                        // the read's child died with the collector
+    } finally {
+      try { collector.kill("SIGKILL"); } catch { /* already gone */ }
+      if (self > 0) { try { process.kill(-self, "SIGKILL"); } catch { /* already gone */ } }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  };
+
+  it("a collector killed mid-read by SIGTERM leaves no child running", async () => {
+    await killedMidRead("SIGTERM");
+  });
+
+  it("a collector killed mid-read by SIGINT leaves no child running", async () => {
+    await killedMidRead("SIGINT");
   });
 });

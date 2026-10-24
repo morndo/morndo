@@ -2,7 +2,7 @@
 // the account's config directory, with no token variable in the child, its own process group killed at the timeout,
 // one read at a time on the node, and a per-account lock file a stale holder loses. The CLI here is a fake a test
 // writes into a temp directory (never the real claude binary), controlled by files beside it.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -165,6 +165,25 @@ describe("rationed on one node (AT-32, AT-41's lock)", () => {
     const refused = await readClaude({ account: "seat-a", configDir: "/cfg", bin: r.bin, now: () => at, lockDir: r.dir });
     expect(refused).toEqual({ ok: false, reason: "unreachable", retryAfterS: null, hint: null });
     expect(r.count("spawn.log")).toBe(1);        // still the one spawn of the stale case
+  });
+
+  // The fix round (2026-10-24, finding 4): the lock also records the child's pgid, and taking over a stale lock kills
+  // that group if it is alive, so a collector that died mid-read leaves nothing running. Red against the code before
+  // the fix: the lock names no group and a takeover kills nothing.
+  it("taking over a stale lock kills the group its pgid names, when that group is alive", async () => {
+    const kid = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore", detached: true });
+    const kidPid = kid.pid ?? -1;
+    if (kidPid <= 0) throw new Error("the grandchild never started");
+    try {
+      const at = Date.now();
+      writeFileSync(join(r.dir, "claude-usage-seat-a.lock"), `${JSON.stringify({ pid: process.pid, pgid: kidPid, startedAt: at - 211_000 })}\n`);
+      const out = await readClaude({ account: "seat-a", configDir: "/cfg", bin: r.bin, now: () => at, lockDir: r.dir });
+      expect(out.ok).toBe(true);                     // the stale lock was taken over all the same
+      await new Promise(resolve => setTimeout(resolve, 500));
+      expect(() => process.kill(kidPid, 0)).toThrow();   // the group the stale lock named died with the takeover
+    } finally {
+      try { process.kill(-kidPid, "SIGKILL"); } catch { /* already gone, or never the leader */ }
+    }
   });
 
   it("after signed_out no spawn until the fake's auth status says signed in", async () => {

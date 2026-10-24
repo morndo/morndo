@@ -1,0 +1,2 @@
+{"type":"system","subtype":"init","session_id":"fix-leak-2","cwd":"/tmp"}
+{"type":"result","subtype":"error","is_error":true,"num_turns":0,"result":"well Dave, the uuid 123e4567-e89b-12d3-a456-426614174000 broke the screen"}

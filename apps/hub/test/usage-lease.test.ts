@@ -67,6 +67,26 @@ describe("the lease policy on the book (AT-40)", () => {
     if (held.status === "denied") { expect(held.reason).toBe("cooldown"); expect(held.retryAfterMs).toBe(300_000); }
   });
 
+  // The fix round (2026-10-24, finding 3): retry_after_s 0 is a cooldown of a minute, not "no cooldown" — the floor is
+  // max(retry_after_s * 1000, 60 s) before the doubling. Red against the code before the fix: a 0 cools nothing.
+  it("a failure with retry_after_s 0 cools down 60 s and doubles on a second failure", () => {
+    const b = new LeaseBook(() => now);
+    const first = b.grant("seat-a", "claude-usage", null);
+    if (first.status !== "granted") throw new Error("grant denied");
+    b.complete(first.id, { ok: false, retryAfterS: 0 });
+    const held = b.grant("seat-a", "claude-usage", null);
+    expect(held.status).toBe("denied");
+    if (held.status === "denied") { expect(held.reason).toBe("cooldown"); expect(held.retryAfterMs).toBe(60_000); }
+    now += 61_000;
+    const second = b.grant("seat-a", "claude-usage", null);
+    expect(second.status).toBe("granted");
+    if (second.status !== "granted") return;
+    b.complete(second.id, { ok: false, retryAfterS: 0 });              // the same zero failure again: doubled
+    const doubled = b.grant("seat-a", "claude-usage", null);
+    expect(doubled.status).toBe("denied");
+    if (doubled.status === "denied") { expect(doubled.reason).toBe("cooldown"); expect(doubled.retryAfterMs).toBe(120_000); }
+  });
+
   it("two accounts at once are granted; a third concurrent lease is denied by the hub-wide cap", () => {
     const b = new LeaseBook(() => now);
     expect(b.grant("seat-a", "claude-usage", null).status).toBe("granted");
@@ -91,7 +111,9 @@ describe("the lease route", () => {
   let token: string;
   beforeEach(async () => {
     hub = await startInProcessHub({ now: () => now });
-    token = hub.agents.issue("lanes", "worker").secret;
+    // The fix round (2026-10-24, finding 1): the lease route is a manager's or the usage-pool scope's, so the lane's
+    // own token carries the scope. A pin changed with the finding: this was a bare worker token.
+    token = hub.agents.issue("lanes", "worker", ["usage-pool"]).secret;
   });
   afterEach(async () => { await hub.close(); });
 
@@ -118,5 +140,57 @@ describe("the lease route", () => {
     expect((await ask({ account: "", source: "claude-usage" })).status).toBe(400);
     expect((await ask({ account: "x".repeat(81), source: "claude-usage" })).status).toBe(400);
     expect((await ask({ account: "seat-a", source: "not-a-source" })).status).toBe(400);
+  });
+});
+
+// The fix round (2026-10-24, finding 1): a lease belongs to the token that took it. The route is a manager's or the
+// usage-pool scope's (the limit route's rule), and a reading that carries another token's lease id completes nothing —
+// no cache, no cooldown. Red against the code before the fix: any agent token may ask, and any token's reading ends
+// the lease.
+describe("the lease route's authority and the lease's owner (finding 1)", () => {
+  let hub: InProcessHub;
+  let pool = "";      // a worker token with the usage-pool scope: the collector's own shape
+  let bare = "";      // a worker token without it
+  let manager = "";
+  beforeEach(async () => {
+    hub = await startInProcessHub({ now: () => now });
+    pool = hub.agents.issue("lanes", "worker", ["usage-pool"]).secret;
+    bare = hub.agents.issue("lanes", "worker").secret;
+    manager = hub.agents.issue("manager", "manager").secret;
+  });
+  afterEach(async () => { await hub.close(); });
+
+  const ask = (token: string, account: string) =>
+    hub.post("/api/agent/usage/lease", { account, source: "claude-usage", node: "pc" }, { authorization: `Bearer ${token}`, "x-morndo-lane": "usage-claude" });
+  const reading = (token: string, account: string, body: Record<string, unknown>) =>
+    hub.post("/api/agent/usage/readings", { source: "claude-usage", node: "pc", captured_at: Math.floor(now / 1000), ...body },
+      { authorization: `Bearer ${token}`, "x-morndo-lane": "usage-claude", "x-morndo-account": account });
+  const grantOf = async (token: string, account: string): Promise<string> => {
+    const r = await ask(token, account);
+    expect(r.status).toBe(200);
+    const body = await r.json() as Record<string, unknown>;
+    expect(body.status).toBe("granted");
+    return body.lease_id as string;
+  };
+
+  it("a worker token without the usage-pool scope is refused 403 not_allowed; a manager's or a scoped one is answered", async () => {
+    const refused = await ask(bare, "seat-a");
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "not_allowed" });
+    expect((await ask(pool, "seat-a")).status).toBe(200);
+    expect((await ask(manager, "seat-b")).status).toBe(200);
+  });
+
+  it("a reading that carries another token's lease id completes nothing: no cache, no cooldown", async () => {
+    const leaseA = await grantOf(pool, "seat-a");
+    const good = await reading(bare, "seat-a", { lease_id: leaseA, windows: [{ id: "five_hour", used_percent: 10, resets_at: Math.floor((now + 6 * 3_600_000) / 1000), length_mins: 300 }] });
+    expect(good.status).toBe(200);
+    const again = await ask(pool, "seat-a");
+    expect(await again.json()).toEqual({ status: "denied", reason: "busy", retry_after_s: LEASE_TTL_MS / 1000 });   // the lease stands: no cache was set
+    const leaseB = await grantOf(pool, "seat-b");
+    const failed = await reading(bare, "seat-b", { lease_id: leaseB, failure: { reason: "unknown_screen", retry_after_s: 120 } });
+    expect(failed.status).toBe(200);
+    const after = await ask(pool, "seat-b");
+    expect(await after.json()).toEqual({ status: "denied", reason: "busy", retry_after_s: LEASE_TTL_MS / 1000 });   // and no cooldown was set
   });
 });

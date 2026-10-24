@@ -1,6 +1,7 @@
 // The headless Claude usage report, mapped (AT-31, AT-38's claude cases; plan 4.4): the kinds the report names, the
 // windows they become, the null report that is no scope and never 0%, the bad values dropped, and every failure
 // class. The fixtures under fixtures/usage/claude are made-up report lines, never a real account's values.
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -43,21 +44,36 @@ describe("maps the headless report (AT-31)", () => {
     expect(r.windows.map(w => w.id)).toEqual(["Weekly (claude-sonnet-4-5)"]);
   });
 
-  it("a changed shape is unknown_screen, with a redacted head of the last line: no token, no URL", () => {
-    const r = parseClaudeReport(fixture("changed-shape"));
+  // The fix round (2026-10-24, finding 5): an unknown_screen hint is never free text from the CLI. It is the fixed
+  // shape `unknown shape ${hash}`, the hash the first 8 hex characters of the sha256 of the last stdout line's first
+  // 120 characters. Red against the code before the fix: the hint is the redacted head, free text still.
+  it("a changed shape is unknown_screen, with the fixed hashed hint: no token, no URL, no free text", () => {
+    const lines = fixture("changed-shape");
+    const r = parseClaudeReport(lines);
     expect(r.ok).toBe(false);
     if (r.ok) return;
     expect(r.reason).toBe("unknown_screen");
-    expect(r.hint).toBeTruthy();
+    expect(r.hint).toBe(`unknown shape ${createHash("sha256").update(lines[lines.length - 1]!.slice(0, 120)).digest("hex").slice(0, 8)}`);
     expect(r.hint).not.toContain("sk-ant");
     expect(r.hint).not.toContain("stats.example.test");
-    expect(r.hint).not.toContain("http");
-    expect(r.hint!.length).toBeLessThanOrEqual(120);
   });
 
   it("an unknown report shape is unknown_screen too", () => {
     const r = parseClaudeReport(fixture("unknown-shape"));
     expect(r).toEqual({ ok: false, reason: "unknown_screen", retryAfterS: null, hint: null });
+  });
+
+  it("a leaky line yields only the fixed shape: no name, no token, no URL, no UUID (finding 5)", () => {
+    const lines = fixture("leaky");
+    const r = parseClaudeReport(lines);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("unknown_screen");
+    expect(r.hint).toBe(`unknown shape ${createHash("sha256").update(lines[lines.length - 1]!.slice(0, 120)).digest("hex").slice(0, 8)}`);
+    expect(r.hint).not.toContain("Jack");
+    expect(r.hint).not.toContain("sk-ant");
+    expect(r.hint).not.toContain("stats.example.test");
+    expect(r.hint).not.toContain("123e4567");
   });
 });
 
@@ -105,5 +121,18 @@ describe("the error classes (plan 4.3 item 6)", () => {
 
   it("organization words are refused", () => {
     expect(parseClaudeReport(fixture("refused"))).toEqual({ ok: false, reason: "refused", retryAfterS: null, hint: null });
+  });
+
+  // The fix round (2026-10-24, finding 5): an unclassifiable error's hint is the fixed shape too — the error's own
+  // words (a name, a UUID) never reach the hub. Red against the code before the fix: the hint is the redacted head of
+  // the error text, and a name and a UUID survive it.
+  it("an unclassifiable error's hint is the fixed shape, never the error's own words", () => {
+    const r = parseClaudeReport(fixture("error-leak"));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("unknown_screen");
+    expect(r.hint).toMatch(/^unknown shape [0-9a-f]{8}$/);
+    expect(r.hint).not.toContain("Dave");
+    expect(r.hint).not.toContain("123e4567");
   });
 });
