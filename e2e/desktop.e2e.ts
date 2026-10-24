@@ -6,8 +6,9 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync,
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, type Page } from "playwright";
+import type { Page } from "playwright";
 import { themes } from "@morndo/brand";
+import { launch } from "./harness.ts";
 import { buildOffice } from "./office.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -46,7 +47,7 @@ let hub: ChildProcess | null = spawn(process.execPath, [hubMain, "serve"], { env
 await new Promise<void>((res, rej) => { hub?.stdout?.on("data", d => { if (String(d).includes("morndo hub on")) res(); }); hub?.once("exit", c => rej(new Error(`hub exited ${c}`))); });
 const pairUrl = execFileSync(process.execPath, [hubMain, "pair"], { env, encoding: "utf8" }).split("\n").find(l => l.includes("/pair#t="))?.trim() ?? "";
 
-const browser = await chromium.launch();
+const browser = await launch();
 try {
   for (const scheme of ["light", "dark"] as const) {
     const context = await browser.newContext({ viewport: { width: 1920, height: 908 }, colorScheme: scheme });
