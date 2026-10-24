@@ -4435,6 +4435,9 @@ export const CONTROLS: Control[] = [
   { id: "t415s7r1-zai-404", task: "T-415", file: "apps/connections/src/adapters/usage-zai.ts",
     find: "if (status === 404) return", replace: "if (false) return",
     run: ["apps/connections/test/usage-zai.test.ts"] },
+  { id: "t415s7r2-plan-omitted-drops-family", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "plan: plan ?? planWatch.baseline?.plan ?? null, identity,", replace: "plan, identity,",
+    run: ["apps/hub/test/usage-cursor-periods.test.ts"] },
 ];
 
 // ---- the runner

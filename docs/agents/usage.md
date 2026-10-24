@@ -300,6 +300,11 @@ fixed shape `unknown shape <hash>` — never a word of the answer. The codes are
 unverified. The ok result maps to a reading with source
 `vendor-api`, posted under the readings contract above.
 
+A Z.ai window carries its own length (unit and number say it), so its windows and their titles need no plan, and a
+collector that posts unleased readings still shows them. What an unleased reading cannot do is feed the plan watch: a
+change of the window set, of a cadence, or a drop of points on this source is told only from leased readings, so a
+collector that wants those notices takes a lease (`usage-pool` scope, source `vendor-api`) like the headless reader does.
+
 ## Cursor
 
 The hub never drives the Cursor CLI. A collector outside the repository reads the screen and posts named windows as
@@ -312,6 +317,12 @@ seen, the reset horizon does — within 8 days and a weekly-family plan name (th
 a change waits for a second agreeing leased reading, so one odd or forged plan string flips no title) (`free`, `plus`, `premium`, `super`)
 "about weekly", further out "about monthly", and a name on both periods (`ultra`) "plan period" until the second
 reset is observed.
+
+**The collector must take a lease for period titles.** The plan family comes from the plan the plan watch has
+confirmed, and only a *leased* reading (a lease taken from `POST /api/agent/usage/lease` with a token that carries
+the `usage-pool` scope, source `cli-screen`, and posted with its `lease_id`) reaches the watch. A collector that posts
+readings with no lease still shows its windows, but a window with no length falls back to "resets in …" with no
+cadence word, whatever plan the reading names. A leased reading that names no plan keeps the plan already confirmed.
 
 ## Pool seats
 

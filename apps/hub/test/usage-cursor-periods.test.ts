@@ -114,5 +114,14 @@ describe("the plan family follows the confirmed plan, not the newest reading", (
     next(); expect(reading(win(53), { plan: "Ultra", unleased: true }).ok).toBe(true);
     expect(titleOf()).toBe("about weekly");
   });
+
+  it("a leased reading that names no plan keeps the confirmed plan, so the family does not fall away", () => {
+    expect(reading(win(50), { plan: "Super" }).ok).toBe(true);
+    next(); expect(reading(win(51), { plan: "Super" }).ok).toBe(true);
+    next(); expect(reading(win(52), { plan: null }).ok).toBe(true);          // the screen named no plan this time
+    expect(titleOf()).toBe("about weekly");
+    next(); expect(reading(win(53)).ok).toBe(true);                          // nor does one that omits the field
+    expect(titleOf()).toBe("about weekly");
+  });
 });
 

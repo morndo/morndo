@@ -582,13 +582,15 @@ export class UsageService {
     // must neither tell a change, nor drop a derived mark, nor move the baseline a leased reading is compared with.
     const leased = this.#leaseBook.valid(leaseId, account, source, tokenId);
     if (leased) {
+      const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
+      // A reading that names no plan carries the confirmed one forward: the baseline must not fall to "no plan" and
+      // take the period family (and its titles) with it until a later reading names it again.
       const fact: PlanFact = {
-        plan, identity,
+        plan: plan ?? planWatch.baseline?.plan ?? null, identity,
         windows: windows.map(w => ({ id: w.id, lengthMins: w.lengthMins, usedPercent: w.usedPercent, resetsAt: w.resetsAt, rolling: w.rolling })),
         // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
         ...(source === "claude-usage" ? { complete: true } : {}),
       };
-      const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
       const seen = watchPlan(planWatch, fact, capturedAt);
       this.#tx(() => {
         if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", source, seen.watch);
