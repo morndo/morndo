@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-const KEYS = ["sk-ant-synthetic-pool-key-0001", "sk-ant-synthetic-pool-key-0002", "sk-ant-synthetic-pool-key-0003"];
+const KEYS: [string, string, string] = ["sk-ant-synthetic-pool-key-0001", "sk-ant-synthetic-pool-key-0002", "sk-ant-synthetic-pool-key-0003"];
 const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 const fixture = join(import.meta.dirname, "fixtures/fake-keyed-runtime.mjs");
 const main = join(import.meta.dirname, "../src/main.ts");
@@ -19,10 +19,13 @@ const homeDir = (): string => {
   const dir = mkdtempSync(join(tmpdir(), "morndo-keypool-"));
   dirs.push(dir);
   mkdirSync(join(dir, "work"));
+  mkdirSync(join(dir, "home"));
   return dir;
 };
+// HOME is a temporary one: the launcher's helper line is then this build's own bin, never an installed morndo-keys (a build with
+// an older catalog schema would refuse the catalog the helper is given).
 const envOf = (dir: string, extra: Record<string, string> = {}): NodeJS.ProcessEnv => ({
-  ...process.env, MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: catalogPath, MORNDO_CLAUDE_BIN: fixture,
+  ...process.env, HOME: join(dir, "home"), MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: catalogPath, MORNDO_CLAUDE_BIN: fixture,
   PWD: join(dir, "work"), ...extra,
 });
 function cli(args: string[], env: NodeJS.ProcessEnv, stdin = ""): Promise<Out> {

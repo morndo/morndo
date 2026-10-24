@@ -2,8 +2,8 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Mode } from "@morndo/domain";
-import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
+import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type KeyConnection, type Lease, type Mode, type SubscriptionConnection } from "@morndo/domain";
+import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, type VendorPreset } from "@morndo/protocol";
 import { findPreset as presetOf, firstPartyHost, floorOf } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
@@ -15,6 +15,8 @@ import { baseUrlProblem, childEnv, ClaudeRuntime, isStatusRefusal, isThirdPartyA
 import { readCodexLimits, usageReport } from "./adapters/usage-codex.ts";
 import { productVersion } from "@morndo/service-kit";
 import { poolCommand } from "./pool-cli.ts";
+import { keyPoolCommand } from "./keypool-cli.ts";
+import { signalFromText } from "./adapters/outcome-anthropic.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -37,6 +39,8 @@ const PIN_FILE = "claude-pin.json";
 // The signed-release pin (T-346): the key, the directory releases are installed in, the lowest version.
 const RELEASE_PIN_FILE = "claude-release-pin.json";
 const USAGE_WORDS = new Set(["missing argument", "isolation"]);
+// How much of a run's last output a key pool reads a refusal from: the end of each stream, never stored.
+const RUN_TAIL = 8192;
 
 // `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
 // `tty`: the command runs at an interactive terminal (stdin and stdout), which only pin-claude asks for.
@@ -91,6 +95,22 @@ morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [-
   NODE_TLS_REJECT_UNAUTHORIZED=0. Anything else
   is refused with isolation.
   --workspace are the caller's claims. run keeps its own helper, \`helper --lease <id>\`.
+
+morndo-keys keypool create <name> --vendor V --runtime R --by <who> [--mode round-robin|drain] [--recheck 24h] [--confirm-own-account] <key-connection>...
+morndo-keys keypool add|remove|revive <pool> <connection> [--confirm-own-account]    keypool move <pool> <connection> --to N
+morndo-keys keypool policy <pool> [--mode …] [--recheck …]    keypool list    keypool delete <pool>
+morndo-keys keypool report <pool> --member M --outcome exhausted|failing|limited|ok [--reason R]
+morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role R] [--workspace DIR] [--reserve USD] -- <agent arguments>
+  A key pool groups two or more of your API-key connections of one vendor and runtime behind one name (opt in; ADR-0037). It holds
+  connection names and health, never a key. lease --pool and run --pool take the next member that can serve, in join order (round-robin) or
+  the same member until it is out (drain); the member's own gate (terms, expiry, repo, isolation, budget) still runs, and a member the gate
+  refuses is passed over. Naming a pool, never a key, is all a caller can do: lease --pool refuses --connection and --member.
+  A member the provider refuses for lack of credit, or at a spend limit you set, is marked exhausted and skipped. A refused key or
+  account (401, 403, on hold, the tier's monthly cap) marks it failing, which stops the whole pool until you revive that member
+  or rotate its key: traffic never moves to another account because one account was refused. A run that fails is read for such a refusal
+  (the text is classified and dropped); a headless run (-p) that ended on an exhausted key goes once more on the next member. A pool
+  holds only keys of accounts you hold: every member needs --confirm-own-account, and create needs --by, who read the terms line it shows.
+  Exit 75 with a word: pool_empty, pool_blocked, terms, or the gate's word.
 `;
 
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
@@ -141,6 +161,7 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "spend": return spend(home, need(name), io);
     case "usage": return usage(home, parsed, io);
     case "pool": return poolCommand(home, parsed, io);
+    case "keypool": return keyPoolCommand(home, parsed, io);
     case "log": return log(home, name, io);
     case "revoke": return done(home.connections.revoke(need(name), ACTOR), io);
     case "rotate": return rotate(home, need(name), io);
@@ -229,19 +250,40 @@ function check(home: Opened, name: string, parsed: Parsed, io: Io): number {
   return closed.ok ? 0 : fail(io, closed.error.problem, closed.error.exit);
 }
 
+type Failed = { ok: false; error: { problem: string; exit?: number } };
+type Started = { ok: true; value: { prep: RunPrep; lease: Lease } } | Failed;
+// What a run needs from its Connection and its preset, read before the lease and kept for the run.
+type RunPrep = {
+  name: string; connection: SubscriptionConnection | KeyConnection; preset: VendorPreset; baseUrl: string; party: string;
+  choice: { model: string; effort: string }; model: string; small: string;
+};
+// A run's end: its exit code, and the tail of what it printed, for a pool to read a refusal from and drop (ADR-0037).
+type RunEnd = { code: number; text: string };
+
+const failed = (problem: string, exit?: number): Failed => ({ ok: false, error: exit === undefined ? { problem } : { problem, exit } });
+
+// `morndo-keys run --connection <name>`, or `run --pool <name>`: the first names the Connection, the second has the key pool pick it.
 async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
-  const name = need(parsed.get("connection"));
+  if (parsed.get("pool") !== undefined) return launchPooled(home, parsed, io);
+  const started = startRun(home, parsed, need(parsed.get("connection")));
+  if (!started.ok) return fail(io, started.error.problem, started.error.exit);
+  return (await runLeased(home, parsed, io, started.value.prep, started.value.lease)).code;
+}
+
+// The checks before a run and its lease: the Connection, the preset, the base URL, the model, then the gate. A refusal names its word
+// and, for a gate refusal, the exit 75 (what a key pool reads to try the next member).
+function startRun(home: Opened, parsed: Parsed, name: string): Started {
   const loaded = home.store.load().directory;
   const connection = findConnection(loaded, name);
-  if (!connection || connection.custody !== "morndo") return fail(io, "missing");
-  if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, LOGIN_KEY_REFUSAL);
+  if (!connection || connection.custody !== "morndo") return failed("missing");
+  if (loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return failed(LOGIN_KEY_REFUSAL);
   const preset = presetOf(home.catalog, connection.vendor);
-  if (!preset) return fail(io, "missing");
+  if (!preset) return failed("missing");
   const baseUrl = preset.runtimes.find(item => item.runtime === connection.runtime)?.baseUrl ?? "";
   const party = firstPartyHost(home.catalog.presets());
   if (connection.kind === "api-key" && connection.runtime === "claude") {
     const problem = baseUrlProblem(baseUrl);
-    if (problem) return fail(io, problem);
+    if (problem) return failed(problem);
   }
   const choice = launchChoice(preset.defaultPicks, parsed.get("role") ?? "run");
   const model = choice.model;
@@ -249,10 +291,17 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const small = smallModel(listed, model) ?? "";
   const reserve = Number(parsed.get("reserve") ?? "5");
   const granted = ask(home, name, parsed, false, reserve, choice.model || "default");
-  if (!granted.ok) return fail(io, granted.problem, granted.exit);
+  if (!granted.ok) return failed(granted.problem, granted.exit);
   const row = findConnection(home.store.load().directory, name);
   const lease = row && row.custody === "morndo" ? row.leases.find(item => item.id === granted.id) : undefined;
-  if (!lease) return fail(io, "missing");
+  if (!lease) return failed("missing");
+  return { ok: true, value: { prep: { name, connection, preset, baseUrl, party, choice, model, small }, lease } };
+}
+
+// The run on a lease already granted, to its end. The key is released to the child, so `home` is closed once the child starts and the
+// lease is closed in a home of its own.
+async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, lease: Lease): Promise<RunEnd> {
+  const { name, connection, preset, baseUrl, party, choice, model, small } = prep;
   const keys = keysProgram(home.env.HOME ?? "", home.env.MORNDO_KEYS, existsSync, {
     command: process.execPath,
     args: ["--experimental-strip-types", join(import.meta.dirname, "main.ts")],
@@ -272,6 +321,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   let refusal: number | null = null;
   let status = 1;
   let stdout = "";
+  let text = "";
   let failure = "";
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
@@ -300,8 +350,10 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
         : await new ClaudeRuntime(bin, helperLine, saved, baseUrl, party).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
+    text = `${child.stdout.slice(-RUN_TAIL)}\n${child.stderr.slice(-RUN_TAIL)}`;
   } catch (error) {
     failure = error instanceof Error ? error.message : "run failed";
+    text = failure;
     if (isStatusRefusal(error)) refusal = 75;
     io.stderr(errRedactor.push(failure));
     status = 1;
@@ -321,12 +373,44 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
       if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); stopper.done(); }
   }
-  if (refusal !== null) return refusal;
-  if (hungUp) return 129;                                  // the terminal went away (SIGHUP): 128 + 1
+  if (refusal !== null) return { code: refusal, text };
+  if (hungUp) return { code: 129, text };                  // the terminal went away (SIGHUP): 128 + 1
   // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
-  return status === 70 || status === 75 || status === 78 ? 1 : status;
+  return { code: status === 70 || status === 75 || status === 78 ? 1 : status, text };
+}
+
+// `morndo-keys run --pool <name>` (ADR-0037): the pool picks the member (the last pick is saved, the member's gate runs, one MemberPicked is
+// written), the run goes on it, and a run that failed is read for a refusal of the key. A credit or spend-limit refusal marks the member
+// exhausted; a refused key or account marks it failing, which blocks the pool; anything else changes nothing. A headless turn (-p) that
+// ended on an exhausted key goes once more, on the next member. What the child printed is classified and dropped.
+async function launchPooled(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  const pool = need(parsed.get("pool"));
+  if (parsed.get("connection") !== undefined) return fail(io, "usage");
+  const headless = parsed.rest.includes("-p") || parsed.rest.includes("--print");
+  let current = home;
+  try {
+    for (let attempt = 0; ; attempt++) {
+      const began = current.now();
+      const picked = await current.keypools.pick(pool, async member => startRun(current, parsed, member));
+      if (!picked.ok) return fail(io, picked.error.problem, picked.error.exit);
+      const { member, value } = picked.value;
+      const end = await runLeased(current, parsed, io, value.prep, value.lease);
+      // runLeased closed its home when the key went to the child: the report is made in a home of its own.
+      const after = openHome(home.env);
+      let exhausted = false;
+      try {
+        if (end.code !== 0) {
+          const reported = after.keypools.reportSignal(pool, member, signalFromText(end.text), began);
+          exhausted = reported.ok && reported.value.kind === "exhausted";
+        }
+      } finally { after.close(); }
+      if (!exhausted || !headless || attempt > 0) return end.code;
+      current.close();
+      current = openHome(home.env);
+    }
+  } finally { if (current !== home) current.close(); }
 }
 
 // `morndo-keys lease --connection <name>`: one call is one lease, as an apiKeyHelper takes it — the gate runs, the key
@@ -338,15 +422,31 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
 // are claims too: the repo gate guards a mistake, not a lie. The key is in this process's memory for as long as it takes to
 // print it; Node can neither wipe a string nor set its own core limit, so the helper line sets `ulimit -c 0` and `exec`s.
 async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
-  const name = need(parsed.get("connection"));
+  const pool = parsed.get("pool");
+  if (pool !== undefined) {
+    // A caller names a pool, never a key: --connection and --member are refused (ADR-0037).
+    if (parsed.get("connection") !== undefined || parsed.get("member") !== undefined) return fail(io, "usage");
+    const picked = await home.keypools.pick(pool, member => prepareLease(home, parsed, member));
+    if (!picked.ok) return fail(io, picked.error.problem, picked.error.exit);
+    return serveLeased(home, io, picked.value.value);
+  }
+  const prepared = await prepareLease(home, parsed, need(parsed.get("connection")));
+  if (!prepared.ok) return fail(io, prepared.error.problem, prepared.error.exit);
+  return serveLeased(home, io, prepared.value);
+}
+
+type Prepared = { name: string; ref: string; holder: { lane: string | null }; workspace: string; seen: "none" | "rules" | "os"; proof: "verified" | "claimed"; id: string };
+
+// Everything up to the lease: the Connection, the caller's proof, the gate. A refusal that is not a gate word carries no exit.
+async function prepareLease(home: Opened, parsed: Parsed, name: string): Promise<{ ok: true; value: Prepared } | Failed> {
   const connection = findConnection(home.store.load().directory, name);
-  if (!connection) return fail(io, "missing");
-  if (connection.status === "revoked") return fail(io, "revoked");
-  if (connection.custody !== "morndo" || connection.kind !== "api-key" || connection.runtime !== "claude" || loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return fail(io, "not_leasable");
+  if (!connection) return failed("missing");
+  if (connection.status === "revoked") return failed("revoked");
+  if (connection.custody !== "morndo" || connection.kind !== "api-key" || connection.runtime !== "claude" || loginKeyRefused(home.catalog.presets(), connection.runtime, connection.kind, connection.custody)) return failed("not_leasable");
   const preset = presetOf(home.catalog, connection.vendor);
-  if (!preset) return fail(io, "missing");
+  if (!preset) return failed("missing");
   const holder = selfHolder(parsed.get("lane") ?? null);
-  if (!holder) return fail(io, "holder");
+  if (!holder) return failed("holder");
   const vouched = isolationOf(parsed.get("isolation") ?? "none");
   let seen = vouched;
   let proof: "verified" | "claimed" = "claimed";
@@ -367,11 +467,16 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     role: parsed.get("role") ?? "lease", entry: "lease", holder, workspacePath: workspace,
     limit: LEASES, reserve: 0, margin: 0, probe: true,
   });
-  if (!granted.ok) return fail(io, granted.error.problem, granted.error.exit);
+  if (!granted.ok) return failed(granted.error.problem, granted.error.exit);
+  return { ok: true, value: { name, ref: connection.ref, holder, workspace, seen, proof, id: granted.value.id } };
+}
+
+// The key goes to stdout once; the audit line lands before it is printed; the lease closes after.
+async function serveLeased(home: Opened, io: Io, p: Prepared): Promise<number> {
   let outcome = "failed";
   try {
-    const secret = await home.open(connection.ref);
-    const served = home.leases.serve(name, granted.value.id, { pid: process.pid, ppid: process.ppid, lane: holder.lane, workspace, isolation: seen, proof });
+    const secret = await home.open(p.ref);
+    const served = home.leases.serve(p.name, p.id, { pid: process.pid, ppid: process.ppid, lane: p.holder.lane, workspace: p.workspace, isolation: p.seen, proof: p.proof });
     if (!served.ok) return fail(io, served.error.problem);
     io.stdout(`${secret}\n`);
     outcome = "done";
@@ -379,7 +484,7 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   } catch {
     io.stderr("failed\n");
     return 1;
-  } finally { home.leases.close(name, granted.value.id, outcome, null); }
+  } finally { home.leases.close(p.name, p.id, outcome, null); }
 }
 
 // `morndo-keys pin-claude [--path P]`: the owner says which claude binary a lease may be served to (P, else `claude` on this
@@ -817,7 +922,7 @@ function parse(argv: readonly string[]): Parsed {
   const values = new Map<string, string[]>();
   for (let i = 1; i < ours.length; i++) {
     const token = ours[i] ?? "";
-    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed") {
+    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed" || token === "--confirm-own-account") {
       values.set(token.slice(2), ["true"]);
       continue;
     }
