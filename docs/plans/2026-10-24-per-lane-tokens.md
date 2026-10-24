@@ -1,5 +1,44 @@
 # Usage readings: who may speak for which account (T-430). Plan, no code
 
+## Owner summary (one screen)
+
+**The problem.** Worker tokens are shared. A lane can post a usage reading for any account, name any lane in its header, and invent account names that are only budgeted on the lease path. That lets one lane (or one stolen token) change what Home shows and which limits and thresholds the T-415 detection sees.
+
+**What the plan closes** (in `warn` first, then `enforce`):
+- a lane posting readings at all (readings need a manager or `usage-pool` token);
+- invented account names on all five usage routes (names must be known or declared);
+- a pool or collector token speaking for another node, and, for names declared after the migration, for an account its node does not run;
+- a lane report under a name outside its node's set, and a node-bound token reporting as a lane of another node.
+
+**What it does not close:**
+- a lane claiming another lane of its own node, or a lane on an old shared token claiming any lane (the claim is checked, the claimant is not);
+- a lane steering a lane's record to another real account of the same node;
+- a forged failure-hook word for an account the node runs;
+- names that exist at the migration and pool-declared seats are fleet-wide until the principal narrows them, so a node-bound pool token can name them.
+Only per-lane tokens (A) or the node vouching for the lane (D5) close the first three; neither stops a hostile lane on the same OS user.
+
+**Cost.** About 9.5 lane-days for the two layers (1 role gate with its callers moved, 2 account sets with bootstrap, 3 node binding, 4 moves bound to the set, 5 docs and flip). Per-lane tokens would add 4 to 5. The per-node launcher change that gives lanes a node-bound token is the owner's work, one change per node, and is not in these days.
+
+**Safety.** Every gate has `off`, `warn`, `enforce`, set by the principal (`morndo usage-bind set`); old lanes keep working in `warn`; nothing in the migration is destructive.
+
+**Decisions** (recommended answer first; details in [§8](#8-owner-decisions)):
+
+| | Decision | Recommended |
+|---|---|---|
+| D1 | Defend against a hostile lane on the same OS user? | No: mistakes, injected text, other nodes. Per-lane tokens last |
+| D2 | Who declares accounts no lane started? | `lane.start` and the pool; the principal for off-fleet collectors and hand-started seats |
+| D3 | How long in `warn`? | 7 days, and flip only when the token list is quiet 7 days |
+| D4 | Unbound pool tokens after the grace? | Refused; lane reports on shared tokens stay allowed |
+| D5 | The node vouches for a lane's identity? | Yes, as the follow-up instead of A |
+| D6 | Pool token per node or per account? | Per node |
+| D7 | Hand-started lane on an undeclared seat? | First report is pending until approved |
+| D8 | Same lane identity for board, memory, jobs? | Not in T-430 |
+| D9 | Merge order | After T-415's stack (PR #138) is on `main` |
+| D10 | The pool declares seats fleet-wide, 5 an hour per token? | Yes |
+| D11 | Backfill scope | Fleet-wide (nothing refused on flip), narrowed later |
+| D12 | Push for a pending name? | No: a Home line and a list |
+| D13 | Who changes each node's launcher for node-bound lane tokens? | The owner, optional, per node; gates do not wait |
+
 **Question.** Worker tokens are shared, so one lane can steer the usage detection of another. How do we tie a reading, a lease, a limit post and a pool post to the accounts a node really runs?
 
 **Answer in short.** Close it in three layers, cheapest first. (1) Say who may post at all and which names are real. (2) Bind pool tokens and lane reports to a node and to the accounts that node runs. (3) Only then, and only if the owner wants it, give each lane a secret of its own. Per-lane tokens alone do not close the hole on a node whose lanes share one OS user (see [§2](#2-what-a-per-lane-token-can-and-cannot-do)). Estimate: about 9.5 lane-days for layers 1 and 2; 4 to 5 more for layer 3. Revision 3 (after two reviews of this plan, [§10](#10-review-of-this-plan-and-how-it-was-answered)) says plainly what each layer does and does not stop.
@@ -66,7 +105,7 @@ The hub mints a worker token bound to `(node, lane, account)` when it issues `la
 The token carries a node (`morndo agent-token new <name> --role worker --node n1`). A call names its lane in `X-Morndo-Lane`, as now, and the hub checks the claim: the lane must run on the token's node (fleet observation) and, for an account-carrying call, the account must be the lane's recorded start account, or for a hand-started lane one that the node runs.
 
 - **Delivery** changes little: the token is as shared as today, but it is minted per node, so a copy on `n1` is worthless on `n2`.
-- **Closes:** a pool token posting as another node or for an account its node does not run; a *node-bound* worker token reporting as a lane of another node (the token's node differs from the lane's node by observation); a report for a name the lane's node does not run.
+- **Closes:** a pool token posting as another node, and, **for names a `lane.start` declared after the migration**, a pool token speaking for an account its node does not run (every account that exists at the migration and every pool-declared seat is fleet-wide, [§4.3](#43-account-sets-node-scoped-and-fleet-wide), so a node-bound pool token may name those; the principal narrows them one by one); a *node-bound* worker token reporting as a lane of another node (the token's node differs from the lane's node by observation); a report for a name the lane's node does not run.
 - **Does not close:** the claim is checked, the claimant is not. The lane is named by the caller's own header on a token every lane of the node shares (`agent-access.ts:50-66`), so a lane on `n1` can claim another lane of `n1`, and a lane holding an *unbound* (legacy) token can claim a lane of any node. Only A (a secret per lane) or D5 (the node's relay vouches for the lane) closes that.
 - **Cost:** about 3 lane-days on top of C (column, console flag, claim checks, collector configs).
 
@@ -147,7 +186,7 @@ A status-line report for a name outside the sets is not stored as an account. Wh
 
 - **Its windows are dropped.** No account row, no source row, no threshold, no plan watch, no lane record is written from it, so Home shows nothing for the seat until the principal approves the name. The next report after approval is the first one shown (a lane reports after each turn, so the gap is a turn).
 - What is kept: a row `(node, name, lane, first_seen, last_seen, count)`. No numbers from the report.
-- **Caps:** at most 20 pending names per node, at most 5 new pending names an hour per token, at most 100 on the hub. Over a cap the report is dropped and only a counter moves.
+- **Caps:** at most 20 pending names per node, at most 5 new pending names an hour per token, at most 100 on the hub. The caps are keyed on a shared token and a node, so one lane inventing names could fill a node's 20 and crowd out a genuine seat. Three things keep that from lasting: (a) **the oldest unapproved name is evicted** when the list is full, so a new name always gets a place and a flood displaces itself, not the newest genuine seat; (b) **`morndo usage accounts reject <node> <name>`** drops one name, and **`reject <node> --lane <lane>`** clears every pending name that lane reported (a lane's flood is one command); (c) the **counter is shown**: `usage accounts pending` and the Home line say how many were evicted or dropped over the hour, per node, so a flood is visible before it matters. A rejected name may be reported again; it returns to pending within the budget.
 - **TTL:** 7 days since `last_seen`; pruned in `sweep()` like the notices (`usage-service.ts`, prune moved there by the slice 2 review).
 - **Notice:** none pushed. Home gets one line ("2 names wait for approval") and `morndo usage accounts pending` lists them. A push for every invented name would hand an attacker a notification generator (D12).
 
@@ -176,7 +215,7 @@ Hub tests in `apps/hub/test/` unless said otherwise. "Red today" is the verdict 
 | 4 | `usage-bind: /limit refuses a name no node runs` | same, `/limit` | 200 |
 | 5 | `usage-bind: a lease for an unknown name is denied and spends no budget` | invented names hold both slots (slice 5) | granted, 5 an hour |
 | 6 | `usage-bind: a pool token bound to n1 cannot lease, read or post as n2` | self-declared node (slice 5, slice 3) | accepted |
-| 7 | `usage-bind: a pool token for n1 cannot name an account only n2 runs` | token binding to accounts | accepted |
+| 7 (r4) | `usage-bind: a pool token for n1 cannot name an account only n2's lane.start declared after the migration; it can still name a fleet-wide name (pinned, and narrowed with accounts move)` | token binding to accounts. The guarantee is narrowed on purpose (D11): backfilled and pool-declared names are fleet-wide | accepted |
 | 8 (r2) | `usage-bind: a report under a name outside the lane's node set writes no record and no account` | slice 3 R2: lane `w1` on `acct-a`, report as an invented name | name stored, record written |
 | 9 (r2) | `usage-bind: a moved lane keeps working: a report under another account of its node moves the record and the next failure marks the new seat` | pool `move()`, slice 3 R3 (must stay **green**: the guard against breaking moves) | green today, red if the first revision's rule were built |
 | 9b (r2) | `usage-bind: a move to a name outside the set is refused, the old record stands` | slice 3 R3 | record moves to the invented name |
@@ -184,6 +223,7 @@ Hub tests in `apps/hub/test/` unless said otherwise. "Red today" is the verdict 
 | 10 (r2) | `usage-bind: a hand-started lane's first report under an undeclared name is pending, not an account` | slice 3 R2, D7 bootstrap | account created |
 | 10b (r3) | `usage-bind: a pending report stores no windows, no thresholds and no lane record; after approval the next report shows` | re-check finding 3 | windows stored |
 | 10c (r3) | `usage-bind: pending caps (20 per node, 5 new an hour per token, 100) and a 7-day TTL; no push is made` | re-check finding 3 | no list exists |
+| 10d (r4) | `usage-bind: a full pending list evicts the oldest unapproved name; reject <node> <name> and reject --lane clear them; the dropped/evicted counter is shown` | R2 re-check finding 2: one lane fills a node's 20 | no list exists |
 | 11 (r2) | `usage-bind: a node-bound worker token cannot report as a lane of another node` | lane header names a lane on `n2` while the token is for `n1`. Holds only for lanes whose node launcher carries such a token ([§5](#5-migration-old-lanes-keep-working)) | accepted. (The first revision's test, "a report claiming a lane of another node is refused" for any token, cannot be built: a legacy shared token has no node. This one can, because the token has.) |
 | 11b (r2) | `usage-bind: a shared legacy token can still claim another lane (pinned limit)` | the claim is checked, not the claimant (§3 B) | green; pins the gap, so closing it (A or D5) turns it red on purpose |
 | 12 | `usage-bind-migration: legacy shared token keeps reporting in warn mode and is counted` | migration | not written yet |
@@ -201,7 +241,7 @@ Each ends with a negative control (the repo's `--only` flow): remove the check a
 | Slice | Work | Lane-days |
 |---|---|---|
 | 1 | Role gate on readings in `warn`; move the callers (e2e and unit helpers, Cursor and Z.ai docs and collector tokens); `agent-token list` counts; tests 1, 2, 18 | 1.0 |
-| 2 | `node_accounts` (node and fleet-wide), migration and backfill, `usage_bind` table and console command, `unknown_account` gate on the five routes, the bootstrap (pending list with caps and TTL, pool `declare`, console add/approve/move/list/remove); tests 3, 4, 5, 9c, 10, 10b, 10c, 12, 13, 15, 17 | 3.4 |
+| 2 | `node_accounts` (node and fleet-wide), migration and backfill, `usage_bind` table and console command, `unknown_account` gate on the five routes, the bootstrap (pending list with caps and TTL, pool `declare`, console add/approve/reject/move/list/remove); tests 3, 4, 5, 9c, 10, 10b, 10c, 10d, 12, 13, 15, 17 | 3.4 |
 | 3 | `--node` on tokens, node check on pool routes, lease bound to node, node-bound worker tokens, the `agent-token list` unbound column, the doc for the per-node launcher change; tests 6, 7, 11, 11b, 14. The launcher change itself is the owner's, per node, and is not in these days | 2.0 |
 | 4 | Moves bound to the node set; tests 8, 9, 9b, 16 | 0.7 |
 | 5 | Docs (`docs/agents/usage.md` known-limits section rewritten), flip to `enforce` | 0.5 |
@@ -254,3 +294,10 @@ The review of revision 1 (md-rev6 on T-430, 4 MED, 1 LOW).
 | 1 (MED) | Seats are not per node; a pool move across nodes would be refused | [§4.3](#43-account-sets-node-scoped-and-fleet-wide): pool-declared seats, principal `--fleet` names and the backfill are fleet-wide; `lane.start` names stay on their node. §4.1 and §4.2 updated. Test 9c; D10, D11 |
 | 2 (LOW) | Test 11 needs every lane to hold a node-bound token | §4 step 3, §5 ("Lanes on old tokens"), the comparison table, slice 3 (2.0 days, the launcher change is the owner's and outside the estimate). Test 11 says it holds only for such lanes; 11b pins the rest. D13 |
 | 3 (LOW) | The pending list drops windows and has no cap or TTL | [§4.4](#44-the-pending-list): windows dropped (stated), 20 per node, 5 an hour per token, 100 on the hub, 7-day TTL, no push, a Home line. Tests 10b, 10c; D12 |
+
+### Re-check of revision 3 (md-rev6, 2 LOW)
+
+| # | Finding | Answer in the text |
+|---|---|---|
+| 1 (LOW) | Fleet-wide backfill and pool seats leave test 7 and the "closes" line true only for new names | The B "closes" line and test 7 state the narrowed guarantee: it holds for names a `lane.start` declared after the migration; backfilled and pool-declared names are fleet-wide until the principal narrows them (D11) |
+| 2 (LOW) | The pending caps are keyed on a shared token; one lane can crowd out genuine seats | [§4.4](#44-the-pending-list): oldest-unapproved eviction, `usage accounts reject <node> <name>` and `reject <node> --lane <lane>`, the counter shown; test 10d |
