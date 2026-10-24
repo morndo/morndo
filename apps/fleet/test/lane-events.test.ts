@@ -1,9 +1,17 @@
 // Lane events from hooks (fleet clients spec §6, §7): both body forms (Claude Code's and the owner's scripts'), kira's
 // STATUS rule, first line, error and question rules, verbatim; none without a window, for the manager's own lane or an
-// ignored one; today's JSON line shape, key order included; a batch split at 8000 characters (Review Focus 4).
+// ignored one; today's JSON line shape, key order included; a batch split at 8000 characters (Review Focus 4). S3: the
+// limit tap (plan 4.5 item 4), read before the manager and ignore filters, so a limit failure of the manager's own
+// window or an ignored one is a tap even though it makes no lane event.
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { HookEvent, LaneEvent } from "@morndo/protocol";
-import { firstLineOf, globMatcher, laneEventOf, lineOf, partsOf, rulesOf, statusOf } from "../src/application/lane-events.ts";
+import { LaneEvents, firstLineOf, globMatcher, laneEventOf, limitTapOf, lineOf, partsOf, rulesOf, statusOf } from "../src/application/lane-events.ts";
+import { EventHub } from "../src/application/events.ts";
+import { openFleetDb } from "../src/adapters/db.ts";
+import { LaneEventsStore } from "../src/adapters/lane-events-store.ts";
+import { quiet } from "./helpers/fleet.ts";
+import { tempDir } from "./helpers/temp.ts";
 
 const AT = Date.parse("2026-10-08T17:17:06.086Z");
 const SID = "45460920-67e6-4bea-8c1d-2f3a4b5c6d7e";
@@ -136,5 +144,33 @@ describe("the manager's message", () => {
     }
     expect(parts.flatMap(p => p.events.map(e => e.seq))).toEqual(events.map(e => e.seq));
     expect(partsOf(events.slice(0, 3), header)).toHaveLength(1);
+  });
+});
+
+// The usage tap (S3, plan 4.5 item 4): read inside the intake's transaction before any lane-event filter, so a limit
+// failure is a tap even where it makes no lane event — the manager's own window, an ignored one — while a failure that
+// is no limit at all and a stop are no tap. Red until round 2: the reading throws "not implemented".
+describe("the usage tap", () => {
+  const takeWith = (window: string | null, body: unknown, path: HookEvent["path"] = "/hook/failure") => {
+    const db = openFleetDb(join(tempDir(), "fleet.db"));
+    const lanes = new LaneEvents({ store: new LaneEventsStore(db), events: new EventHub(), config: { deliverTo: "manager", header: "h", ignore: ["pooltest*"], batchMs: 3000 }, log: quiet });
+    const r = lanes.take(hook(path, body, window));
+    const rows = db.prepare("SELECT seq FROM lane_events").all();
+    db.close();
+    return { r, rows };
+  };
+
+  it("the manager's failure reaches the limit tap but makes no lane event", () => {
+    for (const window of ["manager", "pooltest-3"]) {
+      const { r, rows } = takeWith(window, { session_id: SID, error_type: "rate_limit" });
+      expect(r, window).toEqual({ event: null, own: false, limit: { kind: "failure", lane: window, window, sessionId: SID, error: "rate_limit", account: null, at: AT } });
+      expect(rows, window).toEqual([]);
+    }
+  });
+
+  it("a failure that is no limit, and a stop, make no tap; a body without a readable account taps with none", () => {
+    expect(takeWith("studio", { session_id: SID, error_type: "overloaded" }).r.limit).toBeNull();
+    expect(takeWith("studio", { session_id: SID, text: "x" }, "/hook/stop").r.limit).toBeNull();
+    expect(takeWith("api", { session_id: SID, error_type: "rate_limit", account: 42 }).r.limit).toEqual({ kind: "failure", lane: "api", window: "api", sessionId: SID, error: "rate_limit", account: null, at: AT });
   });
 });

@@ -2,7 +2,7 @@
 // same state and why only extends the back time, and a mark clears only the way usage-seat's clearsMark says. A
 // seat the pool set by hand is never cleared by a reading.
 import { describe, expect, it } from "vitest";
-import { DEFAULT_MARK_MS, MAX_MARK_MS, MIN_MARK_MS, applyLimit, clearSeat, type FreshRead, type LimitHit, type SeatRecord } from "../src/index.ts";
+import { DEFAULT_MARK_MS, MAX_MARK_MS, MIN_MARK_MS, applyLimit, clearSeat, poolSeat, shownSeat, type FreshRead, type LimitHit, type SeatRecord } from "../src/index.ts";
 
 const T = 1_700_000_000_000;      // 10:00
 const MIN = 60_000, HOUR = 3_600_000;
@@ -72,5 +72,25 @@ describe("one seat state per account (plan 4.5)", () => {
   it("a seat the pool set by hand is never cleared here", () => {
     const pooled = out({ owner: "pool", by: "hand" });
     expect(clearSeat(pooled, read())).toEqual({ seat: pooled, cleared: false });
+  });
+
+  it("the pool's own record: owner pool, its own times, no cycle and no window, the back time as given (U15)", () => {
+    expect(poolSeat({ state: "retired", why: "refused", backAt: null, at: T + 5 * MIN, by: "pool-bot" })).toEqual({
+      state: "retired", why: "refused", since: T + 5 * MIN, markedAt: T + 5 * MIN, backAt: null, cycleReset: null, windowId: null, owner: "pool", by: "pool-bot",
+    });
+    expect(poolSeat({ state: "out", why: null, backAt: T + 2 * HOUR, at: T, by: "hand" })).toMatchObject({ state: "out", why: null, backAt: T + 2 * HOUR, owner: "pool", by: "hand" });
+  });
+
+  it("the seat shown is the worse of the pool's and the derived one; on an equal state, the pool's (U17)", () => {
+    const pooled = out({ owner: "pool", by: "hand" });
+    const derivedOut = out({ owner: "derived", by: "worker-one" });
+    const derivedRetired: SeatRecord = { ...out(), state: "retired", why: "refused", backAt: null, cycleReset: null, windowId: null, owner: "derived", by: "worker-one" };
+    expect(shownSeat(pooled, null)).toBe(pooled);
+    expect(shownSeat(null, derivedOut)).toBe(derivedOut);
+    expect(shownSeat(null, null)).toBeNull();
+    expect(shownSeat({ ...pooled, state: "ok" }, derivedOut)).toBe(derivedOut);
+    expect(shownSeat(pooled, { ...derivedOut, state: "low" })).toBe(pooled);
+    expect(shownSeat(pooled, derivedRetired)).toBe(derivedRetired);
+    expect(shownSeat({ ...derivedRetired, owner: "pool" }, derivedRetired)).toMatchObject({ state: "retired", owner: "pool" });
   });
 });

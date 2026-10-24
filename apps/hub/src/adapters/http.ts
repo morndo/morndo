@@ -42,7 +42,7 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLimitBody, UsageReadingsBody, UsageReportBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -438,7 +438,7 @@ export function startHttp(p: {
     const who = agentCaller(req, res, p.board.agents);
     if (!who) return;
     const { service } = p.board;
-    if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role } });
+    if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role, scopes: who.token.scopes } });
     if (path.startsWith("/api/agent/decisions")) return agentDecisions(req, res, path, method, who.actor);
     // A job grant (ADR-0017 §6). The body names the lane, the class and a directory hash. It has no command.
     if (path === "/api/agent/jobs/grant" && method === "POST") {
@@ -477,6 +477,22 @@ export function startHttp(p: {
         by: body.by,
         at: typeof body.at === "number" ? body.at * 1000 : null,
         fix: body.fix, hint: body.hint,
+      });
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    // The pool's own word on a seat (U15): a token with the usage-pool scope only — a role is not the scope, so the
+    // manager's token is refused without it too. The reply says only that it was taken.
+    if (path === "/api/agent/usage/pool" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (!who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "scope_required" });
+      const body = await readBody(req, UsagePoolBody);
+      const r = p.usage.poolSeat({
+        account: body.account, action: body.action,
+        ...(body.state === undefined ? {} : { state: body.state }),
+        why: body.why ?? null,
+        backAt: typeof body.back_at === "number" ? body.back_at * 1000 : null,
+        at: typeof body.at === "number" ? body.at * 1000 : null,
+        by: body.by,
       });
       return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
     }
@@ -802,6 +818,14 @@ export function startHttp(p: {
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, UsageForgetBody);
       return json(res, 200, { forgotten: p.usage.forget(body.account, body.source, body.node ?? undefined) });
+    }
+    // The principal's own clear of a seat (U17): the pool's word or the hub's derived one, or both. A Command like
+    // the others: limited, and the principal's session only — an agent token never reaches here.
+    if (path === "/api/usage/seat/clear" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UsageSeatClearBody);
+      return json(res, 200, { cleared: p.usage.clearSeat(body.account, body.owner) });
     }
     // The fleet's job mirror: the list and the counts beside each node. A look.
     if (path === "/api/jobs" && method === "GET") {

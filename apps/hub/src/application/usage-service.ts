@@ -11,8 +11,8 @@ import {
   shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince, watchPlan, watchThreshold, windowTitle,
   type AccountProfile, type AccountUsage, type BoardActor, type Candidate, type CycleBook, type DisagreeView,
   type FreshRead, type LimitHit, type LimitKind, type NamedWindow, type PlanFact, type PlanWatch, type SeatRecord,
-  type SeatView, type SourceView, type ThresholdWatch, type UsageNotice, type UsageReport, type UsageSource,
-  type UsageWindow, type WindowReading, type NoticeKind,
+  type SeatState, type SeatView, type SeatWhy, type SourceView, type ThresholdWatch, type UsageNotice, type UsageReport,
+  type UsageSource, type UsageWindow, type WindowReading, type NoticeKind,
 } from "@morndo/domain";
 import type { UsageReadingsBody, UsageReportBody } from "@morndo/protocol";
 import type { Store, UsageSourceBody, UsageSourceRow } from "../adapters/store.ts";
@@ -77,12 +77,16 @@ export class UsageService {
   #lastTold = "";
   #profiles: () => ReadonlyMap<string, AccountProfile>;
   #leaseBook: LeaseBook;
+  #laneNode: (lane: string) => string | null;
 
-  constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile>; leases?: LeaseBook }) {
+  constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile>; leases?: LeaseBook; laneNode?: (lane: string) => string | null }) {
     this.#store = p.store;
     this.#now = p.now ?? Date.now;
     this.#profiles = p.profiles ?? (() => EMPTY_PROFILES);
     this.#leaseBook = p.leases ?? new LeaseBook(this.#now);
+    // S3 (plan 4.5 item 4): where a lane runs, for the lane records a report writes and a failure resolves through.
+    // Without a fleet the hub knows no lane's node, so a record is kept under node "" and never serves a node's rule.
+    this.#laneNode = p.laneNode ?? (() => null);
     for (const a of this.#store.usageAccounts()) this.#accounts.set(a.account, a);
   }
 
@@ -212,6 +216,10 @@ export class UsageService {
     const account = (accountHeader ?? "").trim() || DEFAULT_ACCOUNT;
     if (!ACCOUNT_NAME.test(account)) return { ok: false, problem: "bad_account" };
     const now = this.#now();
+    // S3 (plan 4.5 item 4): a lane's report writes the lane record its failures resolve from, replacing the record of
+    // that (node, lane) — the lane may have moved to another account since its last report.
+    const lane = actor.kind === "principal" ? null : actor.name;
+    if (lane !== null && lane !== "") this.#store.saveLaneAccount(this.#laneNode(lane) ?? "", lane, account, now);
     const next = applyReport(this.#accounts.get(account) ?? null, reportFrom(body, account, actor, now), now);
     this.#accounts.set(account, next);
     this.#store.saveUsageAccount(next);
@@ -230,6 +238,32 @@ export class UsageService {
 
   // The pool's file can change with no report in sight (every lane quiet): what it changed is told the same way.
   refreshProfiles() { this.#tellIfChanged(); }
+
+  // The fleet's usage tap (plan 4.5 item 4): a lane's start with an account writes its lane record; a limit failure
+  // resolves to an account — the hook's own word, the lane's record, the session, the node's only one — and marks that
+  // account's seat. A failure that resolves to nothing is kept as nothing (U9): no seat changes.
+  fromFleet(node: string, body: unknown): void {
+    // Round 2: parse with UsageTapBody; a lane_account saves the record; a failure resolves and calls noteLimit.
+    void node; void body;
+    throw new Error("not implemented");
+  }
+
+  // The pool's own word on a seat (U15): set by a token with the usage-pool scope, cleared by the same or by the
+  // principal. One seat notice per change, one back notice per clear.
+  poolSeat(a: { account: string; action: "set" | "cleared"; state?: SeatState; why?: SeatWhy | null; backAt: number | null; at: number | null; by: string }): { ok: true } | { ok: false; problem: "bad_account" | "bad_state" } {
+    // Round 2: a bad name is bad_account, a set without a state is bad_state; a set saves the pool's record and tells
+    // one seat notice when its state or why changed; a cleared removes the record and tells one back notice.
+    void a;
+    throw new Error("not implemented");
+  }
+
+  // The principal's own clear of a seat (U17): true when something was removed, with one back notice. Without an
+  // owner, both the pool's and the derived one go.
+  clearSeat(account: string, owner?: "pool" | "derived"): boolean {
+    // Round 2: remove the named owner's record (or both), one back notice when one was there.
+    void account; void owner;
+    throw new Error("not implemented");
+  }
 
   // A usage reading a source posts (plan 4.3, U14): the windows it can see now, or the one reason it cannot. The
   // account comes from the header, as with a status line's report; the body's own `source` says who read it.

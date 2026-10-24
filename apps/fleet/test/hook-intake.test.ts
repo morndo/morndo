@@ -1,15 +1,20 @@
 // The hook bus's intake (spec 5.4, 5.6, 9 "Stream"): events above the stream's mark are stored for the subscribers
 // whose paths take them, in the one transaction that raises the mark; duplicates are skipped; seqs may skip; a new
 // streamId starts fresh. Negative control: without streamId tracking, a reset agent's events are dropped. Backlog
-// cap: progress events (/cc, /sl) give way first, then dead letters and one alert.
+// cap: progress events (/cc, /sl) give way first, then dead letters and one alert. S3: a limit failure's usage tap,
+// read in the same transaction and published only once that commit is on the disk.
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { HookEvent } from "@morndo/protocol";
 import type { Subscriber } from "../src/config.ts";
 import { Audit } from "../src/adapters/audit.ts";
 import { openFleetDb } from "../src/adapters/db.ts";
+import { LaneEventsStore } from "../src/adapters/lane-events-store.ts";
 import { OutboxStore } from "../src/adapters/outbox-store.ts";
+import { EventHub, type FleetEvent } from "../src/application/events.ts";
 import { HookIntake, unsubscribedScriptPaths } from "../src/application/hook-intake.ts";
+import { LaneEvents } from "../src/application/lane-events.ts";
+import { quiet } from "./helpers/fleet.ts";
 import { tempDir } from "./helpers/temp.ts";
 
 const ev = (streamId: string, seq: number, path: HookEvent["path"] = "/hook/stop"): HookEvent =>
@@ -111,5 +116,43 @@ describe("events no subscriber takes (final review I3, ADR-0012 decision 8: neve
     expect(unsubscribedScriptPaths([])).toEqual(["/hook/stop", "/hook/failure", "/notify", "/file"]);
     expect(unsubscribedScriptPaths([STOPS, { name: "n", url: "http://127.0.0.1:3/h", paths: ["/notify", "/cc"] }])).toEqual(["/hook/failure", "/file"]);
     expect(unsubscribedScriptPaths([ALL])).toEqual([]);
+  });
+});
+
+// S3, plan 4.5 item 4: the tap rides the batch's own transaction, like its lane events — published only once that
+// commit is on the disk, so a batch that rolled back told nothing, and never again for a replayed hook. The limit
+// reading itself is round 2; until then a limit failure throws "not implemented".
+describe("usage taps in the intake", () => {
+  const SID = "45460920-67e6-4bea-8c1d-2f3a4b5c6d7e";
+  const fail = (seq: number, error: string): HookEvent =>
+    ({ streamId: "s1", seq, at: 1_700_000_000_000 + seq, path: "/hook/failure", node: "pc", window: "api", body: { session_id: SID, error_type: error } });
+
+  it("a limit failure's tap is published once the batch's commit is on the disk, and a replayed hook never again", () => {
+    const db = openFleetDb(join(tempDir(), "fleet.db"));
+    const hub = new EventHub();
+    const published: FleetEvent[] = [];
+    hub.subscribe(e => published.push(e));
+    const lanes = new LaneEvents({ store: new LaneEventsStore(db), events: hub, config: { deliverTo: "manager", header: "h", ignore: [], batchMs: 3000 }, log: quiet });
+    let commits = 0;
+    const tx = { synced: <T>(fn: () => T): T => { const r = fn(); commits++; return r; }, savepoint: <T>(fn: () => T): T => fn() };
+    const intake = new HookIntake({ store: new OutboxStore(db), subscribers: [], audit: new Audit(db), lanes, events: hub, tx });
+    intake.accept("pc", "s1", [fail(1, "rate_limit")]);
+    expect(commits).toBe(1);
+    expect(published.filter(e => e.t === "usage")).toEqual([{ t: "usage", node: "pc", body: { kind: "failure", lane: "api", window: "api", sessionId: SID, error: "rate_limit", account: null, at: 1_700_000_000_001 } }]);
+    intake.accept("pc", "s1", [fail(1, "rate_limit")]);                                 // a replay after a lost ack
+    expect(published.filter(e => e.t === "usage")).toHaveLength(1);                     // negative control: below the mark
+    db.close();
+  });
+
+  it("a failure that is no limit at all publishes no tap", () => {
+    const db = openFleetDb(join(tempDir(), "fleet.db"));
+    const hub = new EventHub();
+    const published: FleetEvent[] = [];
+    hub.subscribe(e => published.push(e));
+    const lanes = new LaneEvents({ store: new LaneEventsStore(db), events: hub, config: { deliverTo: "manager", header: "h", ignore: [], batchMs: 3000 }, log: quiet });
+    const intake = new HookIntake({ store: new OutboxStore(db), subscribers: [], audit: new Audit(db), lanes, events: hub, tx: { synced: fn => fn(), savepoint: fn => fn() } });
+    intake.accept("pc", "s1", [fail(1, "overloaded")]);
+    expect(published.filter(e => e.t === "usage")).toEqual([]);
+    db.close();
   });
 });

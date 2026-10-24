@@ -278,6 +278,17 @@ export const MIGRATIONS: readonly Migration[] = [
       CREATE TABLE IF NOT EXISTS lane_accounts (node TEXT NOT NULL, lane TEXT NOT NULL, account TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (node, lane));
     `),
   },
+  {
+    // Usage detection S3 (plan 4.5 item 4, U15, U17): an agent token's scopes (comma-separated names of the closed
+    // list, empty: none) and the seat records the accounts pool owns — the derived ones stay in usage_seats (S2).
+    version: 27,
+    name: "usage (S3): agent token scopes and the pool-owned seat records (plan 4.5 item 4, U15, U17)",
+    compat: "additive",
+    up: db => {
+      if (!hasColumn(db, "agent_tokens", "scopes")) db.exec("ALTER TABLE agent_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT ''");
+      db.exec("CREATE TABLE IF NOT EXISTS usage_pool_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL)");
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

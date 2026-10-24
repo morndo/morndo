@@ -28,7 +28,7 @@
 // StopFailure: error_type), read 2026-10-08; a background task's id, type, status, description (up to 1000 characters)
 // and, for a shell task, command; a cron's id, schedule, recurring and prompt (Stop input), read 2026-10-20.
 import { pendingOf } from "@morndo/domain";
-import { LIMITS, firstLineOf as firstLine, redactKeyMaterial, statusLineOf, type HookEvent, type LaneEvent } from "@morndo/protocol";
+import { LIMITS, firstLineOf as firstLine, redactKeyMaterial, statusLineOf, type HookEvent, type LaneEvent, type UsageTapFailure } from "@morndo/protocol";
 import type { LaneEventsConfig } from "../config.ts";
 import type { LaneEventDraft, LaneEventsStore } from "../adapters/lane-events-store.ts";
 import type { Logger } from "../adapters/log.ts";
@@ -54,6 +54,23 @@ const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "obj
 const countOf = (v: unknown): number => (Array.isArray(v) ? v.length : Number.isFinite(Number(v)) ? Math.max(0, Math.trunc(Number(v))) : 0);
 // A text field: a string as it is, a number or a boolean written out, anything else none.
 const textOf = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "");
+
+// The error words whose failures are limits (the domain's limitKindOfError, usage-account.ts): named here only so a
+// failure that is no limit at all — an overloaded turn — stays no tap while the reading of the limit ones waits.
+const LIMIT_ERROR_WORDS = new Set(["rate_limit", "billing_error", "authentication_failed", "account_on_hold", "oauth_org_not_allowed"]);
+
+// A limit failure as a usage tap (plan 4.5 item 4): read before the manager and ignore filters, so the manager's own
+// window and an ignored one are in it. An error that is no limit makes no tap at all; the manager's own window and an
+// ignored lane still make no lane event.
+export function limitTapOf(e: HookEvent): UsageTapFailure | null {
+  if (e.path !== "/hook/failure") return null;
+  const b = isObject(e.body) ? e.body : {};
+  const error = textOf(b.error_type ?? b.error ?? "unknown").slice(0, 60) || "unknown";
+  if (!LIMIT_ERROR_WORDS.has(error.trim().toLowerCase())) return null;
+  // Round 2: the account the hook's own field names (when it fits the account-name rule), the lane and its window, the
+  // session id as laneEventOf reads it, and the hook's own time.
+  throw new Error("not implemented");
+}
 
 // The lane event a hook makes, or null.
 export function laneEventOf(e: HookEvent, rules: LaneEventRules): LaneEventDraft | null {
@@ -137,9 +154,11 @@ export class LaneEvents {
     this.#now = p.now ?? Date.now;
   }
 
-  // Inside the intake's transaction: stores the lane event `e` makes, if any. `own`: the hook is the fleet's own (a
-  // node's /lane), so it is never counted as unrouted.
-  take(e: HookEvent): { event: LaneEvent | null; own: boolean } {
+  // Inside the intake's transaction: stores the lane event `e` makes, if any, and reads its usage tap first, whatever
+  // lane event the hook makes or doesn't (the manager's own window and an ignored one make no lane event, their limit
+  // failures are taps all the same). `own`: the hook is the fleet's own (a node's /lane), so it is never counted as unrouted.
+  take(e: HookEvent): { event: LaneEvent | null; own: boolean; limit: UsageTapFailure | null } {
+    const limit = limitTapOf(e);
     const own = e.path === "/lane";
     this.#watch?.saw(e);
     // A Stop the relay asked to go on still tells the watch that the lane's turn may end there: if the lane never acts on
@@ -154,9 +173,9 @@ export class LaneEvents {
       if (only) this.#watch?.runTurn(only);
     }
     const d = laneEventOf(e, this.#rules);
-    if (!d) return { event: null, own };
-    if (d.event === "needs_input" && d.sessionId !== undefined && this.#store.lastOf(d.sessionId) === "needs_input") return { event: null, own };
-    return { event: this.#store.insert(d, this.#toManager && d.event !== "answered" ? 0 : null), own };
+    if (!d) return { event: null, own, limit };
+    if (d.event === "needs_input" && d.sessionId !== undefined && this.#store.lastOf(d.sessionId) === "needs_input") return { event: null, own, limit };
+    return { event: this.#store.insert(d, this.#toManager && d.event !== "answered" ? 0 : null), own, limit };
   }
 
   // After the commit that stored them.

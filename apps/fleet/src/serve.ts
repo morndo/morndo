@@ -195,7 +195,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   // Each lane's Run (ADR-0032), made once the job mirror is: a hook is activity once its commit is on the disk.
   let runs: Runs | null = null;
   const hooks = new HookIntake({
-    store: outbox, subscribers: config.subscribers, audit, now, onStored: () => delivery.kick(), tx, lanes: laneEvents,
+    store: outbox, subscribers: config.subscribers, audit, now, onStored: () => delivery.kick(), tx, lanes: laneEvents, events,
     onCommitted: () => runs?.kick(), ...(o.hookBacklog === undefined ? {} : { cap: o.hookBacklog }),
   });
   const intake = new IntakeWindow({ intake: hooks, tx, log, ...(o.intakeWindowMs === undefined ? {} : { windowMs: o.intakeWindowMs }) });

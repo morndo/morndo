@@ -38,6 +38,21 @@ export function applyLimit(prev: SeatRecord | null, hit: LimitHit): { seat: Seat
   return { seat: next, changed: true };
 }
 
+// The pool-owned seat (U15, U17): what the accounts pool set by hand. The pool's own record, never a reading's to end.
+export function poolSeat(hit: { state: SeatState; why: SeatWhy | null; backAt: number | null; at: number; by: string }): SeatRecord {
+  // Round 2: owner "pool", markedAt and since the hit's own time, no cycle and no window, the back time as given.
+  void hit;
+  throw new Error("not implemented");
+}
+
+// The seat the principal is shown (U17): the worse of the pool's and the hub's derived one by worseSeatState; on an
+// equal state, the pool's. Either null: the other; both null: null.
+export function shownSeat(pool: SeatRecord | null, derived: SeatRecord | null): SeatRecord | null {
+  // Round 2: worseSeatState decides, a tie goes to the pool.
+  void pool; void derived;
+  throw new Error("not implemented");
+}
+
 export function clearSeat(prev: SeatRecord, read: FreshRead): { seat: SeatRecord | null; cleared: boolean } {
   // A seat the pool set by hand is the pool's to end, never a reading's.
   if (prev.owner === "pool") return { seat: prev, cleared: false };

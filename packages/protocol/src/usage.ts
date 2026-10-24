@@ -129,6 +129,54 @@ export const UsageLimitBody = z.looseObject({
 });
 export type UsageLimitBody = z.output<typeof UsageLimitBody>;
 
+// The pool's word on a seat (U15): what a token with the usage-pool scope posts. `back_at` and `at` are epoch seconds
+// here, milliseconds in the domain; a `state` (and its `why`) comes only with "set".
+export const UsagePoolBody = z.looseObject({
+  account: z.string().check(z.minLength(1), z.maxLength(80)),
+  action: z.enum(["set", "cleared"]),
+  state: z.exactOptional(z.enum(["logged-out", "retired", "out", "low", "ok"])),
+  why: z.exactOptional(z.nullable(z.enum(["usage_limit", "refused", "signed_out", "plan_ended", "billing", "by_hand"]))),
+  back_at: z.exactOptional(z.nullable(num())),
+  by: z.string().check(z.minLength(1), z.maxLength(80)),
+  at: z.exactOptional(z.nullable(num())),
+});
+export type UsagePoolBody = z.output<typeof UsagePoolBody>;
+
+// The principal's own clear of a seat (U17): the account, and whose seat — without an owner, both.
+export const UsageSeatClearBody = z.looseObject({
+  account: z.string().check(z.minLength(1), z.maxLength(80)),
+  owner: z.exactOptional(z.enum(["pool", "derived"])),
+});
+export type UsageSeatClearBody = z.output<typeof UsageSeatClearBody>;
+
+// The fleet's usage tap (plan 4.5 item 4): a limit failure a lane hit, and the account a lane started with. `at` is
+// milliseconds here (the fleet's own event, never a wire body a source posts). Strict: a body a newer fleet shaped
+// differently is dropped by whoever reads it, never guessed at.
+const tapFailure = z.strictObject({
+  kind: z.literal("failure"),
+  lane: z.nullable(z.string().check(z.maxLength(64))),
+  window: z.nullable(z.string().check(z.maxLength(64))),
+  sessionId: z.exactOptional(z.string().check(z.maxLength(128))),
+  error: z.string().check(z.maxLength(60)),
+  account: z.nullable(z.string().check(z.maxLength(80))),
+  at: num(),
+});
+const tapLaneAccount = z.strictObject({
+  kind: z.literal("lane_account"),
+  lane: z.string().check(z.maxLength(64)),
+  account: z.string().check(z.maxLength(80)),
+  at: num(),
+});
+export const UsageTapBody = z.union([tapFailure, tapLaneAccount]);
+export type UsageTapBody = z.output<typeof UsageTapBody>;
+export type UsageTapFailure = Extract<UsageTapBody, { kind: "failure" }>;
+export type UsageTapLaneAccount = Extract<UsageTapBody, { kind: "lane_account" }>;
+
+// What an agent token may do beyond its role (U15): a closed list, so a scope a newer hub coined is never kept as one
+// of these. Empty (every token minted before this list): none.
+export const AGENT_SCOPES = ["usage-pool"] as const;
+export type AgentScope = (typeof AGENT_SCOPES)[number];
+
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const check = <T extends true>(t: T) => t;
 check<Same<z.output<typeof AccountUsageSchema>, AccountUsage>>(true);

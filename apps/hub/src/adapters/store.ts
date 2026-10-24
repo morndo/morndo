@@ -34,8 +34,9 @@ export type BriefRecord = {
 };
 
 // An agent token (ADR-0015, B1): the credential the manager's lane or a worker's changes the board with. Only its hash
-// is kept; `role` says whether it acts as the manager or as the worker lane it names on each call.
-export type AgentToken = { id: string; name: string; role: "manager" | "worker"; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null };
+// is kept; `role` says whether it acts as the manager or as the worker lane it names on each call, and `scopes` (U15)
+// the closed list's words of what it may do beyond its role — none for every token minted before the list.
+export type AgentToken = { id: string; name: string; role: "manager" | "worker"; scopes: readonly string[]; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null };
 
 // Usage S2 (plan 4.2 to 4.5): what one row of usage_sources holds — the source's health, its last reading and the one
 // before it (the sameAsPrevious rule's memory), and the cleaned hint of its last failure. `previous` keeps only what
@@ -603,10 +604,11 @@ export class Store {
     this.db.prepare("DELETE FROM board_merges WHERE key = ? AND lower(repo) = lower(?) AND sha = ?").run(key, repo, sha);
   }
 
-  // Agent tokens (ADR-0015, B1).
+  // Agent tokens (ADR-0015, B1). `scopes` (U15): the closed list's names, comma-separated in the row, empty: none.
   saveAgentToken(t: AgentToken) {
-    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @createdAt, @lastUsedAt, @revokedAt)
-      ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at`).run(t);
+    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, scopes, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @scopes, @createdAt, @lastUsedAt, @revokedAt)
+      ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at, scopes = excluded.scopes`)
+      .run({ ...t, scopes: [...t.scopes].join(",") });
   }
   agentTokenBySecretHash(hash: string): AgentToken | null {
     const r = this.db.prepare("SELECT * FROM agent_tokens WHERE secret_hash = ?").get(hash) as Row | undefined;
@@ -696,11 +698,28 @@ export class Store {
     this.db.prepare("DELETE FROM usage_seats WHERE account = ?").run(account);
   }
 
-  // Which lane of which node is signed in as which account. Nothing writes it in this slice; the table and its
-  // methods exist so a later one can, without another migration.
+  // The pool-owned seat records (S3, U15): one per account, beside the derived ones in usage_seats.
+  usagePoolSeats(): { account: string; record: SeatRecord }[] {
+    return (this.db.prepare("SELECT account, body FROM usage_pool_seats ORDER BY account").all() as Row[])
+      .map(r => ({ account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord }));
+  }
+  saveUsagePoolSeat(account: string, record: SeatRecord) {
+    this.db.prepare("INSERT INTO usage_pool_seats (account, body) VALUES (?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body")
+      .run(account, JSON.stringify(record));
+  }
+  deleteUsagePoolSeat(account: string) {
+    this.db.prepare("DELETE FROM usage_pool_seats WHERE account = ?").run(account);
+  }
+
+  // Which lane of which node is signed in as which account (plan 4.5 item 4): a lane's reports and starts write it,
+  // its failures resolve from it.
   laneAccount(node: string, lane: string): { node: string; lane: string; account: string; at: number } | null {
     const r = this.db.prepare("SELECT node, lane, account, at FROM lane_accounts WHERE node = ? AND lane = ?").get(node, lane) as Row | undefined;
     return r ? { node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number } : null;
+  }
+  laneAccounts(): { node: string; lane: string; account: string; at: number }[] {
+    return (this.db.prepare("SELECT node, lane, account, at FROM lane_accounts ORDER BY node, lane").all() as Row[])
+      .map(r => ({ node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number }));
   }
   saveLaneAccount(node: string, lane: string, account: string, at: number) {
     this.db.prepare("INSERT INTO lane_accounts (node, lane, account, at) VALUES (?, ?, ?, ?) ON CONFLICT(node, lane) DO UPDATE SET account = excluded.account, at = excluded.at")
@@ -792,6 +811,7 @@ const taskFrom = (r: Row): Task => ({
 });
 const agentTokenFrom = (r: Row): AgentToken => ({
   id: r.id as string, name: r.name as string, role: r.role as AgentToken["role"], secretHash: r.secret_hash as string,
+  scopes: ((r.scopes as string | null) ?? "").split(",").filter(s => s !== ""),
   createdAt: r.created_at as number, lastUsedAt: (r.last_used_at as number | null) ?? null, revokedAt: (r.revoked_at as number | null) ?? null,
 });
 const mergeFrom = (r: Row): MergeRecord => ({

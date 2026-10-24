@@ -15,6 +15,10 @@ type Body = Record<string, unknown>;
 const limit = (body: unknown, token = workerToken) => fetch(`${hub.base}/api/agent/usage/limit`, {
   method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": "builder" }, body: JSON.stringify(body),
 });
+// The pool's own word (U15): a manager-role token with the usage-pool scope, as the pool bot would hold.
+const pool = (body: unknown, token: string) => fetch(`${hub.base}/api/agent/usage/pool`, {
+  method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json" }, body: JSON.stringify(body),
+});
 // A reading straight to the service, for the lease cases: the same body the route would hand it.
 const actor: BoardActor = { kind: "worker", name: "builder", token: "t" };
 // The hub's clock follows a reading's stamp (a source cannot have taken a reading after the hub's own now; the hub caps a stamp past its skew).
@@ -106,5 +110,49 @@ describe("seats (plan 4.5)", () => {
     const v = await viewOf();
     expect((v.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
     expect(await noticesOf("seat")).toEqual([]);
+  });
+
+  // S3 (plan 4.5 item 4): the fleet's taps and the pool's word. Red until round 2 (fromFleet, poolSeat, shownSeat).
+  it("a lane's failure and a manager's limit post set the same seat state (AT-15)", async () => {
+    hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived" });
+    const managerToken = hub.agents.issue("manager", "manager").secret;
+    const r = await limit({ kind: "usage_limit", by: "manager-one", account: "seat-a", at: Math.floor(now / 1000) }, managerToken);
+    expect(await r.json()).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit" });      // one seat, whatever reported it
+    expect(await noticesOf("seat")).toHaveLength(1);
+  });
+
+  it("a pool-set state is sticky, a derived one clears, and authority is the token's (AT-43)", async () => {
+    const poolToken = hub.agents.issue("pool", "manager", ["usage-pool"]).secret;
+    const set = await pool({ account: "seat-a", action: "set", state: "retired", why: "refused", by: "pool-bot", at: Math.floor(now / 1000) }, poolToken);
+    expect(await set.json()).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "retired", why: "refused", owner: "pool", by: "pool-bot" });
+    // Sticky: a lane's limit failure under the pool's word changes nothing of what is shown.
+    hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now + MIN });
+    expect(await seatOf()).toMatchObject({ state: "retired", owner: "pool" });
+    // A derived one clears: a fresh leased read of a new cycle (AT-18's rule).
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
+    now += 65 * MIN;
+    const lease = hub.usage.leases.grant("seat-b", "app-server", null);
+    expect(read({ account: "seat-b", capturedAt: now, usedPercent: 20, resetsAt: now + 3 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    expect(await seatOf("seat-b")).toBeUndefined();
+    // Authority is the token's: the scope, not the role — the manager's own token is refused without it.
+    const managerToken = hub.agents.issue("manager", "manager").secret;
+    const refused = await pool({ account: "seat-a", action: "cleared", by: "manager-one" }, managerToken);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "scope_required" });
+  });
+
+  it("the pool's state wins on Home (AT-44)", async () => {
+    const poolToken = hub.agents.issue("pool", "manager", ["usage-pool"]).secret;
+    const set = await pool({ account: "seat-a", action: "set", state: "out", why: "usage_limit", back_at: Math.floor((now + HOUR) / 1000), by: "pool-bot", at: Math.floor(now / 1000) }, poolToken);
+    expect(await set.json()).toEqual({ ok: true });
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });   // the hub's own derived mark
+    expect(await seatOf()).toMatchObject({ state: "out", owner: "pool" });           // an equal state: the pool's
+    now += 65 * MIN;
+    const lease = hub.usage.leases.grant("seat-a", "app-server", null);
+    expect(read({ capturedAt: now, usedPercent: 20, resetsAt: now + 3 * HOUR, leaseId: lease.ok ? lease.id : null })).toEqual({ ok: true });
+    expect(await seatOf()).toMatchObject({ state: "out", owner: "pool" });           // the derived one cleared; the pool's stands
   });
 });
