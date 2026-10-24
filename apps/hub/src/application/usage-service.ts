@@ -8,7 +8,7 @@ import {
   accountNow, applyLimit, applyReport, backNoticeText, cadenceInput, cadenceOf, changeSignature, cleanHint, cleanLength,
   cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, limitKindOfError, markExpired, mergeWindow, noCycleBook,
   noHealth, noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, pruneSessions, reasonOf, resolveAccount,
-  seatExpiredNoticeText, seatNoticeText,
+  seatClearedNoticeText, seatExpiredNoticeText, seatNoticeText,
   seatResetNoticeText, shownSeat, sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince,
   watchPlan, watchThreshold, windowTitle,
   poolSeat as poolSeatOf,
@@ -349,7 +349,7 @@ export class UsageService {
       if (prev === null) return { ok: true };
       this.#tx(() => {
         this.#store.deleteUsagePoolSeat(a.account);
-        this.#note(a.account, "back", `pool|back|${prev.markedAt}`, backNoticeText(a.account, "the pool"));
+        this.#note(a.account, "back", `pool|back|${prev.markedAt}`, seatClearedNoticeText(a.account, "the pool"));
       });
       this.#tellIfChanged();
       return { ok: true };
@@ -381,7 +381,7 @@ export class UsageService {
     this.#tx(() => {
       if (pool !== null) this.#store.deleteUsagePoolSeat(account);
       if (derived !== null) this.#store.deleteUsageSeat(account);
-      this.#note(account, "back", `cleared|${now}`, backNoticeText(account, "the principal"));
+      this.#note(account, "back", `cleared|${now}`, seatClearedNoticeText(account, "the principal"));
     });
     this.#tellIfChanged();
     return true;

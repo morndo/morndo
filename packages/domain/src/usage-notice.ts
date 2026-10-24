@@ -50,6 +50,10 @@ export function seatNoticeText(account: string, s: SeatRecord): string {
 export function backNoticeText(account: string, by: string): string {
   return `${account}: back in use (${by} shows a new cycle).`;
 }
+// A limit mark ended by someone's own word, not by a reading: the pool's, or the principal's.
+export function seatClearedNoticeText(account: string, by: string): string {
+  return `${account}: its limit mark was cleared by ${by}.`;
+}
 
 // A derived seat dropped because the plan or the account behind it changed (fix round on PR #125, finding 3a).
 export function seatResetNoticeText(account: string): string {

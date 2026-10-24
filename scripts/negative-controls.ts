@@ -4267,6 +4267,21 @@ export const CONTROLS: Control[] = [
   { id: "t415s3r2-forget-keeps-lane-records", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "this.#store.deleteLaneAccountsOf(account);", replace: "",
     run: ["apps/hub/test/usage-account-resolution.test.ts"] },
+  { id: "t415s4-repeat-notice-pushes", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "if (inserted && kind !== \"forgotten\") this.#told.push(kind);", replace: "if (kind !== \"forgotten\") this.#told.push(kind);",
+    run: ["apps/hub/test/usage-push.test.ts"] },
+  { id: "t415s4-forgotten-pushes", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "if (inserted && kind !== \"forgotten\") this.#told.push(kind);", replace: "if (inserted) this.#told.push(kind);",
+    run: ["apps/hub/test/usage-push.test.ts"] },
+  { id: "t415s4-health-worst-state-wins", task: "T-415", file: "apps/web/src/lib/desktop/usage.ts",
+    find: "const rank: Record<HealthState, number> = { available: 0, stale: 1, unavailable: 2, missing: 3 };", replace: "const rank: Record<HealthState, number> = { available: 3, stale: 2, unavailable: 1, missing: 0 };",
+    run: ["apps/web/test/usage-home.test.ts"] },
+  { id: "t415s4-usage-push-says-nothing-without-a-count", task: "T-415", file: "apps/web/src/lib/sw-push.ts",
+    find: "many(Math.max(p.usage, 1), \"Usage needs a look\", \"# usage changes need a look\")", replace: "many(p.usage, \"Usage needs a look\", \"# usage changes need a look\")",
+    run: ["apps/web/test/sw-push.test.ts"] },
+  { id: "t415s4-forget-on-one-tap", task: "T-415", file: "apps/web/src/lib/desktop/HomeView.svelte",
+    find: "if (!confirming[key]) { confirming[key] = true; return; }", replace: "",
+    run: ["apps/web/test/usage-card.test.ts"] },
 ];
 
 // ---- the runner

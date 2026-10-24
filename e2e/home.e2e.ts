@@ -8,8 +8,19 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, expect } from "playwright";
+import { chromium } from "playwright";
 import { HUB_MAIN, assert, checks, outDir, pairedPage, startOffice } from "./harness.ts";
+
+// Polls a read until it satisfies `ok` (what Playwright's expect.poll does in its own test runner, which this script does not use).
+async function eventually<T>(read: () => Promise<T>, ok: (v: T) => boolean, what: string, timeout = 8000): Promise<T> {
+  const end = Date.now() + timeout;
+  for (;;) {
+    const v = await read();
+    if (ok(v)) return v;
+    if (Date.now() > end) throw new Error(`${what}: last read ${JSON.stringify(v)}`);
+    await new Promise(r => setTimeout(r, 200));
+  }
+}
 
 const OUT = outDir("home");
 const { check, watch, finish } = checks(OUT);
@@ -184,18 +195,25 @@ try {
     assert(deadText.includes("Can't read since"), `the dead card doesn't say since when: ${deadText}`);
     assert(deadText.includes("Fix: sign in again"), `the dead card doesn't say the fix: ${deadText}`);
     assert(deadText.includes("the source says:"), `the dead card doesn't quote the source: ${deadText}`);
-    assert(deadText.includes("<b>x</b> https://x.example/"), `the hint is not shown as text: ${deadText}`);
+    assert(deadText.includes("<b>x</b>"), `the hint is not shown as text: ${deadText}`);
+    assert(!deadText.includes("https://x.example"), `a link in the hint reached the page: ${deadText}`);
+    assert(!/reported \d+ d ago/.test(deadText), `an account nothing was reported for says it was long ago: ${deadText}`);
     assert(await dead.locator(".meter").count() === 0, "an unavailable source still shows meters");
     assert(await dead.locator("b, a[href]").count() === 0, "the hint created markup or a link");
-    // (d) a named window whose length is a week: the label it came with, the title the cadence gives it.
+    // (d) a window the poster calls "Monthly" whose length is a week is the weekly window (the hub names a window by its length,
+    // never by the poster's word); an account whose only window has another length keeps its own label with the title its cadence gives it.
     assert((await readings("fresh", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [
       fiveHour(42),
       { id: "Monthly", used_percent: 61, resets_at: Math.floor((Date.now() + 7 * 24 * HOUR) / SEC), length_mins: 10080 },
     ] })).status === 200, "post failed");
-    await expect.poll(async () => (await fresh.innerText()).replace(/\s+/g, " "), { timeout: 8000 }).toContain("Monthly");
+    await eventually(async () => (await fresh.innerText()).replace(/\s+/g, " "), v => v.includes("Weekly window") && v.includes("61%"), "the week-long window");
     const freshText = (await fresh.innerText()).replace(/\s+/g, " ");
-    assert(freshText.includes("· weekly"), `the titled window's title is missing: ${freshText}`);
-    assert(!freshText.includes("monthly"), `the title replaced the cadence's own word: ${freshText}`);
+    assert(!/monthly/i.test(freshText), `the poster's word named a window: ${freshText}`);
+    assert((await readings("burst", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [
+      { id: "Burst", used_percent: 33, resets_at: Math.floor((Date.now() + 3 * 24 * HOUR) / SEC), length_mins: 4320 },
+    ] })).status === 200, "post failed");
+    const burst = page.locator('[data-account="burst"]');
+    await eventually(async () => (await burst.innerText().catch(() => "")).replace(/\s+/g, " "), v => v.includes("Burst · 3-day"), "the titled window's title");
     await page.screenshot({ path: join(OUT, "6-states-desktop.png") });
   });
 
@@ -225,7 +243,7 @@ try {
     assert(/fresh: .*usage limit reached/.test(panelText), `the notices panel doesn't name the seat notice: ${panelText}`);
     const clear = fresh.getByRole("button", { name: /Clear this mark/ });
     await clear.click();
-    await expect.poll(async () => fresh.locator(".seat").count(), { timeout: 8000 }).toBe(0);
+    await eventually(async () => fresh.locator(".seat").count(), v => v === 0, "the seat badge goes");
     await page.screenshot({ path: join(OUT, "8-seat-and-notices-desktop.png") });
   });
 
@@ -244,10 +262,10 @@ try {
       await dead.waitFor({ timeout: 10_000 });
       const forget = dead.getByRole("button", { name: /Forget/ }).first();
       await forget.click();
-      await expect.poll(async () => forget.innerText(), { timeout: 8000 }).toContain("Forget? (this removes it)");
+      await eventually(async () => forget.innerText(), v => v.includes("Forget? (this removes it)"), "the second tap asks");
       await forget.click();
-      await expect.poll(async () => dead.getByRole("button", { name: /Forget/ }).count(), { timeout: 8000 }).toBe(0);
-      assert(!(await dead.innerText()).includes("app-server:"), "the forgotten source's line is still there");
+      await eventually(async () => dead.getByRole("button", { name: /Forget/ }).count(), v => v === 0, "the source line goes");
+      assert((await dead.count()) === 0, "the forgotten account's card is still there");
     } finally { await phone.context.close(); }
   });
 

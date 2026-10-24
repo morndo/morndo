@@ -144,7 +144,7 @@
                 </span>
                 <button type="button" class="clearseat" aria-label="Clear this mark for {a.account}" onclick={() => clearMark(a.account)}>Clear this mark</button>
               {/if}
-              <span class="when">reported {ago(a.reportedAt, now)}</span>
+              {#if a.reportedAt > 0}<span class="when">reported {ago(a.reportedAt, now)}</span>{/if}
             </header>
             {#if problems[`seat|${a.account}`]}<p class="actproblem" role="alert">{problems[`seat|${a.account}`]}</p>{/if}
             {#if h.state === "unavailable"}
@@ -283,7 +283,7 @@
   .notices .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   /* The seat badge, in the card header: words, an icon and who set it — never colour alone. */
   .seat { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--code-bg); font: 400 12px/16px var(--font); }
-  .seat svg { flex: none; color: var(--warn-fg); }
+  .seat :global(svg) { flex: none; color: var(--warn-fg); }
   .seatfix { color: var(--text); font-weight: 700; }
   .seatby { color: var(--muted); overflow-wrap: anywhere; }
   .clearseat { border: 1px solid var(--border); border-radius: 6px; background: var(--main-bg); color: var(--text); font: 400 12px/16px var(--font); padding: 4px 8px; cursor: pointer; }

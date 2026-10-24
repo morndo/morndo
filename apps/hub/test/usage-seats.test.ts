@@ -120,6 +120,12 @@ describe("seats (plan 4.5)", () => {
     expect(await seatOf("seat-b")).toMatchObject({ state: "out" });
   });
 
+  it("the principal's clear is said as that, not as a fresh reading", async () => {
+    hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now });
+    expect(hub.usage.clearSeat("seat-a")).toBe(true);
+    expect(((await noticesOf("back")) as Body[]).map(n => n.text)).toEqual(["seat-a: its limit mark was cleared by the principal."]);
+  });
+
   it("an unknown limit changes no seat", async () => {
     expect(await limit({ kind: "unknown", by: "worker-one", account: "seat-a" })).toMatchObject({ status: 200 });
     expect(await limit({ kind: "usage_limit", by: "worker-one" })).toMatchObject({ status: 200 });      // no account at all
