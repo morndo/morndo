@@ -278,17 +278,20 @@ export class UsageService {
     const prev: UsageSourceBody = row?.body ?? { health: noHealth(body.source), reading: null, previous: null, hint: null };
     // The ordering guard (PR #125, finding 2): a reading, good or bad, older than the newest stamp the source ever
     // gave is a late replay. It changes nothing — health, reading, watches, seats and notices all stand — and is answered ok.
-    // For ordering alone the stamp is capped at the hub's own clock, and each stored stamp with it (PR #125 fix round 2,
-    // finding 3a): a source whose clock runs ahead must not make an honest later reading look older. What is stored —
-    // capturedAt below, shown as asOf — keeps the freshness cap of the clock plus the skew.
+    // For ordering alone the stamp is capped at the hub's own clock when it is RECEIVED, and stored that way (R3 on PR
+    // #125): a source whose clock runs ahead is ordered as of the receipt, so it never locks out an honest reading that
+    // arrives after it (clamping at each later compare would leave the future stamp equal to the hub's clock for ever).
+    // What is stored as capturedAt, shown as asOf, keeps the freshness cap of the clock plus the skew.
     const orderingAt = Math.min(body.captured_at * 1000, now);
-    const stamps = [prev.health.lastOkAt, prev.health.lastFailAt, prev.reading?.capturedAt ?? null]
+    const legacy = [prev.health.lastOkAt, prev.health.lastFailAt, prev.reading?.capturedAt ?? null]
       .filter((s): s is number => s !== null).map(s => Math.min(s, now));
-    if (stamps.length > 0 && orderingAt < Math.max(...stamps)) return { ok: true };
+    const prevOrdered = prev.orderedAt ?? (legacy.length > 0 ? Math.max(...legacy) : null);
+    if (prevOrdered !== null && orderingAt < prevOrdered) return { ok: true };
+    const orderedAt = Math.max(prevOrdered ?? orderingAt, orderingAt);
     if (body.failure != null) {
       // A failure keeps the last good reading and its memory; what it says of itself is cleaned before it is stored.
       const health = failedRead(prev.health, capturedAt, reasonOf(body.failure.reason), body.every_s);
-      this.#store.saveUsageSource(account, body.source, node, { health, reading: prev.reading, previous: prev.previous, hint: cleanHint(body.failure.hint) });
+      this.#store.saveUsageSource(account, body.source, node, { health, reading: prev.reading, previous: prev.previous, hint: cleanHint(body.failure.hint), orderedAt });
       this.#tellIfChanged();
       return { ok: true };
     }
@@ -310,7 +313,7 @@ export class UsageService {
       // Nothing readable is a failure the principal sees, not silence (PR #125, finding 4a): the source cannot read
       // its screen, and the hub's own hint says so. The last good reading is kept, as any failure keeps it.
       const health = failedRead(prev.health, capturedAt, "unknown_screen", body.every_s);
-      this.#store.saveUsageSource(account, body.source, node, { health, reading: prev.reading, previous: prev.previous, hint: UNREADABLE_HINT });
+      this.#store.saveUsageSource(account, body.source, node, { health, reading: prev.reading, previous: prev.previous, hint: UNREADABLE_HINT, orderedAt });
       this.#tellIfChanged();
       return { ok: false, problem: "bad_reading" };
     }
@@ -318,7 +321,7 @@ export class UsageService {
     // `previous` is the sameAsPrevious rule's memory (plan 4.3 item 5): the reading before this one, and when it was
     // taken — the echo rule's line to draw against a status line's last word (PR #125, finding 1).
     const previous = prev.reading === null ? null : { capturedAt: prev.reading.capturedAt, windows: prev.reading.windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt })) };
-    this.#store.saveUsageSource(account, body.source, node, { health, reading: { capturedAt, plan: body.plan ?? null, windows: list }, previous, hint: null });
+    this.#store.saveUsageSource(account, body.source, node, { health, reading: { capturedAt, plan: body.plan ?? null, windows: list }, previous, hint: null, orderedAt });
     this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id);
     this.#thresholds(account, this.#mergedWindows(this.#baseOf(account, now), this.#store.usageSourcesOf(account), now), now);
     this.#tellIfChanged();

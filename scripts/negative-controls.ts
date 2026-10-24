@@ -4177,6 +4177,9 @@ export const CONTROLS: Control[] = [
   { id: "t415s2r2-report-scans-every-row", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "this.#mergedWindows(shown, this.#store.usageSourcesOf(account), now)", replace: "this.#mergedWindows(shown, this.#store.usageSources().filter(r => r.account === account), now)",
     run: ["apps/hub/test/usage-store.test.ts"] },
+  { id: "t415s2r3-future-stamp-locks-out", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "const prevOrdered = prev.orderedAt ?? (legacy.length > 0 ? Math.max(...legacy) : null);", replace: "const prevOrdered = legacy.length > 0 ? Math.max(...legacy) : null;",
+    run: ["apps/hub/test/usage-health.test.ts"] },
 ];
 
 // ---- the runner
