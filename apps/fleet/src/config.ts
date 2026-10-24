@@ -34,7 +34,8 @@ export type FleetConfig = {
   // update.apply open to the hub's signed assertion (updates §5.4); absent, they stay closed as today.
   principalKey?: string;
   // The second client socket, for a caller that reaches the fleet through a forward (T-440). Optional in the file and
-  // absent from defaults(); workerSocketOf fills what the file leaves out.
+  // absent from defaults(); workerSocketOf fills what the file leaves out. protectedLanes in the file adds to the
+  // sticky lanes and laneEvents.deliverTo; it never removes one.
   workerSocket?: { path?: string; protectedLanes?: string[]; startNodes?: string[] };
 };
 export type LaneEventsConfig = { deliverTo: string | null; header: string; ignore: string[]; batchMs: number };
@@ -193,15 +194,17 @@ function workerSocketSettings(v: unknown, home: string, socketPath: string): Non
   return out;
 }
 
-// path beside the owner socket, the sticky lanes plus laneEvents.deliverTo protected, and no node to start on,
-// unless the file named them.
+// path beside the owner socket. protectedLanes is every sticky lane, laneEvents.deliverTo when that is a lane, and
+// every name the file lists, each once: the file adds to those defaults and can never remove one. startNodes is
+// empty unless the file names nodes.
 export function workerSocketOf(config: FleetConfig): { path: string; protectedLanes: string[]; startNodes: string[] } {
   const w = config.workerSocket;
   const protectedLanes = [...config.stickyLanes];
   if (config.laneEvents.deliverTo !== null) protectedLanes.push(config.laneEvents.deliverTo);
+  if (w?.protectedLanes !== undefined) protectedLanes.push(...w.protectedLanes);
   return {
     path: w?.path ?? join(dirname(config.socketPath), "fleet-worker.sock"),
-    protectedLanes: w?.protectedLanes ?? [...new Set(protectedLanes)],
+    protectedLanes: [...new Set(protectedLanes)],
     startNodes: w?.startNodes ?? [],
   };
 }

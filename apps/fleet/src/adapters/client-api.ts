@@ -90,6 +90,9 @@ export type ClientApiDeps = {
 };
 export type ClientApi = { close(): Promise<void> };
 
+// The socket that accepted the request. The worker kind carries its policy, so a worker request cannot run without one.
+type Scope = { kind: "owner" } | { kind: "worker"; policy: WorkerScope };
+
 // Who may move a Rollout forward (review of #107, finding 3). `updater`: the control plane's updater reporting its
 // commit or halt. `principal`: the owner's resume and update.apply, through the hub — one request, one signed
 // assertion for exactly its ask (updates §5.4), the x-morndo-principal header, checked by the authority the
@@ -201,11 +204,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   const answerOp = (res: ServerResponse, ran: { status: number; outcome: Outcome }) =>
     json(res, ran.status, ran.outcome, ran.status === 503 ? { "Retry-After": "1" } : {});
 
-  // The worker listener is only opened with a policy; a worker-scope request without one is a bug and stops here.
-  const workerScope = (): WorkerScope => {
-    if (!d.worker) throw new Error("a worker-scope request without a worker policy");
-    return d.worker.scope;
-  };
+  // Lookups for the worker policy come from the lane registry. The policy itself rides on the request's scope.
   const look: WorkerLook = {
     nameOfWorker: id => d.lanes.nameOfWorker(id),
     nodeOfLane: name => { const r = d.lanes.resolve(name); return r.kind === "ok" ? r.node : null; },
@@ -217,12 +216,12 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     catch (e) { d.log.error(`audit: refused ${what} on ${node ?? "?"} could not be recorded (fleet.db busy or full?): ${JSON.stringify(detail)}`, e); }
   }
   const targetNode = (target: Target): string | null => "node" in target ? target.node : "workerId" in target ? (parseWorkerId(target.workerId)?.node ?? null) : look.nodeOfLane(target.lane);
-  const asked = (req: IncomingMessage, b: { key?: string; timeoutMs?: number }, scope: "owner" | "worker") => ({
-    client: clientOf(req), ...(scope === "worker" ? { actor: "worker" } : {}),
+  const asked = (req: IncomingMessage, b: { key?: string; timeoutMs?: number }, scope: Scope) => ({
+    client: clientOf(req), ...(scope.kind === "worker" ? { actor: "worker" } : {}),
     ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
   });
 
-  async function route(req: IncomingMessage, res: ServerResponse, s: string[], scope: "owner" | "worker"): Promise<void> {
+  async function route(req: IncomingMessage, res: ServerResponse, s: string[], scope: Scope): Promise<void> {
     const method = req.method ?? "GET";
     const [first, second, third] = s;
     if (method === "GET" && s.length === 1 && first === "health") {
@@ -233,7 +232,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     if (method === "POST" && s.length === 3 && first === "nodes" && third === "revoke") {
       const name = second ?? "";
       if (!NODE_NAME.test(name)) throw new HttpError(400, "not a node name");
-      if (scope === "worker") {
+      if (scope.kind === "worker") {
         const message = "revoking a node is not allowed on the worker socket";
         noteRefused("node.revoke", name, message, req);
         return json(res, 403, { error: "not_allowed", message });
@@ -271,12 +270,14 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const parsed = parseOpBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message), store: null, storeSeq: null });
       const b = parsed.body;
-      if (scope === "worker") {
-        const verdict = workerOpVerdict(workerScope(), { target: b.target, op: b.op, args: b.args }, look);
+      let args = b.args;
+      if (scope.kind === "worker") {
+        const verdict = workerOpVerdict(scope.policy, { target: b.target, op: b.op, args: b.args }, look);
         if (!verdict.ok) {
           noteRefused(`op.${b.op}`, targetNode(b.target), verdict.reason, req);
           return json(res, 200, { ok: false, error: opError("not_allowed", verdict.reason), store: null, storeSeq: null });
         }
+        if (verdict.args) args = verdict.args;
       }
       if (b.op === "update.apply") {
         // The proof is for exactly this ask (§5.4) — one node, one Version. args' shape the router checks only
@@ -308,11 +309,19 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         const id = typeof b.args.id === "string" ? b.args.id : "";
         const owned = jobOwner(d, id, b.target);
         if (!owned) return json(res, 200, { ok: false, error: opError("denied", "missing"), store: null, storeSeq: null });
-        return answerOp(res, await runOp({ node: owned.node }, b.op, b.args, asked(req, b, scope)));
+        return answerOp(res, await runOp({ node: owned.node }, b.op, args, asked(req, b, scope)));
       }
-      return answerOp(res, await runOp(b.target, b.op, b.args, asked(req, b, scope)));
+      return answerOp(res, await runOp(b.target, b.op, args, asked(req, b, scope)));
     }
-    if (method === "GET" && s.length === 3 && first === "files") return streamFile(res, d.router, second ?? "", third ?? "");
+    if (method === "GET" && s.length === 3 && first === "files") {
+      const node = second ?? "";
+      if (scope.kind === "worker" && !scope.policy.startNodes.has(node)) {
+        const message = "reading a file is not allowed on the worker socket: that node is not one the worker socket may read";
+        noteRefused("files", node, message, req);
+        return json(res, 403, { error: "not_allowed", message });
+      }
+      return streamFile(res, d.router, node, third ?? "");
+    }
     if (method === "GET" && s.length === 1 && first === "lane-events") {
       const since = queryOf(req.url).get("since") ?? "0";
       if (!/^\d{1,15}$/.test(since)) throw new HttpError(400, "since must be a lane event's seq (a whole number, 0 for the oldest kept)");
@@ -329,7 +338,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       });
     }
     if (method === "POST" && s.length === 2 && first === "rollout" && (second === "committed" || second === "halt" || second === "resume")) {
-      if (scope === "worker") {
+      if (scope.kind === "worker") {
         const message = `rollout ${second} is not allowed on the worker socket`;
         noteRefused(`rollout.${second}`, null, message, req);
         return json(res, 403, { error: "not_allowed", message });
@@ -374,8 +383,8 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       }
       const parsed = parseDeliveryBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message) });
-      if (scope === "worker") {
-        const verdict = workerDeliveryVerdict(workerScope(), parsed.body, look);
+      if (scope.kind === "worker") {
+        const verdict = workerDeliveryVerdict(scope.policy, parsed.body, look);
         if (!verdict.ok) {
           const node = "workerId" in parsed.body ? (parseWorkerId(parsed.body.workerId)?.node ?? null) : look.nodeOfLane(parsed.body.lane);
           noteRefused("delivery.post", node, verdict.reason, req);
@@ -397,10 +406,10 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       return one ? json(res, 200, one) : json(res, 404, { error: "no_such_delivery" });
     }
     if (method === "POST" && s.length === 3 && first === "deliveries" && third === "cancel") {
-      if (scope === "worker") {
+      if (scope.kind === "worker") {
         const one = d.deliveries.get(second ?? "");
         if (!one) return json(res, 404, { error: "no_such_delivery" });
-        const verdict = workerDeliveryCancelVerdict(workerScope(), one.delivery.target, look);
+        const verdict = workerDeliveryCancelVerdict(scope.policy, one.delivery.target, look);
         if (!verdict.ok) {
           noteRefused("delivery.cancel", one.delivery.node, verdict.reason, req);
           return json(res, 200, { ok: false, error: opError("not_allowed", verdict.reason) });
@@ -415,7 +424,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   }
 
   // Each request is handled to its end here, with its own catch, so the promise is dropped on purpose.
-  async function handle(req: IncomingMessage, res: ServerResponse, scope: "owner" | "worker") {
+  async function handle(req: IncomingMessage, res: ServerResponse, scope: Scope) {
     try {
       const s = segments(req.url);
       if (s === null) return json(res, 404, { error: "unsupported_api", api: API_VERSIONS });
@@ -468,7 +477,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
 
   // One HTTP server per socket (the owner, and the worker when configured). They share the events clients.
   const sockets: { server: Server; path: string }[] = [];
-  async function listen(path: string, scope: "owner" | "worker"): Promise<void> {
+  async function listen(path: string, scope: Scope): Promise<void> {
     prepareSocketDir(path);
     await clearStaleSocket(path);
     const server = createServer((req, res) => void handle(req, res, scope));
@@ -511,8 +520,8 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     }
   });
   try {
-    await listen(socketPath, "owner");
-    if (d.worker) await listen(d.worker.socketPath, "worker");
+    await listen(socketPath, { kind: "owner" });
+    if (d.worker) await listen(d.worker.socketPath, { kind: "worker", policy: d.worker.scope });
   } catch (e) {
     await close();
     throw e;
