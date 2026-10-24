@@ -7,7 +7,8 @@ import type { ThresholdLevel } from "./usage-threshold.ts";
 import type { UsageFix, UsageSource } from "./usage-reading.ts";
 import type { SeatRecord } from "./usage-seatbook.ts";
 
-export type NoticeKind = "plan" | "seat" | "back" | "threshold" | "forgotten";
+export const NOTICE_KINDS = ["plan", "seat", "back", "threshold", "forgotten"] as const;
+export type NoticeKind = (typeof NOTICE_KINDS)[number];
 export type UsageNotice = { id: string; kind: NoticeKind; account: string; at: number; text: string };
 export const NOTICE_KEEP = 50;
 

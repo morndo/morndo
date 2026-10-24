@@ -26,6 +26,7 @@
   import { sentTo } from "../manager.ts";
   import { SEEN_MARK, unseen } from "../alerts.ts";
   import TopNav from "./TopNav.svelte";
+  import { clearSeat, forgetSource } from "../usage-api.ts";
   import DecisionCard, { type AnswerBody, type AnswerProblem } from "./DecisionCard.svelte";
   import { UNKNOWN, hubRefusal } from "../catchup/answer.ts";
   import DecisionsPanel from "./DecisionsPanel.svelte";
@@ -394,7 +395,9 @@
             <ActivityView workers={feed.workers} onOpen={open} {nameOf}
               alerts={feed.alerts} seenAt={feed.reads[SEEN_MARK] ?? 0} onSeen={at => feed.markRead(SEEN_MARK, at)} />
           {:else if view === "dashboard"}
-            <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
+            <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane}
+              notices={feed.usageNotices} onForget={(account, source, node) => void forgetSource(account, source, node).catch(() => {})}
+              onClearSeat={account => void clearSeat(account).catch(() => {})} />
           {:else if view === "board"}
             <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} merged={feed.boardMerged} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
               onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />

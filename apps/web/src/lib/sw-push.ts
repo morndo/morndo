@@ -5,7 +5,7 @@
 // handlers are tested without a browser (sw-push.test.ts).
 
 export type PushView = { title: string; body: string; tag: string; url: string };
-type Payload = { kind: number; decisions: number; workers: number; linked: number; alerts: number };
+type Payload = { kind: number; decisions: number; workers: number; linked: number; alerts: number; usage: number };
 
 const count = (v: unknown) => (typeof v === "number" && Number.isInteger(v) && v >= 0 && v <= 10_000 ? v : null);
 function payloadOf(data: unknown): Payload | null {
@@ -13,8 +13,9 @@ function payloadOf(data: unknown): Payload | null {
   const d = data as Record<string, unknown>;
   const kind = count(d.kind), decisions = count(d.decisions), workers = count(d.workers), linked = count(d.linked);
   const alerts = d.alerts === undefined ? 0 : count(d.alerts);      // a hub from before the fleet's alerts: none
-  if (kind === null || kind > 3 || decisions === null || workers === null || linked === null || alerts === null) return null;
-  return { kind, decisions, workers, linked, alerts };
+  const usage = d.usage === undefined ? 0 : count(d.usage);         // a hub from before usage notices: none
+  if (kind === null || kind > 4 || decisions === null || workers === null || linked === null || alerts === null || usage === null) return null;
+  return { kind, decisions, workers, linked, alerts, usage };
 }
 
 const many = (n: number, one: string, more: string) => (n === 1 ? one : more.replace("#", String(n)));
@@ -39,6 +40,9 @@ export function notificationFor(data: unknown): PushView {
       body: "Not you? Review your devices.",
       tag: "morndo-linked", url: "/devices",
     };
+    case 4:
+      // S4 (plan 4.4): a count of usage notices. Round 1 stub: the unreadable-payload view, until the words land.
+      return { title: "Morndo", body: "Something needs you.", tag: "morndo", url: "/" };
     default: return {
       title: many(p.alerts, "Your fleet has an alert", "Your fleet has # alerts"),
       body: "Open Morndo to see what happened.",

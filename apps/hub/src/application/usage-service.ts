@@ -94,8 +94,9 @@ export class UsageService {
   #profiles: () => ReadonlyMap<string, AccountProfile>;
   #leaseBook: LeaseBook;
   #laneNode: (lane: string) => string | null;
+  #onNotice: ((kind: NoticeKind) => void) | null;
 
-  constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile>; leases?: LeaseBook; laneNode?: (lane: string) => string | null }) {
+  constructor(p: { store: Store; now?: () => number; profiles?: () => ReadonlyMap<string, AccountProfile>; leases?: LeaseBook; laneNode?: (lane: string) => string | null; onNotice?: (kind: NoticeKind) => void }) {
     this.#store = p.store;
     this.#now = p.now ?? Date.now;
     this.#profiles = p.profiles ?? (() => EMPTY_PROFILES);
@@ -103,6 +104,8 @@ export class UsageService {
     // S3 (plan 4.5 item 4): where a lane runs, for the lane records a report writes and a failure resolves through.
     // Without a fleet the hub knows no lane's node, so a record is kept under node "" and never serves a node's rule.
     this.#laneNode = p.laneNode ?? (() => null);
+    // S4 (plan 4.4): who hears of a notice newly written (the NotificationService, through a late-bound closure).
+    this.#onNotice = p.onNotice ?? null;
     for (const a of this.#store.usageAccounts()) this.#accounts.set(a.account, a);
   }
 
@@ -653,6 +656,9 @@ export class UsageService {
   // across a restart too — tells nobody. Every word of one comes from the domain, never from an agent token.
   #note(account: string, kind: NoticeKind, signature: string, text: string): void {
     this.#store.saveUsageNotice({ id: `${account}|${kind}|${signature}`, kind, account, at: this.#now(), text }, signature);
+    // S4: told once per notice newly inserted (a repeat the store ignored tells nobody), after the write, and never
+    // for "forgotten". The exact once-only and kind rules land with the push (round 2).
+    this.#onNotice?.(kind);
   }
 
   #tellIfChanged() {

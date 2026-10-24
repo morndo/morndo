@@ -1,7 +1,7 @@
 // The live feed (Observation). Snapshot first, then sequenced events; a gap or a new hub run means resync (O1, O2).
 // Screens arrive only for the watched worker, latest state only (O3).
 // Every frame is decoded with the shared protocol (ADR-0008, A2): a malformed one is dropped, an unknown type ignored.
-import { unreachable, type FeedEvent, type Message, type RosterEntry } from "@morndo/domain";
+import { unreachable, type FeedEvent, type Message, type RosterEntry, type UsageNotice } from "@morndo/domain";
 import { ServerFeedFrames, decode, decodeEvent, onDropped, type AlertWire, type CatchUpConversationWire, type ChatRowWire, type QueuedCommand, type ServerFeedFrame, type SessionInfoWire } from "@morndo/protocol";
 import type { DecisionItem, LedgerState } from "./desktop/decisions.ts";
 import { decodeMerged, decodeRuns, decodeTasks, type MergedView, type Run, type Task } from "./desktop/board.ts";
@@ -52,6 +52,9 @@ export class LiveFeed {
   // ADR-0016: every connected account's usage, as the hub last sent it. A hub without it never sends: Home says so.
   usage = $state<AccountUsage[]>([]);
   usageAt = $state<number | null>(null);
+  // S4 (plan 4.4): the hub's own usage notices, newest first (the `usage` frame's `notices`, decoded). A reconnect
+  // replaces them, as it replaces the accounts.
+  usageNotices = $state<UsageNotice[]>([]);
   // The fleet's job mirror (design §7): the list and the counts beside each node. A hub without it never sends.
   jobs = $state<ShownJob[]>([]);
   jobCounts = $state<JobCount[]>([]);

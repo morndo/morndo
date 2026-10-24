@@ -37,6 +37,7 @@
   import Conversation from "./chat/Conversation.svelte";
   import Status from "./chat/Status.svelte";
   import { SEEN_MARK, unseen } from "../alerts.ts";
+  import { clearSeat, forgetSource } from "../usage-api.ts";
   import Digest from "./chat/Digest.svelte";
   import SettingsSheet from "./chat/SettingsSheet.svelte";
   import { Away } from "./chat/away.svelte.ts";
@@ -391,7 +392,9 @@
     </div>
   {:else}
     <div class="phone-wide">
-      <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
+      <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane}
+        notices={feed.usageNotices} onForget={(account, source, node) => void forgetSource(account, source, node).catch(() => {})}
+        onClearSeat={account => void clearSeat(account).catch(() => {})} />
     </div>
   {/if}
   {#if !deciding}<TabBar {tab} chats={unreadChats} decisions={feed.primed ? session.count : 0} blocked={blockedTasks} alerts={newAlerts} onTab={go} />{/if}

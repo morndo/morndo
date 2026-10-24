@@ -10,9 +10,21 @@
   import TriangleAlert from "@lucide/svelte/icons/triangle-alert";
   import Users from "@lucide/svelte/icons/users";
   import Avatar from "./Avatar.svelte";
-  import { LEVEL_WORDS, accountLabel, ago, onDemandLine, pct, resetsIn, resetsOnLabel, shownLevel, tightestShown, usageLevel, usd, type AccountUsage, type UsageWindow } from "./usage.ts";
+  import { LEVEL_WORDS, accountLabel, ago, onDemandLine, pct, resetsIn, resetsOnLabel, shownLevel, tightestShown, usageLevel, usd, type AccountUsage, type UsageNotice, type UsageWindow } from "./usage.ts";
 
-  let { accounts, at, now, live, onOpenLane }: { accounts: AccountUsage[]; at: number | null; now: number; live: boolean; onOpenLane: (name: string) => void } = $props();
+  // S4 (plan 4.4): the hub's own notices (from the feed), and the principal's own acts on a card: forget a source,
+  // clear a seat mark. Defaults, so a caller that has none of it still renders.
+  let {
+    accounts, at, now, live, onOpenLane,
+    notices = [],
+    onForget = () => {},
+    onClearSeat = () => {},
+  }: {
+    accounts: AccountUsage[]; at: number | null; now: number; live: boolean; onOpenLane: (name: string) => void;
+    notices?: UsageNotice[];
+    onForget?: (account: string, source: string, node: string | null) => void;
+    onClearSeat?: (account: string) => void;
+  } = $props();
 
   const sessions = $derived(accounts.reduce((n, a) => n + a.sessions.length, 0));
   const five = $derived(tightestShown(accounts, "fiveHour"));

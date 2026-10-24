@@ -1,7 +1,7 @@
 // Usage on the wire (ADR-0016): the status-line report an agent's session posts to the hub (the agent CLI's own JSON,
 // of which only these fields are read; the rest is dropped), the accounts the hub pushes to the app (the `usage` feed
 // frame), and the principal's GET. Types are the domain's own.
-import { USAGE_FIXES, USAGE_REASONS, USAGE_SOURCES, type AccountUsage } from "@morndo/domain";
+import { NOTICE_KINDS, USAGE_FIXES, USAGE_REASONS, USAGE_SOURCES, type AccountUsage, type UsageNotice } from "@morndo/domain";
 import * as z from "./z.ts";
 
 const text = () => z.string();
@@ -79,6 +79,16 @@ export const AccountUsageSchema = z.object({
 // Every connected account, whole, after each hello and whenever a report changed what is shown. The S2 notices
 // (plan 4.4) ride along; an older hub's frame, without them, still parses.
 export const UsageFrameSchema = z.object({ t: z.literal("usage"), accounts: z.array(z.unknown()), at: num(), notices: z.exactOptional(z.array(z.unknown())) });
+
+// One of the hub's own usage notices (plan 4.4, S4), as it rides a `usage` frame: the kind is one closed list, the
+// text is the hub's own words. A row that does not parse is dropped by whoever reads it, never guessed at.
+export const UsageNoticeSchema = z.object({
+  id: z.string().check(z.minLength(1), z.maxLength(200)),
+  kind: z.enum(NOTICE_KINDS),
+  account: z.string().check(z.minLength(1), z.maxLength(80)),
+  at: num(),
+  text: z.string().check(z.maxLength(400)),
+});
 
 // A usage reading a source posts (U14): the windows it can see now, or the one reason it cannot. Epoch seconds here,
 // milliseconds in the domain. A bad window row is caught to an empty row and dropped later; it never rejects the
@@ -181,3 +191,4 @@ export type AgentScope = (typeof AGENT_SCOPES)[number];
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const check = <T extends true>(t: T) => t;
 check<Same<z.output<typeof AccountUsageSchema>, AccountUsage>>(true);
+check<Same<z.output<typeof UsageNoticeSchema>, UsageNotice>>(true);

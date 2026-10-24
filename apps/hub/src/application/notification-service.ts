@@ -24,6 +24,7 @@ const OPTIONS: Record<NotificationKind, PushOptions> = {
   worker: { ttlSeconds: 3600, topic: "worker", urgency: "normal" },
   linked: { ttlSeconds: 3600, topic: "linked", urgency: "high" },
   alert: { ttlSeconds: 6 * 3600, topic: "alerts", urgency: "high" },
+  usage: { ttlSeconds: 6 * 3600, topic: "usage", urgency: "normal" },
 };
 const delivered = (status: number) => status >= 200 && status < 300;
 
@@ -40,6 +41,7 @@ export class NotificationService {
   #waiting: Set<string> | null = null;                 // the Decisions waiting, by id; null until the first board
   #needing = new Map<string, boolean>();               // per worker: whether it needs him with something that isn't an Ask
   #linked = 0;                                         // devices linked since the last such Notification went
+  #usageNotices = 0;                                   // usage notices the hub wrote since the last such Notification went (S4)
   #timer: unknown = null;
   #sending: Promise<void> = Promise.resolve();
 
@@ -98,13 +100,19 @@ export class NotificationService {
     if (raises({ kind: "alert", urgent })) this.#raise("alert");
   }
 
+  // A usage notice the hub itself wrote (S4, plan 4.4): one more is counted, and one Notification is raised — the
+  // debounce and the reset-on-send work as `linked` does.
+  usage() {
+    throw new Error("not implemented");               // S4 round 2
+  }
+
   // What each device's app says about the principal using it (N3); a connection that closes says nothing any more.
   attending(connection: string, attending: boolean) { this.#reports.set(connection, { attending, at: this.#now() }); }
   left(connection: string) { this.#reports.delete(connection); }
 
   counts(): Counts {
     const workers = [...this.#needing].filter(([id, needs]) => needs && !this.#muted(id)).length;
-    return { decisions: this.#waiting?.size ?? 0, workers, linked: this.#linked, alerts: this.#alerts() };
+    return { decisions: this.#waiting?.size ?? 0, workers, linked: this.#linked, alerts: this.#alerts(), usage: this.#usageNotices };
   }
 
   // Resolves once everything due has been sent (for tests and an orderly stop).
@@ -136,8 +144,9 @@ export class NotificationService {
     for (const p of due) {
       if (attending && suppressedWhileAttending(p.kind)) continue;     // …but a device linked always does (review M2)
       const counts = this.counts();                                  // as things are now, not as they were a second ago
-      const relevant = p.kind === "decision" ? counts.decisions : p.kind === "worker" ? counts.workers : p.kind === "alert" ? counts.alerts : counts.linked;
+      const relevant = p.kind === "decision" ? counts.decisions : p.kind === "worker" ? counts.workers : p.kind === "alert" ? counts.alerts : p.kind === "usage" ? counts.usage : counts.linked;
       if (p.kind === "linked") this.#linked = 0;
+      if (p.kind === "usage") this.#usageNotices = 0;
       if (relevant === 0) continue;                                  // answered meanwhile: nothing to say
       const payload = Buffer.from(JSON.stringify(payloadOf(p.kind, counts)));
       let sent = 0;
