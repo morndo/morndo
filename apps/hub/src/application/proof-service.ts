@@ -227,7 +227,12 @@ export class ProofService {
     // A fresh green stands against a later failure to reach the forge (a rate limit, a timeout): a lane that spends the budget
     // must not be able to turn true greens into unfetchable ones at the Done.
     const held = this.#store.proofResultsOf(key, briefRev).find(r => r.ref === ref);
-    if (held?.state === "green" && judged.state === "unfetchable" && RETRYABLE_DETAIL.test(judged.detail ?? "") && this.#now() - held.checkedAt < GREEN_HOLD_MS) return;
+    if (held?.state === "green" && judged.state === "unfetchable" && RETRYABLE_DETAIL.test(judged.detail ?? "") && this.#now() - held.checkedAt < GREEN_HOLD_MS) {
+      // Held, not refreshed: checkedAt stays the last real read (so it ages and is asked again), and the row says so.
+      const at = new Date(held.checkedAt).toISOString().slice(11, 16);
+      this.#store.saveProofResult(key, briefRev, { ...held, detail: `last read ${at} UTC; the forge could not be reached since` });
+      return;
+    }
     this.record(key, briefRev, { ref, state: judged.state, detail: judged.detail, checkedAt: this.#now() });
   }
 

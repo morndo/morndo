@@ -620,7 +620,8 @@ describe("verifying (B14, B15)", () => {
       clock = NOW + 10 * 60_000;
       fake.fail("/repos/morndo/morndo/pulls/42", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String((clock + 60_000) / 1000) });
       await proof.verify("T-1");
-      expect(store.proofResultsOf("T-1", 4)[0]).toMatchObject({ state: "green", checkedAt: NOW });   // not downgraded by a rate limit
+      // not downgraded by a rate limit, and it says so: when it was last read and that the forge could not be reached since
+      expect(store.proofResultsOf("T-1", 4)[0]).toEqual({ ref: PRREF, state: "green", detail: `last read ${hhmm(NOW)} UTC; the forge could not be reached since`, checkedAt: NOW });
       clock = NOW + 2 * 3_600_000;                                    // the green is two hours old now
       fake.fail("/repos/morndo/morndo/pulls/42", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String((clock + 60_000) / 1000) });
       await proof.verify("T-1");

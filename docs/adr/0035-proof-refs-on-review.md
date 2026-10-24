@@ -48,6 +48,13 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
   not change.
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
 - A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged), by design and not that its checks passed: that is a `ci` reference's job, which the assigner's proof list can require.
+- Two trade-offs of the caps, kept on purpose. A green row stays when the forge cannot be reached (a rate limit, a timeout,
+  the network), for at most an hour, without being refreshed: the Done's refresh may therefore accept a row up to an hour old
+  while GitHub is unreachable; the row says `last read hh:mm UTC; the forge could not be reached since`, and an hour later
+  it gives way to unfetchable. And the automatic verifications have an hourly allowance for the whole hub (30): a few tasks
+  can spend it and the rest wait for the timer's pass (every 2 or 10 minutes for what is still pending), so a busy hour slows
+  verification and never changes a result. A lane's briefs (20 a round) and proof list changes (100) are capped; the
+  assigner's are not counted.
 - A stand-in forge (`MORNDO_FORGE_URL`) is for tests and scratch hubs: refused with a token, refused with the gate `on` unless the hub declares itself a scratch hub (`MORNDO_SCRATCH_HUB=1`), logged at start, and shown hub-wide (a chip in the Board header, a line in `morndo-board list`) and on every proof.
 - After a rollback to a build from before this decision: the table is additive and is left alone, but the `briefed`
   events and the `proofSeen` of Done events stay in a task's record, and an older build's event schema has no `briefed`
