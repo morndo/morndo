@@ -147,6 +147,21 @@ describe("the panel's proof section (ADR-0035)", () => {
     } finally { await tab.close(); }
   });
 
+  it("a long item wraps beside its mark: the mark stays on the item's first line", { timeout: 30_000 }, async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 390, height: 900 } });
+    try {
+      await tab.goto(web.url);
+      const item = cell(tab, "long-need").locator("[data-proof-need]").first();
+      await item.waitFor();
+      const mark = await item.locator(".mark").boundingBox();
+      const spec = await item.locator("code").boundingBox();
+      expect(mark && spec).toBeTruthy();
+      expect(spec!.height).toBeGreaterThan(40);                         // the text really wraps onto several lines
+      expect(mark!.x).toBeLessThan(spec!.x);                            // the mark is beside it, not above it
+      expect(Math.abs(mark!.y - spec!.y)).toBeLessThan(12);             // on the first line
+    } finally { await tab.close(); }
+  });
+
   it("a stand-in forge is marked, and a real one is not", { timeout: 30_000 }, async () => {
     const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
     try {

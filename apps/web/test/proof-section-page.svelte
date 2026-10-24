@@ -114,6 +114,7 @@
     cell("pending-ref", pendingRef, "review"),
     cell("stand-in", { ...verified, standIn: true }, "review"),
     cell("needs-list", needsList, "review"),
+    cell("long-need", { ...needsList, coverage: [{ spec: "data: a very long description of the sample that has to wrap onto more than one line at phone width without pushing the page sideways", kind: "data", repo: null, text: "x", by: "assigner", status: "not_covered" }] }, "review"),
   ];
 </script>
 
@@ -128,5 +129,6 @@
 <style>
   .row { display: flex; flex-wrap: wrap; }
   .cell { width: 400px; min-height: 320px; padding: 8px; border: 1px solid var(--border); }
+  .cell[data-cell="long-need"] { width: 360px; }
   .cell[data-cell="needs-list-narrow"] { width: 390px; max-width: 390px; }
 </style>
