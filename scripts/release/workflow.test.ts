@@ -751,3 +751,17 @@ describe("signing keys reach one shell-only step", () => {
     ]);
   });
 });
+
+// The release bench shortens the promotion wait to 20 minutes with a script (scripts/release/bench-overlay.sh), and it
+// removes this file from the bench's tree. In production the wait is seven days, pinned here by value, so an overlay
+// edit that leaked into production fails the pull request that carries it.
+describe("production constants the release bench overrides", () => {
+  it("the promotion wait is seven days by value, in the feed code and in the shell check", () => {
+    const feedTs = readFileSync("scripts/release/feed.ts", "utf8");
+    expect(feedTs).toContain("export const PROMOTION_WAIT_MS = 7 * 24 * 60 * 60 * 1000;");
+    expect(feedTs).toContain("export const FEED_TTL_MS = 14 * 24 * 60 * 60 * 1000;");
+    const check = readFileSync("scripts/release/check-signing-feed.sh", "utf8");
+    expect(check).toContain("PROMOTE_MIN_AGE=${PROMOTE_MIN_AGE:-604800}");
+    expect(check).toContain("== 1209600");
+  });
+});
