@@ -60,7 +60,7 @@
       {#if proof.brief.attested.length > 0}
         <ul data-proof-attested class="attested">
           {#each proof.brief.attested as a}
-            <li>Attested ({a.kind}): {a.how}<span class="muted"> — the lane's word, not checked</span></li>
+            <li>Attested ({a.kind}): {a.how}<span class="muted">the lane's word, not checked</span></li>
           {/each}
         </ul>
       {/if}
@@ -87,6 +87,7 @@
   .brief-dl dt { color: var(--muted); }
   .brief-dl dd { margin: 0; }
   .refs, .attested { margin: 0; padding: 0; list-style: none; display: grid; gap: 6px; }
+  .attested .muted { margin-left: 6px; }
   .refs li { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; font: 400 13px/20px var(--font); }
   .mark { flex: none; }
   .ref { font-family: var(--mono); font-size: 12px; }

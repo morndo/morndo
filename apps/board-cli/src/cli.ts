@@ -92,7 +92,7 @@ function changeText(e: TaskEvent): string {
   switch (c.kind) {
     case "created": return `filed it in ${c.status}${c.assignee ? `, for ${c.assignee}` : ""}`;
     // The proof the board saw on a done (B16): its own line, with an override or the principal's acceptance inside it.
-    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}${c.notLive !== undefined ? ` (done while not live: ${c.notLive})` : ""}${c.proofSeen !== undefined ? ` (proof: ${c.proofSeen})` : ""}`;
+    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}${c.notLive !== undefined ? ` (done while not live: ${c.notLive})` : ""}${c.proofSeen !== undefined ? ` (${c.proofSeen})` : ""}`;
     case "assigned": return c.to ? `assigned it to ${c.to}` : `took it from ${c.from ?? "nobody"}`;
     case "edited": return `edited ${Object.keys(c).filter(k => k !== "kind").join(", ")}`;
     case "commented": return c.text.includes("\n") ? `commented:\n      ${c.text.replace(/\n/g, "\n      ")}` : `commented: ${c.text}`;
