@@ -32,8 +32,6 @@ const run = async (argv: string[], env: Record<string, string | undefined> = {})
   return { code, out: out.join(""), err: err.join("") };
 };
 
-const APPLIES_NOTHING = /arrive with the settings step/;
-
 describe("the command line (§8.1, §8.4)", () => {
   // sysexits.h (§8.4): a refusal of the data is 65; anything that should simply be tried again later — the network,
   // a busy lock, an I/O error such as a full disk — is 75.
@@ -79,6 +77,20 @@ describe("the command line (§8.1, §8.4)", () => {
     expect(good.code, good.err).toBe(0);
   });
 
+  it("MORNDO_ORIGIN that is not https is refused before anything runs", async () => {
+    const bad = await run(["update", "--status"], { MORNDO_ORIGIN: "http://mirror.example.invalid" });
+    expect(bad.code).toBe(78);
+    expect(bad.err).toMatch(/^MORNDO_ORIGIN[^\n]*\n$/);
+    expect(bad.out).toBe("");
+  });
+
+  it("MORNDO_ORIGIN as an https address or local http is accepted", async () => {
+    for (const origin of ["https://mirror.example.invalid", "http://127.0.0.1:8790", "http://localhost:8790"]) {
+      const good = await run(["update", "--status", "--json"], { MORNDO_ORIGIN: origin });
+      expect(good.code, `${origin}: ${good.err}`).toBe(0);
+    }
+  });
+
   it("a settings file that is not the wire's shape is one sentence and exit 78", async () => {
     const config = join(home, ".config/morndo-update/config.json");
     mkdirSync(join(config, ".."), { recursive: true });
@@ -94,16 +106,6 @@ describe("the command line (§8.1, §8.4)", () => {
       const r = await run(argv);
       expect(r.code, JSON.stringify(argv)).toBe(64);
       expect(r.err).toMatch(/usage/);
-    }
-  });
-
-  it("the settings step's words — --to, --channel, pin, auto — are one sentence and exit 64 (§8.1)", async () => {
-    for (const argv of [
-      ["update", "--to", "0.2.0"], ["update", "--channel", "latest"], ["update", "pin", "0.2.0"], ["update", "auto", "apply"],
-    ]) {
-      const r = await run(argv);
-      expect(r.code, JSON.stringify(argv)).toBe(64);
-      expect(r.err, JSON.stringify(argv)).toMatch(APPLIES_NOTHING);
     }
   });
 

@@ -4,12 +4,13 @@
 // cli-apply.test.ts injects them. What is asserted is what a first install leaves behind: the read-only Version,
 // the links, the store's first words, the settings, the units for the role, and the refusals — an install that
 // already exists, no linger, a tree that does not check out — before anything is written.
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { TreeFile } from "../../../scripts/release/archive.ts";
 import { listFiles } from "../../../scripts/release/files.ts";
+import { ConfigFile } from "../src/adapters/config-file.ts";
 import { DirsInstaller } from "../src/adapters/installer-dirs.ts";
 import { updaterPaths } from "../src/adapters/paths.ts";
 import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
@@ -124,11 +125,34 @@ describe("`morndo install --role control-plane` (§10.3)", () => {
     for (const s of ["hub", "fleet", "node"]) expect(r.out).toMatch(new RegExp(`${s}: healthy at ${VERSION}`));
   });
 
+  it("a fresh install defaults to mode apply and channel stable", async () => {
+    const w = world({ joined: true });
+    const r = await w.run(["install", "--role", "control-plane"]);   // no --channel: the domain's own default
+    expect(r.code, r.err).toBe(0);
+    expect(JSON.parse(readFileSync(w.paths.config, "utf8"))).toEqual({ channel: "stable" });
+    const settings = new ConfigFile(w.paths.config).read();
+    expect(settings.channel).toBe("stable");
+    expect(settings.mode).toBe("apply");
+    const status = await w.run(["update", "--status"]);
+    expect(status.code, status.err).toBe(0);
+    expect(status.out).toMatch(/channel: stable/);
+    expect(status.out).toMatch(/mode: apply/);
+  });
+
   it("--channel latest writes the channel it was given", async () => {
     const w = world({ joined: true });
     const r = await w.run(["install", "--role", "control-plane", "--channel", "latest"]);
     expect(r.code, r.err).toBe(0);
     expect(JSON.parse(readFileSync(w.paths.config, "utf8"))).toEqual({ channel: "latest" });
+  });
+
+  it("a first install writes its channel through the same locked write", async () => {
+    const w = world({ joined: true });
+    const r = await w.run(["install", "--role", "control-plane", "--channel", "latest"]);
+    expect(r.code, r.err).toBe(0);
+    expect(readFileSync(w.paths.config, "utf8")).toBe(`${JSON.stringify({ channel: "latest" }, null, 2)}\n`);
+    const names = readdirSync(dirname(w.paths.config));
+    expect(names.filter(name => name.includes(".tmp") || name.endsWith(".lock"))).toEqual([]);
   });
 
   it("refuses a second install: already installed, use morndo update", async () => {
