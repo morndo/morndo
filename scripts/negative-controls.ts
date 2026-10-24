@@ -4267,6 +4267,12 @@ export const CONTROLS: Control[] = [
   { id: "t415s3r2-forget-keeps-lane-records", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "this.#store.deleteLaneAccountsOf(account);", replace: "",
     run: ["apps/hub/test/usage-account-resolution.test.ts"] },
+  { id: "t415s3r3-five-hour-always-first", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "    const all: { id: string; usedPercentage: number; resetsAt: number | null }[] = [];\n    if (a.fiveHour !== null) all.push", replace: "    if (a.fiveHour !== null && a.fiveHour.resetsAt !== null) return { windowId: \"five_hour\", resetsAt: a.fiveHour.resetsAt };\n    const all: { id: string; usedPercentage: number; resetsAt: number | null }[] = [];\n    if (a.fiveHour !== null) all.push",
+    run: ["apps/hub/test/usage-seats.test.ts"] },
+  { id: "t415s3r3-earlier-reset-of-two-full", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "(w.resetsAt ?? 0) > (best.resetsAt ?? 0)", replace: "(w.resetsAt ?? 0) < (best.resetsAt ?? 0)",
+    run: ["apps/hub/test/usage-seats.test.ts"] },
 ];
 
 // ---- the runner

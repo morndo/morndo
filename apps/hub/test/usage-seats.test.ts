@@ -120,6 +120,51 @@ describe("seats (plan 4.5)", () => {
     expect(await seatOf("seat-b")).toMatchObject({ state: "out" });
   });
 
+  it("a full weekly window beside a low 5-hour window sets the mark's clock: it waits for the weekly reset (re-check R3)", async () => {
+    const DAY = 24 * HOUR;
+    const t0 = now;
+    const body: UsageReadingsBody = {
+      source: "app-server", node: null, captured_at: Math.floor(t0 / 1000),
+      windows: [
+        { id: "five_hour", used_percent: 30, resets_at: Math.floor((t0 + 2 * HOUR) / 1000), length_mins: 300 },
+        { id: "seven_day", used_percent: 100, resets_at: Math.floor((t0 + 3 * DAY) / 1000), length_mins: 10080 },
+      ],
+    };
+    expect(hub.usage.reading(body, "seat-a", actor)).toEqual({ ok: true });
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    const seat = () => hub.usage.view().accounts.find(a => a.account === "seat-a")?.seat;
+    now = t0 + 10 * HOUR;                                   // far past the default back time and the 5-hour reset
+    hub.usage.sweep();
+    expect(seat()).toMatchObject({ state: "out", why: "usage_limit" });          // the full weekly window is still limited
+    now = t0 + 3 * DAY + 6 * HOUR - MIN;
+    hub.usage.sweep();
+    expect(seat()).toMatchObject({ state: "out" });
+    now = t0 + 3 * DAY + 6 * HOUR + MIN;                    // six hours after the weekly reset
+    hub.usage.sweep();
+    expect(seat()).toBeUndefined();
+  });
+
+  it("when both windows read 100% the mark waits for the later reset (re-check R3)", async () => {
+    const DAY = 24 * HOUR;
+    const t0 = now;
+    const body: UsageReadingsBody = {
+      source: "app-server", node: null, captured_at: Math.floor(t0 / 1000),
+      windows: [
+        { id: "five_hour", used_percent: 100, resets_at: Math.floor((t0 + 2 * HOUR) / 1000), length_mins: 300 },
+        { id: "seven_day", used_percent: 100, resets_at: Math.floor((t0 + 3 * DAY) / 1000), length_mins: 10080 },
+      ],
+    };
+    expect(hub.usage.reading(body, "seat-b", actor)).toEqual({ ok: true });
+    expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    const seat = () => hub.usage.view().accounts.find(a => a.account === "seat-b")?.seat;
+    now = t0 + 2 * DAY;
+    hub.usage.sweep();
+    expect(seat()).toMatchObject({ state: "out" });
+    now = t0 + 3 * DAY + 6 * HOUR + MIN;
+    hub.usage.sweep();
+    expect(seat()).toBeUndefined();
+  });
+
   it("an unknown limit changes no seat", async () => {
     expect(await limit({ kind: "unknown", by: "worker-one", account: "seat-a" })).toMatchObject({ status: 200 });
     expect(await limit({ kind: "usage_limit", by: "worker-one" })).toMatchObject({ status: 200 });      // no account at all

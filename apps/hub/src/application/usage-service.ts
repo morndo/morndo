@@ -528,18 +528,24 @@ export class UsageService {
     return { ok: true, resolved: true };
   }
 
-  // The window a limit hit limited (plan 4.5): the 5-hour window when a reading of it names a reset, else the fullest
-  // window the account shows. No reading at all: no cycle, so the mark keeps only its own back time.
+  // The window a limit hit limited (plan 4.5; re-check R3): the window that reads 100%, the one that holds the account
+  // back for longest when several do (the latest reset), else the fullest window the account shows. A full weekly window
+  // beside a low 5-hour one is therefore the weekly one, and its reset is the mark's clock. No reading at all: no cycle,
+  // so the mark keeps only its own back time.
   #cycleOf(a: AccountUsage | null): LimitHit["cycle"] {
     if (a === null) return null;
-    if (a.fiveHour !== null && a.fiveHour.resetsAt !== null) return { windowId: "five_hour", resetsAt: a.fiveHour.resetsAt };
     const all: { id: string; usedPercentage: number; resetsAt: number | null }[] = [];
     if (a.fiveHour !== null) all.push({ id: "five_hour", ...a.fiveHour });
     if (a.sevenDay !== null) all.push({ id: "seven_day", ...a.sevenDay });
     for (const w of a.limits ?? []) all.push({ id: w.label, usedPercentage: w.usedPercentage, resetsAt: w.resetsAt });
     if (all.length === 0) return null;
-    let best = all[0]!;
-    for (const w of all) if (w.usedPercentage > best.usedPercentage) best = w;
+    const full = all.filter(w => w.usedPercentage >= 100);
+    const pool = full.length > 0 ? full : all;
+    let best = pool[0]!;
+    for (const w of pool) {
+      const better = full.length > 0 ? (w.resetsAt ?? 0) > (best.resetsAt ?? 0) : w.usedPercentage > best.usedPercentage;
+      if (better) best = w;
+    }
     return { windowId: best.id, resetsAt: best.resetsAt };
   }
 
