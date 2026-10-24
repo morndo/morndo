@@ -11,7 +11,7 @@ import { parseVersion, PROBATION_MS, type UpdateService } from "@morndo/domain";
 import { UpdateStatusSchema } from "@morndo/protocol";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ApplyTiming } from "../src/application/apply-steps.ts";
-import { configLockWaitMs } from "../src/adapters/config-file.ts";
+import { configLockHooks, configLockWaitMs } from "../src/adapters/config-file.ts";
 import { DirsInstaller } from "../src/adapters/installer-dirs.ts";
 import { databasePaths, updaterPaths } from "../src/adapters/paths.ts";
 import { openUpdateStore, SqliteUpdateStore } from "../src/adapters/store-sqlite.ts";
@@ -519,6 +519,61 @@ describe("update settings commands (§8.1, §8.3)", () => {
     expect(r.code, r.err).toBe(0);
     expect(existsSync(lock)).toBe(false);
     expect(JSON.parse(readFileSync(config, "utf8")).channel).toBe("latest");
+  });
+
+  it("a waiter that finds a stale lock already replaced does not take the live lock", async () => {
+    const home = freshHome();
+    const config = configOf(home);
+    mkdirSync(dirname(config), { recursive: true, mode: 0o700 });
+    const seeded = `${JSON.stringify({ channel: "stable" }, null, 2)}\n`;
+    writeFileSync(config, seeded, { mode: 0o600 });
+    const lock = `${config}.lock`;
+    writeFileSync(lock, "", { mode: 0o600 });
+    const minuteAgo = new Date(Date.now() - 60_000);
+    utimesSync(lock, minuteAgo, minuteAgo);
+    const previousWait = configLockWaitMs.ms;
+    const previousHook = configLockHooks.afterStaleSeen;
+    configLockWaitMs.ms = 50;
+    configLockHooks.afterStaleSeen = () => {
+      rmSync(lock);
+      writeFileSync(lock, "live\n", { mode: 0o600 });
+    };
+    try {
+      const r = await run(home, ["update", "auto", "off"]);
+      expect(r.code, r.err).toBe(75);
+      expect(r.err.trim().split("\n")).toHaveLength(1);
+      expect(r.err).toBe(`another settings command holds ${lock}; try again\n`);
+      expect(readFileSync(config, "utf8")).toBe(seeded);
+      expect(readFileSync(lock, "utf8")).toBe("live\n");
+    } finally {
+      configLockWaitMs.ms = previousWait;
+      if (previousHook === undefined) delete configLockHooks.afterStaleSeen;
+      else configLockHooks.afterStaleSeen = previousHook;
+    }
+  });
+
+  it("taking over a stale lock leaves no claimed file behind", async () => {
+    const home = freshHome();
+    const config = configOf(home);
+    const dir = dirname(config);
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+    const lock = `${config}.lock`;
+    writeFileSync(lock, "", { mode: 0o600 });
+    const minuteAgo = new Date(Date.now() - 60_000);
+    utimesSync(lock, minuteAgo, minuteAgo);
+    const previousWait = configLockWaitMs.ms;
+    const previousHook = configLockHooks.afterStaleSeen;
+    configLockWaitMs.ms = 50;
+    try {
+      const r = await run(home, ["update", "auto", "off"]);
+      expect(r.code, r.err).toBe(0);
+      expect(JSON.parse(readFileSync(config, "utf8")).mode).toBe("off");
+      expect(readdirSync(dir).filter(name => name === "config.json.lock" || name.startsWith("config.json.lock.stale."))).toEqual([]);
+    } finally {
+      configLockWaitMs.ms = previousWait;
+      if (previousHook === undefined) delete configLockHooks.afterStaleSeen;
+      else configLockHooks.afterStaleSeen = previousHook;
+    }
   });
 
   it("a settings write that cannot be made is one sentence, exit 78 or 75, and leaves no temp file", async () => {

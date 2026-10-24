@@ -4,7 +4,7 @@
 // nothing is written until a settings command runs. A command re-reads under an exclusive lock, applies its one
 // change, and writes the file back atomically (a unique temp beside it, mode 0600, then rename; the directory
 // 0700). A read takes no lock: the rename is atomic.
-import { accessSync, chmodSync, closeSync, constants, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { accessSync, chmodSync, closeSync, constants, fsyncSync, linkSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { DEFAULT_CHANNEL, DEFAULT_MODE, formatVersion, parseVersion, type Channel, type UpdateMode, type Window } from "@morndo/domain";
 import { UpdateConfigSchema } from "@morndo/protocol";
@@ -16,6 +16,9 @@ export class ConfigInvalid extends Error {
 
 // How long change() waits for `<config>.lock`. A test lowers `ms`; five seconds is the command's own wait.
 export const configLockWaitMs = { ms: 5_000 };
+
+// A test steps in after a lock is seen stale and before it is claimed. Production leaves this empty.
+export const configLockHooks: { afterStaleSeen?: () => void } = {};
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_MS = 25;
 
@@ -139,8 +142,10 @@ export class ConfigFile implements SettingsSource, SettingsSink {
     }
   }
 
-  // Exclusive create of `<config>.lock`, retried every 25 ms up to the wait. A lock older than 30 s is stale:
-  // it is removed and the create is tried again. A lock this call did not take is never removed.
+  // Exclusive create of `<config>.lock`, retried every 25 ms up to the wait. A lock older than 30 s is stale.
+  // It is claimed by renaming it to `<lock>.stale.<pid>.<hex>` before it is judged, so a lock another command
+  // already replaced is given back and waited on, and one that is still stale is removed. The claimed name is
+  // always removed. A lock this call did not take is never removed.
   #acquireLock(): void {
     const lock = this.#lockPath();
     const deadline = Date.now() + configLockWaitMs.ms;
@@ -159,11 +164,30 @@ export class ConfigFile implements SettingsSource, SettingsSink {
           throw this.#failed(statError);
         }
         if (stale) {
-          try { rmSync(lock); }
-          catch (rmError) {
-            if (errnoOf(rmError).code !== "ENOENT") throw this.#failed(rmError);
+          configLockHooks.afterStaleSeen?.();
+          const claimed = `${lock}.stale.${process.pid}.${randomHex()}`;
+          try {
+            renameSync(lock, claimed);
+          } catch (renameError) {
+            if (errnoOf(renameError).code === "ENOENT") continue;
+            throw this.#failed(renameError);
           }
-          continue;
+          let stillStale = false;
+          try {
+            stillStale = Date.now() - statSync(claimed).mtimeMs > LOCK_STALE_MS;
+            if (!stillStale) {
+              try {
+                linkSync(claimed, lock);
+              } catch (linkError) {
+                if (errnoOf(linkError).code !== "EEXIST") throw linkError;
+              }
+            }
+          } catch (judgeError) {
+            throw this.#failed(judgeError);
+          } finally {
+            rmSync(claimed, { force: true });
+          }
+          if (stillStale) continue;
         }
         if (Date.now() >= deadline) throw new ConfigBusy(lock);
         pause(Math.min(LOCK_RETRY_MS, Math.max(1, deadline - Date.now())));
