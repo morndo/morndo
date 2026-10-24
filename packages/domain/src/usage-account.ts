@@ -7,7 +7,10 @@ import type { LimitKind } from "./usage-seatbook.ts";
 
 // `source` says how the record was written (fix round on PR #127, finding 4b): "start" by a lane_account tap, "report"
 // by a status-line report. Absent on every row written before the column existed; a start record outranks a report one.
-export type LaneRecord = { node: string; lane: string; account: string; at: number; source?: "start" | "report" };
+// `token` is the agent token that wrote or last confirmed the record (null for a hub-issued start until a report binds
+// it) and `conflictUntil` the moment a disagreement between two tokens stops making the record ambiguous (fix round 2
+// on PR #127, finding 1); both null on every row written before those columns existed.
+export type LaneRecord = { node: string; lane: string; account: string; at: number; source?: "start" | "report"; token?: string | null; conflictUntil?: number | null };
 export type FreshSession = { account: string; sessionId: string; lane: string | null };
 export type ResolveInput = { hookAccount: unknown; node: string; lane: string | null; sessionId: string | null; now: number; records: readonly LaneRecord[]; sessions: readonly FreshSession[]; laneNode: (lane: string) => string | null };
 export type Resolved = { account: string | null; by: "hook" | "record" | "session" | "node" | null };

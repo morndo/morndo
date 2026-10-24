@@ -10,7 +10,7 @@ let hub: InProcessHub;
 let now: number;
 let workerToken: string;
 let managerToken: string;
-const HOUR = 3_600_000, MIN = 60_000;
+const HOUR = 3_600_000, MIN = 60_000, DAY = 86_400_000;
 type Body = Record<string, unknown>;
 
 // PR #125 fix round 2, finding 2: the limit route is a manager's. Every seat test posts it with a manager token; the
@@ -293,6 +293,27 @@ describe("seats (plan 4.5)", () => {
     expect((gone.accounts as Body[]).find(a => a.account === "seat-b")?.seat).toBeUndefined();
     expect((gone.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-b")).toEqual([
       { id: expect.stringMatching(/^seat-b\|back\|expired\|\d+$/), kind: "back", account: "seat-b", at: expect.any(Number), text: "seat-b: its limit mark expired, the back time passed with no newer hit." },
+    ]);
+  });
+
+  // Fix round 2 on PR #127, finding 2: the cycle the limit hit is the clock the sweep expires a derived out mark by.
+  // A weekly window resets days later than the default one-hour back time; the mark is not dropped while that window
+  // still reads 100%, only six hours after its own reset.
+  it("a derived out mark whose cycle resets days after its back time waits for the cycle's own reset (fix round 2, finding 2)", async () => {
+    const t0 = now;
+    // A reading of a five-hour-shaped weekly window at 100%, resetting three days out.
+    expect((await postReading({ plan: "Max 5x", capturedAt: t0, windows: [fiveHour(100, t0 + 3 * DAY)] })).status).toBe(200);
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: t0 + HOUR, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
+    expect(hub.store.usageSeat("seat-a")?.record).toMatchObject({ state: "out", backAt: t0 + HOUR, cycleReset: t0 + 3 * DAY, windowId: "five_hour" });
+    now = t0 + HOUR + 6 * HOUR + MIN;      // seven hours past the back time: the weekly window has not reset
+    hub.usage.sweep();
+    expect(await seatOf()).toMatchObject({ state: "out" });      // the mark stays: the window still reads 100%
+    now = t0 + 3 * DAY + 6 * HOUR + MIN;   // six hours and a minute past the cycle's own reset: dropped, with one notice
+    hub.usage.sweep();
+    const dropped = await viewOf();
+    expect((dropped.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
+    expect((dropped.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-a")).toEqual([
+      { id: expect.stringMatching(/^seat-a\|back\|expired\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: its limit mark expired, the back time passed with no newer hit." },
     ]);
   });
 

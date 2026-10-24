@@ -745,23 +745,30 @@ export class Store {
 
   // Which lane of which node is signed in as which account (plan 4.5 item 4): a lane's reports and starts write it,
   // its failures resolve from it. `source` says how the record was written (PR #127, finding 4b): "start" by a
-  // lane_account tap, "report" by a status-line report; every row from before the column is a report.
+  // lane_account tap, "report" by a status-line report; every row from before the column is a report. `token` and
+  // `conflictUntil` (fix round 2, finding 1) say which agent token wrote or last confirmed it, and until when a
+  // disagreement between two tokens makes it ambiguous; null on every row from before those columns.
   laneAccount(node: string, lane: string): LaneRecord | null {
-    const r = this.db.prepare("SELECT node, lane, account, at, source FROM lane_accounts WHERE node = ? AND lane = ?").get(node, lane) as Row | undefined;
-    return r ? { node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report" } : null;
+    const r = this.db.prepare("SELECT node, lane, account, at, source, token, conflict_until FROM lane_accounts WHERE node = ? AND lane = ?").get(node, lane) as Row | undefined;
+    return r ? { node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report", token: (r.token as string | null) ?? null, conflictUntil: (r.conflict_until as number | null) ?? null } : null;
   }
   laneAccounts(): LaneRecord[] {
-    return (this.db.prepare("SELECT node, lane, account, at, source FROM lane_accounts ORDER BY node, lane").all() as Row[])
-      .map(r => ({ node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report" }));
+    return (this.db.prepare("SELECT node, lane, account, at, source, token, conflict_until FROM lane_accounts ORDER BY node, lane").all() as Row[])
+      .map(r => ({ node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report", token: (r.token as string | null) ?? null, conflictUntil: (r.conflict_until as number | null) ?? null }));
   }
   // A report never replaces a start record of the same (node, lane) younger than START_RECORD_HOLD_MS (PR #127, finding
   // 4b): a lane started with an account keeps that account against a self-declared header. A start always replaces,
   // and a report may replace a start record past its hold, or another report.
-  saveLaneAccount(node: string, lane: string, account: string, at: number, source: "start" | "report") {
-    this.db.prepare(`INSERT INTO lane_accounts (node, lane, account, at, source) VALUES (?, ?, ?, ?, ?)
-      ON CONFLICT(node, lane) DO UPDATE SET account = excluded.account, at = excluded.at, source = excluded.source
+  saveLaneAccount(node: string, lane: string, account: string, at: number, source: "start" | "report", token: string | null = null, conflictUntil: number | null = null) {
+    this.db.prepare(`INSERT INTO lane_accounts (node, lane, account, at, source, token, conflict_until) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(node, lane) DO UPDATE SET account = excluded.account, at = excluded.at, source = excluded.source, token = excluded.token, conflict_until = excluded.conflict_until
       WHERE excluded.source = 'start' OR lane_accounts.source <> 'start' OR lane_accounts.at <= excluded.at - ?`)
-      .run(node, lane, account, at, source, START_RECORD_HOLD_MS);
+      .run(node, lane, account, at, source, token, conflictUntil, START_RECORD_HOLD_MS);
+  }
+  // Fix round 2 on PR #127 (finding 4): forgetting a whole account takes its lane records with it, so a later failure
+  // of one of its lanes resolves nothing until a start or a report names the account again.
+  deleteLaneAccountsOf(account: string) {
+    this.db.prepare("DELETE FROM lane_accounts WHERE account = ?").run(account);
   }
 
   // One comment per job id. `open` is a claim this process still has to finish. A settled row is not taken again.

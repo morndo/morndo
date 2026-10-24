@@ -13,8 +13,16 @@ type Body = Record<string, unknown>;
 // The fleet's taps, as the fleet client would hand them to main.ts (milliseconds, the fleet's own event shape).
 const laneAccount = (h: InProcessHub, lane: string, account: string, at: number) =>
   h.usage.fromFleet("pc", { kind: "lane_account", lane, account, at });
-const failure = (h: InProcessHub, o: { lane: string | null; account: string | null; at: number; sessionId?: string; node?: string }) =>
-  h.usage.fromFleet(o.node ?? "pc", { kind: "failure", lane: o.lane, window: o.lane, error: "rate_limit", account: o.account, at: o.at, ...(o.sessionId === undefined ? {} : { sessionId: o.sessionId }) });
+const failure = (h: InProcessHub, o: { lane: string | null; account: string | null; at: number; sessionId?: string; node?: string; error?: string }) =>
+  h.usage.fromFleet(o.node ?? "pc", { kind: "failure", lane: o.lane, window: o.lane, error: o.error ?? "rate_limit", account: o.account, at: o.at, ...(o.sessionId === undefined ? {} : { sessionId: o.sessionId }) });
+// A status-line report through the agent door, as a worker token posts it: the lane is the token's own header, the
+// account the header it declares. Fix round 2 on PR #127 (finding 1) turns on WHICH token reports, so each test names it.
+const report = (h: InProcessHub, token: string, lane: string, account: string, sessionId: string, at: number) =>
+  fetch(`${h.base}/api/agent/usage`, {
+    method: "POST",
+    headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": lane, "x-morndo-account": account },
+    body: JSON.stringify({ session_id: sessionId, rate_limits: { five_hour: { used_percentage: 10, resets_at: Math.floor((at + 4 * 3_600_000) / 1000) } } }),
+  });
 const viewOn = async (h: InProcessHub) => {
   const cookie = await h.cookie();
   return (await (await fetch(`${h.base}/api/usage`, { headers: { cookie: `__Host-morndo=${cookie}` } })).json()) as Body;
@@ -25,7 +33,7 @@ const seatOf = (account = "seat-a") => seatOn(hub, account);
 
 beforeEach(async () => {
   now = 1_700_000_000_000;      // 10:00
-  hub = await startInProcessHub({ now: () => now, laneNode: lane => ["w1", "w2", "w3"].includes(lane) ? "pc" : null });
+  hub = await startInProcessHub({ now: () => now, laneNode: lane => ["w1", "w2", "w3", "max-1"].includes(lane) ? "pc" : null });
 });
 afterEach(async () => { await hub.close(); });
 
@@ -166,5 +174,79 @@ describe("account resolution from the fleet's taps (plan 4.5 item 4)", () => {
     expect((await report("seat-b", now)).status).toBe(200);
     failure(hub, { lane: "w1", account: null, at: now + MIN });
     expect(await seatOf("seat-b")).toMatchObject({ state: "out", why: "usage_limit" });
+  });
+
+  // Fix round 2 on PR #127, finding 1: worker tokens are not per lane, so "the lane's own token" does not exist — a
+  // lane's record is bound to the token that reported for it, and two tokens reporting different accounts for one lane
+  // make its record ambiguous for an hour, so a failure of that lane marks nothing rather than the wrong account.
+  it("two tokens reporting different accounts for one lane make its record ambiguous: a hook-less failure marks nothing (fix round 2, finding 1)", async () => {
+    const tokenA = hub.agents.issue("w1", "worker").secret;
+    const tokenB = hub.agents.issue("w1-alt", "worker").secret;      // a second worker token of the same principal
+    expect((await report(hub, tokenA, "w1", "seat-a", "s-a", now)).status).toBe(200);
+    expect((await report(hub, tokenB, "w1", "seat-b", "s-b", now + MIN)).status).toBe(200);
+    failure(hub, { lane: "w1", account: null, at: now + 2 * MIN, error: "oauth_org_not_allowed" });   // no hook word
+    expect(hub.store.usageSeats()).toEqual([]);                      // the record is ambiguous: nothing is marked
+    expect(await noticesOn(hub, "seat")).toEqual([]);
+    // An hour later, with only token A reporting seat-a again, the ambiguity ends and a failure marks seat-a.
+    now += HOUR + 2 * MIN;
+    expect((await report(hub, tokenA, "w1", "seat-a", "s-a", now)).status).toBe(200);
+    failure(hub, { lane: "w1", account: null, at: now + MIN, error: "oauth_org_not_allowed" });
+    expect(await seatOf()).toMatchObject({ state: "retired", why: "refused", owner: "derived" });
+  });
+
+  // The rule guards against disagreement only: one token alone on a lane writes a record the next failure uses.
+  it("one token alone on its lane writes a record the next failure uses (fix round 2, finding 1)", async () => {
+    const tokenB = hub.agents.issue("w2", "worker").secret;
+    expect((await report(hub, tokenB, "w2", "seat-b", "s-b2", now)).status).toBe(200);
+    failure(hub, { lane: "w2", account: null, at: now + MIN });
+    expect(await seatOn(hub, "seat-b")).toMatchObject({ state: "out", why: "usage_limit" });
+  });
+
+  it("a start record with no bound token holds its account against another token's report, with no conflict (fix round 2, finding 1)", async () => {
+    laneAccount(hub, "max-1", "seat-a", now);                        // a hub-issued start, no token bound to it
+    const tokenB = hub.agents.issue("max-1-alt", "worker").secret;
+    expect((await report(hub, tokenB, "max-1", "seat-c", "s-c", now + MIN)).status).toBe(200);   // a different account: ignored, the hold stands
+    failure(hub, { lane: "max-1", account: null, at: now + 2 * MIN });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit" });      // the start's own account, not a conflict
+  });
+
+  it("a start record bound to its reporter's token is held against that token only: another token's different account turns the lane ambiguous (fix round 2, finding 1)", async () => {
+    laneAccount(hub, "max-1", "seat-a", now);
+    const tokenA = hub.agents.issue("max-1", "worker").secret;
+    const tokenB = hub.agents.issue("max-1-alt", "worker").secret;
+    expect((await report(hub, tokenA, "max-1", "seat-a", "s-a1", now + MIN)).status).toBe(200);       // binds the start to token A
+    expect((await report(hub, tokenB, "max-1", "seat-c", "s-c", now + 2 * MIN)).status).toBe(200);    // a different token, a different account
+    failure(hub, { lane: "max-1", account: null, at: now + 3 * MIN });
+    expect(hub.store.usageSeats()).toEqual([]);                      // ambiguous within the hold: nothing is marked
+  });
+
+  // Finding 3 of the re-check (a lane moved by a pool script) is this same rule: a bound start record gives way to its
+  // own token's newer report, and only to it.
+  it("a bound start moved by its own token gives way within the hold; another token's attempt is ignored and ambiguous (fix round 2, findings 1 and 3)", async () => {
+    laneAccount(hub, "max-1", "seat-a", now);
+    const tokenA = hub.agents.issue("max-1", "worker").secret;
+    const tokenB = hub.agents.issue("max-1-alt", "worker").secret;
+    expect((await report(hub, tokenA, "max-1", "seat-a", "s-a1", now + MIN)).status).toBe(200);       // binds the start to token A
+    expect((await report(hub, tokenA, "max-1", "seat-b", "s-b1", now + 2 * MIN)).status).toBe(200);   // its own reporter moved: the record follows
+    failure(hub, { lane: "max-1", account: null, at: now + 3 * MIN });
+    expect(await seatOn(hub, "seat-b")).toMatchObject({ state: "out", why: "usage_limit" });          // the hold cleared for its own token
+    expect((await report(hub, tokenB, "max-1", "seat-c", "s-c", now + 4 * MIN)).status).toBe(200);    // another token's word: no replacement
+    failure(hub, { lane: "max-1", account: null, at: now + 5 * MIN });
+    expect(await seatOn(hub, "seat-c")).toBeUndefined();                                             // ambiguous again: seat-c is never marked
+  });
+
+  // Fix round 2 on PR #127, finding 4: a hub-issued lane.start is the principal's own act, so its account is known
+  // from that moment — but the principal's Forget of the account takes its lane records too, so a later failure of the
+  // lane resolves nothing until a start or a report names the account again.
+  it("an account first heard of through a hub-issued start: a failure marks its seat, Forget removes it with its lane records, and a later failure marks nothing (fix round 2, finding 4)", async () => {
+    laneAccount(hub, "w1", "seat-a", now);                           // the principal's own act (AT-19): the account is known from now
+    failure(hub, { lane: "w1", account: null, at: now + MIN });
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived" });
+    expect(hub.usage.forget("seat-a")).toBe(true);                   // the principal's Forget of the whole account
+    const v = await viewOn(hub);
+    expect((v.accounts as Body[]).find(a => a.account === "seat-a")).toBeUndefined();   // the account and its seat are gone
+    expect(hub.store.usageSeats()).toEqual([]);
+    failure(hub, { lane: "w1", account: null, at: now + 2 * MIN });  // the start record went with the forget
+    expect(hub.store.usageSeats()).toEqual([]);                      // nothing left to resolve: no seat comes back
   });
 });
