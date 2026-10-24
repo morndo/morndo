@@ -3,7 +3,7 @@
 // adapter's base points there, so nothing here reaches a real forge (AGENTS.md: invented repos, numbers and shas).
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GithubChecks } from "../src/adapters/github-checks.ts";
 import { startFakeForge, type FakeForge } from "./fake-forge.ts";
 
@@ -128,6 +128,31 @@ describe("the forge adapter", () => {
     for (const sha of ["3E9D1A7", "zzzzzzz", "3e9d1", "3e9d1a7/builds/9", ""])   // uppercase, not hex, too short, not a sha
       expect(await checks.checkRuns("acme/shop", sha)).toEqual({ ok: false, failure: { reason: "unexpected", detail: "not a reference" } });
     expect(fake.requests).toEqual([]);          // none of it ever asked the forge
+  });
+
+  it("the token appears in no log line and no output, whatever the forge does", async () => {
+    const written: string[] = [];
+    const take = (...a: unknown[]) => { written.push(a.map(String).join(" ")); };
+    const spies = (["log", "info", "warn", "error", "debug"] as const).map(m => vi.spyOn(console, m).mockImplementation(take));
+    spies.push(vi.spyOn(process.stdout, "write").mockImplementation((c: unknown) => { take(c); return true; }) as never);
+    spies.push(vi.spyOn(process.stderr, "write").mockImplementation((c: unknown) => { take(c); return true; }) as never);
+    try {
+      console.error("probe", TOKEN);                                   // the capture itself works: a line with the token is seen
+      expect(written.join("\n")).toContain(TOKEN);
+      written.length = 0;
+      fake.fail("/repos/acme/shop/pulls/41", 401);
+      fake.fail("/repos/acme/shop/pulls/43", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String((NOW + 60_000) / 1000) });
+      fake.fail("/repos/acme/shop/pulls/44", 404);
+      fake.fail("/repos/acme/shop/pulls/45", 500);
+      fake.fail("/repos/acme/shop/pulls/46", 302, { location: `https://example.test/${TOKEN}` });
+      const checks = made({ token: TOKEN });
+      for (const n of [41, 43, 44, 45, 46]) await checks.pullRequest("acme/shop", n);
+      await checks.checkRuns("acme/shop", "3e9d1a7");
+      const throwing = new GithubChecks({ token: TOKEN, baseUrl: fake.base, now, fetch: async () => { throw new Error(`boom ${TOKEN}`); } });
+      const thrown = await throwing.pullRequest("acme/shop", 42);
+      expect(JSON.stringify(thrown)).not.toContain(TOKEN);
+      expect(written.join("\n")).not.toContain(TOKEN);               // nothing the adapter did said it, in any log or output
+    } finally { for (const sp of spies) sp.mockRestore(); }
   });
 
   it("the token is not in any failure detail", async () => {
