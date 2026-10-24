@@ -4288,6 +4288,9 @@ export const CONTROLS: Control[] = [
   { id: "t415s4r1-forget-null-is-every-node", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "const any = node === undefined;", replace: "const any = node === undefined || node === null;",
     run: ["apps/hub/test/usage-health.test.ts"] },
+  { id: "t415s4r1-push-on-rollback", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "    } catch (e) {\n      this.#told.length = mark;\n      throw e;", replace: "    } catch (e) {\n      for (const kind of this.#told.splice(mark)) this.#onNotice?.(kind);\n      throw e;",
+    run: ["apps/hub/test/usage-push.test.ts"] },
 ];
 
 // ---- the runner
