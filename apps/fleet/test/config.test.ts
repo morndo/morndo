@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConfigError, HOOK_PATHS, configPath, homeOf, loadConfig } from "../src/config.ts";
+import { ConfigError, HOOK_PATHS, configPath, homeOf, loadConfig, workerSocketOf } from "../src/config.ts";
 import { tempDir } from "./helpers/temp.ts";
 
 const withFile = (content: unknown) => {
@@ -87,6 +87,42 @@ describe("fleet config", () => {
     expect(loadConfig(withFile({})).principalKey).toBeUndefined();
     const key = Buffer.alloc(32, 7).toString("base64");
     expect(loadConfig(withFile({ principalKey: key })).principalKey).toBe(key);
+  });
+
+  it("workerSocket defaults: a socket beside the owner's, the sticky and event lanes protected, no node to start on", () => {
+    const home = tempDir();
+    const c = loadConfig({ env: {}, home });
+    expect(c.workerSocket).toBeUndefined();                       // absent from the file and from the defaults: derived, so nothing else changes
+    expect(workerSocketOf(c)).toEqual({ path: join(home, ".local/state/morndo-fleet/fleet-worker.sock"), protectedLanes: ["manager"], startNodes: [] });
+    const own = loadConfig(withFile({ socketPath: "~/run/own.sock", stickyLanes: ["manager", "chief"], laneEvents: { deliverTo: "scribe" } }));
+    expect(workerSocketOf(own).path.endsWith("/run/fleet-worker.sock")).toBe(true);
+    expect(workerSocketOf(own).protectedLanes).toEqual(["manager", "chief", "scribe"]);
+  });
+
+  it("workerSocket settings: path, protectedLanes and startNodes are taken one by one", () => {
+    const home = tempDir();
+    const f = withFile({ workerSocket: { path: join(home, "w.sock"), protectedLanes: ["a b", "c"], startNodes: ["pc", "srv01"] } });
+    expect(workerSocketOf(loadConfig(f))).toEqual({ path: join(home, "w.sock"), protectedLanes: ["a b", "c"], startNodes: ["pc", "srv01"] });
+    const partial = workerSocketOf(loadConfig(withFile({ workerSocket: { startNodes: ["pc"] } })));
+    expect(partial.startNodes).toEqual(["pc"]);
+    expect(partial.protectedLanes).toEqual(["manager"]);
+  });
+
+  it("workerSocket refuses unknown keys, relative paths, a path equal to the owner's and bad names", () => {
+    const home = tempDir();
+    const cases: [unknown, RegExp][] = [
+      [{ workerSocket: [] }, /workerSocket must be an object/],
+      [{ workerSocket: { paths: "x" } }, /workerSocket has unknown settings: paths/],
+      [{ workerSocket: { path: "rel/w.sock" } }, /workerSocket.path must be absolute/],
+      [{ socketPath: join(home, "f.sock"), workerSocket: { path: join(home, "f.sock") } }, /workerSocket.path must differ from socketPath/],
+      [{ workerSocket: { protectedLanes: "manager" } }, /workerSocket.protectedLanes must be a list of lane names/],
+      [{ workerSocket: { startNodes: ["Bad Node"] } }, /workerSocket.startNodes must be a list of node names/],
+      [{ workerSocket: { startNodes: "pc" } }, /workerSocket.startNodes must be a list of node names/],
+    ];
+    for (const [content, message] of cases) {
+      const { home: h, env } = withFile(content);
+      expect(() => loadConfig({ env, home: h }), JSON.stringify(content)).toThrow(message);
+    }
   });
 
   it("refuses a file that doesn't fit, naming the setting", () => {
