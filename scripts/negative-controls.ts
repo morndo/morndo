@@ -4285,6 +4285,9 @@ export const CONTROLS: Control[] = [
   { id: "t415s3r3-earlier-reset-of-two-full", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "(w.resetsAt ?? 0) > (best.resetsAt ?? 0)", replace: "(w.resetsAt ?? 0) < (best.resetsAt ?? 0)",
     run: ["apps/hub/test/usage-seats.test.ts"] },
+  { id: "t415s4r1-forget-null-is-every-node", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
+    find: "const any = node === undefined;", replace: "const any = node === undefined || node === null;",
+    run: ["apps/hub/test/usage-health.test.ts"] },
 ];
 
 // ---- the runner

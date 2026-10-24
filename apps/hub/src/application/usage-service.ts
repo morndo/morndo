@@ -576,9 +576,12 @@ export class UsageService {
       if (had) this.#tellIfChanged();
       return had;
     }
-    const any = node === undefined || node === null;
-    const existed = rows.some(r => r.source === source && (any || r.node === node));
-    this.#store.deleteUsageSources(account, source, any ? undefined : node);
+    // No node named: every node of that source. A node of null is the unnamed row (stored "") and nothing else: the view
+    // says null for a source nobody named a node for, and the principal's second tap names exactly that row.
+    const any = node === undefined;
+    const want = node ?? "";
+    const existed = rows.some(r => r.source === source && (any || r.node === want));
+    this.#store.deleteUsageSources(account, source, any ? undefined : want);
     if (this.#store.usageSourcesOf(account).length === 0) this.#store.deleteUsageWatches(account);
     if (existed) this.#tellIfChanged();
     return existed;
