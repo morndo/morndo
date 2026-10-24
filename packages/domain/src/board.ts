@@ -436,7 +436,8 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
         toDrop.push(spec);
       }
       if (toAdd.length === 0 && toDrop.length === 0) return refuse("same");
-      const nextCount = current.length + toAdd.length - toDrop.length;
+      // A re-own (the assigner adding what the lane listed first) is not growth: only items not yet on the list count.
+      const nextCount = current.length + toAdd.filter(sp => !bySpec.has(sp)).length - toDrop.length;
       if (nextCount > LIST_MAX) return refuse("too_many", undefined, undefined, "proof list");
       return next(task, { kind: "proof_listed", add: toAdd, drop: toDrop }, false);
     }

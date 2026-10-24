@@ -746,6 +746,16 @@ describe("the proof list (B17)", () => {
     expect(problem(act(t, { action: "proof_list", drop: [DATA_SPEC] }, builder, proofGate({ list: [item(DATA_SPEC, "assigner")] })))).toBe("not_allowed");
   });
 
+  it("an assigner's re-own of a lane's item is not growth: it passes at the cap, while a new item at the cap does not", () => {
+    let t = make(1, { assignee: "builder" });
+    t = value(apply(t, { action: "move", to: "doing" }, builder)).task;
+    const specs = Array.from({ length: 12 }, (_, i) => `data: item ${i}`);
+    const full = (laneFirst: string) => proofGate({ list: specs.map(sp => item(sp, sp === laneFirst ? "lane" : "assigner")) });
+    expect(act(t, { action: "proof_list", add: [specs[3]!] }, manager, full(specs[3]!)).ok).toBe(true);           // twelve stay twelve
+    expect(problem(act(t, { action: "proof_list", add: ["data: a thirteenth"] }, manager, full(specs[3]!)))).toBe("too_many");
+    expect(act(t, { action: "proof_list", add: ["data: a thirteenth"], drop: [specs[0]!] }, manager, full(specs[3]!)).ok).toBe(true);   // a swap is not growth either
+  });
+
   it("a lane adds items to its own task and cannot drop the manager's; it drops its own", () => {
     let t = make(1, { assignee: "builder" });
     t = value(apply(t, { action: "move", to: "doing" }, builder)).task;
