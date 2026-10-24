@@ -15,9 +15,10 @@ const report = (o: Partial<UsageReport> = {}): UsageReport => ({
 const DEMAND = `on-demand ${"x".repeat(61)}`;
 
 describe("what Home counts", () => {
-  it("a named window at 90 or above raises the same notice, and a hidden 5-hour row is not the tightest", () => {
+  it("a named window at 90 or above raises the same notice, and a named-only account's absent 5-hour row is not the tightest", () => {
+    // S6: an account that names its windows and has no fixed ones (Cursor's status line) is the named-only case.
     const named = applyReport(null, report({
-      account: "cursor", fiveHour: { usedPercentage: 99, resetsAt: NOW + HOUR }, sevenDay: null,
+      account: "cursor", fiveHour: null, sevenDay: null,
       limits: [{ label: "Cursor models", usedPercentage: 92, resetsAt: NOW + HOUR, resetsOn: "2026-11-07" }],
       onDemand: "off",
     }), NOW);
@@ -30,6 +31,28 @@ describe("what Home counts", () => {
       spend: { usedPercentage: 95, resetsAt: NOW + HOUR, usedUsd: null, limitUsd: null, period: null },
     }), NOW);
     expect(shownLevel([spend])).toBe("critical");
+  });
+
+  it("a mixed account counts its fixed windows in the headline and the tiles; a named-only account is as before (S6)", () => {
+    const mixed = applyReport(null, report({
+      account: "codex",
+      fiveHour: { usedPercentage: 95, resetsAt: NOW + HOUR }, sevenDay: { usedPercentage: 30, resetsAt: NOW + 3 * 24 * HOUR },
+      limits: [{ label: "Big model: 5-hour window", usedPercentage: 10, resetsAt: NOW + HOUR, resetsOn: null }],
+    }), NOW);
+    const classic = applyReport(null, report(), NOW);
+    // the fixed 5-hour row at 95 is what the headline counts, beside the named windows
+    expect(shownLevel([mixed, classic])).toBe("critical");
+    expect(shownLevel([classic])).toBe("ok");
+    // and the mixed account takes part in the tightest tiles
+    expect(tightestShown([mixed, classic], "fiveHour")).toEqual({ account: "codex", window: { usedPercentage: 95, resetsAt: NOW + HOUR } });
+    expect(tightestShown([mixed, classic], "sevenDay")).toEqual({ account: "codex", window: { usedPercentage: 30, resetsAt: NOW + 3 * 24 * HOUR } });
+    // a named-only account still counts only its named windows and its spend
+    const namedOnly = applyReport(null, report({
+      account: "cursor", fiveHour: null, sevenDay: null,
+      limits: [{ label: "Cursor models", usedPercentage: 92, resetsAt: NOW + HOUR, resetsOn: null }],
+    }), NOW);
+    expect(shownLevel([namedOnly])).toBe("critical");
+    expect(tightestShown([namedOnly, classic], "fiveHour")).toEqual({ account: "max-1", window: { usedPercentage: 23.5, resetsAt: NOW + 2 * HOUR } });
   });
 
   it("the on-demand line and the reset date are decided once", () => {

@@ -111,3 +111,39 @@ export async function readCodexLimits(input: { bin: string; env: NodeJS.ProcessE
   if (!limits.primary && !limits.secondary && limits.others.length === 0) return { ok: false, problem: "Codex reported no usage window" };
   return { ok: true, limits };
 }
+
+// S6 (plan 4.6): the reading body a codex account posts to the hub's readings route — the same windows the status-line
+// report carries, plus who is behind the account (a digest, never an id) and Codex's own limit flags. Epoch seconds
+// here, as on the whole readings wire. Round 1: a stub.
+export type CodexReadingBody = {
+  source: "app-server";
+  node: string | null;
+  captured_at: number;            // seconds
+  every_s: number;
+  plan: string | null;
+  identity: string | null;
+  windows: { id: string; used_percent: number; resets_at: number | null; length_mins: number | null; rolling: false; note: null }[];
+  ordinary_usage_allowed?: boolean | null;
+  rate_limit_reached_type?: string | null;
+};
+export function codexReadingBody(limits: CodexLimits, o: {
+  identity: string | null; ordinaryUsageAllowed: boolean | null; rateLimitReachedType: string | null; now: number; node: string | null;
+}): CodexReadingBody {
+  void limits; void o;
+  throw new Error("not implemented");
+}
+
+// The adaptive read interval (AT-42), from the highest used percent over every window: 15 minutes idle, 5 from 75%,
+// 2 from 90%, once a minute from 99% — never faster than once a minute. Round 1: a stub.
+export function everyFor(maxPercent: number | null): number {
+  void maxPercent;
+  throw new Error("not implemented");
+}
+
+// A pushed `account/rateLimits/updated` notification (S6): an update in the same snapshot shape `account/rateLimits/read`
+// answers with, mapped to the same reading body — flagged pushed, no lease, because a push is nobody's rationed read.
+// Round 1: a stub; the long-lived client that would deliver these notifications is not built in this slice.
+export function codexPushedReading(update: unknown, o: { identity: string | null; now: number; node: string | null }): CodexReadingBody & { pushed: true } {
+  void update; void o;
+  throw new Error("not implemented");
+}

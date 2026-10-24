@@ -2,13 +2,17 @@
 // random port) and a fake CLI (a node script a test writes, never the real claude). It polls the HUB, never the
 // provider: only a granted lease spawns a read, and the reading or failure carries the lease id. The token is read
 // from its file and never printed. Synthetic data only.
+import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { collectOnce } from "../src/adapters/usage-claude-main.ts";
+
+const CODEX_FIXTURES = join(import.meta.dirname, "fixtures", "codex");
+const FAKE_APP_SERVER = join(import.meta.dirname, "fixtures", "fake-codex-app-server.mjs");
+const CODEX_PLUS: unknown = JSON.parse(readFileSync(join(CODEX_FIXTURES, "rate-limits-plus.json"), "utf8"));
 
 const TOKEN = "mat_collector-not-a-real-token";
 const SESSION_ONLY = [
@@ -135,5 +139,96 @@ describe("the collector's one pass (plan 4.4)", () => {
     const { out, err } = await pass();
     expect(out).not.toContain(TOKEN);
     expect(err).not.toContain(TOKEN);
+  });
+});
+
+// S6 (plan 4.6): a codex account in the same config. The fake app server a test writes stands in for the binary
+// (selected by MORNDO_CODEX_BIN), its CODEX_HOME is the directory it and its answer live in. Never the real codex.
+function codexServer(mode = "ok", limits: unknown = CODEX_PLUS): { bin: string; dir: string } {
+  const dir = mkdtempSync(join(tmpdir(), "morndo-codex-collector-"));
+  const bin = join(dir, "codex.mjs");
+  copyFileSync(FAKE_APP_SERVER, bin);
+  writeFileSync(join(dir, "limits.json"), JSON.stringify(limits));
+  writeFileSync(join(dir, "mode"), mode);
+  return { bin, dir };
+}
+
+async function codexPassOnce(o: { mode?: string; accounts?: Record<string, unknown> } = {}) {
+  const server = codexServer(o.mode);
+  const config = join(dir, "usage-claude.json");
+  writeFileSync(config, `${JSON.stringify({ hub: hub.base, tokenFile: join(dir, "token"), node: "pc", accounts: o.accounts ?? { "codex-a": { kind: "codex", codexHome: server.dir } } })}\n`);
+  const err: string[] = [];
+  const code = await collectOnce({
+    configPath: config,
+    env: { ...process.env, MORNDO_CODEX_BIN: server.bin, MORNDO_FAKE_REPORT: SESSION_ONLY, MORNDO_CLAUDE_BIN: join(dir, "fake-claude.mjs") },
+    stderr: t => err.push(t),
+    now: Date.now,
+  });
+  return { code, err: err.join("") };
+}
+
+describe("the collector's codex account (S6, plan 4.6)", () => {
+  it("a granted lease for source app-server reads the app server and posts the reading with the lease id", async () => {
+    hub.answerWith({ status: "granted", lease_id: "lease-9-test", expires_at: 4_102_444_800 });
+    const { code, err } = await codexPassOnce();
+    expect(code).toBe(0);
+    expect(err).toBe("");
+    const asks = hub.of("/api/agent/usage/lease");
+    expect(asks).toHaveLength(1);
+    expect(asks[0]?.body).toEqual({ account: "codex-a", source: "app-server", node: "pc" });
+    expect(asks[0]?.headers.authorization).toBe(`Bearer ${TOKEN}`);
+    const readings = hub.of("/api/agent/usage/readings");
+    expect(readings).toHaveLength(1);
+    const body = readings[0]?.body ?? {};
+    expect(body.source).toBe("app-server");
+    expect(body.node).toBe("pc");
+    expect(body.lease_id).toBe("lease-9-test");
+    expect(body.plan).toBe("plus");
+    expect(body.windows).toEqual([
+      { id: "five_hour", used_percent: 42, resets_at: 1_893_456_000, length_mins: 300, rolling: false, note: null },
+      { id: "seven_day", used_percent: 17, resets_at: 1_893_888_000, length_mins: 10_080, rolling: false, note: null },
+    ]);
+    expect(body.every_s).toBe(900);                        // 42% at most: the idle interval
+    expect(body.identity).toBe(null);                      // the answer names no account id: null, never a guess
+    expect(readings[0]?.headers["x-morndo-account"]).toBe("codex-a");
+  });
+
+  it("a refused read posts its failure classified by its words, with a redacted hint and the lease id", async () => {
+    const { code } = await codexPassOnce({ mode: "error" });
+    expect(code).toBe(0);
+    const readings = hub.of("/api/agent/usage/readings");
+    expect(readings).toHaveLength(1);
+    const failure = readings[0]?.body.failure as { reason?: string; hint?: string } | undefined;
+    expect(failure?.reason).toBe("signed_out");
+    expect(readings[0]?.body.lease_id).toBe("lease-9-test");
+    expect(JSON.stringify(failure?.hint)).not.toContain(tmpdir());   // no path of this box in the hint
+  });
+
+  it("an answer in a shape the reader does not know is an unknown_screen failure", async () => {
+    const { code } = await codexPassOnce({ mode: "garbage" });
+    expect(code).toBe(0);
+    const readings = hub.of("/api/agent/usage/readings");
+    expect(readings).toHaveLength(1);
+    expect((readings[0]?.body.failure as { reason?: string } | undefined)?.reason).toBe("unknown_screen");
+  });
+
+  it("a claude and a codex account in one config each ask and post under their own source", async () => {
+    const server = codexServer();
+    const config = join(dir, "usage-claude.json");
+    writeFileSync(config, `${JSON.stringify({
+      hub: hub.base, tokenFile: join(dir, "token"), node: "pc",
+      accounts: { "seat-a": { configDir: "/cfg/seat-a" }, "codex-a": { kind: "codex", codexHome: server.dir } },
+    })}\n`);
+    const code = await collectOnce({
+      configPath: config,
+      env: { ...process.env, MORNDO_CLAUDE_BIN: join(dir, "fake-claude.mjs"), MORNDO_FAKE_REPORT: SESSION_ONLY, MORNDO_CODEX_BIN: server.bin },
+      now: Date.now,
+    });
+    expect(code).toBe(0);
+    expect(hub.of("/api/agent/usage/lease").map(p => p.body)).toEqual([
+      { account: "seat-a", source: "claude-usage", node: "pc" },
+      { account: "codex-a", source: "app-server", node: "pc" },
+    ]);
+    expect(hub.of("/api/agent/usage/readings").map(p => p.body.source)).toEqual(["claude-usage", "app-server"]);
   });
 });
