@@ -291,14 +291,29 @@ if [ "$have_rulesets" = 1 ]; then
       while IFS= read -r line; do fail "feed ruleset '$name' $line"; done <"$tmp/feed-$id.problems"
     done
   fi
+  # A CODEOWNERS entry is a required review only when an active ruleset on main requires code-owner review: a
+  # pull_request rule with require_code_owner_review true. Without it the /trust/ line below reviews nothing.
+  owners_rule=0
+  for id in $(jq -r '.[]? | select(.target == "branch") | .id' "$tmp/rulesets"); do
+    [ -f "$tmp/ruleset-$id" ] || continue
+    if jq -e '.enforcement == "active"
+        and ((.conditions.ref_name.include // []) | any(. == "~DEFAULT_BRANCH" or . == "~ALL" or . == "refs/heads/main"))
+        and ((.rules // []) | any(.type == "pull_request" and (.parameters.require_code_owner_review == true)))' "$tmp/ruleset-$id" >/dev/null; then
+      owners_rule=1
+    fi
+  done
+  [ "$owners_rule" = 1 ] || fail "no active ruleset on main requires code-owner review (a pull_request rule with require_code_owner_review true), so the CODEOWNERS entry for /trust/ reviews nothing"
 fi
 
-# .github/CODEOWNERS on main, through the contents API with the raw media type, the same call the workflows use. A
-# comment is not an entry even when the words after "#" name /trust/ and an owner: those words are read and then
-# refused because the line is a comment. A line for * does not count, and the pattern must be followed by an @owner.
+# .github/CODEOWNERS on main, through the contents API with the raw media type, the same call the workflows use.
+# CODEOWNERS is last-match-wins, so the LAST line whose pattern is the trust directory decides, and it must be
+# followed by an @owner; a later catch-all line (*, **, /**) takes the trust files over and fails too. A comment is
+# not an entry even when the words after "#" name /trust/ and an owner: those words are read and then refused
+# because the line is a comment. A line for * before the trust line does not count as the entry.
 if gh api "repos/$repo/contents/.github/CODEOWNERS?ref=main" -H "Accept: application/vnd.github.raw+json" >"$tmp/codeowners" 2>/dev/null; then
-  if ! awk '
-    BEGIN { found = 0 }
+  rc=0
+  awk '
+    BEGIN { decided = 0; owned = 0; overridden = 0 }
     /^[ \t]*$/ { next }
     {
       comment = ($0 ~ /^[ \t]*#/)
@@ -306,16 +321,20 @@ if gh api "repos/$repo/contents/.github/CODEOWNERS?ref=main" -H "Accept: applica
       sub(/^[ \t]*#[ \t]+/, "", line)
       n = split(line, f)
       if (comment) next
-      if (f[1] !~ /^\/?trust\/\*?$/) next
-      owned = 0
-      for (i = 2; i <= n; i++) if (f[i] ~ /^@/) owned = 1
-      if (!owned) next
-      found = 1
+      if (f[1] ~ /^\/?trust\/\*?$/) {
+        decided = 1; owned = 0; overridden = 0
+        for (i = 2; i <= n; i++) if (f[i] ~ /^@/) owned = 1
+        next
+      }
+      if (decided && f[1] ~ /^(\*|\*\*|\/\*\*|\*\*\/\*)$/) overridden = 1
     }
-    END { exit (found ? 0 : 1) }
-  ' "$tmp/codeowners"; then
-    fail "CODEOWNERS has no entry for /trust/ with an owner"
-  fi
+    END { if (!decided || !owned) exit 1; if (overridden) exit 2; exit 0 }
+  ' "$tmp/codeowners" || rc=$?
+  case $rc in
+    0) ;;
+    2) fail "CODEOWNERS: a later line for * takes over /trust/, so its entry reviews nothing" ;;
+    *) fail "CODEOWNERS has no entry for /trust/ with an owner" ;;
+  esac
 else
   rm -f "$tmp/codeowners"
   fail "cannot read repos/$repo/contents/.github/CODEOWNERS?ref=main"

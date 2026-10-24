@@ -26,7 +26,7 @@ read-only and printing secret names only, never values:
 | key secrets | derived from the workflows, not from a name pattern: every `secrets.<NAME>` a job uses in `release`, `feed`, `promote` or `withdraw` must be a secret of exactly that environment, of no other environment, and neither a repository nor an organisation secret; a job with no environment that reads a key (`RELEASE_SSH_KEY`, `FEED_SSH_KEY`, `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` by name, a secret a key job reads, or one a key environment holds) fails |
 | the App's secrets | `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY` are environment secrets of `release-please` only: not a repository secret, not an organisation secret, and not a secret of any other environment (step 6). Any other secret a job with no environment uses is an `INFO:` line, and so is every repository or organisation secret that no workflow on `main` uses (a stray key kept as a backup shows up there; it is listed, not judged by its name) |
 | the `main` rulesets | their bypass actors are printed as `INFO:` lines for the owner to read |
-| CODEOWNERS | `.github/CODEOWNERS` on `main`, read through the contents API with the raw media type, has a non-comment, non-blank line whose pattern is `/trust/`, `/trust/*`, `trust/` or `trust/*`, followed by at least one owner starting with `@` (a `*` line does not count; who the owner is is not judged) |
+| CODEOWNERS | `.github/CODEOWNERS` on `main`, read through the contents API with the raw media type, has a non-comment, non-blank line whose pattern is `/trust/`, `/trust/*`, `trust/` or `trust/*`, followed by at least one owner starting with `@` (the LAST such line decides, a `*` line before it does not count and a catch-all line after it takes the files over and fails; who the owner is is not judged); and an active ruleset on `main` has a `pull_request` rule with `require_code_owner_review` true |
 
 Two exposures were named so they are decided with open eyes (the release plan's section 1, decisions 9 and 10).
 Decision 9 stays open: the account the lanes run as is a repository administrator that can merge a changed workflow
@@ -156,7 +156,12 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    the second gate (the sign job is behind the `feed` environment, and that environment allows `main` only). This
    ruleset keeps the branch's history from being rewritten and the branch from being deleted. Creating the branch and
    fast-forward updates, which is what those workflows do, are not blocked by these two rules
-   (https://docs.github.com/en/rest/repos/rules, read 2026-10-24):
+   (https://docs.github.com/en/rest/repos/rules, read 2026-10-24). **A promotion's seven-day soak relies on this
+   ruleset**: it counts from the commit date of the oldest feed commit whose signed `latest.json` lists the Version,
+   in first-parent order along the whole branch, and that is only the real first listing while history cannot be
+   rewritten (no force push) or dropped (no deletion). It also relies on the dates of the commits the release bot
+   itself makes: the signed feed pins which commit counts, not what its date says. The shell check before the key
+   recomputes it from the branch, but it cannot tell a rewritten branch from a real one:
 
    ```sh
    gh api -X POST repos/morndo/morndo/rulesets --input - <<'EOF'
@@ -176,9 +181,11 @@ Each command is exact, each with the one-line result to expect. `<login>` below 
    /trust/ @owner-account
    ```
 
-   The existing main ruleset `main: pull request and code owners` is what turns that line into a required review
-   (https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners,
-   read 2026-10-24). With one maintainer account that the lanes also use, the `/trust/` entry names the same owner as
+   An active ruleset on `main` with a `pull_request` rule that has `require_code_owner_review` true (the existing
+   `main: pull request and code owners`) is what turns that line into a required review, so the check requires that
+   rule too (https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners,
+   read 2026-10-24). CODEOWNERS is last-match-wins: the last `/trust/` line decides and must name an owner, and a later
+   catch-all line (`*`, `**`, `/**`) would take the trust files over, so the check fails on one. With one maintainer account that the lanes also use, the `/trust/` entry names the same owner as
    `*`, so it is explicit but not yet a second review. It becomes one once the lanes get a GitHub account of their own
    without administrator rights (the plan's decision 9, "the real fix"). The check requires the entry either way.
 

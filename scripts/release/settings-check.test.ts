@@ -151,7 +151,7 @@ function world() {
     id: 10, name: "main: pull request and code owners", target: "branch", enforcement: "active",
     bypass_actors: [{ actor_id: 3, actor_type: "RepositoryRole", bypass_mode: "always" }],
     conditions: { ref_name: { include: ["refs/heads/main"], exclude: [] } },
-    rules: [{ type: "pull_request" }, { type: "required_linear_history" }],
+    rules: [{ type: "pull_request", parameters: { require_code_owner_review: true, required_approving_review_count: 1 } }, { type: "required_linear_history" }],
   });
   put(`repos/${REPO}/rulesets/20`, {
     id: 20, name: "v* tags: only the release App", target: "tag", enforcement: "active",
@@ -893,6 +893,61 @@ describe("check-release-settings.sh", () => {
       const r = w.run();
       expect(r.status, `${JSON.stringify(text)}: ${r.stdout}${r.stderr}`).toBe(0);
       expect(failLines(r.stdout), text).toEqual([]);
+    }
+  });
+
+  it("main's ruleset must require code-owner review, or a CODEOWNERS entry reviews nothing", () => {
+    const sentence = "FAIL: no active ruleset on main requires code-owner review (a pull_request rule with require_code_owner_review true), so the CODEOWNERS entry for /trust/ reviews nothing";
+    const cases: [string, (d: any) => any][] = [
+      ["no pull_request rule", d => ({ ...d, rules: d.rules.filter((r: { type: string }) => r.type !== "pull_request") })],
+      ["require_code_owner_review false", d => ({ ...d, rules: d.rules.map((r: any) => r.type === "pull_request" ? { ...r, parameters: { ...r.parameters, require_code_owner_review: false } } : r) })],
+      ["the parameter missing", d => ({ ...d, rules: d.rules.map((r: any) => r.type === "pull_request" ? { type: "pull_request" } : r) })],
+      ["the parameter on another kind of rule", d => ({ ...d, rules: [{ type: "required_linear_history", parameters: { require_code_owner_review: true } }] })],
+      ["the ruleset not active", d => ({ ...d, enforcement: "disabled" })],
+      ["the ruleset on another branch", d => ({ ...d, conditions: { ref_name: { include: ["refs/heads/develop"], exclude: [] } } })],
+    ];
+    for (const [what, change] of cases) {
+      const w = world();
+      w.edit(`repos/${REPO}/rulesets/10`, change);
+      const r = w.run();
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(failLines(r.stdout), what).toEqual([sentence]);
+    }
+    // the default-branch word GitHub itself writes passes, and so does a second ruleset that requires it
+    const word = world();
+    word.edit(`repos/${REPO}/rulesets/10`, d => ({ ...d, conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } } }));
+    expect(word.run().status).toBe(0);
+    const second = world();
+    second.edit(`repos/${REPO}/rulesets/10`, d => ({ ...d, rules: d.rules.filter((r: { type: string }) => r.type !== "pull_request") }));
+    second.edit(`repos/${REPO}/rulesets`, list => [...list, { id: 40, name: "main: code owners", target: "branch", enforcement: "active" }]);
+    second.put(`repos/${REPO}/rulesets/40`, {
+      id: 40, name: "main: code owners", target: "branch", enforcement: "active", bypass_actors: [],
+      conditions: { ref_name: { include: ["~DEFAULT_BRANCH"], exclude: [] } },
+      rules: [{ type: "pull_request", parameters: { require_code_owner_review: true } }],
+    });
+    const r = second.run();
+    expect(r.status, r.stdout + r.stderr).toBe(0);
+  });
+
+  it("CODEOWNERS is last-match-wins: the last /trust/ line decides, and a later catch-all takes over", () => {
+    const path = `repos/${REPO}/contents/.github/CODEOWNERS?ref=main`;
+    const noEntry = "FAIL: CODEOWNERS has no entry for /trust/ with an owner";
+    const overridden = "FAIL: CODEOWNERS: a later line for * takes over /trust/, so its entry reviews nothing";
+    const cases: [string, string, string | null][] = [
+      ["a later /trust/ line with no owner", "/trust/ @a\n/trust/\n", noEntry],
+      ["a later /trust/* line with no owner", "/trust/ @a\n/trust/*\n", noEntry],
+      ["a later catch-all", "/trust/ @a\n* @b\n", overridden],
+      ["a later /** catch-all", "/trust/ @a\n/** @b\n", overridden],
+      ["the owner line last", "/trust/\n/trust/ @a\n", null],
+      ["the catch-all first", "* @b\n/trust/ @a\n", null],
+      ["two owner lines", "/trust/ @a\ntrust/ @b\n", null],
+    ];
+    for (const [what, text, expected] of cases) {
+      const w = world();
+      w.raw(path, text);
+      const r = w.run();
+      expect(failLines(r.stdout), what).toEqual(expected === null ? [] : [expected]);
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(expected === null ? 0 : 1);
     }
   });
 
