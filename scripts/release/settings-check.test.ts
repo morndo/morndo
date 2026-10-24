@@ -54,11 +54,13 @@ const reviewed = (name: string) => ({
   deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
 });
 // github-pages serves documents the clients verify, so it needs no reviewer and may let administrators bypass; it still
-// allows main only.
+// allows main only. release-please runs on every push to main, so it has no required reviewer either; administrator
+// bypass may stay on, and it still allows main only.
 const PAGES = { name: "github-pages", can_admins_bypass: true, protection_rules: [{ type: "branch_policy" }], deployment_branch_policy: { custom_branch_policies: true, protected_branches: false } };
+const RELEASE_PLEASE = { name: "release-please", can_admins_bypass: true, protection_rules: [{ type: "branch_policy" }], deployment_branch_policy: { custom_branch_policies: true, protected_branches: false } };
 const MAIN_ONLY = { total_count: 1, branch_policies: [{ id: 1, name: "main", type: "branch" }] };
 const secret = (name: string) => ({ name, created_at: "2026-10-01T00:00:00Z", updated_at: "2026-10-01T00:00:00Z" });
-const ENVIRONMENTS = ["release", "feed", "promote", "withdraw", "github-pages"] as const;
+const ENVIRONMENTS = ["release", "feed", "promote", "withdraw", "github-pages", "release-please"] as const;
 const KEY_ENVIRONMENTS = ["release", "feed", "promote", "withdraw"] as const;
 const WORKFLOWS = `repos/${REPO}/contents/.github/workflows`;
 
@@ -70,6 +72,7 @@ const RELEASE_YML = [
   "jobs:",
   "  release-please:",
   "    runs-on: ubuntu-24.04",
+  "    environment: release-please",
   "    steps:",
   "      # the app token opens the release pull request",
   "      - uses: example/app-token@v1",
@@ -110,10 +113,10 @@ const PAGES_YML = [
 ].join("\n");
 
 // The good settings set: four environments with exactly the one reviewer (by id), Prevent self-review on and
-// administrator bypass off, every environment allowing the branch main only, a tag ruleset only the release App (by
-// id) can bypass, a main ruleset whose bypass the owner can read, the two signing keys as secrets of exactly the
-// environments whose jobs use them, the App's two secrets as repository secrets (the known exposure, decision 10),
-// and the workflows on main using them.
+// administrator bypass off, every environment allowing the branch main only, release-please with no required reviewer
+// and the branch main only, a tag ruleset only the release App (by id) can bypass, a main ruleset whose bypass the
+// owner can read, the two signing keys as secrets of exactly the environments whose jobs use them, the App's two
+// secrets as secrets of release-please only, and the workflows on main using them.
 function world() {
   const dir = mkdtempSync(join(tmpdir(), "morndo-settings-"));
   roots.push(dir);
@@ -125,15 +128,16 @@ function world() {
   const file = (path: string) => join(ghDir, `${path.split("/").join("__")}.json`);
   const put = (path: string, data: unknown) => writeFileSync(file(path), `${JSON.stringify(data, null, 1)}\n`);
 
-  const environments = [reviewed("release"), reviewed("feed"), reviewed("promote"), reviewed("withdraw"), PAGES];
+  const environments = [reviewed("release"), reviewed("feed"), reviewed("promote"), reviewed("withdraw"), PAGES, RELEASE_PLEASE];
   put(`repos/${REPO}/environments`, { total_count: environments.length, environments });
   for (const name of ENVIRONMENTS) put(`repos/${REPO}/environments/${name}/deployment-branch-policies`, MAIN_ONLY);
   put(`repos/${REPO}/environments/release/secrets`, { total_count: 1, secrets: [secret("RELEASE_SSH_KEY")] });
   put(`repos/${REPO}/environments/feed/secrets`, { total_count: 1, secrets: [secret("FEED_SSH_KEY")] });
+  put(`repos/${REPO}/environments/release-please/secrets`, { total_count: 2, secrets: [secret("RELEASE_APP_ID"), secret("RELEASE_APP_PRIVATE_KEY")] });
   for (const name of ["promote", "withdraw", "github-pages"]) {
     put(`repos/${REPO}/environments/${name}/secrets`, { total_count: 0, secrets: [] });
   }
-  put(`repos/${REPO}/actions/secrets`, { total_count: 2, secrets: [secret("RELEASE_APP_ID"), secret("RELEASE_APP_PRIVATE_KEY")] });
+  put(`repos/${REPO}/actions/secrets`, { total_count: 0, secrets: [] });
   put("orgs/acme/actions/secrets", { total_count: 0, secrets: [] });
   put(`repos/${REPO}/rulesets`, [
     { id: 10, name: "main: pull request and code owners", target: "branch", enforcement: "active" },
@@ -193,7 +197,8 @@ describe("check-release-settings.sh", () => {
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stdout).toContain("check-release-settings: ok");
     expect(failLines(r.stdout)).toEqual([]);
-    expect(r.stdout).toContain("KNOWN: RELEASE_APP_PRIVATE_KEY and RELEASE_APP_ID are repository secrets (decision 10: move them to an environment limited to main)");
+    expect(r.stdout).not.toContain("KNOWN");
+    expect(r.stdout).toMatch(/release-please allows the branch main only/);
     expect(r.stdout).toContain("INFO: main ruleset");
     expect(r.stdout).toContain("INFO: tag ruleset bypass: Integration:7");
   });
@@ -576,8 +581,7 @@ describe("check-release-settings.sh", () => {
     const r = w.run();
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stdout).toContain("INFO: job lint of lint.yml uses repository secret REPORT_TOKEN (no environment)");
-    // the App's two secrets are the known exposure, said once, not an INFO per name
-    expect(r.stdout.split("\n").filter(line => line.startsWith("KNOWN:"))).toHaveLength(1);
+    expect(r.stdout).not.toContain("KNOWN");
   });
 
   it("a key secret read by a job with no environment fails", () => {
@@ -621,12 +625,14 @@ describe("check-release-settings.sh", () => {
       expect(k.stdout, key).toContain(`FAIL: job sign of release.yml reads key secret ${key} without an environment`);
       expect(k.stdout, key).not.toContain(`INFO: job sign of release.yml uses repository secret ${key}`);
     }
-    // the App's two secrets are not keys (no key environment holds or uses them), and another secret stays an INFO
+    // the App's two secrets are keys by name, so a job with no environment that reads one fails like a signing key
     const w = world();
     w.workflow("build.yml", outside("RELEASE_APP_ID"));
     const r = w.run();
-    expect(r.status, r.stdout + r.stderr).toBe(0);
-    expect(failLines(r.stdout)).toEqual([]);
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(r.stdout).toContain("FAIL: job build of build.yml reads key secret RELEASE_APP_ID without an environment");
+    expect(r.stdout).not.toContain("INFO: job build of build.yml uses repository secret RELEASE_APP_ID");
+    expect(r.stdout).not.toContain("KNOWN");
   });
 
   it("organisation secrets that cannot be read fail unless --no-org-secrets, which says they were not checked", () => {
@@ -653,10 +659,151 @@ describe("check-release-settings.sh", () => {
     const withValue = (s: { name: string }) => ({ ...s, value: "CANARY-VALUE-12345" });
     w.edit(`repos/${REPO}/actions/secrets`, d => ({ ...d, secrets: d.secrets.map(withValue) }));
     w.edit(`repos/${REPO}/environments/release/secrets`, d => ({ ...d, secrets: d.secrets.map(withValue) }));
+    w.edit(`repos/${REPO}/environments/release-please/secrets`, d => ({ ...d, secrets: d.secrets.map(withValue) }));
     w.edit("orgs/acme/actions/secrets", d => ({ ...d, secrets: [withValue(secret("ORG_DEPLOY_TOKEN"))] }));
     const r = w.run();
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(r.stdout + r.stderr).not.toContain("CANARY-VALUE-12345");
+  });
+
+  it("the release-please environment must exist", () => {
+    const absent = world();
+    absent.edit(`repos/${REPO}/environments`, data => ({ ...data, environments: data.environments.filter((e: { name: string }) => e.name !== "release-please") }));
+    const a = absent.run();
+    expect(a.status, a.stdout + a.stderr).toBe(1);
+    expect(a.stdout).toContain("FAIL: environment release-please does not exist");
+    // a missing environment is reported once: its branch rule, its reviewer and its secrets are not checked again
+    expect(a.stdout).not.toMatch(/environment release-please allows/);
+    expect(a.stdout).not.toMatch(/environment release-please has a required reviewer/);
+    expect(a.stdout).not.toMatch(/RELEASE_APP_(ID|PRIVATE_KEY) must be a secret/);
+
+    // the shape the first run auto-creates: no branch rule, no secrets, the App's secrets still on the repository
+    const created = world();
+    editEnvironment(created, "release-please", env => {
+      env.protection_rules = [];
+      env.deployment_branch_policy = { protected_branches: true, custom_branch_policies: false };
+    });
+    created.edit(`repos/${REPO}/environments/release-please/secrets`, () => ({ total_count: 0, secrets: [] }));
+    created.edit(`repos/${REPO}/actions/secrets`, () => ({ total_count: 2, secrets: [secret("RELEASE_APP_ID"), secret("RELEASE_APP_PRIVATE_KEY")] }));
+    const b = created.run();
+    expect(b.status, b.stdout + b.stderr).toBe(1);
+    expect(b.stdout).toContain("FAIL: environment release-please allows all protected branches; it must allow the branch main only");
+    expect(b.stdout).toContain("FAIL: RELEASE_APP_ID must be a secret of environment release-please only (found in: repository)");
+    expect(b.stdout).toContain("FAIL: RELEASE_APP_PRIVATE_KEY must be a secret of environment release-please only (found in: repository)");
+    expect(b.stdout).not.toContain("environment release-please has a required reviewer");
+  });
+
+  it("the release-please environment allows main only", () => {
+    const tag = { id: 2, name: "v*", type: "tag" };
+    const cases: [string, string, (w: World) => void][] = [
+      ["a tag policy beside main", "environment release-please allows main (branch), v* (tag); it must allow the branch main only", w => {
+        w.edit(`repos/${REPO}/environments/release-please/deployment-branch-policies`, d => ({ ...d, branch_policies: [...d.branch_policies, tag] }));
+      }],
+      ["a branch named develop", "environment release-please allows develop (branch); it must allow the branch main only", w => {
+        w.edit(`repos/${REPO}/environments/release-please/deployment-branch-policies`, d => ({ ...d, branch_policies: [{ id: 1, name: "develop", type: "branch" }] }));
+      }],
+      ["no custom policies", "environment release-please allows all protected branches; it must allow the branch main only", w => {
+        editEnvironment(w, "release-please", env => { env.deployment_branch_policy.custom_branch_policies = false; });
+      }],
+    ];
+    for (const [what, message, change] of cases) {
+      const w = world();
+      change(w);
+      const r = w.run();
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(failLines(r.stdout), what).toEqual([`FAIL: ${message}`]);
+    }
+  });
+
+  it("the release-please environment has no required reviewer", () => {
+    const required = world();
+    editEnvironment(required, "release-please", env => {
+      env.protection_rules = [
+        { type: "required_reviewers", prevent_self_review: false, reviewers: [REVIEWER] },
+        { type: "branch_policy" },
+      ];
+    });
+    const r = required.run();
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(r.stdout).toContain(`FAIL: environment release-please has a required reviewer (User:${REVIEWER_ID}); the job that uses it runs on every push to main`);
+    expect(r.stdout).not.toContain("Prevent self-review");
+    expect(r.stdout).not.toContain("can_admins_bypass");
+
+    const empty = world();
+    editEnvironment(empty, "release-please", env => {
+      env.protection_rules = [
+        { type: "required_reviewers", reviewers: [] },
+        { type: "branch_policy" },
+      ];
+    });
+    const e = empty.run();
+    expect(e.status, e.stdout + e.stderr).toBe(0);
+
+    const branchOnly = world();
+    editEnvironment(branchOnly, "release-please", env => { env.protection_rules = [{ type: "branch_policy" }]; });
+    expect(branchOnly.run().status).toBe(0);
+
+    const noRules = world();
+    editEnvironment(noRules, "release-please", env => { env.protection_rules = []; });
+    const n = noRules.run();
+    expect(n.status, n.stdout + n.stderr).toBe(0);
+  });
+
+  it("the App's two secrets must be secrets of release-please only", () => {
+    const line = (name: string, found: string) => `FAIL: ${name} must be a secret of environment release-please only (found in: ${found})`;
+    const cases: [string, string, string, (w: World) => void][] = [
+      ["RELEASE_APP_ID missing from the environment", "RELEASE_APP_ID", "nowhere", w => {
+        w.edit(`repos/${REPO}/environments/release-please/secrets`, d => ({ ...d, secrets: d.secrets.filter((s: { name: string }) => s.name !== "RELEASE_APP_ID") }));
+      }],
+      ["RELEASE_APP_PRIVATE_KEY missing from the environment", "RELEASE_APP_PRIVATE_KEY", "nowhere", w => {
+        w.edit(`repos/${REPO}/environments/release-please/secrets`, d => ({ ...d, secrets: d.secrets.filter((s: { name: string }) => s.name !== "RELEASE_APP_PRIVATE_KEY") }));
+      }],
+      ["RELEASE_APP_ID also a repository secret", "RELEASE_APP_ID", "environment release-please, repository", w => {
+        w.edit(`repos/${REPO}/actions/secrets`, d => ({ ...d, secrets: [...d.secrets, secret("RELEASE_APP_ID")] }));
+      }],
+      ["RELEASE_APP_ID also an organisation secret", "RELEASE_APP_ID", "environment release-please, organisation", w => {
+        w.edit("orgs/acme/actions/secrets", d => ({ ...d, secrets: [secret("RELEASE_APP_ID")] }));
+      }],
+      ["RELEASE_APP_ID also in the feed environment", "RELEASE_APP_ID", "environment feed, environment release-please", w => {
+        w.edit(`repos/${REPO}/environments/feed/secrets`, d => ({ ...d, secrets: [...d.secrets, secret("RELEASE_APP_ID")] }));
+      }],
+    ];
+    for (const [what, name, found, change] of cases) {
+      const w = world();
+      change(w);
+      const r = w.run();
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(r.stdout, what).toContain(line(name, found));
+      const other = name === "RELEASE_APP_ID" ? "RELEASE_APP_PRIVATE_KEY" : "RELEASE_APP_ID";
+      expect(failLines(r.stdout).some(row => row.includes(other)), what).toBe(false);
+    }
+  });
+
+  it("the App's secrets in both the environment and the repository fail until the repository copies are deleted", () => {
+    const w = world();
+    w.edit(`repos/${REPO}/actions/secrets`, () => ({ total_count: 2, secrets: [secret("RELEASE_APP_ID"), secret("RELEASE_APP_PRIVATE_KEY")] }));
+    const r = w.run();
+    expect(r.status, r.stdout + r.stderr).toBe(1);
+    expect(failLines(r.stdout)).toEqual([
+      "FAIL: RELEASE_APP_ID must be a secret of environment release-please only (found in: environment release-please, repository)",
+      "FAIL: RELEASE_APP_PRIVATE_KEY must be a secret of environment release-please only (found in: environment release-please, repository)",
+    ]);
+    w.edit(`repos/${REPO}/actions/secrets`, () => ({ total_count: 0, secrets: [] }));
+    const ok = w.run();
+    expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+    expect(ok.stdout).not.toContain("KNOWN");
+  });
+
+  it("a job with no environment that reads an App secret fails", () => {
+    const outside = (name: string) => ["jobs:", "  build:", "    runs-on: ubuntu-24.04", "    steps:", `      - run: echo \${{ secrets.${name} }}`, ""].join("\n");
+    for (const name of ["RELEASE_APP_ID", "RELEASE_APP_PRIVATE_KEY"]) {
+      const w = world();
+      w.workflow("build.yml", outside(name));
+      const r = w.run();
+      expect(r.status, `${name}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(r.stdout, name).toContain(`FAIL: job build of build.yml reads key secret ${name} without an environment`);
+      expect(r.stdout, name).not.toContain("KNOWN");
+    }
   });
 
   it("it reports every problem at once, not only the first", () => {

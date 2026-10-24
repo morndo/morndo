@@ -1,24 +1,27 @@
 #!/bin/sh
 # check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets]: proves,
-# read-only, the GitHub settings a release depends on; it never changes a setting (GitHub API GETs through gh api
-# only) and never prints a secret value (secret NAMES only). The environments release, feed, promote and withdraw
-# must each have exactly one required reviewer, the second account, named by its id (--reviewer-id: a team, the
-# maintainer account or a second reviewer fails), Prevent self-review on, administrator bypass off (can_admins_bypass
-# false: the account the lanes run as is a repository administrator, and with the bypass on it could skip the
-# reviewer), and deployments from the branch main only; github-pages must allow main only too (it serves documents the
-# clients verify, so it needs no reviewer). The workflows are read from main through the API, not from a checkout, and
-# every environment they name must already exist, because a workflow that names a missing one creates it with no
-# reviewer and no branch rule. A tag ruleset must hold refs/tags/v* with only the release App, by its id (--app-id),
-# as its bypass actor, so nobody else, administrators included, can create or move a release tag. A key secret is a
-# secret a job uses in one of the four environments (a `secrets.NAME` of that job in the workflows on main, not a name
-# pattern): it must be a secret of that environment and of no other, and neither a repository nor an organisation
-# secret, because a repository secret is readable by any workflow from any branch. The release App's own two secrets,
-# used by a job with no environment, are printed as KNOWN (the exposure of decision 10, until they move into an
-# environment limited to main); any other secret such a job uses is printed as INFO. Every problem is one FAIL line on
-# stdout, and the exit status is 1 when there was one, 2 for a usage error; INFO and KNOWN lines never fail. The check
-# runs before every release and every Monday, on a machine with an administrator token, never inside Actions (the
-# Actions token cannot read environment secrets, rulesets or reviewers). gh, jq and awk come from the caller's PATH,
-# which the administrator's machine provides. Endpoints and response shapes, read 2026-10-24:
+# read-only, the GitHub settings a release depends on; it never changes a setting (GitHub API GETs through gh api only)
+# and never prints a secret value (secret NAMES only). The environments release, feed, promote and withdraw must each
+# have exactly one required reviewer, the second account, named by its id (--reviewer-id: a team, the maintainer account
+# or a second reviewer fails), Prevent self-review on, administrator bypass off (can_admins_bypass false: the account
+# the lanes run as is a repository administrator, and with the bypass on it could skip the reviewer), and deployments
+# from the branch main only; github-pages must allow main only too (it serves documents the clients verify, so it needs
+# no reviewer). The environment release-please holds the release App's secrets RELEASE_APP_ID and
+# RELEASE_APP_PRIVATE_KEY: it must exist, allow the branch main only, and have no required reviewer (the job that uses
+# it runs on every push to main). Its branch rule keeps every other branch and every tag from reading those secrets but
+# does not wall off main. The workflows are read from main through the API, not from a checkout, and every environment
+# they name must already exist, because a workflow that names a missing one creates it with no reviewer and no branch
+# rule. A tag ruleset must hold refs/tags/v* with only the release App, by its id (--app-id), as its bypass actor, so
+# nobody else, administrators included, can create or move a release tag. A key secret is a secret a job uses in one of
+# the four environments (a `secrets.NAME` of that job in the workflows on main, not a name pattern): it must be a secret
+# of that environment and of no other, and neither a repository nor an organisation secret, because a repository secret
+# is readable by any workflow from any branch. RELEASE_SSH_KEY, FEED_SSH_KEY, RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY
+# are keys by name as well, and the App's two must be secrets of the environment release-please and of no other place.
+# Any other secret a job with no environment uses is printed as INFO. Every problem is one FAIL line on stdout, and the
+# exit status is 1 when there was one, 2 for a usage error; INFO lines never fail. The check runs before every release
+# and every Monday, on a machine with an administrator token, never inside Actions (the Actions token cannot read
+# environment secrets, rulesets or reviewers). gh, jq and awk come from the caller's PATH, which the administrator's
+# machine provides. Endpoints and response shapes, read 2026-10-24:
 # https://docs.github.com/en/rest/deployments/environments,
 # https://docs.github.com/en/rest/deployments/branch-policies,
 # https://docs.github.com/en/rest/repos/rules, https://docs.github.com/en/rest/actions/secrets and
@@ -29,7 +32,6 @@ set -eu
 problems=0
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 info() { printf 'INFO: %s\n' "$*"; }
-known() { printf 'KNOWN: %s\n' "$*"; }
 
 usage='usage: check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets]'
 repo=morndo/morndo
@@ -76,16 +78,21 @@ exists() { # exists <environment>: true when the environments list names it
 
 # The environments release, feed, promote and withdraw hold a key or move a release, so each needs the one reviewer,
 # administrator bypass off and the branch main only; github-pages serves documents the clients verify, so it needs
-# no reviewer (and is not failed for having one, or for the bypass). A missing environment is reported once and
-# nothing else is checked for it; when the list itself could not be read, the environments are not reported missing
-# on top of that.
-for name in release feed promote withdraw github-pages; do
+# no reviewer (and is not failed for having one, or for the bypass). release-please holds the App's secrets and its
+# job runs on every push to main, so it allows main only and must not have a required reviewer (Prevent self-review
+# and the administrator bypass are not required of it). A missing environment is reported once and nothing else is
+# checked for it; when the list itself could not be read, the environments are not reported missing on top of that.
+for name in release feed promote withdraw github-pages release-please; do
   [ "$have_envs" = 1 ] || continue
   if ! exists "$name"; then
     fail "environment $name does not exist"
     continue
   fi
-  if [ "$name" != "github-pages" ]; then
+  if [ "$name" = "release-please" ]; then
+    found=$(jq -r --arg n "$name" \
+      '[.environments[] | select(.name == $n) | .protection_rules[]? | select(.type == "required_reviewers")][0].reviewers // [] | map("\(.type):\(.reviewer.id)") | join(", ")' "$tmp/environments")
+    [ -z "$found" ] || fail "environment $name has a required reviewer ($found); the job that uses it runs on every push to main"
+  elif [ "$name" != "github-pages" ]; then
     count=$(jq -r --arg n "$name" \
       '[.environments[] | select(.name == $n) | .protection_rules[]? | select(.type == "required_reviewers")][0].reviewers // [] | length' "$tmp/environments")
     if [ "$count" -eq 0 ]; then
@@ -256,7 +263,7 @@ fi
 # the existence check are not fetched: its 404 would report the same problem twice. Organisation secrets need an
 # administrator token (admin:org); --no-org-secrets leaves them out and says so.
 if fetch repo-secrets "repos/$repo/actions/secrets"; then :; fi
-for name in release feed promote withdraw github-pages; do
+for name in release feed promote withdraw github-pages release-please; do
   if exists "$name"; then
     fetch "secrets-$name" "repos/$repo/environments/$name/secrets" || :
   fi
@@ -275,13 +282,23 @@ has_name() { # has_name <file> <secret name>: the secrets list in <file> holds t
 }
 places() { # places <secret name>: where the name was found, "environment <env>" for each, then repository, organisation
   found=""
-  for env in release feed promote withdraw github-pages; do
+  for env in release feed promote withdraw github-pages release-please; do
     if has_name "$tmp/secrets-$env" "$1"; then found="${found:+$found, }environment $env"; fi
   done
   if has_name "$tmp/repo-secrets" "$1"; then found="${found:+$found, }repository"; fi
   if has_name "$tmp/org-secrets" "$1"; then found="${found:+$found, }organisation"; fi
   printf '%s' "$found"
 }
+
+# RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY belong to the environment release-please and to nowhere else. A missing
+# release-please is already a failure, and nothing else is checked for it.
+if exists release-please; then
+  for key in RELEASE_APP_ID RELEASE_APP_PRIVATE_KEY; do
+    where=$(places "$key")
+    [ "$where" = "environment release-please" ] ||
+      fail "$key must be a secret of environment release-please only (found in: ${where:-nowhere})"
+  done
+fi
 
 # A key secret is one a job uses in release, feed, promote or withdraw. It must be a secret of exactly that
 # environment: not of another, not a repository secret, not an organisation secret.
@@ -306,17 +323,16 @@ if [ -s "$tmp/key-uses" ] && [ "$have_envs" = 1 ]; then
   while IFS= read -r line; do printf '%s\n' "$line"; problems=$((problems + 1)); done <"$tmp/key-failures"
 fi
 
-# The release App's two secrets are used by a job with no environment, so they are repository secrets by necessity:
-# the known exposure of decision 10. Any other secret such a job uses is only reported.
+# A job with no environment that reads a key fails below. Any other secret such a job uses is only reported.
 awk -F'\t' '$1 == "secret" && $4 == "-" { print $5 "\t" $3 "\t" $2 }' "$tmp/facts" | sort -t "$(printf '\t')" -k1,1 -u >"$tmp/open-uses"
-# A key is RELEASE_SSH_KEY or FEED_SSH_KEY, a secret a job reads in release, feed, promote or withdraw, or one those
-# environments hold: it lives in its main-only environment, so a job with no environment must not read it by name (it
-# would get nothing, or a repository secret of that name, which the check above already fails). Every such job is a
-# FAIL, not an INFO.
+# A key is RELEASE_SSH_KEY, FEED_SSH_KEY, RELEASE_APP_ID or RELEASE_APP_PRIVATE_KEY, a secret a job reads in release,
+# feed, promote or withdraw, or one those environments hold: it lives in its main-only environment, so a job with no
+# environment must not read it by name (it would get nothing, or a repository secret of that name, which the check
+# above already fails). Every such job is a FAIL, not an INFO.
 {
-  # The two signing keys are keys by name, whatever the settings and the workflows say: a sign job that lost its
-  # `environment:` line while the key sits as a repository secret must not look like a job with no key at all.
-  printf '%s\n' RELEASE_SSH_KEY FEED_SSH_KEY
+  # The signing keys and the release App's two secrets are keys by name, whatever the settings and the workflows say:
+  # a job that lost its `environment:` line must not look like a job with no key at all.
+  printf '%s\n' RELEASE_SSH_KEY FEED_SSH_KEY RELEASE_APP_ID RELEASE_APP_PRIVATE_KEY
   cut -f1 "$tmp/key-uses"
   for env in release feed promote withdraw; do
     if [ -f "$tmp/secrets-$env" ]; then jq -r '.secrets[]?.name' "$tmp/secrets-$env"; fi
@@ -328,17 +344,10 @@ while IFS="$(printf '\t')" read -r name job file; do
     fail "job $job of $file reads key secret $name without an environment (a key is a secret of its own main-only environment; a job outside it must not read it)"
   fi
 done <"$tmp/open-uses-all"
-app_known=0
 while IFS="$(printf '\t')" read -r name job file; do
   grep -qxF -- "$name" "$tmp/key-names" && continue
-  case $name in
-    RELEASE_APP_ID|RELEASE_APP_PRIVATE_KEY) app_known=1 ;;
-    *) info "job $job of $file uses repository secret $name (no environment)" ;;
-  esac
+  info "job $job of $file uses repository secret $name (no environment)"
 done <"$tmp/open-uses"
-if [ "$app_known" = 1 ]; then
-  known "RELEASE_APP_PRIVATE_KEY and RELEASE_APP_ID are repository secrets (decision 10: move them to an environment limited to main)"
-fi
 
 # Every repository and organisation secret no workflow on main uses is listed, so a stray one (a key kept as a backup,
 # say) is seen: not judged by its name, but not silent. A secret a workflow uses is not listed, whatever the job.
@@ -357,4 +366,4 @@ if [ "$problems" -gt 0 ]; then
   printf 'check-release-settings: %d problem(s)\n' "$problems"
   exit 1
 fi
-echo "check-release-settings: ok ($repo: release, feed, promote and withdraw have the one reviewer, no administrator bypass and allow the branch main only, github-pages allows main only, the tag ruleset holds refs/tags/v* for the release App, the signing keys are secrets of the environments that use them)"
+echo "check-release-settings: ok ($repo: release, feed, promote and withdraw have the one reviewer, no administrator bypass and allow the branch main only, github-pages allows main only, release-please allows the branch main only and has no required reviewer, the tag ruleset holds refs/tags/v* for the release App, the signing keys are secrets of the environments that use them and the App's secrets are secrets of release-please)"
