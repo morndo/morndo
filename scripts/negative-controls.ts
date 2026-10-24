@@ -4139,7 +4139,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/board-cli/test/cli.test.ts"], expect: "stand-in forge" },
   { id: "t406-list-cap-holds-the-lane-only", task: "T-406", file: "apps/hub/src/application/board-service.ts",
     find: `if (action.action === "proof_list" && actor.kind === "worker"`, replace: `if (action.action === "proof_list"`,
-    run: ["apps/hub/test/proof-service.test.ts"], expect: "ok" },
+    run: ["apps/hub/test/proof-service.test.ts"], expect: "to be true" },
   { id: "t406-proof-reapplies-merge-repo", task: "T-406", file: "packages/domain/src/proof.ts",
     find: `if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
     run: ["packages/domain/test/proof.test.ts", "packages/domain/test/board.test.ts"], expect: "no reference in that repository" },
