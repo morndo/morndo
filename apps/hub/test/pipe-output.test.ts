@@ -35,6 +35,6 @@ describe("morndo on a pipe", () => {
   });
   it("a usage error says what is wrong and exits 2", async () => {
     const r = await runOnPipe([MAIN, "revoke"], env);
-    expect({ code: r.code, stderr: r.stderr }).toEqual({ code: 2, stderr: "usage: morndo revoke <device id>\n" });
+    expect({ code: r.code, stderr: r.stderr }).toEqual({ code: 2, stderr: "morndo revoke: needs a device id. usage: morndo revoke <device id>\n" });
   });
 });
