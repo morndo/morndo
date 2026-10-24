@@ -61,23 +61,57 @@ try {
   await context.grantPermissions(["notifications"], { origin: office.base });
 
   await check("the service worker shows a push built from its numbers, and a newer one of its kind replaces it (CDP)", async () => {
-    await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
-    const registrations: { registrationId: string; scopeURL: string }[] = [];
-    cdp.on("ServiceWorker.workerRegistrationUpdated", e => registrations.push(...(e.registrations as typeof registrations)));
-    await cdp.send("ServiceWorker.enable");
-    assert(await waitFor(() => registrations.some(r => r.scopeURL.startsWith(office.base)), 10_000), "no service worker registration");
-    const registrationId = registrations.find(r => r.scopeURL.startsWith(office.base))?.registrationId ?? "";
-    const shown = () => page.evaluate(() => navigator.serviceWorker.ready.then(r => r.getNotifications()).then(ns => ns.map(n => ({ title: n.title, body: n.body, tag: n.tag }))));
-    await cdp.send("ServiceWorker.deliverPushMessage", { origin: office.base, registrationId, data: JSON.stringify({ kind: 0, decisions: 2, workers: 1, linked: 0 }) });
-    let list: { title: string; body: string; tag: string }[] = [];
-    for (let i = 0; i < 50 && !list.length; i++) { list = await shown(); if (!list.length) await page.waitForTimeout(100); }
-    assert(JSON.stringify(list) === JSON.stringify([{ title: "2 decisions wait for you", body: "Open Morndo to decide. 1 worker needs you too.", tag: "morndo-decision" }]), `shown: ${JSON.stringify(list)}`);
-    await cdp.send("ServiceWorker.deliverPushMessage", { origin: office.base, registrationId, data: JSON.stringify({ kind: 0, decisions: 3, workers: 1, linked: 0 }) });
-    for (let i = 0; i < 50; i++) { list = await shown(); if (list[0]?.title.startsWith("3")) break; await page.waitForTimeout(100); }
-    assert(list.length === 1 && list[0]?.title === "3 decisions wait for you", `after the second: ${JSON.stringify(list)}`);
-    await cdp.send("ServiceWorker.deliverPushMessage", { origin: office.base, registrationId, data: "not json" });
-    for (let i = 0; i < 50; i++) { list = await shown(); if (list.length === 2) break; await page.waitForTimeout(100); }
-    assert(list.some(n => n.title === "Morndo" && n.body === "Something needs you."), `an unreadable push showed: ${JSON.stringify(list)}`);
+    // What Chromium says about each push, on one clock: the pushMessaging and notifications events of the DevTools
+    // BackgroundService domain (experimental; https://chromedevtools.github.io/devtools-protocol/tot/BackgroundService/),
+    // the worker's state changes and errors, and when each CDP delivery returned. Printed when this check fails.
+    const t0 = Date.now();
+    const trace: string[] = [];
+    const displayed: string[] = [];                                       // the titles Chromium displayed, in order
+    const note = (what: string) => trace.push(`${((Date.now() - t0) / 1000).toFixed(3)}s ${what}`);
+    cdp.on("BackgroundService.backgroundServiceEventReceived", e => {
+      const ev = e.backgroundServiceEvent;
+      note(`${ev.service} "${ev.eventName}" instance ${ev.instanceId} ${ev.eventMetadata.map(m => `${m.key}=${m.value}`).join(" ")}`);
+      if (ev.service === "notifications" && ev.eventName === "Notification displayed") displayed.push(ev.eventMetadata.find(m => m.key === "Title")?.value ?? "");
+    });
+    cdp.on("ServiceWorker.workerVersionUpdated", e => { for (const v of e.versions) note(`worker version ${v.versionId}: ${v.runningStatus}, ${v.status}`); });
+    cdp.on("ServiceWorker.workerErrorReported", e => note(`worker error: ${e.errorMessage.errorMessage}`));
+    for (const service of ["pushMessaging", "notifications"] as const) {
+      await cdp.send("BackgroundService.startObserving", { service });
+      await cdp.send("BackgroundService.setRecording", { shouldRecord: true, service });
+    }
+    try {
+      await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
+      const registrations: { registrationId: string; scopeURL: string }[] = [];
+      cdp.on("ServiceWorker.workerRegistrationUpdated", e => registrations.push(...(e.registrations as typeof registrations)));
+      await cdp.send("ServiceWorker.enable");
+      assert(await waitFor(() => registrations.some(r => r.scopeURL.startsWith(office.base)), 10_000), "no service worker registration");
+      const registrationId = registrations.find(r => r.scopeURL.startsWith(office.base))?.registrationId ?? "";
+      const shown = () => page.evaluate(() => navigator.serviceWorker.ready.then(r => r.getNotifications()).then(ns => ns.map(n => ({ title: n.title, body: n.body, tag: n.tag }))));
+      // Delivers a push and waits until Chromium says it displayed the notification, and only then does the caller read
+      // the list. Reading getNotifications() while Chromium is still storing a notification can lose that notification
+      // for good: it is displayed, and never listed (T-67: push 1 empty in 3 of 160 plain runs, 8 of 30 with reads back to
+      // back; push 3 missing in 2 of 40 with reads throughout, the failure CI showed about 1 in 19 runs).
+      const deliver = async (n: number, data: string, title: string) => {
+        const before = displayed.length;
+        note(`push ${n} sent`);
+        await cdp.send("ServiceWorker.deliverPushMessage", { origin: office.base, registrationId, data });
+        note(`push ${n} returned`);
+        assert(await waitFor(() => displayed.slice(before).includes(title), 10_000), `Chromium never displayed push ${n} ("${title}")`);
+      };
+      await deliver(1, JSON.stringify({ kind: 0, decisions: 2, workers: 1, linked: 0 }), "2 decisions wait for you");
+      let list: { title: string; body: string; tag: string }[] = [];
+      for (let i = 0; i < 50 && !list.length; i++) { list = await shown(); if (!list.length) await page.waitForTimeout(100); }
+      assert(JSON.stringify(list) === JSON.stringify([{ title: "2 decisions wait for you", body: "Open Morndo to decide. 1 worker needs you too.", tag: "morndo-decision" }]), `shown: ${JSON.stringify(list)}`);
+      await deliver(2, JSON.stringify({ kind: 0, decisions: 3, workers: 1, linked: 0 }), "3 decisions wait for you");
+      for (let i = 0; i < 50; i++) { list = await shown(); if (list[0]?.title.startsWith("3")) break; await page.waitForTimeout(100); }
+      assert(list.length === 1 && list[0]?.title === "3 decisions wait for you", `after the second: ${JSON.stringify(list)}`);
+      await deliver(3, "not json", "Morndo");
+      for (let i = 0; i < 50; i++) { list = await shown(); if (list.length === 2) break; await page.waitForTimeout(100); }
+      assert(list.some(n => n.title === "Morndo" && n.body === "Something needs you."), `an unreadable push showed: ${JSON.stringify(list)}`);
+    } catch (e) {
+      console.log(`      push trace:\n${trace.map(l => `        ${l}`).join("\n")}`);
+      throw e;
+    }
   });
 
   await check("the hub sends nothing while this device says he is attending (N3)", async () => {
