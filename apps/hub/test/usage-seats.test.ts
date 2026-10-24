@@ -53,8 +53,10 @@ const viewOf = async () => {
 const seatOf = async (account = "seat-a") => ((await viewOf()).accounts as Body[]).find(a => a.account === account)?.seat;
 const noticesOf = async (kind: string) => ((await viewOf()).notices as Body[]).filter(n => n.kind === kind);
 // S5: grant answers the policy's shape now (granted/fresh/denied); a seat test needs only the id of a granted one.
+// The fix round (2026-10-24, finding 1) binds a lease to the token that took it, so the helper grants as the same
+// actor token the read() above posts with.
 const leaseIdOf = (account: string, source: UsageReadingsBody["source"] = "app-server") => {
-  const g = hub.usage.leases.grant(account, source, null);
+  const g = hub.usage.leases.grant(account, source, null, actor.token);
   expect(g.status).toBe("granted");
   return g.status === "granted" ? g.id : null;
 };

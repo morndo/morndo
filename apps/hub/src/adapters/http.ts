@@ -465,11 +465,14 @@ export function startHttp(p: {
     }
     // A node's ask for a lease before a rationed read (S5, plan 4.4, U16): granted with an opaque id and its expiry,
     // fresh with the capture time the caller may use instead of spawning, or denied with one reason and a wait. The
-    // answer leaks nothing else — not which node holds a live lease, not why a reading is fresh.
+    // answer leaks nothing else — not which node holds a live lease, not why a reading is fresh. The route is a
+    // manager's or the pool's (fix round 2026-10-24, finding 1, the limit route's rule): a worker token without the
+    // usage-pool scope is refused, and the lease granted is bound to the asking token's id.
     if (path === "/api/agent/usage/lease" && method === "POST") {
       if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (who.token.role !== "manager" && !who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "not_allowed" });
       const body = await readBody(req, UsageLeaseBody);
-      const g = p.usage.leases.grant(body.account, body.source, body.node ?? null);
+      const g = p.usage.leases.grant(body.account, body.source, body.node ?? null, who.token.id);
       if (g.status === "granted") return json(res, 200, { status: "granted", lease_id: g.id, expires_at: Math.floor(g.expiresAt / 1000) });
       if (g.status === "fresh") return json(res, 200, { status: "fresh", captured_at: Math.floor(g.capturedAt / 1000) });
       return json(res, 200, { status: "denied", reason: g.reason, retry_after_s: Math.ceil(g.retryAfterMs / 1000) });

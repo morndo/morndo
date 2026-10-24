@@ -1,12 +1,15 @@
 // A Claude subscription's usage windows, read the documented way (plan 4.4): the unmodified CLI's own headless
 // `/usage`, run under the account's own config directory — never the OAuth usage endpoint, never a token, never a
-// credentials file. This module is the pure half: it maps the report's stream-json lines to reading windows, or to
-// the one closed-list reason the read failed. `claude -p /usage --output-format stream-json --verbose
+// credentials file. This module is the mapping half: it maps the report's stream-json lines to reading windows, or
+// to the one closed-list reason the read failed. `claude -p /usage --tools "" --output-format stream-json --verbose
 // --no-session-persistence` prints newline-delimited events (a system init, hook events, an assistant message whose
 // event carries the report under a `usage_report` key, a final result); wherever the report sits in the event, the
 // parse searches the event's JSON for that key. The type is experimental, so an answer outside the shape is
 // "unknown_screen", never a guess, and `rate_limits: null` (a setup-token login has no usage scope) is "no_scope",
-// never 0%. `extra_usage` is ignored in this slice. Made-up shapes only in tests and fixtures.
+// never 0%. An unknown_screen's hint is never the CLI's own words — only the fixed shape `unknown shape ${hash}`
+// (fix round 2026-10-24, finding 5), so no name, token, address or UUID of a screen this reader does not know can
+// reach the hub. `extra_usage` is ignored in this slice. Made-up shapes only in tests and fixtures.
+import { createHash } from "node:crypto";
 import { takePercent, type UsageReason } from "@morndo/domain";
 
 // One window of the report, as a reading posts it (U14): epoch seconds here, milliseconds in the domain. `session`
@@ -56,24 +59,13 @@ function findReport(v: unknown): unknown {
   return found;
 }
 
-// What the hint may never show: a link or an address, and anything that looks like a token (a sk-… key, a Bearer
-// credential, a long run of base64 or hex). Redact.ts takes the secrets it is handed; this head is untrusted text
-// nobody listed the secrets of, so the shapes are matched instead.
-const URLISH = /(?:[a-z][a-z0-9+.-]*:\/\/|www\.)\S+/gi;
-const TOKENISH = /\b(?:sk-[A-Za-z0-9_-]{6,}|Bearer\s+[A-Za-z0-9._+/=-]{8,}|[A-Za-z0-9+/]{40,}={0,2}|[0-9a-fA-F]{32,})\b/g;
-const ADDRESSISH = /\S+@\S+/g;
-
-// The first 120 characters of a line, with every link, address and token shape removed: all the hub keeps of a
-// screen this reader does not know. Empty after that is nothing to say.
-function redactHead(text: string): string | null {
-  const head = text.slice(0, HINT_HEAD)
-    .replace(URLISH, "[redacted]")
-    .replace(TOKENISH, "[redacted]")
-    .replace(ADDRESSISH, "[redacted]")
-    .trim();
-  return head === "" ? null : head;
-}
+// The hint of an unknown screen (fix round 2026-10-24, finding 5): the fixed shape `unknown shape ${hash}` and
+// nothing else — the hash the first 8 hex characters of the sha256 of the last stdout line's first 120 characters,
+// enough to tell two broken shapes apart, never enough to repeat a word the CLI printed.
 const HINT_HEAD = 120;
+function hintOf(lastLine: string): string {
+  return `unknown shape ${createHash("sha256").update(lastLine.slice(0, HINT_HEAD)).digest("hex").slice(0, 8)}`;
+}
 
 // The report's own window: `percent` goes through the domain's takePercent (out of range or not a number: that
 // window is dropped, never clamped); `resets_at` is ISO 8601 to epoch seconds (unparseable: null).
@@ -100,8 +92,8 @@ function windowOf(row: unknown): ReadingWindow | null {
 
 // An `is_error` result's own words, classified (plan 4.3 item 6): the login words are signed_out, the organization
 // words refused, the rate-limit words rate_limited with the provider's own retry word when it gave one, anything
-// else unknown_screen with the redacted head of the error text.
-function classifyError(text: string): ClaudeReadResult {
+// else unknown_screen with the fixed hashed hint of the last line.
+function classifyError(text: string, lastLine: string): ClaudeReadResult {
   const words = text.toLowerCase();
   if (words.includes("login") || words.includes("sign in") || words.includes("401") || words.includes("403") || words.includes("authentication"))
     return { ok: false, reason: "signed_out", retryAfterS: null, hint: null };
@@ -111,7 +103,7 @@ function classifyError(text: string): ClaudeReadResult {
     const retry = /retry[- ]after\s+(\d+)/.exec(words);
     return { ok: false, reason: "rate_limited", retryAfterS: retry !== null ? Number(retry[1]) : null, hint: null };
   }
-  return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: redactHead(text) };
+  return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: hintOf(lastLine) };
 }
 
 // Maps the report: `percent` goes through the domain's takePercent (out of range or not a number: that window is
@@ -132,16 +124,11 @@ export function parseClaudeReport(lines: readonly string[]): ClaudeReadResult {
     const found = findReport(event);
     if (found !== undefined) report = found;                // the last report in the stream is the report
   }
-  if (errorText !== null) return classifyError(errorText);
+  const last = lines.length > 0 ? lines[lines.length - 1]! : "";
+  if (errorText !== null) return classifyError(errorText, last);
   if (report === undefined) {
-    // Nothing this reader knows: the head of the last line, the CLI's own words when it gave any, redacted.
-    const last = lines.length > 0 ? lines[lines.length - 1]! : "";
-    let text = last;
-    try {
-      const event = JSON.parse(last) as unknown;
-      if (isObject(event) && typeof event.result === "string") text = event.result;
-    } catch { /* not JSON: the line itself is the head */ }
-    return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: redactHead(text) };
+    // Nothing this reader knows: only the fixed hashed hint of the last line (finding 5) — never its own words.
+    return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: hintOf(last) };
   }
   const rateLimits = (report as Record<string, unknown>).rate_limits;
   if (rateLimits === null) return { ok: false, reason: "no_scope", retryAfterS: null, hint: null };

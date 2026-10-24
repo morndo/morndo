@@ -7,7 +7,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
-import { readClaude } from "./usage-claude-run.ts";
+import { killActiveReads, readClaude } from "./usage-claude-run.ts";
 
 export type UsageClaudeAccount = { configDir: string };
 export type UsageClaudeConfig = {
@@ -100,6 +100,12 @@ export async function runCollector(argv: readonly string[], env: NodeJS.ProcessE
 
 // Runs only when executed as the bin (node …/usage-claude-main.ts [--once]), never when a test imports this module.
 if (process.argv[1]?.endsWith("usage-claude-main.ts")) {
+  // The collector dies with its reads (fix round 2026-10-24, finding 4): SIGTERM, SIGINT and exit each kill every
+  // active read's whole process group, so a collector stopped mid-read leaves no child running.
+  const die = (): never => { killActiveReads(); process.exit(1); };
+  process.on("SIGTERM", die);
+  process.on("SIGINT", die);
+  process.on("exit", killActiveReads);
   const code = await runCollector(process.argv.slice(2), process.env, {
     stdout: text => process.stdout.write(text),
     stderr: text => process.stderr.write(text),
