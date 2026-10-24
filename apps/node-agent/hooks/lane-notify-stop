@@ -1,0 +1,135 @@
+#!/usr/bin/env bash
+# Claude Code Stop hook: hand this turn's final answer to the node's hook relay (127.0.0.1:8787), which sends it on to
+# the fleet's lane events (and kira, the lane's Telegram topic).
+# Input on stdin is the hook JSON (session_id, cwd, last_assistant_message, background_tasks, session_crons,
+# stop_hook_active, ...). It is posted as it is, with this machine's facts added (window, branch, changed, ahead) and
+# the older fields (text, background, crons), so the relay can read Claude Code's own fields.
+# The relay may answer {"decision":"block","reason":...}: the lane's answer had no status line, and Claude Code is asked once
+# to add one (Morndo's status ask, morndo/morndo#49). That answer is printed for Claude Code to read, so this hook runs
+# synchronously (settings.json: no "async"). Sessions outside tmux are not lanes and are skipped.
+#
+# T-422: Claude Code kills a Stop hook after its timeout (20 s in settings.json) and a killed hook posts nothing, so the
+# turn end is lost. Every step here is therefore bound, and no step ever waits for a child after its bound: the tmux
+# window and the git facts are started in the background (each in its own process group, with no stdio of this script),
+# the script polls for their results for at most LOOKUP_S (2 s), kills the groups of those that are still running and goes
+# on without waiting for them (a process stuck in uninterruptible I/O is not killed by SIGKILL until the I/O returns).
+# Then the post goes out FIRST with whatever was found; a fact that missed its bound is left out of the post. The post is
+# bound to POST_S (8 s), the fallback notice to NOTIFY_S (4 s): 2 + 8 + 4 = 14 s at the very worst. Do not add an unbound
+# step before the post, and do not `wait` on a lookup.
+# The lookups' files live in a per-user directory on a RAM disk where there is one ($XDG_RUNTIME_DIR, else $TMPDIR, else
+# /tmp); a hook killed outright leaves its directory, which the next hook removes once it is an hour old.
+set -uo pipefail
+set -m   # job control: every background job gets its own process group, so a bound can kill what a lookup started
+
+RELAY="${MORNDO_RELAY_URL:-http://127.0.0.1:${MORNDO_RELAY_PORT:-8787}}"
+LANES="${MORNDO_LANES:-$HOME/.local/bin/lanes}"
+LOOKUP_S="${MORNDO_HOOK_LOOKUP_S:-2}"
+POST_S="${MORNDO_HOOK_POST_S:-8}"
+NOTIFY_S="${MORNDO_HOOK_NOTIFY_S:-4}"
+export GIT_OPTIONAL_LOCKS=0
+
+started=""   # "name:pgid name:pgid ..." of the background jobs not yet settled or cut off
+
+# start NAME CMD...: runs CMD in the background, in its own process group and with none of this script's stdio. Its stdout
+# goes to $tmp/NAME and, last and atomically, its exit status to $tmp/NAME.rc.
+start() {
+  local name=$1
+  shift
+  ( "$@" >"$tmp/$name" 2>/dev/null </dev/null; echo "$?" >"$tmp/$name.part"; mv -f "$tmp/$name.part" "$tmp/$name.rc" ) >/dev/null 2>&1 </dev/null &
+  started="$started $name:$!"
+}
+
+# settle SECONDS: polls until every started job has its status file or SECONDS have passed. Never waits on a child.
+settle() {
+  local ticks=$(( $1 * 10 )) pending item
+  while [ "$ticks" -gt 0 ]; do
+    pending=0
+    for item in $started; do
+      [ -e "$tmp/${item%%:*}.rc" ] || pending=1
+    done
+    [ "$pending" = 0 ] && return 0
+    sleep 0.1 2>/dev/null || sleep 1
+    ticks=$((ticks - 1))
+  done
+  return 1
+}
+
+# cut_off: kills the process group of every started job that has no status file, forgets the jobs, and does not wait.
+cut_off() {
+  local item
+  for item in $started; do
+    [ -e "$tmp/${item%%:*}.rc" ] || kill -KILL -- "-${item##*:}" >/dev/null 2>&1
+  done
+  started=""
+}
+
+# finish: removes this run's directory and, in the background, the directories of hooks killed outright (older than 1 h).
+finish() {
+  [ -n "$tmp" ] && rm -rf -- "${tmp:?}"
+  [ -n "$base" ] && ( find "$base" -mindepth 1 -maxdepth 1 -mmin +60 -exec rm -rf -- {} + ) >/dev/null 2>&1 </dev/null &
+}
+
+in=$(cat)
+[ -n "${TMUX_PANE:-}" ] || exit 0
+cwd=$(jq -r '.cwd // ""' <<<"$in")
+
+base="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/morndo-hook-$(id -u)"
+mkdir -p -m 700 "$base" 2>/dev/null || base=""
+# mkdir -p also succeeds on a directory someone else made first (the /tmp fallback): use it only when it is a real
+# directory (find does not follow a symlink for -type d), owned by this user, with mode 700; otherwise post without facts.
+[ -n "$base" ] && [ -z "$(find "$base" -maxdepth 0 -type d -user "$(id -u)" -perm 700 2>/dev/null)" ] && base=""
+tmp=""
+[ -n "$base" ] && tmp=$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)
+if [ -n "$tmp" ]; then
+  start win tmux display-message -p -t "$TMUX_PANE" '#{window_name}'
+  start branch git -C "$cwd" rev-parse --abbrev-ref HEAD
+  start status git -C "$cwd" status --porcelain
+  start ahead git -C "$cwd" rev-list --count '@{u}..HEAD'
+  settle "$LOOKUP_S"
+  cut_off
+fi
+
+# A lookup that finished gives its value (a failed one, the old script's default: empty, 0); one that was cut off or never
+# ran has no status file and gives nothing, and the field is left out.
+rc_of() { cat "$tmp/$1.rc" 2>/dev/null || echo cut; }
+win=""
+branch=""
+facts='{}'
+if [ -n "$tmp" ]; then
+  [ "$(rc_of win)" = 0 ] && win=$(head -n 1 "$tmp/win")
+  case "$(rc_of branch)" in
+    0) branch=$(head -n 1 "$tmp/branch"); facts=$(jq -c --arg v "$branch" '. + {branch: $v}' <<<"$facts") ;;
+    cut) ;;
+    *) facts=$(jq -c '. + {branch: ""}' <<<"$facts") ;;
+  esac
+  case "$(rc_of status)" in
+    0) facts=$(jq -c --argjson v "$(wc -l <"$tmp/status" | tr -d ' ')" '. + {changed: $v}' <<<"$facts") ;;
+    cut) ;;
+    *) facts=$(jq -c '. + {changed: 0}' <<<"$facts") ;;
+  esac
+  case "$(rc_of ahead)" in
+    0) facts=$(jq -c --argjson v "$(head -n 1 "$tmp/ahead" | tr -d ' ')" '. + {ahead: $v}' <<<"$facts") ;;
+    cut) ;;
+    *) facts=$(jq -c '. + {ahead: 0}' <<<"$facts") ;;
+  esac
+fi
+
+body=$(jq -c --arg window "$win" --argjson facts "$facts" \
+  '. + $facts + {window: $window, text: (.last_assistant_message // ""),
+    background: ((.background_tasks // []) | length), crons: ((.session_crons // []) | length)}' <<<"$in")
+if out=$(curl -sf --connect-timeout 2 -m "$POST_S" -H 'content-type: application/json' -d "$body" "$RELAY/hook/stop" 2>/dev/null); then
+  [ "$(jq -r '.decision // empty' <<<"$out" 2>/dev/null)" = block ] && printf '%s\n' "$out"
+  finish
+  exit 0
+fi
+
+# The relay is down: fall back to a plain DM with the start of the answer
+said=$(jq -r '.last_assistant_message // ""' <<<"$in" | tr -s '[:space:]' ' ' | cut -c1-300)
+if [ -n "$tmp" ]; then
+  start notice "$LANES" notify "$win finished${branch:+ @$branch}
+$said"
+  settle "$NOTIFY_S"
+  cut_off
+fi
+finish
+exit 0
