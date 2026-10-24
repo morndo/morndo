@@ -1,7 +1,7 @@
 // The plain words of a usage notice (plan 4.4): every word comes from these functions and the account's own name.
 // Nothing an agent token wrote is ever in one, and the fix words are the closed list's, never free text.
 import { describe, expect, it } from "vitest";
-import { NOTICE_KEEP, backNoticeText, fixWords, forgottenNoticeText, planNoticeText, seatExpiredNoticeText, seatNoticeText, thresholdNoticeText, type SeatRecord } from "../src/index.ts";
+import { NOTICE_KEEP, backNoticeText, seatClearedNoticeText, fixWords, forgottenNoticeText, planNoticeText, seatExpiredNoticeText, seatNoticeText, thresholdNoticeText, type SeatRecord } from "../src/index.ts";
 
 const T = 1_700_000_000_000;      // 10:00
 const HOUR = 3_600_000;
@@ -29,6 +29,8 @@ describe("the words of a usage notice (plan 4.4)", () => {
 
   it("a return, a threshold and a forgotten source are said in plain words too", () => {
     expect(backNoticeText("seat-a", "a fresh reading")).toBe("seat-a: back in use (a fresh reading shows a new cycle).");
+    expect(seatClearedNoticeText("seat-a", "the principal")).toBe("seat-a: its limit mark was cleared by the principal.");
+    expect(seatClearedNoticeText("seat-a", "the pool")).toBe("seat-a: its limit mark was cleared by the pool.");
     expect(thresholdNoticeText("seat-a", "5-hour", "warning")).toBe("seat-a: the 5-hour window passed 75%.");
     expect(thresholdNoticeText("seat-a", "weekly", "critical")).toBe("seat-a: the weekly window passed 90%.");
     expect(forgottenNoticeText("seat-a", "cli-screen")).toBe("seat-a: no reading for 14 days from cli-screen, so it is forgotten.");

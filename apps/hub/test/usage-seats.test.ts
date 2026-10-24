@@ -120,6 +120,12 @@ describe("seats (plan 4.5)", () => {
     expect(await seatOf("seat-b")).toMatchObject({ state: "out" });
   });
 
+  it("the principal's clear is said as that, not as a fresh reading", async () => {
+    hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now });
+    expect(hub.usage.clearSeat("seat-a")).toBe(true);
+    expect(((await noticesOf("back")) as Body[]).map(n => n.text)).toEqual(["seat-a: its limit mark was cleared by the principal."]);
+  });
+
   it("a full weekly window beside a low 5-hour window sets the mark's clock: it waits for the weekly reset (re-check R3)", async () => {
     const DAY = 24 * HOUR;
     const t0 = now;

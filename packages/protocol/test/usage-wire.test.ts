@@ -2,7 +2,8 @@
 // and the kind are closed lists; the reason, hint and fix are free strings the domain cleans; a bad window row is
 // caught to an empty row and dropped later, never rejecting the report.
 import { describe, expect, it } from "vitest";
-import { AGENT_SCOPES, AccountUsageSchema, UsageForgetBody, UsageFrameSchema, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody, UsageTapBody, parseBody } from "../src/index.ts";
+import { NOTICE_KINDS } from "@morndo/domain";
+import { AGENT_SCOPES, AccountUsageSchema, UsageForgetBody, UsageFrameSchema, UsageLimitBody, UsageNoticeSchema, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody, UsageTapBody, parseBody } from "../src/index.ts";
 
 describe("usage readings on the wire", () => {
   it("a full reading parses, windows and all", () => {
@@ -150,6 +151,19 @@ describe("the S2 view fields on the wire (plan 4.4)", () => {
   it("a usage frame may carry the notices; one without them still parses", () => {
     expect(parseBody(UsageFrameSchema, { t: "usage", accounts: [], at: 1 })?.notices).toBeUndefined();
     expect(parseBody(UsageFrameSchema, { t: "usage", accounts: [], at: 1, notices: [{ id: "n1" }] })?.notices).toEqual([{ id: "n1" }]);
+  });
+
+  it("a notice parses with its kind from the closed list; a kind outside it, or a field too long or wrong, is rejected", () => {
+    const notice = { id: "seat-a|seat|out|usage_limit|3", kind: "seat", account: "seat-a", at: 1_700_000_000_000, text: "seat-a: usage limit reached. Back at an unknown time. Fix: wait for the reset." };
+    expect(parseBody(UsageNoticeSchema, notice)).toEqual(notice);
+    for (const kind of NOTICE_KINDS) expect(parseBody(UsageNoticeSchema, { ...notice, kind })?.kind).toBe(kind);
+    expect(parseBody(UsageNoticeSchema, { ...notice, kind: "gossip" })).toBeNull();
+    expect(parseBody(UsageNoticeSchema, { ...notice, id: "" })).toBeNull();
+    expect(parseBody(UsageNoticeSchema, { ...notice, id: "x".repeat(201) })).toBeNull();
+    expect(parseBody(UsageNoticeSchema, { ...notice, account: "x".repeat(81) })).toBeNull();
+    expect(parseBody(UsageNoticeSchema, { ...notice, text: "x".repeat(401) })).toBeNull();
+    expect(parseBody(UsageNoticeSchema, { ...notice, at: "soon" })).toBeNull();
+    expect(parseBody(UsageNoticeSchema, null)).toBeNull();
   });
 });
 

@@ -1,23 +1,24 @@
 // Notifications (ADR-0008 phase F; N1–N5 in docs/domain.md): a content-free alert to the principal's devices that a
-// number of Decisions wait, of workers need him, of devices were linked, or of urgent fleet alerts came in. Counts only
-// (N1), raised only on those four changes (N2), never while he is attending (N3), and granting nothing (N5). Pure: time
-// comes in as `now`.
+// number of Decisions wait, of workers need him, of devices were linked, of urgent fleet alerts came in, or of usage
+// notices the hub wrote. Counts only (N1), raised only on those five changes (N2), never while he is attending (N3),
+// and granting nothing (N5). Pure: time comes in as `now`.
 // Design reference, not code: Signal-Desktop ts/services/notifications.preload.ts (the latest one wins, after a pause).
 
 export const NOTIFY_DEBOUNCE_MS = 1000;            // N3: per kind, the latest one wins after a 1-second pause
 export const ATTENDING_INPUT_MS = 2 * 60_000;      // "Attending": focus, and his input in the last 2 minutes
 
-export type NotificationKind = "decision" | "worker" | "linked" | "alert";
-export const NOTIFICATION_KINDS: readonly NotificationKind[] = ["decision", "worker", "linked", "alert"];
-// `alerts`: urgent fleet alerts he hasn't seen (the fleet's alerts in the app, 2026-10-12).
-export type Counts = { decisions: number; workers: number; linked: number; alerts: number };
+export type NotificationKind = "decision" | "worker" | "linked" | "alert" | "usage";
+export const NOTIFICATION_KINDS: readonly NotificationKind[] = ["decision", "worker", "linked", "alert", "usage"];
+// `alerts`: urgent fleet alerts he hasn't seen (the fleet's alerts in the app, 2026-10-12). `usage`: usage notices the
+// hub itself wrote since the last such Notification went (plan 4.4, S4).
+export type Counts = { decisions: number; workers: number; linked: number; alerts: number; usage: number };
 
 // What goes to the push service, numbers only (N1; the product lane's amendment 4): the kind as its number, then the
 // counts. The device builds its words from these.
-export type NotificationPayload = { kind: number; decisions: number; workers: number; linked: number; alerts: number };
+export type NotificationPayload = { kind: number; decisions: number; workers: number; linked: number; alerts: number; usage: number };
 export const kindCode = (k: NotificationKind) => NOTIFICATION_KINDS.indexOf(k);
 export const payloadOf = (kind: NotificationKind, c: Counts): NotificationPayload =>
-  ({ kind: kindCode(kind), decisions: c.decisions, workers: c.workers, linked: c.linked, alerts: c.alerts });
+  ({ kind: kindCode(kind), decisions: c.decisions, workers: c.workers, linked: c.linked, alerts: c.alerts, usage: c.usage });
 
 // What one device's app last said: focused or not, and when it saw his input. Its report ages: a device that stopped
 // reporting (asleep, gone) isn't attending.
@@ -32,13 +33,15 @@ export type Raise =
   | { kind: "decision"; waiting: number }                                          // a Decision started waiting; how many wait now
   | { kind: "worker"; needsYou: boolean; was: boolean; muted: boolean; isAsk: boolean }
   | { kind: "linked" }
-  | { kind: "alert"; urgent: boolean };                                             // a fleet alert came in
+  | { kind: "alert"; urgent: boolean }                                              // a fleet alert came in
+  | { kind: "usage" };                                                              // the hub wrote a usage notice (S4)
 export function raises(r: Raise): boolean {
   switch (r.kind) {
     case "decision": return r.waiting > 0;
     case "worker": return r.needsYou && !r.was && !r.muted && !r.isAsk;
     case "linked": return true;
     case "alert": return r.urgent;
+    case "usage": return true;
   }
 }
 

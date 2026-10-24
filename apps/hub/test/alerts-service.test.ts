@@ -70,7 +70,7 @@ describe("an urgent alert is a push, counts only (N1)", () => {
     expect(sent).toEqual([]);
     linked.add(alert(2, "source_changed"));
     await vi.advanceTimersByTimeAsync(1500);
-    expect(sent).toEqual([{ kind: 3, decisions: 0, workers: 0, linked: 0, alerts: 1 }]);
+    expect(sent).toEqual([{ kind: 3, decisions: 0, workers: 0, linked: 0, alerts: 1, usage: 0 }]);
     n.stop();
   });
 });

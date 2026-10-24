@@ -352,7 +352,9 @@ switch (cmd) {
     // S3 (plan 4.5 item 4): a lane's node, from the observation loop's synchronous roster, for the lane records a
     // report writes and a failure resolves through. Without a fleet the hub knows no lane's node: nothing changes.
     const laneNode = fleet ? (lane: string) => observation.snapshot().workers.find(w => w.name === lane)?.node ?? null : undefined;
-    const usage = new UsageService({ store, profiles: pool.current, ...(laneNode ? { laneNode } : {}) });
+    // S4 (plan 4.4): a usage notice the hub newly wrote raises one count-only Notification. Late-bound: the
+    // NotificationService is built above, and the closure only ever runs once the UsageService exists.
+    const usage = new UsageService({ store, profiles: pool.current, ...(laneNode ? { laneNode } : {}), onNotice: () => notifications.usage() });
     // The fleet's usage taps (plan 4.5 item 4): a lane's start with an account, and its limit failures.
     const stopUsageEvents = fleet ? fleet.client.events(e => { if (e.t !== "usage") return; try { usage.fromFleet(e.node, e.body); } catch (err) { log.warn("a usage tap from the fleet could not be taken", err); } }) : null;
     if (stopUsageEvents) shutdown.onStop(stopUsageEvents);

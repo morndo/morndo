@@ -820,7 +820,7 @@ export function startHttp(p: {
       if (!p.usage) return json(res, 404, { error: "usage_off" });
       limited(buckets.commands.take(a.endpoint.id));
       const body = await readBody(req, UsageForgetBody);
-      return json(res, 200, { forgotten: p.usage.forget(body.account, body.source, body.node ?? undefined) });
+      return json(res, 200, { forgotten: p.usage.forget(body.account, body.source, body.node) });
     }
     // The principal's own clear of a seat (U17): the pool's word or the hub's derived one, or both. A Command like
     // the others: limited, and the principal's session only — an agent token never reaches here.

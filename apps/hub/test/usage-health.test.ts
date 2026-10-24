@@ -108,6 +108,22 @@ describe("source health (plan 4.3)", () => {
     expect((v.notices as Body[]).filter(n => (n.text as string).includes("plan changed"))).toEqual([]);
   });
 
+  it("forgetting the unnamed-node row leaves the same source on a named node (the view's null is the unnamed row, not every node)", async () => {
+    const post = (node: string | null) => hub.usage.reading({ source: "app-server", node, captured_at: Math.floor(now / 1000), windows: [{ id: "five_hour", used_percent: 20, resets_at: Math.floor((now + 2 * HOUR) / 1000), length_mins: 300 }] }, "seat-a", { kind: "worker", name: "builder", token: "t" });
+    expect(post(null)).toEqual({ ok: true });
+    expect(post("pc")).toEqual({ ok: true });
+    const cookie = await hub.cookie();
+    const call = (node: string | null | undefined) => fetch(`${hub.base}/api/usage/forget`, {
+      method: "POST", headers: { origin: "https://hub.example.test", cookie: `__Host-morndo=${cookie}`, "content-type": "application/json" },
+      body: JSON.stringify({ account: "seat-a", source: "app-server", ...(node === undefined ? {} : { node }) }),
+    });
+    expect(await (await call(null)).json()).toEqual({ forgotten: true });                     // exactly the unnamed row
+    expect(hub.store.usageSourcesOf("seat-a").map(r => r.node)).toEqual(["pc"]);
+    expect(await (await call(null)).json()).toEqual({ forgotten: false });                    // nothing unnamed is left
+    expect(await (await call(undefined)).json()).toEqual({ forgotten: true });                // no node named: every node
+    expect(hub.store.usageSourcesOf("seat-a")).toEqual([]);
+  });
+
   it("any source silent for 14 days is forgotten once (AT-24)", async () => {
     expect((await reading({ source: "app-server", everyS: 900, windows: [fiveHour(20)] })).status).toBe(200);
     expect((await statusLine(41.2)).status).toBe(200);
