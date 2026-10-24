@@ -431,7 +431,7 @@ describe("withdraw.yml", () => {
   };
   type Doc = {
     name?: string;
-    on?: { workflow_dispatch?: { inputs?: Record<string, { description?: string; required?: boolean; type?: string }> } };
+    on?: { workflow_dispatch?: { inputs?: Record<string, { description?: string; required?: boolean; default?: boolean; type?: string }> } };
     permissions?: { contents?: string };
     concurrency?: { group?: string; "cancel-in-progress"?: boolean };
     jobs: Record<string, Job>;
@@ -445,10 +445,16 @@ describe("withdraw.yml", () => {
     expect(text()).not.toMatch(/^on:\n(?:  .*\n)*  schedule:/m);
     expect(text()).not.toMatch(/^on:\n(?:  .*\n)*  push:/m);
     const inputs = parsed.on?.workflow_dispatch?.inputs ?? {};
-    expect(Object.keys(inputs)).toEqual(["version"]);
+    expect(Object.keys(inputs)).toEqual(["version", "allow_empty_channel"]);
     expect(inputs["version"]).toMatchObject({ required: true, type: "string" });
     expect(inputs["version"]?.description).toEqual(expect.any(String));
     expect(inputs["version"]?.description).not.toBe("");
+    expect(inputs["allow_empty_channel"]).toEqual({
+      description: "Allow withdrawing the last Version a channel offers (the channel then offers nothing)",
+      required: false,
+      default: false,
+      type: "boolean",
+    });
   });
 
   it("every withdraw job runs only on main", () => {
@@ -490,17 +496,27 @@ describe("withdraw.yml", () => {
 
   it("withdraw never writes the version input inside a run script", () => {
     const parsed = doc();
-    const lines = text().split("\n").filter(line => line.includes("inputs.version"));
+    const lines = text().split("\n").filter(line => line.includes("inputs."));
     expect(lines.length).toBeGreaterThan(0);
-    for (const line of lines) expect(line).toMatch(/^\s+\w+:\s+\$\{\{\s*inputs\.version\s*\}\}\s*$/);
+    for (const line of lines) expect(line).toMatch(/^\s+\w+:\s+\$\{\{\s*inputs\.[A-Za-z0-9_]+\s*\}\}\s*$/);
     const envHits: string[] = [];
     for (const job of Object.values(parsed.jobs)) {
       for (const step of job.steps ?? []) {
-        expect(step.run ?? "").not.toContain("inputs.version");
-        for (const value of Object.values(step.env ?? {})) if (value.includes("inputs.version")) envHits.push(value);
+        expect(step.run ?? "").not.toContain("inputs.");
+        for (const value of Object.values(step.env ?? {})) if (value.includes("inputs.")) envHits.push(value);
       }
     }
     expect(envHits).toHaveLength(lines.length);
+  });
+
+  it("withdraw passes the empty-channel decision to the preparation and to the check", () => {
+    const parsed = doc();
+    const prepare = parsed.jobs["withdraw-prepare"]?.steps?.find(step => (step.run ?? "").includes("feed-withdraw-prepare"));
+    expect(prepare?.env?.["ALLOW_EMPTY"]).toBe("${{ inputs.allow_empty_channel }}");
+    expect(prepare?.run).toContain('--allow-empty-channel "$ALLOW_EMPTY"');
+    const check = parsed.jobs["withdraw-sign"]?.steps?.find(step => (step.run ?? "").includes("check-signing-feed.sh"));
+    expect(check?.env?.["ALLOW_EMPTY_CHANNEL"]).toBe("${{ inputs.allow_empty_channel }}");
+    expect(check?.run ?? "").not.toContain("allow_empty_channel");
   });
 
   it("every action in withdraw.yml is pinned by commit and is one feed.yml already uses", () => {
@@ -513,10 +529,16 @@ describe("withdraw.yml", () => {
     }
   });
 
-  it("withdraw shares the feed concurrency group and never cancels", () => {
+  it("withdraw takes the feed concurrency group only in the job that writes the feed, and never cancels", () => {
     const parsed = doc();
-    expect(parsed.concurrency).toEqual({ group: "morndo-feed", "cancel-in-progress": false });
-    expect(parsed.jobs["pages"]?.concurrency).toEqual({ group: "morndo-pages", "cancel-in-progress": false });
+    expect(parsed.concurrency).toBeUndefined();
+    expect(text()).not.toMatch(/^concurrency:/m);
+    expect(Object.entries(parsed.jobs).map(([name, job]) => [name, job.concurrency])).toEqual([
+      ["withdraw-prepare", undefined],
+      ["withdraw-sign", undefined],
+      ["withdraw", { group: "morndo-feed", "cancel-in-progress": false }],
+      ["pages", { group: "morndo-pages", "cancel-in-progress": false }],
+    ]);
     expect(text()).not.toContain("cancel-in-progress: true");
   });
 

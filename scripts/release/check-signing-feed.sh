@@ -3,7 +3,10 @@
 # Checks the two unsigned feeds in site/ against the feed branch as it stands and against the release:
 # the numbers rise by one (a publish leaves stable as it was), the lists change only as they should,
 # the key-set version is the shipped one, and the new entry names the published Manifest's size and digest.
-# MODE is publish, resign, withdraw or promote. A publish, a withdrawal or a promotion needs VERSION. GH may name another gh for a test.
+# MODE is publish, resign, withdraw or promote. A publish, a withdrawal or a promotion needs VERSION.
+# A withdrawal reads ALLOW_EMPTY_CHANNEL (true or false, default false) and refuses to sign when a channel
+# offered something before and offers nothing afterwards, unless that value is true.
+# GH may name another gh for a test.
 set -eu
 PATH=/usr/bin:/bin
 : "${MODE:?}"
@@ -24,6 +27,14 @@ case $MODE in
   resign) ;;
   *) fail "unknown mode $MODE" ;;
 esac
+
+if [ "$MODE" = withdraw ]; then
+  ALLOW_EMPTY_CHANNEL=${ALLOW_EMPTY_CHANNEL:-false}
+  case "$ALLOW_EMPTY_CHANNEL" in
+    true|false) ;;
+    *) fail "ALLOW_EMPTY_CHANNEL must be true or false" ;;
+  esac
+fi
 
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
@@ -109,6 +120,11 @@ for channel in latest stable; do
     jq -e --slurpfile p "$prev" --arg v "$VERSION" '.withdrawn == (($p[0].withdrawn // []) + [$v])' "$new" > /dev/null || fail "$channel.json withdrawn list is not the previous list plus the version"
     if [ "$channel" = latest ]; then
       jq -e --slurpfile p "$prev" --arg v "$VERSION" '($p[0].releases // [] | map(.version) | index($v)) != null' "$new" > /dev/null || fail "the latest feed does not list $VERSION"
+    fi
+    if [ "$ALLOW_EMPTY_CHANNEL" != true ]; then
+      before=$(jq -r '(.releases // [] | map(.version)) - (.withdrawn // []) | length' "$prev")
+      after=$(jq -r '(.releases // [] | map(.version)) - (.withdrawn // []) | length' "$new")
+      [ "$before" -eq 0 ] || [ "$after" -gt 0 ] || fail "withdrawing $VERSION would leave the $channel feed offering nothing; set allow_empty_channel to true to do it"
     fi
   elif [ "$MODE" = promote ]; then
     if [ "$channel" = latest ]; then
