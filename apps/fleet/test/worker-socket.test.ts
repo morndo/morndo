@@ -196,7 +196,7 @@ describe("worker socket: what a forwarded caller still does", () => {
     const w = await world();
     expect((await w.worker.post("/v1/op", op({ lane: "worker-a" }, "pane.send", { text: "hi" }, "lanes:p1")))?.body).toMatchObject({ ok: true });
     expect((await w.worker.post("/v1/op", op({ lane: "worker-a" }, "pane.keys", { data: "x" })))?.body).toMatchObject({ ok: true });
-    expect((await w.worker.post("/v1/op", op({ workerId: "pc.3fa2c1d0.0" }, "pane.send", { text: "hi" }, "lanes:p2")))?.body).toMatchObject({ ok: true });
+    expect((await w.worker.post("/v1/op", op({ workerId: "pc.3fa2c1d0.0" }, "pane.send", { text: "hi", expect: { server: "3fa2c1d0", window: "pc-lane" } }, "lanes:p2")))?.body).toMatchObject({ ok: true });
     expect((await w.worker.post("/v1/deliveries", { id: "lanes:dd1", lane: "worker-a", text: "hi" }))?.body).toMatchObject({ ok: true });
     expect((await w.worker.post("/v1/deliveries", { id: "lanes:dd2", workerId: "pc.3fa2c1d0.0", text: "hi" }))?.body).toMatchObject({ ok: true });
     expect(sent(w.ctl, "pane.send", "pane.keys", "lane.deliver")).toHaveLength(3);

@@ -23,7 +23,8 @@ import { SIDE_EFFECT_OPS, failed, type Outcome } from "./requests.ts";
 
 export type Target = { workerId: string } | { node: string } | { lane: string };
 // client: the client that asks (the client API's x-morndo-client header), for the audit.
-export type OpOptions = { key?: string; timeoutMs?: number; client?: string; audit?: boolean };
+// actor: who the audit names. The owner socket's calls stay "client"; the worker socket passes "worker".
+export type OpOptions = { key?: string; timeoutMs?: number; client?: string; audit?: boolean; actor?: string };
 
 export const DEFAULT_TIMEOUT_MS = 15_000;
 export const MAX_TIMEOUT_MS = 120_000;
@@ -71,7 +72,7 @@ export class Router {
       target, keyNs: o.key === undefined ? null : o.key.slice(0, o.key.indexOf(":")), outcome: out.ok ? "ok" : out.error.code, client: o.client ?? "unknown",
       ...engine,
     };
-    try { this.#audit.record("client", `op.${op}`, node, detail); }
+    try { this.#audit.record(o.actor ?? "client", `op.${op}`, node, detail); }
     catch (e) { this.#log?.error(`audit: op.${op} on ${node ?? "?"} could not be recorded (fleet.db busy or full?): ${JSON.stringify(detail)}`, e); }
   }
 

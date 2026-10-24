@@ -14,8 +14,8 @@
 // work (`waitingMin`); the deadline of a turn with no status line (`noStatusMin`); whether a stale lane is nudged.
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { isAbsolute, join } from "node:path";
-import { fleetUrlOk, type HookEvent } from "@morndo/protocol";
+import { dirname, isAbsolute, join } from "node:path";
+import { NODE_NAME, fleetUrlOk, type HookEvent } from "@morndo/protocol";
 import { DEFAULT_LANE_WATCH, type LaneWatchConfig } from "./application/lane-watch.ts";
 
 export type HookPath = HookEvent["path"];
@@ -33,6 +33,9 @@ export type FleetConfig = {
   // The hub's public key (Ed25519's 32 raw bytes, base64 or base64url) pinned in the file: with it, resume and
   // update.apply open to the hub's signed assertion (updates §5.4); absent, they stay closed as today.
   principalKey?: string;
+  // The second client socket, for a caller that reaches the fleet through a forward (T-440). Optional in the file and
+  // absent from defaults(); workerSocketOf fills what the file leaves out.
+  workerSocket?: { path?: string; protectedLanes?: string[]; startNodes?: string[] };
 };
 export type LaneEventsConfig = { deliverTo: string | null; header: string; ignore: string[]; batchMs: number };
 
@@ -50,7 +53,8 @@ const SUBSCRIBER_NAME = /^[a-z0-9-]{1,32}$/;
 const JOIN_URL = /^wss?:\/\/[!-~]{1,2040}$/;
 // The loopback names and addresses the agent endpoint may listen on.
 const LOOPBACK_HOST = /^(?:127(?:\.\d{1,3}){3}|localhost|::1)$/;
-const KEYS = new Set(["listen", "socketPath", "dbPath", "keyPath", "publicUrl", "subscribers", "stickyLanes", "laneEvents", "laneWatch", "principalKey"]);
+const KEYS = new Set(["listen", "socketPath", "dbPath", "keyPath", "publicUrl", "subscribers", "stickyLanes", "laneEvents", "laneWatch", "principalKey", "workerSocket"]);
+const WORKER_SOCKET_KEYS = new Set(["path", "protectedLanes", "startNodes"]);
 const LANE_WATCH_KEYS = new Set(["waitingMin", "noStatusMin", "nudge"]);
 const LANE_EVENT_KEYS = new Set(["deliverTo", "header", "ignore", "batchMs"]);
 // The header is the message's first line: printable, no line break; the batch window from 0.1 to 60 s.
@@ -168,6 +172,40 @@ function laneWatch(v: unknown, base: LaneWatchConfig): LaneWatchConfig {
   };
 }
 
+// The worker socket's own settings, each optional. What the file leaves out, workerSocketOf fills.
+function workerSocketSettings(v: unknown, home: string, socketPath: string): NonNullable<FleetConfig["workerSocket"]> {
+  if (!isObject(v)) throw new ConfigError("workerSocket must be an object with path, protectedLanes and startNodes");
+  const extra = Object.keys(v).filter(k => !WORKER_SOCKET_KEYS.has(k));
+  if (extra.length) throw new ConfigError(`workerSocket has unknown settings: ${extra.join(", ")}`);
+  const out: NonNullable<FleetConfig["workerSocket"]> = {};
+  if (v.path !== undefined) {
+    const p = path(v.path, "workerSocket.path", home);
+    if (p === socketPath) throw new ConfigError("workerSocket.path must differ from socketPath");
+    out.path = p;
+  }
+  if (v.protectedLanes !== undefined) out.protectedLanes = laneNames(v.protectedLanes, "workerSocket.protectedLanes");
+  if (v.startNodes !== undefined) {
+    if (!Array.isArray(v.startNodes) || !v.startNodes.every(n => typeof n === "string" && NODE_NAME.test(n))) {
+      throw new ConfigError("workerSocket.startNodes must be a list of node names");
+    }
+    out.startNodes = [...new Set(v.startNodes as string[])];
+  }
+  return out;
+}
+
+// path beside the owner socket, the sticky lanes plus laneEvents.deliverTo protected, and no node to start on,
+// unless the file named them.
+export function workerSocketOf(config: FleetConfig): { path: string; protectedLanes: string[]; startNodes: string[] } {
+  const w = config.workerSocket;
+  const protectedLanes = [...config.stickyLanes];
+  if (config.laneEvents.deliverTo !== null) protectedLanes.push(config.laneEvents.deliverTo);
+  return {
+    path: w?.path ?? join(dirname(config.socketPath), "fleet-worker.sock"),
+    protectedLanes: w?.protectedLanes ?? [...new Set(protectedLanes)],
+    startNodes: w?.startNodes ?? [],
+  };
+}
+
 // The hub's public key, Ed25519's 32 raw bytes in base64 (base64url reads the same): absent means closed as today,
 // so only its shape is checked here — what it opens is the authority's own check (§5.4).
 function principalKey(v: unknown): string {
@@ -189,6 +227,7 @@ export function loadConfig(o: { env?: NodeJS.ProcessEnv; home?: string } = {}): 
   if (!isObject(raw)) throw new ConfigError(`${file} must hold a JSON object`);
   const unknown = Object.keys(raw).filter(k => !KEYS.has(k));
   if (unknown.length) throw new ConfigError(`${file} has unknown settings: ${unknown.join(", ")}`);
+  const socketPath = raw.socketPath === undefined ? base.socketPath : path(raw.socketPath, "socketPath", home);
   let listen = base.listen;
   if (raw.listen !== undefined) {
     const l = raw.listen;
@@ -202,7 +241,7 @@ export function loadConfig(o: { env?: NodeJS.ProcessEnv; home?: string } = {}): 
   }
   return {
     listen,
-    socketPath: raw.socketPath === undefined ? base.socketPath : path(raw.socketPath, "socketPath", home),
+    socketPath,
     dbPath: raw.dbPath === undefined ? base.dbPath : path(raw.dbPath, "dbPath", home),
     keyPath: raw.keyPath === undefined ? base.keyPath : path(raw.keyPath, "keyPath", home),
     publicUrl: raw.publicUrl === undefined ? base.publicUrl : publicUrl(raw.publicUrl),
@@ -211,5 +250,6 @@ export function loadConfig(o: { env?: NodeJS.ProcessEnv; home?: string } = {}): 
     laneEvents: raw.laneEvents === undefined ? base.laneEvents : laneEvents(raw.laneEvents, base.laneEvents),
     laneWatch: raw.laneWatch === undefined ? base.laneWatch : laneWatch(raw.laneWatch, base.laneWatch),
     ...(raw.principalKey === undefined ? {} : { principalKey: principalKey(raw.principalKey) }),
+    ...(raw.workerSocket === undefined ? {} : { workerSocket: workerSocketSettings(raw.workerSocket, home, socketPath) }),
   };
 }
