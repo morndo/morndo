@@ -59,6 +59,14 @@ describe("no read without a viewer or a mark (AT-45)", () => {
     expect(((await r.json()) as Record<string, unknown>).status).toBe("granted");
   });
 
+  it("a look is not a standing order: its demand lapses after ten minutes if no lease used it", async () => {
+    await report("seat-a");
+    now += 16 * 60_000;
+    hub.usage.look();
+    now += 11 * 60_000;                            // nobody asked in ten minutes: the viewer has gone
+    await denied("seat-a", "no_demand");
+  });
+
   it("ten looks inside the cache window cause one read: after it, the next ask is fresh", async () => {
     await report("seat-a");
     now += 16 * 60_000;

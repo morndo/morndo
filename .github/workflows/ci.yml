@@ -149,6 +149,12 @@ jobs:
         env: { E2E_OUT: "${{ runner.temp }}/e2e/home" }
         run: node e2e/home.e2e.ts
 
+      # Slice 5 of the usage plan: the headless reader (a fake CLI), the hub's lease and on-demand rule, Home.
+      - name: e2e usage-claude
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/usage-claude" }
+        run: node e2e/usage-claude.e2e.ts
+
       - name: e2e phone-chat
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/phone-chat" }
