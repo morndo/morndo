@@ -43,7 +43,7 @@ I'm a software engineer at a startup, and we live in Slack all day. When I thoug
 
 ## Status
 
-Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Verification is designed and written down, but not built yet. This is one person's project, a few weeks old, and it is not installable by anyone else yet.
+Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Verification is designed and written down, but not built yet. This is one person's project, a few weeks old, and it is not installable by anyone else yet: from source today; from the first release by the commands in Install and update.
 
 ## Run locally
 
@@ -56,6 +56,156 @@ MORNDO_ORIGIN=http://localhost:8790 node apps/hub/src/main.ts serve
 ```
 
 Open `http://localhost:8790`. `MORNDO_ORIGIN` must be the exact origin the browser uses; http is allowed for localhost. Pair a browser with `node apps/hub/src/main.ts pair`. These commands are the start. There is no screenshot guide. A setup command by role (control plane, node) is not written yet. Until then, each service's README says how it runs: [`apps/hub`](apps/hub/README.md), [`apps/fleet`](apps/fleet/README.md), [`apps/node-agent`](apps/node-agent/README.md).
+
+## Install and update
+
+The first release is not published yet, so until it is the release URLs below answer 404; this section describes the install a release will have.
+
+### Install, verifying first
+
+Save the release key, download `install.sh` and its signature, and check the signature before the script runs.
+
+```sh
+curl -fsSLO https://github.com/morndo/morndo/releases/latest/download/install.sh
+curl -fsSLO https://github.com/morndo/morndo/releases/latest/download/install.sh.sig
+echo 'release@morndo.github.io namespaces="release@morndo.github.io" ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAILGOA2QkwWhAgWf3mM3sUCqH38i9HiFRe84R7qadRdh7' > morndo.allowed_signers
+ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s install.sh.sig < install.sh \
+  && sh install.sh --role control-plane --signers morndo.allowed_signers
+```
+
+Use `--role node` for a machine that only hosts agents. Use `--channel latest` for the newest channel:
+
+```sh
+sh install.sh --role node --channel latest --signers morndo.allowed_signers
+```
+
+`install.sh` checks the Manifest and the archive again. It installs the Channel's Version, writes the units, and starts the services. Nothing runs before the check passes.
+
+`gh attestation verify install.sh --repo morndo/morndo` is a second, independent check. The same key line is in SECURITY.md, so a mismatch shows.
+
+### Update
+
+A machine checks the feed in the background, stages a verified Version, and applies it at a safe point. The default mode is `apply`. The default channel is `stable`. A window never blocks an update you ask for with `morndo update`.
+
+Checks the feed, shows what would change, and asks before applying.
+
+```sh
+morndo update
+```
+
+Applies without asking.
+
+```sh
+morndo update --yes
+```
+
+Checks the feed and stages only.
+
+```sh
+morndo update --check
+```
+
+Prints the channel, the mode, the pin, and the versions this machine knows.
+
+```sh
+morndo update --status
+```
+
+Prints that report as JSON.
+
+```sh
+morndo update --status --json
+```
+
+Applies without waiting for the window.
+
+```sh
+morndo update --now
+```
+
+Takes exactly that Version from the machine's own channel, and is refused when that Version is withdrawn, lower than the running one, below the highest this machine ever ran, pinned, or, on a node, above its control plane.
+
+```sh
+morndo update --to 0.2.0
+```
+
+Re-verifies the installed tree against its signed file list and reports what fails.
+
+```sh
+morndo doctor
+```
+
+### Channels
+
+`stable` is the default and the right one for most machines. `latest` is newer. `morndo update --channel latest` switches to it. A machine never moves down: on a newer build it waits until the other channel catches up. `morndo install --channel latest` (through `install.sh --channel latest`) installs from `latest`.
+
+```sh
+morndo update --channel latest
+```
+
+### Pin, mode and window
+
+The settings file is `~/.config/morndo-update/config.json`. The commands edit it atomically.
+
+A pin above the running Version is taken by the next check if the feed lists it, then held. A pin equal to the running Version holds. A pin below the running Version never moves a machine down. A pin the feed does not list leaves the machine where it is.
+
+```sh
+morndo update pin 0.2.0
+```
+
+```sh
+morndo update unpin
+```
+
+`apply` stages and applies at a safe point. `stage` stages in the background, and applies with `morndo update` or at the next boot. `off` does no background checks.
+
+```sh
+morndo update auto apply
+```
+
+```sh
+morndo update auto stage
+```
+
+```sh
+morndo update auto off
+```
+
+The window is the local hours for automatic applies. None means any safe point.
+
+```sh
+morndo update window 03:30-05:00
+```
+
+```sh
+morndo update window any
+```
+
+`MORNDO_DISABLE_UPDATES=1` makes every update path refuse, `morndo update` included. `MORNDO_DISABLE_AUTOUPDATE=1` stops the background only.
+
+```sh
+MORNDO_DISABLE_UPDATES=1 morndo update
+```
+
+```sh
+MORNDO_DISABLE_AUTOUPDATE=1 morndo update
+```
+
+### Roll back
+
+`morndo update --rollback` goes back to the previous Version, asks first, and asks for a typed word when a restore would drop writes. `morndo update --rollback --preview --json` is the read-only look.
+
+```sh
+morndo update --rollback
+```
+
+```sh
+morndo update --rollback --preview --json
+```
+
+A rollback halts that Version for the fleet until the owner resumes it. A withdrawn Release stays in the feed, marked: machines stop being offered it, and machines already on it stay.
+
+The design is in `docs/design/updates/README.md`, and the manual QA checklist is in `docs/design/updates/manual-qa.md`.
 
 ## What is here
 
