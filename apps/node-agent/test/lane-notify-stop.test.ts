@@ -1,7 +1,7 @@
 // The Stop hook script (hooks/lane-notify-stop): the turn end is posted before tmux or git can use up Claude Code's
 // 20 s hook timeout (T-422). A stub relay records the POST; shims stand in for tmux, git and lanes.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -57,6 +57,10 @@ function scratchDir(): string {
   const dir = mkdtempSync(join(tmpdir(), "t422-"));
   dirs.push(dir);
   return dir;
+}
+
+function runDir(dir: string): string {
+  return join(dir, "run");
 }
 
 function relay(): Promise<{ port: number; hits: Hit[]; hold: () => void; reply: (status: number, body: string) => void }> {
@@ -138,6 +142,13 @@ fi
 printf '%s\\n' lane-x
 `);
   writeExe(join(bin, "git"), `#!/bin/sh
+if [ -n "\${FAKE_PID_DIR:-}" ]; then
+  sleep 30 &
+  printf '%s\\n' "$!" > "$FAKE_PID_DIR/child.pid"
+  printf '%s\\n' "$$" > "$FAKE_PID_DIR/shim.pid"
+  printf '%s %s\\n' "$$" "$!" >> "$FAKE_PID_DIR/all"
+  wait
+fi
 if [ "\${FAKE_GIT_SLEEP:-0}" != 0 ]; then
   sleep "$FAKE_GIT_SLEEP"
 fi
@@ -189,6 +200,12 @@ function startHook(dir: string, port: string, lanes: string, body: HookInput, ex
   delete env.FAKE_GIT_SLEEP;
   delete env.FAKE_TMUX_SLEEP;
   delete env.FAKE_LANES_SLEEP;
+  delete env.FAKE_PID_DIR;
+  delete env.BASH_ENV;
+  delete env.TMPDIR;
+  const runtime = runDir(dir);
+  mkdirSync(runtime, { recursive: true });
+  env.XDG_RUNTIME_DIR = runtime;
   Object.assign(env, extra);
   if (pane !== null) env.TMUX_PANE = pane;
   const started = performance.now();
@@ -215,6 +232,27 @@ function posted(hit: Hit): Record<string, unknown> {
   expect(hit.url).toBe("/hook/stop");
   expect(hit.body && typeof hit.body === "object" && !Array.isArray(hit.body)).toBe(true);
   return hit.body as Record<string, unknown>;
+}
+
+function isGone(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === "ESRCH";
+  }
+}
+
+function recordedPids(pidDir: string): number[] {
+  const out: number[] = [];
+  for (const name of ["shim.pid", "child.pid", "all"]) {
+    let text = "";
+    try { text = readFileSync(join(pidDir, name), "utf8"); } catch { continue; }
+    for (const word of text.split(/\s+/)) {
+      if (/^\d+$/.test(word)) out.push(Number(word));
+    }
+  }
+  return out;
 }
 
 const INPUT_KEYS = ["session_id", "cwd", "hook_event_name", "stop_hook_active", "background_tasks", "session_crons", "transcript_path", "last_assistant_message"] as const;
@@ -349,9 +387,11 @@ describe("lane-notify-stop", () => {
     const curls = code.filter(line => /\bcurl\b/.test(line));
     expect(curls).toHaveLength(1);
     expect(curls[0]).toContain('"$RELAY/hook/stop"');
-    const lookedUp = code.filter(line => /\bgit\b/.test(line) || /\btmux\b/.test(line));
+    const lookedUp = code.filter(line => /\bgit\b|\btmux\b/.test(line));
     expect(lookedUp.length).toBeGreaterThan(0);
-    expect(lookedUp.every(line => /^\s*fact /.test(line))).toBe(true);
+    expect(lookedUp.every(line => line.trimStart().startsWith("start ") || line.includes("GIT_OPTIONAL_LOCKS"))).toBe(true);
+    expect(code.some(line => /(^|[;&|(]\s*)wait\b/.test(line))).toBe(false);
+    expect(text).toContain("set -m");
     expect(statSync(SCRIPT).mode & 0o111).not.toBe(0);
   });
 
@@ -379,5 +419,97 @@ describe("lane-notify-stop", () => {
       const asked = statusAsk(body, "lane-x", ASK);
       expect(asked).toBe(want === null ? STATUS_ASK : null);
     }
+  });
+
+  it("does not wait for a lookup that survives its kill (T-422)", async () => {
+    const dir = scratchDir();
+    const { repo } = initRepo(dir);
+    const { lanes } = installShims(dir);
+    const stub = await relay();
+    const killless = join(dir, "killless.sh");
+    writeFileSync(killless, "kill() { :; }\n");
+    const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "unkillable lookup"), {
+      BASH_ENV: killless,
+      FAKE_GIT_SLEEP: "6",
+      MORNDO_HOOK_LOOKUP_S: "1",
+      MORNDO_HOOK_POST_S: "3",
+    });
+    expect(await until(() => stub.hits.length >= 1, 3_000)).toBe(true);
+    expect(stub.hits[0]!.at - run.started).toBeLessThan(3_000);
+    expect(await waitExit(run.child, run.started + 5_000)).toBe(0);
+    expect(performance.now() - run.started).toBeLessThan(5_000);
+    const body = posted(stub.hits[0]!);
+    expect(body.window).toBe("lane-x");
+    expect(body).not.toHaveProperty("branch");
+    expect(body).not.toHaveProperty("changed");
+    expect(body).not.toHaveProperty("ahead");
+  }, 20_000);
+
+  it("kills the whole process group of a lookup at the bound (T-422)", async () => {
+    const dir = scratchDir();
+    const { repo } = initRepo(dir);
+    const { lanes } = installShims(dir);
+    const pidDir = join(dir, "pids");
+    mkdirSync(pidDir);
+    const stub = await relay();
+    const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "group kill"), {
+      FAKE_PID_DIR: pidDir,
+      MORNDO_HOOK_LOOKUP_S: "1",
+    });
+    try {
+      expect(await waitExit(run.child, run.started + 8_000)).toBe(0);
+      const shim = Number(readFileSync(join(pidDir, "shim.pid"), "utf8").trim());
+      const grandchild = Number(readFileSync(join(pidDir, "child.pid"), "utf8").trim());
+      expect(Number.isInteger(shim) && shim > 0).toBe(true);
+      expect(Number.isInteger(grandchild) && grandchild > 0).toBe(true);
+      const recorded = recordedPids(pidDir);
+      expect(recorded.length).toBeGreaterThanOrEqual(2);
+      expect(await until(() => recorded.every(isGone), 3_000)).toBe(true);
+    } finally {
+      for (const pid of recordedPids(pidDir)) {
+        try { process.kill(pid, "SIGKILL"); } catch { /* already gone */ }
+      }
+    }
+  }, 20_000);
+
+  it("leaves no directory of its own behind, and removes an old one left by a killed hook (T-422)", async () => {
+    const dir = scratchDir();
+    const { repo } = initRepo(dir);
+    const { lanes } = installShims(dir);
+    const stub = await relay();
+    const uid = process.getuid?.();
+    if (uid === undefined) throw new Error("process.getuid unavailable");
+    const base = join(runDir(dir), `morndo-hook-${uid}`);
+    const oldRun = join(base, "run.OLD");
+    const freshRun = join(base, "run.FRESH");
+    mkdirSync(oldRun, { recursive: true });
+    mkdirSync(freshRun, { recursive: true });
+    const twoHoursAgo = Date.now() / 1000 - 2 * 60 * 60;
+    utimesSync(oldRun, twoHoursAgo, twoHoursAgo);
+    const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "sweep leftovers"));
+    expect(await waitExit(run.child, run.started + 8_000)).toBe(0);
+    expect(await until(() => !existsSync(oldRun), 3_000)).toBe(true);
+    expect(existsSync(freshRun)).toBe(true);
+    expect(readdirSync(base).filter(name => name.startsWith("run."))).toEqual(["run.FRESH"]);
+  }, 20_000);
+
+  it("still posts when the runtime directory cannot be created (T-422)", async () => {
+    const dir = scratchDir();
+    const { repo } = initRepo(dir);
+    const { lanes } = installShims(dir);
+    const stub = await relay();
+    const blocker = join(dir, "not-a-dir");
+    writeFileSync(blocker, "x\n");
+    const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "no runtime dir"), {
+      XDG_RUNTIME_DIR: join(blocker, "nested"),
+    });
+    expect(await until(() => stub.hits.length === 1, 5_000)).toBe(true);
+    expect(await waitExit(run.child, run.started + 8_000)).toBe(0);
+    expect(stub.hits).toHaveLength(1);
+    const body = posted(stub.hits[0]!);
+    expect(body.window).toBe("");
+    expect(body).not.toHaveProperty("branch");
+    expect(body).not.toHaveProperty("changed");
+    expect(body).not.toHaveProperty("ahead");
   });
 });
