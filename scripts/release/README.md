@@ -12,6 +12,6 @@ Run `npm ci` with the Node that will run these scripts before `manifest` or any 
 
 The four inputs are the source commit, the bench version (`x.y.z`), a trust directory that holds exactly the four bench trust files, and the bench root signer file. `--out` is where the tree is written.
 
-`sh scripts/release/bench-overlay.sh --audit <commit> <out-dir> [--repo <dir>]` compares that tree with `git archive` of the commit and refuses a difference that is not part of the overlay.
+`sh scripts/release/bench-overlay.sh --audit <commit> <out-dir> [--repo <dir>]` compares that tree with `git archive` of the commit and refuses a difference that is not part of the overlay. Changed files are checked by content: the release-please job must be the stand-in with any `x.y.z` version, the root signer line must be the pinned bench form and differ from the source, and the promotion wait is the only edit in the feed and the signing check. A trust file still identical to the source is refused, and a file may not have more `PRIVATE KEY` lines than the same path in the source (the four trust files may have none).
 
 `scripts/release/bench-overlay/removed-tests.txt` is data, one test path per line, for tests that pin a production value. `release.test.ts` is on it because three of its tests assert the seven-day promotion wait, which the overlay shortens to 20 minutes (found by running the whole `units` suite on an overlaid tree). Extend the list when a test starts failing in the bench's `units` job.

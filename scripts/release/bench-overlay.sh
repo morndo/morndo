@@ -462,12 +462,205 @@ while IFS= read -r line || [ -n "$line" ]; do
   esac
 done < "$work/rq"
 
-if [ -s "$work/bad" ]; then
-  while IFS= read -r item; do
-    printf '%s\n' "bench-overlay: $item is not an allowed difference" >&2
-  done < "$work/bad"
+differ() {
+  printf '%s\n' "bench-overlay: $1 differs from the source outside the overlay" >&2
+  diff -u "$2" "$3" >&2 || true
+  exit 1
+}
+
+norm_swap() {
+  FROM="$2" TO="$3" awk '
+    BEGIN { from = ENVIRON["FROM"]; to = ENVIRON["TO"] }
+    $0 == from { print to; next }
+    { print }
+  ' "$1" > "$4"
+}
+
+root_form_ok() {
+  printf '%s\n' "$1" | awk '
+    BEGIN { q = sprintf("%c", 39) }
+    NR == 1 { line = $0 }
+    END {
+      if (NR != 1) exit 1
+      pre = "  ROOT_ALLOWED_SIGNER: " q "root@morndo.github.io namespaces=\"keys@morndo.github.io\" ssh-ed25519 "
+      suf = q " #gitleaks:allow"
+      if (index(line, pre) != 1) exit 1
+      rest = substr(line, length(pre) + 1)
+      if (length(rest) <= length(suf)) exit 1
+      if (substr(rest, length(rest) - length(suf) + 1) != suf) exit 1
+      body = substr(rest, 1, length(rest) - length(suf))
+      if (body !~ /^[A-Za-z0-9+\/=]+$/) exit 1
+      exit 0
+    }
+  '
+}
+
+audit_swapped() {
+  path=$1
+  src_line=$2
+  dst_line=$3
+  if [ ! -f "$src/$path" ] || [ -L "$src/$path" ] || [ ! -f "$dst/$path" ] || [ -L "$dst/$path" ]; then
+    return 0
+  fi
+  src_n=$(grep -c -x -F "$src_line" "$src/$path" || true)
+  [ -n "$src_n" ] || src_n=0
+  dst_n=$(grep -c -x -F "$dst_line" "$dst/$path" || true)
+  [ -n "$dst_n" ] || dst_n=0
+  norm_swap "$src/$path" "$src_line" '@@WAIT@@' "$work/norm-src"
+  norm_swap "$dst/$path" "$dst_line" '@@WAIT@@' "$work/norm-dst"
+  if [ "$src_n" -ne 1 ] || [ "$dst_n" -ne 1 ] || ! cmp -s "$work/norm-src" "$work/norm-dst"; then
+    differ "$path" "$work/norm-src" "$work/norm-dst"
+  fi
+}
+
+audit_release() {
+  path=.github/workflows/release.yml
+  srcf=$src/$path
+  dstf=$dst/$path
+  if [ ! -f "$srcf" ] || [ -L "$srcf" ] || [ ! -f "$dstf" ] || [ -L "$dstf" ]; then
+    return 0
+  fi
+  standin_first=$(awk 'NR == 1 { print; exit }' "$standin_src")
+  START="$standin_first" awk '
+    BEGIN { start = ENVIRON["START"] }
+    $0 == start { p = 1 }
+    $0 == "  build:" { if (p) { p = 0; next } }
+    p { print }
+  ' "$dstf" > "$work/dst-block"
+  # stand-in comparison: the tree block must match the data file, version for version
+  standin_ok=0
+  if STANDIN="$standin_src" BLOCK="$work/dst-block" awk '
+    BEGIN {
+      standin = ENVIRON["STANDIN"]
+      block = ENVIRON["BLOCK"]
+      i = 0
+      while ((getline line < standin) > 0) {
+        i++
+        s[i] = line
+      }
+      close(standin)
+      j = 0
+      while ((getline line < block) > 0) {
+        j++
+        while (match(line, /[0-9]+\.[0-9]+\.[0-9]+/)) {
+          line = substr(line, 1, RSTART - 1) "__VERSION__" substr(line, RSTART + RLENGTH)
+        }
+        if (j > i || line != s[j]) exit 1
+      }
+      if (j != i) exit 1
+      exit 0
+    }
+  '; then
+    standin_ok=1
+  fi
+  awk '
+    $0 == "  release-please:" && !done { print "@@STANDIN@@"; skip = 1; done = 1; next }
+    $0 == "  build:" { skip = 0 }
+    skip { next }
+    { print }
+  ' "$srcf" > "$work/norm-src-pre"
+  if [ "$standin_ok" -eq 1 ]; then
+    START="$standin_first" awk '
+      BEGIN { start = ENVIRON["START"] }
+      $0 == start && !done { print "@@STANDIN@@"; skip = 1; done = 1; next }
+      $0 == "  build:" { skip = 0 }
+      skip { next }
+      { print }
+    ' "$dstf" > "$work/norm-dst-pre"
+  else
+    cp "$dstf" "$work/norm-dst-pre"
+  fi
+  src_root_n=$(grep -c -E '^  ROOT_ALLOWED_SIGNER: ' "$srcf" || true)
+  [ -n "$src_root_n" ] || src_root_n=0
+  dst_root_n=$(grep -c -E '^  ROOT_ALLOWED_SIGNER: ' "$dstf" || true)
+  [ -n "$dst_root_n" ] || dst_root_n=0
+  src_root=$(awk '/^  ROOT_ALLOWED_SIGNER: / { print; exit }' "$srcf")
+  dst_root=$(awk '/^  ROOT_ALLOWED_SIGNER: / { print; exit }' "$dstf")
+  # root line form, and it must not be the source line
+  accept_root=0
+  if [ "$dst_root_n" -eq 1 ] && [ "$src_root_n" -eq 1 ] && [ "$dst_root" != "$src_root" ] && root_form_ok "$dst_root"; then
+    accept_root=1
+  fi
+  if [ "$src_root_n" -eq 1 ]; then
+    awk '
+      /^  ROOT_ALLOWED_SIGNER: / && !done { print "@@ROOT@@"; done = 1; next }
+      { print }
+    ' "$work/norm-src-pre" > "$work/norm-src"
+  else
+    cp "$work/norm-src-pre" "$work/norm-src"
+  fi
+  if [ "$accept_root" -eq 1 ]; then
+    awk '
+      /^  ROOT_ALLOWED_SIGNER: / && !done { print "@@ROOT@@"; done = 1; next }
+      { print }
+    ' "$work/norm-dst-pre" > "$work/norm-dst"
+  else
+    cp "$work/norm-dst-pre" "$work/norm-dst"
+  fi
+  if [ "$standin_ok" -ne 1 ] || [ "$accept_root" -ne 1 ] || ! cmp -s "$work/norm-src" "$work/norm-dst"; then
+    differ "$path" "$work/norm-src" "$work/norm-dst"
+  fi
+}
+
+# private key scan: a file may not gain PRIVATE KEY lines over the source
+: > "$work/privbad"
+if grep -rl 'PRIVATE KEY' "$dst" > "$work/privlist"; then
+  while IFS= read -r abs || [ -n "$abs" ]; do
+    [ -n "$abs" ] || continue
+    rel=${abs#"$dst/"}
+    dst_n=$(grep -c 'PRIVATE KEY' "$abs" || true)
+    [ -n "$dst_n" ] || dst_n=0
+    src_n=0
+    if [ -f "$src/$rel" ] && [ ! -L "$src/$rel" ]; then
+      src_n=$(grep -c 'PRIVATE KEY' "$src/$rel" || true)
+      [ -n "$src_n" ] || src_n=0
+    fi
+    case $rel in
+      trust/keys.json|trust/keys.json.sig|trust/release_allowed_signers|trust/feed_allowed_signers)
+        src_n=0
+        ;;
+    esac
+    allowed=$src_n
+    if [ "$dst_n" -gt "$allowed" ]; then
+      printf '%s\n' "private key material in $rel" >> "$work/privbad"
+    fi
+  done < "$work/privlist"
+fi
+
+# unchanged trust files are not a diff, so compare them on purpose
+: > "$work/trustbad"
+for name in keys.json keys.json.sig release_allowed_signers feed_allowed_signers; do
+  if [ -f "$src/trust/$name" ] && [ ! -L "$src/trust/$name" ] && [ -f "$dst/trust/$name" ] && [ ! -L "$dst/trust/$name" ] && cmp -s "$src/trust/$name" "$dst/trust/$name"; then
+    printf '%s\n' "trust/$name is still the source's" >> "$work/trustbad"
+  fi
+done
+
+if [ -s "$work/bad" ] || [ -s "$work/privbad" ] || [ -s "$work/trustbad" ]; then
+  if [ -s "$work/bad" ]; then
+    while IFS= read -r item; do
+      printf '%s\n' "bench-overlay: $item is not an allowed difference" >&2
+    done < "$work/bad"
+  fi
+  if [ -s "$work/privbad" ]; then
+    while IFS= read -r item; do
+      printf '%s\n' "bench-overlay: $item" >&2
+    done < "$work/privbad"
+  fi
+  if [ -s "$work/trustbad" ]; then
+    while IFS= read -r item; do
+      printf '%s\n' "bench-overlay: $item" >&2
+    done < "$work/trustbad"
+  fi
   exit 1
 fi
+
+audit_release
+audit_swapped "scripts/release/feed.ts" \
+  "export const PROMOTION_WAIT_MS = 7 * 24 * 60 * 60 * 1000;" \
+  "export const PROMOTION_WAIT_MS = 20 * 60 * 1000;"
+audit_swapped "scripts/release/check-signing-feed.sh" \
+  'PROMOTE_MIN_AGE=${PROMOTE_MIN_AGE:-604800}' \
+  'PROMOTE_MIN_AGE=${PROMOTE_MIN_AGE:-1200}'
 
 if [ "$mode" = build ]; then
   if [ ! -e "$out" ]; then

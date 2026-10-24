@@ -133,6 +133,8 @@ function seed(repo: string, alter?: (repo: string) => void): string {
   writeFileSync(join(repo, "apps/updater/test/docs.test.ts"), "docs\n");
   writeFileSync(join(repo, "README.md"), "readme\n");
   writeFileSync(join(repo, "apps/x/src/main.ts"), "export const main = 1;\n");
+  mkdirSync(join(repo, "docs"), { recursive: true });
+  writeFileSync(join(repo, "docs/note.md"), "A note that mentions a PRIVATE KEY only as prose.\n");
   alter?.(repo);
   return commit(repo);
 }
@@ -553,6 +555,181 @@ describe("bench-overlay.sh", () => {
     const stray = audit(f.repo, f.sha, out);
     expect(stray.status).toBe(1);
     expect(stray.stdout + stray.stderr).toContain("stray.txt");
+  });
+
+  it("the audit fails a release.yml with a line appended after the stand-in and the signer line", () => {
+    const f = fx();
+    const out = join(tmp("morndo-out-"), "out");
+    const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    const yml = join(out, ".github/workflows/release.yml");
+    appendFileSync(yml, "  extra-job:\n");
+    const result = audit(f.repo, f.sha, out);
+    expect(result.status, result.stdout + result.stderr).toBe(1);
+    expect(result.stderr).toContain(".github/workflows/release.yml");
+    expect(result.stderr).toContain("  extra-job:");
+  });
+
+  it("the audit fails a changed line inside another job of release.yml", () => {
+    const f = fx();
+    const out = join(tmp("morndo-out-"), "out");
+    const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    const yml = join(out, ".github/workflows/release.yml");
+    const text = readFileSync(yml, "utf8");
+    const next = text.replace("    timeout-minutes: 90\n", "    timeout-minutes: 91\n");
+    expect(next).not.toBe(text);
+    writeFileSync(yml, next);
+    const result = audit(f.repo, f.sha, out);
+    expect(result.status, result.stdout + result.stderr).toBe(1);
+    expect(result.stderr).toContain(".github/workflows/release.yml");
+    expect(result.stderr).toContain("timeout-minutes: 91");
+  });
+
+  it("the audit fails an edit inside the stand-in block", () => {
+    const f = fx();
+    const out = join(tmp("morndo-out-"), "out");
+    const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    const yml = join(out, ".github/workflows/release.yml");
+    const text = readFileSync(yml, "utf8");
+    const next = text.replace("(bench)", "(altered)");
+    expect(next).not.toBe(text);
+    writeFileSync(yml, next);
+    const result = audit(f.repo, f.sha, out);
+    expect(result.status, result.stdout + result.stderr).toBe(1);
+    expect(result.stderr).toContain(".github/workflows/release.yml");
+    expect(result.stderr).toContain("(altered)");
+  });
+
+  it("the audit fails a root signer line that is the source's own or not the pinned form", () => {
+    const f = fx();
+    const out = join(tmp("morndo-out-"), "out");
+    const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    const yml = join(out, ".github/workflows/release.yml");
+    const text = readFileSync(yml, "utf8");
+    const src = readFileSync(join(f.repo, ".github/workflows/release.yml"), "utf8");
+    const srcLine = src.split("\n").find((line) => line.startsWith("  ROOT_ALLOWED_SIGNER: "));
+    const dstLine = text.split("\n").find((line) => line.startsWith("  ROOT_ALLOWED_SIGNER: "));
+    if (srcLine === undefined || dstLine === undefined) throw new Error("fixture has no root signer line");
+    expect(dstLine).not.toBe(srcLine);
+
+    writeFileSync(yml, text.replace(dstLine, srcLine));
+    const own = audit(f.repo, f.sha, out);
+    expect(own.status, own.stdout + own.stderr).toBe(1);
+    expect(own.stderr).toContain(".github/workflows/release.yml");
+    expect(own.stderr).toContain(srcLine);
+
+    const malformed = "  ROOT_ALLOWED_SIGNER: 'nope'";
+    writeFileSync(yml, text.replace(dstLine, malformed));
+    const bad = audit(f.repo, f.sha, out);
+    expect(bad.status, bad.stdout + bad.stderr).toBe(1);
+    expect(bad.stderr).toContain(".github/workflows/release.yml");
+    expect(bad.stderr).toContain(malformed);
+  });
+
+  it("the audit fails a feed.ts or check-signing-feed.sh edited outside the promotion wait line", () => {
+    const f = fx();
+    const out = join(tmp("morndo-out-"), "out");
+    const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    const feed = join(out, "scripts/release/feed.ts");
+    const feedBytes = readFileSync(feed);
+    appendFileSync(feed, "export const EXTRA = 1;\n");
+    const feedAudit = audit(f.repo, f.sha, out);
+    expect(feedAudit.status, feedAudit.stdout + feedAudit.stderr).toBe(1);
+    expect(feedAudit.stderr).toContain("scripts/release/feed.ts");
+    expect(feedAudit.stderr).toContain("export const EXTRA = 1;");
+    writeFileSync(feed, feedBytes);
+
+    const age = join(out, "scripts/release/check-signing-feed.sh");
+    const ageBytes = readFileSync(age);
+    appendFileSync(age, "echo extra\n");
+    const ageAudit = audit(f.repo, f.sha, out);
+    expect(ageAudit.status, ageAudit.stdout + ageAudit.stderr).toBe(1);
+    expect(ageAudit.stderr).toContain("scripts/release/check-signing-feed.sh");
+    expect(ageAudit.stderr).toContain("echo extra");
+    writeFileSync(age, ageBytes);
+
+    const feedText = feedBytes.toString("utf8").replace(PROMOTION_TO, "export const PROMOTION_WAIT_MS = 1;");
+    expect(feedText).not.toBe(feedBytes.toString("utf8"));
+    writeFileSync(feed, feedText);
+    const feedWait = audit(f.repo, f.sha, out);
+    expect(feedWait.status, feedWait.stdout + feedWait.stderr).toBe(1);
+    expect(feedWait.stderr).toContain("scripts/release/feed.ts");
+    expect(feedWait.stderr).toContain("PROMOTION_WAIT_MS = 1;");
+    writeFileSync(feed, feedBytes);
+
+    const ageText = ageBytes.toString("utf8").replace(AGE_TO, "PROMOTE_MIN_AGE=${PROMOTE_MIN_AGE:-1}");
+    expect(ageText).not.toBe(ageBytes.toString("utf8"));
+    writeFileSync(age, ageText);
+    const ageWait = audit(f.repo, f.sha, out);
+    expect(ageWait.status, ageWait.stdout + ageWait.stderr).toBe(1);
+    expect(ageWait.stderr).toContain("scripts/release/check-signing-feed.sh");
+    expect(ageWait.stderr).toContain("PROMOTE_MIN_AGE:-1");
+  });
+
+  it("the audit fails when a trust file is still the source's", () => {
+    const f = fx();
+    const out = join(tmp("morndo-out-"), "out");
+    const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    for (const name of TRUST_FILES) {
+      const dest = join(out, "trust", name);
+      const builtBytes = readFileSync(dest);
+      copyFileSync(join(f.repo, "trust", name), dest);
+      const result = audit(f.repo, f.sha, out);
+      expect(result.status, result.stdout + result.stderr).toBe(1);
+      expect(result.stderr).toContain(`trust/${name} is still the source's`);
+      writeFileSync(dest, builtBytes);
+    }
+  });
+
+  it("the audit refuses private key text added to any file, but not the source's own mentions", () => {
+    const f = fx();
+    const out = join(tmp("morndo-out-"), "out");
+    const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out });
+    expect(built.status, built.stdout + built.stderr).toBe(0);
+    const ok = audit(f.repo, f.sha, out);
+    expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+
+    const shaped = `${readFileSync(f.keys.release.priv, "utf8").split("\n")[0]}\n`;
+    const note = join(out, "docs/note.md");
+    const noteBytes = readFileSync(note);
+    appendFileSync(note, shaped);
+    const extra = audit(f.repo, f.sha, out);
+    expect(extra.status, extra.stdout + extra.stderr).toBe(1);
+    expect(extra.stdout + extra.stderr).toContain("private key material in docs/note.md");
+    writeFileSync(note, noteBytes);
+
+    const addedPath = join(out, "extra-key.txt");
+    writeFileSync(addedPath, shaped);
+    const added = audit(f.repo, f.sha, out);
+    expect(added.status, added.stdout + added.stderr).toBe(1);
+    expect(added.stdout + added.stderr).toContain("extra-key.txt");
+    expect(added.stdout + added.stderr).toContain("private key material in extra-key.txt");
+    rmSync(addedPath);
+
+    const keysPath = join(out, "trust/keys.json");
+    const keysBytes = readFileSync(keysPath);
+    appendFileSync(keysPath, shaped);
+    const trust = audit(f.repo, f.sha, out);
+    expect(trust.status, trust.stdout + trust.stderr).toBe(1);
+    expect(trust.stdout + trust.stderr).toContain("private key material in trust/keys.json");
+    writeFileSync(keysPath, keysBytes);
+  });
+
+  it("the audit passes trees built with different versions", () => {
+    const f = fx();
+    for (const version of ["0.1.2", "10.20.30"]) {
+      const out = join(tmp("morndo-out-"), "out");
+      const built = overlay({ repo: f.repo, sha: f.sha, trust: f.trust.trust, signer: f.trust.signer, out, version });
+      expect(built.status, built.stdout + built.stderr).toBe(0);
+      expect(readFileSync(join(out, ".github/workflows/release.yml"), "utf8")).toContain(`version=${version}`);
+      const ok = audit(f.repo, f.sha, out);
+      expect(ok.status, ok.stdout + ok.stderr).toBe(0);
+    }
   });
 
   it("the script never pushes and never reaches a network", () => {
