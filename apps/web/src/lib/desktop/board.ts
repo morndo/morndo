@@ -1,7 +1,8 @@
 // How the board is shown (ADR-0015): the columns in work order, the words for each status and refusal, and what the
 // app may do from where. The rules live in the domain and the hub; this presents their results and asks the hub.
 import { workingOn, type AuthorKind, type BoardRule, type MergedView, type Run, type Task, type TaskActor, type TaskEvent, type TaskPriority, type TaskStatus } from "@morndo/domain";
-import { BoardTaskSchema, MergedViewSchema, RunViewSchema, parseBody } from "@morndo/protocol";
+import { BoardTaskSchema, MergedViewSchema, ProofViewSchema, RunViewSchema, parseBody, type ProofView } from "@morndo/protocol";
+export type { ProofView };
 import { saidOf } from "./run-words.ts";
 
 export type { MergedView, Run, Task, TaskEvent, TaskPriority, TaskStatus };
@@ -71,6 +72,24 @@ export function decodeMerged(raw: readonly unknown[] | undefined): { merged: Rea
   return { merged, dropped };
 }
 
+// The hub's proof view for one task (ADR-0035 step 5): absent or unreadable on an older hub → no Proof section.
+export function decodeProof(raw: unknown): ProofView | null {
+  return raw === undefined || raw === null ? null : parseBody(ProofViewSchema, raw);
+}
+
+// The Accept-as-done button while a task is in review (B11 merge gate, B16 proof gate): merge override wins over proof.
+export function acceptLabel(proof: ProofView | null, merged: MergedView | null): { label: string; title: string | undefined } {
+  if (merged?.live === false)
+    return { label: "Accept anyway", title: "Its merge is not live on every node; this is recorded as accepted by you" };
+  // The gate's mode decides what the button promises: on holds the Done (so this is an override, recorded), warn only
+  // records it, off says nothing.
+  if (proof !== null && !proof.state.accepts && proof.mode === "on")
+    return { label: "Accept anyway", title: "Its proof is not green; this is recorded as accepted by you" };
+  if (proof !== null && !proof.state.accepts && proof.mode === "warn")
+    return { label: "Accept as done", title: "Its proof is not green; the gate is in warn mode, so this is recorded" };
+  return { label: "Accept as done", title: undefined };
+}
+
 export const byStatus = (tasks: readonly Task[]) => {
   const m = new Map<TaskStatus, Task[]>(COLUMNS.map(c => [c.status, []]));
   for (const t of tasks) m.get(t.status)?.push(t);
@@ -100,6 +119,11 @@ export const REFUSALS: Record<string, string> = {
   no_merge: "That merge isn't recorded on this task.",
   too_many: "A task holds at most 5 merge records.",
   no_commit: "The hub's checkout doesn't have that commit yet.",
+  // B14 to B16 (ADR-0035): the proof gate's refusals.
+  proof_not_green: "Its proof isn't green yet; accepting it anyway is recorded.",
+  bad_ref: "That isn't a whole reference: owner/repo#PR@sha.",
+  ref_unrelated: "A ci reference must hang off a pull request of the same brief.",
+  ref_repo: "The board doesn't check that repository.",
 };
 
 // Who made a change, in the record's words: you, a lane or the manager by its name, the control plane's console
@@ -133,13 +157,21 @@ export function eventLine(e: TaskEvent): { who: string; text: string; comment: s
         const said = boardSaid(e.actor.rule, c.reason);
         return { who: w, text: `moved it to ${STATUS_WORDS[c.to]} ${BOARD_WHY[e.actor.rule](e.actor.lane)}${said ? `: ${said}` : ""}`, comment: null };
       }
-      return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}`, comment: null };
+      const proofComment = c.proofSeen ? `Proof when accepted: ${c.proofSeen}` : null;
+      return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}`, comment: proofComment };
     }
     case "assigned": return { who: w, text: c.to ? `assigned it to ${c.to}` : "unassigned it", comment: null };
     case "edited": return { who: w, text: `edited the ${Object.keys(c).filter(k => k !== "kind").join(", ")}`, comment: null };
     case "commented": return { who: w, text: "commented", comment: c.text };
+    case "briefed": return { who: w, text: "filed a brief", comment: null };   // B13; the later round words this
     case "merged": return { who: w, text: `recorded its merge in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };   // B11; the later round words this
     case "unmerged": return { who: w, text: `cleared its merge record in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };
+    case "proof_listed": {
+      const lines = [...c.add.map(s => `+ ${s}`), ...c.drop.map(s => `- ${s}`)];
+      return { who: w, text: "set the proof list", comment: lines.length > 0 ? lines.join("\n") : null };
+    }
+    // A kind this build does not know (a newer hub's record): one plain line, never a throw that takes the whole panel down.
+    default: return { who: w, text: "made a change this version cannot show", comment: null };
   }
 }
 export const ago = (t: number, now: number) => {

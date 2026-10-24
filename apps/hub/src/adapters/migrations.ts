@@ -297,9 +297,17 @@ export const MIGRATIONS: readonly Migration[] = [
     },
   },
   {
+    version: 28,
+    name: "board_proofs (B14): one row per reference of a task's brief, its state as the hub read it, kept in rows of their own so a re-check never touches the task or its events; a new table only, so an older hub opens the database as it is",
+    compat: "additive",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS board_proofs (
+      key TEXT NOT NULL, brief_rev INTEGER NOT NULL, ref TEXT NOT NULL, state TEXT NOT NULL, detail TEXT, checked_at INTEGER NOT NULL,
+      PRIMARY KEY (key, brief_rev, ref))`),
+  },
+  {
     // A plain worker token's usage readings: how many, and when the last one was. A manager token, or a worker token
     // with the usage-pool scope, is not counted.
-    version: 28,
+    version: 29,
     name: "usage (T-430 slice 1): per-token count of readings posted with a plain worker token",
     compat: "additive",
     up: db => {

@@ -28,9 +28,10 @@
   import { PHASE_WORDS, lanesWithoutTask, runCards, runCounts, runLook } from "./run-words.ts";
   import "./board-controls.css";
 
-  let { tasks, lanes, live, now, runs = null, merged = null, open = null, jobs = [], counts = [], more = 0, openJob = null, onOpen, onAct, onCreate, onOpenLane, onOpenJob, onLoadJobs }: {
+  let { tasks, lanes, live, now, runs = null, merged = null, standIn = false, open = null, jobs = [], counts = [], more = 0, openJob = null, onOpen, onAct, onCreate, onOpenLane, onOpenJob, onLoadJobs }: {
     tasks: Task[]; lanes: string[]; live: boolean; now: number;
     runs?: ReadonlyMap<string, Run> | null;               // each lane's Run, by lane (board.ts decodeRuns); null: the hub sent none
+    standIn?: boolean;                                    // the hub reads its proof references from a stand-in forge (ADR-0035)
     merged?: ReadonlyMap<string, MergedView> | null;      // where each task's merges stand, by key (board.ts decodeMerged); null: the hub sent none
     open?: string | null;                                 // the task open beside the board, by key
     jobs?: ShownJob[];
@@ -140,6 +141,7 @@
   <div class="main">
     <header class="bh">
       <SquareKanban size={18} /><h1>Board</h1>
+      {#if standIn}<span class="standin" data-stand-in-forge title="Proof references are read from a stand-in forge, not GitHub">stand-in forge</span>{/if}
       <div class="sums" role="group" aria-label="The board in numbers">
         {#if runSums}
           <span class="sum run" data-sum="working"><RunDot dot="dot-fill dot-working" /><b>{runSums.working}</b> working now</span>
@@ -234,6 +236,7 @@
 </section>
 
 <style>
+  .standin { flex: none; padding: 1px 8px; border-radius: 10px; background: var(--warn-bg); color: var(--warn-fg); font: 700 11px/18px var(--font); }
   .board { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; min-height: 0; flex: 1; background: var(--main-bg); }
   .board.with-panel { grid-template-columns: minmax(0, 1fr) 400px; }
   .main { display: flex; flex-direction: column; min-width: 0; min-height: 0; }

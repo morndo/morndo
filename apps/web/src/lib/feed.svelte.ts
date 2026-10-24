@@ -48,6 +48,7 @@ export class LiveFeed {
   boardRuns = $state<ReadonlyMap<string, Run> | null>(null);
   // B11: where each task's merges stand, by task key, from the same frame; null: the hub sends none.
   boardMerged = $state<ReadonlyMap<string, MergedView> | null>(null);
+  boardStandIn = $state(false);               // the hub reads its proof references from a stand-in forge (ADR-0035)
   boardAt = $state<number | null>(null);
   // ADR-0016: every connected account's usage, as the hub last sent it. A hub without it never sends: Home says so.
   usage = $state<AccountUsage[]>([]);
@@ -430,6 +431,7 @@ export class LiveFeed {
         this.boardLanes = m.lanes;
         this.boardRuns = runs.runs;
         this.boardMerged = merged.merged;
+        this.boardStandIn = m.standIn === true;
         this.boardAt = m.at;
         break;
       }
