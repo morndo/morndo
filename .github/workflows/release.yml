@@ -195,7 +195,7 @@ jobs:
           node scripts/release/main.ts pack --root "$RUNNER_TEMP/stage" --out "dist/morndo-${VERSION}-${PLATFORM}.tar.gz" --mtime "$mtime"
           cp "$RUNNER_TEMP/stage/files.json" "dist/files-${PLATFORM}.json"
 
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-${{ matrix.platform }}
           path: dist
@@ -298,7 +298,7 @@ jobs:
             "dist/morndo-${VERSION}-linux-arm64.tar.gz" \
             "dist/morndo-${VERSION}-darwin-arm64.tar.gz" \
             dist/manifest.json dist/install.sh
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: unsigned
           path: |
@@ -361,7 +361,7 @@ jobs:
             /usr/bin/ssh-keygen -Y sign -f "$key" -n release@morndo.github.io "$file"
             /usr/bin/ssh-keygen -Y verify -f trust/release_allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s "$file.sig" < "$file"
           done
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: signatures
           path: |
@@ -529,7 +529,7 @@ jobs:
             --repository "$GITHUB_REPOSITORY" --dir site --version "$VERSION" \
             --manifest "$RUNNER_TEMP/release/manifest.json" --manifest-url "$manifest_url" \
             --now "$now" --key-set "$key_set" --signers trust/feed_allowed_signers --scratch "$RUNNER_TEMP"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: feed-unsigned
           path: |
@@ -580,7 +580,7 @@ jobs:
             /usr/bin/ssh-keygen -Y sign -f "$key" -n feed@morndo.github.io "$file"
             /usr/bin/ssh-keygen -Y verify -f trust/feed_allowed_signers -I feed@morndo.github.io -n feed@morndo.github.io -s "$file.sig" < "$file"
           done
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: feed-signatures
           path: |
