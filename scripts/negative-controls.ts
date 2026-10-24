@@ -4087,7 +4087,7 @@ export const CONTROLS: Control[] = [
     find: `      // B17: the assigner's requirement list — no state change, like a comment; never the board itself (D5).\n      if (actor.kind === "board") return refuse("not_allowed");\n`, replace: `      // B17\n`,
     run: ["packages/domain/test/board.test.ts"], expect: "not_allowed" },
   { id: "t406-list-stands-across-rounds", task: "T-406", file: "packages/domain/src/proof.ts",
-    find: `  const sorted = [...events].sort((a, b) => a.rev - b.rev);\n  const list: ProofItem[] = [];`, replace: `  const sorted = [...events].sort((a, b) => a.rev - b.rev).filter(e => e.change.kind !== "moved");\n  const list: ProofItem[] = [];`,
+    find: `    if (e.change.kind !== "proof_listed") continue;`, replace: `    if (e.change.kind === "moved" && e.change.from === "review") { list.length = 0; bySpec.clear(); }\n    if (e.change.kind !== "proof_listed") continue;`,
     run: ["packages/domain/test/proof.test.ts"], expect: "stands across rounds" },
   { id: "t406-proof-reapplies-merge-repo", task: "T-406", file: "packages/domain/src/proof.ts",
     find: `if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
