@@ -326,7 +326,7 @@ describe("worker socket: a protected lane's words, identity and files", () => {
     w.ctl.answer = req => (req.op === "inventory.get" ? { ok: true, result: { panes, invVersion: 9 } } : prev(req));
     w.ctl.inventory(panes);
     await vi.waitFor(() => expect(w.fleet.connections.latest("ctl").inventory?.panes.find(p => p.window === "manager")?.topic).toBe("the owner's words"));
-    const seen = (r: { body: unknown } | null) => (r?.body as { result: { panes: Record<string, unknown>[] } }).result.panes;
+    const seen = (r: { body: unknown } | null) => ((r ? r.body : {}) as { result: { panes: Record<string, unknown>[] } }).result.panes;
     const asWorker = seen(await w.worker.post("/v1/op", op({ node: "ctl" }, "inventory.get")));
     expect(asWorker.find(p => p.window === "manager")).toEqual({ workerId: "ctl.3fa2c1d0.0", window: "manager", cwd: "", status: "idle", pid: 100 });
     expect(asWorker.find(p => p.window === "worker-a")).toMatchObject({ topic: "fine to show", sessionId: SID2 });
@@ -336,13 +336,14 @@ describe("worker socket: a protected lane's words, identity and files", () => {
     for (const [who, client2, hidden] of [["worker", w.worker, true], ["owner", w.owner, false]] as const) {
       const events = await client2.events();
       await events.when(() => events.received.some(e => e.t === "inventory" && e.node === "ctl"));
-      const manager = (events.received.find(e => e.t === "inventory" && e.node === "ctl")?.body as { panes: Record<string, unknown>[] }).panes.find(p => p.window === "manager");
+      const inventoryPanes = (e: { body: unknown } | undefined) => ((e ? e.body : {}) as { panes: Record<string, unknown>[] }).panes;
+      const manager = inventoryPanes(events.received.find(e => e.t === "inventory" && e.node === "ctl")).find(p => p.window === "manager");
       expect(manager?.topic === undefined, who).toBe(hidden);
       expect(manager?.lastPrompt === undefined, who).toBe(hidden);
       expect(manager?.sessionId === undefined, who).toBe(hidden);
       w.ctl.inventory([...panes, pane("ctl.3fa2c1d0.2", "late", { topic: "later" })]);
       await events.when(() => events.received.filter(e => e.t === "inventory" && e.node === "ctl").length >= 2);
-      const next = (events.received.filter(e => e.t === "inventory" && e.node === "ctl").at(-1)?.body as { panes: Record<string, unknown>[] }).panes.find(p => p.window === "manager");
+      const next = inventoryPanes(events.received.filter(e => e.t === "inventory" && e.node === "ctl").at(-1)).find(p => p.window === "manager");
       expect(next?.title === undefined, who).toBe(hidden);
       events.close();
     }
