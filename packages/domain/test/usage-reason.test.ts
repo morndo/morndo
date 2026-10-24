@@ -1,9 +1,18 @@
 // Reasons, fixes and cleaned text (U14): closed lists on the way in — a reason or fix outside the list is not one —
 // and free text cleaned of control characters, links and addresses before it is shown.
 import { describe, expect, it } from "vitest";
-import { USAGE_FIXES, USAGE_REASONS, clampEvery, cleanHint, cleanLength, cleanNote, fixOf, isTransientReason, reasonOf, takePercent } from "../src/index.ts";
+import { USAGE_FIXES, USAGE_REASONS, clampEvery, cleanHint, cleanLength, cleanNote, fixForReason, fixOf, isTransientReason, reasonOf, takePercent } from "../src/index.ts";
 
 describe("reasons, fixes and cleaned text (U14)", () => {
+  it("each failed-source reason names its fix, or none", () => {
+    expect(fixForReason("signed_out")).toBe("sign_in_again");
+    expect(fixForReason("refused")).toBe("use_another_account");
+    expect(fixForReason("no_scope")).toBe("sign_in_fully_here");
+    expect(fixForReason("unknown_screen")).toBe("check_the_source");
+    expect(fixForReason("plan_ended")).toBe("reactivate_the_seat");
+    for (const r of ["no_usage_for_plan", "rate_limited", "unreachable", "timeout"] as const) expect(fixForReason(r)).toBeNull();
+  });
+
   it("reason classes are closed", () => {
     expect(reasonOf("banana")).toBe("unknown_screen");
     expect(reasonOf(42)).toBe("unknown_screen");

@@ -262,6 +262,22 @@ export const MIGRATIONS: readonly Migration[] = [
       if (known === undefined) MIGRATIONS.find(m => m.version === 24)!.up(db);
     },
   },
+  {
+    // Usage detection S2 (plan 4.2 to 4.5): one row per source and node (its health, its last reading and the one
+    // before it), the notices the hub itself wrote, the plan/threshold/cycle watches, the seat record, and the lane
+    // an account is used from (written by a later slice; the table and its store methods exist now).
+    version: 26,
+    name: "usage (S2): per-source health and readings, notices, watches and seat records (plan 4.2 to 4.5)",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS usage_sources (account TEXT NOT NULL, source TEXT NOT NULL, node TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (account, source, node));
+      CREATE TABLE IF NOT EXISTS usage_notices (id TEXT PRIMARY KEY, account TEXT NOT NULL, kind TEXT NOT NULL, signature TEXT NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS usage_notices_at ON usage_notices (at);
+      CREATE TABLE IF NOT EXISTS usage_watch (account TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (account, kind, key));
+      CREATE TABLE IF NOT EXISTS usage_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS lane_accounts (node TEXT NOT NULL, lane TEXT NOT NULL, account TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (node, lane));
+    `),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

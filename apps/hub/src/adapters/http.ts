@@ -42,7 +42,7 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageReportBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLimitBody, UsageReadingsBody, UsageReportBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -455,6 +455,33 @@ export function startHttp(p: {
       const r = p.usage.report(await readBody(req, UsageReportBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
       return r.ok ? json(res, 200, { account: r.account }) : json(res, 400, { error: r.problem });
     }
+    // A usage reading a source posts (U14): the windows it can see now, or the one reason it cannot. The status line
+    // has its own route above; a reading that names it is refused.
+    if (path === "/api/agent/usage/readings" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      const accountHeader = req.headers["x-morndo-account"];
+      const r = p.usage.reading(await readBody(req, UsageReadingsBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    // A seat's limit hit as any source reports it (U9). The reply says only that it was taken: the agent door leaks
+    // nothing of the seat or any state. Slice 2 takes it from manager-role tokens only (PR #125 fix round 2, finding 2):
+    // a worker token cannot mark a seat, until slice 3 widens the route to an account's own lane and a usage-pool token.
+    if (path === "/api/agent/usage/limit" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (who.token.role !== "manager") return json(res, 403, { error: "not_allowed" });
+      const body = await readBody(req, UsageLimitBody);
+      const accountHeader = req.headers["x-morndo-account"];
+      const account = body.account ?? (typeof accountHeader === "string" ? accountHeader : null);
+      const r = p.usage.noteLimit({
+        account,
+        kind: body.kind,
+        backAt: typeof body.back_at === "number" ? body.back_at * 1000 : null,
+        by: body.by,
+        at: typeof body.at === "number" ? body.at * 1000 : null,
+        fix: body.fix, hint: body.hint,
+      });
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
     if (path === "/api/agent/board" && method === "GET") return json(res, 200, service.view());
     if (path === "/api/agent/board/tasks" && method === "POST") return boardAnswer(res, service.create(await readBody(req, BoardCreateBody), who.actor));
     const task = /^\/api\/agent\/board\/tasks\/(T-\d{1,9})$/.exec(path);
@@ -770,6 +797,14 @@ export function startHttp(p: {
     }
     // ADR-0016: the accounts' usage, a look.
     if (path === "/api/usage" && method === "GET") return p.usage ? json(res, 200, p.usage.view()) : json(res, 404, { error: "usage_off" });
+    // The principal's own forget of a usage source (AT-23): the account, and the source to drop; without a source,
+    // the whole account. A Command like the others: limited, and the principal's session only.
+    if (path === "/api/usage/forget" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UsageForgetBody);
+      return json(res, 200, { forgotten: p.usage.forget(body.account, body.source, body.node ?? undefined) });
+    }
     // The fleet's job mirror: the list and the counts beside each node. A look.
     if (path === "/api/jobs" && method === "GET") {
       if (!p.jobs) return json(res, 404, { error: "jobs_off" });
