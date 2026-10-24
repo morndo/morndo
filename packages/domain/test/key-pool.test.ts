@@ -1,4 +1,4 @@
-// Key pool (ADR-0036; KP1-KP15): which API-key Connection serves the next request, and the rules around it. One history per
+// Key pool (ADR-0037; KP1-KP15): which API-key Connection serves the next request, and the rules around it. One history per
 // invariant, and a negative control where a guard could silently go missing. `now` is the clock; nothing here reads it.
 // Names, refs and fingerprints are synthetic; the planted values must never reach a pool, its events or its JSON.
 import { describe, expect, it } from "vitest";
