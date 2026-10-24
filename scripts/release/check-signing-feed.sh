@@ -139,6 +139,7 @@ for channel in latest stable; do
         | ($from | length) == 1
           and ((.releases | map(select(.version == $v))) == $from)
           and ((.releases | map(select(.version != $v))) == $was[0].releases)' "$new" > /dev/null || fail "stable.json is not the previous releases plus the one release latest lists"
+      jq -e --arg v "$VERSION" '.releases[0].version == $v' "$new" > /dev/null || fail "stable.json does not list $VERSION first: stable only moves forward"
     fi
   elif [ "$MODE" = resign ] || [ "$channel" = latest ]; then
     # Entries that were already published are carried over whole (version, URL, size, digest), not by version.
@@ -164,17 +165,39 @@ if [ "$MODE" = publish ]; then
 fi
 
 if [ "$MODE" = promote ]; then
-  "$GH" api "/repos/$REPOSITORY/commits?sha=feed&path=latest.json&per_page=100" --paginate --jq '.[] | "\(.sha) \(.commit.committer.date)"' > "$work/commits" || fail "cannot list the commits that touched latest.json"
-  awk '{ line[NR] = $0 } END { for (i = NR; i > 0; i--) print line[i] }' "$work/commits" > "$work/commits.asc"
+  # First parent only, the whole chain to the root. The age is the date of the OLDEST commit in graph order whose
+  # latest.json lists the version and verifies under the feed key. A back-dated committer date cannot jump the
+  # queue, and a replayed older feed that does not list the version cannot end the walk early: a push can append
+  # such replays, so stopping at the first commit that does not list the version would take a forged tip's date.
+  sha=$head
   listed=
-  while read -r sha when; do
-    [ -n "$sha" ] || continue
-    "$GH" api -H 'Accept: application/vnd.github.raw+json' "/repos/$REPOSITORY/contents/latest.json?ref=$sha" > "$work/at.json" || fail "cannot read latest.json at $sha"
-    if jq -e --arg v "$VERSION" '(.releases | map(.version) | index($v)) != null' "$work/at.json" > /dev/null; then
+  first=1
+  tab=$(printf '\t')
+  while [ -n "$sha" ]; do
+    line=$("$GH" api "/repos/$REPOSITORY/git/commits/$sha" --jq '[.committer.date, (.parents[0].sha // "")] | @tsv') || fail "cannot read the feed commit $sha"
+    case $line in
+      *"$tab"*) ;;
+      *) fail "cannot read the feed commit $sha" ;;
+    esac
+    when=${line%%"$tab"*}
+    parent=${line#*"$tab"}
+    lists=0
+    if "$GH" api -H 'Accept: application/vnd.github.raw+json' "/repos/$REPOSITORY/contents/latest.json?ref=$sha" > "$work/at.json" 2> "$work/at.err"; then
+      if jq -e --arg v "$VERSION" '(.releases | map(.version) | index($v)) != null' "$work/at.json" > /dev/null 2>&1; then lists=1; fi
+    elif ! grep -q 'HTTP 404' "$work/at.err"; then
+      fail "cannot read latest.json at $sha"
+    fi
+    if [ "$lists" = 1 ]; then
+      "$GH" api -H 'Accept: application/vnd.github.raw+json' "/repos/$REPOSITORY/contents/latest.json.sig?ref=$sha" > "$work/at.sig" 2> "$work/sig.err" || fail "cannot read latest.json.sig at $sha"
+      /usr/bin/ssh-keygen -Y verify -f "$TRUST/feed_allowed_signers" -I feed@morndo.github.io -n feed@morndo.github.io -s "$work/at.sig" < "$work/at.json" > /dev/null 2>&1 ||
+        fail "the feed branch commit $sha lists $VERSION in a latest.json that is not signed by the feed key"
       listed=$when
+    elif [ "$first" = 1 ]; then
       break
     fi
-  done < "$work/commits.asc"
+    first=0
+    sha=$parent
+  done
   [ -n "$listed" ] || fail "cannot tell when $VERSION was first listed on latest"
   listed_s=$(date -d "$listed" +%s) || fail "cannot read when $VERSION was first listed"
   [ $((now - listed_s)) -ge "$PROMOTE_MIN_AGE" ] || fail "$VERSION has been on latest for too short a time (since $listed, when the feed commit first listed it); promotion needs 7 days"

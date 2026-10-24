@@ -21,10 +21,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: morndo-feed
-  cancel-in-progress: false
-
 jobs:
   # Prepare runs npm and holds no key (the promote environment is the first approval). Sign holds the feed key and
   # runs no npm (it checks the feeds in plain shell first; the feed environment is the second approval). The last
@@ -122,6 +118,13 @@ jobs:
   promote:
     needs: promote-sign
     if: github.ref == 'refs/heads/main'
+    # Preparation and signing wait for approvals and write nothing, so they do not take this group.
+    # A promotion waits for two approvals, so feed.yml's Monday re-sign must still run.
+    # This job writes the feed. It verifies that the feed branch still points at the commit the preparation read
+    # and fails safe, "the feed branch moved; run this job again", if a re-sign ran meanwhile.
+    concurrency:
+      group: morndo-feed
+      cancel-in-progress: false
     runs-on: ubuntu-24.04
     outputs:
       present: ${{ steps.commit.outputs.present }}

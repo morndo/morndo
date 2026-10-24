@@ -72,45 +72,76 @@ export type PrepareIo = {
   listedSince?: (version: string) => number | null;
 };
 
-// The commit time of the oldest feed commit whose latest.json lists the version.
-// GitHub returns the commits newest first; the walk goes oldest first and stops at the first hit.
+// The commit time of the OLDEST commit, in first-parent graph order, whose latest.json lists the version. The whole
+// chain is read: a push can append replayed older feeds, so stopping at the first commit that does not list the
+// version would let a back-dated tip stand in for the real listing. Every commit that lists it must carry a
+// latest.json.sig that verifies under the pinned feed signers (a replay of a signed file is signed, so graph order,
+// not the signature, is what keeps it from moving the answer). The head has to list it, or there is no run.
+function listsVersion(body: string, version: string): boolean {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  if (typeof parsed !== "object" || parsed === null || !("releases" in parsed)) return false;
+  const releases = (parsed as { releases?: unknown }).releases;
+  if (!Array.isArray(releases)) return false;
+  return releases.some(release => typeof release === "object" && release !== null && (release as { version?: unknown }).version === version);
+}
+
+// GET a commit: committer.date and the first parent's sha.
+// https://docs.github.com/en/rest/git/commits#get-a-commit (read 2026-10-24)
+function commitOf(repository: string, sha: string): { parent: string | null; at: string } {
+  const run = gh([
+    "api",
+    `/repos/${repository}/git/commits/${sha}`,
+    "--jq",
+    '[.committer.date, (.parents[0].sha // "")] | @tsv',
+  ]);
+  if (!run.ok) throw new Error(`commit failed: ${run.stderr}`);
+  const line = run.stdout.split("\n")[0] ?? "";
+  const tab = line.indexOf("\t");
+  if (tab < 1) throw new Error(`commit failed: ${line}`);
+  const parent = line.slice(tab + 1).trim();
+  return { at: line.slice(0, tab), parent: parent === "" ? null : parent };
+}
+
 export function listedSince(
   repository: string,
   version: string,
+  head: string,
+  trust: { signers: string; scratch: string },
   io: {
-    commits: () => { sha: string; at: string }[];
-    read: (sha: string) => string | null;
+    read: (sha: string, file: string) => string | null;
+    commit: (sha: string) => { parent: string | null; at: string };
   } = {
-    commits: () => commitsTouchingLatest(repository),
-    read: sha => readAt(repository, sha, "latest.json"),
+    read: (sha, file) => readAt(repository, sha, file),
+    commit: sha => commitOf(repository, sha),
   },
 ): number | null {
-  for (const commit of io.commits().slice().reverse()) {
-    const body = io.read(commit.sha);
-    if (body === null) continue;
-    const feed = ChannelFeedSchema.parse(JSON.parse(body));
-    if (!feed.releases.some(release => release.version === version)) continue;
-    const at = Date.parse(commit.at);
-    if (!Number.isInteger(at)) throw new Error(`not a time: ${commit.at}`);
-    return at;
+  let sha: string | null = head;
+  let oldest: number | null = null;
+  while (sha !== null && sha !== "") {
+    const body = io.read(sha, "latest.json");
+    const lists = body !== null && listsVersion(body, version);
+    if (!lists && sha === head) return null;
+    const commit = io.commit(sha);
+    if (lists) {
+      const signature = io.read(sha, "latest.json.sig");
+      if (signature === null) throw new Error(`the feed branch commit ${sha} lists ${version} in a latest.json that is not signed by the feed key`);
+      try {
+        verifyFeed(trust.signers, body, signature, trust.scratch);
+      } catch {
+        throw new Error(`the feed branch commit ${sha} lists ${version} in a latest.json that is not signed by the feed key`);
+      }
+      const at = Date.parse(commit.at);
+      if (!Number.isInteger(at)) throw new Error(`not a time: ${commit.at}`);
+      oldest = at;
+    }
+    sha = commit.parent;
   }
-  return null;
-}
-
-function commitsTouchingLatest(repository: string): { sha: string; at: string }[] {
-  const text = must(gh([
-    "api",
-    `/repos/${repository}/commits?sha=feed&path=latest.json&per_page=100`,
-    "--paginate",
-    "--jq",
-    '.[] | "\\(.sha) \\(.commit.committer.date)"',
-  ]), "commits");
-  return text.split("\n").flatMap(line => {
-    if (line === "") return [];
-    const space = line.indexOf(" ");
-    if (space <= 0) throw new Error(`commits failed: ${line}`);
-    return [{ sha: line.slice(0, space), at: line.slice(space + 1) }];
-  });
+  return oldest;
 }
 
 // A branch that exists must hold both feeds. A missing file is never a reason to start that feed again
@@ -164,7 +195,10 @@ io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => r
       if (!latestFeed.releases.some(release => release.version === p.version)) throw new Error(`${p.version} is not in the latest feed`);
       if (latestFeed.withdrawn.includes(p.version) || stableFeed.withdrawn.includes(p.version)) throw new Error(`${p.version} is withdrawn`);
       if (stableFeed.releases.some(release => release.version === p.version)) throw new Error(`${p.version} is already in the stable feed`);
-      const since = (io.listedSince ?? (version => listedSince(p.repository, version)))(p.version);
+      const since = (io.listedSince ?? ((version: string) => {
+        if (head === null) throw new Error("no feed branch to promote from");
+        return listedSince(p.repository, version, head, { signers: p.signers, scratch: p.scratch });
+      }))(p.version);
       if (since === null) throw new Error(`cannot tell when ${p.version} was first listed on latest`);
       if (p.now - since < PROMOTION_WAIT_MS) {
         const days = ((p.now - since) / (24 * 60 * 60 * 1000)).toFixed(1);

@@ -48,6 +48,14 @@ export function promoteRelease(existingStable: string, latest: string, version: 
   if (entry === undefined) throw new Error(`${version} is not in the latest feed`);
   if (stable.releases.some(release => release.version === version)) throw new Error(`${version} is already in the stable feed`);
   if (from.withdrawn.includes(version) || stable.withdrawn.includes(version)) throw new Error(`${version} is withdrawn`);
+  const promoted = mustVersion(version);
+  let newest: string | null = null;
+  for (const release of stable.releases) {
+    if (newest === null || compareVersions(mustVersion(release.version), mustVersion(newest)) > 0) newest = release.version;
+  }
+  if (newest !== null && compareVersions(promoted, mustVersion(newest)) < 0) {
+    throw new Error(`${version} is lower than ${newest}, the newest in the stable feed; stable only moves forward`);
+  }
   const releases = [...stable.releases, entry].sort((a, b) => compareVersions(mustVersion(b.version), mustVersion(a.version)));
   return writeFeed({
     channel: stable.channel, seq: stable.seq + 1, issuedAt: now, keySetVersion: stable.keySetVersion,

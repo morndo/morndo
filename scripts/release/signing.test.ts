@@ -149,14 +149,27 @@ describe("check-signing-feed.sh", () => {
       "#!/bin/sh",
       `D=${dir}`,
       'case "$*" in',
-      `  *git/ref/heads/feed*) ${p.headError ? "echo 'gh: Server Error (HTTP 500)' >&2; exit 1" : p.branch ? 'echo h1' : "echo 'gh: Not Found (HTTP 404)' >&2; exit 1"} ;;`,
+      `  *git/ref/heads/feed*) ${p.headError ? "echo 'gh: Server Error (HTTP 500)' >&2; exit 1" : p.branch ? 'if [ -f "$D/head" ]; then cat "$D/head"; else echo h1; fi' : "echo 'gh: Not Found (HTTP 404)' >&2; exit 1"} ;;`,
       `  *repos/o/r/pages*) ${p.pages === undefined || p.pages === "none" ? "echo 'gh: Not Found (HTTP 404)' >&2; exit 1" : "echo https://pages.example.invalid/site/"} ;;`,
       '  *per_page=100*) cat "$D/commits.txt" ;;',
+      '  *git/commits/*)',
+      '    sha=',
+      '    for arg in "$@"; do',
+      '      case $arg in *git/commits/*) sha=${arg##*/} ;; esac',
+      '    done',
+      '    if [ -n "$sha" ] && [ -f "$D/history/$sha.commit" ]; then cat "$D/history/$sha.commit"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi ;;',
+      '  *contents/latest.json.sig*)',
+      '    ref=',
+      '    for arg in "$@"; do',
+      '      case $arg in *ref=*) ref=${arg#*ref=} ;; esac',
+      '    done',
+      '    if [ -n "$ref" ] && [ -f "$D/history/$ref.json.sig" ]; then cat "$D/history/$ref.json.sig"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi ;;',
       '  *contents/latest.json*)',
       '    ref=',
       '    for arg in "$@"; do',
       '      case $arg in *ref=*) ref=${arg#*ref=} ;; esac',
       '    done',
+      '    if [ -n "$ref" ] && [ -f "$D/history/$ref.json.error" ]; then echo "gh: Server Error (HTTP 500)" >&2; exit 1; fi',
       '    if [ -n "$ref" ] && [ -f "$D/history/$ref.json" ]; then cat "$D/history/$ref.json"; else cat "$D/prev/latest.json"; fi ;;',
       '  *contents/stable.json*) cat "$D/prev/stable.json" ;;',
       '  *repos/o/r/releases*) cat "$D/release.json" ;;',
@@ -456,13 +469,36 @@ describe("check-signing-feed.sh", () => {
   });
 
   const day = 86_400_000;
-  const listing = (w: ReturnType<typeof world>, rows: { sha: string; ageDays: number; body: string }[]) => {
-    mkdirSync(join(w.dir, "history"));
-    const lines = rows.map(row => {
-      writeFileSync(join(w.dir, "history", `${row.sha}.json`), row.body);
-      return `${row.sha} ${iso(NOW - row.ageDays * day)}`;
+  // Rows are the first-parent chain, newest first. commits.txt stays in committer-date order
+  // (newest date first), which is the list the old soak walked.
+  const listing = (w: ReturnType<typeof world>, rows: { sha: string; ageDays: number; body: string; sig?: "bad" | "missing"; inCommitList?: boolean }[]) => {
+    const history = join(w.dir, "history");
+    mkdirSync(history, { recursive: true });
+    const key = join(w.dir, "feed-key");
+    expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "feed-test", "-q"]).status).toBe(0);
+    const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(w.dir, "trust/feed_allowed_signers"), `feed@morndo.github.io namespaces="feed@morndo.github.io" ${pub}\n`);
+    const other = join(w.dir, "other-key");
+    rows.forEach((row, i) => {
+      const bodyPath = join(history, `${row.sha}.json`);
+      writeFileSync(bodyPath, row.body);
+      const parent = rows[i + 1]?.sha ?? "";
+      writeFileSync(join(history, `${row.sha}.commit`), `${iso(NOW - row.ageDays * day)}\t${parent}\n`);
+      if (row.sig === "missing") return;
+      const signer = row.sig === "bad" ? other : key;
+      if (row.sig === "bad" && !existsSync(other)) {
+        expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", other, "-N", "", "-C", "other-feed", "-q"]).status).toBe(0);
+      }
+      expect(spawnSync("ssh-keygen", ["-Y", "sign", "-f", signer, "-n", "feed@morndo.github.io", bodyPath]).status).toBe(0);
     });
-    writeFileSync(join(w.dir, "commits.txt"), `${lines.join("\n")}\n`);
+    const listed = rows.filter(row => row.inCommitList !== false);
+    const byDate = [...listed].sort((a, b) => a.ageDays - b.ageDays);
+    writeFileSync(join(w.dir, "commits.txt"), `${byDate.map(row => `${row.sha} ${iso(NOW - row.ageDays * day)}`).join("\n")}\n`);
+    const tip = rows[0];
+    if (tip !== undefined) {
+      writeFileSync(join(w.dir, "head"), `${tip.sha}\n`);
+      writeFileSync(join(w.dir, "prev/latest.json"), tip.body);
+    }
   };
   const dates = (w: ReturnType<typeof world>, publishedAt: string) => {
     writeFileSync(join(w.dir, "manifest.json"), JSON.stringify({ manifest: true, publishedAt }));
@@ -481,12 +517,12 @@ describe("check-signing-feed.sh", () => {
     expect(done.status, done.stderr).toBe(0);
   });
 
-  it("refuses a promotion before seven days on latest, counted from the first feed commit that lists the Version", () => {
+  it("refuses a promotion before seven days, counted along the first-parent chain from signed commits, not by date", () => {
     const young = world({ branch: true });
     listing(young, [
-      { sha: "newer", ageDays: 1, body: emptyFeed({ channel: "latest", now: NOW - day, keySetVersion: 1 }) },
-      { sha: "first", ageDays: 2, body: young.latest },
-      { sha: "older", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+      { sha: "forged", ageDays: 20, body: young.latest },
+      { sha: "real", ageDays: 2, body: young.latest },
+      { sha: "gap", ageDays: 40, body: emptyFeed({ channel: "latest", now: NOW - 40 * day, keySetVersion: 1 }) },
     ]);
     dates(young, iso(NOW - 20 * day));
     put(young, resignFeed(young.latest, NOW), promoteRelease(young.stable, young.latest, "0.1.0", NOW));
@@ -494,29 +530,136 @@ describe("check-signing-feed.sh", () => {
     expect(refused.status).toBe(1);
     expect(refused.stderr).toMatch(/refusing to sign/);
     expect(refused.stderr).toMatch(/promotion needs 7/);
+    expect(refused.stderr).toContain(iso(NOW - 2 * day));
     const mature = world({ branch: true });
     listing(mature, [
-      { sha: "newer", ageDays: 2, body: mature.latest },
-      { sha: "first", ageDays: 8, body: mature.latest },
-      { sha: "older", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+      { sha: "tip", ageDays: 2, body: mature.latest },
+      { sha: "first", ageDays: 8, body: mature.latest, inCommitList: false },
+      { sha: "gap", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
     ]);
-    dates(mature, iso(NOW - 20 * day));
+    dates(mature, iso(NOW - day));
     put(mature, resignFeed(mature.latest, NOW), promoteRelease(mature.stable, mature.latest, "0.1.0", NOW));
     const allowed = check(mature, { MODE: "promote", VERSION: "0.1.0" });
     expect(allowed.status, allowed.stderr).toBe(0);
+    const missing = world({ branch: true });
+    listing(missing, [
+      { sha: "h1", ageDays: 2, body: missing.latest, inCommitList: false },
+      { sha: "older", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+    ]);
+    dates(missing, iso(NOW - 20 * day));
+    put(missing, resignFeed(missing.latest, NOW), promoteRelease(missing.stable, missing.latest, "0.1.0", NOW));
+    const untold = check(missing, { MODE: "promote", VERSION: "0.1.0" });
+    expect(untold.status).toBe(1);
+    expect(untold.stderr).toMatch(/promotion needs 7/);
+    expect(untold.stderr).toContain(iso(NOW - 2 * day));
   });
 
-  it("refuses a promotion when no feed commit lists the Version, so its age cannot be told", () => {
+  it("refuses a promotion whose soak a back-dated forged commit tries to shorten", () => {
     const w = world({ branch: true });
     listing(w, [
-      { sha: "newer", ageDays: 1, body: emptyFeed({ channel: "latest", now: NOW - day, keySetVersion: 1 }) },
-      { sha: "older", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+      { sha: "forged", ageDays: 20, body: w.latest },
+      { sha: "real", ageDays: 2, body: w.latest },
+      { sha: "before", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
     ]);
     dates(w, iso(NOW - 20 * day));
     put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
     const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
     expect(refused.status).toBe(1);
-    expect(refused.stderr).toMatch(/cannot tell when 0\.1\.0 was first listed on latest/);
+    expect(refused.stderr).toMatch(/promotion needs 7/);
+    expect(refused.stderr).toContain(iso(NOW - 2 * day));
+  });
+
+  it("refuses a promotion whose soak a replayed older feed and a back-dated tip try to shorten", () => {
+    const w = world({ branch: true });
+    const older = emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 });
+    listing(w, [
+      { sha: "forged", ageDays: 20, body: w.latest },
+      { sha: "replay", ageDays: 19, body: older },
+      { sha: "real", ageDays: 2, body: w.latest },
+      { sha: "before", ageDays: 30, body: older },
+    ]);
+    dates(w, iso(NOW - 20 * day));
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/promotion needs 7/);
+    expect(refused.stderr).toContain(iso(NOW - 2 * day));
+  });
+
+  it("counts the oldest listing across a gap, and refuses an unsigned listing far down the chain", () => {
+    const old = world({ branch: true });
+    const gap = emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 });
+    listing(old, [
+      { sha: "tip", ageDays: 1, body: old.latest },
+      { sha: "gap", ageDays: 5, body: gap },
+      { sha: "first", ageDays: 9, body: old.latest },
+    ]);
+    put(old, resignFeed(old.latest, NOW), promoteRelease(old.stable, old.latest, "0.1.0", NOW));
+    const allowed = check(old, { MODE: "promote", VERSION: "0.1.0" });
+    expect(allowed.status, allowed.stderr).toBe(0);
+    const bad = world({ branch: true });
+    listing(bad, [
+      { sha: "tip", ageDays: 1, body: bad.latest },
+      { sha: "gap", ageDays: 5, body: gap },
+      { sha: "first", ageDays: 9, body: bad.latest, sig: "bad" },
+    ]);
+    put(bad, resignFeed(bad.latest, NOW), promoteRelease(bad.stable, bad.latest, "0.1.0", NOW));
+    const refused = check(bad, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: the feed branch commit first lists 0.1.0 in a latest.json that is not signed by the feed key");
+  });
+
+  it("refuses a promotion when latest.json cannot be read at a commit down the chain, and does not take a 404 for an error", () => {
+    const w = world({ branch: true });
+    const older = emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 });
+    listing(w, [
+      { sha: "tip", ageDays: 1, body: w.latest },
+      { sha: "mid", ageDays: 5, body: older },
+      { sha: "first", ageDays: 9, body: w.latest },
+    ]);
+    writeFileSync(join(w.dir, "history", "mid.json.error"), "");
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: cannot read latest.json at mid");
+  });
+
+  it("refuses a promotion when a commit that lists the Version has no valid signature", () => {
+    const w = world({ branch: true });
+    listing(w, [{ sha: "tip", ageDays: 8, body: w.latest, sig: "bad" }]);
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: the feed branch commit tip lists 0.1.0 in a latest.json that is not signed by the feed key");
+  });
+
+  it("refuses a promotion when latest.json.sig cannot be read at a listing commit", () => {
+    const w = world({ branch: true });
+    listing(w, [{ sha: "tip", ageDays: 8, body: w.latest, sig: "missing" }]);
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: cannot read latest.json.sig at tip");
+  });
+
+  it("refuses a promotion that lands below stable's newest Version", () => {
+    const w = world({ branch: true });
+    const low = entry("0.2.0");
+    const high = entry("0.3.0");
+    const latest = publishRelease(
+      publishRelease(null, { channel: "latest", entry: low, now: NOW - 5000, keySetVersion: 1 }),
+      { channel: "latest", entry: high, now: NOW - 4000, keySetVersion: 1 },
+    );
+    const stable = publishRelease(null, { channel: "stable", entry: high, now: NOW - 4000, keySetVersion: 1 });
+    writeFileSync(join(w.dir, "prev/latest.json"), latest);
+    writeFileSync(join(w.dir, "prev/stable.json"), stable);
+    const next = JSON.parse(resignFeed(stable, NOW)) as { releases: unknown[] };
+    const added = (JSON.parse(latest) as { releases: { version: string }[] }).releases.find(release => release.version === "0.2.0");
+    next.releases = [...next.releases, added];
+    put(w, resignFeed(latest, NOW), JSON.stringify(next));
+    const refused = check(w, { MODE: "promote", VERSION: "0.2.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: stable.json does not list 0.2.0 first: stable only moves forward");
   });
 
   it("refuses a promotion that adds an entry latest does not have, or changes the entry, or adds two", () => {

@@ -652,10 +652,16 @@ describe("promote.yml", () => {
     }
   });
 
-  it("promote shares the feed concurrency group and never cancels", () => {
+  it("promote takes the feed concurrency group only in the job that writes the feed, and never cancels", () => {
     const parsed = doc();
-    expect(parsed.concurrency).toEqual({ group: "morndo-feed", "cancel-in-progress": false });
-    expect(parsed.jobs["pages"]?.concurrency).toEqual({ group: "morndo-pages", "cancel-in-progress": false });
+    expect(parsed.concurrency).toBeUndefined();
+    expect(text()).not.toMatch(/^concurrency:/m);
+    expect(Object.entries(parsed.jobs).map(([name, job]) => [name, job.concurrency])).toEqual([
+      ["promote-prepare", undefined],
+      ["promote-sign", undefined],
+      ["promote", { group: "morndo-feed", "cancel-in-progress": false }],
+      ["pages", { group: "morndo-pages", "cancel-in-progress": false }],
+    ]);
     expect(text()).not.toContain("cancel-in-progress: true");
   });
 
