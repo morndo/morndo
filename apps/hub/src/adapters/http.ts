@@ -464,9 +464,11 @@ export function startHttp(p: {
       return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
     }
     // A seat's limit hit as any source reports it (U9). The reply says only that it was taken: the agent door leaks
-    // nothing of the seat or any state.
+    // nothing of the seat or any state. Slice 2 takes it from manager-role tokens only (PR #125 fix round 2, finding 2):
+    // a worker token cannot mark a seat, until slice 3 widens the route to an account's own lane and a usage-pool token.
     if (path === "/api/agent/usage/limit" && method === "POST") {
       if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (who.token.role !== "manager") return json(res, 403, { error: "not_allowed" });
       const body = await readBody(req, UsageLimitBody);
       const accountHeader = req.headers["x-morndo-account"];
       const account = body.account ?? (typeof accountHeader === "string" ? accountHeader : null);

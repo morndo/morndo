@@ -255,7 +255,7 @@ export class UsageService {
     // The thresholds (U12) watch the merged shown windows — the status line's own rows and whatever a reading source
     // shows of them — each with the capture time of the candidate that showed it (PR #125, finding 4b).
     const shown = accountNow(next, now);
-    this.#thresholds(account, this.#mergedWindows(shown, this.#store.usageSources().filter(r => r.account === account), now), now);
+    this.#thresholds(account, this.#mergedWindows(shown, this.#store.usageSourcesOf(account), now), now);
     this.#tellIfChanged();
     return { ok: true, account: shown };
   }
@@ -278,8 +278,13 @@ export class UsageService {
     const prev: UsageSourceBody = row?.body ?? { health: noHealth(body.source), reading: null, previous: null, hint: null };
     // The ordering guard (PR #125, finding 2): a reading, good or bad, older than the newest stamp the source ever
     // gave is a late replay. It changes nothing — health, reading, watches, seats and notices all stand — and is answered ok.
-    const stamps = [prev.health.lastOkAt, prev.health.lastFailAt, prev.reading?.capturedAt ?? null].filter((s): s is number => s !== null);
-    if (stamps.length > 0 && capturedAt < Math.max(...stamps)) return { ok: true };
+    // For ordering alone the stamp is capped at the hub's own clock, and each stored stamp with it (PR #125 fix round 2,
+    // finding 3a): a source whose clock runs ahead must not make an honest later reading look older. What is stored —
+    // capturedAt below, shown as asOf — keeps the freshness cap of the clock plus the skew.
+    const orderingAt = Math.min(body.captured_at * 1000, now);
+    const stamps = [prev.health.lastOkAt, prev.health.lastFailAt, prev.reading?.capturedAt ?? null]
+      .filter((s): s is number => s !== null).map(s => Math.min(s, now));
+    if (stamps.length > 0 && orderingAt < Math.max(...stamps)) return { ok: true };
     if (body.failure != null) {
       // A failure keeps the last good reading and its memory; what it says of itself is cleaned before it is stored.
       const health = failedRead(prev.health, capturedAt, reasonOf(body.failure.reason), body.every_s);
@@ -315,7 +320,7 @@ export class UsageService {
     const previous = prev.reading === null ? null : { capturedAt: prev.reading.capturedAt, windows: prev.reading.windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt })) };
     this.#store.saveUsageSource(account, body.source, node, { health, reading: { capturedAt, plan: body.plan ?? null, windows: list }, previous, hint: null });
     this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id);
-    this.#thresholds(account, this.#mergedWindows(this.#baseOf(account, now), this.#store.usageSources().filter(r => r.account === account), now), now);
+    this.#thresholds(account, this.#mergedWindows(this.#baseOf(account, now), this.#store.usageSourcesOf(account), now), now);
     this.#tellIfChanged();
     return { ok: true };
   }
@@ -324,7 +329,7 @@ export class UsageService {
   // account only sources speak of.
   #baseOf(account: string, now: number): AccountUsage {
     const own = this.#accounts.get(account);
-    return own !== undefined ? accountNow(own, now) : this.#skeleton(account, this.#store.usageSources().filter(r => r.account === account));
+    return own !== undefined ? accountNow(own, now) : this.#skeleton(account, this.#store.usageSourcesOf(account));
   }
 
   // What one good reading changes: the plan watch, the cycle books, and a seat mark it may end or drop. The
@@ -338,17 +343,19 @@ export class UsageService {
       // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
       ...(source === "claude-usage" ? { complete: true } : {}),
     };
-    const planWatch = (watches.get("plan|") as PlanWatch | undefined) ?? noPlanWatch;
+    const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
     const seen = watchPlan(planWatch, fact, capturedAt);
     this.#store.atomically(() => {
-      if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", "", seen.watch);
+      if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", source, seen.watch);
       for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
     });
     // A plan or account change the plan watch tells drops the seat the old plan's limit marked (PR #125, finding 3a):
-    // a mark from a plan that is gone no longer applies. A pool-owned seat is the pool's, never a reading's.
+    // a mark from a plan that is gone no longer applies. A pool-owned seat is the pool's, never a reading's, and a
+    // mark made after the telling reading was taken stands (PR #125 fix round 2, finding 1a): the change was already
+    // observed when the mark landed, so it cannot be what the mark was made under.
     if (seen.told.some(c => c.kind === "name" || c.kind === "account")) {
-      const marked = this.#store.usageSeats().find(s => s.account === account)?.record ?? null;
-      if (marked !== null && marked.owner === "derived") {
+      const marked = this.#store.usageSeat(account)?.record ?? null;
+      if (marked !== null && marked.owner === "derived" && marked.markedAt <= capturedAt) {
         this.#store.atomically(() => {
           this.#store.deleteUsageSeat(account);
           this.#note(account, "back", `reset|${capturedAt}`, seatResetNoticeText(account));
@@ -361,7 +368,7 @@ export class UsageService {
       if (book !== bookPrev) this.#store.saveUsageWatch(account, "cycle", w.id, book);
     }
     // A fresh leased reading of a new cycle is the one thing that ends a seat mark (plan 4.5, U13).
-    const seat = this.#store.usageSeats().find(s => s.account === account)?.record ?? null;
+    const seat = this.#store.usageSeat(account)?.record ?? null;
     if (seat !== null) {
       const read: FreshRead = { capturedAt, leased: this.#leaseBook.valid(leaseId, account, source), windows: windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt, lengthMins: w.lengthMins })) };
       if (clearSeat(seat, read).cleared) {
@@ -385,10 +392,11 @@ export class UsageService {
     const now = this.#now();
     const by = cleanNote(l.by) ?? "a source";       // control characters, links and addresses gone, 40 characters
     // The cycle the hit limited, if any reading of the account names one: the 5-hour window with a reset, else the
-    // fullest window shown.
-    const a = this.view().accounts.find(x => x.account === account) ?? null;
+    // fullest window shown. One account's view, from its own rows alone (PR #125 fix round 2, finding 3c) — not the
+    // whole board's, which nobody asked for here.
+    const a = this.#accountView(this.#baseOf(account, now), this.#store.usageSourcesOf(account), this.#store.usageSeat(account)?.record ?? null, now);
     const cycle = this.#cycleOf(a);
-    const prev = this.#store.usageSeats().find(s => s.account === account)?.record ?? null;
+    const prev = this.#store.usageSeat(account)?.record ?? null;
     const r = applyLimit(prev, { kind: l.kind, at: l.at ?? now, backAt: l.backAt, by, cycle });
     this.#store.atomically(() => {
       if (r.seat !== null && r.seat !== prev) this.#store.saveUsageSeat(account, r.seat);
@@ -419,9 +427,9 @@ export class UsageService {
   // removed.
   forget(account: string, source?: UsageSource, node?: string | null): boolean {
     if (!ACCOUNT_NAME.test(account)) return false;
-    const rows = this.#store.usageSources().filter(r => r.account === account);
+    const rows = this.#store.usageSourcesOf(account);
     if (source === undefined) {
-      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeats().some(s => s.account === account);
+      const had = rows.length > 0 || this.#accounts.has(account) || this.#store.usageSeat(account) !== null;
       this.#store.deleteUsageSources(account);
       this.#store.deleteUsageWatches(account);
       this.#store.deleteUsageSeat(account);
@@ -433,7 +441,7 @@ export class UsageService {
     const any = node === undefined || node === null;
     const existed = rows.some(r => r.source === source && (any || r.node === node));
     this.#store.deleteUsageSources(account, source, any ? undefined : node);
-    if (!this.#store.usageSources().some(r => r.account === account)) this.#store.deleteUsageWatches(account);
+    if (this.#store.usageSourcesOf(account).length === 0) this.#store.deleteUsageWatches(account);
     if (existed) this.#tellIfChanged();
     return existed;
   }

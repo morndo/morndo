@@ -668,9 +668,11 @@ export class Store {
     else this.db.prepare("DELETE FROM usage_sources WHERE account = ? AND source = ? AND node = ?").run(account, source, node);
   }
 
-  // One account's source rows, without scanning every row and filtering (PR #125 fix round 2, finding 3c). Stub of the
-  // red-test round: the behaviour lands with the fix.
-  usageSourcesOf(account: string): UsageSourceRow[] { void account; throw new Error("not implemented"); }
+  // One account's source rows, without scanning every row and filtering (PR #125 fix round 2, finding 3c).
+  usageSourcesOf(account: string): UsageSourceRow[] {
+    return (this.db.prepare("SELECT account, source, node, body FROM usage_sources WHERE account = ? ORDER BY source, node").all(account) as Row[])
+      .map(r => ({ account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody }));
+  }
 
   // The notices the hub itself wrote (plan 4.4), newest first, at most `limit`. The signature is the once-only key:
   // a notice with the same signature is never told again.
@@ -687,7 +689,8 @@ export class Store {
     return r ? (r.signature as string) : null;
   }
 
-  // The watches (plan 4.1 and 4.2): a plan watch (kind "plan", key ""), a threshold watch per window (kind
+  // The watches (plan 4.1 and 4.2): a plan watch per source (kind "plan", key the source name; PR #125 fix round 2,
+  // finding 1b — a row of the old shape, key "", is never read again), a threshold watch per window (kind
   // "threshold", key the canonical window id) and a cycle book per window (kind "cycle", key the window id).
   usageWatches(account?: string): UsageWatchRow[] {
     const rows = account === undefined
@@ -708,9 +711,11 @@ export class Store {
     return (this.db.prepare("SELECT account, body FROM usage_seats ORDER BY account").all() as Row[])
       .map(r => ({ account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord }));
   }
-  // The one seat row of one account, or null when it has none (PR #125 fix round 2, finding 3c). Stub of the
-  // red-test round: the behaviour lands with the fix.
-  usageSeat(account: string): { account: string; record: SeatRecord } | null { void account; throw new Error("not implemented"); }
+  // The one seat row of one account, or null when it has none (PR #125 fix round 2, finding 3c).
+  usageSeat(account: string): { account: string; record: SeatRecord } | null {
+    const r = this.db.prepare("SELECT account, body FROM usage_seats WHERE account = ?").get(account) as Row | undefined;
+    return r ? { account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord } : null;
+  }
   saveUsageSeat(account: string, record: SeatRecord) {
     this.db.prepare("INSERT INTO usage_seats (account, body) VALUES (?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body")
       .run(account, JSON.stringify(record));
