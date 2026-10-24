@@ -119,8 +119,8 @@ done
 #                                              cannot know what it resolves to)
 #   secret <file> <job> <environment|-> <name> a secret NAME the job uses as ${{ secrets.NAME }} (GITHUB_TOKEN is the
 #                                              run's own and is skipped; a comment line is not a use)
-# A job is a key two spaces in under `jobs:`; its environment is `environment: <name>` on one line or `environment:`
-# with a `name:` entry below it.
+# A job is a key two spaces in under `jobs:`; its environment is `environment: <name>` on one line, `environment:`
+# with a `name:` entry below it, or a flow mapping `environment: { name: <name>, ... }` on one line or over several.
 : >"$tmp/facts"
 have_workflows=0
 if fetch workflow-list "repos/$repo/contents/.github/workflows?ref=main"; then
@@ -137,9 +137,16 @@ if fetch workflow-list "repos/$repo/contents/.github/workflows?ref=main"; then
               if (env != "") printf "env\t%s\t%s\t%s\n", file, job, env
               for (s in secs) printf "secret\t%s\t%s\t%s\t%s\n", file, job, (env == "" ? "-" : env), s
             }
-            delete secs; env = ""; block = 0
+            delete secs; env = ""; block = 0; flow = 0
           }
           function clean(v) { sub(/[ \t]+#.*$/, "", v); sub(/^[ \t]+/, "", v); sub(/[ \t]+$/, "", v); return v }
+          # the name in a flow mapping, `{ name: x, url: y }`, on one line or over several: the first `name:` key
+          function flowname(t,   n) {
+            if (match(t, /[ \t{,]name:[ \t]*[^,}]*/)) {
+              n = substr(t, RSTART + 1, RLENGTH - 1); sub(/^name:[ \t]*/, "", n); n = clean(n)
+              if (n != "" && n !~ /\$\{\{/) env = n
+            }
+          }
           BEGIN { job = "(workflow)"; injobs = 0 }
           /^[ \t]*#/ { next }
           /^jobs:[ \t]*$/ { flush(); job = ""; injobs = 1; next }
@@ -147,10 +154,13 @@ if fetch workflow-list "repos/$repo/contents/.github/workflows?ref=main"; then
           injobs && /^  [A-Za-z0-9_-]+:[ \t]*(#.*)?$/ { flush(); job = $1; sub(/:$/, "", job); next }
           injobs && /^    environment:/ {
             v = $0; sub(/^    environment:[ \t]*/, "", v); v = clean(v)
-            block = (v == "")
-            if (v != "" && v !~ /\$\{\{/) env = v
+            block = (v == ""); flow = (v ~ /^\{/)
+            if (flow) flowname(v)
+            else if (v != "" && v !~ /\$\{\{/) env = v
             next
           }
+          injobs && flow && /^    [^ \t]/ { flow = 0 }
+          injobs && flow { flowname($0) }
           injobs && block && /^      name:/ {
             v = $0; sub(/^      name:[ \t]*/, "", v); v = clean(v)
             if (v !~ /\$\{\{/) env = v
@@ -308,6 +318,19 @@ while IFS="$(printf '\t')" read -r name job file; do
 done <"$tmp/open-uses"
 if [ "$app_known" = 1 ]; then
   known "RELEASE_APP_PRIVATE_KEY and RELEASE_APP_ID are repository secrets (decision 10: move them to an environment limited to main)"
+fi
+
+# Every repository and organisation secret no workflow on main uses is listed, so a stray one (a key kept as a backup,
+# say) is seen: not judged by its name, but not silent. A secret a workflow uses is not listed, whatever the job.
+awk -F'\t' '$1 == "secret" { print $5 }' "$tmp/facts" | sort -u >"$tmp/used-secrets"
+if [ "$have_workflows" = 1 ]; then
+  for kind in repository organisation; do
+    if [ "$kind" = repository ]; then list="$tmp/repo-secrets"; else list="$tmp/org-secrets"; fi
+    [ -f "$list" ] || continue
+    for name in $(jq -r '.secrets[]?.name' "$list"); do
+      grep -qxF -- "$name" "$tmp/used-secrets" || info "$kind secret $name is used by no workflow on main"
+    done
+  done
 fi
 
 if [ "$problems" -gt 0 ]; then

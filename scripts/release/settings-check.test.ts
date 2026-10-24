@@ -368,6 +368,40 @@ describe("check-release-settings.sh", () => {
     expect(c.status, c.stdout + c.stderr).toBe(0);
   });
 
+  it("an environment written as a flow mapping is read as the block form is", () => {
+    const flows: [string, string[]][] = [
+      ["one line", ["    environment: { name: nowhere, url: https://example.test }"]],
+      ["one line, no spaces, quoted", ['    environment: {name: "nowhere"}']],
+      ["several lines", ["    environment: {", "      url: ${{ steps.deploy.outputs.page_url }},", "      name: nowhere", "    }"]],
+    ];
+    for (const [what, lines] of flows) {
+      const w = world();
+      w.workflow("flow.yml", ["jobs:", "  deploy:", "    runs-on: ubuntu-24.04", ...lines, "    steps:", "      - run: echo deploying", ""].join("\n"));
+      const r = w.run();
+      expect(r.status, `${what}: ${r.stdout}${r.stderr}`).toBe(1);
+      expect(r.stdout, what).toMatch(/workflow flow\.yml names environment nowhere, which does not exist/);
+    }
+    // an environment that exists is fine, and a key secret used under the flow form is judged like any other
+    const ok = world();
+    // the flow form ends with its line: a later step's own `name:` is not the environment's
+    ok.workflow("flow.yml", ["jobs:", "  deploy:", "    environment: { name: github-pages, url: https://example.test }", "    steps:", "      - name: build the site", "        run: echo deploying", ""].join("\n"));
+    const o = ok.run();
+    expect(o.status, o.stdout + o.stderr).toBe(0);
+    const multi = world();
+    multi.workflow("flow.yml", ["jobs:", "  deploy:", "    environment: {", "      name: github-pages", "    }", "    steps:", "      - name: build the site", "        run: echo deploying", ""].join("\n"));
+    const m = multi.run();
+    expect(m.status, m.stdout + m.stderr).toBe(0);
+    const key = world();
+    key.workflow("flow.yml", ["jobs:", "  promote:", "    environment: { name: promote }", "    steps:", "      - run: echo ${{ secrets.PROMOTE_SIGNING }}", ""].join("\n"));
+    const k = key.run();
+    expect(k.status, k.stdout + k.stderr).toBe(1);
+    expect(k.stdout).toMatch(/PROMOTE_SIGNING \(used by job promote of flow\.yml in environment promote\) must be a secret of environment promote only/);
+    // a name that is an expression is still skipped in the flow form
+    const expression = world();
+    expression.workflow("flow.yml", ["jobs:", "  deploy:", "    environment: { name: '${{ inputs.environment }}' }", "    steps:", "      - run: echo deploying", ""].join("\n"));
+    expect(expression.run().status).toBe(0);
+  });
+
   it("the workflows are read from main through the API, not from the checkout", () => {
     const w = world();
     // a checkout whose own workflow names an environment that does not exist: it is not what the check reads
@@ -520,6 +554,13 @@ describe("check-release-settings.sh", () => {
     const r = w.run();
     expect(r.status, r.stdout + r.stderr).toBe(0);
     expect(failLines(r.stdout)).toEqual([]);
+    // not judged, but not silent either: every repository and organisation secret no workflow uses is listed
+    expect(r.stdout).toContain("INFO: repository secret UNUSED_SSH_KEY is used by no workflow on main");
+    expect(r.stdout).toContain("INFO: organisation secret ORG_SIGNING_KEY is used by no workflow on main");
+    // a secret a workflow does use is not listed, and neither are the environments' own
+    expect(r.stdout).not.toContain("repository secret RELEASE_APP_ID is used by no workflow");
+    expect(r.stdout).not.toContain("RELEASE_SSH_KEY is used by no workflow");
+    expect(world().run().stdout).not.toContain("is used by no workflow");
   });
 
   it("a job without an environment using another secret is reported, not failed", () => {
