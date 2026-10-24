@@ -32,8 +32,6 @@ const run = async (argv: string[], env: Record<string, string | undefined> = {})
   return { code, out: out.join(""), err: err.join("") };
 };
 
-const APPLIES_NOTHING = /arrive with the settings step/;
-
 describe("the command line (§8.1, §8.4)", () => {
   // sysexits.h (§8.4): a refusal of the data is 65; anything that should simply be tried again later — the network,
   // a busy lock, an I/O error such as a full disk — is 75.
@@ -97,13 +95,14 @@ describe("the command line (§8.1, §8.4)", () => {
     }
   });
 
-  it("the settings step's words — --to, --channel, pin, auto — are one sentence and exit 64 (§8.1)", async () => {
+  it("the settings step's words — --channel, pin, auto — are usage and exit 64 (§8.1)", async () => {
     for (const argv of [
-      ["update", "--to", "0.2.0"], ["update", "--channel", "latest"], ["update", "pin", "0.2.0"], ["update", "auto", "apply"],
+      ["update", "--channel", "latest"], ["update", "pin", "0.2.0"], ["update", "auto", "apply"],
     ]) {
       const r = await run(argv);
       expect(r.code, JSON.stringify(argv)).toBe(64);
-      expect(r.err, JSON.stringify(argv)).toMatch(APPLIES_NOTHING);
+      expect(r.err, JSON.stringify(argv)).toMatch(/usage:/);
+      expect(r.err, JSON.stringify(argv)).not.toMatch(/arrive with the settings step/);
     }
   });
 

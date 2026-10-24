@@ -274,6 +274,7 @@ export class SqliteUpdateStore implements UpdateStore {
   readonly #writeAlertSent: Database.Statement;
   readonly #versions: Database.Statement;
   readonly #writeVersion: Database.Statement;
+  readonly #dropVersion: Database.Statement;
   readonly #insertCheck: Database.Statement;
   readonly #trimChecks: Database.Statement;
   readonly #writeLastFeed: Database.Statement;
@@ -317,6 +318,7 @@ export class SqliteUpdateStore implements UpdateStore {
     this.#writeVersion = this.#db.prepare(`INSERT INTO versions (version, manifest_sha256, files_sha256, staged_at, manifest)
       VALUES (?, ?, ?, ?, ?) ON CONFLICT(version) DO UPDATE SET manifest_sha256 = excluded.manifest_sha256,
       files_sha256 = excluded.files_sha256, staged_at = excluded.staged_at, manifest = excluded.manifest`);
+    this.#dropVersion = this.#db.prepare("DELETE FROM versions WHERE version = ?");
     this.#manifestOf = this.#db.prepare("SELECT manifest FROM versions WHERE version = ?");
     this.#insertCheck = this.#db.prepare(`INSERT INTO checks (at, channel, outcome, detail, version, feed_seq, feed_expires_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`);
@@ -405,6 +407,20 @@ export class SqliteUpdateStore implements UpdateStore {
 
   // The newest staged record whose Version is above every committed one (or any, when nothing is committed yet):
   // what a boot unit or `--status` would apply, never a Version an older machine already passed.
+  // A named `--to` is what stands staged. Only a Version above both the named one and the highest committed one
+  // can shadow it; a row at or below the highest this machine has run stays, history staged() still reads.
+  retireStagedAbove(version: string): void {
+    const keep = parseVersion(version);
+    if (keep === null) return;
+    const committed = this.highestCommitted();
+    const ceiling = committed === null ? null : parseVersion(committed);
+    const floor = ceiling !== null && compareVersions(ceiling, keep) > 0 ? ceiling : keep;
+    for (const row of this.#versions.all() as VersionRow[]) {
+      const v = parseVersion(row.version);
+      if (v !== null && compareVersions(v, floor) > 0) this.#dropVersion.run(row.version);
+    }
+  }
+
   staged(): StagedRecord | null {
     const committed = this.highestCommitted();
     const ceiling = committed === null ? null : parseVersion(committed);

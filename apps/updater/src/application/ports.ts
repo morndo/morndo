@@ -117,6 +117,9 @@ export interface UpdateStore {
   recordStaged(r: StagedRecord): void;
   /** The newest staged record whose Version is above every committed one, or null. */
   staged(): StagedRecord | null;
+  /** Drops staged records whose Version is above both `version` and the highest committed Version, so `staged()`
+   *  is the one a named `--to` just staged. A record at or below the highest committed Version stays. */
+  retireStagedAbove(version: string): void;
   versionRecord(version: string): StagedRecord | null;
   recordCheck(r: CheckRecord): void;
   /** Newest first. */
