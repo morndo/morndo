@@ -136,6 +136,10 @@ describe("the failure classes, in their order", () => {
     expect(parseZaiQuota(answer({ status: 429, retryAfter: "120", body: null }))).toEqual({ ok: false, reason: "rate_limited", retryAfterS: 120, hint: null });
     expect(parseZaiQuota(answer({ status: 429, body: null }))).toEqual({ ok: false, reason: "rate_limited", retryAfterS: null, hint: null });
     expect(parseZaiQuota(answer({ status: 429, retryAfter: "Wed, 21 Oct 2026 07:28:00 GMT", body: null }))).toEqual({ ok: false, reason: "rate_limited", retryAfterS: null, hint: null });
+    // only a non-negative whole number counts: a sign, a fraction, an exponent or an empty word is no number at all
+    for (const word of ["-5", "1.5", "1e3", "", " 7", "0x10"])
+      expect(parseZaiQuota(answer({ status: 429, retryAfter: word, body: null }))).toEqual({ ok: false, reason: "rate_limited", retryAfterS: null, hint: null });
+    expect(parseZaiQuota(answer({ status: 429, retryAfter: "0", body: null }))).toEqual({ ok: false, reason: "rate_limited", retryAfterS: 0, hint: null });
   });
 
   it("success false and a status of 500 or more are unreachable", () => {
