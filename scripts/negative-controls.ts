@@ -106,7 +106,7 @@ export const CONTROLS: Control[] = [
     find: `  const doubled = s.replaceAll("#", "##");`, replace: "  const doubled = s;",
     run: ["packages/node-ops/test/tmux-cli.test.ts"], expect: "amain b" },
   { id: "t2-kill-waits", task: "2", file: "packages/node-ops/test/isolated-tmux.ts",
-    find: "    for (let i = 0; i < 25 && !gone(); i++) await pause(20);\n    for (let i = 0; pid > 0 && i < 10 && fate(pid) === \"alive\"; i++) await pause(20);\n", replace: "",
+    find: "    for (let i = 0; i < 25 && !gone(); i++) await pause(20);\n    for (const end = Date.now() + REAP_WAIT_MS; pid > 0 && fate(pid) === \"alive\" && Date.now() < end;) await pause(20);\n", replace: "",
     run: ["packages/node-ops/test/tmux-cli.test.ts"], expect: "to throw" },
   { id: "t2-kill-removes-socket", task: "2", file: "packages/node-ops/test/isolated-tmux.ts",
     find: "    rmSync(join(process.env.TMUX_TMPDIR || \"/tmp\", `tmux-${process.getuid?.() ?? 0}`, socket), { force: true });\n", replace: "",
