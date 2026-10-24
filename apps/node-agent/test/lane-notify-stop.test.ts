@@ -1,7 +1,7 @@
 // The Stop hook script (hooks/lane-notify-stop): the turn end is posted before tmux or git can use up Claude Code's
 // 20 s hook timeout (T-422). A stub relay records the POST; shims stand in for tmux, git and lanes.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -484,6 +484,7 @@ describe("lane-notify-stop", () => {
     const freshRun = join(base, "run.FRESH");
     mkdirSync(oldRun, { recursive: true });
     mkdirSync(freshRun, { recursive: true });
+    chmodSync(base, 0o700);                                           // as an earlier hook made it
     const twoHoursAgo = Date.now() / 1000 - 2 * 60 * 60;
     utimesSync(oldRun, twoHoursAgo, twoHoursAgo);
     const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "sweep leftovers"));
@@ -511,5 +512,70 @@ describe("lane-notify-stop", () => {
     expect(body).not.toHaveProperty("branch");
     expect(body).not.toHaveProperty("changed");
     expect(body).not.toHaveProperty("ahead");
+  });
+
+  // The per-user directory is trusted only when it is a real directory, owned by the current user, with mode 700: on the
+  // /tmp fallback another local user could have made it first.
+  describe("the per-user working directory (T-422)", () => {
+    async function runWith(prepare: (base: string, dir: string) => void, extraShims?: (bin: string) => void, uid: number = process.getuid?.() ?? 0) {
+      const dir = scratchDir();
+      const { repo } = initRepo(dir);
+      const { lanes } = installShims(dir);
+      if (extraShims) extraShims(join(dir, "bin"));
+      const runtime = runDir(dir);
+      mkdirSync(runtime, { recursive: true });
+      const base = join(runtime, `morndo-hook-${uid}`);
+      prepare(base, dir);
+      const stub = await relay();
+      const run = startHook(dir, String(stub.port), lanes, hookInput(repo, "untrusted directory"));
+      expect(await until(() => stub.hits.length === 1, 5_000)).toBe(true);
+      expect(await waitExit(run.child, run.started + 8_000)).toBe(0);
+      await new Promise(resolve => setTimeout(resolve, 1_500));      // the hourly cleanup, if it were to run, is in the background
+      const body = posted(stub.hits[0]!);
+      expect(body.window).toBe("");
+      expect(body).not.toHaveProperty("branch");
+      expect(body).not.toHaveProperty("changed");
+      expect(body).not.toHaveProperty("ahead");
+      return { dir, base };
+    }
+    const oldRun = (parent: string): string => {
+      const old = join(parent, "run.OLD");
+      mkdirSync(old, { recursive: true });
+      const twoHoursAgo = Date.now() / 1000 - 2 * 60 * 60;
+      utimesSync(old, twoHoursAgo, twoHoursAgo);
+      return old;
+    };
+
+    it("refuses a directory that belongs to someone else: posts without facts, writes and cleans nothing in it", async () => {
+      let old = "";
+      const { base } = await runWith(
+        base => { mkdirSync(base, { mode: 0o700, recursive: true }); chmodSync(base, 0o700); old = oldRun(base); },
+        bin => writeExe(join(bin, "id"), `#!/bin/sh\nif [ "$1" = "-u" ]; then echo 4242; else exec /usr/bin/id "$@"; fi\n`),
+        4242,
+      );
+      expect(existsSync(old)).toBe(true);
+      expect(readdirSync(base)).toEqual(["run.OLD"]);
+    });
+
+    it("refuses a symlink: posts without facts, writes and cleans nothing behind it", async () => {
+      let elsewhere = "";
+      let old = "";
+      await runWith((base, dir) => {
+        elsewhere = join(dir, "elsewhere");
+        mkdirSync(elsewhere, { mode: 0o700 });
+        chmodSync(elsewhere, 0o700);
+        old = oldRun(elsewhere);
+        symlinkSync(elsewhere, base);
+      });
+      expect(existsSync(old)).toBe(true);
+      expect(readdirSync(elsewhere)).toEqual(["run.OLD"]);
+    });
+
+    it("refuses a directory that is not mode 700: posts without facts, writes and cleans nothing in it", async () => {
+      let old = "";
+      const { base } = await runWith(base => { mkdirSync(base, { recursive: true }); chmodSync(base, 0o755); old = oldRun(base); });
+      expect(existsSync(old)).toBe(true);
+      expect(readdirSync(base)).toEqual(["run.OLD"]);
+    });
   });
 });

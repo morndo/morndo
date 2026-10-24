@@ -75,6 +75,9 @@ cwd=$(jq -r '.cwd // ""' <<<"$in")
 
 base="${XDG_RUNTIME_DIR:-${TMPDIR:-/tmp}}/morndo-hook-$(id -u)"
 mkdir -p -m 700 "$base" 2>/dev/null || base=""
+# mkdir -p also succeeds on a directory someone else made first (the /tmp fallback): use it only when it is a real
+# directory (find does not follow a symlink for -type d), owned by this user, with mode 700; otherwise post without facts.
+[ -n "$base" ] && [ -z "$(find "$base" -maxdepth 0 -type d -user "$(id -u)" -perm 700 2>/dev/null)" ] && base=""
 tmp=""
 [ -n "$base" ] && tmp=$(mktemp -d "$base/run.XXXXXX" 2>/dev/null)
 if [ -n "$tmp" ]; then
