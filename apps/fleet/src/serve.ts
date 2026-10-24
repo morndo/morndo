@@ -45,6 +45,7 @@ import type { RolloutAuthority } from "./adapters/client-api.ts";
 import { decodePrincipalKey, hubFilePrincipalAuthority, hubIdentityPubFile, principalAuthority } from "./adapters/principal-check.ts";
 import { UpdaterStateWatch, updaterStateFile } from "./adapters/updater-state-watch.ts";
 import { applyRevocationJournal } from "./application/revocations.ts";
+import { ProtectedIdentity } from "./application/protected-identity.ts";
 import { Router } from "./application/router.ts";
 import { Runs } from "./application/runs.ts";
 
@@ -109,6 +110,8 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   pruneAudit();
   const active = nodes.list().filter(n => n.revokedAt === null).map(n => n.name);
   const lanes = new LaneRegistry({ store: new LanesStore(db), events, audit, activeNodes: active, now });
+  const identity = new ProtectedIdentity(new Set(worker.protectedLanes));
+  identity.seed(lanes.list());
   // The build this fleet runs (updates §7): the control plane's own Version, the only one it may commit and the
   // ceiling for every node's (RL11). The Rollouts service is made after the connections (it pushes to them); the
   // connections reach it through these closures, so the gate in Connections.request answers from the service.
@@ -157,6 +160,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
   events.subscribe(e => {
     if (e.t !== "inventory") return;
     const panes = (e.body as { panes: Pane[] }).panes;
+    identity.observe(panes);
     lanes.inventory(e.node, panes);
     deliveries.inventory(e.node, panes);
     const running = new Map<string, string | null>();
@@ -253,7 +257,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     await agents.ready;
     api = await startClientApi(config.socketPath, {
       router, connections, lanes, nodes, audit, events, deliveries, laneEvents, laneWatch, jobs, runs: laneRuns, rollouts,
-      worker: { socketPath: worker.path, scope: { protectedLanes: new Set(worker.protectedLanes), startNodes: new Set(worker.startNodes) } },
+      worker: { socketPath: worker.path, scope: { protectedLanes: new Set(worker.protectedLanes), startNodes: new Set(worker.startNodes) }, identity },
       rolloutAuthority: o.rolloutAuthority
         ?? (config.principalKey !== undefined
           ? principalAuthority(decodePrincipalKey(config.principalKey), { now })

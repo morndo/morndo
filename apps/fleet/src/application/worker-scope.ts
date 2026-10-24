@@ -1,16 +1,23 @@
 // What a caller on the worker socket may do (T-440). Pure: the socket that accepted the connection chooses the scope,
 // and this says yes or no for one op or one delivery. A no is the whole answer — nothing is sent to a node. Any op
 // not listed is closed. A write that changes a lane, and a read of files, is limited to nodes in startNodes. A
-// protected lane is refused everywhere, writes and peeks alike, and an unknown pane is refused. Reasons name the
+// protected lane is refused everywhere, writes and peeks alike, and an unknown pane is refused. A pane seen under a
+// protected name stays protected after its window is renamed, and a file of its session, project directory or working
+// directory is refused on a start node. What a worker is shown of such a lane drops the words. Reasons name the
 // worker socket and never the caller's text, keystrokes or arguments.
-import { parseWorkerId, type OpName } from "@morndo/protocol";
+import { parseWorkerId, type OpName, type Pane } from "@morndo/protocol";
 import type { Target } from "./router.ts";
 
 export type WorkerScope = { protectedLanes: ReadonlySet<string>; startNodes: ReadonlySet<string> };
 export type WorkerLook = {
   nameOfWorker(workerId: string): string | null;   // null: no node's latest inventory lists it
   nodeOfLane(name: string): string | null;         // null: the name is not one resolved lane
+  workerOfLane(name: string): string | null;       // null: the name is not one resolved lane
+  isProtectedWorker(id: string): boolean;          // the worker ID is a protected lane's pane, a renamed one included
+  isProtectedPath(node: string, path: string): boolean;
 };
+// What to leave out of a worker's view. A lane name, a worker ID, or a session.
+export type Hide = { lane(name: string | null): boolean; worker(id: string): boolean; session(id: string): boolean };
 export type WorkerVerdict = { ok: true; args?: Record<string, unknown> } | { ok: false; reason: string };
 
 const PEEK_OPS: ReadonlySet<OpName> = new Set<OpName>(["pane.capture", "pane.frame"]);
@@ -43,6 +50,14 @@ function panesOf(target: Target, args: Record<string, unknown>): NamedPane[] {
   return panes;
 }
 
+// A lane name is protected when the scope lists it, or when the pane that name resolves to is already a protected worker
+// (its window was renamed away from the protected name).
+function laneProtected(scope: WorkerScope, name: string, look: WorkerLook): boolean {
+  if (scope.protectedLanes.has(name)) return true;
+  const id = look.workerOfLane(name);
+  return id !== null && look.isProtectedWorker(id);
+}
+
 // A pane write names at least one pane. Each lane name is protected or unresolved, each worker ID is missing from
 // every inventory or names a protected lane, or any named node (the target's, the one inside a worker ID, the lane's)
 // sits outside startNodes: any one of those refuses the write.
@@ -53,7 +68,7 @@ function writeWhy(scope: WorkerScope, target: Target, args: Record<string, unkno
   if ("node" in target) nodes.push(target.node);
   for (const pane of panes) {
     if (pane.kind === "lane") {
-      if (scope.protectedLanes.has(pane.name)) return "it addresses a protected lane";
+      if (laneProtected(scope, pane.name, look)) return "it addresses a protected lane";
       const node = look.nodeOfLane(pane.name);
       if (node === null) return "that lane is unknown";
       nodes.push(node);
@@ -61,7 +76,7 @@ function writeWhy(scope: WorkerScope, target: Target, args: Record<string, unkno
     }
     const name = look.nameOfWorker(pane.id);
     if (name === null) return "that pane is in no node's inventory";
-    if (scope.protectedLanes.has(name)) return "it addresses a protected lane";
+    if (look.isProtectedWorker(pane.id)) return "it addresses a protected lane";
     nodes.push(parseWorkerId(pane.id)?.node ?? null);
   }
   if (nodes.some(node => node === null || !scope.startNodes.has(node))) return "that node is not one the worker socket may place work on";
@@ -76,32 +91,32 @@ function peekWhy(scope: WorkerScope, target: Target, args: Record<string, unknow
   if (panes.length === 0) return "it names no pane";
   for (const pane of panes) {
     if (pane.kind === "lane") {
-      if (scope.protectedLanes.has(pane.name)) return "it addresses a protected lane";
+      if (laneProtected(scope, pane.name, look)) return "it addresses a protected lane";
       if (look.nodeOfLane(pane.name) === null) return "that lane is unknown";
       continue;
     }
     const name = look.nameOfWorker(pane.id);
     if (name === null) return "that pane is in no node's inventory";
-    if (scope.protectedLanes.has(name)) return "it addresses a protected lane";
+    if (look.isProtectedWorker(pane.id)) return "it addresses a protected lane";
   }
   return null;
 }
 
 // captureMany keeps the worker IDs whose pane is known and not protected, in the order given, and drops the rest.
-function visibleWorkerIds(scope: WorkerScope, ids: unknown, look: WorkerLook): string[] {
+function visibleWorkerIds(ids: unknown, look: WorkerLook): string[] {
   if (!Array.isArray(ids)) return [];
   const kept: string[] = [];
   for (const id of ids) {
     if (typeof id !== "string") continue;
     const name = look.nameOfWorker(id);
-    if (name !== null && !scope.protectedLanes.has(name)) kept.push(id);
+    if (name !== null && !look.isProtectedWorker(id)) kept.push(id);
   }
   return kept;
 }
 
 export function workerOpVerdict(scope: WorkerScope, req: { target: Target; op: OpName; args: Record<string, unknown> }, look: WorkerLook): WorkerVerdict {
   if (req.op === "inventory.get" || req.op === "op.status") return { ok: true };
-  if (req.op === "pane.captureMany") return { ok: true, args: { ...req.args, workerIds: visibleWorkerIds(scope, req.args.workerIds, look) } };
+  if (req.op === "pane.captureMany") return { ok: true, args: { ...req.args, workerIds: visibleWorkerIds(req.args.workerIds, look) } };
   if (PEEK_OPS.has(req.op)) {
     const why = peekWhy(scope, req.target, req.args, look);
     return why === null ? { ok: true } : closed(req.op, why);
@@ -109,6 +124,8 @@ export function workerOpVerdict(scope: WorkerScope, req: { target: Target; op: O
   if (FILE_OPS.has(req.op)) {
     const node = placeNode(req.target, look);
     if (node === null || !scope.startNodes.has(node)) return closed(req.op, "that node is not one the worker socket may read");
+    if (typeof req.args.path === "string" && look.isProtectedPath(node, req.args.path)) return closed(req.op, "that path belongs to a protected lane");
+    if (req.op === "worktree.list" && typeof req.args.repo === "string" && look.isProtectedPath(node, req.args.repo)) return closed(req.op, "that path belongs to a protected lane");
     return { ok: true };
   }
   if (PANE_WRITE.has(req.op)) {
@@ -116,13 +133,13 @@ export function workerOpVerdict(scope: WorkerScope, req: { target: Target; op: O
     return why === null ? { ok: true } : closed(req.op, why);
   }
   if (PLACE_OPS.has(req.op)) {
-    if (req.op === "lane.start" && typeof req.args.name === "string" && scope.protectedLanes.has(req.args.name)) return closed(req.op, "that lane name is protected");
+    if (req.op === "lane.start" && typeof req.args.name === "string" && laneProtected(scope, req.args.name, look)) return closed(req.op, "that lane name is protected");
     const node = placeNode(req.target, look);
     if (node === null || !scope.startNodes.has(node)) return closed(req.op, "that node is not one the worker socket may place work on");
     return { ok: true };
   }
   if (req.op === "lane.stop") {
-    if (typeof req.args.name === "string" && scope.protectedLanes.has(req.args.name)) return closed(req.op, "that lane name is protected");
+    if (typeof req.args.name === "string" && laneProtected(scope, req.args.name, look)) return closed(req.op, "that lane name is protected");
     const node = placeNode(req.target, look);
     if (node === null || !scope.startNodes.has(node)) return closed(req.op, "that node is not one the worker socket may place work on");
     return { ok: true };
@@ -144,7 +161,7 @@ export function workerDeliveryCancelVerdict(scope: WorkerScope, target: { lane?:
 function deliveryWhy(scope: WorkerScope, req: { lane?: string; workerId?: string }, look: WorkerLook, what: string): WorkerVerdict {
   if (req.lane === undefined && req.workerId === undefined) return closed(what, "that lane is unknown");
   if (req.lane !== undefined) {
-    if (scope.protectedLanes.has(req.lane)) return closed(what, "that lane is protected");
+    if (laneProtected(scope, req.lane, look)) return closed(what, "that lane is protected");
     const node = look.nodeOfLane(req.lane);
     if (node === null) return closed(what, "that lane is unknown");
     if (!scope.startNodes.has(node)) return closed(what, "that node is not one the worker socket may place work on");
@@ -152,9 +169,65 @@ function deliveryWhy(scope: WorkerScope, req: { lane?: string; workerId?: string
   if (req.workerId !== undefined) {
     const name = look.nameOfWorker(req.workerId);
     if (name === null) return closed(what, "that pane is in no node's inventory");
-    if (scope.protectedLanes.has(name)) return closed(what, "that lane is protected");
+    if (look.isProtectedWorker(req.workerId)) return closed(what, "that lane is protected");
     const node = parseWorkerId(req.workerId)?.node ?? null;
     if (node === null || !scope.startNodes.has(node)) return closed(what, "that node is not one the worker socket may place work on");
   }
   return { ok: true };
+}
+
+function sessionHidden(id: unknown, hide: Hide): boolean {
+  return typeof id === "string" && id !== "" && hide.session(id);
+}
+
+function asRecord(body: unknown): Record<string, unknown> | null {
+  return typeof body === "object" && body !== null && !Array.isArray(body) ? body as Record<string, unknown> : null;
+}
+
+// A string as itself; null, or a field the event doesn't carry, as null.
+function named(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
+}
+
+// A protected pane keeps its name, status and process. The same object comes back for a pane that is not protected.
+export function redactPanes<T extends Pane>(panes: readonly T[], hide: Hide): T[] {
+  return panes.map(pane => {
+    if (hide.lane(pane.window) || hide.worker(pane.workerId) || sessionHidden(pane.sessionId, hide)) {
+      const bare: Pane = { workerId: pane.workerId, window: pane.window, cwd: "", status: pane.status, pid: pane.pid };
+      return bare as T;
+    }
+    return pane;
+  });
+}
+
+// An inventory event loses the protected panes' words. A run or lane event of a protected lane is dropped. Every other
+// event is the same object.
+export function redactEvent<E extends { t: string; node: string; body: unknown }>(e: E, hide: Hide): E | null {
+  if (e.t === "inventory") {
+    const body = asRecord(e.body);
+    if (body === null || !Array.isArray(body.panes)) return e;
+    return { ...e, body: { ...body, panes: redactPanes(body.panes as Pane[], hide) } };
+  }
+  if (e.t === "run" || e.t === "lane") {
+    const body = asRecord(e.body);
+    if (body !== null) {
+      const lane = hide.lane(named(body.lane));
+      const session = sessionHidden(body.sessionId, hide);
+      if (e.t === "run" && (lane || session)) return null;
+      if (e.t === "lane" && (lane || hide.lane(named(body.window)) || session)) return null;
+    }
+  }
+  return e;
+}
+
+export function visibleRuns<T extends { lane: string | null; sessionId?: string | null }>(runs: readonly T[], hide: Hide): T[] {
+  return runs.filter(run => !hide.lane(run.lane) && !sessionHidden(run.sessionId, hide));
+}
+
+export function visibleLaneWatch<T extends { window: string | null }>(entries: readonly T[], hide: Hide): T[] {
+  return entries.filter(entry => !hide.lane(entry.window));
+}
+
+export function visibleLaneEvents<T extends { lane: string | null; window: string | null; sessionId?: string | null }>(events: readonly T[], hide: Hide): T[] {
+  return events.filter(event => !hide.lane(event.lane) && !hide.lane(event.window) && !sessionHidden(event.sessionId, hide));
 }

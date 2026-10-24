@@ -44,7 +44,7 @@ import { chmodSync, unlinkSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery, type PrincipalAsk } from "@morndo/protocol";
+import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery, type Pane, type PrincipalAsk } from "@morndo/protocol";
 import { Flight, productStamp } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
 import type { Deliveries } from "../application/deliveries.ts";
@@ -55,7 +55,8 @@ import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
 import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
 import type { Router, Target } from "../application/router.ts";
-import { workerDeliveryCancelVerdict, workerDeliveryVerdict, workerOpVerdict, type WorkerLook, type WorkerScope } from "../application/worker-scope.ts";
+import type { ProtectedIdentity } from "../application/protected-identity.ts";
+import { redactEvent, redactPanes, visibleLaneEvents, visibleLaneWatch, visibleRuns, workerDeliveryCancelVerdict, workerDeliveryVerdict, workerOpVerdict, type Hide, type WorkerLook, type WorkerScope } from "../application/worker-scope.ts";
 import type { Rollouts } from "../application/rollouts.ts";
 import type { Runs } from "../application/runs.ts";
 import type { Audit } from "./audit.ts";
@@ -85,8 +86,9 @@ export type ClientApiDeps = {
   rolloutAuthority: RolloutAuthority;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
-  // The worker socket, when the service opens one. Its scope is decided here; the lookups come from the lane registry.
-  worker?: { socketPath: string; scope: WorkerScope };
+  // The worker socket, when the service opens one. Its scope is decided here; the lookups come from the lane registry,
+  // and the identity is what the fleet remembers of a protected lane after a rename.
+  worker?: { socketPath: string; scope: WorkerScope; identity: ProtectedIdentity };
 };
 export type ClientApi = { close(): Promise<void> };
 
@@ -204,10 +206,27 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   const answerOp = (res: ServerResponse, ran: { status: number; outcome: Outcome }) =>
     json(res, ran.status, ran.outcome, ran.status === 503 ? { "Retry-After": "1" } : {});
 
-  // Lookups for the worker policy come from the lane registry. The policy itself rides on the request's scope.
+  // Lookups for the worker policy come from the lane registry and from what the fleet remembers of a protected lane.
+  // The policy itself rides on the request's scope. The owner socket never asks these.
   const look: WorkerLook = {
     nameOfWorker: id => d.lanes.nameOfWorker(id),
     nodeOfLane: name => { const r = d.lanes.resolve(name); return r.kind === "ok" ? r.node : null; },
+    workerOfLane: name => { const r = d.lanes.resolve(name); return r.kind === "ok" ? r.workerId : null; },
+    isProtectedWorker: id => {
+      const name = d.lanes.nameOfWorker(id);
+      return (name !== null && (d.worker?.scope.protectedLanes.has(name) ?? false)) || (d.worker?.identity.hasWorker(id) ?? false);
+    },
+    isProtectedPath: (node, path) => d.worker?.identity.isProtectedPath(node, path) ?? false,
+  };
+  const hide: Hide = {
+    lane: name => {
+      if (name === null || d.worker === undefined) return false;
+      if (d.worker.scope.protectedLanes.has(name)) return true;
+      const id = look.workerOfLane(name);
+      return id !== null && look.isProtectedWorker(id);
+    },
+    worker: id => look.isProtectedWorker(id),
+    session: id => d.worker?.identity.hasSession(id) ?? false,
   };
   // One refusal, one audit row. A fleet.db that won't take it is logged and never changes the answer already decided.
   function noteRefused(what: string, node: string | null, reason: string, req: IncomingMessage): void {
@@ -311,7 +330,9 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         if (!owned) return json(res, 200, { ok: false, error: opError("denied", "missing"), store: null, storeSeq: null });
         return answerOp(res, await runOp({ node: owned.node }, b.op, args, asked(req, b, scope)));
       }
-      return answerOp(res, await runOp(b.target, b.op, args, asked(req, b, scope)));
+      const ran = await runOp(b.target, b.op, args, asked(req, b, scope));
+      if (scope.kind === "worker" && b.op === "inventory.get") return answerOp(res, { status: ran.status, outcome: shownInventory(ran.outcome) });
+      return answerOp(res, ran);
     }
     if (method === "GET" && s.length === 3 && first === "files") {
       const node = second ?? "";
@@ -320,15 +341,28 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         noteRefused("files", node, message, req);
         return json(res, 403, { error: "not_allowed", message });
       }
-      return streamFile(res, d.router, node, third ?? "");
+      const filePath = third ?? "";
+      if (scope.kind === "worker" && look.isProtectedPath(node, filePath)) {
+        const message = "reading a file is not allowed on the worker socket: that path belongs to a protected lane";
+        noteRefused("files", node, message, req);
+        return json(res, 403, { error: "not_allowed", message });
+      }
+      return streamFile(res, d.router, node, filePath);
     }
     if (method === "GET" && s.length === 1 && first === "lane-events") {
       const since = queryOf(req.url).get("since") ?? "0";
       if (!/^\d{1,15}$/.test(since)) throw new HttpError(400, "since must be a lane event's seq (a whole number, 0 for the oldest kept)");
-      return json(res, 200, { events: d.laneEvents.since(Number(since)) });
+      const events = d.laneEvents.since(Number(since));
+      return json(res, 200, { events: scope.kind === "worker" ? visibleLaneEvents(events, hide) : events });
     }
-    if (method === "GET" && s.length === 1 && first === "lane-watch") return json(res, 200, { lanes: d.laneWatch?.view() ?? [] });
-    if (method === "GET" && s.length === 1 && first === "runs") return json(res, 200, { runs: d.runs?.view() ?? [] });
+    if (method === "GET" && s.length === 1 && first === "lane-watch") {
+      const lanes = d.laneWatch?.view() ?? [];
+      return json(res, 200, { lanes: scope.kind === "worker" ? visibleLaneWatch(lanes, hide) : lanes });
+    }
+    if (method === "GET" && s.length === 1 && first === "runs") {
+      const runs = d.runs?.view() ?? [];
+      return json(res, 200, { runs: scope.kind === "worker" ? visibleRuns(runs, hide) : runs });
+    }
     // The Rollout the fleet carries (updates §7): reads answer however the fleet stands; the writes share the ops'
     // hold refusal (RL9) — nothing moves while the fleet updates itself.
     if (method === "GET" && s.length === 1 && first === "rollout") {
@@ -442,7 +476,25 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   // eventsBufferBytes it is closed with 1013 and unsubscribed, and gets the current state again when it reconnects.
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   const clients = new Set<WebSocket>();
-  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  // An inventory answer the worker socket may show: remember the panes, then drop a protected lane's words. The outcome's
+  // store and storeSeq stay; only result.panes changes.
+  function shownInventory(outcome: Outcome): Outcome {
+    if (!outcome.ok || d.worker === undefined) return outcome;
+    const result = outcome.result;
+    if (typeof result !== "object" || result === null || !("panes" in result) || !Array.isArray(result.panes)) return outcome;
+    const panes = result.panes as Pane[];
+    d.worker.identity.observe(panes);
+    return { ...outcome, result: { ...result, panes: redactPanes(panes, hide) } };
+  }
+  // A live event for a worker socket: remember an inventory's panes, then redact. Null is an event that socket does not see.
+  function workerEvent(e: FleetEvent): FleetEvent | null {
+    if (e.t === "inventory" && d.worker !== undefined) {
+      const body = e.body;
+      if (typeof body === "object" && body !== null && "panes" in body && Array.isArray(body.panes)) d.worker.identity.observe(body.panes as Pane[]);
+    }
+    return redactEvent(e, hide);
+  }
+  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer, scope: Scope) => {
     socket.on("error", () => socket.destroy());
     let s: string[] | null;
     try { s = segments(req.url); } catch { s = null; }
@@ -452,13 +504,15 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       let unsubscribe = () => {};
       const send = (e: FleetEvent) => {
         if (ws.readyState !== ws.OPEN) return;
+        const event = scope.kind === "worker" ? workerEvent(e) : e;
+        if (event === null) return;
         if (ws.bufferedAmount > eventsBufferBytes) {
           unsubscribe();
           d.log.warn(`events socket: a client is ${ws.bufferedAmount} bytes behind; closing it (1013)`);
           ws.close(1013, "too far behind; reconnect for the current state");
           return;
         }
-        ws.send(JSON.stringify(e));
+        ws.send(JSON.stringify(event));
       };
       const nodes = d.connections.list();
       for (const n of nodes) send({ t: "status", node: n.name, body: { status: n.status } });
@@ -481,7 +535,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     prepareSocketDir(path);
     await clearStaleSocket(path);
     const server = createServer((req, res) => void handle(req, res, scope));
-    server.on("upgrade", onUpgrade);
+    server.on("upgrade", (req, socket, head) => onUpgrade(req, socket, head, scope));
     try {
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);

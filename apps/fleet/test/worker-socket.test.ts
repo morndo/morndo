@@ -30,7 +30,7 @@ async function world(o: FleetOptions = {}, ws: { protectedLanes?: string[] } = {
   const srv = await fleet.online("edge");
   for (const a of [ctl, pc, srv]) nodeQueue(a);
   ctl.inventory([{ workerId: "ctl.3fa2c1d0.0", window: "manager", cwd: "/work", status: "idle", pid: 100 }, { workerId: "ctl.3fa2c1d0.1", window: "worker-a", cwd: "/work", status: "idle", pid: 100 }]);
-  pc.inventory([{ workerId: "pc.3fa2c1d0.0", window: "pc-lane", cwd: "/work", status: "idle", pid: 100 }]);
+  pc.inventory([{ workerId: "pc.3fa2c1d0.0", window: "pc-lane", cwd: "/work/pc-lane-dir", status: "idle", pid: 100 }]);
   srv.inventory([{ workerId: "edge.3fa2c1d0.0", window: "srv-lane", cwd: "/work", status: "idle", pid: 100 }]);
   await vi.waitFor(() => expect(fleet.lanes.list()).toHaveLength(4));
   return { fleet, ctl, pc, srv, owner: client(fleet.config.socketPath, { "x-morndo-client": "lanes" }), worker: client(workerPath, { "x-morndo-client": "lanes" }), workerPath };
@@ -382,7 +382,7 @@ describe("worker socket: a protected lane's words, identity and files", () => {
     expect((await route("/work/pcl/notes.txt"))?.status).toBe(403);
     expect((await route(`/data/u/.cfg/projects/-work-pcl/${SID}.jsonl`))?.status).toBe(403);
     expect((await route("/work/other/a.txt"))?.status).not.toBe(403);
-    expect(sent(w.pc, "file.stat", "file.get").map(r => (r.args as { path: string }).path)).toEqual(["/work/other/a.txt", "/work/pclx/a.txt", "/work/other/a.txt"]);
+    expect(sent(w.pc, "file.stat", "file.get").map(r => (r.args as { path: string }).path)).toEqual(["/work/other/a.txt", "/work/pclx/a.txt", "/work/other/a.txt", "/work/other/a.txt"]);   // the last two: the files route sends file.stat, then file.get
   });
 
   it("worker socket: a delivery by a protected lane name is refused on a startNode", async () => {

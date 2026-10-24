@@ -823,12 +823,12 @@ export const CONTROLS: Control[] = [
   // ---- PR #12 review, batch B6 (fleet; .keryx/validations/sections/B6.md): one entry per guard its fixes add, each
   // with the test that must notice it gone.
   { id: "b6-s1-close-all-at-once", task: "B6", file: "apps/fleet/src/adapters/client-api.ts",
-    find: "      server.closeIdleConnections();\n    }),",
-    replace: "      server.closeAllConnections();\n    }),",
+    find: "      server.closeIdleConnections();\n    }\n  });",
+    replace: "      server.closeAllConnections();\n    }\n  });",
     run: ["apps/fleet/test/shutdown-drain.test.ts"], expect: "socket hang up" },
   { id: "b6-v21-audit-throw-replaces-outcome", task: "B6", file: "apps/fleet/src/application/router.ts",
-    find: "    try { this.#audit.record(\"client\", `op.${op}`, node, detail); }\n    catch (e) {",
-    replace: "    this.#audit.record(\"client\", `op.${op}`, node, detail);\n    if (false) (e: unknown) => {",
+    find: "    try { this.#audit.record(o.actor ?? \"client\", `op.${op}`, node, detail); }\n    catch (e) {",
+    replace: "    this.#audit.record(o.actor ?? \"client\", `op.${op}`, node, detail);\n    if (false) (e: unknown) => {",
     run: ["apps/fleet/test/audit-failure.test.ts"], expect: "expected 500 to be 200" },
   { id: "b6-v39-no-store-failure-hold", task: "B6", file: "apps/fleet/src/application/delivery.ts",
     find: " || this.#held(k)) return false;",
