@@ -34,7 +34,7 @@ import { DeliveryWorker, type Backoff, type Post } from "./application/delivery.
 import { EventHub } from "./application/events.ts";
 import { HookIntake, unsubscribedScriptPaths } from "./application/hook-intake.ts";
 import { IntakeWindow } from "./application/intake-window.ts";
-import { LaneEvents } from "./application/lane-events.ts";
+import { LaneEvents, rulesOf } from "./application/lane-events.ts";
 import { LaneEventsPush } from "./application/lane-events-push.ts";
 import { LaneRegistry } from "./application/lane-registry.ts";
 import { LaneWatch, REBUILD_WINDOW_MS } from "./application/lane-watch.ts";
@@ -164,8 +164,11 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     store: laneEventsStore, events, config: config.laneEvents, log, now, onWaiting: () => laneEventsPush.kick(), waitMs: config.laneWatch.waitingMin * 60_000,
   });
   // Every lane's last turn and its deadline (reliable lanes §3.2): stale lanes become lane events and, nudged, deliveries.
+  // The orchestrator's own lane and ignored windows make no lane events, so a missing Stop there is not a lost turn.
+  const laneRules = rulesOf(config.laneEvents);
   const laneWatch = new LaneWatch({
     config: config.laneWatch, log, now, raise: d => laneEvents.raise(d), nudge: r => deliveries.post(r, "fleet"),
+    watched: w => w !== laneRules.manager && !laneRules.ignore.some(g => g.test(w)),
     // A window is there while its node claims the name, a name in conflict too (another node's window called the same).
     alive: (node, window) => {
       const r = lanes.resolve(window);
@@ -175,6 +178,7 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     nudgeTarget: (node, window) => sessions.get(node)?.get(window) ?? null,
     ...(o.laneWatchSweepMs === undefined ? {} : { sweepMs: o.laneWatchSweepMs }),
   });
+  events.subscribe(e => { if (e.t === "inventory") laneWatch.panes(e.node, (e.body as { panes: Pane[] }).panes); });
   laneEvents.watchWith(laneWatch);
   events.subscribe(e => { if (e.t === "delivery") laneEventsPush.delivery(e.body as Delivery); });
   const router = new Router({ connections, lanes, audit, log });
