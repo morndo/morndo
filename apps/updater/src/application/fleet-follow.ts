@@ -6,7 +6,7 @@
 // reads it itself — so this file asks the fleet nothing on the control plane's behalf, and the skew gate asks it
 // only for its node list.
 import {
-  NODE_JITTER_MAX_MS, beginRollout, formatVersion, nodeMayApply, parseVersion, skew,
+  NODE_JITTER_MAX_MS, beginRollout, compareVersions, formatVersion, nodeMayApply, parseVersion, skew,
   type ProtocolRange, type Version,
 } from "@morndo/domain";
 import type { FleetNode, FleetView, FleetWord, UpdateStore } from "./ports.ts";
@@ -117,6 +117,26 @@ export function applyUnitGate(p: {
   const targetText = formatVersion(p.target);
   if (p.word.rollout?.version === targetText && p.word.rollout.halted) return err({ reason: "halted" });
   if (p.localHalts.some(h => h.version === targetText)) return err({ reason: "halted" });
+  return { ok: true };
+}
+
+// A node asked for a named Version (`morndo update --to`) never takes one above its control plane (RL11, §7).
+// The word is the tick's: no word, no control plane in it, or one older than the freshness bound, and `--to`
+// waits. A target at or below the control plane is the gate open. The caller asks only when this machine runs
+// no hub or no fleet — a control plane is not gated here.
+export function nodeToGate(p: { word: FleetWord | null; now: number; target: Version }):
+  { ok: true } | { ok: false; sentence: string } {
+  const heard = heardControlPlane(p.word, p.now);
+  const controlPlane = heard === null ? null : parseVersion(heard.version);
+  if (heard === null || controlPlane === null) {
+    return { ok: false, sentence: "the fleet has not told this node its control plane, so --to waits (RL11)" };
+  }
+  if (compareVersions(p.target, controlPlane) > 0) {
+    return {
+      ok: false,
+      sentence: `${formatVersion(p.target)} is above the control plane (${heard.version}); a node is never newer than its control plane (RL11)`,
+    };
+  }
   return { ok: true };
 }
 

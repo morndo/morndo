@@ -5,7 +5,7 @@
 // list, the self-test, the promotion. Every exit but a staging leaves nothing behind (§13), and every outcome is a
 // row in the store.
 import {
-  acceptFeed, acceptKeySets, admit, compareVersions, equalVersions, higherOf, judgeVerification, parseVersion,
+  acceptFeed, acceptKeySets, admit, compareVersions, equalVersions, formatVersion, higherOf, judgeVerification, parseVersion,
   type FeedEntry, type Installation, type KeySet, type OfferedKeySet, type Platform, type VerificationStep,
   type Version,
 } from "@morndo/domain";
@@ -74,7 +74,7 @@ export class CheckService {
     this.#p = p;
   }
 
-  async check(): Promise<CheckOutcome> {
+  async check(ask?: { to: Version }): Promise<CheckOutcome> {
     const { feed, artifacts, verifier, installer, store, settings: settingsSource, clock, platform, switches, fleet, state } = this.#p;
     const settings = settingsSource.read();
     // What the store learns on the way (§4.5): the feed's word once accepted, the Version once offered.
@@ -170,29 +170,43 @@ export class CheckService {
       feedExpiresAt = channelFeed.expiresAt;
       store.saveTrust({ keySet, highestFeedSeq: { ...trust.highestFeedSeq, [settings.channel]: channelFeed.seq } });
 
-      // The offer: the highest Version the feed lists that is not withdrawn (RL2, RL12). An unparsable entry is
-      // skipped, never guessed at. A pin (RL14) narrows it: the entry the pin names — when the feed offers it and
-      // nobody withdrew it — is the offer even with a higher one standing above it, so a pinned machine moves to
-      // its pin instead of refusing every check. A pin the feed does not offer leaves the highest as the offer,
-      // and admit's own word for the difference — pinned — is the answer.
-      const withdrawn = channelFeed.withdrawn
-        .map(parseVersion).filter((v): v is Version => v !== null);
-      const offers: { text: string; version: Version; entry: FeedEntry }[] = [];
-      for (const entry of channelFeed.releases) {
-        const version = parseVersion(entry.version);
-        if (version === null) continue;
-        if (withdrawn.some(w => equalVersions(w, version))) continue;
-        offers.push({ text: entry.version, version, entry });
+      // The offer. With no ask: the highest Version the feed lists that is not withdrawn (RL2, RL12). An unparsable
+      // entry is skipped, never guessed at. A pin (RL14) narrows it: the entry the pin names — when the feed offers
+      // it and nobody withdrew it — is the offer even with a higher one standing above it, so a pinned machine moves
+      // to its pin instead of refusing every check. A pin the feed does not offer leaves the highest as the offer,
+      // and admit's own word for the difference — pinned — is the answer. With `--to`: the feed entry whose version
+      // equals the named one, withdrawn ones included, so a withdrawal can be refused by name. None is no offer.
+      let best: { text: string; version: Version; entry: FeedEntry } | null;
+      if (ask?.to === undefined) {
+        const withdrawn = channelFeed.withdrawn
+          .map(parseVersion).filter((v): v is Version => v !== null);
+        const offers: { text: string; version: Version; entry: FeedEntry }[] = [];
+        for (const entry of channelFeed.releases) {
+          const version = parseVersion(entry.version);
+          if (version === null) continue;
+          if (withdrawn.some(w => equalVersions(w, version))) continue;
+          offers.push({ text: entry.version, version, entry });
+        }
+        const highest = offers.reduce<{ text: string; version: Version; entry: FeedEntry } | null>(
+          (best, offer) => best === null || compareVersions(offer.version, best.version) > 0 ? offer : best, null);
+        const pin = settings.pin;
+        best = pin === null ? highest
+          : offers.find(offer => equalVersions(offer.version, pin)) ?? highest;
+      } else {
+        best = null;
+        for (const entry of channelFeed.releases) {
+          const version = parseVersion(entry.version);
+          if (version !== null && equalVersions(version, ask.to)) { best = { text: entry.version, version, entry }; break; }
+        }
       }
-      const highest = offers.reduce<{ text: string; version: Version; entry: FeedEntry } | null>(
-        (best, offer) => best === null || compareVersions(offer.version, best.version) > 0 ? offer : best, null);
-      const pin = settings.pin;
-      const best = pin === null ? highest
-        : offers.find(offer => equalVersions(offer.version, pin)) ?? highest;
       if (best === null) {
-        return finish({ kind: "up_to_date", current: layout.current }, `no version offered on ${settings.channel}`, layout.current);
+        if (ask?.to === undefined) {
+          return finish({ kind: "up_to_date", current: layout.current }, `no version offered on ${settings.channel}`, layout.current);
+        }
+        offered = formatVersion(ask.to);
+      } else {
+        offered = best.text;
       }
-      offered = best.text;
 
       // RL2, RL12, RL14 and the machine's own memory, in the domain's one place. A principal's `--check` is not a
       // background check (§8.3): mode off and MORNDO_DISABLE_AUTOUPDATE stop the tick, not this.
@@ -212,21 +226,28 @@ export class CheckService {
       // RL12 either way: the fleet's Rollout of the offered Version is halted, or this machine's own halt record
       // of it stands (the record holds even while the fleet cannot be asked). No word from the fleet halts nothing.
       const word = await fleet.view().catch(() => null);
-      const rolloutHalted = word?.rollout?.halted === true && word.rollout.version === best.text
-        || store.halts().some(h => h.version === best.text);
+      const rolloutHalted = word?.rollout?.halted === true && word.rollout.version === offered
+        || store.halts().some(h => h.version === offered);
       const admitted = admit({
         machine,
         switches: { disableAutoUpdate: false, disableUpdates: false },
-        ask: { kind: "auto" },
-        offered: { version: best.version, feed: channelFeed },
+        ask: ask?.to === undefined ? { kind: "auto" } : { kind: "to", version: ask.to, allowDowngrade: false },
+        offered: best === null ? null : { version: best.version, feed: channelFeed },
         rolloutHalted,
       });
       if (!admitted.ok) {
-        if (admitted.error === "not_newer") {
+        if (admitted.error === "not_newer" && ask?.to === undefined) {
           return finish({ kind: "up_to_date", current: layout.current }, `${layout.current} is the newest on ${settings.channel}`, layout.current);
         }
-        return finish({ kind: "skipped", reason: admitted.error, version: best.text }, admitted.error, best.text);
+        return finish({ kind: "skipped", reason: admitted.error, version: offered }, admitted.error, offered);
       }
+      // Above the running Version, but at or below the highest this machine has ever committed: it ran a higher
+      // one and rolled back. The domain admits a named `--to` there; staged() never returns it (its ceiling is
+      // that highest committed Version). Refuse before the manifest or the artifact is fetched.
+      if (ask?.to !== undefined && compareVersions(ask.to, machine.highestCommitted) <= 0) {
+        return finish({ kind: "skipped", reason: "below_committed", version: offered }, "below_committed", offered);
+      }
+      if (best === null) return finish({ kind: "skipped", reason: "no_entry", version: offered }, "no_entry", offered);
 
       // Already staged and installed: nothing is fetched (§6.1's step 1 decides before step 2 downloads).
       if (store.versionRecord(best.text) !== null && installer.has(best.text)) {
