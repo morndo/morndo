@@ -208,18 +208,19 @@ export class UsageService {
     return { account, reportedAt, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: null, sessions: [] };
   }
 
-  // The plan name the account's newest reading that carries one named (plan 4.1 item 3, S7): the family a window with
-  // no length of its own is titled from. The stored source readings the service already loads decide it — newest
-  // capturedAt with a non-null plan wins; none -> null.
-  #planNameOf(account: string, rows?: readonly UsageSourceRow[]): string | null {
-    const list = rows ?? this.#store.usageSourcesOf(account);
+  // The plan name the plan watch has CONFIRMED for the account (plan 4.1 item 3, slice 7 review): the baseline of the
+  // watch whose last leased reading is the newest. A change waits for a second agreeing reading there (AT-28), and
+  // only leased readings reach the watch, so one odd or forged plan string never flips a title or a notice. None
+  // confirmed yet: null.
+  #planNameOf(account: string): string | null {
     let plan: string | null = null;
     let at = -1;
-    for (const r of list) {
-      const reading = r.body.reading;
-      if (reading === null || reading.plan === null || reading.capturedAt <= at) continue;
-      plan = reading.plan;
-      at = reading.capturedAt;
+    for (const [key, value] of this.#watchMap(account)) {
+      if (!key.startsWith("plan|")) continue;
+      const w = value as PlanWatch;
+      if (w.baseline === null || w.baseline.plan === null || w.lastAt <= at) continue;
+      plan = w.baseline.plan;
+      at = w.lastAt;
     }
     return plan;
   }
@@ -280,7 +281,7 @@ export class UsageService {
       const watches = this.#watchMap(base.account);
       // S7 (plan 4.1 item 3): the plan's own family titles a window with no length and no observed gap — the newest
       // reading that named a plan says which, never a caption the poster printed.
-      const family = planFamilyOf(this.#planNameOf(base.account, rows));
+      const family = planFamilyOf(this.#planNameOf(base.account));
       for (const [id, cands] of named) {
         const m = mergeWindow(cands.map(c => c.cand));
         if (m.disagree !== null) disagree.push({ window: id, a: side(m.disagree.a), b: side(m.disagree.b) });

@@ -74,9 +74,9 @@ describe("maps the quota answer by unit and number (AT-39)", () => {
     expect(r.windows).toEqual([FIVE_WINDOW]);
   });
 
-  it("an entry with no readable percent at all is dropped to missing, and an all-unreadable answer is still ok", () => {
+  it("an entry with no readable percent at all is dropped, and an answer with nothing readable is an unknown shape (slice 7 review: it was an ok read with no windows)", () => {
     const r = parseZaiQuota(answer({ body: okBody([{ type: "CREDIT_LIMIT", unit: 3, number: 5, nextResetTime: FIVE_RESET_MS }]) }));
-    expect(r).toEqual({ ok: true, windows: [], missing: ["five_hour", "seven_day"] });
+    expect(r).toMatchObject({ ok: false, reason: "unknown_screen", retryAfterS: null });
   });
 });
 
@@ -110,6 +110,42 @@ describe("the values of one window", () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.windows).toEqual([FIVE_WINDOW]);
+  });
+
+  // The slice 7 review (md-rev6, 2026-10-24 10:31).
+  it("a legacy entry with no unit or number never shadows the explicit 5-hour entry, in either order", () => {
+    const legacy = { type: "TOKENS_LIMIT", percentage: 10, nextResetTime: FIVE_RESET_MS };
+    const explicit = { type: "CREDIT_LIMIT", unit: 3, number: 5, percentage: 90, nextResetTime: FIVE_RESET_MS };
+    for (const limits of [[explicit, legacy], [legacy, explicit]]) {
+      const r = parseZaiQuota(answer({ body: okBody(limits) }));
+      expect(r.ok).toBe(true);
+      if (!r.ok) return;
+      expect(r.windows).toEqual([{ ...FIVE_WINDOW, used_percent: 90 }]);
+    }
+    const alone = parseZaiQuota(answer({ body: okBody([legacy]) }));        // with no explicit one it is the 5-hour window
+    expect(alone.ok && alone.windows.map(w => [w.id, w.used_percent])).toEqual([["five_hour", 10]]);
+  });
+
+  it("limits it recognises but cannot read at all are an unknown shape, not an ok read with nothing in it", () => {
+    const r = parseZaiQuota(answer({ body: okBody([{ ...five, percentage: "42" }, { ...week, percentage: "61" }]) }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reason).toBe("unknown_screen");
+    expect(r.hint).toMatch(/^unknown shape [0-9a-f]{8}$/);
+    // one readable window beside an unreadable one is still an ok read, the other listed as missing
+    const some = parseZaiQuota(answer({ body: okBody([five, { ...week, percentage: "61" }]) }));
+    expect(some).toMatchObject({ ok: true, missing: ["seven_day"] });
+  });
+
+  it("success false: a sign-in code is signed_out, an expired package plan_ended, a rate-limit code rate_limited, a 404 an unknown shape, a network or server fault unreachable", () => {
+    const failed = (code: number, status = 200) => parseZaiQuota(answer({ status, body: { code, success: false, msg: "made up" } }));
+    for (const code of [1000, 1001, 1003, 1005, 401]) expect(reasonOf(failed(code))).toBe("signed_out");
+    for (const code of [1309, 1314]) expect(reasonOf(failed(code))).toBe("plan_ended");
+    expect(reasonOf(failed(1302))).toBe("rate_limited");
+    expect(reasonOf(failed(500, 404))).toBe("unknown_screen");
+    expect(reasonOf(failed(500, 502))).toBe("unreachable");
+    expect(reasonOf(failed(9999))).toBe("unreachable");                      // a code nobody listed stays a transient fault
+    expect(reasonOf(parseZaiQuota(answer({ status: 404, body: null })))).toBe("unknown_screen");
   });
 
   it("a reset in the past is read as it is; the hub's staleness rules judge it, not the parser", () => {

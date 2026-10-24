@@ -22,11 +22,20 @@ afterEach(async () => { await hub.close(); });
 
 // The collector's cursor pass posts one reading per look: the windows the screen named, no length when the plan's
 // period is the very thing it cannot tell.
-const reading = (windows: { id: string; used_percent: number; resets_at: number; length_mins: number | null; note: string | null }[], o: { plan?: string | null; account?: string } = {}) =>
+// The plan family comes from the plan watch's confirmed baseline, which only leased readings feed (slice 6 re-check,
+// slice 7 review): every reading here is leased, unless a case says it is a stranger's.
+const leaseFor = (account: string): string => {
+  hub.usage.look();
+  const g = hub.usage.leases.grant(account, "cli-screen", "mac", "t");
+  if (g.status !== "granted") throw new Error(`the hub did not grant a lease (${g.status})`);
+  return g.id;
+};
+const reading = (windows: { id: string; used_percent: number; resets_at: number; length_mins: number | null; note: string | null }[], o: { plan?: string | null; account?: string; unleased?: boolean } = {}) =>
   hub.usage.reading({
     source: "cli-screen", node: "mac", captured_at: Math.floor(now / SEC),
     ...(o.plan !== undefined ? { plan: o.plan } : {}),
     windows: windows.map(w => ({ ...w, rolling: false })),
+    ...(o.unleased === true ? {} : { lease_id: leaseFor(o.account ?? "seat-a") }),
   }, o.account ?? "seat-a", { kind: "worker", name: "usage-cursor", token: "t" });
 
 // The row Home would show for the one window every fixture names.
@@ -72,3 +81,38 @@ describe("the Cursor period fixtures (AT-37, plan 4.1)", () => {
     expect(titleOf("seat-b")).toBe("monthly");
   });
 });
+
+// The slice 7 review (md-rev6, 2026-10-24 10:31): the family titles windows from the plan watch's CONFIRMED plan, which
+// waits for a second agreeing reading (AT-28), never from the newest single reading.
+describe("the plan family follows the confirmed plan, not the newest reading", () => {
+  const win = (usedPercent: number, afterDays = 6) => [{ id: "Cursor models", used_percent: usedPercent, resets_at: Math.floor((now + afterDays * DAY) / SEC), length_mins: null, note: null }];
+  const next = () => { now += 16 * MIN; };                  // past the lease cache and the look's staleness
+
+  it("a plan change mid-window changes the title only once a second reading agrees", () => {
+    expect(reading(win(50), { plan: "Super" }).ok).toBe(true);
+    next(); expect(reading(win(51), { plan: "Super" }).ok).toBe(true);
+    expect(titleOf()).toBe("about weekly");
+    next(); expect(reading(win(52), { plan: "Ultra" }).ok).toBe(true);        // one reading of another plan: held, says nothing
+    expect(titleOf()).toBe("about weekly");
+    next(); expect(reading(win(53), { plan: "Ultra" }).ok).toBe(true);        // a second one agrees: the plan changed
+    expect(titleOf()).toBe("plan period");
+  });
+
+  it("one odd reading, then the old plan again, never flips the title", () => {
+    expect(reading(win(50), { plan: "Super" }).ok).toBe(true);
+    next(); expect(reading(win(51), { plan: "Super" }).ok).toBe(true);
+    next(); expect(reading(win(52), { plan: "Ultra" }).ok).toBe(true);
+    expect(titleOf()).toBe("about weekly");
+    next(); expect(reading(win(53), { plan: "Super" }).ok).toBe(true);
+    expect(titleOf()).toBe("about weekly");
+  });
+
+  it("a stranger's unleased reading with another plan changes no title", () => {
+    expect(reading(win(50), { plan: "Super" }).ok).toBe(true);
+    next(); expect(reading(win(51), { plan: "Super" }).ok).toBe(true);
+    next(); expect(reading(win(52), { plan: "Ultra", unleased: true }).ok).toBe(true);
+    next(); expect(reading(win(53), { plan: "Ultra", unleased: true }).ok).toBe(true);
+    expect(titleOf()).toBe("about weekly");
+  });
+});
+

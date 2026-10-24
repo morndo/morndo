@@ -197,6 +197,14 @@ Every source except the status line (which has its own route) posts one body to 
 under the account named in the `X-Morndo-Account` header. **Seconds on the wire** everywhere (`captured_at`,
 `resets_at`, `retry_after_s`); the hub's own memory works in milliseconds. The body:
 
+**Who may post.** The route takes any agent token, with no scope: only the lease route and the limit and pool routes
+need a manager token or the `usage-pool` scope. So any lane's token can post a reading for any account. What it can do
+depends on the lease (below): an *unleased* reading changes the windows Home shows and the thresholds that watch
+them, and nothing else; only a *leased* reading, from the token that took the lease, counts for the identity, the
+plan watch, the limit flags and the end of a derived mark. Binding leases and tokens to the accounts a node really
+reports is the follow-up T-430.
+
+
 ```json
 {
   "source": "cli-screen", "node": "mac", "captured_at": 1760000000, "every_s": 300,
@@ -220,8 +228,8 @@ under the account named in the `X-Morndo-Account` header. **Seconds on the wire*
 - **`identity`** — a digest of who is behind the account, never an id. It feeds the plan watch: a changed identity
   between two agreeing readings is an account change.
 - **`windows`** — each with `id` (≤ 40 characters; 300 minutes is titled `five_hour` and 10080 `seven_day`,
-  whatever the source called them), `used_percent` (0..101; outside that is not a reading of that window — dropped,
-  never clamped to 0), `resets_at` (epoch seconds or null), `length_mins` (whole minutes when the source knows the
+  whatever the source called them), `used_percent` (0 to 100, and a value above 100 up to 101 is read as 100; outside 0..101
+  is not a reading of that window — dropped, never clamped to 0), `resets_at` (epoch seconds or null), `length_mins` (whole minutes when the source knows the
   window's length, else null — never a guess), `rolling`, and `note` (the provider's own words about the window,
   ≤ 40 after cleaning).
 - **`ordinary_usage_allowed`, `rate_limit_reached_type`** — the provider's own limit flags (Codex's). They count
@@ -279,10 +287,17 @@ minutes, an unknown unit a window with no length. `CREDIT_LIMIT` is accepted whe
 tokens limit with neither unit nor number is the legacy 5-hour window. The used percent is `percentage`, or
 `currentValue × 100 / usage` when `usage` is a positive number — out of range or epoch-like is no number, and that
 window is dropped and shown as missing, never as 0%. Every Z.ai window is rolling (the credit windows refresh after
-use). A missing weekly entry is missing, not a failure. The failure classes, in their order: HTTP 401/403, or a body
-carrying `code: 401`, is `signed_out`; a 429 is `rate_limited` with `Retry-After` as whole seconds (an HTTP date is
-not supported); `success: false` or a 5xx is `unreachable`; anything else is `unknown_screen`, whose hint is only
-the fixed shape `unknown shape <hash>` — never a word of the answer. The ok result maps to a reading with source
+use). A missing weekly entry is missing, not a failure. A tokens limit with no unit or number only fills an id no explicit
+entry claims, so it never shadows the explicit 5-hour entry, whichever comes first; of two explicit entries claiming
+one id the first wins. An answer whose limits are all unreadable (a percent that is a string, say) is `unknown_screen`,
+not an ok read with nothing in it. The failure classes, in their order: HTTP 401/403, or a body `code` of 401, 403,
+1000, 1001, 1003 or 1005 (Z.ai's authentication codes), is `signed_out`; a 429 or the code 1302 is `rate_limited`
+with `Retry-After` as whole seconds (an HTTP date is not supported); a 404 is `unknown_screen`; the codes 1309 and
+1314 (an expired package) are `plan_ended`; `success: false` with any other code, or a 5xx, is `unreachable` (a
+transient fault, never a guess at a cause); anything else unreadable is `unknown_screen`, whose hint is only the
+fixed shape `unknown shape <hash>` — never a word of the answer. The codes are from Z.ai's error table
+(https://docs.z.ai/api-reference/api-code, read 2026-10-24), which is the model API's: that the quota call shares it is
+unverified. The ok result maps to a reading with source
 `vendor-api`, posted under the readings contract above.
 
 ## Cursor
@@ -293,7 +308,8 @@ window's length, a `note` for what the provider said about it (a pool shared wit
 `"shared with Grok"`), prepaid credit as a line of its own, and a `failure` with the fixed-shape hint when the
 screen is unknown. Which period a Cursor plan is on is the hub's own call, never the caption the poster printed: a
 window with a length is titled by it; with none, the gap between two observed resets titles it; with only one reset
-seen, the reset horizon does — within 8 days and a weekly-family plan name (`free`, `plus`, `premium`, `super`)
+seen, the reset horizon does — within 8 days and a weekly-family plan name (the plan the plan watch has *confirmed*:
+a change waits for a second agreeing leased reading, so one odd or forged plan string flips no title) (`free`, `plus`, `premium`, `super`)
 "about weekly", further out "about monthly", and a name on both periods (`ultra`) "plan period" until the second
 reset is observed.
 

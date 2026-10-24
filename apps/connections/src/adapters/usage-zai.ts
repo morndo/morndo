@@ -28,6 +28,10 @@ export type ZaiReadingBody = {
   windows: ReadingWindow[];
 };
 
+const SIGN_IN_CODES = [401, 403, 1000, 1001, 1003, 1005];
+const RATE_CODES = [1302];
+const PLAN_ENDED_CODES = [1309, 1314];
+
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v);
 
 // The hint of an unknown shape (the usage-claude rule): the fixed shape `unknown shape ${hash}` and nothing else —
@@ -70,55 +74,64 @@ const idOf = (unit: number, n: number): { id: string; lengthMins: number | null 
 
 export function parseZaiQuota(answer: ZaiQuotaAnswer): ZaiReadResult {
   const { status, retryAfter, body } = answer;
-  // The failure classes, in their order: the sign-in ones first (an HTTP 200 carrying `code: 401` is one), then the
-  // rate limit with the provider's own retry word, then the unreachable ones, and only then the shape.
-  if (status === 401 || status === 403 || (isObject(body) && body.code === 401))
+  // The failure classes, in their order: the sign-in ones first (an HTTP 200 carrying a sign-in `code` is one), then the
+  // rate limit with the provider's own retry word, then an unknown page, then the codes the provider lists for a plan
+  // that has ended or a rate limit, and only then the network and server faults. The codes are Z.ai's own error table
+  // (https://docs.z.ai/api-reference/api-code, read 2026-10-24: 1000, 1001, 1003 and 1005 are authentication, 1302 a
+  // rate limit, 1309 and 1314 an expired package); the table is the model API's, and that the quota call shares it is
+  // unverified — a code nobody listed stays the transient `unreachable`, never a guess at a cause.
+  const code = isObject(body) && typeof body.code === "number" ? body.code : null;
+  if (status === 401 || status === 403 || (code !== null && SIGN_IN_CODES.includes(code)))
     return { ok: false, reason: "signed_out", retryAfterS: null, hint: null };
-  if (status === 429)
+  if (status === 429 || (code !== null && RATE_CODES.includes(code)))
     return { ok: false, reason: "rate_limited", retryAfterS: retrySeconds(retryAfter), hint: null };
+  if (status === 404) return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: shapeHint(body) };
+  if (code !== null && PLAN_ENDED_CODES.includes(code))
+    return { ok: false, reason: "plan_ended", retryAfterS: null, hint: null };
   if ((isObject(body) && body.success === false) || status >= 500)
     return { ok: false, reason: "unreachable", retryAfterS: null, hint: null };
   const limits = isObject(body) && isObject(body.data) && Array.isArray(body.data.limits) ? body.data.limits : null;
   if (limits === null || limits.length === 0)
     return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: shapeHint(body) };
-  const windows: ReadingWindow[] = [];
-  const claimed = new Set<string>();
-  const missing: string[] = [];
-  let recognised = false;
+  // Every entry of a type this reader knows, with the id and length its own unit and number give it. CREDIT_LIMIT is
+  // accepted wherever TOKENS_LIMIT was; anything else is no limit this reader knows. A tokens limit with neither
+  // unit nor number is the legacy 5-hour window: it only fills an id no explicit entry claims, so it never shadows
+  // the explicit 5-hour entry whichever comes first in the array.
+  type Known = { entry: Record<string, unknown>; id: string; lengthMins: number | null; legacy: boolean };
+  const known: Known[] = [];
   for (const entry of limits) {
     if (!isObject(entry)) continue;
-    // CREDIT_LIMIT is accepted wherever TOKENS_LIMIT was; anything else is no limit this reader knows.
     if (entry.type !== "CREDIT_LIMIT" && entry.type !== "TOKENS_LIMIT") continue;
-    recognised = true;
     const unit = typeof entry.unit === "number" && Number.isFinite(entry.unit) ? entry.unit : null;
     const n = typeof entry.number === "number" && Number.isFinite(entry.number) ? entry.number : null;
-    let id: string;
-    let lengthMins: number | null;
-    if (unit === null && n === null) {
-      // The legacy shape: a tokens limit with neither unit nor number is the 5-hour window.
-      id = "five_hour";
-      lengthMins = FIVE_HOURS;
-    } else if (unit !== null && n !== null) {
-      ({ id, lengthMins } = idOf(unit, n));
-    } else {
-      // A missing unit or number: no length of its own, the plain `Limit` id.
-      id = "Limit";
-      lengthMins = null;
-    }
-    // Two entries claiming one id: the first by array order wins and the other is dropped, never both.
-    if (claimed.has(id)) continue;
-    claimed.add(id);
-    const usedPercent = percentOf(entry);
+    if (unit === null && n === null) known.push({ entry, id: "five_hour", lengthMins: FIVE_HOURS, legacy: true });
+    else if (unit !== null && n !== null) known.push({ entry, ...idOf(unit, n), legacy: false });
+    else known.push({ entry, id: "Limit", lengthMins: null, legacy: false });       // a missing unit or number: no length
+  }
+  // Limits but none of them a limit this reader knows: nothing was read, the screen is not in a shape it knows.
+  if (known.length === 0) return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: shapeHint(body) };
+  // Two explicit entries claiming one id: the first by array order wins and the other is dropped, never both; a
+  // legacy entry is kept only when no explicit one claimed its id.
+  const claimed = new Set<string>();
+  const kept = new Set<Known>();
+  for (const k of known) if (!k.legacy && !claimed.has(k.id)) { claimed.add(k.id); kept.add(k); }
+  for (const k of known) if (k.legacy && !claimed.has(k.id)) { claimed.add(k.id); kept.add(k); }
+  const windows: ReadingWindow[] = [];
+  const missing: string[] = [];
+  for (const k of known) {
+    if (!kept.has(k)) continue;
+    const usedPercent = percentOf(k.entry);
     if (usedPercent === null) {
-      missing.push(id);                        // dropped, never shown as 0%; the hub shows it as missing
+      missing.push(k.id);                      // dropped, never shown as 0%; the hub shows it as missing
       continue;
     }
     // A reset in the past is read as it is: the hub's staleness rules judge it, not the parser.
-    const resets = typeof entry.nextResetTime === "number" && Number.isFinite(entry.nextResetTime) ? Math.floor(entry.nextResetTime / 1000) : null;
-    windows.push({ id, used_percent: usedPercent, resets_at: resets, length_mins: lengthMins, rolling: true, note: null });
+    const resets = typeof k.entry.nextResetTime === "number" && Number.isFinite(k.entry.nextResetTime) ? Math.floor(k.entry.nextResetTime / 1000) : null;
+    windows.push({ id: k.id, used_percent: usedPercent, resets_at: resets, length_mins: k.lengthMins, rolling: true, note: null });
   }
-  // Limits but none of them a limit this reader knows: nothing was read, the screen is not in a shape it knows.
-  if (!recognised) return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: shapeHint(body) };
+  // Limits it knows by type but cannot read at all (a percent that is a string, say): the shape has changed, which is an
+  // unknown screen, never an ok read with nothing in it.
+  if (windows.length === 0) return { ok: false, reason: "unknown_screen", retryAfterS: null, hint: shapeHint(body) };
   // The named ids no entry gave are missing, never a failure (the hub shows a missing weekly entry as missing).
   for (const named of ["five_hour", "seven_day"]) if (!claimed.has(named) && !missing.includes(named)) missing.push(named);
   return { ok: true, windows, missing };
