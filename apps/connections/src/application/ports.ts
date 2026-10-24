@@ -1,6 +1,6 @@
 // Ports for the connections application (ADR-0018). No secret bytes cross a port: a vault answers
 // whether a ref exists and what its fingerprint is, and nothing else.
-import type { Directory, Holder, Isolation, Policy, Pool, SecretDirectory } from "@morndo/domain";
+import type { Directory, Holder, Isolation, KeyPool, Outcome, Policy, Pool, SecretDirectory } from "@morndo/domain";
 import type { VendorPreset } from "@morndo/protocol";
 
 export type Clock = { now(): number };
@@ -204,6 +204,37 @@ export type PoolStore = {
   load(runtime: string): { pool: Pool; version: number };
   // false when `version` is no longer current, so a stale read cannot land.
   save(pool: Pool, version: number): boolean;
+};
+
+// ---- A key pool (ADR-0037). One versioned row per pool. A name never seen is a null pool at version 0; a null pool at
+// a later version is a tombstone, and that name is never used again. A save lands only on the version it was read at.
+export type KeyPoolStore = {
+  load(name: string): { pool: KeyPool | null; version: number };
+  names(): { live: readonly string[]; deleted: readonly string[] };
+  // Version 0 inserts. False when the name already has a row, live or tombstone. Any other version updates only when
+  // the stored version still equals `version`, and then bumps it.
+  save(pool: KeyPool, version: number): boolean;
+  // Only the current version of a live pool. The body becomes {"deleted":true,"at":<ms>}.
+  tombstone(name: string, version: number, at: number): boolean;
+};
+
+// A provider refusal, reduced to what a classifier may read. `text` is never stored.
+export type ProviderSignal = {
+  status: number | null;
+  kind: string | null;
+  text: string | null;
+  retryAfterSeconds: number | null;
+  code: string | null;
+  resumeDate: string | null;
+};
+export type OutcomeClassifier = { classify(signal: ProviderSignal): Outcome };
+export type Classifiers = { for(dialect: string): OutcomeClassifier | null };
+
+// Told when a Connection is registered, revoked or rotated, so a pool can share its names and follow the key.
+export type ConnectionLifecycle = {
+  reserved(name: string): boolean;
+  revoked(name: string): void;
+  rotated(name: string): void;
 };
 // A notice at most once per `everyMs` for one key; where it goes (a hub, the terminal) is the adapter's.
 export type PoolNotices = { send(key: string, text: string, everyMs: number): void };

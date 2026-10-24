@@ -49,9 +49,9 @@ describe("key-pool-store-sqlite", () => {
     const read = s.load("p");
     expect(read.version).toBe(1);
     expect(read.pool).toEqual(pool());
-    const changed = { ...pool(), cursor: "k1" };
+    const changed = { ...pool(), lastPick: "k1" };
     expect(s.save(changed, 1)).toBe(true);
-    expect(s.save({ ...pool(), cursor: "k2" }, 1)).toBe(false);     // stale
+    expect(s.save({ ...pool(), lastPick: "k2" }, 1)).toBe(false);     // stale
     expect(s.load("p")).toEqual({ pool: changed, version: 2 });
   });
 

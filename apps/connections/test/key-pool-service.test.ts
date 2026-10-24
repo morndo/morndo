@@ -1,4 +1,4 @@
-// The key pool's application service (ADR-0037): creating a pool in one save, picking a member (the cursor is saved before the
+// The key pool's application service (ADR-0037): creating a pool in one save, picking a member (the lastPick is saved before the
 // gate runs, the pick is written after it, KP9 and KP15), reports and their alerts, the names a pool shares with Connections
 // (KP1), a revoked Connection leaving (KP8), and a state that holds no secret. In-memory ports, a manual clock, fixed ids.
 import { describe, expect, it } from "vitest";
@@ -44,7 +44,7 @@ async function world(n = 3, opts: { budgetOf?: Record<string, number> } = {}): P
   const pools = new KeyPoolService({ clock: mem.clock, store, connections: mem.store, catalog: mem.catalog, alerts: mem.alerts, classifiers: { for: d => (d === "dialect-a" ? classifier : null) } });
   const connections = new ConnectionsService(mem.deps, pools);
   for (let i = 1; i <= n; i++) {
-    mem.vault.put(`ref-k${i}`, i === 1 ? FP : `0123456789a${i}`);
+    mem.vault.put(i === 1 ? REF : `ref-k${i}`, i === 1 ? FP : `0123456789a${i}`);
     const added = await connections.addKey({ name: `k${i}`, vendor: "vendor-a", runtime: "runtime-a", ref: i === 1 ? REF : `ref-k${i}`, billing: "metered", budget: { kind: "capped", amount: opts.budgetOf?.[`k${i}`] ?? 10 }, expiry: null }, who);
     expect(added.ok).toBe(true);
     expect(connections.acknowledge(`k${i}`, "ada", who).ok).toBe(true);
@@ -149,14 +149,14 @@ describe("pick", () => {
     }
     expect(got).toEqual(["k1", "k2", "k3", "k1"]);
     expect(loaded(w).events.filter(e => e.type === "MemberPicked")).toHaveLength(4);
-    expect(loaded(w).cursor).toBe("k1");
+    expect(loaded(w).lastPick).toBe("k1");
   });
 
-  it("saves the cursor before the gate attempt runs", async () => {
+  it("saves the lastPick before the gate attempt runs", async () => {
     const w = await world();
     create(w);
     let seen: string | null = "unset";
-    const r = await w.pools.pick("p", async member => { seen = loaded(w).cursor; return leasing(w)(member); });
+    const r = await w.pools.pick("p", async member => { seen = loaded(w).lastPick; return leasing(w)(member); });
     expect(r.ok).toBe(true);
     expect(seen).toBe("k1");
   });
@@ -168,7 +168,7 @@ describe("pick", () => {
     const r = await w.pools.pick("p", leasing(w));
     expect(r.ok && r.value.member).toBe("k2");
     const pool = loaded(w);
-    expect(pool.cursor).toBe("k2");
+    expect(pool.lastPick).toBe("k2");
     expect(pool.members.map(m => m.health.state)).toEqual(["active", "active", "active"]);
     expect(pool.events.filter(e => e.type === "MemberPicked")).toEqual([{ type: "MemberPicked", member: "k2", declined: [{ member: "k1", word: "budget" }], at: w.mem.clock.now() }]);
   });
@@ -236,7 +236,7 @@ describe("pick", () => {
     expect(same.map(r => (r.ok ? r.value.member : "refused"))).toEqual(["k1", "k1"]);
   });
 
-  it("a lost save is retried on fresh state and the cursor is not advanced twice", async () => {
+  it("a lost save is retried on fresh state and the lastPick is not advanced twice", async () => {
     const w = await world();
     create(w);
     w.store.beforeSave = () => {
@@ -247,7 +247,7 @@ describe("pick", () => {
     };
     const r = await w.pools.pick("p", leasing(w));
     expect(r.ok && r.value.member).toBe("k1");
-    expect(loaded(w).cursor).toBe("k1");
+    expect(loaded(w).lastPick).toBe("k1");
     expect(loaded(w).events.filter(e => e.type === "MemberPicked")).toHaveLength(1);
   });
 
@@ -376,13 +376,13 @@ describe("a Connection's life reaches the pool", () => {
 });
 
 describe("state", () => {
-  it("lists pools in ring order with health words, times and the cursor, and no ref, fingerprint or secret", async () => {
+  it("lists pools in ring order with health words, times and the lastPick, and no ref, fingerprint or secret", async () => {
     const w = await world();
     create(w);
     w.pools.report("p", "k2", { kind: "exhausted", reason: "spend-limit", resumeAt: w.mem.clock.now() + 2 * DAY }, w.mem.clock.now());
     const view = w.pools.list();
     expect(view).toHaveLength(1);
-    expect(view[0]).toMatchObject({ name: "p", runtime: "runtime-a", vendor: "vendor-a", mode: "round-robin", standing: "ok", cursor: null });
+    expect(view[0]).toMatchObject({ name: "p", runtime: "runtime-a", vendor: "vendor-a", mode: "round-robin", standing: "ok", lastPick: null });
     expect(view[0]?.members).toEqual([
       { credential: "k1", state: "active", reason: null, since: w.mem.clock.now(), nextCheck: null },
       { credential: "k2", state: "exhausted", reason: "spend-limit", since: w.mem.clock.now(), nextCheck: w.mem.clock.now() + 2 * DAY },

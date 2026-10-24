@@ -144,6 +144,11 @@ export const VendorPreset = z.strictObject({
     summary: text(400),
     sources: z.array(z.url()),
   }).check(z.refine((t: { revision: string; sources: readonly string[] }) => (t.revision === "unknown") === (t.sources.length === 0))),
+  keyPool: z.optional(z.strictObject({
+    errorDialect: text(64),
+    termsRevision: text(64),
+    termsLine: text(1500),
+  })),
 });
 export const VendorCatalog = z.array(VendorPreset).check(z.minLength(1));
 

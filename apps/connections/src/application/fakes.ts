@@ -1,8 +1,8 @@
 // In-memory ports. Tests move the clock and the runtime by hand. No ambient I/O.
-import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type Isolation, type Policy } from "@morndo/domain";
+import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type Isolation, type KeyPool, type Policy } from "@morndo/domain";
 import type { VendorPreset } from "@morndo/protocol";
 import { chainHolders } from "./providers.ts";
-import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type ModelLister, type ModelRow, type ProcId, type Processes, type ProviderEntry, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
+import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type KeyPoolStore, type ModelLister, type ModelRow, type ProcId, type Processes, type ProviderEntry, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
 import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, WorkspaceRoots } from "./ports.ts";
 import { savedVaultRefs } from "./vault-refs.ts";
 
@@ -66,6 +66,61 @@ export class MemoryStore implements ConnectionStore {
     this.directory = directory;
     this.policy = policy;
     this.version += 1;
+    this.saves += 1;
+    return true;
+  }
+}
+
+type PoolRow = { version: number; body: string };
+
+function tombstoneBody(body: string): boolean {
+  const value = JSON.parse(body) as { deleted?: unknown };
+  return value.deleted === true;
+}
+
+// The same rules as the SQLite store: version 0 inserts once, a later save lands only on the version it read, and a
+// tombstone keeps the name. `beforeSave` runs once, if set, before that check, so a test can land another write first.
+export class MemoryKeyPoolStore implements KeyPoolStore {
+  readonly #rows = new Map<string, PoolRow>();
+  saves = 0;
+  beforeSave: (() => void) | null = null;
+
+  load(name: string): { pool: KeyPool | null; version: number } {
+    const row = this.#rows.get(name);
+    if (!row) return { pool: null, version: 0 };
+    return { pool: tombstoneBody(row.body) ? null : JSON.parse(row.body) as KeyPool, version: row.version };
+  }
+
+  names(): { live: readonly string[]; deleted: readonly string[] } {
+    const live: string[] = [];
+    const gone: string[] = [];
+    for (const name of [...this.#rows.keys()].sort()) (this.load(name).pool ? live : gone).push(name);
+    return { live, deleted: gone };
+  }
+
+  save(pool: KeyPool, version: number): boolean {
+    const hook = this.beforeSave;
+    if (hook) {
+      this.beforeSave = null;
+      hook();
+    }
+    if (version === 0) {
+      if (this.#rows.has(pool.name)) return false;
+      this.#rows.set(pool.name, { version: 1, body: JSON.stringify(pool) });
+      this.saves += 1;
+      return true;
+    }
+    const row = this.#rows.get(pool.name);
+    if (!row || row.version !== version || tombstoneBody(row.body)) return false;
+    this.#rows.set(pool.name, { version: row.version + 1, body: JSON.stringify(pool) });
+    this.saves += 1;
+    return true;
+  }
+
+  tombstone(name: string, version: number, at: number): boolean {
+    const row = this.#rows.get(name);
+    if (!row || row.version !== version || tombstoneBody(row.body)) return false;
+    this.#rows.set(name, { version: row.version + 1, body: JSON.stringify({ deleted: true, at }) });
     this.saves += 1;
     return true;
   }

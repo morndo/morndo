@@ -171,26 +171,26 @@ describe("terms acknowledgement (CN4 pattern)", () => {
 });
 
 describe("kp3 an exhausted member is never picked; a failing member blocks the pool", () => {
-  it("skips an exhausted member whatever the cursor and the mode", () => {
+  it("skips an exhausted member whatever the lastPick and the mode", () => {
     for (const mode of ["round-robin", "drain"] as const) {
       const p = mark(pool(3, mode), "k2", exhausted());
-      for (const cursor of [null, "k1", "k2", "k3"]) {
-        const at = { ...p, cursor };
+      for (const lastPick of [null, "k1", "k2", "k3"]) {
+        const at = { ...p, lastPick };
         const { names } = picks(at, 6);
-        expect(names, `${mode} cursor ${cursor}`).not.toContain("k2");
+        expect(names, `${mode} lastPick ${lastPick}`).not.toContain("k2");
       }
     }
   });
   it("negative control: with the guard removed the exhausted member is picked (the test can fail)", () => {
     const p = mark(pool(3), "k2", exhausted());
     const unguarded = { ...p, members: p.members.map(m => ({ ...m, health: { state: "active" as const } })) };
-    expect(picks({ ...unguarded, cursor: "k1" }, 1).names).toEqual(["k2"]);
+    expect(picks({ ...unguarded, lastPick: "k1" }, 1).names).toEqual(["k2"]);
   });
-  it("a failing member blocks every pick with pool_blocked, whatever the cursor and the mode", () => {
+  it("a failing member blocks every pick with pool_blocked, whatever the lastPick and the mode", () => {
     for (const mode of ["round-robin", "drain"] as const) {
       const p = mark(pool(3, mode), "k2", { kind: "failing", reason: "denied" });
-      for (const cursor of [null, "k1", "k2", "k3"]) {
-        const r = chooseKey({ ...p, cursor });
+      for (const lastPick of [null, "k1", "k2", "k3"]) {
+        const r = chooseKey({ ...p, lastPick });
         expect(r.ok).toBe(false);
         if (!r.ok) expect(r.error).toEqual({ problem: "pool_blocked", member: "k2", reason: "denied" });
       }
@@ -202,11 +202,11 @@ describe("kp4 rotation order is deterministic and survives restarts", () => {
   it("round-robin follows the join order and wraps", () => {
     expect(picks(pool(3), 7).names).toEqual(["k1", "k2", "k3", "k1", "k2", "k3", "k1"]);
   });
-  it("round-robin takes the first servable member after the cursor", () => {
-    const p = { ...mark(pool(4), "k3", exhausted()), cursor: "k2" };
+  it("round-robin takes the first servable member after the lastPick", () => {
+    const p = { ...mark(pool(4), "k3", exhausted()), lastPick: "k2" };
     expect(picks(p, 4).names).toEqual(["k4", "k1", "k2", "k4"]);
   });
-  it("drain stays on the cursor's member while it is servable, then moves on and stays there", () => {
+  it("drain stays on the lastPick's member while it is servable, then moves on and stays there", () => {
     let p = pool(3, "drain");
     expect(picks(p, 3).names).toEqual(["k1", "k1", "k1"]);
     p = mark(picks(p, 2).pool, "k1", exhausted());
@@ -219,16 +219,16 @@ describe("kp4 rotation order is deterministic and survives restarts", () => {
     expect(picks(roundTrip(p), 3).names).toEqual(picks(p, 3).names);
     expect(ok(chooseKey(roundTrip(p))).member).toBe("k3");
   });
-  it("a pick sets the cursor and nothing else about the members", () => {
+  it("a pick sets the lastPick and nothing else about the members", () => {
     const p = pool(3);
     const r = ok(chooseKey(p));
-    expect(r.pool.cursor).toBe("k1");
+    expect(r.pool.lastPick).toBe("k1");
     expect(r.pool.members).toEqual(p.members);
   });
-  it("skip leaves out members a gate declined, and the cursor moves to the one finally chosen", () => {
+  it("skip leaves out members a gate declined, and the lastPick moves to the one finally chosen", () => {
     const r = ok(chooseKey(pool(3), ["k1"]));
     expect(r.member).toBe("k2");
-    expect(r.pool.cursor).toBe("k2");
+    expect(r.pool.lastPick).toBe("k2");
     expect(word(chooseKey(pool(2), ["k1", "k2"]))).toBe("none_left");
   });
 });
@@ -332,11 +332,11 @@ describe("outcomes: what each one does to a member", () => {
     const p = mark(pool(2), "k1", { kind: "failing", reason: "denied" }, T + MIN);
     expect(ok(reportKeyOutcome(p, "k1", exhausted(), T + 2 * MIN, T + 2 * MIN))).toBe(p);
   });
-  it("limited is recorded and changes no health, no cursor and no order", () => {
+  it("limited is recorded and changes no health, no lastPick and no order", () => {
     const p = pool(2);
     const l = ok(reportKeyOutcome(p, "k1", { kind: "limited", retryAfterMs: 30_000 }, T + MIN, T + MIN));
     expect(l.members).toEqual(p.members);
-    expect(l.cursor).toBe(p.cursor);
+    expect(l.lastPick).toBe(p.lastPick);
     expect(l.events.at(-1)).toEqual({ type: "KeyLimited", member: "k1", retryAfterSeconds: 30, at: T + MIN });
     expect(picks(l, 2).names).toEqual(["k1", "k2"]);
   });
@@ -348,13 +348,13 @@ describe("outcomes: what each one does to a member", () => {
 });
 
 describe("kp8 a member that leaves takes its health with it", () => {
-  it("removing a member drops it, and a cursor on it falls back so the next pick is the member after it", () => {
-    const p = { ...pool(4), cursor: "k2" };
+  it("removing a member drops it, and a lastPick on it falls back so the next pick is the member after it", () => {
+    const p = { ...pool(4), lastPick: "k2" };
     const gone = ok(leaveKeyPool(p, "k2", T + MIN));
     expect(gone.members.map(m => m.credential)).toEqual(["k1", "k3", "k4"]);
-    expect(gone.cursor).toBe("k1");
+    expect(gone.lastPick).toBe("k1");
     expect(ok(chooseKey(gone)).member).toBe("k3");
-    expect(ok(leaveKeyPool({ ...p, cursor: "k1" }, "k1", T)).cursor).toBeNull();
+    expect(ok(leaveKeyPool({ ...p, lastPick: "k1" }, "k1", T)).lastPick).toBeNull();
     expect(gone.events.at(-1)).toEqual({ type: "MemberLeft", member: "k2", why: "left", at: T + MIN });
     expect(word(leaveKeyPool(p, "nope", T))).toBe("missing");
   });
@@ -375,7 +375,7 @@ describe("kp8 a member that leaves takes its health with it", () => {
   });
 });
 
-describe("kp9 a gate refusal does not change health, moves the cursor to the member leased, and writes one MemberPicked", () => {
+describe("kp9 a gate refusal does not change health, moves the lastPick to the member leased, and writes one MemberPicked", () => {
   it("records the declined members and their gate words in one event", () => {
     const p = pool(3);
     const first = ok(chooseKey(p));
@@ -383,7 +383,7 @@ describe("kp9 a gate refusal does not change health, moves the cursor to the mem
     const second = ok(chooseKey(first.pool, ["k1"]));
     expect(second.member).toBe("k2");
     const noted = keyPicked(second.pool, "k2", [{ member: "k1", word: "budget" }], T + MIN);
-    expect(noted.cursor).toBe("k2");
+    expect(noted.lastPick).toBe("k2");
     expect(noted.members.map(m => m.health)).toEqual(p.members.map(m => m.health));
     expect(noted.events.filter(e => e.type === "MemberPicked")).toEqual([{ type: "MemberPicked", member: "k2", declined: [{ member: "k1", word: "budget" }], at: T + MIN }]);
   });
@@ -493,13 +493,13 @@ describe("kp13 a pool of one picks its member every time", () => {
   });
 });
 
-describe("kp14 changing the order is the principal's and does not move the cursor's member", () => {
-  it("moves a member to an index, keeps the cursor naming the same member and the next pick follows the new ring", () => {
-    const p = ok(chooseKey(ok(chooseKey(pool(3))).pool)).pool;          // cursor on k2
-    expect(p.cursor).toBe("k2");
+describe("kp14 changing the order is the principal's and does not move the lastPick's member", () => {
+  it("moves a member to an index, keeps the lastPick naming the same member and the next pick follows the new ring", () => {
+    const p = ok(chooseKey(ok(chooseKey(pool(3))).pool)).pool;          // lastPick on k2
+    expect(p.lastPick).toBe("k2");
     const moved = ok(moveKeyMember(p, "k3", 0, principal("c8"), T + MIN));
     expect(moved.members.map(m => m.credential)).toEqual(["k3", "k1", "k2"]);
-    expect(moved.cursor).toBe("k2");
+    expect(moved.lastPick).toBe("k2");
     expect(ok(chooseKey(moved)).member).toBe("k3");
     expect(moved.events.at(-1)).toEqual({ type: "MemberMoved", member: "k3", to: 0, at: T + MIN, command: "c8" });
   });
@@ -512,7 +512,7 @@ describe("kp14 changing the order is the principal's and does not move the curso
 });
 
 describe("kp15 concurrent picks are serialised by the pool's version", () => {
-  // The service saves the cursor before a gate attempt, on the version it read; the second picker re-reads and sees it.
+  // The service saves the lastPick before a gate attempt, on the version it read; the second picker re-reads and sees it.
   it("two picks, the second on the first's saved state, give different members in round-robin and the same in drain", () => {
     const rr = pool(2);
     const a = ok(chooseKey(rr));
@@ -523,12 +523,12 @@ describe("kp15 concurrent picks are serialised by the pool's version", () => {
     const d = ok(chooseKey(roundTrip(c.pool)));
     expect([c.member, d.member]).toEqual(["k1", "k1"]);
   });
-  it("a pick that lost its save and re-reads the winner's state does not advance the cursor twice", () => {
+  it("a pick that lost its save and re-reads the winner's state does not advance the lastPick twice", () => {
     const base = pool(3);
     const won = ok(chooseKey(base));                // the winner's pick, saved
     const retry = ok(chooseKey(won.pool));          // the loser re-picks on fresh state
-    expect(retry.pool.cursor).toBe("k2");
-    expect(won.pool.cursor).toBe("k1");
+    expect(retry.pool.lastPick).toBe("k2");
+    expect(won.pool.lastPick).toBe("k1");
   });
 });
 

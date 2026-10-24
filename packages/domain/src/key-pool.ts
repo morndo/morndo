@@ -44,14 +44,11 @@ export type KeyPoolEvent =
   | { type: "PoolEmpty"; backAt: number | null; at: number }
   | { type: "PoolBlocked"; member: string; reason: FailingReason; at: number }
   | { type: "PoolRefilled"; at: number };
-// The ring position's field name is a catalog word, so it is built and never written out.
-type PinName = `${"cur"}${"sor"}`;
-const PIN = ("cur" + "sor") as PinName;
 export type KeyPool = {
   name: string; runtime: string; vendor: string; policy: RotationPolicy; members: readonly KeyMember[];
-  terms: TermsAck | null; ownedOrgs: readonly string[]; standing: Standing;
+  lastPick: string | null; terms: TermsAck | null; ownedOrgs: readonly string[]; standing: Standing;
   events: readonly KeyPoolEvent[]; seq: number;
-} & { [K in PinName]: string | null };
+};
 export type PickRefusal =
   | { problem: "pool_blocked"; member: string; reason: FailingReason }
   | { problem: "pool_empty"; backAt: number | null }
@@ -136,7 +133,7 @@ export function createKeyPool(
   if (names.connections.includes(input.name) || names.pools.includes(input.name) || names.deleted.includes(input.name)) return err("taken");
   const created: KeyPool = {
     name: input.name, runtime: input.runtime, vendor: input.vendor, policy: policy.value,
-    members: [], [PIN]: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
+    members: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
   };
   return ok(settleKeyPool(withEvents(created, [{ type: "KeyPoolCreated", pool: input.name, at: now, command: who.value }]), now));
 }
@@ -181,8 +178,8 @@ export function leaveKeyPool(p: KeyPool, credential: string, now: number, why: "
   if (index < 0) return err("missing");
   const members = p.members.filter(m => m.credential !== credential);
   const previous = members[index - 1];
-  const pin = p[PIN] !== credential ? p[PIN] : index === 0 || previous === undefined ? null : previous.credential;
-  return ok(settleKeyPool(withEvents({ ...p, members, [PIN]: pin }, [{ type: "MemberLeft", member: credential, why, at: now }]), now));
+  const lastPick = p.lastPick !== credential ? p.lastPick : index === 0 || previous === undefined ? null : previous.credential;
+  return ok(settleKeyPool(withEvents({ ...p, members, lastPick }, [{ type: "MemberLeft", member: credential, why, at: now }]), now));
 }
 
 export function moveKeyMember(
@@ -229,21 +226,21 @@ export function chooseKey(p: KeyPool, skip: readonly string[] = []): Result<{ po
   const blocked = failingMember(p);
   if (blocked) return err({ problem: "pool_blocked", member: blocked.credential, reason: blocked.health.reason });
   if (!p.members.some(servable)) return err({ problem: "pool_empty", backAt: keyPoolBackAt(p) });
-  const pinAt = p[PIN] === null ? -1 : p.members.findIndex(m => m.credential === p[PIN]);
+  const lastAt = p.lastPick === null ? -1 : p.members.findIndex(m => m.credential === p.lastPick);
   let chosen: KeyMember | undefined;
-  if (p.policy.mode === "drain" && pinAt >= 0) {
-    const current = p.members[pinAt];
-    chosen = current && servable(current) && !skip.includes(current.credential) ? current : ringFrom(p, (pinAt + 1) % p.members.length, skip);
+  if (p.policy.mode === "drain" && lastAt >= 0) {
+    const current = p.members[lastAt];
+    chosen = current && servable(current) && !skip.includes(current.credential) ? current : ringFrom(p, (lastAt + 1) % p.members.length, skip);
   } else {
-    chosen = ringFrom(p, pinAt < 0 ? 0 : (pinAt + 1) % p.members.length, skip);
+    chosen = ringFrom(p, lastAt < 0 ? 0 : (lastAt + 1) % p.members.length, skip);
   }
   if (!chosen) return err({ problem: "none_left" });
-  if (p[PIN] === chosen.credential) return ok({ pool: p, member: chosen.credential });
-  return ok({ pool: { ...p, [PIN]: chosen.credential }, member: chosen.credential });
+  if (p.lastPick === chosen.credential) return ok({ pool: p, member: chosen.credential });
+  return ok({ pool: { ...p, lastPick: chosen.credential }, member: chosen.credential });
 }
 
 export function keyPicked(p: KeyPool, member: string, declined: readonly { member: string; word: string }[], now: number): KeyPool {
-  return settleKeyPool(withEvents({ ...p, [PIN]: member }, [{ type: "MemberPicked", member, declined, at: now }]), now);
+  return settleKeyPool(withEvents({ ...p, lastPick: member }, [{ type: "MemberPicked", member, declined, at: now }]), now);
 }
 
 function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report"): KeyPool | null {
