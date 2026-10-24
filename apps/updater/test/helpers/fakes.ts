@@ -338,6 +338,20 @@ export class FakeStore implements UpdateStore {
     return best;
   }
 
+  // A named `--to` is the staged Version. Drop only a record above both it and the highest committed Version;
+  // one at or below the highest this machine has run stays, the same as the SQLite store.
+  retireStagedAbove(version: string): void {
+    const keep = parseVersion(version);
+    if (keep === null) return;
+    const committed = this.highestCommitted();
+    const ceiling = committed === null ? null : parseVersion(committed);
+    const floor = ceiling !== null && compareVersions(ceiling, keep) > 0 ? ceiling : keep;
+    for (const staged of [...this.versions.keys()]) {
+      const v = parseVersion(staged);
+      if (v !== null && compareVersions(v, floor) > 0) this.versions.delete(staged);
+    }
+  }
+
   versionRecord(version: string): StagedRecord | null { return this.versions.get(version) ?? null; }
 
   manifestOf(version: string): string | null { return this.versions.get(version)?.manifest ?? null; }

@@ -41,8 +41,11 @@ const statusFile = (name: string, doc: Record<string, unknown>): string => {
 let scratch = "";
 let hub: Server;
 let hubPort = 0;
+let origin: Server;
+let originPort = 0;
 let fleet: Server;
 let hubAnswer: (req: IncomingMessage, res: ServerResponse) => void = (_req, res) => reply(res, 200, full());
+let originAnswer: (req: IncomingMessage, res: ServerResponse) => void = (_req, res) => reply(res, 200, JSON.stringify({ ready: true }));
 let fleetAnswer: (req: IncomingMessage, res: ServerResponse) => void = (_req, res) => reply(res, 200, full());
 
 beforeAll(async () => {
@@ -50,15 +53,19 @@ beforeAll(async () => {
   hub = createServer((req, res) => hubAnswer(req, res));
   await new Promise<void>(resolve => hub.listen(0, "127.0.0.1", resolve));
   hubPort = (hub.address() as AddressInfo).port;
+  origin = createServer((req, res) => originAnswer(req, res));
+  await new Promise<void>(resolve => origin.listen(0, "127.0.0.1", resolve));
+  originPort = (origin.address() as AddressInfo).port;
   fleet = createServer((req, res) => fleetAnswer(req, res));
   await new Promise<void>(resolve => fleet.listen(join(scratch, FLEET_SOCK), resolve));
 });
 beforeEach(() => {
   hubAnswer = (_req, res) => reply(res, 200, full());
+  originAnswer = (_req, res) => reply(res, 200, JSON.stringify({ ready: true }));
   fleetAnswer = (_req, res) => reply(res, 200, full());
 });
 afterAll(async () => {
-  for (const s of [hub, fleet]) { s.close(); s.closeAllConnections(); }
+  for (const s of [hub, origin, fleet]) { s.close(); s.closeAllConnections(); }
   rmSync(scratch, { recursive: true, force: true });
 });
 
@@ -69,6 +76,54 @@ const probes = (o: { nodeStatus?: string; timeoutMs?: number; hubUrl?: string } 
     nodeStatus: o.nodeStatus ?? join(scratch, "no-such-status.json"),
     timeoutMs: o.timeoutMs ?? 2_000,
   });
+
+// The owner path (C4-6): the same hub and fleet, plus an origin the test serves over http on 127.0.0.1.
+const ownerProbes = (o: {
+  origin?: string; timeoutMs?: number; hubUrl?: string; fleetSocket?: string; nodeStatus?: string; managerLane?: boolean;
+} = {}) =>
+  new ServiceProbes({
+    hubUrl: o.hubUrl ?? `http://127.0.0.1:${hubPort}`,
+    fleetSocket: o.fleetSocket ?? join(scratch, FLEET_SOCK),
+    nodeStatus: o.nodeStatus ?? join(scratch, "no-such-status.json"),
+    timeoutMs: o.timeoutMs ?? 2_000,
+    ownerPath: {
+      ...(o.origin !== undefined ? { origin: o.origin } : {}),
+      ...(o.managerLane !== undefined ? { managerLane: o.managerLane } : {}),
+    },
+  });
+
+const originUrl = (): string => `http://127.0.0.1:${originPort}`;
+
+const page = (res: ServerResponse, status: number, body: string): void => {
+  res.writeHead(status, { "content-type": "text/html" });
+  res.end(body);
+};
+
+// A hub whose health is the wire's shape and whose pages are a non-empty document.
+const hubUp = (appStatus = 200, appBody = "<p>app</p>"): void => {
+  hubAnswer = (req, res) => {
+    if ((req.url ?? "").split("?")[0] === "/") { page(res, appStatus, appBody); return; }
+    reply(res, 200, full());
+  };
+};
+
+const laneDoc = (over: Record<string, unknown> = {}): string =>
+  JSON.stringify({ name: "manager", node: "n1", workerId: "m-1", conflict: false, ...over });
+
+const nodesDoc = (rows: readonly { name: string; status: string }[] = [{ name: "n1", status: "online" }]): string =>
+  JSON.stringify(rows.map(row => ({ ...row, health: null, agent: V })));
+
+// The fleet's health, plus the two owner-path reads, each named so a test can bend one.
+const fleetUp = (o: { laneStatus?: number; laneBody?: string; nodesStatus?: number; nodesBody?: string; seen?: string[] } = {}): void => {
+  fleetAnswer = (req, res) => {
+    const url = (req.url ?? "").split("?")[0];
+    const client = req.headers["x-morndo-client"];
+    o.seen?.push(`${url} ${typeof client === "string" ? client : ""}`);
+    if (url === "/v1/lanes/manager") return reply(res, o.laneStatus ?? 200, o.laneBody ?? laneDoc());
+    if (url === "/v1/nodes") return reply(res, o.nodesStatus ?? 200, o.nodesBody ?? nodesDoc());
+    reply(res, 200, full());
+  };
+};
 
 describe("the hub probe (§6.3, §6.4)", () => {
   it("reads the safe point and the health from GET /api/health", async () => {
@@ -226,5 +281,120 @@ describe("the node probe (§6.3, §6.4)", () => {
     const shapeless = probes({ nodeStatus: statusFile("shapeless.json", { pid: process.pid, ready: true }) });
     expect(await shapeless.safePoint("node")).toBeNull();
     expect(await shapeless.health("node")).toBeNull();
+  });
+});
+
+describe("the owner path on the control plane (C4-6, §6.4)", () => {
+  it("the hub's report carries the owner-path checks when they are configured", async () => {
+    const seen: string[] = [];
+    hubUp();
+    fleetUp({ seen });
+    const p = ownerProbes({ origin: originUrl() });
+    expect(await p.health("hub")).toEqual({
+      service: "hub", version: V,
+      checks: { ready: true, owner_app_served: true, owner_origin_ready: true, owner_manager_lane: true },
+    });
+    expect(seen).toContain("/v1/lanes/manager updater");
+    expect(seen).toContain("/v1/nodes updater");
+  });
+
+  it("owner_app_served is false when the hub answers 503 for the app", async () => {
+    hubUp(503, JSON.stringify({ error: "web app not built" }));
+    fleetUp();
+    const p = ownerProbes({ origin: originUrl() });
+    const report = await p.health("hub");
+    expect(report).not.toBeNull();
+    expect(report?.checks.ready).toBe(true);
+    expect(report?.checks.owner_app_served).toBe(false);
+  });
+
+  it("owner_app_served is false when the hub answers 200 with an empty body", async () => {
+    hubUp(200, "");
+    fleetUp();
+    const report = await ownerProbes({ origin: originUrl() }).health("hub");
+    expect(report?.checks.ready).toBe(true);
+    expect(report?.checks.owner_app_served).toBe(false);
+  });
+
+  it("owner_origin_ready is false when the origin does not answer, answers 503 or says ready false", async () => {
+    hubUp();
+    fleetUp();
+    originAnswer = () => { /* it never answers */ };
+    const silent = ownerProbes({ origin: originUrl(), timeoutMs: 80 });
+    expect((await silent.health("hub"))?.checks.owner_origin_ready).toBe(false);
+
+    originAnswer = (_req, res) => reply(res, 503, JSON.stringify({ ready: true }));
+    const down = ownerProbes({ origin: originUrl() });
+    expect((await down.health("hub"))?.checks.owner_origin_ready).toBe(false);
+
+    originAnswer = (_req, res) => reply(res, 200, JSON.stringify({ ready: false }));
+    const notReady = ownerProbes({ origin: originUrl() });
+    expect((await notReady.health("hub"))?.checks.owner_origin_ready).toBe(false);
+  });
+
+  it("owner_origin_ready is absent when no origin is configured", async () => {
+    hubUp();
+    fleetUp();
+    const report = await ownerProbes().health("hub");
+    expect(report?.checks.owner_app_served).toBe(true);
+    expect(report?.checks.owner_manager_lane).toBe(true);
+    expect(report?.checks).not.toHaveProperty("owner_origin_ready");
+  });
+
+  it("owner_manager_lane is false when the fleet has no manager lane, a conflicting one, or its node offline or unlisted", async () => {
+    hubUp();
+    const cases: { name: string; laneStatus?: number; laneBody?: string; nodesBody?: string }[] = [
+      { name: "no such lane", laneStatus: 404, laneBody: JSON.stringify({ error: "no_such_lane" }) },
+      { name: "conflict", laneBody: laneDoc({ conflict: true, workerId: null }) },
+      { name: "offline", nodesBody: nodesDoc([{ name: "n1", status: "offline" }]) },
+      { name: "stale", nodesBody: nodesDoc([{ name: "n1", status: "stale" }]) },
+      { name: "unlisted", nodesBody: nodesDoc([{ name: "n2", status: "online" }]) },
+    ];
+    for (const c of cases) {
+      fleetUp({
+        ...(c.laneStatus !== undefined ? { laneStatus: c.laneStatus } : {}),
+        ...(c.laneBody !== undefined ? { laneBody: c.laneBody } : {}),
+        ...(c.nodesBody !== undefined ? { nodesBody: c.nodesBody } : {}),
+      });
+      const report = await ownerProbes({ origin: originUrl() }).health("hub");
+      expect(report, c.name).not.toBeNull();
+      expect(report?.checks.owner_manager_lane, c.name).toBe(false);
+    }
+    const closed = ownerProbes({ origin: originUrl(), fleetSocket: join(scratch, "no-such-fleet.sock"), timeoutMs: 300 });
+    expect((await closed.health("hub"))?.checks.owner_manager_lane).toBe(false);
+  });
+
+  it("the fleet's and the node's reports never carry the owner-path checks", async () => {
+    hubUp();
+    fleetUp();
+    const p = ownerProbes({ origin: originUrl(), nodeStatus: statusFile("owner-node.json", statusDoc()) });
+    for (const service of ["fleet", "node"] as const) {
+      const report = await p.health(service);
+      expect(report, service).not.toBeNull();
+      expect(Object.keys(report?.checks ?? {}).some(name => name.startsWith("owner_")), service).toBe(false);
+    }
+  });
+
+  it("a probe built without the owner path never adds the checks", async () => {
+    hubUp();
+    fleetUp();
+    const report = await probes().health("hub");
+    expect(report).toEqual({ service: "hub", version: V, checks: { ready: true } });
+  });
+
+  it("an origin that is neither https nor local http is refused at construction", () => {
+    for (const origin of ["http://10.0.0.5:8790", "http://hub.example.invalid", "ftp://127.0.0.1/app", "not a url"]) {
+      expect(() => ownerProbes({ origin }), origin).toThrow(/https|127\.0\.0\.1|localhost/);
+    }
+    expect(() => ownerProbes({ origin: "https://morndo.example.invalid" })).not.toThrow();
+    expect(() => ownerProbes({ origin: "http://127.0.0.1:8790" })).not.toThrow();
+    expect(() => ownerProbes({ origin: "http://localhost:8790" })).not.toThrow();
+  });
+
+  it("a hub that does not answer has no report even with the owner path configured", async () => {
+    hubAnswer = () => { /* it never answers */ };
+    fleetUp();
+    const p = ownerProbes({ origin: originUrl(), timeoutMs: 60 });
+    expect(await p.health("hub")).toBeNull();
   });
 });

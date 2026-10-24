@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { parse } from "yaml";
 import { sha256Sums } from "./checksums.ts";
-import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
+import { emptyFeed, promoteRelease, publishRelease, resignFeed } from "./feed.ts";
 import { artifactName, buildManifest, declaredSchemas, protocolRange } from "./manifest.ts";
 import { BUNDLED_NODE } from "./node-pin.ts";
 import { createHash } from "node:crypto";
@@ -149,10 +149,30 @@ describe("check-signing-feed.sh", () => {
       "#!/bin/sh",
       `D=${dir}`,
       'case "$*" in',
-      `  *git/ref/heads/feed*) ${p.headError ? "echo 'gh: Server Error (HTTP 500)' >&2; exit 1" : p.branch ? 'echo h1' : "echo 'gh: Not Found (HTTP 404)' >&2; exit 1"} ;;`,
+      `  *git/ref/heads/feed*) ${p.headError ? "echo 'gh: Server Error (HTTP 500)' >&2; exit 1" : p.branch ? 'if [ -f "$D/head" ]; then cat "$D/head"; else echo h1; fi' : "echo 'gh: Not Found (HTTP 404)' >&2; exit 1"} ;;`,
       `  *repos/o/r/pages*) ${p.pages === undefined || p.pages === "none" ? "echo 'gh: Not Found (HTTP 404)' >&2; exit 1" : "echo https://pages.example.invalid/site/"} ;;`,
-      '  *contents/latest.json*) cat "$D/prev/latest.json" ;;',
+      '  *per_page=100*) cat "$D/commits.txt" ;;',
+      '  *git/commits/*)',
+      '    sha=',
+      '    for arg in "$@"; do',
+      '      case $arg in *git/commits/*) sha=${arg##*/} ;; esac',
+      '    done',
+      '    if [ -n "$sha" ] && [ -f "$D/history/$sha.commit" ]; then cat "$D/history/$sha.commit"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi ;;',
+      '  *contents/latest.json.sig*)',
+      '    ref=',
+      '    for arg in "$@"; do',
+      '      case $arg in *ref=*) ref=${arg#*ref=} ;; esac',
+      '    done',
+      '    if [ -n "$ref" ] && [ -f "$D/history/$ref.json.sig" ]; then cat "$D/history/$ref.json.sig"; else echo "gh: Not Found (HTTP 404)" >&2; exit 1; fi ;;',
+      '  *contents/latest.json*)',
+      '    ref=',
+      '    for arg in "$@"; do',
+      '      case $arg in *ref=*) ref=${arg#*ref=} ;; esac',
+      '    done',
+      '    if [ -n "$ref" ] && [ -f "$D/history/$ref.json.error" ]; then echo "gh: Server Error (HTTP 500)" >&2; exit 1; fi',
+      '    if [ -n "$ref" ] && [ -f "$D/history/$ref.json" ]; then cat "$D/history/$ref.json"; else cat "$D/prev/latest.json"; fi ;;',
       '  *contents/stable.json*) cat "$D/prev/stable.json" ;;',
+      '  *repos/o/r/releases*) cat "$D/release.json" ;;',
       '  "release download"*) while [ $# -gt 0 ]; do [ "$1" = --dir ] && out=$2; shift; done; cp "$D/manifest.json" "$out/manifest.json" ;;',
       "  *) exit 2 ;;",
       "esac",
@@ -306,6 +326,454 @@ describe("check-signing-feed.sh", () => {
     put(first, publishRelease(first.latest, { channel: "latest", entry: entry(VERSION), now: NOW, keySetVersion: 1 }), first.stable);
     expect(check(first, { MODE: "publish", VERSION }).status).toBe(1);
     expect(check(first, { MODE: "resign" }).stderr).toMatch(/needs a feed branch/);
+  });
+
+  const iso = (ms: number) => new Date(ms).toISOString().replace(/\.\d{3}Z$/, "Z");
+  const bump = (text: string, now: number, withdrawn: string[], change?: (doc: { seq: number; keySetVersion: number; releases: { manifestSha256: string }[] }) => void) => {
+    const doc = JSON.parse(text) as { seq: number; issuedAt: string; expiresAt: string; withdrawn: string[]; keySetVersion: number; releases: { manifestSha256: string }[] };
+    doc.seq += 1;
+    doc.issuedAt = iso(now);
+    doc.expiresAt = iso(now + 14 * 86_400_000);
+    doc.withdrawn = withdrawn;
+    change?.(doc);
+    return JSON.stringify(doc);
+  };
+
+  it("passes a withdrawal: both feeds +1, the lists as they were, the Version appended to withdrawn", () => {
+    const w = world({ branch: true });
+    const latest = publishRelease(w.latest, { channel: "latest", entry: entry("0.2.0"), now: NOW - 4000, keySetVersion: 1 });
+    writeFileSync(join(w.dir, "prev/latest.json"), latest);
+    put(w, bump(latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+    const done = check(w, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(done.status, done.stderr).toBe(0);
+  });
+
+  it("refuses a withdrawal that removes or edits a release", () => {
+    const removed = world({ branch: true });
+    put(removed, bump(removed.latest, NOW, ["0.1.0"], doc => { doc.releases = []; }), bump(removed.stable, NOW, ["0.1.0"]));
+    const gone = check(removed, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(gone.status).toBe(1);
+    expect(gone.stderr).toMatch(/refusing to sign/);
+    expect(gone.stderr).toMatch(/changed a release/);
+    const edited = world({ branch: true });
+    put(edited, bump(edited.latest, NOW, ["0.1.0"], doc => { doc.releases[0]!.manifestSha256 = "ef".repeat(32); }), bump(edited.stable, NOW, ["0.1.0"]));
+    const changed = check(edited, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(changed.status).toBe(1);
+    expect(changed.stderr).toMatch(/changed a release/);
+  });
+
+  it("refuses a withdrawal that appends anything but the Version, or two entries, or a Version already withdrawn", () => {
+    const other = world({ branch: true });
+    put(other, bump(other.latest, NOW, ["0.9.9"]), bump(other.stable, NOW, ["0.1.0"]));
+    const wrong = check(other, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(wrong.status).toBe(1);
+    expect(wrong.stderr).toMatch(/refusing to sign/);
+    expect(wrong.stderr).toMatch(/withdrawn/);
+    const two = world({ branch: true });
+    put(two, bump(two.latest, NOW, ["0.1.0", "0.9.9"]), bump(two.stable, NOW, ["0.1.0"]));
+    const extra = check(two, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(extra.status).toBe(1);
+    expect(extra.stderr).toMatch(/withdrawn/);
+    const again = world({ branch: true });
+    const prev = JSON.parse(readFileSync(join(again.dir, "prev/latest.json"), "utf8")) as { withdrawn: string[] };
+    prev.withdrawn = ["0.1.0"];
+    writeFileSync(join(again.dir, "prev/latest.json"), JSON.stringify(prev));
+    put(again, bump(again.latest, NOW, ["0.1.0", "0.1.0"]), bump(again.stable, NOW, ["0.1.0"]));
+    const held = check(again, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(held.status).toBe(1);
+    expect(held.stderr).toMatch(/already withdrawn/);
+  });
+
+  it("refuses a withdrawal of a Version the latest feed does not list", () => {
+    const w = world({ branch: true });
+    put(w, bump(w.latest, NOW, [VERSION]), bump(w.stable, NOW, [VERSION]));
+    const done = check(w, { MODE: "withdraw", VERSION });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/refusing to sign/);
+    expect(done.stderr).toMatch(/does not list/);
+  });
+
+  it("refuses a withdrawal with the wrong number, a changed key set, a stale issue time or an existing signature", () => {
+    const number = world({ branch: true });
+    put(number, bump(number.latest, NOW, ["0.1.0"], doc => { doc.seq = 9; }), bump(number.stable, NOW, ["0.1.0"]));
+    expect(check(number, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/expected/);
+    const keysChanged = world({ branch: true });
+    put(keysChanged, bump(keysChanged.latest, NOW, ["0.1.0"], doc => { doc.keySetVersion = 2; }), bump(keysChanged.stable, NOW, ["0.1.0"]));
+    expect(check(keysChanged, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/key set/);
+    const stale = world({ branch: true });
+    const old = NOW - 2 * 86_400_000;
+    put(stale, bump(stale.latest, old, ["0.1.0"]), bump(stale.stable, old, ["0.1.0"]));
+    expect(check(stale, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/issued/);
+    // stable is held to the same freshness as latest: a withdrawal writes both feeds now
+    const staleStable = world({ branch: true });
+    const stillOffered = publishRelease(staleStable.latest, { channel: "latest", entry: entry("0.2.0"), now: NOW - 4000, keySetVersion: 1 });
+    writeFileSync(join(staleStable.dir, "prev/latest.json"), stillOffered);
+    put(staleStable, bump(stillOffered, NOW, ["0.1.0"]), bump(staleStable.stable, old, ["0.1.0"]));
+    const staleStableDone = check(staleStable, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(staleStableDone.status).toBe(1);
+    expect(staleStableDone.stderr).toMatch(/stable\.json was issued/);
+    const signed = world({ branch: true });
+    put(signed, bump(signed.latest, NOW, ["0.1.0"]), bump(signed.stable, NOW, ["0.1.0"]));
+    writeFileSync(join(signed.dir, "site/latest.json.sig"), "old");
+    expect(check(signed, { MODE: "withdraw", VERSION: "0.1.0" }).stderr).toMatch(/already exists/);
+  });
+
+  it("refuses a withdrawal without VERSION or with no feed branch", () => {
+    const w = world({ branch: true });
+    put(w, bump(w.latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+    expect(check(w, { MODE: "withdraw" }).status).not.toBe(0);
+    const missing = world({ branch: false });
+    put(missing, bump(missing.latest, NOW, ["0.1.0"]), bump(missing.stable, NOW, ["0.1.0"]));
+    const done = check(missing, { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/a withdrawal needs a feed branch/);
+  });
+
+  it("refuses a withdrawal that leaves a channel offering nothing unless ALLOW_EMPTY_CHANNEL is true", () => {
+    const sentence = (channel: string) => `refusing to sign: withdrawing 0.1.0 would leave the ${channel} feed offering nothing; set allow_empty_channel to true to do it`;
+    const latestOnly = () => {
+      const w = world({ branch: true });
+      put(w, bump(w.latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+      return w;
+    };
+    const stableOnly = () => {
+      const w = world({ branch: true });
+      const latest = publishRelease(w.latest, { channel: "latest", entry: entry("0.2.0"), now: NOW - 4000, keySetVersion: 1 });
+      const stable = publishRelease(w.stable, { channel: "stable", entry: entry("0.1.0"), now: NOW - 4000, keySetVersion: 1 });
+      writeFileSync(join(w.dir, "prev/latest.json"), latest);
+      writeFileSync(join(w.dir, "prev/stable.json"), stable);
+      put(w, bump(latest, NOW, ["0.1.0"]), bump(stable, NOW, ["0.1.0"]));
+      return w;
+    };
+    for (const [channel, build] of [["latest", latestOnly], ["stable", stableOnly]] as const) {
+      for (const value of ["false", "true"]) {
+        const done = check(build(), { MODE: "withdraw", VERSION: "0.1.0", ALLOW_EMPTY_CHANNEL: value });
+        if (value === "true") expect(done.status, `${channel}: ${done.stderr}`).toBe(0);
+        else {
+          expect(done.status, done.stderr).toBe(1);
+          expect(done.stderr).toContain(sentence(channel));
+        }
+      }
+    }
+    const unset = check(latestOnly(), { MODE: "withdraw", VERSION: "0.1.0" });
+    expect(unset.status, unset.stderr).toBe(1);
+    expect(unset.stderr).toContain(sentence("latest"));
+  });
+
+  it("refuses an ALLOW_EMPTY_CHANNEL that is not true or false", () => {
+    const w = world({ branch: true });
+    put(w, bump(w.latest, NOW, ["0.1.0"]), bump(w.stable, NOW, ["0.1.0"]));
+    const done = check(w, { MODE: "withdraw", VERSION: "0.1.0", ALLOW_EMPTY_CHANNEL: "yes" });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toContain("refusing to sign: ALLOW_EMPTY_CHANNEL must be true or false");
+  });
+
+  const day = 86_400_000;
+  // Rows are the first-parent chain, newest first. commits.txt stays in committer-date order
+  // (newest date first), which is the list the old soak walked.
+  const listing = (w: ReturnType<typeof world>, rows: { sha: string; ageDays: number; body: string; sig?: "bad" | "missing"; inCommitList?: boolean }[]) => {
+    const history = join(w.dir, "history");
+    mkdirSync(history, { recursive: true });
+    const key = join(w.dir, "feed-key");
+    expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "feed-test", "-q"]).status).toBe(0);
+    const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(w.dir, "trust/feed_allowed_signers"), `feed@morndo.github.io namespaces="feed@morndo.github.io" ${pub}\n`);
+    const other = join(w.dir, "other-key");
+    rows.forEach((row, i) => {
+      const bodyPath = join(history, `${row.sha}.json`);
+      writeFileSync(bodyPath, row.body);
+      const parent = rows[i + 1]?.sha ?? "";
+      writeFileSync(join(history, `${row.sha}.commit`), `${iso(NOW - row.ageDays * day)}\t${parent}\n`);
+      if (row.sig === "missing") return;
+      const signer = row.sig === "bad" ? other : key;
+      if (row.sig === "bad" && !existsSync(other)) {
+        expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", other, "-N", "", "-C", "other-feed", "-q"]).status).toBe(0);
+      }
+      expect(spawnSync("ssh-keygen", ["-Y", "sign", "-f", signer, "-n", "feed@morndo.github.io", bodyPath]).status).toBe(0);
+    });
+    const listed = rows.filter(row => row.inCommitList !== false);
+    const byDate = [...listed].sort((a, b) => a.ageDays - b.ageDays);
+    writeFileSync(join(w.dir, "commits.txt"), `${byDate.map(row => `${row.sha} ${iso(NOW - row.ageDays * day)}`).join("\n")}\n`);
+    const tip = rows[0];
+    if (tip !== undefined) {
+      writeFileSync(join(w.dir, "head"), `${tip.sha}\n`);
+      writeFileSync(join(w.dir, "prev/latest.json"), tip.body);
+    }
+  };
+  const dates = (w: ReturnType<typeof world>, publishedAt: string) => {
+    writeFileSync(join(w.dir, "manifest.json"), JSON.stringify({ manifest: true, publishedAt }));
+    writeFileSync(join(w.dir, "release.json"), JSON.stringify({ published_at: publishedAt }));
+  };
+
+  it("passes a promotion: both feeds +1, stable gains the entry latest lists, latest's lists as they were, seven days on latest", () => {
+    const w = world({ branch: true });
+    listing(w, [
+      { sha: "newer", ageDays: 2, body: w.latest },
+      { sha: "first", ageDays: 8, body: w.latest },
+      { sha: "older", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+    ]);
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const done = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(done.status, done.stderr).toBe(0);
+  });
+
+  it("refuses a promotion before seven days, counted along the first-parent chain from signed commits, not by date", () => {
+    const young = world({ branch: true });
+    listing(young, [
+      { sha: "forged", ageDays: 20, body: young.latest },
+      { sha: "real", ageDays: 2, body: young.latest },
+      { sha: "gap", ageDays: 40, body: emptyFeed({ channel: "latest", now: NOW - 40 * day, keySetVersion: 1 }) },
+    ]);
+    dates(young, iso(NOW - 20 * day));
+    put(young, resignFeed(young.latest, NOW), promoteRelease(young.stable, young.latest, "0.1.0", NOW));
+    const refused = check(young, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/refusing to sign/);
+    expect(refused.stderr).toMatch(/promotion needs 7/);
+    expect(refused.stderr).toContain(iso(NOW - 2 * day));
+    const mature = world({ branch: true });
+    listing(mature, [
+      { sha: "tip", ageDays: 2, body: mature.latest },
+      { sha: "first", ageDays: 8, body: mature.latest, inCommitList: false },
+      { sha: "gap", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+    ]);
+    dates(mature, iso(NOW - day));
+    put(mature, resignFeed(mature.latest, NOW), promoteRelease(mature.stable, mature.latest, "0.1.0", NOW));
+    const allowed = check(mature, { MODE: "promote", VERSION: "0.1.0" });
+    expect(allowed.status, allowed.stderr).toBe(0);
+    const missing = world({ branch: true });
+    listing(missing, [
+      { sha: "h1", ageDays: 2, body: missing.latest, inCommitList: false },
+      { sha: "older", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+    ]);
+    dates(missing, iso(NOW - 20 * day));
+    put(missing, resignFeed(missing.latest, NOW), promoteRelease(missing.stable, missing.latest, "0.1.0", NOW));
+    const untold = check(missing, { MODE: "promote", VERSION: "0.1.0" });
+    expect(untold.status).toBe(1);
+    expect(untold.stderr).toMatch(/promotion needs 7/);
+    expect(untold.stderr).toContain(iso(NOW - 2 * day));
+  });
+
+  it("refuses a promotion whose soak a back-dated forged commit tries to shorten", () => {
+    const w = world({ branch: true });
+    listing(w, [
+      { sha: "forged", ageDays: 20, body: w.latest },
+      { sha: "real", ageDays: 2, body: w.latest },
+      { sha: "before", ageDays: 30, body: emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 }) },
+    ]);
+    dates(w, iso(NOW - 20 * day));
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/promotion needs 7/);
+    expect(refused.stderr).toContain(iso(NOW - 2 * day));
+  });
+
+  it("refuses a promotion whose soak a replayed older feed and a back-dated tip try to shorten", () => {
+    const w = world({ branch: true });
+    const older = emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 });
+    listing(w, [
+      { sha: "forged", ageDays: 20, body: w.latest },
+      { sha: "replay", ageDays: 19, body: older },
+      { sha: "real", ageDays: 2, body: w.latest },
+      { sha: "before", ageDays: 30, body: older },
+    ]);
+    dates(w, iso(NOW - 20 * day));
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toMatch(/promotion needs 7/);
+    expect(refused.stderr).toContain(iso(NOW - 2 * day));
+  });
+
+  it("counts the oldest listing across a gap, and refuses an unsigned listing far down the chain", () => {
+    const old = world({ branch: true });
+    const gap = emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 });
+    listing(old, [
+      { sha: "tip", ageDays: 1, body: old.latest },
+      { sha: "gap", ageDays: 5, body: gap },
+      { sha: "first", ageDays: 9, body: old.latest },
+    ]);
+    put(old, resignFeed(old.latest, NOW), promoteRelease(old.stable, old.latest, "0.1.0", NOW));
+    const allowed = check(old, { MODE: "promote", VERSION: "0.1.0" });
+    expect(allowed.status, allowed.stderr).toBe(0);
+    const bad = world({ branch: true });
+    listing(bad, [
+      { sha: "tip", ageDays: 1, body: bad.latest },
+      { sha: "gap", ageDays: 5, body: gap },
+      { sha: "first", ageDays: 9, body: bad.latest, sig: "bad" },
+    ]);
+    put(bad, resignFeed(bad.latest, NOW), promoteRelease(bad.stable, bad.latest, "0.1.0", NOW));
+    const refused = check(bad, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: the feed branch commit first lists 0.1.0 in a latest.json that is not signed by the feed key");
+  });
+
+  it("refuses a promotion when latest.json cannot be read at a commit down the chain, and does not take a 404 for an error", () => {
+    const w = world({ branch: true });
+    const older = emptyFeed({ channel: "latest", now: NOW - 30 * day, keySetVersion: 1 });
+    listing(w, [
+      { sha: "tip", ageDays: 1, body: w.latest },
+      { sha: "mid", ageDays: 5, body: older },
+      { sha: "first", ageDays: 9, body: w.latest },
+    ]);
+    writeFileSync(join(w.dir, "history", "mid.json.error"), "");
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: cannot read latest.json at mid");
+  });
+
+  it("refuses a promotion when a commit that lists the Version has no valid signature", () => {
+    const w = world({ branch: true });
+    listing(w, [{ sha: "tip", ageDays: 8, body: w.latest, sig: "bad" }]);
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: the feed branch commit tip lists 0.1.0 in a latest.json that is not signed by the feed key");
+  });
+
+  it("refuses a promotion when latest.json.sig cannot be read at a listing commit", () => {
+    const w = world({ branch: true });
+    listing(w, [{ sha: "tip", ageDays: 8, body: w.latest, sig: "missing" }]);
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    const refused = check(w, { MODE: "promote", VERSION: "0.1.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: cannot read latest.json.sig at tip");
+  });
+
+  it("refuses a promotion that lands below stable's newest Version", () => {
+    const w = world({ branch: true });
+    const low = entry("0.2.0");
+    const high = entry("0.3.0");
+    const latest = publishRelease(
+      publishRelease(null, { channel: "latest", entry: low, now: NOW - 5000, keySetVersion: 1 }),
+      { channel: "latest", entry: high, now: NOW - 4000, keySetVersion: 1 },
+    );
+    const stable = publishRelease(null, { channel: "stable", entry: high, now: NOW - 4000, keySetVersion: 1 });
+    writeFileSync(join(w.dir, "prev/latest.json"), latest);
+    writeFileSync(join(w.dir, "prev/stable.json"), stable);
+    const next = JSON.parse(resignFeed(stable, NOW)) as { releases: unknown[] };
+    const added = (JSON.parse(latest) as { releases: { version: string }[] }).releases.find(release => release.version === "0.2.0");
+    next.releases = [...next.releases, added];
+    put(w, resignFeed(latest, NOW), JSON.stringify(next));
+    const refused = check(w, { MODE: "promote", VERSION: "0.2.0" });
+    expect(refused.status).toBe(1);
+    expect(refused.stderr).toContain("refusing to sign: stable.json does not list 0.2.0 first: stable only moves forward");
+  });
+
+  it("refuses a promotion that adds an entry latest does not have, or changes the entry, or adds two", () => {
+    const missing = world({ branch: true });
+    const invented = JSON.parse(resignFeed(missing.stable, NOW)) as { releases: unknown[] };
+    invented.releases = [entry("9.9.9")];
+    put(missing, resignFeed(missing.latest, NOW), JSON.stringify(invented));
+    const never = check(missing, { MODE: "promote", VERSION: "9.9.9" });
+    expect(never.status).toBe(1);
+    expect(never.stderr).toMatch(/refusing to sign/);
+    expect(never.stderr).toMatch(/a Version latest never had/);
+    const changed = world({ branch: true });
+    const edited = JSON.parse(promoteRelease(changed.stable, changed.latest, "0.1.0", NOW)) as { releases: { manifestSha256: string }[] };
+    edited.releases[0]!.manifestSha256 = "ef".repeat(32);
+    put(changed, resignFeed(changed.latest, NOW), JSON.stringify(edited));
+    const differ = check(changed, { MODE: "promote", VERSION: "0.1.0" });
+    expect(differ.status).toBe(1);
+    expect(differ.stderr).toMatch(/not the previous releases plus the one release/);
+    const extra = world({ branch: true });
+    const two = JSON.parse(promoteRelease(extra.stable, extra.latest, "0.1.0", NOW)) as { releases: unknown[] };
+    two.releases.push(entry("0.3.0"));
+    put(extra, resignFeed(extra.latest, NOW), JSON.stringify(two));
+    const both = check(extra, { MODE: "promote", VERSION: "0.1.0" });
+    expect(both.status).toBe(1);
+    expect(both.stderr).toMatch(/not the previous releases plus the one release/);
+  });
+
+  it("refuses a promotion of a Version already in stable, or withdrawn in either feed", () => {
+    const held = world({ branch: true });
+    const stable = publishRelease(null, { channel: "stable", entry: entry("0.1.0"), now: NOW - 5000, keySetVersion: 1 });
+    writeFileSync(join(held.dir, "prev/stable.json"), stable);
+    put(held, resignFeed(held.latest, NOW), resignFeed(stable, NOW));
+    const again = check(held, { MODE: "promote", VERSION: "0.1.0" });
+    expect(again.status).toBe(1);
+    expect(again.stderr).toMatch(/refusing to sign/);
+    expect(again.stderr).toMatch(/already in the stable feed/);
+    const fromLatest = world({ branch: true });
+    const latest = fromLatest.latest.replace('"withdrawn": []', '"withdrawn": ["0.1.0"]');
+    writeFileSync(join(fromLatest.dir, "prev/latest.json"), latest);
+    put(fromLatest, resignFeed(latest, NOW), promoteRelease(fromLatest.stable, fromLatest.latest, "0.1.0", NOW));
+    const latestHeld = check(fromLatest, { MODE: "promote", VERSION: "0.1.0" });
+    expect(latestHeld.status).toBe(1);
+    expect(latestHeld.stderr).toMatch(/is withdrawn/);
+    const fromStable = world({ branch: true });
+    const marked = fromStable.stable.replace('"withdrawn": []', '"withdrawn": ["0.1.0"]');
+    writeFileSync(join(fromStable.dir, "prev/stable.json"), marked);
+    const nextStable = JSON.parse(promoteRelease(fromStable.stable, fromStable.latest, "0.1.0", NOW)) as { withdrawn: string[] };
+    nextStable.withdrawn = ["0.1.0"];
+    put(fromStable, resignFeed(fromStable.latest, NOW), JSON.stringify(nextStable));
+    const stableHeld = check(fromStable, { MODE: "promote", VERSION: "0.1.0" });
+    expect(stableHeld.status).toBe(1);
+    expect(stableHeld.stderr).toMatch(/is withdrawn/);
+  });
+
+  it("refuses a promotion that changes latest's lists or either withdrawn list", () => {
+    const releases = world({ branch: true });
+    const latest = JSON.parse(resignFeed(releases.latest, NOW)) as { releases: unknown[] };
+    latest.releases = [];
+    put(releases, JSON.stringify(latest), promoteRelease(releases.stable, releases.latest, "0.1.0", NOW));
+    const dropped = check(releases, { MODE: "promote", VERSION: "0.1.0" });
+    expect(dropped.status).toBe(1);
+    expect(dropped.stderr).toMatch(/refusing to sign/);
+    expect(dropped.stderr).toMatch(/changed a list a promotion keeps/);
+    const withdrawn = world({ branch: true });
+    const marked = JSON.parse(resignFeed(withdrawn.latest, NOW)) as { withdrawn: string[] };
+    marked.withdrawn = ["0.0.9"];
+    put(withdrawn, JSON.stringify(marked), promoteRelease(withdrawn.stable, withdrawn.latest, "0.1.0", NOW));
+    const latestWithdrawn = check(withdrawn, { MODE: "promote", VERSION: "0.1.0" });
+    expect(latestWithdrawn.status).toBe(1);
+    expect(latestWithdrawn.stderr).toMatch(/changed a list a promotion keeps/);
+    const stable = world({ branch: true });
+    const next = JSON.parse(promoteRelease(stable.stable, stable.latest, "0.1.0", NOW)) as { withdrawn: string[] };
+    next.withdrawn = ["0.0.9"];
+    put(stable, resignFeed(stable.latest, NOW), JSON.stringify(next));
+    const stableWithdrawn = check(stable, { MODE: "promote", VERSION: "0.1.0" });
+    expect(stableWithdrawn.status).toBe(1);
+    expect(stableWithdrawn.stderr).toMatch(/changed its withdrawn list/);
+  });
+
+  it("refuses a promotion with the wrong number, a changed key set, a stale issue time or an existing signature", () => {
+    const number = world({ branch: true });
+    const high = JSON.parse(resignFeed(number.latest, NOW)) as { seq: number };
+    high.seq = 9;
+    put(number, JSON.stringify(high), promoteRelease(number.stable, number.latest, "0.1.0", NOW));
+    expect(check(number, { MODE: "promote", VERSION: "0.1.0" }).stderr).toMatch(/expected/);
+    const keysChanged = world({ branch: true });
+    const other = JSON.parse(resignFeed(keysChanged.latest, NOW)) as { keySetVersion: number };
+    other.keySetVersion = 2;
+    put(keysChanged, JSON.stringify(other), promoteRelease(keysChanged.stable, keysChanged.latest, "0.1.0", NOW));
+    expect(check(keysChanged, { MODE: "promote", VERSION: "0.1.0" }).stderr).toMatch(/key set/);
+    const stale = world({ branch: true });
+    const old = NOW - 2 * day;
+    put(stale, resignFeed(stale.latest, old), promoteRelease(stale.stable, stale.latest, "0.1.0", old));
+    expect(check(stale, { MODE: "promote", VERSION: "0.1.0" }).stderr).toMatch(/issued/);
+    const staleStable = world({ branch: true });
+    put(staleStable, resignFeed(staleStable.latest, NOW), promoteRelease(staleStable.stable, staleStable.latest, "0.1.0", old));
+    const staleStableDone = check(staleStable, { MODE: "promote", VERSION: "0.1.0" });
+    expect(staleStableDone.status).toBe(1);
+    expect(staleStableDone.stderr).toMatch(/stable\.json was issued/);
+    const signed = world({ branch: true });
+    put(signed, resignFeed(signed.latest, NOW), promoteRelease(signed.stable, signed.latest, "0.1.0", NOW));
+    writeFileSync(join(signed.dir, "site/latest.json.sig"), "old");
+    expect(check(signed, { MODE: "promote", VERSION: "0.1.0" }).stderr).toMatch(/already exists/);
+  });
+
+  it("refuses a promotion without VERSION or with no feed branch", () => {
+    const w = world({ branch: true });
+    put(w, resignFeed(w.latest, NOW), promoteRelease(w.stable, w.latest, "0.1.0", NOW));
+    expect(check(w, { MODE: "promote" }).status).not.toBe(0);
+    const missing = world({ branch: false });
+    put(missing, resignFeed(missing.latest, NOW), promoteRelease(missing.stable, missing.latest, "0.1.0", NOW));
+    const done = check(missing, { MODE: "promote", VERSION: "0.1.0" });
+    expect(done.status).toBe(1);
+    expect(done.stderr).toMatch(/a promotion needs a feed branch/);
   });
 });
 

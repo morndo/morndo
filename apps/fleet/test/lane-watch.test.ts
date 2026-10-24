@@ -7,7 +7,7 @@ import type { HookEvent, LaneEvent, LaneEventName } from "@morndo/protocol";
 import type { LaneEventDraft } from "../src/adapters/lane-events-store.ts";
 import { createLogger, type Logger } from "../src/adapters/log.ts";
 import type { DeliveryRequest } from "../src/application/deliveries.ts";
-import { LaneWatch, NUDGE_MAX_STALLS, REBUILD_WINDOW_MS, nudgeText, type LaneWatchConfig, type NudgeAnswer } from "../src/application/lane-watch.ts";
+import { LaneWatch, LOST_TURN_GRACE_MS, LOST_TURN_SKEW_MS, NUDGE_MAX_STALLS, REBUILD_WINDOW_MS, nudgeText, type LaneWatchConfig, type NudgeAnswer } from "../src/application/lane-watch.ts";
 import { quiet } from "./helpers/fleet.ts";
 
 const MIN = 60_000;
@@ -18,6 +18,7 @@ const WORKER = "pc.3fa2c1d0.1";                                                 
 function rig(o: {
   config?: LaneWatchConfig; alive?: boolean; online?: () => boolean; nudgeTarget?: (node: string, window: string) => string | null;
   raise?: (d: LaneEventDraft) => LaneEvent | null; answer?: NudgeAnswer; log?: Logger;
+  watched?: (window: string) => boolean; lostTurnMs?: number;
 } = {}) {
   let now = T0;
   let seq = 0;
@@ -29,6 +30,7 @@ function rig(o: {
     nudgeTarget: o.nudgeTarget ?? (() => WORKER),
     raise: o.raise ?? (d => { raised.push(d); return { ...d, seq: ++seq } as LaneEvent; }),
     nudge: async r => { nudged.push(r); return o.answer ?? { ok: true }; },
+    ...(o.watched ? { watched: o.watched } : {}), ...(o.lostTurnMs === undefined ? {} : { lostTurnMs: o.lostTurnMs }),
   });
   let n = 0;
   const finished = (at: number, over: Partial<LaneEvent> = {}): LaneEvent =>
@@ -36,7 +38,11 @@ function rig(o: {
   // A stored lane event that is no turn end: a session state change or a failed turn.
   const state = (event: LaneEventName, at: number): LaneEvent => ({ v: 1, t: "lane", seq: ++n, event, node: "pc", window: "api", lane: "api", at });
   const hook = (at: number, path: HookEvent["path"] = "/cc", body: unknown = {}): HookEvent => ({ streamId: "s", seq: ++n, at, path, node: "pc", window: "api", body });
-  return { watch, raised, nudged, alive, finished, state, hook, at: (t: number) => { now = t; } };
+  // One pane of api on pc. `over` replaces window, session or status.
+  const panes = (status: "busy" | "idle" | "waiting" | "shell" | null, over: { window?: string; sessionId?: string; status?: "busy" | "idle" | "waiting" | "shell" | null } = {}) => {
+    watch.panes("pc", [{ window: "api", sessionId: "s1", status, ...over }]);
+  };
+  return { watch, raised, nudged, alive, finished, state, hook, panes, at: (t: number) => { now = t; } };
 }
 
 describe("the lane watch", () => {
@@ -331,5 +337,266 @@ describe("the lane watch: what a Run reads (runOf)", () => {
     r.alive.value = false;
     r.watch.sweep();
     expect(r.watch.runOf("pc", "api")).toBeNull();
+  });
+});
+
+// A turn whose Stop never arrived (T-422): the session was seen leaving idle, then working, then idle, and no turn end
+// covers that busy start. A lane first seen already working is a restart and is not judged.
+describe("a turn end that never arrived (T-422)", () => {
+  const BUSY = T0 + 10 * MIN;
+  const IDLE = T0 + 40 * MIN;
+  const seed = (r: ReturnType<typeof rig>) => r.watch.turn(r.finished(T0, { status: "blocked", sessionId: "s1" }));
+  // Idle first, so the following busy is a start the watch saw. A first sighting already busy is not one.
+  const began = (r: ReturnType<typeof rig>, busyAt = BUSY) => { r.at(busyAt - MIN); r.panes("idle"); r.at(busyAt); r.panes("busy"); };
+  const ended = (r: ReturnType<typeof rig>, idleAt = IDLE) => { r.at(idleAt); r.panes("idle"); };
+
+  it("flags a working lane that went idle with no turn end after the grace, once", () => {
+    const r = rig();
+    seed(r);
+    began(r);
+    ended(r);
+    r.at(IDLE + LOST_TURN_GRACE_MS - 1);
+    r.watch.sweep();
+    expect(r.raised).toEqual([]);
+    r.at(IDLE + LOST_TURN_GRACE_MS);
+    r.watch.sweep();
+    r.watch.sweep();
+    expect(r.raised).toEqual([{
+      v: 1, t: "lane", event: "stale", node: "pc", window: "api", lane: "api", at: IDLE + LOST_TURN_GRACE_MS,
+      sessionId: "s1", reason: "no_turn_end", since: IDLE, stalls: 1,
+    }]);
+    expect(r.nudged).toEqual([]);
+  });
+
+  it("an interrupted session gets no resume nudge (T-422)", () => {
+    const r = rig({ config: { ...CONFIG, nudge: true } });
+    seed(r);
+    began(r);
+    ended(r);
+    r.at(IDLE + LOST_TURN_GRACE_MS + 10 * MIN);
+    r.watch.sweep();
+    expect(r.raised).toEqual([{
+      v: 1, t: "lane", event: "stale", node: "pc", window: "api", lane: "api", at: IDLE + LOST_TURN_GRACE_MS + 10 * MIN,
+      sessionId: "s1", reason: "no_turn_end", since: IDLE, stalls: 1,
+    }]);
+    expect(r.nudged).toEqual([]);
+    let idleAt = IDLE;
+    for (let i = 2; i <= 3; i++) {
+      const busyAt = idleAt + 10 * MIN;
+      began(r, busyAt);
+      idleAt = busyAt + 30 * MIN;
+      ended(r, idleAt);
+      r.at(idleAt + LOST_TURN_GRACE_MS + 10 * MIN);
+      r.watch.sweep();
+      expect(r.raised.at(-1)).toMatchObject({ reason: "no_turn_end", stalls: i });
+      expect(r.nudged).toEqual([]);
+    }
+  });
+
+  it("does not flag when the turn end arrives", () => {
+    for (const at of [IDLE, IDLE + 4 * MIN]) {
+      const r = rig();
+      seed(r);
+      began(r);
+      ended(r);
+      r.at(at);                                                                         // the fleet takes it now, after the busy start
+      r.watch.turn(r.finished(at, { status: "done", sessionId: "s1" }));
+      r.at(IDLE + LOST_TURN_GRACE_MS);
+      r.watch.sweep();
+      expect([r.raised, r.nudged]).toEqual([[], []]);
+    }
+  });
+
+  it("covers a turn end the fleet took at the busy start minus the skew, on its own clock", () => {
+    const covered = rig();
+    covered.at(BUSY - LOST_TURN_SKEW_MS);
+    covered.watch.turn(covered.finished(0, { status: "blocked", sessionId: "s1" }));   // the node's clock is irrelevant
+    began(covered);
+    ended(covered);
+    covered.at(IDLE + LOST_TURN_GRACE_MS);
+    covered.watch.sweep();
+    expect(covered.raised).toEqual([]);
+    const missed = rig();
+    missed.at(BUSY - LOST_TURN_SKEW_MS - 1);
+    missed.watch.turn(missed.finished(T0 + 24 * 60 * MIN, { status: "blocked", sessionId: "s1" }));
+    began(missed);
+    ended(missed);
+    missed.at(IDLE + LOST_TURN_GRACE_MS);
+    missed.watch.sweep();
+    expect(missed.raised).toHaveLength(1);
+    expect(missed.raised[0]).toMatchObject({ reason: "no_turn_end", since: IDLE });
+  });
+
+  it("a node whose clock is behind does not make short turns look lost (T-422)", () => {
+    const T = T0;
+    const behind = rig();
+    behind.at(T - MIN);                                                                 // a prior turn, taken before the busy start
+    behind.watch.turn(behind.finished(T - 10 * MIN, { status: "blocked", sessionId: "s1" }));
+    began(behind, T);
+    behind.at(T + 30_000);
+    behind.watch.turn(behind.finished(T - 5 * MIN, { status: "done", sessionId: "s1" })); // node 5.5 min behind the fleet
+    ended(behind, T + 30_000);
+    behind.at(T + 30_000 + LOST_TURN_GRACE_MS);
+    behind.watch.sweep();
+    expect(behind.raised).toEqual([]);
+    const lost = rig();
+    lost.at(T - MIN);
+    lost.watch.turn(lost.finished(T - 10 * MIN, { status: "blocked", sessionId: "s1" }));
+    began(lost, T);
+    ended(lost, T + 30_000);
+    lost.at(T + 30_000 + LOST_TURN_GRACE_MS);
+    lost.watch.sweep();
+    expect(lost.raised).toHaveLength(1);
+    expect(lost.raised[0]).toMatchObject({ reason: "no_turn_end" });
+  });
+
+  it("a node whose clock is ahead does not hide a lost turn end", () => {
+    const r = rig();
+    r.at(BUSY - LOST_TURN_SKEW_MS - MIN);
+    r.watch.turn(r.finished(BUSY + 60 * MIN, { status: "blocked", sessionId: "s1" }));  // taken before the busy start
+    began(r);
+    ended(r);
+    r.at(IDLE + LOST_TURN_GRACE_MS);
+    r.watch.sweep();
+    expect(r.raised).toHaveLength(1);
+    expect(r.raised[0]).toMatchObject({ reason: "no_turn_end", since: IDLE });
+  });
+
+  it("does not judge a lane first seen working (a restart)", () => {
+    const restart = rig();
+    seed(restart);
+    restart.at(BUSY);
+    restart.panes("busy");
+    restart.at(IDLE);
+    restart.panes("idle");
+    restart.at(IDLE + LOST_TURN_GRACE_MS);
+    restart.watch.sweep();
+    expect(restart.raised).toEqual([]);
+  });
+
+  it("does not judge a lane that never had a turn end", () => {
+    const never = rig();
+    began(never);
+    ended(never);
+    never.at(IDLE + LOST_TURN_GRACE_MS);
+    never.watch.sweep();
+    expect(never.raised).toEqual([]);
+  });
+
+  it("a failed turn is a turn end", () => {
+    const r = rig();
+    seed(r);
+    began(r);
+    r.at(BUSY + 1_000);                                                                 // the fleet takes the failure after the busy start
+    r.watch.saw(r.hook(T0 - 60 * MIN, "/hook/failure", {}));                            // the hook's own time is far in the past
+    ended(r);
+    r.at(IDLE + LOST_TURN_GRACE_MS);
+    r.watch.sweep();
+    expect([r.raised, r.nudged]).toEqual([[], []]);
+  });
+
+  it("leaves out unwatched, multi-pane and offline cases", () => {
+    const unseen = rig({ watched: () => false });
+    seed(unseen);
+    began(unseen);
+    ended(unseen);
+    unseen.at(IDLE + LOST_TURN_GRACE_MS);
+    unseen.watch.sweep();
+    expect(unseen.raised).toEqual([]);
+
+    const many = rig();
+    seed(many);
+    many.at(BUSY - MIN);
+    many.watch.panes("pc", [{ window: "api", sessionId: "s1", status: "idle" }, { window: "api", sessionId: "s2", status: "idle" }]);
+    many.at(BUSY);
+    many.watch.panes("pc", [{ window: "api", sessionId: "s1", status: "busy" }, { window: "api", sessionId: "s2", status: "busy" }]);
+    many.at(IDLE);
+    many.watch.panes("pc", [{ window: "api", sessionId: "s1", status: "idle" }, { window: "api", sessionId: "s2", status: "idle" }]);
+    many.at(IDLE + LOST_TURN_GRACE_MS);
+    many.watch.sweep();
+    expect(many.raised).toEqual([]);
+
+    let up = false;
+    const offline = rig({ online: () => up });
+    seed(offline);
+    began(offline);
+    ended(offline);
+    offline.at(IDLE + LOST_TURN_GRACE_MS);
+    offline.watch.sweep();
+    expect(offline.raised).toEqual([]);
+    up = true;
+    offline.watch.sweep();
+    expect(offline.raised).toHaveLength(1);
+
+    const gone = rig();
+    seed(gone);
+    began(gone);
+    ended(gone);
+    gone.alive.value = false;
+    gone.at(IDLE + LOST_TURN_GRACE_MS);
+    gone.watch.sweep();
+    expect(gone.raised).toEqual([]);
+    gone.alive.value = true;
+    gone.watch.sweep();
+    expect(gone.raised).toEqual([]);
+  });
+
+  it("counts stalls for repeated losses; a settled turn resets the count, and none of them nudge", () => {
+    const r = rig();
+    seed(r);
+    let idleAt = T0;
+    for (let i = 1; i <= 3; i++) {
+      const busyAt = idleAt + 10 * MIN;
+      began(r, busyAt);
+      idleAt = busyAt + 30 * MIN;
+      ended(r, idleAt);
+      r.at(idleAt + LOST_TURN_GRACE_MS);
+      r.watch.sweep();
+      expect(r.raised.at(-1)?.stalls).toBe(i);
+    }
+    expect(r.nudged).toEqual([]);
+    r.at(idleAt + LOST_TURN_GRACE_MS);
+    r.watch.turn(r.finished(idleAt + LOST_TURN_GRACE_MS, { status: "done", sessionId: "s1" }));
+    const busyAt = idleAt + LOST_TURN_GRACE_MS + 10 * MIN;
+    began(r, busyAt);
+    idleAt = busyAt + 30 * MIN;
+    ended(r, idleAt);
+    r.at(idleAt + LOST_TURN_GRACE_MS);
+    r.watch.sweep();
+    expect(r.raised.at(-1)?.stalls).toBe(1);
+    expect(r.nudged).toEqual([]);
+  });
+
+  it("stays quiet when the lane went busy again before the grace", () => {
+    const r = rig();
+    seed(r);
+    began(r);
+    ended(r);
+    r.at(IDLE + MIN);
+    r.panes("busy");
+    r.at(IDLE + LOST_TURN_GRACE_MS);
+    r.watch.sweep();
+    expect([r.raised, r.nudged]).toEqual([[], []]);
+  });
+
+  it("a store failure is retried at the next sweep", () => {
+    const stored: LaneEventDraft[] = [];
+    let left = 1;
+    const r = rig({
+      raise: d => {
+        if (left > 0) { left -= 1; throw new Error("busy"); }
+        stored.push(d);
+        return { ...d, seq: stored.length } as LaneEvent;
+      },
+    });
+    seed(r);
+    began(r);
+    ended(r);
+    r.at(IDLE + LOST_TURN_GRACE_MS);
+    r.watch.sweep();
+    expect(stored).toEqual([]);
+    r.watch.sweep();
+    expect(stored).toHaveLength(1);
+    expect(stored[0]).toMatchObject({ reason: "no_turn_end", stalls: 1, since: IDLE });
   });
 });

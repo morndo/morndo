@@ -683,7 +683,7 @@ The fleet builds five lane events from three sources: the hooks of each lane, th
   - the owner's script's counts give one placeholder each: a task `{ "type": "task", "label": "background work" }`, a wake-up with an empty `schedule`.
 - `question` is the menu's question as the screen shows it: the last line ending in "?", else the line above the options, at most 200 characters.
 - `error` is the error's type.
-- `reason` is `waiting` (the turn said WAITING, or ended with background work or a wake-up) or `no_status`; `since` is the end of the turn that went stale; `stalls` counts the stale events since the lane last ended DONE, BLOCKED or NEEDS DECISION.
+- `reason` is `waiting` (the turn said WAITING, or ended with background work or a wake-up), `no_status`, or `no_turn_end` (the session went from working to idle and no turn end reached the fleet within 5 min); `since` is the end of the turn that went stale; `stalls` counts the stale events since the lane last ended DONE, BLOCKED or NEEDS DECISION.
 
 **The shape:** `{ v: 1, t: "lane", seq, event, node, window, lane, sessionId?, at, … }`.
 - `seq` is the fleet's own counter, growing by one.
