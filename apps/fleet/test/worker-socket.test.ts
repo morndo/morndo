@@ -313,6 +313,99 @@ describe("worker socket: what a forwarded caller still does", () => {
   });
 });
 
+const SID = "11111111-1111-4111-8111-111111111111";
+const SID2 = "22222222-2222-4222-8222-222222222222";
+const pane = (workerId: string, window: string, extra: Record<string, unknown> = {}) => ({ workerId, window, cwd: "/work", status: "idle" as const, pid: 100, ...extra });
+
+describe("worker socket: a protected lane's words, identity and files", () => {
+  it("worker socket: inventory.get and the events stream show a protected pane without its words", async () => {
+    const w = await world();
+    const panes = [pane("ctl.3fa2c1d0.0", "manager", { topic: "the owner's words", lastPrompt: "a private prompt", title: "private title", sessionId: SID, sessionName: "private name" }),
+      pane("ctl.3fa2c1d0.1", "worker-a", { topic: "fine to show", sessionId: SID2 })];
+    const prev = w.ctl.answer;
+    w.ctl.answer = req => (req.op === "inventory.get" ? { ok: true, result: { panes, invVersion: 9 } } : prev(req));
+    w.ctl.inventory(panes);
+    await vi.waitFor(() => expect(w.fleet.connections.latest("ctl").inventory?.panes.find(p => p.window === "manager")?.topic).toBe("the owner's words"));
+    const seen = (r: { body: unknown } | null) => (r?.body as { result: { panes: Record<string, unknown>[] } }).result.panes;
+    const asWorker = seen(await w.worker.post("/v1/op", op({ node: "ctl" }, "inventory.get")));
+    expect(asWorker.find(p => p.window === "manager")).toEqual({ workerId: "ctl.3fa2c1d0.0", window: "manager", cwd: "", status: "idle", pid: 100 });
+    expect(asWorker.find(p => p.window === "worker-a")).toMatchObject({ topic: "fine to show", sessionId: SID2 });
+    const asOwner = seen(await w.owner.post("/v1/op", op({ node: "ctl" }, "inventory.get")));
+    expect(asOwner.find(p => p.window === "manager")).toMatchObject({ topic: "the owner's words", lastPrompt: "a private prompt", sessionId: SID });
+    // the events stream: the snapshot a new client gets, and the next inventory event
+    for (const [who, client2, hidden] of [["worker", w.worker, true], ["owner", w.owner, false]] as const) {
+      const events = await client2.events();
+      await events.when(() => events.received.some(e => e.t === "inventory" && e.node === "ctl"));
+      const manager = (events.received.find(e => e.t === "inventory" && e.node === "ctl")?.body as { panes: Record<string, unknown>[] }).panes.find(p => p.window === "manager");
+      expect(manager?.topic === undefined, who).toBe(hidden);
+      expect(manager?.lastPrompt === undefined, who).toBe(hidden);
+      expect(manager?.sessionId === undefined, who).toBe(hidden);
+      w.ctl.inventory([...panes, pane("ctl.3fa2c1d0.2", "late", { topic: "later" })]);
+      await events.when(() => events.received.filter(e => e.t === "inventory" && e.node === "ctl").length >= 2);
+      const next = (events.received.filter(e => e.t === "inventory" && e.node === "ctl").at(-1)?.body as { panes: Record<string, unknown>[] }).panes.find(p => p.window === "manager");
+      expect(next?.title === undefined, who).toBe(hidden);
+      events.close();
+    }
+    expect(JSON.stringify(await w.worker.get("/v1/lanes"))).not.toContain("the owner's words");
+  });
+
+  it("worker socket: a protected pane that was renamed is still protected, by its identity", async () => {
+    const w = await world({}, { protectedLanes: ["pc-lane"] });
+    w.pc.inventory([pane("pc.3fa2c1d0.0", "renamed", { sessionId: SID })]);
+    await vi.waitFor(() => expect(w.fleet.lanes.get("renamed")?.node).toBe("pc"));
+    refused(await w.worker.post("/v1/op", op({ workerId: "pc.3fa2c1d0.0" }, "pane.keys", { data: "x" })));
+    refused(await w.worker.post("/v1/op", op({ lane: "renamed" }, "pane.send", { text: "x" }, "lanes:id1")));
+    refused(await w.worker.post("/v1/op", op({ workerId: "pc.3fa2c1d0.0" }, "pane.capture", { lines: 5 })));
+    refused(await w.worker.post("/v1/op", op({ lane: "renamed" }, "pane.frame")));
+    const d = await w.worker.post("/v1/deliveries", { id: "lanes:id2", workerId: "pc.3fa2c1d0.0", text: "x" });
+    expect(d?.body).toMatchObject({ ok: false, error: { code: "not_allowed" } });
+    const d2 = await w.worker.post("/v1/deliveries", { id: "lanes:id3", lane: "renamed", text: "x" });
+    expect(d2?.body).toMatchObject({ ok: false, error: { code: "not_allowed" } });
+    const many = await w.worker.post("/v1/op", op({ node: "pc" }, "pane.captureMany", { workerIds: ["pc.3fa2c1d0.0"] }));
+    expect(many?.body).toMatchObject({ ok: true });
+    expect(sent(w.pc, "pane.captureMany").map(r => r.args)).toEqual([{ workerIds: [] }]);
+    expect(sent(w.pc, "pane.keys", "pane.send", "pane.capture", "pane.frame", "lane.deliver")).toHaveLength(0);
+  });
+
+  it("worker socket: files of a protected lane's session, project directory and working directory are refused on a startNode", async () => {
+    const w = await world({}, { protectedLanes: ["pc-lane"] });
+    w.pc.inventory([pane("pc.3fa2c1d0.0", "pc-lane", { cwd: "/work/pcl", sessionId: SID })]);
+    const stat = (path: string) => w.worker.post("/v1/op", op({ node: "pc" }, "file.stat", { path }));
+    await vi.waitFor(async () => refused(await stat("/work/pcl/notes.txt")));
+    refused(await stat(`/data/u/.cfg/projects/-work-pcl/old.jsonl`));
+    refused(await stat(`/data/u/.cfg/${SID}.jsonl`));
+    refused(await w.worker.post("/v1/op", op({ node: "pc" }, "file.get", { path: "/work/pcl/../pcl/n.txt", offset: 0, max: 10 })));
+    expect((await stat("/work/other/a.txt"))?.body).toMatchObject({ ok: true });
+    expect((await stat("/work/pclx/a.txt"))?.body).toMatchObject({ ok: true });
+    const route = (path: string) => w.worker.get(`/v1/files/pc/${encodeURIComponent(path)}`);
+    expect((await route("/work/pcl/notes.txt"))?.status).toBe(403);
+    expect((await route(`/data/u/.cfg/projects/-work-pcl/${SID}.jsonl`))?.status).toBe(403);
+    expect((await route("/work/other/a.txt"))?.status).not.toBe(403);
+    expect(sent(w.pc, "file.stat", "file.get").map(r => (r.args as { path: string }).path)).toEqual(["/work/other/a.txt", "/work/pclx/a.txt", "/work/other/a.txt"]);
+  });
+
+  it("worker socket: a delivery by a protected lane name is refused on a startNode", async () => {
+    const w = await world({}, { protectedLanes: ["pc-lane"] });
+    const r = await w.worker.post("/v1/deliveries", { id: "lanes:g1", lane: "pc-lane", text: "x" });
+    expect(r?.body).toMatchObject({ ok: false, error: { code: "not_allowed", executed: "no" } });
+    expect(sent(w.pc, "lane.deliver")).toHaveLength(0);
+    expect((await w.worker.post("/v1/deliveries", { id: "lanes:g2", lane: "srv-lane", text: "x" }))?.body).toMatchObject({ ok: true });
+  });
+
+  it("worker socket: args.workerId naming a protected pane is refused even when the target is an ordinary lane", async () => {
+    const w = await world({}, { protectedLanes: ["pc-lane"] });
+    refused(await w.worker.post("/v1/op", op({ lane: "srv-lane" }, "pane.send", { text: "x", workerId: "pc.3fa2c1d0.0" }, "lanes:g3")));
+    expect(sent(w.srv, "pane.send")).toHaveLength(0);
+    expect(sent(w.pc, "pane.send")).toHaveLength(0);
+  });
+
+  it("worker socket: expect.window naming a protected lane is refused even when the pane is an ordinary one", async () => {
+    const w = await world({}, { protectedLanes: ["pc-lane"] });
+    refused(await w.worker.post("/v1/op", op({ workerId: "edge.3fa2c1d0.0" }, "pane.send", { text: "x", expect: { server: "3fa2c1d0", window: "pc-lane" } }, "lanes:g4")));
+    expect(sent(w.srv, "pane.send")).toHaveLength(0);
+  });
+});
+
 describe("owner socket: nothing is taken away", () => {
   it("owner socket: the ops the worker socket refuses still work", async () => {
     const w = await world();
