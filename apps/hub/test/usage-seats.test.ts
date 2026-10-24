@@ -9,6 +9,7 @@ import type { UsageReadingsBody } from "@morndo/protocol";
 let hub: InProcessHub;
 let now: number;
 let workerToken: string;
+let workerTokenId: string;
 let managerToken: string;
 const HOUR = 3_600_000, MIN = 60_000, DAY = 86_400_000;
 type Body = Record<string, unknown>;
@@ -24,13 +25,14 @@ const pool = (body: unknown, token: string) => fetch(`${hub.base}/api/agent/usag
 });
 
 // A reading through the route, as the collector posts it, with the plan name it read (finding 3a's cases).
-const postReading = (o: { account?: string; source?: string; plan: string | null; capturedAt: number; windows: unknown[] }) =>
+const postReading = (o: { account?: string; source?: string; plan: string | null; capturedAt: number; windows: unknown[]; leaseId?: string | null }) =>
   fetch(`${hub.base}/api/agent/usage/readings`, {
     method: "POST",
     headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-lane": "builder", "x-morndo-account": o.account ?? "seat-a" },
     body: JSON.stringify({
       source: o.source ?? "claude-usage", node: null, captured_at: Math.floor(o.capturedAt / 1000), plan: o.plan,
       windows: o.windows,
+      ...(o.leaseId === undefined ? {} : { lease_id: o.leaseId }),
     }),
   });
 const fiveHour = (usedPercent: number, resetsAt: number) => ({ id: "five_hour", used_percent: usedPercent, resets_at: Math.floor(resetsAt / 1000), length_mins: 300 });
@@ -60,16 +62,50 @@ const leaseIdOf = (account: string, source: UsageReadingsBody["source"] = "app-s
   expect(g.status).toBe("granted");
   return g.status === "granted" ? g.id : null;
 };
+// A plan-watch reading posted through the route needs a lease bound to the worker token that posts it, and the hub
+// grants one only when somebody wants the account read: a look marks the demand once the last reading is 15 minutes
+// old, so every leased post below advances the clock 16 minutes first, past the lease cache and the look's staleness
+// (the codex tests' rhythm).
+const httpLeaseFor = (account: string, source: UsageReadingsBody["source"]): string => {
+  hub.usage.look();
+  const g = hub.usage.leases.grant(account, source, null, workerTokenId);
+  if (g.status !== "granted") throw new Error(`the hub did not grant a lease (${g.status})`);
+  return g.id;
+};
 
 beforeEach(async () => {
   now = 1_700_000_000_000;      // 10:00
   hub = await startInProcessHub({ now: () => now });
-  workerToken = hub.agents.issue("lanes", "worker").secret;
+  const issued = hub.agents.issue("lanes", "worker");
+  workerToken = issued.secret;
+  workerTokenId = issued.token.id;
   managerToken = hub.agents.issue("manager", "manager").secret;
 });
 afterEach(async () => { await hub.close(); });
 
 describe("seats (plan 4.5)", () => {
+  // The product lane's question (2026-10-24): Home lists an account's sessions of the last 10 minutes, so a lane stopped on a
+  // blocked account drops off that list. The seat is the account's own, so its limit stays on the account's card.
+  it("a seat stays on the account after its lane's session has dropped off the list", async () => {
+    const report = await fetch(`${hub.base}/api/agent/usage`, {
+      method: "POST", headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-account": "seat-a", "x-morndo-lane": "builder" },
+      body: JSON.stringify({ session_id: "s-builder", rate_limits: { five_hour: { used_percentage: 100, resets_at: Math.floor((now + 3 * DAY) / 1000) } } }),
+    });
+    expect(report.status).toBe(200);
+    const hit = await limit({ kind: "usage_limit", by: "builder", account: "seat-a", back_at: Math.floor((now + 4 * DAY) / 1000), at: Math.floor(now / 1000) });
+    expect(hit.status).toBe(200);
+    const live = ((await viewOf()).accounts as Body[]).find(a => a.account === "seat-a")!;
+    expect((live.sessions as Body[]).length).toBe(1);
+    expect(live.seat).toMatchObject({ state: "out" });
+    now += 3 * HOUR;                                   // far past the 10-minute session window: the lane has stopped
+    const later = ((await viewOf()).accounts as Body[]).find(a => a.account === "seat-a")!;
+    expect(later.sessions).toEqual([]);                // the list no longer shows the lane
+    expect(later.seat).toMatchObject({ state: "out", why: "usage_limit" });   // but the account's own card still says so
+    now += 2 * DAY;                                    // and the account is not forgotten while its seat stands
+    const days = ((await viewOf()).accounts as Body[]).find(a => a.account === "seat-a");
+    expect(days?.seat).toMatchObject({ state: "out" });
+  });
+
   it("two reporters, one change, one notice (AT-16)", async () => {
     const backAt = now + HOUR;
     const worker = await limit({ kind: "usage_limit", by: "reporter-one", account: "seat-a", back_at: Math.floor(backAt / 1000), at: Math.floor(now / 1000) });
@@ -241,30 +277,32 @@ describe("seats (plan 4.5)", () => {
 
   it("a plan change the plan watch tells drops the derived seat, with one reset notice; an unchanged plan leaves it (PR #125 finding 3a)", async () => {
     const reset = now + 2 * HOUR;
-    const post = (plan: string | null, n: number, account = "seat-a") => postReading({ account, plan, capturedAt: now, windows: [fiveHour(20 + n, reset)] });
+    // Every plan-watch reading is leased (only a leased reading may tell a change), each on its own lease: 16 minutes
+    // past the last reading, after a look. The readings all keep the same 5-hour cycle, so none of them clears the
+    // mark by itself — only the told plan change drops it.
+    const post = async (plan: string | null, n: number, account = "seat-a") => {
+      now += 16 * MIN;
+      return postReading({ account, plan, capturedAt: now, windows: [fiveHour(20 + n, reset)], leaseId: httpLeaseFor(account, "claude-usage") });
+    };
     // The plan watch's baseline and its agreement, on the plan the seat is marked under.
     expect((await post("Max 5x", 0)).status).toBe(200);
-    now += MIN;
     expect((await post("Max 5x", 1)).status).toBe(200);
     expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
     expect(await seatOf()).toMatchObject({ state: "out", owner: "derived" });
     // A different plan, told by two agreeing readings: the first only holds it.
-    now += MIN;
     expect((await post("Max 20x", 2)).status).toBe(200);
     expect(await seatOf()).toMatchObject({ state: "out" });
-    now += MIN;
     expect((await post("Max 20x", 3)).status).toBe(200);
     expect(await seatOf()).toBeUndefined();
     expect(await noticesOf("back")).toEqual([
       { id: expect.stringMatching(/^seat-a\|back\|reset\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: the plan or account changed, so its earlier limit mark is dropped." },
     ]);
-    // An unchanged plan tells nothing, so a seat under it stays.
+    // An unchanged plan tells nothing, so a seat under it stays. The hub's clock moves past this mark's back time
+    // before its first reading, so the out mark itself wants the confirming reads the leases need.
     expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
-    const postB = (plan: string | null, n: number) => postReading({ account: "seat-b", plan, capturedAt: now, windows: [fiveHour(20 + n, reset)] });
-    now += MIN;
-    expect((await postB("Max 5x", 4)).status).toBe(200);
-    now += MIN;
-    expect((await postB("Max 5x", 5)).status).toBe(200);
+    now += 61 * MIN;
+    expect((await post("Max 5x", 4, "seat-b")).status).toBe(200);
+    expect((await post("Max 5x", 5, "seat-b")).status).toBe(200);
     expect(await seatOf("seat-b")).toMatchObject({ state: "out", owner: "derived" });
     expect((await noticesOf("back")).filter(n => n.account === "seat-b")).toEqual([]);
   });
@@ -378,13 +416,15 @@ describe("seats (plan 4.5)", () => {
   it("a plan change told by readings stamped after the mark drops it (PR #125 fix round 2, finding 1a)", async () => {
     const reset = now + 2 * HOUR;
     // The plan watch's baseline, on the plan the seat is marked under; the mark lands at 10:01.
-    expect((await postReading({ plan: "Max 5x", capturedAt: now, windows: [fiveHour(20, reset)] })).status).toBe(200);
+    expect((await postReading({ plan: "Max 5x", capturedAt: now, windows: [fiveHour(20, reset)], leaseId: httpLeaseFor("seat-a", "claude-usage") })).status).toBe(200);
     expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now + MIN })).toEqual({ ok: true, resolved: true });
     // Two readings stamped after the mark name another plan: the first only holds it, the second tells the change.
-    now += 4 * MIN;
-    expect((await postReading({ plan: "Max 20x", capturedAt: now - 2 * MIN, windows: [fiveHour(21, reset)] })).status).toBe(200);
+    // Each is leased, so the hub's clock is 16 minutes past the last reading before each; the stamps stay after the mark.
+    now += 16 * MIN;
+    expect((await postReading({ plan: "Max 20x", capturedAt: now, windows: [fiveHour(21, reset)], leaseId: httpLeaseFor("seat-a", "claude-usage") })).status).toBe(200);
     expect(await seatOf()).toMatchObject({ state: "out" });          // the first differing reading tells nothing
-    expect((await postReading({ plan: "Max 20x", capturedAt: now - 1 * MIN, windows: [fiveHour(22, reset)] })).status).toBe(200);
+    now += 16 * MIN;
+    expect((await postReading({ plan: "Max 20x", capturedAt: now, windows: [fiveHour(22, reset)], leaseId: httpLeaseFor("seat-a", "claude-usage") })).status).toBe(200);
     expect(await seatOf()).toBeUndefined();                          // the mark was made before the change was observed
     expect(await noticesOf("back")).toEqual([
       { id: expect.stringMatching(/^seat-a\|back\|reset\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: the plan or account changed, so its earlier limit mark is dropped." },
@@ -394,13 +434,15 @@ describe("seats (plan 4.5)", () => {
   it("a plan change told by readings stamped before the mark does not drop it (PR #125 fix round 2, finding 1a)", async () => {
     const reset = now + 2 * HOUR;
     // The plan watch's baseline, then the mark lands at 10:05 — after the stamps of the readings that will tell the change.
-    expect((await postReading({ plan: "Max 5x", capturedAt: now, windows: [fiveHour(20, reset)] })).status).toBe(200);
+    expect((await postReading({ plan: "Max 5x", capturedAt: now, windows: [fiveHour(20, reset)], leaseId: httpLeaseFor("seat-a", "claude-usage") })).status).toBe(200);
     const markAt = now + 5 * MIN;
     expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: markAt })).toEqual({ ok: true, resolved: true });
-    // The hub's clock is past the mark when two readings stamped 10:03 and 10:04 name another plan.
-    now = markAt + MIN;
-    expect((await postReading({ plan: "Max 20x", capturedAt: markAt - 2 * MIN, windows: [fiveHour(21, reset)] })).status).toBe(200);
-    expect((await postReading({ plan: "Max 20x", capturedAt: markAt - 1 * MIN, windows: [fiveHour(22, reset)] })).status).toBe(200);
+    // The hub's clock is past the mark — and 16 minutes past the last reading, so each lease is granted — when two
+    // readings stamped 10:03 and 10:04 name another plan. Their stamps stay before the mark's own time.
+    now = markAt + 16 * MIN;
+    expect((await postReading({ plan: "Max 20x", capturedAt: markAt - 2 * MIN, windows: [fiveHour(21, reset)], leaseId: httpLeaseFor("seat-a", "claude-usage") })).status).toBe(200);
+    now += 16 * MIN;
+    expect((await postReading({ plan: "Max 20x", capturedAt: markAt - 1 * MIN, windows: [fiveHour(22, reset)], leaseId: httpLeaseFor("seat-a", "claude-usage") })).status).toBe(200);
     // The change is told, but the mark was made after the telling reading was taken: the seat stands.
     expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toHaveLength(1);
     expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived", backAt: markAt + HOUR });
@@ -411,23 +453,25 @@ describe("seats (plan 4.5)", () => {
     const reset = now + 2 * HOUR;
     // A derived seat, marked before any reading.
     expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
+    // Every plan-watch reading is leased (only a leased reading may tell a change), each on its own lease, 16 minutes
+    // past the last. The hub's clock starts past the mark's back time, so the out mark itself wants the confirming
+    // reads the leases need; the readings all keep the same 5-hour cycle, so none of them clears the mark by itself.
+    now += 65 * MIN;
+    const post = async (source: "app-server" | "cli-screen", plan: string, n: number) => {
+      now += 16 * MIN;
+      return postReading({ source, plan, capturedAt: now, windows: [fiveHour(20 + n, reset)], leaseId: httpLeaseFor("seat-a", source) });
+    };
     // Two sources, each steady on its own plan: no plan change is told and the seat stands.
-    now += MIN;
-    expect((await postReading({ source: "app-server", plan: "A", capturedAt: now, windows: [fiveHour(21, reset)] })).status).toBe(200);
-    now += MIN;
-    expect((await postReading({ source: "app-server", plan: "A", capturedAt: now, windows: [fiveHour(22, reset)] })).status).toBe(200);
-    now += MIN;
-    expect((await postReading({ source: "cli-screen", plan: "B", capturedAt: now, windows: [fiveHour(23, reset)] })).status).toBe(200);
-    now += MIN;
-    expect((await postReading({ source: "cli-screen", plan: "B", capturedAt: now, windows: [fiveHour(24, reset)] })).status).toBe(200);
+    expect((await post("app-server", "A", 0)).status).toBe(200);
+    expect((await post("app-server", "A", 1)).status).toBe(200);
+    expect((await post("cli-screen", "B", 2)).status).toBe(200);
+    expect((await post("cli-screen", "B", 3)).status).toBe(200);
     expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toEqual([]);
     expect(await seatOf()).toMatchObject({ state: "out", owner: "derived" });
     // One source changing its own plan, told by two agreeing readings: told once, and the seat marked before it drops.
-    now += MIN;
-    expect((await postReading({ source: "app-server", plan: "B", capturedAt: now, windows: [fiveHour(25, reset)] })).status).toBe(200);
+    expect((await post("app-server", "B", 4)).status).toBe(200);
     expect(await seatOf()).toMatchObject({ state: "out" });          // the first differing reading tells nothing
-    now += MIN;
-    expect((await postReading({ source: "app-server", plan: "B", capturedAt: now, windows: [fiveHour(26, reset)] })).status).toBe(200);
+    expect((await post("app-server", "B", 5)).status).toBe(200);
     expect(await seatOf()).toBeUndefined();
     expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toEqual([
       { id: expect.any(String), kind: "plan", account: "seat-a", at: expect.any(Number), text: 'seat-a: plan changed from "A" to "B".' },

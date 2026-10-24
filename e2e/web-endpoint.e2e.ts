@@ -7,7 +7,8 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, unlinkSync } from "node:fs"
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, type Page } from "playwright";
+import type { Page } from "playwright";
+import { launch } from "./harness.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const OUT = process.env.E2E_OUT ?? mkdtempSync(join(tmpdir(), "morndo-e2e-out-"));
@@ -65,7 +66,7 @@ tmux("new-window", "-t", "qa", "-n", "reviewer", "bash --norc --noprofile");
 tmux("send-keys", "-t", "qa:builder", "PS1='$ '; clear; echo 'synthetic worker: building the login page'", "Enter");
 tmux("send-keys", "-t", "qa:reviewer", "PS1='$ '; clear; echo 'synthetic worker: reviewing change 42'", "Enter");
 
-const browser = await chromium.launch();
+const browser = await launch();
 try {
   await startHub();
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, colorScheme: "dark", deviceScaleFactor: 2 });

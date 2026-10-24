@@ -1,7 +1,9 @@
 // The board on the wire (ADR-0015): the tasks the hub pushes to the app (the `board` feed frame) and answers to the
 // agents' CLI, and the bodies a change is sent with, from the app (a Command, AC7) or from an agent (a bearer token).
 // Types are the domain's own; a task this build can't read is dropped from the list, never guessed.
-import type { EndpointId, MergeRecord, MergedView, SessionId, Task, TaskActor, TaskChange, TaskEvent, TASK_PRIORITIES, TASK_STATUSES } from "@morndo/domain";
+import type { EndpointId, MergeRecord, MergedView, ProofBrief, ProofState, RefResult, SessionId, Task, TaskActor, TaskChange, TaskEvent, TASK_PRIORITIES, TASK_STATUSES } from "@morndo/domain";
+import type { CoverageItem } from "@morndo/domain";
+import { ATTESTED_KINDS, COVERAGE_STATUSES, ITEM_KINDS, PROOF_KINDS, PROOF_MODES, REF_STATES } from "@morndo/domain";
 import * as z from "./z.ts";
 
 const str = (max: number) => z.string().check(z.maxLength(max));
@@ -14,6 +16,22 @@ export const PRIORITIES = ["high", "normal", "low"] as const satisfies typeof TA
 export const taskKey = () => z.pipe(z.string().check(z.regex(/^T-[1-9]\d{0,8}$/)), z.transform(s => s as Task["key"]));
 const endpointId = () => z.pipe(text(), z.transform(s => s as EndpointId));
 const sessionId = () => z.pipe(text(), z.transform(s => s as SessionId));
+
+// B13: the stored brief on the wire (ADR-0035).
+export const ProofBriefSchema = z.object({
+  summary: text(), decisions: text(), leftOut: text(), limits: text(), refs: z.array(text()),
+  attested: z.array(z.object({ kind: z.enum(ATTESTED_KINDS), how: text() })), noCode: text(),
+});
+export const RefResultSchema = z.object({ ref: text(), state: z.enum(REF_STATES), detail: z.nullable(text()), checkedAt: count() });
+export const CoverageItemSchema = z.object({
+  spec: text(), kind: z.enum(ITEM_KINDS), repo: z.nullable(text()), text: text(), by: z.enum(["assigner", "lane"]), status: z.enum(COVERAGE_STATUSES), via: z.exactOptional(text()),
+});
+export const ProofViewSchema = z.object({
+  rev: z.nullable(z.int().check(z.gte(1))), brief: z.nullable(ProofBriefSchema), results: z.array(RefResultSchema), mode: z.enum(PROOF_MODES), standIn: z.boolean(),
+  coverage: z.array(CoverageItemSchema),
+  state: z.object({ kind: z.enum(PROOF_KINDS), green: count(), total: count(), accepts: z.boolean(), line: text() }),
+});
+export type ProofView = z.output<typeof ProofViewSchema>;
 
 export const BoardActorSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("principal"), endpointId: endpointId(), sessionId: sessionId() }),
@@ -34,12 +52,15 @@ export const BoardTaskSchema = z.object({
 });
 export const TaskChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("created"), status: z.enum(STATUSES), assignee: z.nullable(text()) }),
-  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()) }),
+  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()), proofSeen: z.exactOptional(text()) }),
   z.object({ kind: z.literal("assigned"), from: z.nullable(text()), to: z.nullable(text()) }),
   z.object({ kind: z.literal("edited"), title: z.exactOptional(text()), description: z.exactOptional(text()), priority: z.exactOptional(z.enum(PRIORITIES)) }),
   z.object({ kind: z.literal("commented"), text: text() }),
+  // B13: the stored brief (ADR-0035); `refs` are the canonical reference strings, `attested` the lane's own word.
+  z.object({ kind: z.literal("briefed"), brief: ProofBriefSchema }),
   z.object({ kind: z.literal("merged"), repo: text(), sha: text() }),
   z.object({ kind: z.literal("unmerged"), repo: text(), sha: text() }),
+  z.object({ kind: z.literal("proof_listed"), add: z.array(text()), drop: z.array(text()) }),
 ]);
 export const TaskEventSchema = z.object({ key: taskKey(), rev: z.int().check(z.gte(1)), at: count(), actor: TaskActorSchema, change: TaskChangeSchema });
 
@@ -57,6 +78,7 @@ export const BoardFrameSchema = z.object({
   t: z.literal("board"), tasks: z.array(z.unknown()), lanes: z.array(text()), at: count(), runs: z.exactOptional(z.array(z.unknown())),
   orphans: z.exactOptional(z.array(text())),
   merged: z.exactOptional(z.array(z.unknown())),
+  standIn: z.exactOptional(z.boolean()),     // the hub reads its proof references from a stand-in forge, not GitHub (ADR-0035)
 });
 
 // A new task, from the app or an agent. A worker's lands in the backlog whatever it says (B2).
@@ -67,14 +89,25 @@ export const BoardCreateBody = z.object({
 // One change to one task: the same body from the app and from an agent; the hub decides by who sent it.
 const ifRev = z.exactOptional(z.int().check(z.gte(1)));
 export const BoardActionBody = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), notLive: z.exactOptional(str(2000)), ifRev }),
+  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), notLive: z.exactOptional(str(2000)), proofOverride: z.exactOptional(str(2000)), ifRev }),
   z.object({ action: z.literal("assign"), to: z.nullable(str(200)), ifRev }),
   z.object({ action: z.literal("edit"), title: z.exactOptional(str(1000)), description: z.exactOptional(str(20_000)), priority: z.exactOptional(z.enum(PRIORITIES)), ifRev }),
   z.object({ action: z.literal("comment"), text: str(20_000) }),
+  // B13: the brief, its own action (ADR-0035). No ifRev (like a comment or a merged record): it changes no state, so it
+  // races with nothing. The wire caps are loose on purpose; the domain judges the real ones.
+  z.object({
+    action: z.literal("brief"), brief: z.object({
+      summary: str(20_000), decisions: z.exactOptional(str(20_000)), leftOut: str(20_000), limits: str(20_000),
+      refs: z.exactOptional(z.array(str(1000)).check(z.maxLength(50))),
+      attested: z.exactOptional(z.array(z.object({ kind: str(40), how: str(20_000) })).check(z.maxLength(50))),
+      noCode: z.exactOptional(str(20_000)),
+    }),
+  }),
   // B11: recording a task's PR merged, and clearing a wrong record (only the board's hands may). No ifRev (like a
   // comment): neither changes state, so each races with nothing.
   z.object({ action: z.literal("merged"), sha: str(100), repo: z.exactOptional(str(300)) }),
   z.object({ action: z.literal("unmerged"), sha: str(100), repo: z.exactOptional(str(300)) }),
+  z.object({ action: z.literal("proof_list"), add: z.exactOptional(z.array(str(400)).check(z.maxLength(12))), drop: z.exactOptional(z.array(str(400)).check(z.maxLength(12))) }),
 ]);
 export type BoardCreateBody = z.output<typeof BoardCreateBody>;
 export type BoardActionBody = z.output<typeof BoardActionBody>;
@@ -88,3 +121,7 @@ check<Same<z.output<typeof TaskEventSchema>, TaskEvent>>(true);
 check<Same<z.output<typeof TaskActorSchema>, TaskActor>>(true);
 check<Same<z.output<typeof MergeRecordSchema>, MergeRecord>>(true);
 check<Same<z.output<typeof MergedViewSchema>, MergedView>>(true);
+check<Same<z.output<typeof ProofBriefSchema>, ProofBrief>>(true);
+check<Same<z.output<typeof RefResultSchema>, RefResult>>(true);
+check<Same<z.output<typeof ProofViewSchema>["state"], ProofState>>(true);
+check<Same<z.output<typeof CoverageItemSchema>, CoverageItem>>(true);

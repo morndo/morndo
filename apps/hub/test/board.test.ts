@@ -6,6 +6,8 @@ import type { WebSocket } from "ws";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 import { frameText } from "./http-crash-fixture.ts";
+import { GithubChecks } from "../src/adapters/github-checks.ts";
+import { startFakeForge, type FakeForge } from "./fake-forge.ts";
 import { ObservationService } from "../src/application/observation-service.ts";
 import type { RunView } from "@morndo/protocol";
 import type { Liveness } from "@morndo/domain";
@@ -391,5 +393,208 @@ describe("merged, not live (B11)", () => {
     const builder = agent(workerToken, "builder");
     expect(await json(await builder.post("/api/agent/board/tasks/T-1", { action: "unmerged", sha: SHA }))).toEqual({ error: "not_allowed" });
     expect((await builder.post("/api/agent/board/tasks/T-1", { action: "unmerged", sha: SHA })).status).toBe(403);
+  });
+});
+
+describe("the brief on the agents' route (B13)", () => {
+  const brief = { summary: "Totals row rounds to cents", leftOut: "nothing", limits: "locale formats not covered", refs: ["morndo/morndo#42@3e9d1a7", "morndo/morndo@3e9d1a7:ci,lint"] };
+  // A task T-1 offered for review by its lane: where a brief is filed from.
+  const atReview = async () => {
+    await agent(managerToken).post("/api/agent/board/tasks", { title: "Ship the totals row", assignee: "builder" });
+    const builder = agent(workerToken, "builder");
+    await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await builder.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+  };
+  it("a brief posted by the lane goes through the proof service and seeds its rows", async () => {
+    await atReview();
+    const r = await agent(workerToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief });
+    expect(r.status).toBe(200);
+    expect(await json(r)).toMatchObject({ task: { key: "T-1", rev: 4 }, event: { rev: 4, change: { kind: "briefed" } } });
+    const view = hub.proof.view("T-1");
+    expect(view?.rev).toBe(4);
+    expect(view?.results.map(x => [x.ref, x.state, x.detail])).toEqual([
+      ["morndo/morndo#42@3e9d1a7", "pending", null],
+      ["morndo/morndo@3e9d1a7:ci,lint", "pending", null],
+    ]);
+    expect(view?.state).toMatchObject({ kind: "pending", green: 0, total: 2, accepts: false });
+  });
+  it("a refused brief answers with the problem", async () => {
+    await atReview();
+    const r = await agent(workerToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief: { ...brief, refs: ["not a ref"] } });
+    expect(r.status).toBe(400);                                // bad_ref falls through boardProblemStatus's default
+    expect(await json(r)).toEqual({ error: "bad_ref", detail: "not a ref: a reference is owner/repo#PR@sha or owner/repo@sha:check,check" });
+    expect(hub.proof.view("T-1")).toEqual({ rev: null, brief: null, results: [], mode: "off", standIn: false, coverage: [], state: { kind: "no_brief", green: 0, total: 0, accepts: false, line: "proof: no brief" } });
+  });
+});
+
+describe("the proof list on the routes (B17)", () => {
+  const PR_SPEC = "pr@morndo/morndo: the pull request";
+  const DATA_SPEC = "data: a sample of 30 rows";
+
+  it("the proof list on the routes", async () => {
+    await agent(managerToken).post("/api/agent/board/tasks", { title: "Ship the totals row", assignee: "builder" });
+    const agents = agent(managerToken);
+    expect((await agents.post("/api/agent/board/tasks/T-1", { action: "proof_list", add: [PR_SPEC, DATA_SPEC] })).status).toBe(200);
+    const cookie = await hub.cookie();
+    const principal = (body: unknown) => hub.post("/api/board/tasks/T-1", body, { cookie: `__Host-morndo=${cookie}` });
+    expect((await principal({ action: "proof_list", add: ["ui: the totals row"] })).status).toBe(200);
+    const task = await json(await agent(workerToken, "builder").get("/api/agent/board/tasks/T-1")) as { proof?: { coverage: unknown[] } };
+    expect(task.proof?.coverage).toEqual([
+      { spec: PR_SPEC, kind: "pr", repo: "morndo/morndo", text: "the pull request", by: "assigner", status: "not_covered" },
+      { spec: DATA_SPEC, kind: "data", repo: null, text: "a sample of 30 rows", by: "assigner", status: "not_covered" },
+      { spec: "ui: the totals row", kind: "ui", repo: null, text: "the totals row", by: "assigner", status: "not_covered" },
+    ]);
+  });
+});
+
+describe("the proof on the agents' reads", () => {
+  // ADR-0035 step 4: what the agents' reads carry once the proof service answers for them — the proof view beside a
+  // task, the review tasks' one-liners beside the board, and the Done's own refusal. The forge is the local fake (no
+  // real network), the gate is on; every repository, number and sha invented.
+  const PR = "morndo/morndo#42@3e9d1a7";
+  const CI = "morndo/morndo@3e9d1a7:ci,lint";
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  let forgeHub: InProcessHub;
+  let fakeForge: FakeForge;
+  let forgeManager: string;
+  let forgeBuilder: string;
+  beforeEach(async () => {
+    fakeForge = await startFakeForge();
+    forgeHub = await startInProcessHub({ now: () => now, forge: new GithubChecks({ baseUrl: fakeForge.base, now: () => now }), proofMode: "on" });
+    forgeManager = forgeHub.agents.issue("manager", "manager").secret;
+    forgeBuilder = forgeHub.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await forgeHub.close(); await fakeForge.close(); });
+
+  const onForge = (token: string, lane?: string) => ({
+    get: (path: string) => fetch(forgeHub.base + path, { headers: { authorization: `Bearer ${token}`, ...(lane ? { "x-morndo-lane": lane } : {}) } }),
+    post: (path: string, body: unknown) => fetch(forgeHub.base + path, {
+      method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(lane ? { "x-morndo-lane": lane } : {}) }, body: JSON.stringify(body),
+    }),
+  });
+  // A task T-1 in review with a brief whose references the fake forge answers green (rev 4): the proof a read carries.
+  const reviewedWithBrief = async () => {
+    fakeForge.pr("morndo/morndo", 42, { head: FULL });
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    const m = onForge(forgeManager), b = onForge(forgeBuilder, "builder");
+    await m.post("/api/agent/board/tasks", { title: "Ship the totals row", assignee: "builder" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "brief", brief: { summary: "Totals row rounds to cents", leftOut: "nothing", limits: "locale formats not covered", refs: [PR, CI] } });
+    await forgeHub.proof.idle();
+    return { m, b };
+  };
+
+  it("GET task carries the proof view and GET board carries the review tasks' lines", async () => {
+    const { m, b } = await reviewedWithBrief();
+    await m.post("/api/agent/board/tasks", { title: "No brief yet", assignee: "builder" });   // reaches review with no brief: its line says so
+    await b.post("/api/agent/board/tasks/T-2", { action: "move", to: "doing" });
+    await b.post("/api/agent/board/tasks/T-2", { action: "move", to: "review" });
+    await forgeHub.proof.idle();
+    const task = await json(await b.get("/api/agent/board/tasks/T-1"));
+    expect(task.proof).toEqual({
+      rev: 4,
+      brief: { summary: "Totals row rounds to cents", decisions: "", leftOut: "nothing", limits: "locale formats not covered", refs: [PR, CI], attested: [], noCode: "" },
+      results: [
+        { ref: PR, state: "green", detail: null, checkedAt: now },
+        { ref: CI, state: "green", detail: null, checkedAt: now },
+      ],
+      mode: "on",
+      standIn: false,
+      coverage: [],
+      state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" },
+    });
+    const board = await json(await m.get("/api/agent/board"));
+    expect(board.proof).toEqual({ "T-1": "proof: 2 of 2 green", "T-2": "proof: no brief" });
+  });
+
+  it("a done held for proof answers 409 with the line as detail", async () => {
+    const m = onForge(forgeManager), b = onForge(forgeBuilder, "builder");
+    await m.post("/api/agent/board/tasks", { title: "Ship it", assignee: "builder" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+    const r = await m.post("/api/agent/board/tasks/T-1", { action: "move", to: "done", reason: "read the diff" });
+    expect(r.status).toBe(409);
+    expect(await json(r)).toEqual({ error: "proof_not_green", detail: "proof: no brief" });
+    expect((await json(await m.get("/api/agent/board/tasks/T-1"))).task).toMatchObject({ status: "review" });
+  });
+
+  it("the principal's GET task carries proof when the service is wired", async () => {
+    const m = onForge(forgeManager), b = onForge(forgeBuilder, "builder");
+    await m.post("/api/agent/board/tasks", { title: "Ship it", assignee: "builder" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await b.post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+    const cookie = await forgeHub.cookie();
+    const record = await json(await fetch(`${forgeHub.base}/api/board/tasks/T-1`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    expect(record.proof).toMatchObject({ state: { line: "proof: no brief" } });
+  });
+});
+
+describe("the principal's proof path (B13, B16)", () => {
+  const PR = "morndo/morndo#42@3e9d1a7";
+  const CI = "morndo/morndo@3e9d1a7:ci,lint";
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  const briefBody = { summary: "Totals row rounds to cents", leftOut: "nothing", limits: "locale formats not covered", refs: [PR, CI] };
+  let forgeHub: InProcessHub;
+  let fakeForge: FakeForge;
+  let cookie: string;
+  let principalPost: (path: string, body: unknown) => Promise<Response>;
+  let forgeAgent: (token: string, lane?: string) => ReturnType<typeof agent>;
+  let forgeBuilderToken: string;
+
+  beforeEach(async () => {
+    fakeForge = await startFakeForge();
+    forgeHub = await startInProcessHub({ now: () => now, forge: new GithubChecks({ baseUrl: fakeForge.base, now: () => now }), proofMode: "on" });
+    cookie = await forgeHub.cookie();
+    principalPost = (path, body) => forgeHub.post(path, body, { cookie: `__Host-morndo=${cookie}` });
+    forgeBuilderToken = forgeHub.agents.issue("lanes", "worker").secret;
+    const managerTok = forgeHub.agents.issue("manager", "manager").secret;
+    forgeAgent = (token, lane) => ({
+      get: (path: string) => fetch(forgeHub.base + path, { headers: { authorization: `Bearer ${token}`, ...(lane ? { "x-morndo-lane": lane } : {}) } }),
+      post: (path: string, body: unknown) => fetch(forgeHub.base + path, {
+        method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", ...(lane ? { "x-morndo-lane": lane } : {}) }, body: JSON.stringify(body),
+      }),
+    });
+    await forgeAgent(managerTok).post("/api/agent/board/tasks", { title: "Ship the totals row", assignee: "builder" });
+    await forgeAgent(forgeBuilderToken, "builder").post("/api/agent/board/tasks/T-1", { action: "move", to: "doing" });
+    await forgeAgent(forgeBuilderToken, "builder").post("/api/agent/board/tasks/T-1", { action: "move", to: "review" });
+  });
+  afterEach(async () => { await forgeHub.close(); await fakeForge.close(); });
+
+  it("the principal's done refreshes stale results first", async () => {
+    fakeForge.pr("morndo/morndo", 42, { head: FULL });
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "failure" },
+    ]);
+    await forgeAgent(forgeBuilderToken, "builder").post("/api/agent/board/tasks/T-1", { action: "brief", brief: briefBody });
+    await forgeHub.proof.idle();
+    now += 31_000;
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    const done = await principalPost("/api/board/tasks/T-1", { action: "move", to: "done" });
+    expect(done.status).toBe(200);
+    const record = await json(await fetch(`${forgeHub.base}/api/board/tasks/T-1`, { headers: { cookie: `__Host-morndo=${cookie}` } }));
+    const moved = (record.events as Body[]).find(e => (e.change as Body).to === "done");
+    const change = moved?.change as Body | undefined;
+    expect(change?.proofSeen).toBe("proof: 2 of 2 green [mode on]");
+  });
+
+  it("a brief filed by the principal is seeded and verified", async () => {
+    fakeForge.pr("morndo/morndo", 42, { head: FULL });
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    expect((await principalPost("/api/board/tasks/T-1", { action: "brief", brief: briefBody })).status).toBe(200);
+    await forgeHub.proof.idle();
+    const view = forgeHub.proof.view("T-1");
+    expect(view?.state.kind).toBe("verified");
+    expect(view?.results.every(r => r.state === "green")).toBe(true);
   });
 });

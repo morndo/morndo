@@ -4,10 +4,12 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 import { UsageService } from "../src/application/usage-service.ts";
+import type { UsageSource } from "@morndo/domain";
 
 let hub: InProcessHub;
 let now: number;
 let workerToken: string;
+let workerTokenId: string;
 let managerToken: string;
 const HOUR = 3_600_000, MIN = 60_000;
 type Body = Record<string, unknown>;
@@ -44,31 +46,50 @@ const viewOf = async () => {
 beforeEach(async () => {
   now = 1_700_000_000_000;
   hub = await startInProcessHub({ now: () => now });
-  workerToken = hub.agents.issue("lanes", "worker").secret;
+  const issued = hub.agents.issue("lanes", "worker");
+  workerToken = issued.secret;
+  workerTokenId = issued.token.id;
   managerToken = hub.agents.issue("manager", "manager").secret;
 });
 afterEach(async () => { await hub.close(); });
 
+// A reading feeds the plan watch only when it carries a valid lease, and the hub grants one only when somebody wants
+// the account read: a look marks the demand once the last reading is 15 minutes old, so every leased post below
+// advances the clock 16 minutes first, past the lease cache and the look's staleness (the codex tests' rhythm). The
+// lease is the worker token's that posts the reading through the route.
+const leaseFor = (account: string, source: UsageSource): string => {
+  hub.usage.look();
+  const g = hub.usage.leases.grant(account, source, null, workerTokenId);
+  if (g.status !== "granted") throw new Error(`the hub did not grant a lease (${g.status})`);
+  return g.id;
+};
+
 describe("usage notices (plan 4.4)", () => {
   it("tells a change once, across a restart (AT-8)", async () => {
-    // The plan watch needs two agreeing readings per change: the first holds, the second tells.
-    expect((await reading({ plan: "Max 5x", windows: [fiveHour(20)] })).status).toBe(200);
-    expect((await reading({ plan: "Max 20x", windows: [fiveHour(21)], capturedAt: now + MIN })).status).toBe(200);
-    expect((await reading({ plan: "Max 20x", windows: [fiveHour(22)], capturedAt: now + 2 * MIN })).status).toBe(200);
+    // The plan watch needs two agreeing readings per change: the first holds, the second tells. Every reading is
+    // leased, 16 minutes apart, so the hub grants each its own (a look, then the grant).
+    let n = 0;
+    const post = async (plan: string) => {
+      now += 16 * MIN;
+      return (await reading({ plan, windows: [fiveHour(20 + n++)], capturedAt: now, leaseId: leaseFor("seat-a", "app-server") })).status;
+    };
+    expect(await post("Max 5x")).toBe(200);
+    expect(await post("Max 20x")).toBe(200);
+    expect(await post("Max 20x")).toBe(200);
     let v = await viewOf();
     expect((v.notices as Body[]).filter(n => (n.text as string).includes("plan changed"))).toEqual([
       { id: expect.any(String), kind: "plan", account: "seat-a", at: expect.any(Number), text: 'seat-a: plan changed from "Max 5x" to "Max 20x".' },
     ]);
     // The same change posted again tells nobody again.
-    expect((await reading({ plan: "Max 20x", windows: [fiveHour(23)], capturedAt: now + 3 * MIN })).status).toBe(200);
+    expect(await post("Max 20x")).toBe(200);
     v = await viewOf();
     expect((v.notices as Body[]).filter(n => (n.text as string).includes("plan changed"))).toHaveLength(1);
     // And again after the service restarts over the same store: still one.
     const again = new UsageService({ store: hub.store, now: () => now });
     expect(again.view().notices.filter(n => n.text.includes("plan changed"))).toHaveLength(1);
     // A different change is a second notice, told once.
-    expect((await reading({ plan: "Max 5x", windows: [fiveHour(24)], capturedAt: now + 4 * MIN })).status).toBe(200);
-    expect((await reading({ plan: "Max 5x", windows: [fiveHour(25)], capturedAt: now + 5 * MIN })).status).toBe(200);
+    expect(await post("Max 5x")).toBe(200);
+    expect(await post("Max 5x")).toBe(200);
     v = await viewOf();
     expect((v.notices as Body[]).filter(n => (n.text as string).includes("plan changed"))).toHaveLength(2);
   });
@@ -131,7 +152,10 @@ describe("usage notices (plan 4.4)", () => {
   });
   it("a plan that changes back and changes again is told each time", async () => {
     const reset = now + 2 * HOUR;
-    const post = async (plan: string, n: number) => { now += MIN; expect((await reading({ plan, windows: [fiveHour(20 + n, reset)], capturedAt: now })).status).toBe(200); };
+    const post = async (plan: string, n: number) => {
+      now += 16 * MIN;                                   // past the lease cache and the look's staleness, so the next lease is granted
+      expect((await reading({ plan, windows: [fiveHour(20 + n, reset)], capturedAt: now, leaseId: leaseFor("seat-a", "app-server") })).status).toBe(200);
+    };
     // two agreeing readings per change: A, B, B, A, A, B, B
     for (const [i, plan] of ["A", "B", "B", "A", "A", "B", "B"].entries()) await post(plan, i);
     const told = ((await viewOf()).notices as Body[]).filter(n => n.kind === "plan").map(n => n.text);
@@ -141,9 +165,12 @@ describe("usage notices (plan 4.4)", () => {
 
   it("only the headless report can tell that a window is gone (complete is pinned to the source)", async () => {
     const weekly = { id: "seven_day", used_percent: 30, resets_at: Math.floor((now + 70 * HOUR) / 1000), length_mins: 10080 };
-    const gone = async (source: string, account: string) => {
-      const send = (windows: unknown[], n: number) => reading({ source, plan: "Max 5x", windows, capturedAt: now + n * MIN }, account);
-      for (const [i, ws] of [[fiveHour(20), weekly], [fiveHour(21), weekly], [weekly], [weekly], [weekly]].entries()) expect((await send(ws as unknown[], i)).status).toBe(200);
+    const gone = async (source: UsageSource, account: string) => {
+      const send = async (windows: unknown[]) => {
+        now += 16 * MIN;                                 // each leased reading its own lease, as above
+        expect((await reading({ source, plan: "Max 5x", windows, capturedAt: now, leaseId: leaseFor(account, source) }, account)).status).toBe(200);
+      };
+      for (const ws of [[fiveHour(20), weekly], [fiveHour(21), weekly], [weekly], [weekly], [weekly]]) await send(ws as unknown[]);
       return ((await viewOf()).notices as Body[]).filter(n => n.account === account && (n.text as string).includes("set of windows"));
     };
     expect(await gone("app-server", "seat-a")).toEqual([]);
@@ -153,9 +180,9 @@ describe("usage notices (plan 4.4)", () => {
 
   it("the plan watch is per source: two steady sources tell no plan change, and one source's own change is told once (PR #125 fix round 2, finding 1b)", async () => {
     const reset = now + 2 * HOUR;
-    const post = async (source: string, plan: string, n: number) => {
-      now += MIN;
-      expect((await reading({ source, plan, windows: [fiveHour(20 + n, reset)], capturedAt: now })).status).toBe(200);
+    const post = async (source: UsageSource, plan: string, n: number) => {
+      now += 16 * MIN;                                   // each leased reading its own lease, as above
+      expect((await reading({ source, plan, windows: [fiveHour(20 + n, reset)], capturedAt: now, leaseId: leaseFor("seat-a", source) })).status).toBe(200);
     };
     // Two sources, each steady on its own plan for several readings: no plan change is told.
     await post("app-server", "A", 0);

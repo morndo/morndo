@@ -7,7 +7,7 @@ import {
   ACCOUNT_NAME, DEFAULT_ACCOUNT, FORGET_MS, NOTICE_KEEP, SESSION_FRESH_MS,
   accountNow, applyLimit, applyReport, backNoticeText, cadenceInput, cadenceOf, changeSignature, cleanHint, cleanLength,
   cleanNote, clearSeat, failedRead, fixFor, fixForReason, forgottenNoticeText, limitKindOfError, markExpired, mergeWindow, noCycleBook,
-  noHealth, noPlanWatch, noThresholdWatch, observeCycle, okRead, planNoticeText, pruneSessions, reasonOf, resolveAccount,
+  noHealth, noPlanWatch, noThresholdWatch, observeCycle, okRead, planFamilyOf, planNoticeText, pruneSessions, reasonOf, resolveAccount,
   seatClearedNoticeText, seatExpiredNoticeText, seatNoticeText,
   seatResetNoticeText, shownSeat, sourceState, shouldForget, takeNamed, takePercent, thresholdNoticeText, unavailableSince,
   watchPlan, watchThreshold, windowTitle,
@@ -208,6 +208,23 @@ export class UsageService {
     return { account, reportedAt, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: null, sessions: [] };
   }
 
+  // The plan name the plan watch has CONFIRMED for the account (plan 4.1 item 3, slice 7 review): the baseline of the
+  // watch whose last leased reading is the newest. A change waits for a second agreeing reading there (AT-28), and
+  // only leased readings reach the watch, so one odd or forged plan string never flips a title or a notice. None
+  // confirmed yet: null.
+  #planNameOf(account: string): string | null {
+    let plan: string | null = null;
+    let at = -1;
+    for (const [key, value] of this.#watchMap(account)) {
+      if (!key.startsWith("plan|")) continue;
+      const w = value as PlanWatch;
+      if (w.baseline === null || w.baseline.plan === null || w.lastAt <= at) continue;
+      plan = w.baseline.plan;
+      at = w.lastAt;
+    }
+    return plan;
+  }
+
   // The windows one account shows, merged across its sources (plan 4.3 item 5), and the capture time of the candidate
   // that showed each (fix round on PR #125, finding 4b): one function for the principal's view and for the thresholds,
   // so a watch always counts what the merge of every source shows, never one source's raw numbers.
@@ -262,6 +279,9 @@ export class UsageService {
     }
     if (named.size > 0) {
       const watches = this.#watchMap(base.account);
+      // S7 (plan 4.1 item 3): the plan's own family titles a window with no length and no observed gap — the newest
+      // reading that named a plan says which, never a caption the poster printed.
+      const family = planFamilyOf(this.#planNameOf(base.account));
       for (const [id, cands] of named) {
         const m = mergeWindow(cands.map(c => c.cand));
         if (m.disagree !== null) disagree.push({ window: id, a: side(m.disagree.a), b: side(m.disagree.b) });
@@ -274,7 +294,7 @@ export class UsageService {
           label: id, usedPercentage: m.shown.usedPercent, resetsAt: m.shown.resetsAt,
           resetsOn: at !== -1 ? limits[at]!.resetsOn : null,
           lengthMins: win.lengthMins, rolling: win.rolling, note: win.note,
-          title: windowTitle(cadenceOf({ lengthMins: win.lengthMins, ...cadenceInput(book), family: null }), win.resetsAt, now),
+          title: windowTitle(cadenceOf({ lengthMins: win.lengthMins, ...cadenceInput(book), family }), win.resetsAt, now),
         };
         if (at !== -1) limits[at] = row; else limits.push(row);
         namedAt.set(id, m.shown.capturedAt);
@@ -482,14 +502,24 @@ export class UsageService {
       this.#tellIfChanged();
       return { ok: true };
     }
-    // 300 minutes is the 5-hour window and 10080 the weekly one, whatever the source called them (plan 4.1).
+    // 300 minutes is the 5-hour window and 10080 the weekly one, whatever the source called them (plan 4.1) — but only
+    // for a window nobody named explicitly (slice 6 review, finding 1): a reading that already carries `five_hour` or
+    // `seven_day` under that id keeps those as the account's main windows, and another window of the same length (a
+    // second limit's) keeps its own id and never replaces them. Of several unnamed windows of one length, the first
+    // is the main one; the rest keep their ids.
+    const explicit = new Set<string>();
+    for (const w of body.windows ?? []) {
+      const id = typeof w.id === "string" ? w.id.trim() : "";
+      if (id === "five_hour" || id === "seven_day") explicit.add(id);
+    }
     const windows = new Map<string, WindowReading>();
     for (const w of body.windows ?? []) {
       const id = typeof w.id === "string" ? w.id.trim() : "";
       const usedPercent = takePercent(w.used_percent);
       if (id === "" || id.length > 40 || usedPercent === null) continue;
       const lengthMins = cleanLength(w.length_mins);
-      const canonical = lengthMins === 300 ? "five_hour" : lengthMins === 10080 ? "seven_day" : id;
+      const byLength = lengthMins === 300 ? "five_hour" : lengthMins === 10080 ? "seven_day" : null;
+      const canonical = byLength !== null && id !== byLength && !explicit.has(byLength) && !windows.has(byLength) ? byLength : id;
       windows.set(canonical, {
         id: canonical, usedPercent, lengthMins, rolling: w.rolling === true, note: cleanNote(w.note),
         resetsAt: typeof w.resets_at === "number" && Number.isFinite(w.resets_at) ? w.resets_at * 1000 : null,
@@ -510,7 +540,17 @@ export class UsageService {
     // taken — the echo rule's line to draw against a status line's last word (PR #125, finding 1).
     const previous = prev.reading === null ? null : { capturedAt: prev.reading.capturedAt, windows: prev.reading.windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt })) };
     this.#store.saveUsageSource(account, body.source, node, { health, reading: { capturedAt, plan: body.plan ?? null, windows: list }, previous, hint: null, orderedAt });
-    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id, tokenId);
+    // S6 (plan 4.6, AT-36): the limit flags count only on a leased reading. A flag that says the account cannot use its
+    // plan is a limit hit; flags that say all is well reach the FreshRead so they can end a derived mark (AT-34). The
+    // free-string type is never shown and never stored beyond this boolean effect.
+    const leased = this.#leaseBook.valid(body.lease_id, account, body.source, tokenId);
+    const allowed = body.ordinary_usage_allowed === true && (body.rate_limit_reached_type ?? null) === null;
+    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id, tokenId, body.identity ?? null, leased && allowed);
+    if (leased && (body.ordinary_usage_allowed === false || (body.rate_limit_reached_type ?? null) !== null)) {
+      // The soonest reset of a window at or above 100%, else no word on when it is back.
+      const back = list.filter(w => w.usedPercent !== null && w.usedPercent >= 100 && w.resetsAt !== null).map(w => w.resetsAt as number);
+      this.noteLimit({ account, kind: "usage_limit", backAt: back.length > 0 ? Math.min(...back) : null, by: "the usage reading", at: capturedAt });
+    }
     this.#thresholds(account, this.#mergedWindows(this.#baseOf(account, now), this.#store.usageSourcesOf(account), now), now);
     this.#completeLease(body.lease_id, account, body.source, tokenId, { ok: true, capturedAt });
     this.#tellIfChanged();
@@ -532,32 +572,42 @@ export class UsageService {
 
   // What one good reading changes: the plan watch, the cycle books, and a seat mark it may end or drop. The
   // thresholds no longer run here: they watch the merged shown windows, after the reading is stored (finding 4b).
-  #observe(account: string, windows: readonly WindowReading[], capturedAt: number, source: UsageSource, plan: string | null, leaseId: unknown, tokenId: string | null): void {
+  // S6 (plan 4.6): the reading's own identity digest feeds the plan watch (a changed identity is an account change),
+  // and `flagsAllowed` — true only on a leased reading whose flags say all is well — reaches the FreshRead so the flag
+  // path of clearsMark can end a derived mark.
+  #observe(account: string, windows: readonly WindowReading[], capturedAt: number, source: UsageSource, plan: string | null, leaseId: unknown, tokenId: string | null, identity: string | null, flagsAllowed: boolean): void {
     const watches = this.#watchMap(account);
-    // The plan watch (plan 4.2): a difference is held, and told only once a later reading agrees with it.
-    const fact: PlanFact = {
-      plan, identity: null,
-      windows: windows.map(w => ({ id: w.id, lengthMins: w.lengthMins, usedPercent: w.usedPercent, resetsAt: w.resetsAt, rolling: w.rolling })),
-      // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
-      ...(source === "claude-usage" ? { complete: true } : {}),
-    };
-    const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
-    const seen = watchPlan(planWatch, fact, capturedAt);
-    this.#tx(() => {
-      if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", source, seen.watch);
-      for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
-    });
-    // A plan or account change the plan watch tells drops the seat the old plan's limit marked (PR #125, finding 3a):
-    // a mark from a plan that is gone no longer applies. A pool-owned seat is the pool's, never a reading's, and a
-    // mark made after the telling reading was taken stands (PR #125 fix round 2, finding 1a): the change was already
-    // observed when the mark landed, so it cannot be what the mark was made under.
-    if (seen.told.some(c => c.kind === "name" || c.kind === "account")) {
-      const marked = this.#store.usageSeat(account)?.record ?? null;
-      if (marked !== null && marked.owner === "derived" && marked.markedAt <= capturedAt) {
-        this.#tx(() => {
-          this.#store.deleteUsageSeat(account);
-          this.#note(account, "back", `reset|${capturedAt}`, seatResetNoticeText(account));
-        });
+    // The plan watch (plan 4.2): a difference is held, and told only once a later reading agrees with it. It sees
+    // leased readings only (slice 6 re-check): the readings route is open to any agent token, so an unleased reading
+    // must neither tell a change, nor drop a derived mark, nor move the baseline a leased reading is compared with.
+    const leased = this.#leaseBook.valid(leaseId, account, source, tokenId);
+    if (leased) {
+      const planWatch = (watches.get(`plan|${source}`) as PlanWatch | undefined) ?? noPlanWatch;
+      // A reading that names no plan carries the confirmed one forward: the baseline must not fall to "no plan" and
+      // take the period family (and its titles) with it until a later reading names it again.
+      const fact: PlanFact = {
+        plan: plan ?? planWatch.baseline?.plan ?? null, identity,
+        windows: windows.map(w => ({ id: w.id, lengthMins: w.lengthMins, usedPercent: w.usedPercent, resetsAt: w.resetsAt, rolling: w.rolling })),
+        // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
+        ...(source === "claude-usage" ? { complete: true } : {}),
+      };
+      const seen = watchPlan(planWatch, fact, capturedAt);
+      this.#tx(() => {
+        if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", source, seen.watch);
+        for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
+      });
+      // A plan or account change the plan watch tells drops the seat the old plan's limit marked (PR #125, finding 3a):
+      // a mark from a plan that is gone no longer applies. A pool-owned seat is the pool's, never a reading's, and a
+      // mark made after the telling reading was taken stands (PR #125 fix round 2, finding 1a): the change was already
+      // observed when the mark landed, so it cannot be what the mark was made under.
+      if (seen.told.some(c => c.kind === "name" || c.kind === "account")) {
+        const marked = this.#store.usageSeat(account)?.record ?? null;
+        if (marked !== null && marked.owner === "derived" && marked.markedAt <= capturedAt) {
+          this.#tx(() => {
+            this.#store.deleteUsageSeat(account);
+            this.#note(account, "back", `reset|${capturedAt}`, seatResetNoticeText(account));
+          });
+        }
       }
     }
     for (const w of windows) {
@@ -568,7 +618,7 @@ export class UsageService {
     // A fresh leased reading of a new cycle is the one thing that ends a seat mark (plan 4.5, U13).
     const seat = this.#store.usageSeat(account)?.record ?? null;
     if (seat !== null) {
-      const read: FreshRead = { capturedAt, leased: this.#leaseBook.valid(leaseId, account, source, tokenId), windows: windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt, lengthMins: w.lengthMins })) };
+      const read: FreshRead = { capturedAt, leased: this.#leaseBook.valid(leaseId, account, source, tokenId), windows: windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt, lengthMins: w.lengthMins })), ...(flagsAllowed ? { ordinaryUsageAllowed: true, rateLimitReachedType: null } : {}) };
       if (clearSeat(seat, read).cleared) {
         this.#tx(() => {
           this.#store.deleteUsageSeat(account);
@@ -709,9 +759,11 @@ export class UsageService {
   // window's own id titles the notice, as the readings that observed the cycle left it.
   #thresholds(account: string, m: MergedView, now: number): void {
     const watches = this.#watchMap(account);
+    // S7 (plan 4.1 item 3): the plan's family titles the notice the same way it titles the row the principal sees.
+    const plan = this.#planNameOf(account);
     for (const w of m.shown) {
       const book = (watches.get(`cycle|${w.cycleKey}`) as CycleBook | undefined) ?? noCycleBook;
-      this.#threshold(account, w.key, w.usedPercent, w.resetsAt, w.lengthMins, watches, now, book, w.capturedAt);
+      this.#threshold(account, w.key, w.usedPercent, w.resetsAt, w.lengthMins, watches, now, book, w.capturedAt, plan);
     }
   }
 
@@ -719,7 +771,7 @@ export class UsageService {
   // stores the capture time of the shown candidate it last counted (PR #125, finding 4b): a value whose time is not
   // later than that is a retried duplicate post or a stale echo, and counts nothing. A body stored in the old shape
   // (the watch alone) reads as time 0, so every fresh reading counts.
-  #threshold(account: string, key: string, usedPercent: number | null, resetsAt: number | null, lengthMins: number | null, watches: Map<string, unknown>, now: number, book: CycleBook = noCycleBook, at: number = 0): void {
+  #threshold(account: string, key: string, usedPercent: number | null, resetsAt: number | null, lengthMins: number | null, watches: Map<string, unknown>, now: number, book: CycleBook = noCycleBook, at: number = 0, plan: string | null = null): void {
     const storedRaw = watches.get(`threshold|${key}`);
     const held = storedRaw != null && typeof storedRaw === "object" && "watch" in storedRaw
       ? { watch: (storedRaw as { watch: ThresholdWatch }).watch ?? noThresholdWatch, at: typeof (storedRaw as { at?: unknown }).at === "number" ? (storedRaw as { at?: unknown }).at as number : 0 }
@@ -730,7 +782,7 @@ export class UsageService {
     this.#tx(() => {
       this.#store.saveUsageWatch(account, "threshold", key, body);
       if (r.told !== null) {
-        const title = windowTitle(cadenceOf({ lengthMins, ...cadenceInput(book), family: null }), resetsAt, now);
+        const title = windowTitle(cadenceOf({ lengthMins, ...cadenceInput(book), family: planFamilyOf(plan) }), resetsAt, now);
         this.#note(account, "threshold", `threshold|${key}|${r.told}|${now}`, thresholdNoticeText(account, title, r.told));
       }
     });

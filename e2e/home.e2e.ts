@@ -215,6 +215,15 @@ try {
     const burst = page.locator('[data-account="burst"]');
     await eventually(async () => (await burst.innerText().catch(() => "")).replace(/\s+/g, " "), v => v.includes("Burst · 3-day"), "the titled window's title");
     await page.screenshot({ path: join(OUT, "6-states-desktop.png") });
+    // (d, S6) the same account with a fixed pair and a named window beside them: the card shows the fixed rows first
+    // and the named one after them under "Other limits".
+    assert((await readings("fresh", { source: "app-server", node: null, captured_at: Math.floor(Date.now() / SEC), windows: [
+      fiveHour(42),
+      { id: "seven_day", used_percent: 61, resets_at: Math.floor((Date.now() + 7 * 24 * HOUR) / SEC), length_mins: 10080 },
+      { id: "Burst", used_percent: 33, resets_at: Math.floor((Date.now() + 3 * 24 * HOUR) / SEC), length_mins: 4320 },
+    ] })).status === 200, "post failed");
+    await eventually(async () => (await fresh.innerText()).replace(/\s+/g, " "), v => v.includes("Weekly window") && v.includes("5-hour window") && v.includes("Burst · 3-day"), "the mixed card");
+    await page.screenshot({ path: join(OUT, "10-mixed-desktop.png") });
   });
 
   await check("the states on a phone (390 px): the tab bar's Home, nothing wider than the screen", async () => {
@@ -227,6 +236,22 @@ try {
       assert(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page scrolls sideways at 390 px");
       assert(phone.errors.length === 0, `console errors: ${phone.errors.join(" | ")}`);
       await phone.page.screenshot({ path: join(OUT, "7-states-phone.png") });
+    } finally { await phone.context.close(); }
+  });
+
+  await check("the mixed card on a phone (390 px): fixed rows, Other limits, nothing wider than the screen (S6)", async () => {
+    const phone = await pairedPage(browser, office!, { width: 390, height: 844, phone: true, ready: "nav.tabbar" });
+    try {
+      const box = await phone.page.locator("nav.tabbar button", { hasText: "Home" }).boundingBox();
+      assert(box !== null, "no Home tab");
+      await phone.page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
+      const fresh = phone.page.locator('[data-account="fresh"]');
+      await fresh.waitFor({ timeout: 10_000 });
+      await eventually(async () => (await fresh.innerText().catch(() => "")).replace(/\s+/g, " "), v => v.includes("Burst · 3-day"), "the mixed card on the phone");
+      assert(await phone.page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth), "the page scrolls sideways at 390 px");
+      assert(phone.errors.length === 0, `console errors: ${phone.errors.join(" | ")}`);
+      await fresh.scrollIntoViewIfNeeded();                    // the shot shows the mixed card, not the top of the page
+      await phone.page.screenshot({ path: join(OUT, "11-mixed-phone.png") });
     } finally { await phone.context.close(); }
   });
 
