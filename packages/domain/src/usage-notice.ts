@@ -57,7 +57,7 @@ export function seatResetNoticeText(account: string): string {
 
 // A derived out mark dropped because its back time passed with no newer hit (fix round on PR #127, finding 3b).
 export function seatExpiredNoticeText(account: string): string {
-  throw new Error("not implemented");
+  return `${account}: its limit mark expired, the back time passed with no newer hit.`;
 }
 
 export function thresholdNoticeText(account: string, windowTitle: string, level: ThresholdLevel): string {

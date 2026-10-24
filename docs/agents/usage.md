@@ -51,13 +51,17 @@ The fleet turns a failure whose error word is a limit (`rate_limit`, `billing_er
 `account_on_hold`, `oauth_org_not_allowed`) into a usage tap and hands it to the hub, which resolves the account in
 this order:
 
-1. the hook's own `account` field, when it is a valid account name;
+1. the hook's own `account` field, when it is a valid account name **and** an account the hub already knows of that is
+   run on the node the failure came from (a word naming an unknown account is dropped, and nothing is ever created by
+   a failure);
 2. the lane's last record — written when a lane is started with an account, and by each status-line report — if it is
-   at most seven days old;
+   at most seven days old; a record written at the lane's start outranks one written by a report for twelve hours, so
+   a lane started with an account keeps it against a self-declared header;
 3. the session the failure's `session_id` names, while that session is fresh;
 4. the node's only account, when every record and session on that node names the same one.
 
-A failure that resolves to no account is kept as nothing: no seat changes (U9).
+A failure that resolves to no account is kept as nothing: no seat changes (U9). A failure older than five minutes is a
+replayed event and marks nothing.
 
 ## Pool seats
 
@@ -77,4 +81,9 @@ That token posts to `POST /api/agent/usage/pool`:
 `plan_ended`, `billing`, `by_hand`; `action: "cleared"` removes the pool's word again. A pool-set seat is sticky: no
 reading clears it, and it wins over the hub's own derived mark when both name the same state. The principal clears
 either owner's seat with `POST /api/usage/seat/clear` (`{ "account": "max-1", "owner": "pool" | "derived" }`, no
-`owner` for both). Any other token's limit post makes a derived state that a fresh leased read can end.
+`owner` for both).
+
+A limit post (`POST /api/agent/usage/limit`) is for a manager token or a token with the `usage-pool` scope; it always
+speaks for the hub's own derived seat, never the pool's. Until the headless reader arrives, a derived mark ends when
+the plan or account changes, when the principal clears it, or when it expires: an out mark whose back time passed more
+than six hours ago, with no newer hit to push it out, is dropped.

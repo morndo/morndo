@@ -280,13 +280,16 @@ export const MIGRATIONS: readonly Migration[] = [
   },
   {
     // Usage detection S3 (plan 4.5 item 4, U15, U17): an agent token's scopes (comma-separated names of the closed
-    // list, empty: none) and the seat records the accounts pool owns — the derived ones stay in usage_seats (S2).
+    // list, empty: none) and the seat records the accounts pool owns — the derived ones stay in usage_seats (S2). The
+    // fix round on PR #127 (finding 4b) adds how a lane record was written: 'start' by a lane_account tap, 'report' by
+    // a status-line report; every row before the column is a report.
     version: 27,
-    name: "usage (S3): agent token scopes and the pool-owned seat records (plan 4.5 item 4, U15, U17)",
+    name: "usage (S3): agent token scopes, the pool-owned seat records and how a lane record was written (plan 4.5 item 4, U15, U17)",
     compat: "additive",
     up: db => {
       if (!hasColumn(db, "agent_tokens", "scopes")) db.exec("ALTER TABLE agent_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT ''");
       db.exec("CREATE TABLE IF NOT EXISTS usage_pool_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL)");
+      if (!hasColumn(db, "lane_accounts", "source")) db.exec("ALTER TABLE lane_accounts ADD COLUMN source TEXT NOT NULL DEFAULT 'report'");
     },
   },
 ];

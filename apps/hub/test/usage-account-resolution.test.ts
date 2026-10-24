@@ -131,7 +131,8 @@ describe("account resolution from the fleet's taps (plan 4.5 item 4)", () => {
   it("a failure stamped in the future is capped at the hub's clock plus the skew (PR #127, finding 3a)", async () => {
     laneAccount(hub, "w1", "seat-a", now);
     failure(hub, { lane: "w1", account: "seat-a", at: now + 10 * MIN });   // ten minutes ahead of the hub's clock
-    expect(await seatOf()).toMatchObject({ state: "out", since: now + 5 * MIN, markedAt: now + 5 * MIN });
+    // `since` is the mark's own stamp as stored (an out mark's markedAt is the same value); the view shows no markedAt.
+    expect(await seatOf()).toMatchObject({ state: "out", since: now + 5 * MIN });
   });
 
   // PR #127, finding 4: a lane the fleet's list places on no node writes no record, and a start record outranks a report.

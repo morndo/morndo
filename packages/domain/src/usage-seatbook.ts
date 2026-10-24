@@ -59,7 +59,7 @@ export function shownSeat(pool: SeatRecord | null, derived: SeatRecord | null): 
 // 3b): the sweep drops such a mark with one notice. Everything else — a pool seat, a retired or logged-out derived
 // seat, an out mark with no back time, one whose back time is not past the six hours — stays.
 export function markExpired(seat: SeatRecord, now: number): boolean {
-  throw new Error("not implemented");
+  return seat.owner === "derived" && seat.state === "out" && seat.backAt !== null && now - seat.backAt > MARK_EXPIRY_MS;
 }
 
 export function clearSeat(prev: SeatRecord, read: FreshRead): { seat: SeatRecord | null; cleared: boolean } {

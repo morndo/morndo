@@ -8,10 +8,10 @@ import { log } from "./log.ts";
 import { migrate } from "./migrations.ts";
 import type { DeliveryState } from "@morndo/protocol";
 import {
-  endpointId, pairingTokenId, sessionId,
+  endpointId, pairingTokenId, sessionId, START_RECORD_HOLD_MS,
   type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
   type Session, type Task, type TaskEvent, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
-  type SourceHealth, type UsageNotice, type SeatRecord, type WindowReading,
+  type SourceHealth, type UsageNotice, type SeatRecord, type WindowReading, type LaneRecord,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
@@ -740,18 +740,24 @@ export class Store {
   }
 
   // Which lane of which node is signed in as which account (plan 4.5 item 4): a lane's reports and starts write it,
-  // its failures resolve from it.
-  laneAccount(node: string, lane: string): { node: string; lane: string; account: string; at: number } | null {
-    const r = this.db.prepare("SELECT node, lane, account, at FROM lane_accounts WHERE node = ? AND lane = ?").get(node, lane) as Row | undefined;
-    return r ? { node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number } : null;
+  // its failures resolve from it. `source` says how the record was written (PR #127, finding 4b): "start" by a
+  // lane_account tap, "report" by a status-line report; every row from before the column is a report.
+  laneAccount(node: string, lane: string): LaneRecord | null {
+    const r = this.db.prepare("SELECT node, lane, account, at, source FROM lane_accounts WHERE node = ? AND lane = ?").get(node, lane) as Row | undefined;
+    return r ? { node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report" } : null;
   }
-  laneAccounts(): { node: string; lane: string; account: string; at: number }[] {
-    return (this.db.prepare("SELECT node, lane, account, at FROM lane_accounts ORDER BY node, lane").all() as Row[])
-      .map(r => ({ node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number }));
+  laneAccounts(): LaneRecord[] {
+    return (this.db.prepare("SELECT node, lane, account, at, source FROM lane_accounts ORDER BY node, lane").all() as Row[])
+      .map(r => ({ node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report" }));
   }
-  saveLaneAccount(node: string, lane: string, account: string, at: number) {
-    this.db.prepare("INSERT INTO lane_accounts (node, lane, account, at) VALUES (?, ?, ?, ?) ON CONFLICT(node, lane) DO UPDATE SET account = excluded.account, at = excluded.at")
-      .run(node, lane, account, at);
+  // A report never replaces a start record of the same (node, lane) younger than START_RECORD_HOLD_MS (PR #127, finding
+  // 4b): a lane started with an account keeps that account against a self-declared header. A start always replaces,
+  // and a report may replace a start record past its hold, or another report.
+  saveLaneAccount(node: string, lane: string, account: string, at: number, source: "start" | "report") {
+    this.db.prepare(`INSERT INTO lane_accounts (node, lane, account, at, source) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(node, lane) DO UPDATE SET account = excluded.account, at = excluded.at, source = excluded.source
+      WHERE excluded.source = 'start' OR lane_accounts.source <> 'start' OR lane_accounts.at <= excluded.at - ?`)
+      .run(node, lane, account, at, source, START_RECORD_HOLD_MS);
   }
 
   // One comment per job id. `open` is a claim this process still has to finish. A settled row is not taken again.

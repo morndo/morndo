@@ -130,6 +130,7 @@ describe("seats (plan 4.5)", () => {
 
   // S3 (plan 4.5 item 4): the fleet's taps and the pool's word.
   it("a lane's failure and a manager's limit post set the same seat state (AT-15)", async () => {
+    hub.usage.fromFleet("pc", { kind: "lane_account", lane: "w1", account: "seat-a", at: now });   // PR #127, finding 1: the account is known and seen on the node before the hook's word counts
     hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now });
     expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived" });
     const managerToken = hub.agents.issue("manager", "manager").secret;
@@ -144,7 +145,9 @@ describe("seats (plan 4.5)", () => {
     const set = await pool({ account: "seat-a", action: "set", state: "retired", why: "refused", by: "pool-bot", at: Math.floor(now / 1000) }, poolToken);
     expect(await set.json()).toEqual({ ok: true });
     expect(await seatOf()).toMatchObject({ state: "retired", why: "refused", owner: "pool", by: "pool-bot" });
-    // Sticky: a lane's limit failure under the pool's word changes nothing of what is shown.
+    // Sticky: a lane's limit failure under the pool's word changes nothing of what is shown. PR #127, finding 1: the
+    // lane_account tap first, so seat-a is known and seen on the node and the failure's own word reaches resolution.
+    hub.usage.fromFleet("pc", { kind: "lane_account", lane: "w1", account: "seat-a", at: now });
     hub.usage.fromFleet("pc", { kind: "failure", lane: "w1", window: "w1", error: "rate_limit", account: "seat-a", at: now + MIN });
     expect(await seatOf()).toMatchObject({ state: "retired", owner: "pool" });
     // A limit post that says "pool" on the limit route speaks only for the hub's own derived seat (PR #127, finding 2):
@@ -259,17 +262,21 @@ describe("seats (plan 4.5)", () => {
   });
 
   it("a derived out mark expires six hours past its back time, with one notice, and a newer limit post pushes that out (PR #127, finding 3b)", async () => {
+    // One view per checkpoint: each cookie() call pairs a fresh device, and the default policy's sessions outlive
+    // every clock jump here, so a view per seat and per notice list would hit the hub's six-device cap mid-test.
     const t0 = now;
     expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: t0 + HOUR, by: "worker-one", at: t0 })).toEqual({ ok: true, resolved: true });
     expect(await seatOf()).toMatchObject({ state: "out", backAt: t0 + HOUR });
     now = t0 + HOUR + 6 * HOUR - MIN;      // six hours less a minute past the back time: not yet
     hub.usage.sweep();
-    expect(await seatOf()).toMatchObject({ state: "out" });
-    expect((await noticesOf("back")).filter(n => n.account === "seat-a")).toEqual([]);
+    const held = await viewOf();
+    expect((held.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toMatchObject({ state: "out" });
+    expect((held.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-a")).toEqual([]);
     now = t0 + HOUR + 6 * HOUR + MIN;      // a minute past the six hours: dropped, with one notice
     hub.usage.sweep();
-    expect(await seatOf()).toBeUndefined();
-    expect((await noticesOf("back")).filter(n => n.account === "seat-a")).toEqual([
+    const dropped = await viewOf();
+    expect((dropped.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
+    expect((dropped.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-a")).toEqual([
       { id: expect.stringMatching(/^seat-a\|back\|expired\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: its limit mark expired, the back time passed with no newer hit." },
     ]);
     // A newer limit post in between extends the back time, so the mark lives as long as its newest word says.
@@ -277,12 +284,14 @@ describe("seats (plan 4.5)", () => {
     expect(hub.usage.noteLimit({ account: "seat-b", kind: "usage_limit", backAt: t0 + 2 * HOUR, by: "worker-one", at: t0 + 30 * MIN })).toEqual({ ok: true, resolved: true });
     now = t0 + HOUR + 6 * HOUR + MIN;      // past the first back time, before the extended one: the mark stays
     hub.usage.sweep();
-    expect(await seatOf("seat-b")).toMatchObject({ state: "out", backAt: t0 + 2 * HOUR });
-    expect((await noticesOf("back")).filter(n => n.account === "seat-b")).toEqual([]);
+    const kept = await viewOf();
+    expect((kept.accounts as Body[]).find(a => a.account === "seat-b")?.seat).toMatchObject({ state: "out", backAt: t0 + 2 * HOUR });
+    expect((kept.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-b")).toEqual([]);
     now = t0 + 2 * HOUR + 6 * HOUR + MIN;
     hub.usage.sweep();
-    expect(await seatOf("seat-b")).toBeUndefined();
-    expect((await noticesOf("back")).filter(n => n.account === "seat-b")).toEqual([
+    const gone = await viewOf();
+    expect((gone.accounts as Body[]).find(a => a.account === "seat-b")?.seat).toBeUndefined();
+    expect((gone.notices as Body[]).filter(n => n.kind === "back" && n.account === "seat-b")).toEqual([
       { id: expect.stringMatching(/^seat-b\|back\|expired\|\d+$/), kind: "back", account: "seat-b", at: expect.any(Number), text: "seat-b: its limit mark expired, the back time passed with no newer hit." },
     ]);
   });
