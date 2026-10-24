@@ -179,13 +179,19 @@ export async function startInProcessHub(o: {
   });
   await http.ready;
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
+  const cookieSessions: { secret: string; endpointId: string }[] = [];
   return {
     base, store, access, dir, identity, notifications, board, agents, briefs, escalations, usage, jobs, pushes,
     async cookie() {
+      // Each call pairs a fresh device, as the linking tests count on — but a device whose session the test's fake
+      // clock has since expired is revoked first, so a test that looks at the principal's side many times across
+      // long clock jumps never runs into the device cap.
+      for (const c of cookieSessions) if (access.authenticate(c.secret, false) === null) access.revoke(c.endpointId);
       const opts = await access.pairOptions(access.issueConsoleToken().secret, "phone");
       if (!("flowId" in opts)) throw new Error(opts.refused);
       const r = await access.pairVerify(opts.flowId, {} as never);
       if (!("cookieSecret" in r)) throw new Error(r.refused);
+      cookieSessions.push({ secret: r.cookieSecret, endpointId: r.endpoint.id });
       return r.cookieSecret;
     },
     post: (path, body, headers = {}) => fetch(base + path, {
