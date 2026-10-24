@@ -52,7 +52,7 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
   events and the `proofSeen` of Done events stay in a task's record, and an older build's event schema has no `briefed`
   kind, so its CLI and app may fail to read the history of a task that carries one (not run; the fix is to roll forward,
   or to ship the older build a reader that skips kinds it does not know). A hub rollback that keeps the data is therefore
-  not free for tasks that were briefed.
+  not free for tasks that were briefed. The known case (found by review, not run): the build at 4a0274cf, the first on the new database, has no case for `briefed` or `proof_listed` in the task panel's record line and returns nothing for them, so its panel throws for any task whose record holds one while the board itself still loads. This build gives the record line a default for kinds it does not know, so that class of break is closed from here on; for that older build the fix is to roll forward or to patch it with the same default.
 - Screenshots and per-item human marks are not in this decision; they are a later one (plan, option C).
 - GitHub's documentation (read 2026-10-23) lists `Pull requests: read` and `Contents: read` for the pull request
   endpoint with fine-grained tokens and lists no fine-grained permission for the check-runs endpoint (`Checks` is a

@@ -170,6 +170,8 @@ export function eventLine(e: TaskEvent): { who: string; text: string; comment: s
       const lines = [...c.add.map(s => `+ ${s}`), ...c.drop.map(s => `- ${s}`)];
       return { who: w, text: "set the proof list", comment: lines.length > 0 ? lines.join("\n") : null };
     }
+    // A kind this build does not know (a newer hub's record): one plain line, never a throw that takes the whole panel down.
+    default: return { who: w, text: "made a change this version cannot show", comment: null };
   }
 }
 export const ago = (t: number, now: number) => {

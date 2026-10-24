@@ -159,3 +159,12 @@ describe("proof in the board app (ADR-0035 step 5)", () => {
     expect(acceptLabel(failing, liveMerge).label).not.toBe("Accept as done");
   });
 });
+
+describe("a record this build cannot read in full", () => {
+  it("an event of a kind this build does not know reads as one plain line, never a throw (a newer hub's record)", () => {
+    const future = ev({ kind: "worker", name: "builder", token: "t" }, { kind: "from_the_future", detail: "x" } as unknown as TaskChange);
+    expect(() => eventLine(future)).not.toThrow();
+    expect(eventLine(future)).toEqual({ who: "builder", text: "made a change this version cannot show", comment: null });
+  });
+});
+
