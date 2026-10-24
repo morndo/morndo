@@ -20,6 +20,7 @@ export type ProofView = { rev: number | null; brief: ProofBrief | null; results:
 
 const AUTO_WINDOW_MS = 3_600_000;
 const BRIEFS_MAX = 20;
+const BRIEFS_LIFETIME_MAX = 200;
 const GREEN_HOLD_MS = 3_600_000;
 
 export class ProofService {
@@ -71,7 +72,9 @@ export class ProofService {
     // work; the assigner's are not counted (a lane must not be able to spend a limit that stops the Done's own brief).
     const events = this.#store.taskEvents(key);
     const since = roundStart(events);
-    if (actor.kind === "worker" && events.filter(e => e.change.kind === "briefed" && e.actor.kind === "worker" && e.rev > since).length >= BRIEFS_MAX)
+    // And over its whole life: a lane may start a new round itself, so the round's count alone could be cycled.
+    const lane = actor.kind === "worker" ? events.filter(e => e.change.kind === "briefed" && e.actor.kind === "worker") : [];
+    if (actor.kind === "worker" && (lane.filter(e => e.rev > since).length >= BRIEFS_MAX || lane.length >= BRIEFS_LIFETIME_MAX))
       return { ok: false, problem: "too_many", detail: "briefs on this task" };
     const brief: BriefInput = {
       summary: redactKeyMaterial(input.summary),

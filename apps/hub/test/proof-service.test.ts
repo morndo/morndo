@@ -642,6 +642,20 @@ describe("verifying (B14, B15)", () => {
       store.close();
     });
 
+    it("a lane's briefs have a lifetime cap too, so cycling the rounds does not reset it", async () => {
+      const { store, board, proof } = withForge({ auto: { perTask: 0, hub: 0 } });          // no verifications: this is about the count
+      atReview(board);
+      for (let round = 0; round < 10; round++) {
+        for (let i = 0; i < 20; i++) expect((await proof.file("T-1", one, lane)).ok, `${round}/${i}`).toBe(true);
+        expect(await proof.file("T-1", one, lane)).toEqual({ ok: false, problem: "too_many", detail: "briefs on this task" });   // the round's cap
+        board.act("T-1", { action: "move", to: "doing" }, lane);                              // the lane starts a new round itself
+        board.act("T-1", { action: "move", to: "review" }, lane);
+      }
+      expect(await proof.file("T-1", one, lane)).toEqual({ ok: false, problem: "too_many", detail: "briefs on this task" });     // 200 in all: no more
+      expect((await proof.file("T-1", one, manager)).ok).toBe(true);                         // the assigner is not held to either
+      store.close();
+    });
+
     it("a lane's proof list changes are bounded, and the assigner is never locked out by them", async () => {
       const { store, board } = withForge();
       atReview(board);
