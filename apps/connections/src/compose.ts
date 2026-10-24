@@ -10,6 +10,7 @@ import { KeyPoolService } from "./application/key-pool-service.ts";
 import { PoolService } from "./application/pool-service.ts";
 import { RoutingService } from "./application/routing-service.ts";
 import { FileAlerts } from "./adapters/alerts-file.ts";
+import { builtinClassifiers } from "./adapters/classifiers.ts";
 import { FileCatalog } from "./adapters/catalog-file.ts";
 import { CliEngines } from "./adapters/engines-bin.ts";
 import { FileEngines } from "./adapters/engines-file.ts";
@@ -97,7 +98,7 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
     repos: new GitRepos(), alerts: new FileAlerts(join(dir, "alerts.log")), processes, engines,
   };
   const keypools = new KeyPoolService({
-    clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, classifiers: { for: () => null },
+    clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, classifiers: builtinClassifiers,
   });
   return {
     dir, db, vaultDir, identity, store, vault, catalog, engines, models, processes, runtime, env,

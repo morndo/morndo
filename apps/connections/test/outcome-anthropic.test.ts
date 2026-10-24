@@ -1,4 +1,4 @@
-// The first-party error classifier (ADR-0036, plan 3.1): what a refusal from the provider means to a key pool. Fixtures follow the
+// The first-party error classifier (ADR-0037, plan 3.1): what a refusal from the provider means to a key pool. Fixtures follow the
 // error pages as read on 2026-10-25 (platform.claude.com/docs/en/api/errors and .../rate-limits); request ids are made up. Claude
 // Code's own printed lines are not documented, so those fixtures are synthetic and say so. A malformed request must never exhaust a key.
 import { describe, expect, it } from "vitest";
@@ -100,6 +100,10 @@ describe("signalFromText: what Claude Code prints (synthetic: its format is not 
     expect(sig("Done. All tests passed.")).toEqual({ kind: "unknown" });
     expect(sig("")).toEqual({ kind: "unknown" });
     expect(signalFromText("Done. sk-planted-secret-0001")).toMatchObject({ status: null, kind: null, text: null });
+  });
+  it("ordinary words from a run's own tools (git or ssh failing to authenticate) say nothing about the key", () => {
+    expect(sig("fatal: Authentication failed for 'https://example.com/team/repo.git'")).toEqual({ kind: "unknown" });
+    expect(sig("ssh: account on hold, try again later")).toEqual({ kind: "unknown" });
   });
   it("a 400 line for another reason stays unknown", () => {
     expect(sig(`API Error: 400 ${body("invalid_request_error", "max_tokens: Input should be greater than or equal to 1")}`)).toEqual({ kind: "unknown" });
