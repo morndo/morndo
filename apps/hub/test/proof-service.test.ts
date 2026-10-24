@@ -212,7 +212,7 @@ describe("verifying (B14, B15)", () => {
   let fake: FakeForge;
   let clock = NOW;
   const now = () => clock;
-  const withForge = (o: { mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean; token?: string; runs?: () => RunView[] } = {}) => {
+  const withForge = (o: { mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean; token?: string; runs?: () => RunView[]; auto?: { perTask?: number; hub?: number } } = {}) => {
     const store = new Store(tempDir());
     const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now, ...(o.runs ? { runs: o.runs } : {}) });
     const proof = new ProofService({
@@ -221,6 +221,7 @@ describe("verifying (B14, B15)", () => {
       mode: o.mode ?? "off",
       ...(o.allowedRepos !== undefined ? { allowedRepos: o.allowedRepos } : {}),
       ...(o.authenticated !== undefined || o.token !== undefined ? { authenticated: o.authenticated ?? true } : {}),
+      ...(o.auto ? { autoBudget: o.auto } : {}),
     });
     return { store, board, proof };
   };
@@ -574,6 +575,69 @@ describe("verifying (B14, B15)", () => {
       detail: `merged as ${OTHER.slice(0, 7)}, the task records ${RECORDED.slice(0, 7)}`,
     });
     store.close();
+  });
+
+  describe("the hub's GitHub budget is not a lane's to spend (B14)", () => {
+    const PRREF = "morndo/morndo#42@3e9d1a7";
+    const one = { ...brief, refs: [PRREF] };
+    const prRequests = () => fake.requests.filter(r => r.path.endsWith("/pulls/42")).length;
+
+    it("a brief filed over and over is verified a few times an hour; the rest wait for the timer", async () => {
+      fake.pr("morndo/morndo", 42, { head: FULL });
+      const { store, board, proof } = withForge();                   // the default allowance: 6 automatic verifications of a task an hour
+      atReview(board);
+      for (let i = 0; i < 8; i++) { await proof.file("T-1", one, lane); await proof.idle(); }
+      expect(prRequests()).toBe(5);                                   // six in all: the move to review used one, before any brief
+      clock = NOW + 61 * 60_000;                                      // the hour has passed: the allowance is back
+      await proof.file("T-1", one, lane);
+      await proof.idle();
+      expect(prRequests()).toBe(6);
+      store.close();
+    });
+
+    it("the whole hub has an allowance too, so several tasks cannot spend the budget together", async () => {
+      fake.pr("morndo/morndo", 42, { head: FULL });
+      const { store, board, proof } = withForge({ auto: { perTask: 6, hub: 3 } });
+      for (const k of ["T-1", "T-2", "T-3", "T-4"]) {
+        board.create({ title: `Task ${k}`, assignee: "builder" }, manager);
+        board.act(k, { action: "move", to: "doing" }, lane);
+        await proof.file(k, one, lane);
+        await proof.idle();
+        board.act(k, { action: "move", to: "todo" }, lane);          // frees the lane for the next task
+      }
+      expect(prRequests()).toBe(3);
+      store.close();
+    });
+
+    it("a failure to reach the forge keeps a fresh green, and an old green gives way", async () => {
+      fake.pr("morndo/morndo", 42, { head: FULL });
+      const { store, board, proof } = withForge();
+      atReview(board);
+      await proof.file("T-1", one, lane);
+      await proof.idle();
+      expect(store.proofResultsOf("T-1", 4)[0]?.state).toBe("green");
+      fake.fail("/repos/morndo/morndo/pulls/42", 500);
+      clock = NOW + 10 * 60_000;
+      fake.fail("/repos/morndo/morndo/pulls/42", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String((clock + 60_000) / 1000) });
+      await proof.verify("T-1");
+      expect(store.proofResultsOf("T-1", 4)[0]).toMatchObject({ state: "green", checkedAt: NOW });   // not downgraded by a rate limit
+      clock = NOW + 2 * 3_600_000;                                    // the green is two hours old now
+      fake.fail("/repos/morndo/morndo/pulls/42", 403, { "x-ratelimit-remaining": "0", "x-ratelimit-reset": String((clock + 60_000) / 1000) });
+      await proof.verify("T-1");
+      expect(store.proofResultsOf("T-1", 4)[0]?.state).toBe("unfetchable");
+      store.close();
+    });
+
+    it("briefs per task and changes of a proof list are bounded", async () => {
+      const { store, board, proof } = withForge();
+      atReview(board);
+      for (let i = 0; i < 20; i++) expect((await proof.file("T-1", one, lane)).ok).toBe(true);
+      await proof.idle();
+      expect(await proof.file("T-1", one, lane)).toEqual({ ok: false, problem: "too_many", detail: "briefs on this task" });
+      for (let i = 0; i < 100; i++) expect(board.act("T-1", { action: "proof_list", add: [`data: item ${i % 2}`], drop: i % 2 === 0 ? [] : [`data: item ${(i - 1) % 2}`] }, manager).ok, String(i)).toBe(true);
+      expect(board.act("T-1", { action: "proof_list", add: ["data: one more"] }, manager)).toMatchObject({ ok: false, problem: "too_many", detail: "proof list changes" });
+      store.close();
+    });
   });
 
   describe("private repositories", () => {

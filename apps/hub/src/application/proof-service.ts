@@ -18,6 +18,10 @@ import type { BoardResult, BoardService } from "./board-service.ts";
 // `mode`: the gate's mode, so a reader (the panel's Accept button) says only what the gate would do.
 export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; mode: ProofMode; standIn: boolean; coverage: CoverageItem[]; state: ProofState };
 
+const AUTO_WINDOW_MS = 3_600_000;
+const BRIEFS_MAX = 20;
+const GREEN_HOLD_MS = 3_600_000;
+
 export class ProofService {
   #store: Store;
   #board: BoardService;
@@ -26,13 +30,17 @@ export class ProofService {
   #mode: ProofMode;
   #allowedRepos: readonly string[];
   #authenticated: boolean;
+  #autoPerTask: number;                          // automatic verifications (a brief filed, a review entered, a merge recorded) one task may start an hour
+  #autoHub: number;                              // and the whole hub: a lane must not spend the hub's GitHub budget (60 an hour without a token)
+  #autoLog = new Map<string, number[]>();
+  #autoAll: number[] = [];
   #standIn: boolean;                             // its references are read from a stand-in forge (MORNDO_FORGE_URL), not GitHub
   #chain = new Map<string, Promise<void>>();     // every run for a task, one after another (the timer's included)
   #whole = new Map<string, Promise<void>>();     // a whole-brief check out or waiting: what a refresh joins
   #verifyAll = new Map<string, Promise<void>>(); // the one that re-reads every reference: what a second verify joins
   #running = new Set<Promise<void>>();           // every check begun, for idle()
 
-  constructor(p: { store: Store; board: BoardService; now?: () => number; forge?: ForgeChecks | null; mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean; standIn?: boolean }) {
+  constructor(p: { store: Store; board: BoardService; now?: () => number; forge?: ForgeChecks | null; mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean; standIn?: boolean; autoBudget?: { perTask?: number; hub?: number } }) {
     this.#store = p.store; this.#board = p.board; this.#now = p.now ?? Date.now;
     this.#forge = p.forge ?? null; this.#mode = p.mode ?? "off";
     this.#allowedRepos = p.allowedRepos ?? [MORNDO_REPO];
@@ -40,6 +48,7 @@ export class ProofService {
     // themselves are the same either way.
     this.#authenticated = p.authenticated ?? false;
     this.#standIn = p.standIn ?? false;
+    this.#autoPerTask = p.autoBudget?.perTask ?? 6; this.#autoHub = p.autoBudget?.hub ?? 30;
     this.#board.attachProof({ gate: key => this.gate(key), refresh: key => this.refresh(key) });
     this.#board.onEvent(e => this.onBoardEvent(e));
   }
@@ -58,6 +67,9 @@ export class ProofService {
   // refused brief writes nothing and seeds nothing. Every text field loses key material first, before it is judged and
   // stored (plan 3.8); the references are typed values, not prose, and pass as they are.
   async file(key: string, input: BriefInput, actor: TaskActor): Promise<BoardResult> {
+    // Bounded: each brief is an event and up to 8 rows to check, so a task takes at most BRIEFS_MAX of them.
+    if (this.#store.taskEvents(key).filter(e => e.change.kind === "briefed").length >= BRIEFS_MAX)
+      return { ok: false, problem: "too_many", detail: "briefs on this task" };
     const brief: BriefInput = {
       summary: redactKeyMaterial(input.summary),
       leftOut: redactKeyMaterial(input.leftOut),
@@ -72,7 +84,7 @@ export class ProofService {
     // crash between the two leaves the same picture, and the seed's INSERT OR IGNORE keeps a row that exists standing.
     if (r.ok && r.event.change.kind === "briefed") {
       this.#store.seedProofs(key, r.event.rev, r.event.change.brief.refs, this.#now());
-      void this.verify(key);                        // a filed brief is checked at once, in the background
+      if (this.#autoAllowed(key)) void this.verify(key);       // a filed brief is checked at once, in the background (within the allowance)
     }
     return r;
   }
@@ -143,9 +155,9 @@ export class ProofService {
   // verified in the background. The event is the whole trigger: no Run is read here.
   onBoardEvent(e: TaskEvent): void {
     if ((e.change.kind === "moved" && e.change.to === "review") || (e.change.kind === "created" && e.change.status === "review"))
-      void this.verify(e.key);
+      if (this.#autoAllowed(e.key)) void this.verify(e.key);
     // A merge record changes what a pull request reference means; re-read after any check already queued (not joined to verifyAll).
-    if (e.change.kind === "merged" || e.change.kind === "unmerged")
+    if ((e.change.kind === "merged" || e.change.kind === "unmerged") && this.#autoAllowed(e.key))
       void this.#serialize(e.key, () => this.#check(e.key, brief => [...brief.brief.refs]));
   }
 
@@ -209,6 +221,10 @@ export class ProofService {
     const parsed = parseProofRef(ref);
     if (!parsed.ok) return;                        // a stored ref always parses; anything else writes nothing
     const judged = await this.#ask(parsed.value, allowed, young, merges);
+    // A fresh green stands against a later failure to reach the forge (a rate limit, a timeout): a lane that spends the budget
+    // must not be able to turn true greens into unfetchable ones at the Done.
+    const held = this.#store.proofResultsOf(key, briefRev).find(r => r.ref === ref);
+    if (held?.state === "green" && judged.state === "unfetchable" && RETRYABLE_DETAIL.test(judged.detail ?? "") && this.#now() - held.checkedAt < GREEN_HOLD_MS) return;
     this.record(key, briefRev, { ref, state: judged.state, detail: judged.detail, checkedAt: this.#now() });
   }
 
@@ -227,6 +243,19 @@ export class ProofService {
     } catch {
       return { state: "unfetchable", detail: "network error" };
     }
+  }
+
+  // The allowance for automatic verifications: a task and the hub each get so many an hour; what is not verified now waits
+  // for the timer's pass (its own cadence), so a lane filing briefs in a loop slows nobody but itself.
+  #autoAllowed(key: string): boolean {
+    const now = this.#now();
+    const fresh = (t: number) => now - t < AUTO_WINDOW_MS;
+    const mine = (this.#autoLog.get(key) ?? []).filter(fresh);
+    this.#autoAll = this.#autoAll.filter(fresh);
+    this.#autoLog.set(key, mine);
+    if (mine.length >= this.#autoPerTask || this.#autoAll.length >= this.#autoHub) return false;
+    mine.push(now); this.#autoAll.push(now);
+    return true;
   }
 
   // The task's merge records as the rules read them: live while the task is open, and as they stood at the Done once it
