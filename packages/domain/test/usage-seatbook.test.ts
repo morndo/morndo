@@ -82,7 +82,8 @@ describe("one seat state per account (plan 4.5)", () => {
     expect(markExpired(out({ backAt: T, cycleReset: null }), T + 6 * HOUR + 1)).toBe(true);     // a millisecond past: expired
     expect(markExpired(out({ backAt: T, cycleReset: null }), T + 5 * HOUR)).toBe(false);        // the back time not six hours past
     expect(markExpired(out({ backAt: null }), T + 8 * HOUR)).toBe(false);     // no back time to pass
-    expect(markExpired(out({ owner: "pool" }), T + 8 * HOUR)).toBe(false);    // the pool's word never expires by time
+    expect(markExpired(out({ owner: "pool" }), T + 40 * HOUR)).toBe(false);    // the pool's word never expires by time, however late (past the back time and the cycle's reset by more than six hours)
+    expect(markExpired(out(), T + 40 * HOUR)).toBe(true);                       // the same seat, derived, has expired by then
     const retired: SeatRecord = { ...out(), state: "retired", why: "refused", backAt: null, cycleReset: null, windowId: null };
     expect(markExpired(retired, T + 8 * HOUR)).toBe(false);                   // a retired derived seat stays
     const signedOut: SeatRecord = { ...out(), state: "logged-out", why: "signed_out", backAt: null, cycleReset: null, windowId: null };
