@@ -337,13 +337,20 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
   return overlayList(base, list, brief, results);
 }
 
+// B13: the rev after which the task's current round of work began: the last move out of review (anywhere but Done) or out
+// of Done. A brief from before it is stale; a count of "this round's briefs" starts after it.
+export function roundStart(events: readonly TaskEvent[]): number {
+  let back = 0;
+  for (const e of events) if (e.change.kind === "moved" && ((e.change.from === "review" && e.change.to !== "done") || e.change.from === "done") && e.rev > back) back = e.rev;
+  return back;
+}
+
 // B13: the brief that still counts — the newest `briefed` event, unless the task has left review since (any review →
 // elsewhere move with a higher rev stales every brief before it; a new round of work files a new one). The move to Done
 // is not leaving: a task accepted as done keeps the brief it was accepted on, for its card and its record; but a Done
 // ends that round, so a move out of done (a reopened task) stales it, and a second Done needs a brief of its own.
 export function currentBrief(events: readonly TaskEvent[]): { brief: ProofBrief; rev: number } | null {
-  let back = 0;
-  for (const e of events) if (e.change.kind === "moved" && ((e.change.from === "review" && e.change.to !== "done") || e.change.from === "done") && e.rev > back) back = e.rev;
+  const back = roundStart(events);
   let best: { brief: ProofBrief; rev: number } | null = null;
   for (const e of events) if (e.change.kind === "briefed" && e.rev > back && (best === null || e.rev > best.rev)) best = { brief: e.change.brief, rev: e.rev };
   return best;

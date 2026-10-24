@@ -628,6 +628,19 @@ describe("verifying (B14, B15)", () => {
       store.close();
     });
 
+    it("a lane's briefs are bounded per round, and the assigner's are not counted", async () => {
+      const { store, board, proof } = withForge();
+      atReview(board);
+      for (let i = 0; i < 20; i++) expect((await proof.file("T-1", one, lane)).ok, String(i)).toBe(true);
+      await proof.idle();
+      expect(await proof.file("T-1", one, lane)).toEqual({ ok: false, problem: "too_many", detail: "briefs on this task" });
+      expect((await proof.file("T-1", one, manager)).ok).toBe(true);                       // the assigner is never locked out
+      board.act("T-1", { action: "move", to: "doing" }, lane);                              // a new round of work
+      board.act("T-1", { action: "move", to: "review" }, lane);
+      expect((await proof.file("T-1", one, lane)).ok).toBe(true);                           // the lane's count starts again
+      store.close();
+    });
+
     it("a lane's proof list changes are bounded, and the assigner is never locked out by them", async () => {
       const { store, board } = withForge();
       atReview(board);

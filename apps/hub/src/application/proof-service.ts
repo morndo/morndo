@@ -7,7 +7,7 @@
 // credential), judges the answer with the domain's pure functions, and stores the row. Triggers ride on the board's own
 // events (a move to review, a brief filed), a timer pass re-reads what is still pending or was rate-limited, and a Done
 // attempt re-reads first whatever has gone stale — all through `record`, so none of it ever writes a task or an event.
-import { MORNDO_REPO, YOUNG_MS, coverageOf, currentBrief, currentList, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type CoverageItem, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type Task, type TaskActor, type TaskEvent } from "@morndo/domain";
+import { MORNDO_REPO, YOUNG_MS, coverageOf, currentBrief, currentList, roundStart, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type CoverageItem, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type Task, type TaskActor, type TaskEvent } from "@morndo/domain";
 import { redactKeyMaterial } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import { RETRYABLE_DETAIL, type ForgeChecks, type ForgeFailure } from "./ports.ts";
@@ -67,8 +67,11 @@ export class ProofService {
   // refused brief writes nothing and seeds nothing. Every text field loses key material first, before it is judged and
   // stored (plan 3.8); the references are typed values, not prose, and pass as they are.
   async file(key: string, input: BriefInput, actor: TaskActor): Promise<BoardResult> {
-    // Bounded: each brief is an event and up to 8 rows to check, so a task takes at most BRIEFS_MAX of them.
-    if (this.#store.taskEvents(key).filter(e => e.change.kind === "briefed").length >= BRIEFS_MAX)
+    // Bounded: each brief is an event and up to 8 rows to check, so a lane takes at most BRIEFS_MAX of them in a round of
+    // work; the assigner's are not counted (a lane must not be able to spend a limit that stops the Done's own brief).
+    const events = this.#store.taskEvents(key);
+    const since = roundStart(events);
+    if (actor.kind === "worker" && events.filter(e => e.change.kind === "briefed" && e.actor.kind === "worker" && e.rev > since).length >= BRIEFS_MAX)
       return { ok: false, problem: "too_many", detail: "briefs on this task" };
     const brief: BriefInput = {
       summary: redactKeyMaterial(input.summary),
