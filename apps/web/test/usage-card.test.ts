@@ -328,9 +328,31 @@ describe("Home usage card: the four states, a title, a seat, a disagreement, sou
     expect(await forget.innerText()).toContain("Forget? (this removes it)");
     let calls = await tab.evaluate(() => (window as unknown as { __forget: unknown[][] }).__forget);
     expect(calls).toEqual([]);
+    await tab.waitForTimeout(500);                                               // a second tap right on the first (a double click) is not a decision
     await forget.click();                                                        // the second forgets
     calls = await tab.evaluate(() => (window as unknown as { __forget: unknown[][] }).__forget);
     expect(calls).toEqual([["seated", "app-server", null]]);
+    await tab.close();
+  });
+
+  it("an armed Forget does not wait for ever: it disarms after a few seconds, on blur, and a double click fires nothing", async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
+    await tab.goto(web.url);
+    const seated = tab.locator("[data-account='seated']");
+    await seated.waitFor();
+    const forget = seated.getByRole("button", { name: /Forget/ }).first();
+    await forget.waitFor({ timeout: 2000 });
+    const calls = () => tab.evaluate(() => (window as unknown as { __forget: unknown[][] }).__forget);
+    await forget.dblclick();                                                     // two taps within a moment: armed, not fired
+    expect(await forget.innerText()).toContain("Forget? (this removes it)");
+    expect(await calls()).toEqual([]);
+    await tab.waitForTimeout(4600);                                              // left alone, it disarms
+    expect(await forget.innerText()).toBe("Forget");
+    await forget.click();                                                        // armed again by one tap
+    expect(await forget.innerText()).toContain("Forget? (this removes it)");
+    await forget.evaluate(el => (el as HTMLElement).blur());                     // focus moves away: disarmed
+    expect(await forget.innerText()).toBe("Forget");
+    expect(await calls()).toEqual([]);
     await tab.close();
   });
 

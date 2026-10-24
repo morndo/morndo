@@ -50,8 +50,14 @@
   // A named disagreement's window, in the words the rows already use; a window a source named itself keeps its own id.
   const windowWords = (id: string) => id === "five_hour" ? "5-hour window" : id === "seven_day" ? "weekly window" : id;
 
-  // The Forget of a source asks first: the first tap only says what it removes, the second runs it. Per source row.
+  // The Forget of a source asks first: the first tap only says what it removes, the second runs it. Per source row. An
+  // armed row does not wait for ever: it disarms after a few seconds, when it loses focus and when its row is gone, and
+  // a second tap right on the first (a double click) is not a decision.
+  const ARM_MS = 4000, DOUBLE_TAP_MS = 400;
   let confirming = $state<Record<string, boolean>>({});
+  const armedAt: Record<string, number> = {};
+  const timers = new Map<string, ReturnType<typeof setTimeout>>();
+  const disarm = (key: string) => { confirming[key] = false; const t = timers.get(key); if (t !== undefined) clearTimeout(t); timers.delete(key); };
   // A failed act's words, per account (the seat) and per source row (the forget); empty: none.
   let problems = $state<Record<string, string>>({});
   const problemOf = async (key: string, run: () => Act) => {
@@ -60,10 +66,22 @@
   };
   const forget = (account: string, source: string, node: string | null) => {
     const key = `${account}|${source}|${node}`;
-    if (!confirming[key]) { confirming[key] = true; return; }
-    confirming[key] = false;
+    if (!confirming[key]) {
+      confirming[key] = true;
+      armedAt[key] = Date.now();
+      timers.set(key, setTimeout(() => disarm(key), ARM_MS));
+      return;
+    }
+    if (Date.now() - (armedAt[key] ?? 0) < DOUBLE_TAP_MS) return;
+    disarm(key);
     void problemOf(key, () => onForget(account, source, node));
   };
+  // A row that is gone (or an account that went) leaves nothing armed; and no timer outlives the card.
+  $effect(() => {
+    const live = new Set(accounts.flatMap(a => (a.sources ?? []).map(s => `${a.account}|${s.source}|${s.node}`)));
+    for (const key of [...timers.keys()]) if (!live.has(key)) disarm(key);
+  });
+  $effect(() => () => { for (const t of timers.values()) clearTimeout(t); timers.clear(); });
   const clearMark = (account: string) => void problemOf(`seat|${account}`, () => onClearSeat(account));
 </script>
 
@@ -191,7 +209,7 @@
                   <div class="src">
                     <span class="line">{sourceLine(s, now)}</span>
                     {#if s.state === "unavailable" || s.state === "stale"}
-                      <button type="button" class="forget" aria-label="Forget {s.source} of {a.account}" onclick={() => forget(a.account, s.source, s.node)}>{confirming[key] ? "Forget? (this removes it)" : "Forget"}</button>
+                      <button type="button" class="forget" aria-label="Forget {s.source} of {a.account}" onclick={() => forget(a.account, s.source, s.node)} onblur={() => disarm(key)}>{confirming[key] ? "Forget? (this removes it)" : "Forget"}</button>
                     {/if}
                   </div>
                   {#if problems[key]}<p class="actproblem" role="alert">{problems[key]}</p>{/if}

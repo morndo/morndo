@@ -263,6 +263,7 @@ try {
       const forget = dead.getByRole("button", { name: /Forget/ }).first();
       await forget.click();
       await eventually(async () => forget.innerText(), v => v.includes("Forget? (this removes it)"), "the second tap asks");
+      await new Promise(r => setTimeout(r, 500));                 // a second tap right on the first is a double click, not a decision
       await forget.click();
       await eventually(async () => dead.getByRole("button", { name: /Forget/ }).count(), v => v === 0, "the source line goes");
       assert((await dead.count()) === 0, "the forgotten account's card is still there");

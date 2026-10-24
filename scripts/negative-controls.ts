@@ -4291,6 +4291,15 @@ export const CONTROLS: Control[] = [
   { id: "t415s4r1-push-on-rollback", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "    } catch (e) {\n      this.#told.length = mark;\n      throw e;", replace: "    } catch (e) {\n      for (const kind of this.#told.splice(mark)) this.#onNotice?.(kind);\n      throw e;",
     run: ["apps/hub/test/usage-push.test.ts"] },
+  { id: "t415s4r1-double-tap-fires", task: "T-415", file: "apps/web/src/lib/desktop/HomeView.svelte",
+    find: "if (Date.now() - (armedAt[key] ?? 0) < DOUBLE_TAP_MS) return;", replace: "",
+    run: ["apps/web/test/usage-card.test.ts"] },
+  { id: "t415s4r1-armed-for-ever", task: "T-415", file: "apps/web/src/lib/desktop/HomeView.svelte",
+    find: "timers.set(key, setTimeout(() => disarm(key), ARM_MS));", replace: "",
+    run: ["apps/web/test/usage-card.test.ts"] },
+  { id: "t415s4r1-armed-through-blur", task: "T-415", file: "apps/web/src/lib/desktop/HomeView.svelte",
+    find: "onblur={() => disarm(key)}", replace: "",
+    run: ["apps/web/test/usage-card.test.ts"] },
 ];
 
 // ---- the runner
