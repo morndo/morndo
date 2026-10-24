@@ -76,9 +76,11 @@ describe("one seat state per account (plan 4.5)", () => {
 
   it("a derived out mark expires six hours past its back time, and nothing else does (PR #127, finding 3b)", () => {
     expect(MARK_EXPIRY_MS).toBe(6 * HOUR);
-    expect(markExpired(out({ backAt: T }), T + 6 * HOUR)).toBe(false);        // exactly six hours: not yet
-    expect(markExpired(out({ backAt: T }), T + 6 * HOUR + 1)).toBe(true);     // a millisecond past: expired
-    expect(markExpired(out({ backAt: T }), T + 5 * HOUR)).toBe(false);        // the back time not six hours past
+    // Fix round 2, finding 2 turned the clock from the back time alone to the later of it and the cycle's own reset,
+    // so this case is pinned with no cycle: the back time alone (the cycleReset term has its own case below).
+    expect(markExpired(out({ backAt: T, cycleReset: null }), T + 6 * HOUR)).toBe(false);        // exactly six hours: not yet
+    expect(markExpired(out({ backAt: T, cycleReset: null }), T + 6 * HOUR + 1)).toBe(true);     // a millisecond past: expired
+    expect(markExpired(out({ backAt: T, cycleReset: null }), T + 5 * HOUR)).toBe(false);        // the back time not six hours past
     expect(markExpired(out({ backAt: null }), T + 8 * HOUR)).toBe(false);     // no back time to pass
     expect(markExpired(out({ owner: "pool" }), T + 8 * HOUR)).toBe(false);    // the pool's word never expires by time
     const retired: SeatRecord = { ...out(), state: "retired", why: "refused", backAt: null, cycleReset: null, windowId: null };

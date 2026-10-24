@@ -55,11 +55,15 @@ export function shownSeat(pool: SeatRecord | null, derived: SeatRecord | null): 
   return worseSeatState(pool.state, derived.state) === derived.state && pool.state !== derived.state ? derived : pool;
 }
 
-// True only for a derived seat in state "out" whose back time passed more than MARK_EXPIRY_MS ago (PR #127, finding
-// 3b): the sweep drops such a mark with one notice. Everything else — a pool seat, a retired or logged-out derived
-// seat, an out mark with no back time, one whose back time is not past the six hours — stays.
+// True only for a derived seat in state "out" whose own clock passed more than MARK_EXPIRY_MS ago (PR #127, finding
+// 3b): the later of its back time and the cycle's own reset (fix round 2, finding 2) — the cycle the limit hit is the
+// clock, so a weekly window that resets days after the default one-hour back time is not shown as fine while it still
+// reads 100%. The sweep drops such a mark with one notice. Everything else — a pool seat, a retired or logged-out
+// derived seat, an out mark with no back time, one whose clock is not past the six hours — stays.
 export function markExpired(seat: SeatRecord, now: number): boolean {
-  return seat.owner === "derived" && seat.state === "out" && seat.backAt !== null && now - seat.backAt > MARK_EXPIRY_MS;
+  if (seat.owner !== "derived" || seat.state !== "out" || seat.backAt === null) return false;
+  const clock = Math.max(seat.backAt, seat.cycleReset ?? seat.backAt);
+  return now - clock > MARK_EXPIRY_MS;
 }
 
 export function clearSeat(prev: SeatRecord, read: FreshRead): { seat: SeatRecord | null; cleared: boolean } {

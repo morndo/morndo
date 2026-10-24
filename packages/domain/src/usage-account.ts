@@ -19,6 +19,9 @@ export const RECORD_FRESH_MS = 7 * 86_400_000;
 // A start record's hold (PR #127, finding 4b): a status-line report of the same (node, lane) never replaces a start
 // record younger than this, so a lane started with an account keeps that account against a self-declared header.
 export const START_RECORD_HOLD_MS = 12 * 3_600_000;
+// A disagreement's life (fix round 2 on PR #127, finding 1): two tokens reporting different accounts for one lane
+// make its record ambiguous for this long, and a record fresher than this is not replaced by another token's word.
+export const RECORD_CONFLICT_MS = 3_600_000;
 
 // Which of two records of one lane speaks for it: a start record outranks a report one (finding 4b), and two of a kind
 // go by the newest stamp. A row from before the source column counts as a report.
@@ -26,12 +29,15 @@ const speaksForLane = (a: LaneRecord, b: LaneRecord): boolean =>
   (a.source === "start") !== (b.source === "start") ? a.source === "start" : a.at > b.at;
 
 export function resolveAccount(i: ResolveInput): Resolved {
+  // A record two tokens disagree over is as good as absent (fix round 2, finding 1): while its conflict window is open
+  // it names no account, neither for its lane nor among its node's.
+  const ambiguous = (r: LaneRecord): boolean => r.conflictUntil != null && r.conflictUntil > i.now;
   // The hook's own word: the lane's lane, whatever any record or session says.
   if (typeof i.hookAccount === "string" && ACCOUNT_NAME.test(i.hookAccount)) return { account: i.hookAccount, by: "hook" };
   // The lane's record: this node's own before one of node "" (the hub could not place the lane), a start record before a
   // report one, then the newest at among them (PR #127, finding 4b).
   if (i.lane !== null) {
-    const fresh = i.records.filter(r => r.lane === i.lane && i.now - r.at <= RECORD_FRESH_MS);
+    const fresh = i.records.filter(r => r.lane === i.lane && !ambiguous(r) && i.now - r.at <= RECORD_FRESH_MS);
     const placed = fresh.filter(r => r.node === i.node);
     const mine = placed.length > 0 ? placed : fresh.filter(r => r.node === "");
     if (mine.length > 0) {
@@ -48,7 +54,7 @@ export function resolveAccount(i: ResolveInput): Resolved {
   // The node's only account: its fresh records' and its fresh sessions' (through laneNode). A node of "" is never the node.
   if (i.node !== "") {
     const accounts = new Set<string>();
-    for (const r of i.records) if (r.node === i.node && i.now - r.at <= RECORD_FRESH_MS) accounts.add(r.account);
+    for (const r of i.records) if (r.node === i.node && !ambiguous(r) && i.now - r.at <= RECORD_FRESH_MS) accounts.add(r.account);
     for (const s of i.sessions) if (s.lane !== null && i.laneNode(s.lane) === i.node) accounts.add(s.account);
     if (accounts.size === 1) return { account: accounts.values().next().value as string, by: "node" };
   }
