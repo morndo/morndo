@@ -1,7 +1,7 @@
 // The release pipeline's shape (design §9, ADR-0019). These read the workflow files; they do not
 // call GitHub. A private scratch repository still has to run the real tag once the owner adds keys.
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -376,6 +376,74 @@ describe("release pipeline files", () => {
     const unguarded = Object.entries(jobs).filter(([, j]) => !j.needs && !j.if).map(([name]) => name);
     expect(unguarded).toEqual(["resign-prepare"]);
     expect(job(feed, "resign-prepare")).toContain("skipping re-sign:");
+  });
+
+  it("the release-please job reads the App's secrets from an environment of its own, and the environment is not a key environment", () => {
+    const environment = (parse(release) as { jobs: Record<string, { environment?: unknown }> }).jobs["release-please"]?.environment;
+    expect(environment).toBe("release-please");
+    // release, feed, promote and withdraw are the keys' environments: the settings check treats them as holding signing keys.
+    expect(["release", "feed", "promote", "withdraw"]).not.toContain(environment);
+    const text = job(release, "release-please");
+    expect(text).toContain("secrets.RELEASE_APP_ID");
+    expect(text).toContain("secrets.RELEASE_APP_PRIVATE_KEY");
+  });
+
+  it("no job reads the App's secrets except release-please", () => {
+    const workflows = readdirSync(".github/workflows").filter(name => name.endsWith(".yml")).sort();
+    expect(workflows.length).toBeGreaterThan(1);
+    const please = job(release, "release-please");
+    // A new job that read either secret would fail here, so the environment's reach stays this one job.
+    for (const secret of ["secrets.RELEASE_APP_ID", "secrets.RELEASE_APP_PRIVATE_KEY"]) {
+      for (const name of workflows) {
+        const text = readFileSync(join(".github/workflows", name), "utf8");
+        const hits = text.split(secret).length - 1;
+        expect(hits, `${name} ${secret}`).toBe(name === "release.yml" ? please.split(secret).length - 1 : 0);
+      }
+      expect(please.split(secret).length - 1).toBeGreaterThan(0);
+    }
+  });
+
+  it("no job but release-please reaches the App's secrets by any other form", () => {
+    // `secrets.NAME` is not the only way to read a secret: the bracket form, the whole context (toJSON(secrets), a bare
+    // ${{ secrets }}), a prefix pattern and `secrets: inherit` into a reusable workflow all reach the App's two
+    // secrets without the literal name. None of them may appear outside the release-please job.
+    const forms: [string, RegExp][] = [
+      ["a bracket lookup", /secrets\s*\[/],
+      ["the whole context through toJSON", /toJSON\(\s*secrets\s*\)/i],
+      ["the whole context", /\$\{\{\s*secrets\s*\}\}/],
+      ["secrets: inherit", /secrets:\s*inherit\b/],
+      ["a RELEASE_APP name in another spelling", /RELEASE_APP[A-Z_]*/],
+    ];
+    const outside: [string, string][] = readdirSync(".github/workflows").filter(name => name.endsWith(".yml")).sort().map(name => {
+      const text = readFileSync(join(".github/workflows", name), "utf8");
+      return [name, name === "release.yml" ? text.replace(job(text, "release-please"), "") : text];
+    });
+    expect(outside.length).toBeGreaterThan(1);
+    for (const [name, text] of outside) {
+      for (const [what, pattern] of forms) {
+        // the release-please job's own comment may name the secrets; outside that job nothing may
+        const code = text.split("\n").filter(line => !line.trim().startsWith("#")).join("\n");
+        expect(pattern.test(code), `${name}: ${what}`).toBe(false);
+      }
+    }
+    // the same scan, run on a job that does read them, sees every form (so the scan itself cannot go blind)
+    for (const [what, sample] of [
+      ["a bracket lookup", "key: ${{ secrets['RELEASE_APP_ID'] }}"],
+      ["the whole context through toJSON", "env: ${{ toJSON(secrets) }}"],
+      ["the whole context", "env: ${{ secrets }}"],
+      ["secrets: inherit", "    secrets: inherit"],
+      ["a RELEASE_APP name in another spelling", "key: ${{ vars.RELEASE_APP_ID }}"],
+    ] as const) {
+      const pattern = forms.find(([label]) => label === what)![1];
+      expect(pattern.test(sample), what).toBe(true);
+    }
+  });
+
+  it("the release-please job's environment names no url and no extra keys", () => {
+    const environment = (parse(release) as { jobs: Record<string, { environment?: unknown }> }).jobs["release-please"]?.environment;
+    // A plain string: an expression, a mapping or a url cannot slip in without this test changing.
+    expect(typeof environment).toBe("string");
+    expect(environment).toBe("release-please");
   });
 });
 
