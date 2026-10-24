@@ -4,8 +4,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { noHealth } from "@morndo/domain";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { noHealth, type BoardActor, type SeatRecord } from "@morndo/domain";
 import { Store, type UsageSourceBody } from "../src/adapters/store.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 
@@ -59,5 +59,48 @@ describe("the usage store (fix round, PR #125)", () => {
     store.saveUsageNotice({ id: "new", kind: "plan", account: "seat-a", at: now, text: "new" }, "new");
     svc.sweep();
     expect(store.usageNotices(10).map(n => n.id)).toEqual(["new", "edge"]);
+  });
+
+  it("usageSourcesOf returns only one account's rows, and usageSeat its one seat row or null (PR #125 fix round 2, finding 3c)", () => {
+    store.saveUsageSource("seat-a", "app-server", "", body);
+    store.saveUsageSource("seat-a", "cli-screen", "", body);
+    store.saveUsageSource("seat-b", "app-server", "", body);
+    const seat: SeatRecord = { state: "out", why: "usage_limit", since: 1, markedAt: 1, backAt: null, cycleReset: null, windowId: null, owner: "derived", by: "a source" };
+    store.saveUsageSeat("seat-a", seat);
+    store.saveUsageSeat("seat-b", { ...seat, state: "retired", why: "refused" });
+    expect(store.usageSourcesOf("seat-a")).toEqual([
+      { account: "seat-a", source: "app-server", node: "", body },
+      { account: "seat-a", source: "cli-screen", node: "", body },
+    ]);
+    expect(store.usageSourcesOf("seat-c")).toEqual([]);
+    expect(store.usageSeat("seat-a")).toEqual({ account: "seat-a", record: seat });
+    expect(store.usageSeat("seat-c")).toBeNull();
+  });
+
+  it("a report for one account does not scan every account's rows (PR #125 fix round 2, finding 3c)", () => {
+    store.saveUsageSource("seat-a", "app-server", "", body);
+    store.saveUsageSource("seat-b", "app-server", "", body);
+    const svc = new UsageService({ store, now: () => 1_700_000_000_000 });
+    const everyRow = vi.spyOn(store, "usageSources");
+    const actor: BoardActor = { kind: "worker", name: "builder", token: "t" };
+    const r = svc.report({ session_id: "s1" }, "seat-a", actor);
+    if (!r.ok) throw new Error("report refused");
+    expect(r.account.account).toBe("seat-a");
+    expect(everyRow).not.toHaveBeenCalled();
+  });
+
+  it("sweep prunes notices the service itself wrote, not only direct store inserts (PR #125 fix round 2, finding 3b)", () => {
+    let now = 1_700_000_000_000;
+    const svc = new UsageService({ store, now: () => now });
+    // 520 seat notices through noteLimit's own path: a retired seat that alternates its why is a change every time.
+    for (let i = 0; i < 520; i++) {
+      now += 1000;
+      expect(svc.noteLimit({ account: "seat-a", kind: i % 2 === 0 ? "refused" : "billing", backAt: null, by: "reporter", at: now })).toEqual({ ok: true, resolved: true });
+    }
+    expect(store.usageNotices(1000).filter(n => n.kind === "seat")).toHaveLength(520);
+    svc.sweep();
+    const kept = store.usageNotices(1000);
+    expect(kept).toHaveLength(500);
+    expect(kept.every(n => n.kind === "seat")).toBe(true);
   });
 });

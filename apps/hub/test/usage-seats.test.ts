@@ -9,10 +9,13 @@ import type { UsageReadingsBody } from "@morndo/protocol";
 let hub: InProcessHub;
 let now: number;
 let workerToken: string;
+let managerToken: string;
 const HOUR = 3_600_000, MIN = 60_000;
 type Body = Record<string, unknown>;
 
-const limit = (body: unknown, token = workerToken) => fetch(`${hub.base}/api/agent/usage/limit`, {
+// PR #125 fix round 2, finding 2: the limit route is a manager's. Every seat test posts it with a manager token; the
+// worker's refusal has its own test below.
+const limit = (body: unknown, token = managerToken) => fetch(`${hub.base}/api/agent/usage/limit`, {
   method: "POST", headers: { authorization: `Bearer ${token}`, "content-type": "application/json", "x-morndo-lane": "builder" }, body: JSON.stringify(body),
 });
 // The pool's own word (U15): a manager-role token with the usage-pool scope, as the pool bot would hold.
@@ -54,18 +57,19 @@ beforeEach(async () => {
   now = 1_700_000_000_000;      // 10:00
   hub = await startInProcessHub({ now: () => now });
   workerToken = hub.agents.issue("lanes", "worker").secret;
+  managerToken = hub.agents.issue("manager", "manager").secret;
 });
 afterEach(async () => { await hub.close(); });
 
 describe("seats (plan 4.5)", () => {
   it("two reporters, one change, one notice (AT-16)", async () => {
     const backAt = now + HOUR;
-    const worker = await limit({ kind: "usage_limit", by: "worker-one", account: "seat-a", back_at: Math.floor(backAt / 1000), at: Math.floor(now / 1000) });
+    const worker = await limit({ kind: "usage_limit", by: "reporter-one", account: "seat-a", back_at: Math.floor(backAt / 1000), at: Math.floor(now / 1000) });
     expect(await worker.json()).toEqual({ ok: true });
-    const managerToken = hub.agents.issue("manager", "manager").secret;
-    const manager = await limit({ kind: "usage_limit", by: "manager-one", account: "seat-a", back_at: Math.floor(backAt / 1000), at: Math.floor((now + 5 * MIN) / 1000) }, managerToken);
+    const secondManager = hub.agents.issue("reporter-two", "manager").secret;      // PR #125 fix round 2, finding 2: two manager tokens report
+    const manager = await limit({ kind: "usage_limit", by: "reporter-two", account: "seat-a", back_at: Math.floor(backAt / 1000), at: Math.floor((now + 5 * MIN) / 1000) }, secondManager);
     expect(await manager.json()).toEqual({ ok: true });
-    expect(await seatOf()).toEqual({ state: "out", why: "usage_limit", since: now, backAt, owner: "derived", by: "worker-one", fix: "wait_for_reset" });
+    expect(await seatOf()).toEqual({ state: "out", why: "usage_limit", since: now, backAt, owner: "derived", by: "reporter-one", fix: "wait_for_reset" });
     expect(await noticesOf("seat")).toEqual([
       { id: expect.any(String), kind: "seat", account: "seat-a", at: expect.any(Number), text: `seat-a: usage limit reached. Back at ${new Date(backAt).toISOString()}. Fix: wait for the reset.` },
     ]);
@@ -211,5 +215,76 @@ describe("seats (plan 4.5)", () => {
     const again = await viewOf();
     expect((again.accounts as Body[]).find(a => a.account === "seat-b")?.seat).toMatchObject({ by: "a source" });
     expect(JSON.stringify(again)).not.toMatch(/evil|:\/\/|@/);
+  });
+
+  it("the limit route is a manager's: a worker token is refused 403 and nothing changes, a manager token's post is taken (PR #125 fix round 2, finding 2)", async () => {
+    const refused = await limit({ kind: "usage_limit", by: "worker-one", account: "seat-a", at: Math.floor(now / 1000) }, workerToken);
+    expect(refused.status).toBe(403);
+    expect(await refused.json()).toEqual({ error: "not_allowed" });
+    const v = await viewOf();
+    expect((v.accounts as Body[]).find(a => a.account === "seat-a")?.seat).toBeUndefined();
+    expect(await noticesOf("seat")).toEqual([]);
+    const taken = await limit({ kind: "usage_limit", by: "manager-one", account: "seat-a", at: Math.floor(now / 1000) });
+    expect(taken.status).toBe(200);
+    expect(await seatOf()).toMatchObject({ state: "out", owner: "derived" });
+  });
+
+  it("a plan change told by readings stamped after the mark drops it (PR #125 fix round 2, finding 1a)", async () => {
+    const reset = now + 2 * HOUR;
+    // The plan watch's baseline, on the plan the seat is marked under; the mark lands at 10:01.
+    expect((await postReading({ plan: "Max 5x", capturedAt: now, windows: [fiveHour(20, reset)] })).status).toBe(200);
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now + MIN })).toEqual({ ok: true, resolved: true });
+    // Two readings stamped after the mark name another plan: the first only holds it, the second tells the change.
+    now += 4 * MIN;
+    expect((await postReading({ plan: "Max 20x", capturedAt: now - 2 * MIN, windows: [fiveHour(21, reset)] })).status).toBe(200);
+    expect(await seatOf()).toMatchObject({ state: "out" });          // the first differing reading tells nothing
+    expect((await postReading({ plan: "Max 20x", capturedAt: now - 1 * MIN, windows: [fiveHour(22, reset)] })).status).toBe(200);
+    expect(await seatOf()).toBeUndefined();                          // the mark was made before the change was observed
+    expect(await noticesOf("back")).toEqual([
+      { id: expect.stringMatching(/^seat-a\|back\|reset\|\d+$/), kind: "back", account: "seat-a", at: expect.any(Number), text: "seat-a: the plan or account changed, so its earlier limit mark is dropped." },
+    ]);
+  });
+
+  it("a plan change told by readings stamped before the mark does not drop it (PR #125 fix round 2, finding 1a)", async () => {
+    const reset = now + 2 * HOUR;
+    // The plan watch's baseline, then the mark lands at 10:05 — after the stamps of the readings that will tell the change.
+    expect((await postReading({ plan: "Max 5x", capturedAt: now, windows: [fiveHour(20, reset)] })).status).toBe(200);
+    const markAt = now + 5 * MIN;
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: markAt })).toEqual({ ok: true, resolved: true });
+    // The hub's clock is past the mark when two readings stamped 10:03 and 10:04 name another plan.
+    now = markAt + MIN;
+    expect((await postReading({ plan: "Max 20x", capturedAt: markAt - 2 * MIN, windows: [fiveHour(21, reset)] })).status).toBe(200);
+    expect((await postReading({ plan: "Max 20x", capturedAt: markAt - 1 * MIN, windows: [fiveHour(22, reset)] })).status).toBe(200);
+    // The change is told, but the mark was made after the telling reading was taken: the seat stands.
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toHaveLength(1);
+    expect(await seatOf()).toMatchObject({ state: "out", why: "usage_limit", owner: "derived", backAt: markAt + HOUR });
+    expect((await noticesOf("back")).filter(n => n.account === "seat-a")).toEqual([]);
+  });
+
+  it("the plan watch is per source: two steady sources tell no change and hold the seat; one source's own change tells once and drops it (PR #125 fix round 2, finding 1b)", async () => {
+    const reset = now + 2 * HOUR;
+    // A derived seat, marked before any reading.
+    expect(hub.usage.noteLimit({ account: "seat-a", kind: "usage_limit", backAt: null, by: "worker-one", at: now })).toEqual({ ok: true, resolved: true });
+    // Two sources, each steady on its own plan: no plan change is told and the seat stands.
+    now += MIN;
+    expect((await postReading({ source: "app-server", plan: "A", capturedAt: now, windows: [fiveHour(21, reset)] })).status).toBe(200);
+    now += MIN;
+    expect((await postReading({ source: "app-server", plan: "A", capturedAt: now, windows: [fiveHour(22, reset)] })).status).toBe(200);
+    now += MIN;
+    expect((await postReading({ source: "cli-screen", plan: "B", capturedAt: now, windows: [fiveHour(23, reset)] })).status).toBe(200);
+    now += MIN;
+    expect((await postReading({ source: "cli-screen", plan: "B", capturedAt: now, windows: [fiveHour(24, reset)] })).status).toBe(200);
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toEqual([]);
+    expect(await seatOf()).toMatchObject({ state: "out", owner: "derived" });
+    // One source changing its own plan, told by two agreeing readings: told once, and the seat marked before it drops.
+    now += MIN;
+    expect((await postReading({ source: "app-server", plan: "B", capturedAt: now, windows: [fiveHour(25, reset)] })).status).toBe(200);
+    expect(await seatOf()).toMatchObject({ state: "out" });          // the first differing reading tells nothing
+    now += MIN;
+    expect((await postReading({ source: "app-server", plan: "B", capturedAt: now, windows: [fiveHour(26, reset)] })).status).toBe(200);
+    expect(await seatOf()).toBeUndefined();
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toEqual([
+      { id: expect.any(String), kind: "plan", account: "seat-a", at: expect.any(Number), text: 'seat-a: plan changed from "A" to "B".' },
+    ]);
   });
 });
