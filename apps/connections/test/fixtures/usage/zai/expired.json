@@ -1,0 +1,14 @@
+{
+  "status": 200,
+  "retryAfter": null,
+  "body": {
+    "code": 0,
+    "success": true,
+    "data": {
+      "limits": [
+        { "type": "CREDIT_LIMIT", "unit": 3, "number": 5, "percentage": 87, "nextResetTime": 1760000000000 },
+        { "type": "CREDIT_LIMIT", "unit": 6, "number": 1, "percentage": 61, "nextResetTime": 1793620000000 }
+      ]
+    }
+  }
+}

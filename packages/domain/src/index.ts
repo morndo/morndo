@@ -21,6 +21,7 @@ export * from "./digest.ts";
 export * from "./usage.ts";
 export * from "./usage-reading.ts";
 export * from "./usage-title.ts";
+export * from "./usage-planfamily.ts";
 export * from "./usage-plan.ts";
 export * from "./usage-threshold.ts";
 export * from "./usage-health.ts";
