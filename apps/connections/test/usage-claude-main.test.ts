@@ -5,6 +5,10 @@
 import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
+<<<<<<< HEAD
+=======
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+>>>>>>> origin/feat/usage-s5
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AddressInfo } from "node:net";
@@ -267,8 +271,11 @@ await new Promise(r => setTimeout(r, 60000));
     const config = join(dir, "usage-claude.json");
     writeFileSync(config, `${JSON.stringify({ hub: hub.base, tokenFile: join(dir, "token"), node: "pc", accounts: { "seat-a": { configDir: "/cfg/seat-a" } } })}\n`);
     const main = join(import.meta.dirname, "../src/adapters/usage-claude-main.ts");
+    // The collector's own temp directory: the read's working directory is made there, and must be gone after its death.
+    const scratch = join(dir, "tmp");
+    mkdirSync(scratch);
     const collector = spawn(process.execPath, [main, "--once"], {
-      env: { ...process.env, MORNDO_USAGE_CLAUDE_CONFIG: config, MORNDO_CLAUDE_BIN: bin },
+      env: { ...process.env, MORNDO_USAGE_CLAUDE_CONFIG: config, MORNDO_CLAUDE_BIN: bin, TMPDIR: scratch },
       stdio: "ignore",
     });
     let self = 0;
@@ -286,6 +293,7 @@ await new Promise(r => setTimeout(r, 60000));
         try { process.kill(kid, 0); return false; } catch { return true; }
       }, 5_000);
       expect(dead).toBe(true);                        // the read's child died with the collector
+      expect(readdirSync(scratch)).toEqual([]);       // and so did the read's working directory (CI's temp-dir guard)
     } finally {
       try { collector.kill("SIGKILL"); } catch { /* already gone */ }
       if (self > 0) { try { process.kill(-self, "SIGKILL"); } catch { /* already gone */ } }
