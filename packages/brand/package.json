@@ -18,7 +18,7 @@
     "test": "vitest run"
   },
   "devDependencies": {
-    "@types/node": "^24.19.0",
+    "@types/node": "^26.6.4",
     "apca-w3": "^0.1.9",
     "opentype.js": "^2.0.0",
     "sharp": "^0.35.5",
