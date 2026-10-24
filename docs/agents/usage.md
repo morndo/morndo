@@ -166,12 +166,25 @@ and the reading or the failure carries the lease id. How often it reads adapts t
 every 15 minutes while it idles below 75%, every 5 from 75%, every 2 from 90%, once a minute from 99% — never faster
 than once a minute. The hub, not the collector, holds that rhythm through its lease.
 
-Two things only a leased reading may say. The identity digest feeds the plan watch: a changed identity between two
-agreeing readings is an account change ("the account behind it changed"), told once, and it drops a derived seat mark
-as a plan change does. And Codex's own limit flags — `ordinary_usage_allowed` false, or any `rate_limit_reached_type`
+Two things only a leased reading may say. The identity digest feeds the plan watch, and only on a leased reading (an
+unleased reading's identity is ignored, so no token can tell a change or poison the baseline): a changed identity
+between two agreeing readings is an account change ("the account behind it changed"), told once, and it drops a
+derived seat mark as a plan change does. And Codex's own limit flags — `ordinary_usage_allowed` false, or any `rate_limit_reached_type`
 — mark the seat out at the soonest reset of a window at 100%; flags that say all is well end a derived mark again. A
 reading without a valid lease never marks and never clears from its flags, and the type string itself is never shown
 and never stored.
+
+Window identity is explicit. A reading's primary pair is the account's `five_hour` and `seven_day` windows; another
+limit's windows (a second limit under its own name) keep their own ids even at the same length, and are shown as named
+windows under "Other limits" — they never replace the main pair. A window nobody named explicitly is still read by its
+length (300 minutes is the 5-hour window, 10080 the weekly one), and of several such windows of one length the first
+is the main one. One edge: a reading that carries only another limit's windows and no primary pair would have the
+first of them read by length as the main window.
+
+Two accounts on one machine are told apart by their own directory (`codexHome` here, `configDir` for a claude
+account), so the collector refuses a config in which two names resolve to the same directory: it reads nothing and
+says which two. It also has no node-wide lock or semaphore for a codex read as the claude read does; a codex read is
+bounded by its 15-second timeout and the hub's lease cap of two.
 
 The app server also pushes `account/rateLimits/updated` notifications; Morndo maps one to the same reading body (a
 push needs no lease — it is nobody's rationed read). The long-lived app-server client that would receive those

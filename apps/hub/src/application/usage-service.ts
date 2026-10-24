@@ -482,14 +482,24 @@ export class UsageService {
       this.#tellIfChanged();
       return { ok: true };
     }
-    // 300 minutes is the 5-hour window and 10080 the weekly one, whatever the source called them (plan 4.1).
+    // 300 minutes is the 5-hour window and 10080 the weekly one, whatever the source called them (plan 4.1) — but only
+    // for a window nobody named explicitly (slice 6 review, finding 1): a reading that already carries `five_hour` or
+    // `seven_day` under that id keeps those as the account's main windows, and another window of the same length (a
+    // second limit's) keeps its own id and never replaces them. Of several unnamed windows of one length, the first
+    // is the main one; the rest keep their ids.
+    const explicit = new Set<string>();
+    for (const w of body.windows ?? []) {
+      const id = typeof w.id === "string" ? w.id.trim() : "";
+      if (id === "five_hour" || id === "seven_day") explicit.add(id);
+    }
     const windows = new Map<string, WindowReading>();
     for (const w of body.windows ?? []) {
       const id = typeof w.id === "string" ? w.id.trim() : "";
       const usedPercent = takePercent(w.used_percent);
       if (id === "" || id.length > 40 || usedPercent === null) continue;
       const lengthMins = cleanLength(w.length_mins);
-      const canonical = lengthMins === 300 ? "five_hour" : lengthMins === 10080 ? "seven_day" : id;
+      const byLength = lengthMins === 300 ? "five_hour" : lengthMins === 10080 ? "seven_day" : null;
+      const canonical = byLength !== null && id !== byLength && !explicit.has(byLength) && !windows.has(byLength) ? byLength : id;
       windows.set(canonical, {
         id: canonical, usedPercent, lengthMins, rolling: w.rolling === true, note: cleanNote(w.note),
         resetsAt: typeof w.resets_at === "number" && Number.isFinite(w.resets_at) ? w.resets_at * 1000 : null,
@@ -515,7 +525,7 @@ export class UsageService {
     // free-string type is never shown and never stored beyond this boolean effect.
     const leased = this.#leaseBook.valid(body.lease_id, account, body.source, tokenId);
     const allowed = body.ordinary_usage_allowed === true && (body.rate_limit_reached_type ?? null) === null;
-    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id, tokenId, body.identity ?? null, leased && allowed);
+    this.#observe(account, list, capturedAt, body.source, body.plan ?? null, body.lease_id, tokenId, leased ? body.identity ?? null : null, leased && allowed);
     if (leased && (body.ordinary_usage_allowed === false || (body.rate_limit_reached_type ?? null) !== null)) {
       // The soonest reset of a window at or above 100%, else no word on when it is back.
       const back = list.filter(w => w.usedPercent !== null && w.usedPercent >= 100 && w.resetsAt !== null).map(w => w.resetsAt as number);

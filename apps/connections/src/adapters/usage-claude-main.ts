@@ -6,7 +6,7 @@
 // tests and for QA).
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { productVersion } from "@morndo/service-kit";
 import type { UsageReason } from "@morndo/domain";
 import { childEnv } from "./runtime-claude.ts";
@@ -55,6 +55,20 @@ function loadConfig(path: string): UsageClaudeConfig | null {
     } else return null;
   }
   return { hub: c.hub, tokenFile: c.tokenFile, node: c.node, accounts };
+}
+
+// The first two accounts that read the same directory (slice 6 review): accounts on one machine are told apart by
+// their own config directory or CODEX_HOME, so two names on one directory would post one account's numbers under
+// both. Paths are compared resolved, so `/x/` and `/x/../x` are one.
+function sharedDirectory(accounts: Record<string, UsageAccount>): [string, string] | null {
+  const seen = new Map<string, string>();
+  for (const [name, a] of Object.entries(accounts)) {
+    const key = "kind" in a ? `codex|${resolve(a.codexHome)}` : `claude|${resolve(a.configDir)}`;
+    const first = seen.get(key);
+    if (first !== undefined) return [first, name];
+    seen.set(key, name);
+  }
+  return null;
 }
 
 // One codex account's pass (S6, plan 4.6): the same lease, read and post loop as a claude account, asking for source
@@ -143,6 +157,8 @@ export async function collectOnce(p: {
   const configPath = p.configPath ?? env.MORNDO_USAGE_CLAUDE_CONFIG ?? process.env.MORNDO_USAGE_CLAUDE_CONFIG ?? DEFAULT_CONFIG();
   const config = loadConfig(configPath);
   if (config === null) { stderr(`morndo-usage-claude: no readable config at ${configPath}\n`); return 1; }
+  const shared = sharedDirectory(config.accounts);
+  if (shared !== null) { stderr(`morndo-usage-claude: ${shared[0]} and ${shared[1]} read the same directory; fix the config, nothing was read\n`); return 1; }
   let token = "";
   try { token = readFileSync(config.tokenFile, "utf8").trim(); } catch { stderr("morndo-usage-claude: the token file cannot be read\n"); return 1; }
   if (token === "") { stderr("morndo-usage-claude: the token file is empty\n"); return 1; }
