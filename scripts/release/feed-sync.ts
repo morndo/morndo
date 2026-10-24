@@ -9,8 +9,9 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { parseVersion } from "@morndo/domain";
 import { ChannelFeedSchema } from "@morndo/protocol";
-import { emptyFeed, publishRelease, resignFeed, withdrawRelease } from "./feed.ts";
+import { emptyFeed, PROMOTION_WAIT_MS, promoteRelease, publishRelease, resignFeed, withdrawRelease } from "./feed.ts";
 import { FEED_FILES, gh, must, readAt, readFeedHead, verifyFeed } from "./feed-site.ts";
+import { isoUtc } from "./json.ts";
 
 // The trees API writes the blob when the entry carries content, so the feed push
 // does not create a blob per file first.
@@ -50,20 +51,66 @@ export const MOVED = "the feed branch moved; run this job again";
 
 export type Prepared = { head: string | null; message: string };
 
-export type PrepareIo = { head: () => string | null; read: (sha: string, file: string) => string | null };
+export type PrepareIo = {
+  head: () => string | null;
+  read: (sha: string, file: string) => string | null;
+  listedSince?: (version: string) => number | null;
+};
+
+// The commit time of the oldest feed commit whose latest.json lists the version.
+// GitHub returns the commits newest first; the walk goes oldest first and stops at the first hit.
+export function listedSince(
+  repository: string,
+  version: string,
+  io: {
+    commits: () => { sha: string; at: string }[];
+    read: (sha: string) => string | null;
+  } = {
+    commits: () => commitsTouchingLatest(repository),
+    read: sha => readAt(repository, sha, "latest.json"),
+  },
+): number | null {
+  for (const commit of io.commits().slice().reverse()) {
+    const body = io.read(commit.sha);
+    if (body === null) continue;
+    const feed = ChannelFeedSchema.parse(JSON.parse(body));
+    if (!feed.releases.some(release => release.version === version)) continue;
+    const at = Date.parse(commit.at);
+    if (!Number.isInteger(at)) throw new Error(`not a time: ${commit.at}`);
+    return at;
+  }
+  return null;
+}
+
+function commitsTouchingLatest(repository: string): { sha: string; at: string }[] {
+  const text = must(gh([
+    "api",
+    `/repos/${repository}/commits?sha=feed&path=latest.json&per_page=100`,
+    "--paginate",
+    "--jq",
+    '.[] | "\\(.sha) \\(.commit.committer.date)"',
+  ]), "commits");
+  return text.split("\n").flatMap(line => {
+    if (line === "") return [];
+    const space = line.indexOf(" ");
+    if (space <= 0) throw new Error(`commits failed: ${line}`);
+    return [{ sha: line.slice(0, space), at: line.slice(space + 1) }];
+  });
+}
 
 // A branch that exists must hold both feeds. A missing file is never a reason to start that feed again
 // at 1: machines that saw a higher number would reject every later feed (design §9.5).
 export function prepareFeeds(p: {
   repository: string; dir: string; signers: string; scratch: string; now: number;
-} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" } | { mode: "withdraw"; version: string }),
+} & ({ mode: "publish"; version: string; manifestPath: string; manifestUrl: string; keySetVersion: number } | { mode: "resign" } | { mode: "withdraw"; version: string } | { mode: "promote"; version: string }),
 io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => readAt(p.repository, sha, file) }): "absent" | "ready" {
-  if (p.mode === "withdraw" && parseVersion(p.version) === null) throw new Error(`not a version: ${p.version}`);
+  if ((p.mode === "withdraw" || p.mode === "promote") && parseVersion(p.version) === null) throw new Error(`not a version: ${p.version}`);
   mkdirSync(p.dir, { recursive: true });
   for (const file of [...FEED_FILES, PREPARED]) rmSync(join(p.dir, file), { force: true });
   const head = io.head();
   if (p.mode === "resign" && head === null) return "absent";
   if (p.mode === "withdraw" && head === null) throw new Error("no feed branch to withdraw from");
+  if (p.mode === "promote" && head === null) throw new Error("no feed branch to promote from");
   // Both feeds and both signatures are looked for before any is checked, so a missing file is the first error.
   const found = head === null ? null : Object.fromEntries(FEED_FILES.map(file => [file, io.read(head, file)])) as Record<(typeof FEED_FILES)[number], string | null>;
   if (found !== null) {
@@ -80,13 +127,29 @@ io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => r
   };
   const latest = verified("latest.json");
   const stable = verified("stable.json");
-  if (p.mode === "resign" || p.mode === "withdraw") {
+  if (p.mode === "resign" || p.mode === "withdraw" || p.mode === "promote") {
     if (latest === null || stable === null) throw new Error(`feed ${latest === null ? "latest" : "stable"} is missing at ${head}`);
     if (p.mode === "withdraw") {
       const listed = ChannelFeedSchema.parse(JSON.parse(latest));
       if (!listed.releases.some(release => release.version === p.version)) throw new Error(`${p.version} is not in the latest feed`);
       const nextLatest = withdrawRelease(latest, p.version, p.now);
       const nextStable = withdrawRelease(stable, p.version, p.now);
+      writeFileSync(join(p.dir, "latest.json"), nextLatest);
+      writeFileSync(join(p.dir, "stable.json"), nextStable);
+    } else if (p.mode === "promote") {
+      const latestFeed = ChannelFeedSchema.parse(JSON.parse(latest));
+      const stableFeed = ChannelFeedSchema.parse(JSON.parse(stable));
+      if (!latestFeed.releases.some(release => release.version === p.version)) throw new Error(`${p.version} is not in the latest feed`);
+      if (latestFeed.withdrawn.includes(p.version) || stableFeed.withdrawn.includes(p.version)) throw new Error(`${p.version} is withdrawn`);
+      if (stableFeed.releases.some(release => release.version === p.version)) throw new Error(`${p.version} is already in the stable feed`);
+      const since = (io.listedSince ?? (version => listedSince(p.repository, version)))(p.version);
+      if (since === null) throw new Error(`cannot tell when ${p.version} was first listed on latest`);
+      if (p.now - since < PROMOTION_WAIT_MS) {
+        const days = ((p.now - since) / (24 * 60 * 60 * 1000)).toFixed(1);
+        throw new Error(`${p.version} has been on latest for ${days} days (since ${isoUtc(since)}, when the feed commit first listed it); promotion needs 7`);
+      }
+      const nextLatest = resignFeed(latest, p.now);
+      const nextStable = promoteRelease(stable, latest, p.version, p.now);
       writeFileSync(join(p.dir, "latest.json"), nextLatest);
       writeFileSync(join(p.dir, "stable.json"), nextStable);
     } else {
@@ -106,7 +169,7 @@ io: PrepareIo = { head: () => readFeedHead(p.repository), read: (sha, file) => r
   }
   const prepared: Prepared = {
     head,
-    message: p.mode === "publish" ? "Publish the channel feeds" : p.mode === "resign" ? "Re-sign the channel feeds" : `Withdraw ${p.version}`,
+    message: p.mode === "publish" ? "Publish the channel feeds" : p.mode === "resign" ? "Re-sign the channel feeds" : p.mode === "withdraw" ? `Withdraw ${p.version}` : `Promote ${p.version} to stable`,
   };
   writeFileSync(join(p.dir, PREPARED), JSON.stringify(prepared));
   return "ready";

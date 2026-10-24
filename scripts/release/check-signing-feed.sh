@@ -3,7 +3,7 @@
 # Checks the two unsigned feeds in site/ against the feed branch as it stands and against the release:
 # the numbers rise by one (a publish leaves stable as it was), the lists change only as they should,
 # the key-set version is the shipped one, and the new entry names the published Manifest's size and digest.
-# MODE is publish, resign or withdraw. A publish or a withdrawal also needs VERSION. GH may name another gh for a test.
+# MODE is publish, resign, withdraw or promote. A publish, a withdrawal or a promotion needs VERSION. GH may name another gh for a test.
 set -eu
 PATH=/usr/bin:/bin
 : "${MODE:?}"
@@ -12,6 +12,7 @@ GH=${GH:-/usr/bin/gh}
 SITE=${SITE:-site}
 TRUST=${TRUST:-trust}
 MAX_AGE=${MAX_AGE:-86400}
+PROMOTE_MIN_AGE=${PROMOTE_MIN_AGE:-604800}
 
 fail() {
   echo "refusing to sign: $1" >&2
@@ -19,7 +20,7 @@ fail() {
 }
 
 case $MODE in
-  publish|withdraw) : "${VERSION:?}" ;;
+  publish|withdraw|promote) : "${VERSION:?}" ;;
   resign) ;;
   *) fail "unknown mode $MODE" ;;
 esac
@@ -62,7 +63,7 @@ for channel in latest stable; do
   [ -f "$new" ] || fail "$new is missing"
   jq -e --arg ch "$channel" '.schema == 1 and .channel == $ch and ((.expiresAt | fromdateiso8601) - (.issuedAt | fromdateiso8601) == 1209600)' "$new" > /dev/null || fail "$channel.json is not a 14-day $channel feed"
   # Only a feed written now is fresh. A publish carries stable.json over as it was, hours or days old.
-  if [ "$MODE" = resign ] || [ "$MODE" = withdraw ] || [ "$channel" = latest ] || [ -z "$head" ]; then
+  if [ "$MODE" = resign ] || [ "$MODE" = withdraw ] || [ "$MODE" = promote ] || [ "$channel" = latest ] || [ -z "$head" ]; then
     issued=$(jq -r '.issuedAt | fromdateiso8601' "$new")
     delta=$((issued - now))
     # The feed environment may hold the job for an approval, so a feed prepared up to MAX_AGE ago (a day) is fresh.
@@ -85,7 +86,7 @@ for channel in latest stable; do
     fi
     if [ "$MODE" = publish ]; then
       [ "$(jq -r .keySetVersion "$new")" = "$keys_version" ] || fail "$channel.json names another key set than $TRUST/keys.json"
-    elif [ "$MODE" = withdraw ]; then
+    elif [ "$MODE" = withdraw ] || [ "$MODE" = promote ]; then
       [ "$(jq -r .keySetVersion "$new")" = "$(jq -r .keySetVersion "$prev")" ] || fail "$channel.json changed the key set"
     else
       [ "$(jq -r .keySetVersion "$new")" = "$(jq -r .keySetVersion "$prev")" ] || fail "a re-sign changed the key set"
@@ -93,6 +94,9 @@ for channel in latest stable; do
   else
     if [ "$MODE" = withdraw ]; then
       fail "a withdrawal needs a feed branch"
+    fi
+    if [ "$MODE" = promote ]; then
+      fail "a promotion needs a feed branch"
     fi
     [ "$MODE" = publish ] || fail "a re-sign needs a feed branch"
     [ "$seq" = 1 ] || fail "$channel.json starts at $seq, not 1"
@@ -105,6 +109,20 @@ for channel in latest stable; do
     jq -e --slurpfile p "$prev" --arg v "$VERSION" '.withdrawn == (($p[0].withdrawn // []) + [$v])' "$new" > /dev/null || fail "$channel.json withdrawn list is not the previous list plus the version"
     if [ "$channel" = latest ]; then
       jq -e --slurpfile p "$prev" --arg v "$VERSION" '($p[0].releases // [] | map(.version) | index($v)) != null' "$new" > /dev/null || fail "the latest feed does not list $VERSION"
+    fi
+  elif [ "$MODE" = promote ]; then
+    if [ "$channel" = latest ]; then
+      jq -e --slurpfile p "$prev" '.releases == $p[0].releases and .withdrawn == $p[0].withdrawn' "$new" > /dev/null || fail "latest.json changed a list a promotion keeps"
+    else
+      jq -e --slurpfile p "$prev" --arg v "$VERSION" '($p[0].releases | map(.version) | index($v)) == null' "$new" > /dev/null || fail "$VERSION is already in the stable feed"
+      jq -e --slurpfile latest "$work/latest.prev" --slurpfile stable "$prev" --arg v "$VERSION" '($latest[0].withdrawn | index($v)) == null and ($stable[0].withdrawn | index($v)) == null' "$new" > /dev/null || fail "$VERSION is withdrawn"
+      jq -e --slurpfile latest "$work/latest.prev" --arg v "$VERSION" '($latest[0].releases | map(.version) | index($v)) != null' "$new" > /dev/null || fail "a Version latest never had"
+      jq -e --slurpfile p "$prev" '.withdrawn == $p[0].withdrawn' "$new" > /dev/null || fail "stable.json changed its withdrawn list"
+      jq -e --slurpfile latest "$work/latest.prev" --slurpfile was "$prev" --arg v "$VERSION" '
+        ($latest[0].releases | map(select(.version == $v))) as $from
+        | ($from | length) == 1
+          and ((.releases | map(select(.version == $v))) == $from)
+          and ((.releases | map(select(.version != $v))) == $was[0].releases)' "$new" > /dev/null || fail "stable.json is not the previous releases plus the one release latest lists"
     fi
   elif [ "$MODE" = resign ] || [ "$channel" = latest ]; then
     # Entries that were already published are carried over whole (version, URL, size, digest), not by version.
@@ -127,5 +145,22 @@ if [ "$MODE" = publish ]; then
   [ "$(printf '%s' "$entry" | jq -r .manifest)" = "https://github.com/$REPOSITORY/releases/download/v$VERSION/manifest.json" ] || fail "the entry names another manifest URL"
   [ "$(printf '%s' "$entry" | jq -r .manifestSize)" = "$(wc -c < "$work/manifest.json" | tr -d ' ')" ] || fail "the entry's manifest size is not the published one"
   [ "$(printf '%s' "$entry" | jq -r .manifestSha256)" = "$(sha256sum "$work/manifest.json" | cut -d' ' -f1)" ] || fail "the entry's manifest digest is not the published one"
+fi
+
+if [ "$MODE" = promote ]; then
+  "$GH" api "/repos/$REPOSITORY/commits?sha=feed&path=latest.json&per_page=100" --paginate --jq '.[] | "\(.sha) \(.commit.committer.date)"' > "$work/commits" || fail "cannot list the commits that touched latest.json"
+  awk '{ line[NR] = $0 } END { for (i = NR; i > 0; i--) print line[i] }' "$work/commits" > "$work/commits.asc"
+  listed=
+  while read -r sha when; do
+    [ -n "$sha" ] || continue
+    "$GH" api -H 'Accept: application/vnd.github.raw+json' "/repos/$REPOSITORY/contents/latest.json?ref=$sha" > "$work/at.json" || fail "cannot read latest.json at $sha"
+    if jq -e --arg v "$VERSION" '(.releases | map(.version) | index($v)) != null' "$work/at.json" > /dev/null; then
+      listed=$when
+      break
+    fi
+  done < "$work/commits.asc"
+  [ -n "$listed" ] || fail "cannot tell when $VERSION was first listed on latest"
+  listed_s=$(date -d "$listed" +%s) || fail "cannot read when $VERSION was first listed"
+  [ $((now - listed_s)) -ge "$PROMOTE_MIN_AGE" ] || fail "$VERSION has been on latest for too short a time (since $listed, when the feed commit first listed it); promotion needs 7 days"
 fi
 echo "checked: $MODE feeds follow the branch and the release"
