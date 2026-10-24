@@ -14,9 +14,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { CLIENT_API, ChannelFeedSchema, FileListSchema, FLEET_PROTO, ManifestSchema } from "@morndo/protocol";
 import { packTree, type TreeFile } from "./archive.ts";
 import { compilePackage } from "./compile.ts";
-import { emptyFeed, FEED_TTL_MS, publishRelease, resignFeed, withdrawRelease } from "./feed.ts";
+import { emptyFeed, FEED_TTL_MS, PROMOTION_WAIT_MS, promoteRelease, publishRelease, resignFeed, withdrawRelease } from "./feed.ts";
 import { deployedSeq, writeVerifiedSite } from "./feed-site.ts";
-import { commitFeeds, feedTree, MOVED, parseAllowEmptyChannel, prepareFeeds, refUpdateResult } from "./feed-sync.ts";
+import { commitFeeds, feedTree, listedSince, MOVED, parseAllowEmptyChannel, prepareFeeds, refUpdateResult } from "./feed-sync.ts";
 import { readSchemaJson } from "./schema-read.ts";
 import { freshSite } from "./pages.ts";
 import { listFiles } from "./files.ts";
@@ -737,6 +737,384 @@ describe("feed", () => {
     const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
     const { site } = withdraw(latest, stable, "0.1.0");
     expect(JSON.parse(readFileSync(join(site, "feed-prepared.json"), "utf8"))).toEqual({ head: "aaa", message: "Withdraw 0.1.0" });
+  });
+
+  const DAY = 24 * 60 * 60 * 1000;
+  const promote = (latest: string, stable: string, version: string, since: number | null, now = WHEN) => {
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    let asked = 0;
+    const outcome = prepareFeeds({
+      mode: "promote", version, repository: "o/r", dir: site, signers, scratch: dir, now,
+    }, { ...io, listedSince: () => { asked += 1; return since; } });
+    return { dir, site, signers, outcome, asked };
+  };
+
+  it("promote adds the Release to stable, copied whole from latest, and raises both numbers", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN - DAY, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN - DAY, keySetVersion: 1 });
+    const now = WHEN;
+    const { site } = promote(latest, stable, "0.1.0", now - PROMOTION_WAIT_MS, now);
+    const beforeLatest = ChannelFeedSchema.parse(JSON.parse(latest));
+    const nextLatest = ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "latest.json"), "utf8")));
+    const nextStable = ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "stable.json"), "utf8")));
+    expect(nextLatest.seq).toBe(beforeLatest.seq + 1);
+    expect(nextStable.seq).toBe(2);
+    expect(nextLatest.releases).toEqual(beforeLatest.releases);
+    expect(nextLatest.withdrawn).toEqual(beforeLatest.withdrawn);
+    expect(nextStable.withdrawn).toEqual([]);
+    expect(nextStable.releases).toEqual(beforeLatest.releases);
+    expect(nextStable.releases[0]).toEqual(beforeLatest.releases[0]);
+    expect(nextStable.issuedAt).toBe(now);
+    expect(nextLatest.issuedAt).toBe(now);
+    expect(nextStable.expiresAt - nextStable.issuedAt).toBe(FEED_TTL_MS);
+    expect(nextLatest.expiresAt - nextLatest.issuedAt).toBe(FEED_TTL_MS);
+    expect(nextStable.keySetVersion).toBe(beforeLatest.keySetVersion);
+    expect(nextLatest.keySetVersion).toBe(beforeLatest.keySetVersion);
+    expect(nextStable.channel).toBe("stable");
+    expect(nextLatest.channel).toBe("latest");
+  });
+
+  it("promote keeps stable's own withdrawn list and latest's", () => {
+    const now = WHEN;
+    const latest = withdrawRelease(publishRelease(null, { channel: "latest", entry, now: WHEN - DAY, keySetVersion: 1 }), "0.0.5", WHEN - DAY);
+    const stable = withdrawRelease(emptyFeed({ channel: "stable", now: WHEN - DAY, keySetVersion: 1 }), "0.0.4", WHEN - DAY);
+    const { site } = promote(latest, stable, "0.1.0", now - PROMOTION_WAIT_MS, now);
+    const nextLatest = ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "latest.json"), "utf8")));
+    const nextStable = ChannelFeedSchema.parse(JSON.parse(readFileSync(join(site, "stable.json"), "utf8")));
+    expect(nextStable.withdrawn).toEqual(["0.0.4"]);
+    expect(nextLatest.withdrawn).toEqual(["0.0.5"]);
+    expect(nextStable.releases.map(release => release.version)).toEqual(["0.1.0"]);
+  });
+
+  it("promote refuses a Release with less than seven days since it was published on latest", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN - 2 * DAY, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN - 2 * DAY, keySetVersion: 1 });
+    const since = WHEN - 2 * DAY;
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: site, signers, scratch: dir, now: WHEN,
+    }, { ...io, listedSince: () => since })).toThrow(
+      "0.1.0 has been on latest for 2.0 days (since 2026-10-31T10:00:00Z, when the feed commit first listed it); promotion needs 7",
+    );
+    expect(existsSync(join(site, "latest.json"))).toBe(false);
+    expect(existsSync(join(site, "stable.json"))).toBe(false);
+    expect(existsSync(join(site, "feed-prepared.json"))).toBe(false);
+  });
+
+  it("promote counts the seven days from the commit time of the latest-Feed commit that first listed the version, not from the manifest's publishedAt (the release commit's date) and not from the release's published_at", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN - DAY, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN - DAY, keySetVersion: 1 });
+    const stage = (publishedAt: number) => {
+      const { dir, signers, io } = signedFeeds(latest, stable);
+      writeFileSync(join(dir, "manifest.json"), JSON.stringify({ publishedAt: new Date(publishedAt).toISOString().replace(/\.\d{3}Z$/, "Z") }));
+      writeFileSync(join(dir, "release.json"), JSON.stringify({ published_at: new Date(publishedAt).toISOString().replace(/\.\d{3}Z$/, "Z") }));
+      return { dir, signers, io, site: join(dir, "site") };
+    };
+    const young = stage(WHEN - 20 * DAY);
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: young.site, signers: young.signers, scratch: young.dir, now: WHEN,
+    }, { ...young.io, listedSince: () => WHEN - 2 * DAY })).toThrow(/2\.0 days \(since 2026-10-31T10:00:00Z/);
+    expect(existsSync(join(young.site, "latest.json"))).toBe(false);
+    const old = stage(WHEN - DAY);
+    const outcome = prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: old.site, signers: old.signers, scratch: old.dir, now: WHEN,
+    }, { ...old.io, listedSince: () => WHEN - 8 * DAY });
+    expect(outcome).toBe("ready");
+    const next = ChannelFeedSchema.parse(JSON.parse(readFileSync(join(old.site, "stable.json"), "utf8")));
+    expect(next.releases).toEqual(ChannelFeedSchema.parse(JSON.parse(latest)).releases);
+  });
+
+  it("promote refuses a withdrawn Release", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 })
+      .replace('"withdrawn": []', '"withdrawn": ["0.1.0"]');
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    expect(() => promoteRelease(stable, latest, "0.1.0", WHEN)).toThrow("0.1.0 is withdrawn");
+    const held = signedFeeds(latest, stable);
+    const heldSite = join(held.dir, "site");
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: heldSite, signers: held.signers, scratch: held.dir, now: WHEN,
+    }, { ...held.io, listedSince: () => { throw new Error("age was asked before the withdrawal check"); } })).toThrow("0.1.0 is withdrawn");
+    expect(existsSync(join(heldSite, "latest.json"))).toBe(false);
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stableHeld = stable.replace('"withdrawn": []', '"withdrawn": ["0.1.0"]');
+    expect(() => promoteRelease(stableHeld, listed, "0.1.0", WHEN)).toThrow("0.1.0 is withdrawn");
+    const other = signedFeeds(listed, stableHeld);
+    const otherSite = join(other.dir, "site");
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: otherSite, signers: other.signers, scratch: other.dir, now: WHEN,
+    }, { ...other.io, listedSince: () => WHEN - 8 * DAY })).toThrow("0.1.0 is withdrawn");
+    expect(existsSync(join(otherSite, "stable.json"))).toBe(false);
+  });
+
+  it("promote refuses a Release the latest Feed does not list", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    expect(() => promoteRelease(stable, latest, "0.2.0", WHEN)).toThrow("0.2.0 is not in the latest feed");
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.2.0", repository: "o/r", dir: site, signers, scratch: dir, now: WHEN,
+    }, { ...io, listedSince: () => { throw new Error("age was asked before the listing check"); } })).toThrow("0.2.0 is not in the latest feed");
+    expect(existsSync(join(site, "latest.json"))).toBe(false);
+    expect(existsSync(join(site, "feed-prepared.json"))).toBe(false);
+  });
+
+  it("stable never lists a Version latest never had", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const onlyStable = publishRelease(null, { channel: "stable", entry: later, now: WHEN, keySetVersion: 1 });
+    expect(() => promoteRelease(onlyStable, latest, "0.2.0", WHEN)).toThrow("0.2.0 is not in the latest feed");
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const both = publishRelease(latest, { channel: "latest", entry: later, now: WHEN + 1000, keySetVersion: 1 });
+    const stableHeld = publishRelease(null, { channel: "stable", entry, now: WHEN, keySetVersion: 1 });
+    const produced = ChannelFeedSchema.parse(JSON.parse(promoteRelease(stableHeld, both, "0.2.0", WHEN + 2000)));
+    const from = ChannelFeedSchema.parse(JSON.parse(both));
+    expect(produced.releases.length).toBeGreaterThan(0);
+    for (const release of produced.releases) {
+      expect(from.releases.find(row => row.version === release.version)).toEqual(release);
+    }
+    expect(() => promoteRelease(stable, latest, "9.9.9", WHEN)).toThrow("9.9.9 is not in the latest feed");
+  });
+
+  it("promote refuses a Version lower than stable's newest", () => {
+    const v020 = { ...entry, version: "0.2.0", manifest: "https://github.com/morndo/morndo/releases/download/v0.2.0/manifest.json" };
+    const v030 = { ...later, version: "0.3.0", manifest: "https://github.com/morndo/morndo/releases/download/v0.3.0/manifest.json", manifestSha256: "ef".repeat(32) };
+    const v040 = { ...entry, version: "0.4.0", manifest: "https://github.com/morndo/morndo/releases/download/v0.4.0/manifest.json", manifestSha256: "12".repeat(32) };
+    const latest = [v020, v030, v040].reduce<string | null>((feed, item, i) => publishRelease(feed, {
+      channel: "latest", entry: item, now: WHEN + i * 1000, keySetVersion: 1,
+    }), null);
+    if (latest === null) throw new Error("latest was not built");
+    const stable = publishRelease(null, { channel: "stable", entry: v030, now: WHEN, keySetVersion: 1 });
+    expect(() => promoteRelease(stable, latest, "0.2.0", WHEN)).toThrow(
+      "0.2.0 is lower than 0.3.0, the newest in the stable feed; stable only moves forward",
+    );
+    const promoted = ChannelFeedSchema.parse(JSON.parse(promoteRelease(stable, latest, "0.4.0", WHEN + 2000)));
+    expect(promoted.releases.map(release => release.version)).toEqual(["0.4.0", "0.3.0"]);
+    const sameLatest = publishRelease(null, { channel: "latest", entry: v020, now: WHEN, keySetVersion: 1 });
+    const sameStable = publishRelease(null, { channel: "stable", entry: v020, now: WHEN, keySetVersion: 1 });
+    expect(() => promoteRelease(sameStable, sameLatest, "0.2.0", WHEN)).toThrow("0.2.0 is already in the stable feed");
+  });
+
+  it("promote refuses a Version that is already in stable", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = publishRelease(null, { channel: "stable", entry, now: WHEN, keySetVersion: 1 });
+    expect(() => promoteRelease(stable, latest, "0.1.0", WHEN)).toThrow("0.1.0 is already in the stable feed");
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: site, signers, scratch: dir, now: WHEN,
+    }, { ...io, listedSince: () => { throw new Error("age was asked before the stable check"); } })).toThrow("0.1.0 is already in the stable feed");
+    expect(existsSync(join(site, "latest.json"))).toBe(false);
+  });
+
+  it("promote refuses a word that is not a Version, before any feed is read", () => {
+    const dir = temp();
+    let reads = 0;
+    let heads = 0;
+    let ages = 0;
+    expect(() => prepareFeeds({
+      mode: "promote", version: "not-a-version", repository: "o/r", dir: join(dir, "site"),
+      signers: join(dir, "none"), scratch: dir, now: WHEN,
+    }, {
+      head: () => { heads += 1; return "aaa"; },
+      read: () => { reads += 1; return null; },
+      listedSince: () => { ages += 1; return WHEN; },
+    })).toThrow("not a version: not-a-version");
+    expect(heads).toBe(0);
+    expect(reads).toBe(0);
+    expect(ages).toBe(0);
+  });
+
+  it("promote needs a feed branch", () => {
+    const dir = temp();
+    let reads = 0;
+    let ages = 0;
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: join(dir, "site"),
+      signers: join(dir, "none"), scratch: dir, now: WHEN,
+    }, {
+      head: () => null,
+      read: () => { reads += 1; return null; },
+      listedSince: () => { ages += 1; return WHEN; },
+    })).toThrow("no feed branch to promote from");
+    expect(reads).toBe(0);
+    expect(ages).toBe(0);
+    expect(existsSync(join(dir, "site/latest.json"))).toBe(false);
+    expect(existsSync(join(dir, "site/feed-prepared.json"))).toBe(false);
+  });
+
+  it("promote refuses when it cannot tell when the Version was first listed", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const { dir, signers, io } = signedFeeds(latest, stable);
+    const site = join(dir, "site");
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: site, signers, scratch: dir, now: WHEN,
+    }, { ...io, listedSince: () => null })).toThrow("cannot tell when 0.1.0 was first listed on latest");
+    expect(existsSync(join(site, "latest.json"))).toBe(false);
+    expect(existsSync(join(site, "stable.json"))).toBe(false);
+    expect(existsSync(join(site, "feed-prepared.json"))).toBe(false);
+  });
+
+  it("the prepared message names the Version", () => {
+    const latest = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const stable = emptyFeed({ channel: "stable", now: WHEN, keySetVersion: 1 });
+    const { site } = promote(latest, stable, "0.1.0", WHEN - 8 * DAY);
+    expect(JSON.parse(readFileSync(join(site, "feed-prepared.json"), "utf8"))).toEqual({ head: "aaa", message: "Promote 0.1.0 to stable" });
+  });
+
+  function feedSigner(dir: string) {
+    const key = join(dir, "feed");
+    expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", key, "-N", "", "-C", "feed-test", "-q"]).status).toBe(0);
+    const pub = spawnSync("ssh-keygen", ["-y", "-f", key], { encoding: "utf8" });
+    expect(pub.status).toBe(0);
+    const signers = join(dir, "allowed");
+    writeFileSync(signers, `${allowedSignerLine({ identity: FEED_NAMESPACE, namespace: FEED_NAMESPACE, publicKey: pub.stdout.trim() })}\n`);
+    const sign = (body: string) => {
+      const path = join(dir, `body-${createHash("sha256").update(body).digest("hex")}`);
+      writeFileSync(path, body);
+      expect(spawnSync("ssh-keygen", ["-Y", "sign", "-f", key, "-n", FEED_NAMESPACE, path]).status).toBe(0);
+      return readFileSync(`${path}.sig`, "utf8");
+    };
+    return { signers, sign, key };
+  }
+
+  // Newest first. The next row is the first parent. A signature of null is an unreadable .sig.
+  function signedRun(commits: { sha: string; at: string; body: string; sig?: string | null }[]) {
+    const dir = temp();
+    const { signers, sign, key } = feedSigner(dir);
+    const files = new Map<string, { body: string; sig: string | null }>();
+    const meta = new Map<string, { parent: string | null; at: string }>();
+    commits.forEach((commit, i) => {
+      files.set(commit.sha, { body: commit.body, sig: commit.sig === undefined ? sign(commit.body) : commit.sig });
+      meta.set(commit.sha, { parent: commits[i + 1]?.sha ?? null, at: commit.at });
+    });
+    const seen: { sha: string; file: string }[] = [];
+    return {
+      dir, signers, key, sign,
+      seen,
+      read: (sha: string, file: string) => {
+        seen.push({ sha, file });
+        const row = files.get(sha);
+        if (row === undefined) return null;
+        if (file === "latest.json") return row.body;
+        if (file === "latest.json.sig") return row.sig;
+        return null;
+      },
+      commit: (sha: string) => meta.get(sha) ?? { parent: null, at: "" },
+    };
+  }
+
+  it("the soak is counted from the oldest signed commit of the unbroken run that lists the Version", () => {
+    const listed = publishRelease(null, { channel: "latest", entry: later, now: WHEN, keySetVersion: 1 });
+    const gap = emptyFeed({ channel: "latest", now: WHEN - DAY, keySetVersion: 1 });
+    const run = signedRun([
+      { sha: "c3", at: "2026-10-20T00:00:00Z", body: listed },
+      { sha: "c2", at: "2026-10-10T00:00:00Z", body: listed },
+      { sha: "c1", at: "2026-10-01T00:00:00Z", body: gap },
+    ]);
+    const at = listedSince("o/r", "0.2.0", "c3", { signers: run.signers, scratch: run.dir }, { read: run.read, commit: run.commit });
+    expect(at).toBe(Date.parse("2026-10-10T00:00:00Z"));
+    expect(run.seen.map(hit => hit.sha)).toEqual(["c3", "c3", "c2", "c2", "c1"]);
+  });
+
+  it("a back-dated forged commit on top does not shorten the soak", () => {
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN - 2 * DAY, keySetVersion: 1 });
+    const gap = emptyFeed({ channel: "latest", now: WHEN - 30 * DAY, keySetVersion: 1 });
+    const run = signedRun([
+      { sha: "forged", at: new Date(WHEN - 20 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z"), body: listed },
+      { sha: "real", at: new Date(WHEN - 2 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z"), body: listed },
+      { sha: "before", at: new Date(WHEN - 30 * DAY).toISOString().replace(/\.\d{3}Z$/, "Z"), body: gap },
+    ]);
+    const at = listedSince("o/r", "0.1.0", "forged", { signers: run.signers, scratch: run.dir }, { read: run.read, commit: run.commit });
+    expect(at).toBe(WHEN - 2 * DAY);
+    const stable = emptyFeed({ channel: "stable", now: WHEN - 2 * DAY, keySetVersion: 1 });
+    const held = signedFeeds(listed, stable);
+    expect(() => prepareFeeds({
+      mode: "promote", version: "0.1.0", repository: "o/r", dir: join(held.dir, "site"),
+      signers: held.signers, scratch: held.dir, now: WHEN,
+    }, { ...held.io, listedSince: () => at })).toThrow(
+      "0.1.0 has been on latest for 2.0 days (since 2026-10-31T10:00:00Z, when the feed commit first listed it); promotion needs 7",
+    );
+  });
+
+  it("a commit that lists the Version without a valid signature is a hard failure", () => {
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const unsigned = signedRun([{ sha: "tip", at: "2026-10-20T00:00:00Z", body: listed, sig: "unsigned\n" }]);
+    const sentence = "the feed branch commit tip lists 0.1.0 in a latest.json that is not signed by the feed key";
+    expect(() => listedSince("o/r", "0.1.0", "tip", { signers: unsigned.signers, scratch: unsigned.dir }, { read: unsigned.read, commit: unsigned.commit })).toThrow(sentence);
+    const missing = signedRun([{ sha: "tip", at: "2026-10-20T00:00:00Z", body: listed, sig: null }]);
+    expect(() => listedSince("o/r", "0.1.0", "tip", { signers: missing.signers, scratch: missing.dir }, { read: missing.read, commit: missing.commit })).toThrow(sentence);
+    const other = join(unsigned.dir, "other");
+    expect(spawnSync("ssh-keygen", ["-t", "ed25519", "-f", other, "-N", "", "-C", "other-feed", "-q"]).status).toBe(0);
+    const wrongBody = join(unsigned.dir, "wrong-body");
+    writeFileSync(wrongBody, listed);
+    expect(spawnSync("ssh-keygen", ["-Y", "sign", "-f", other, "-n", FEED_NAMESPACE, wrongBody]).status).toBe(0);
+    const wrong = signedRun([{ sha: "tip", at: "2026-10-20T00:00:00Z", body: listed, sig: readFileSync(`${wrongBody}.sig`, "utf8") }]);
+    expect(() => listedSince("o/r", "0.1.0", "tip", { signers: wrong.signers, scratch: wrong.dir }, { read: wrong.read, commit: wrong.commit })).toThrow(sentence);
+  });
+
+  it("a replayed older feed between the real listing and a back-dated tip does not shorten the soak", () => {
+    // The real listing is the oldest commit that lists the Version in the graph. An attacker who can push appends a
+    // replayed older signed feed that does not list it, then a replay that does, back-dated: stopping at the gap
+    // would take the forged tip's date. The whole first-parent chain is read, and the oldest listing wins.
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN - 2 * DAY, keySetVersion: 1 });
+    const older = emptyFeed({ channel: "latest", now: WHEN - 30 * DAY, keySetVersion: 1 });
+    const stamp = (days: number) => new Date(WHEN - days * DAY).toISOString().replace(/\.\d{3}Z$/, "Z");
+    const run = signedRun([
+      { sha: "forged", at: stamp(20), body: listed },
+      { sha: "replay", at: stamp(19), body: older },
+      { sha: "real", at: stamp(2), body: listed },
+      { sha: "before", at: stamp(30), body: older },
+    ]);
+    const at = listedSince("o/r", "0.1.0", "forged", { signers: run.signers, scratch: run.dir }, { read: run.read, commit: run.commit });
+    expect(at).toBe(WHEN - 2 * DAY);
+  });
+
+  it("the oldest listing in the first-parent chain counts, across a gap", () => {
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const gap = emptyFeed({ channel: "latest", now: WHEN - DAY, keySetVersion: 1 });
+    const run = signedRun([
+      { sha: "c4", at: "2026-10-20T00:00:00Z", body: listed },
+      { sha: "c3", at: "2026-10-18T00:00:00Z", body: listed },
+      { sha: "c2", at: "2026-10-12T00:00:00Z", body: gap },
+      { sha: "c1", at: "2026-10-01T00:00:00Z", body: listed },
+    ]);
+    const at = listedSince("o/r", "0.1.0", "c4", { signers: run.signers, scratch: run.dir }, { read: run.read, commit: run.commit });
+    expect(at).toBe(Date.parse("2026-10-01T00:00:00Z"));
+    expect(run.seen.some(hit => hit.sha === "c1" && hit.file === "latest.json.sig")).toBe(true);
+  });
+
+  it("a commit far down the chain that lists the Version without a valid signature is a hard failure", () => {
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const gap = emptyFeed({ channel: "latest", now: WHEN - DAY, keySetVersion: 1 });
+    const run = signedRun([
+      { sha: "c3", at: "2026-10-20T00:00:00Z", body: listed },
+      { sha: "c2", at: "2026-10-12T00:00:00Z", body: gap },
+      { sha: "c1", at: "2026-10-01T00:00:00Z", body: listed, sig: "unsigned\n" },
+    ]);
+    expect(() => listedSince("o/r", "0.1.0", "c3", { signers: run.signers, scratch: run.dir }, { read: run.read, commit: run.commit }))
+      .toThrow("the feed branch commit c1 lists 0.1.0 in a latest.json that is not signed by the feed key");
+  });
+
+  it("a commit date that is not a time is an error, not an answer", () => {
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const run = signedRun([{ sha: "tip", at: "not a date", body: listed }]);
+    expect(() => listedSince("o/r", "0.1.0", "tip", { signers: run.signers, scratch: run.dir }, { read: run.read, commit: run.commit }))
+      .toThrow("not a time: not a date");
+  });
+
+  it("a head that does not list the Version has no run", () => {
+    const listed = publishRelease(null, { channel: "latest", entry, now: WHEN, keySetVersion: 1 });
+    const gap = emptyFeed({ channel: "latest", now: WHEN, keySetVersion: 1 });
+    const run = signedRun([
+      { sha: "c2", at: "2026-10-20T00:00:00Z", body: gap },
+      { sha: "c1", at: "2026-10-01T00:00:00Z", body: listed },
+    ]);
+    const at = listedSince("o/r", "0.1.0", "c2", { signers: run.signers, scratch: run.dir }, { read: run.read, commit: run.commit });
+    expect(at).toBeNull();
+    expect(run.seen).toEqual([{ sha: "c2", file: "latest.json" }]);
   });
 
   it("an empty stable feed is seq 1 with no releases", () => {

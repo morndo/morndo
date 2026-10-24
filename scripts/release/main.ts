@@ -62,7 +62,7 @@ function treeFiles(root: string): TreeFile[] {
 
 function main(argv: string[]): void {
   const [command, ...rest] = argv;
-  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-prepare | feed-withdraw-prepare | feed-publish-prepare | feed-commit | key-set | feed-site | sums | node-check");
+  if (!command) throw new Error("usage: stage | compile | pack | manifest | stamp | sign | feed-empty | feed-add | feed-resign | feed-resign-prepare | feed-withdraw-prepare | feed-promote-prepare | feed-publish-prepare | feed-commit | key-set | feed-site | sums | node-check");
   const { values, positionals } = parseArgs({
     args: rest,
     options: {
@@ -158,6 +158,14 @@ function main(argv: string[]): void {
         mode: "withdraw", version: flag(values, "version"), repository: flag(values, "repository"), dir: flag(values, "dir"),
         now: Number(flag(values, "now")), signers: flag(values, "signers"), scratch: flag(values, "scratch"),
         allowEmptyChannel: parseAllowEmptyChannel(values["allow-empty-channel"]),
+      });
+      process.stdout.write(`${outcome}\n`);
+      return;
+    }
+    case "feed-promote-prepare": {
+      const outcome = prepareFeeds({
+        mode: "promote", version: flag(values, "version"), repository: flag(values, "repository"), dir: flag(values, "dir"),
+        now: Number(flag(values, "now")), signers: flag(values, "signers"), scratch: flag(values, "scratch"),
       });
       process.stdout.write(`${outcome}\n`);
       return;
