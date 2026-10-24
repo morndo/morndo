@@ -733,6 +733,19 @@ describe("the proof list (B17)", () => {
     expect(act(doing, { action: "proof_list", add: ["ci@acme/shop: CI green"] }, manager, proofGate()).ok).toBe(true);
   });
 
+  it("the assigner's add of an item the lane listed first makes it the assigner's: the lane cannot then drop it", () => {
+    let t = make(1, { assignee: "builder" });
+    t = value(apply(t, { action: "move", to: "doing" }, builder)).task;
+    const laneOwns = proofGate({ list: [item(DATA_SPEC, "lane")] });
+    const re = act(t, { action: "proof_list", add: [DATA_SPEC] }, manager, laneOwns);
+    expect(value(re).event.change).toEqual({ kind: "proof_listed", add: [DATA_SPEC], drop: [] });      // not ignored as a repeat
+    // an add by the lane of what the assigner already listed stays a repeat, and an assigner's repeat of its own item too
+    expect(problem(act(t, { action: "proof_list", add: [DATA_SPEC] }, builder, proofGate({ list: [item(DATA_SPEC, "assigner")] })))).toBe("same");
+    expect(problem(act(t, { action: "proof_list", add: [DATA_SPEC] }, manager, proofGate({ list: [item(DATA_SPEC, "assigner")] })))).toBe("same");
+    // once owned by the assigner (the folded list says so), the lane's drop is refused
+    expect(problem(act(t, { action: "proof_list", drop: [DATA_SPEC] }, builder, proofGate({ list: [item(DATA_SPEC, "assigner")] })))).toBe("not_allowed");
+  });
+
   it("a lane adds items to its own task and cannot drop the manager's; it drops its own", () => {
     let t = make(1, { assignee: "builder" });
     t = value(apply(t, { action: "move", to: "doing" }, builder)).task;

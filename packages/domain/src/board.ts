@@ -420,7 +420,9 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       for (const raw of adds) {
         const parsed = parseItemSpec(raw);
         if (!parsed.ok) return refuse("bad_item", undefined, undefined, parsed.error.detail);
-        if (bySpec.has(parsed.value.spec)) continue;
+        const have = bySpec.get(parsed.value.spec);
+        // A repeat is ignored, except the assigner's add of what the lane listed first: that makes it the assigner's.
+        if (have !== undefined && !(have.by === "lane" && actor.kind !== "worker")) continue;
         toAdd.push(parsed.value.spec);
       }
       const toDrop: string[] = [];

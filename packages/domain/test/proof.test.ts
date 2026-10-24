@@ -435,6 +435,17 @@ describe("the assigner's proof list (B17)", () => {
     ]);
   });
 
+  it("currentList: the assigner's later add of an item the lane listed first re-owns it", () => {
+    const laneActor = { kind: "worker" as const, name: "builder", token: "t" };
+    const managerActor = { kind: "manager" as const, name: "manager", token: "t" };
+    const listed = (rev: number, actor: typeof laneActor | typeof managerActor, add: string[], drop: string[] = []): TaskEvent => ({ key: taskKey(12), rev, at: NOW + rev, actor, change: { kind: "proof_listed", add, drop } });
+    const spec = "data: a sample of 30 rows";
+    expect(currentList([listed(2, laneActor, [spec])]).map(i => i.by)).toEqual(["lane"]);
+    expect(currentList([listed(2, laneActor, [spec]), listed(3, managerActor, [spec])]).map(i => i.by)).toEqual(["assigner"]);
+    // the other way round the assigner keeps it
+    expect(currentList([listed(2, managerActor, [spec]), listed(3, laneActor, [spec])]).map(i => i.by)).toEqual(["assigner"]);
+  });
+
   it("currentList stands across rounds: a brief going stale does not drop the list", () => {
     const worker = builder;
     const events = [

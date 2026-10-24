@@ -242,7 +242,11 @@ export function currentList(events: readonly TaskEvent[]): ProofItem[] {
       }
     }
     for (const add of e.change.add) {
-      if (bySpec.has(add)) continue;
+      const have = bySpec.get(add);
+      if (have !== undefined) {
+        if (have.by === "lane" && who === "assigner") have.by = "assigner";       // the assigner's add owns what the lane listed first
+        continue;
+      }
       const parsed = parseItemSpec(add);
       if (!parsed.ok) continue;
       const item = { ...parsed.value, by: who };
