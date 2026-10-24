@@ -49,13 +49,13 @@ describe("source health (plan 4.3)", () => {
   it("a posted permanent failure replaces the meters (AT-9)", async () => {
     expect((await statusLine(41.2)).status).toBe(200);
     expect((await reading({ windows: [fiveHour(30)], capturedAt: now + 2 * MIN })).status).toBe(200);
-    expect(((await accountOf())?.fiveHour as Body).usedPercentage).toBe(30);
+    expect((((await accountOf()) as Body).fiveHour as Body).usedPercentage).toBe(30);
     const at = now + 5 * MIN;
     expect((await reading({ failure: { reason: "unknown_screen" }, capturedAt: at })).status).toBe(200);
     // The source is unavailable since the failure, its windows are gone from what is shown, and the status line's
     // windows of the same account are still there.
     expect(await sourceState("app-server")).toMatchObject({ state: "unavailable", since: at, reason: "unknown_screen", fix: "check_the_source" });
-    expect(((await accountOf())?.fiveHour as Body).usedPercentage).toBe(41.2);
+    expect((((await accountOf()) as Body).fiveHour as Body).usedPercentage).toBe(41.2);
     expect(await sourceState("status-line")).toMatchObject({ state: "available" });
   });
 
@@ -147,17 +147,24 @@ describe("source health (plan 4.3)", () => {
     now += 3 * MIN;
     expect((await statusLine(70)).status).toBe(200);                                                          // 10:03, the status line moved
     let a = await accountOf();
-    expect((a?.fiveHour as Body).usedPercentage).toBe(70);
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(70);
     expect(a?.disagree).toEqual([{ window: "five_hour", a: { source: "status-line", usedPercent: 70, capturedAt: now }, b: { source: "app-server", usedPercent: 40, capturedAt: now - 3 * MIN } }]);
     now += 7 * MIN;
     expect((await reading({ windows: [fiveHour(40, reset)], capturedAt: now })).status).toBe(200);             // 10:10, an echo of its own earlier reading
     a = await accountOf();
-    expect((a?.fiveHour as Body).usedPercentage).toBe(70);
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(70);
     expect(a?.disagree).toEqual([]);
     now += 5 * MIN;
     expect((await reading({ windows: [fiveHour(45)], capturedAt: now })).status).toBe(200);                    // 10:15, newer and different
     a = await accountOf();
-    expect((a?.fiveHour as Body).usedPercentage).toBe(45);
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(45);
     expect(a?.disagree).toEqual([]);                                                                          // 12 minutes apart: no disagreement
+  });
+  it("a reading with nothing readable is refused, and a stamp from the future is capped at the hub's clock plus the skew", async () => {
+    expect((await reading({ windows: [] })).status).toBe(400);
+    expect((await reading({ windows: [{ id: "x", used_percent: 1_700_000_000, resets_at: 1 }] })).status).toBe(400);      // an epoch value is no percentage, so nothing is readable
+    expect(await sourcesOf()).toEqual([]);
+    expect((await reading({ windows: [fiveHour(20)], capturedAt: now + DAY })).status).toBe(200);
+    expect(((await sourcesOf())[0] as Body).asOf).toBe(now + 5 * MIN);
   });
 });

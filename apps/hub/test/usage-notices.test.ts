@@ -89,9 +89,30 @@ describe("usage notices (plan 4.4)", () => {
     for (const n of v.notices as Body[]) {
       expect(n.text).not.toMatch(/:\/\/|@|curl|evil/);
     }
-    const source = ((v.accounts as Body[]).find(a => a.account === "seat-a")?.sources as Body[])[0] as Body;
+    const source = (((v.accounts as Body[]).find(a => a.account === "seat-a") as Body).sources as Body[])[0] as Body;
     expect(source).toMatchObject({ source: "app-server", state: "unavailable", reason: "unknown_screen", fix: "check_the_source" });
     expect(source.hint).toBe("see or mail then " + "k".repeat(120 - "see or mail then ".length));
     expect(source.hint as string).not.toMatch(/:\/\/|@/);
+  });
+  it("a plan that changes back and changes again is told each time", async () => {
+    const reset = now + 2 * HOUR;
+    const post = async (plan: string, n: number) => { now += MIN; expect((await reading({ plan, windows: [fiveHour(20 + n, reset)], capturedAt: now })).status).toBe(200); };
+    // two agreeing readings per change: A, B, B, A, A, B, B
+    for (const [i, plan] of ["A", "B", "B", "A", "A", "B", "B"].entries()) await post(plan, i);
+    const told = ((await viewOf()).notices as Body[]).filter(n => n.kind === "plan").map(n => n.text);
+    expect(told).toHaveLength(3);
+    expect(told).toContain('seat-a: plan changed from "B" to "A".');
+  });
+
+  it("only the headless report can tell that a window is gone (complete is pinned to the source)", async () => {
+    const weekly = { id: "seven_day", used_percent: 30, resets_at: Math.floor((now + 70 * HOUR) / 1000), length_mins: 10080 };
+    const gone = async (source: string, account: string) => {
+      const send = (windows: unknown[], n: number) => reading({ source, plan: "Max 5x", windows, capturedAt: now + n * MIN }, account);
+      for (const [i, ws] of [[fiveHour(20), weekly], [fiveHour(21), weekly], [weekly], [weekly], [weekly]].entries()) expect((await send(ws as unknown[], i)).status).toBe(200);
+      return ((await viewOf()).notices as Body[]).filter(n => n.account === account && (n.text as string).includes("set of windows"));
+    };
+    expect(await gone("app-server", "seat-a")).toEqual([]);
+    expect(await gone("cli-screen", "seat-b")).toEqual([]);
+    expect(await gone("claude-usage", "seat-c")).toHaveLength(1);
   });
 });

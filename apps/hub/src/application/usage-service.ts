@@ -62,6 +62,8 @@ function namedLimits(raw: UsageReportBody["limits"]): NamedWindow[] | null {
   return takeNamed(rows);
 }
 const num = (v: number | null | undefined) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+// How far ahead of the hub's clock a source's own stamp may run before the hub caps it (two machines' clocks differ).
+export const CLOCK_SKEW_MS = 5 * 60_000;
 const EMPTY_PROFILES: ReadonlyMap<string, AccountProfile> = new Map();
 // A source row that carries a reading (the sameAsPrevious rule's memory of the one before lives in the same row).
 type ReadRow = UsageSourceRow & { body: UsageSourceBody & { reading: NonNullable<UsageSourceBody["reading"]> } };
@@ -238,7 +240,8 @@ export class UsageService {
     if (body.source === "status-line") return { ok: false, problem: "bad_reading" };   // the status line has its own route
     const now = this.#now();
     const node = body.node ?? "";
-    const capturedAt = body.captured_at * 1000;
+    // A reading is stamped when its source took it: never later than the hub's clock plus the skew two machines may have.
+    const capturedAt = Math.min(body.captured_at * 1000, now + CLOCK_SKEW_MS);
     const row = this.#store.usageSources().find(r => r.account === account && r.source === body.source && r.node === node);
     const prev: UsageSourceBody = row?.body ?? { health: noHealth(body.source), reading: null, previous: null, hint: null };
     if (body.failure != null) {
@@ -262,6 +265,7 @@ export class UsageService {
       });
     }
     const list = [...windows.values()];
+    if (list.length === 0) return { ok: false, problem: "bad_reading" };      // nothing readable: a source with nothing to say posts a failure
     const health = okRead(prev.health, capturedAt, body.every_s);
     // `previous` is the sameAsPrevious rule's memory (plan 4.3 item 5): the reading before this one.
     const previous = prev.reading === null ? null : { windows: prev.reading.windows.map(w => ({ id: w.id, usedPercent: w.usedPercent, resetsAt: w.resetsAt })) };
@@ -278,13 +282,13 @@ export class UsageService {
     const fact: PlanFact = {
       plan, identity: null,
       windows: windows.map(w => ({ id: w.id, lengthMins: w.lengthMins, usedPercent: w.usedPercent, resetsAt: w.resetsAt, rolling: w.rolling })),
-      // claude-usage and app-server name every window the account has, so a window missing from them is really gone.
-      ...(source === "claude-usage" || source === "app-server" ? { complete: true } : {}),
+      // Only the headless usage report lists the account's whole window set, so only a window missing from it is really gone.
+      ...(source === "claude-usage" ? { complete: true } : {}),
     };
     const planWatch = (watches.get("plan|") as PlanWatch | undefined) ?? noPlanWatch;
     const seen = watchPlan(planWatch, fact, capturedAt);
     if (seen.watch !== planWatch) this.#store.saveUsageWatch(account, "plan", "", seen.watch);
-    for (const c of seen.told) this.#note(account, "plan", changeSignature(c), planNoticeText(account, c));
+    for (const c of seen.told) this.#note(account, "plan", `${changeSignature(c)}|${capturedAt}`, planNoticeText(account, c));
     for (const w of windows) {
       const bookPrev = (watches.get(`cycle|${w.id}`) as CycleBook | undefined) ?? noCycleBook;
       const book = observeCycle(bookPrev, w.resetsAt, capturedAt);
@@ -309,7 +313,7 @@ export class UsageService {
     const account = l.account === null ? null : l.account.trim();
     if (account === null || account === "") return { ok: true, resolved: false };
     if (!ACCOUNT_NAME.test(account)) return { ok: false, problem: "bad_account" };
-    if (l.kind === "unknown") return { ok: true, resolved: false };      // an unknown kind changes no seat (U9)
+    if (l.kind === "unknown") return { ok: true, resolved: true };      // the account is known, the kind is not: no seat changes (U9)
     const now = this.#now();
     // The cycle the hit limited, if any reading of the account names one: the 5-hour window with a reset, else the
     // fullest window shown.
@@ -321,7 +325,7 @@ export class UsageService {
     if (r.changed && r.seat !== null)
       this.#note(account, "seat", `${r.seat.state}|${r.seat.why}|${r.seat.markedAt}`, seatNoticeText(account, r.seat));
     this.#tellIfChanged();
-    return { ok: true, resolved: r.changed };
+    return { ok: true, resolved: true };
   }
 
   // The window a limit hit limited (plan 4.5): the 5-hour window when a reading of it names a reset, else the fullest
@@ -379,7 +383,7 @@ export class UsageService {
         this.#store.deleteUsageSources(account, r.source as UsageSource, r.node);
         gone.add(r.source);
       }
-      for (const source of gone) this.#note(account, "forgotten", source, forgottenNoticeText(account, source as UsageSource));
+      for (const source of gone) this.#note(account, "forgotten", `${source}|${now}`, forgottenNoticeText(account, source as UsageSource));
       if (gone.size > 0 && !this.#store.usageSources().some(r => r.account === account)) this.#store.deleteUsageWatches(account);
     }
     const remaining = new Set(this.#store.usageSources().map(r => r.account));
@@ -391,7 +395,7 @@ export class UsageService {
       this.#store.deleteUsageAccount(a.account);
       this.#store.deleteUsageWatches(a.account);
       this.#accounts.delete(a.account);
-      this.#note(a.account, "forgotten", "", forgottenNoticeText(a.account, null));
+      this.#note(a.account, "forgotten", `|${now}`, forgottenNoticeText(a.account, null));
     }
     this.#tellIfChanged();
   }

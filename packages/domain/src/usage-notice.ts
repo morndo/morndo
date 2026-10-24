@@ -1,7 +1,7 @@
 // The plain words of a usage notice (plan 4.4): what the hub itself says about a plan, a seat, a return, a threshold
 // or a forgotten source. Every word comes from here and the account's own name — nothing an agent token wrote is
 // ever in a notice, and nothing in one is ever a link, an address or a command.
-import { fixFor, type SeatWhy } from "./usage-seat.ts";
+import { fixFor } from "./usage-seat.ts";
 import type { PlanChange } from "./usage-plan.ts";
 import type { ThresholdLevel } from "./usage-threshold.ts";
 import type { UsageFix, UsageSource } from "./usage-reading.ts";
