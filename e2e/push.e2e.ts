@@ -68,18 +68,22 @@ try {
     const trace: string[] = [];
     const displayed: string[] = [];                                       // the titles Chromium displayed, in order
     const note = (what: string) => trace.push(`${((Date.now() - t0) / 1000).toFixed(3)}s ${what}`);
-    cdp.on("BackgroundService.backgroundServiceEventReceived", e => {
+    const onEvent = (e: { backgroundServiceEvent: { service: string; eventName: string; instanceId: string; eventMetadata: { key: string; value: string }[] } }) => {
       const ev = e.backgroundServiceEvent;
       note(`${ev.service} "${ev.eventName}" instance ${ev.instanceId} ${ev.eventMetadata.map(m => `${m.key}=${m.value}`).join(" ")}`);
       if (ev.service === "notifications" && ev.eventName === "Notification displayed") displayed.push(ev.eventMetadata.find(m => m.key === "Title")?.value ?? "");
-    });
-    cdp.on("ServiceWorker.workerVersionUpdated", e => { for (const v of e.versions) note(`worker version ${v.versionId}: ${v.runningStatus}, ${v.status}`); });
-    cdp.on("ServiceWorker.workerErrorReported", e => note(`worker error: ${e.errorMessage.errorMessage}`));
-    for (const service of ["pushMessaging", "notifications"] as const) {
-      await cdp.send("BackgroundService.startObserving", { service });
-      await cdp.send("BackgroundService.setRecording", { shouldRecord: true, service });
-    }
+    };
+    const onVersion = (e: { versions: { versionId: string; runningStatus: string; status: string }[] }) => { for (const v of e.versions) note(`worker version ${v.versionId}: ${v.runningStatus}, ${v.status}`); };
+    const onError = (e: { errorMessage: { errorMessage: string } }) => note(`worker error: ${e.errorMessage.errorMessage}`);
+    const services = ["pushMessaging", "notifications"] as const;
+    cdp.on("BackgroundService.backgroundServiceEventReceived", onEvent);
+    cdp.on("ServiceWorker.workerVersionUpdated", onVersion);
+    cdp.on("ServiceWorker.workerErrorReported", onError);
     try {
+      for (const service of services) {
+        await cdp.send("BackgroundService.startObserving", { service });
+        await cdp.send("BackgroundService.setRecording", { shouldRecord: true, service });
+      }
       await page.evaluate(() => navigator.serviceWorker.ready.then(() => true));
       const registrations: { registrationId: string; scopeURL: string }[] = [];
       cdp.on("ServiceWorker.workerRegistrationUpdated", e => registrations.push(...(e.registrations as typeof registrations)));
@@ -111,6 +115,16 @@ try {
     } catch (e) {
       console.log(`      push trace:\n${trace.map(l => `        ${l}`).join("\n")}`);
       throw e;
+    } finally {
+      // The recording belongs to this check: a later check in the same browser must not keep filling its trace. A failed
+      // stop (the page already gone) must not hide the check's own failure.
+      cdp.off("BackgroundService.backgroundServiceEventReceived", onEvent);
+      cdp.off("ServiceWorker.workerVersionUpdated", onVersion);
+      cdp.off("ServiceWorker.workerErrorReported", onError);
+      for (const service of services) {
+        await cdp.send("BackgroundService.setRecording", { shouldRecord: false, service }).catch(() => undefined);
+        await cdp.send("BackgroundService.stopObserving", { service }).catch(() => undefined);
+      }
     }
   });
 
