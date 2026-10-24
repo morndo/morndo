@@ -4091,7 +4091,7 @@ export const CONTROLS: Control[] = [
     run: ["packages/domain/test/proof.test.ts"], expect: "stands across rounds" },
   { id: "t406-needs-mark-beside-the-item", task: "T-406", file: "apps/web/src/lib/desktop/ProofSection.svelte",
     find: `display: grid; grid-template-columns: 14px minmax(0, 1fr); column-gap: 6px; align-items: baseline;`, replace: `display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;`,
-    run: ["apps/web/test/proof-section.test.ts"], expect: "the mark is beside it" },
+    run: ["apps/web/test/proof-section.test.ts"], expect: "to be less than" },
   { id: "t406-proof-reapplies-merge-repo", task: "T-406", file: "packages/domain/src/proof.ts",
     find: `if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
     run: ["packages/domain/test/proof.test.ts", "packages/domain/test/board.test.ts"], expect: "no reference in that repository" },
