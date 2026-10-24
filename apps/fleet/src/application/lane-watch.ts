@@ -12,6 +12,13 @@
 // the turn, so no two lanes' nudges share one. Only lanes that make lane events are watched (not the orchestrator's own,
 // not ignored ones), and a lane whose window is gone is dropped. A lane whose node is not online is left as it is until
 // the node is back: its silence is the node's, which has its own status.
+// A session the watch saw go from idle to working, and then to idle, ended a turn. When no turn end for that window
+// reached the fleet within 5 min of it going idle (LOST_TURN_GRACE_MS, with LOST_TURN_SKEW_MS of slack for a hook's
+// clock and the node's inventory poll), the watch makes one `stale` event with reason `no_turn_end`. A user interrupt
+// (Esc) also ends a turn with no Stop hook and is flagged the same way. It costs one nudge asking for a status line.
+// A lane first seen already working is not judged (after a restart a hook may be replayed with an older time), nor is
+// one that never made a turn end the fleet knows of; a failed turn (/hook/failure) is a turn end. The orchestrator's
+// own lane and ignored windows are left out.
 // Activity is judged by each hook's own time on its node ("the time that each individual event occurred on its producing
 // device": https://nightlies.apache.org/flink/flink-docs-stable/docs/concepts/time/, read 2026-10-13), not by when the
 // fleet takes it: a hook in the same intake batch as the Stop before it, or one a node sends on after an outage, counts.
@@ -27,7 +34,7 @@
 // rests on its session state until its next Stop. A restart is not activity here: a Run's overdue is deriveRun's, from
 // the turn's own lease. A window's entry goes a day after its last sign once its window is gone.
 import { pendingOf, type TurnEnd } from "@morndo/domain";
-import type { HookEvent, LaneEvent, LaneWatchEntry, TurnStatus } from "@morndo/protocol";
+import type { HookEvent, LaneEvent, LaneWatchEntry, Pane, TurnStatus } from "@morndo/protocol";
 import type { LaneEventDraft } from "../adapters/lane-events-store.ts";
 import type { Logger } from "../adapters/log.ts";
 import type { DeliveryRequest } from "./deliveries.ts";
@@ -39,6 +46,10 @@ export const REBUILD_WINDOW_MS = 86_400_000;
 export const NUDGE_TTL_MS = 6 * 3_600_000;
 // The stale events a lane is nudged for; past these it is the orchestrator's to re-plan.
 export const NUDGE_MAX_STALLS = 2;
+// How long a session may sit idle before a missing turn end is lost, and the slack for a hook's clock against the
+// fleet's plus the node's inventory poll (2 s).
+export const LOST_TURN_GRACE_MS = 5 * 60_000;
+export const LOST_TURN_SKEW_MS = 10_000;
 // What the fleet answered a nudge (Deliveries.post): a refusal is logged, never dropped unseen.
 export type NudgeAnswer = { ok: true } | { ok: false; error: { code: string } };
 
@@ -52,6 +63,16 @@ type Turn = {
   waitingOn?: string;
   reported: boolean;               // its stale event is stored
   stalls: number;
+};
+
+// A session the inventory has shown, by window. `working` is busy or waiting. `busySince` stays null until the watch
+// sees the session leave idle: a first sighting already working is not a start. `idleSince` is when that work went idle.
+type OpenSession = {
+  sessionId: string;
+  busySince: number | null;
+  idleSince: number | null;
+  reported: boolean;
+  working: boolean;
 };
 
 // What a Run reads of a window (RunFacts' turn, activity and needsInput), and the session its last turn end named.
@@ -91,6 +112,9 @@ export class LaneWatch {
   #turns = new Map<string, Turn>();
   #tracks = new Map<string, Track>();    // every window's Run facts (runOf), the manager's and ignored ones too
   #seen = new Map<string, number>();     // each lane's latest hook, turn or not: the fleet may take it before the Stop it follows
+  #open = new Map<string, OpenSession>(); // each watched window's session, from the node's inventory
+  #failed = new Map<string, number>();   // a /hook/failure: a turn that ended on an API error, with no Stop hook
+  #lostStalls = new Map<string, number>(); // stale events for lost turn ends, since the lane last settled
   #config: LaneWatchConfig;
   #raise: (d: LaneEventDraft) => LaneEvent | null;
   #nudge: ((r: DeliveryRequest) => Promise<NudgeAnswer>) | null;
@@ -100,12 +124,15 @@ export class LaneWatch {
   #log: Logger;
   #now: () => number;
   #sweepMs: number;
+  #lostTurnMs: number;
+  #watched: (window: string) => boolean;
   #timer: ReturnType<typeof setInterval> | null = null;
 
   constructor(p: {
     config: LaneWatchConfig; raise: (d: LaneEventDraft) => LaneEvent | null; nudge?: (r: DeliveryRequest) => Promise<NudgeAnswer>;
     alive: (node: string, window: string) => boolean; online?: (node: string) => boolean;
     nudgeTarget?: (node: string, window: string) => string | null; log: Logger; now?: () => number; sweepMs?: number;
+    lostTurnMs?: number; watched?: (window: string) => boolean;
   }) {
     this.#config = p.config;
     this.#raise = p.raise;
@@ -116,6 +143,8 @@ export class LaneWatch {
     this.#log = p.log;
     this.#now = p.now ?? Date.now;
     this.#sweepMs = p.sweepMs ?? SWEEP_MS;
+    this.#lostTurnMs = p.lostTurnMs ?? LOST_TURN_GRACE_MS;
+    this.#watched = p.watched ?? (() => true);
   }
 
   // A hook from a lane: activity once it is later than the lane's last turn end, whichever of the two the fleet took
@@ -126,6 +155,7 @@ export class LaneWatch {
   saw(e: HookEvent): void {
     if (e.window === null || e.path === "/sl" || idleNotice(e.body)) return;
     const key = keyOf(e.node, e.window);
+    if (e.path === "/hook/failure") this.#failed.set(key, e.at);
     this.#mark(key, e.at);
     this.#active(key, e.at);
     if (e.path !== "/lane" || typeof e.body !== "object" || e.body === null) return;
@@ -141,6 +171,7 @@ export class LaneWatch {
     this.#ended(key, le);
     const before = this.#turns.get(key);
     const settled = le.status === "done" || le.status === "blocked" || le.status === "needs_decision";
+    if (settled) this.#lostStalls.delete(key);
     const bg = (le.bg ?? 0) > 0 || (le.crons ?? 0) > 0;
     const waiting = le.status === "waiting" || (!le.status && bg);
     const deadline = settled ? null
@@ -228,14 +259,100 @@ export class LaneWatch {
       }
       t.reported = true;
       t.stalls = stalls;
-      if (!made || !this.#config.nudge || !this.#nudge || t.stalls > NUDGE_MAX_STALLS) continue;
-      const workerId = this.#nudgeTarget(t.node, t.window);
-      if (workerId === null) continue;
-      this.#nudge({ id: `fleet:nudge:${workerId}:${t.at}`, workerId, text: nudgeText(t, now), ttlMs: NUDGE_TTL_MS }).then(
-        a => { if (!a.ok) this.#log.warn(`lane watch: nudging ${t.window} on ${t.node} was refused (${a.error.code})`); },
-        (e: unknown) => this.#log.warn(`lane watch: nudging ${t.window} on ${t.node} failed`, e),
-      );
+      if (made) this.#nudgeLane(t.node, t.window, t.stalls, t.at, nudgeText(t, now));
     }
+    this.#sweepOpen(now);
+  }
+
+  // One node's inventory. A window left out, split across panes, or without a session is dropped; so is one this
+  // inventory no longer lists. busy and waiting are working, idle is idle, and shell or no status drops the window.
+  panes(node: string, panes: readonly Pick<Pane, "window" | "sessionId" | "status">[]): void {
+    const byWindow = new Map<string, (typeof panes)[number][]>();
+    for (const p of panes) {
+      const list = byWindow.get(p.window);
+      if (list) list.push(p);
+      else byWindow.set(p.window, [p]);
+    }
+    const seen = new Set<string>();
+    for (const [window, group] of byWindow) {
+      const key = keyOf(node, window);
+      seen.add(key);
+      const pane = group[0];
+      if (!this.#watched(window) || group.length !== 1 || pane === undefined || pane.sessionId === undefined || pane.status === null || pane.status === "shell") {
+        this.#open.delete(key);
+        continue;
+      }
+      this.#seenSession(key, pane.sessionId, pane.status === "busy" || pane.status === "waiting");
+    }
+    const prefix = `${node}\u0000`;
+    for (const key of this.#open.keys()) if (key.startsWith(prefix) && !seen.has(key)) this.#open.delete(key);
+  }
+
+  // A session goes idle to working only once the watch has seen it idle: the first sighting, already working, records
+  // no start. Working to idle, after a start, notes when the turn went quiet.
+  #seenSession(key: string, sessionId: string, working: boolean): void {
+    const prev = this.#open.get(key);
+    if (!prev || prev.sessionId !== sessionId) {
+      this.#open.set(key, { sessionId, busySince: null, idleSince: null, reported: false, working });
+      return;
+    }
+    if (working === prev.working) return;
+    if (working) {
+      prev.busySince = this.#now();
+      prev.idleSince = null;
+      prev.reported = false;
+      prev.working = true;
+      return;
+    }
+    if (prev.busySince !== null) prev.idleSince = this.#now();
+    prev.working = false;
+  }
+
+  // Sessions that went idle with no turn end covering the busy start. A window with no turn end at all is not judged
+  // (an engine lane never ran a Stop hook). A store failure is tried again next sweep.
+  #sweepOpen(now: number): void {
+    for (const key of this.#lostStalls.keys()) {
+      const [node = "", window = ""] = key.split("\u0000");
+      if (!this.#alive(node, window)) this.#lostStalls.delete(key);
+    }
+    for (const [key, s] of this.#open) {
+      if (s.busySince === null || s.idleSince === null || s.reported) continue;
+      if (!(now >= s.idleSince + this.#lostTurnMs)) continue;
+      const [node = "", window = ""] = key.split("\u0000");
+      if (!this.#online(node)) continue;
+      if (!this.#alive(node, window)) { this.#open.delete(key); this.#lostStalls.delete(key); continue; }
+      const turn = this.#tracks.get(key)?.turn ?? null;
+      const failedAt = this.#failed.get(key);
+      if ((turn !== null && turn.at >= s.busySince - LOST_TURN_SKEW_MS) || (failedAt !== undefined && failedAt >= s.busySince - LOST_TURN_SKEW_MS) || turn === null) {
+        s.reported = true;
+        continue;
+      }
+      const stalls = (this.#lostStalls.get(key) ?? 0) + 1;
+      let made: LaneEvent | null;
+      try {
+        made = this.#raise({
+          v: 1, t: "lane", event: "stale", node, window, lane: window, at: now,
+          sessionId: s.sessionId, reason: "no_turn_end", since: s.idleSince, stalls,
+        });
+      } catch (e) {
+        this.#log.error(`lane watch: the stale event of ${window} on ${node} could not be stored (fleet.db busy?); trying again next sweep`, e);
+        continue;
+      }
+      this.#lostStalls.set(key, stalls);
+      s.reported = true;
+      if (made) this.#nudgeLane(node, window, stalls, s.idleSince, lostTurnNudgeText(s.idleSince, now));
+    }
+  }
+
+  // One nudge to the lane's own pane, while stalls is still worth one. A refusal is logged, never dropped unseen.
+  #nudgeLane(node: string, window: string, stalls: number, at: number, text: string): void {
+    if (!this.#config.nudge || !this.#nudge || stalls > NUDGE_MAX_STALLS) return;
+    const workerId = this.#nudgeTarget(node, window);
+    if (workerId === null) return;
+    this.#nudge({ id: `fleet:nudge:${workerId}:${at}`, workerId, text, ttlMs: NUDGE_TTL_MS }).then(
+      a => { if (!a.ok) this.#log.warn(`lane watch: nudging ${window} on ${node} was refused (${a.error.code})`); },
+      (e: unknown) => this.#log.warn(`lane watch: nudging ${window} on ${node} failed`, e),
+    );
   }
 
   // What the watch holds now, for the brief (GET /v1/lane-watch): each lane's last turn, oldest first.
@@ -300,6 +417,14 @@ export class LaneWatch {
       : last !== null ? { first: last, last } : null;
     if (t.needsInput && t.needsInput.at <= end.at) t.needsInput = null;
   }
+}
+
+// What the lane reads when its turn ended and the fleet never got that end: how long ago, and the line to finish with.
+export function lostTurnNudgeText(since: number, now: number): string {
+  const ago = minutes(now - since);
+  return `[fleet] Your last turn ended ${ago} min ago, but the fleet never received its end, so nothing has been reported from it. `
+    + "Check where it stands now and carry on if you can. Then start your answer with one line: "
+    + "STATUS: DONE, STATUS: BLOCKED, STATUS: NEEDS DECISION, or STATUS: WAITING <on what> for <N> min.";
 }
 
 // What the lane reads: when its turn ended and on what it waited, that nothing came since, and the line to end with.

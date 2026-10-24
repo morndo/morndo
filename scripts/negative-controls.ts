@@ -4001,6 +4001,16 @@ export const CONTROLS: Control[] = [
   { id: "t422-hook-post-unbounded", task: "422", file: "apps/node-agent/hooks/lane-notify-stop",
     find: "-m \"$POST_S\"", replace: "-m 3600",
     run: ["apps/node-agent/test/lane-notify-stop.test.ts"], expect: "ends inside its budget" },
+  // ---- T-422: a session that went idle with no turn end is stale after the grace, and only when no turn end covers it.
+  { id: "t422-lost-turn-no-grace", task: "422", file: "apps/fleet/src/application/lane-watch.ts",
+    find: "now >= s.idleSince + this.#lostTurnMs", replace: "now >= s.idleSince",
+    run: ["apps/fleet/test/lane-watch.test.ts"], expect: "flags a working lane that went idle" },
+  { id: "t422-lost-turn-ignores-turn-end", task: "422", file: "apps/fleet/src/application/lane-watch.ts",
+    find: "turn.at >= s.busySince - LOST_TURN_SKEW_MS", replace: "false",
+    run: ["apps/fleet/test/lane-watch.test.ts"], expect: "does not flag when the turn end arrives" },
+  { id: "t422-lost-turn-not-wired", task: "422", file: "apps/fleet/src/serve.ts",
+    find: "laneWatch.panes(e.node,", replace: "void (e.node,",
+    run: ["apps/fleet/test/lane-watch-intake.test.ts"], expect: "never received its end" },
 ];
 
 // ---- the runner

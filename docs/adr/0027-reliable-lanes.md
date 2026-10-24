@@ -33,3 +33,7 @@ Release as its own step (a release lane ships a reviewed commit as it is; a fix 
 - Claude Code hooks: `Stop` fires when the agent finishes responding; `decision: "block"` with a `reason` keeps it going; `stop_hook_active`; eight continuations in a row at most; an HTTP hook's 2xx JSON answer is read as a command hook's output; `SessionStart` matchers `startup`, `resume`, `clear`, `compact`. https://code.claude.com/docs/en/hooks
 - Magentic-One's progress ledger and stall counter: arXiv 2411.04468. OpenHands, SWE-agent, the Agent Client Protocol and Vibe Kanban: the design's §2.
 - Early completion and missing verification as common agent failures: arXiv 2503.13657; Anthropic, "Effective harnesses for long-running agents" (2025-11-26).
+
+## Amendment 2026-10-24 (T-422)
+
+A Stop hook killed by Claude Code's timeout never makes a `finished` event, and DONE, BLOCKED and NEEDS DECISION have no deadline, so that lane was invisible. The watch now also reads each session's state from the node's inventory. A session it saw go from working (busy or waiting) to idle, with no turn end arriving within 5 minutes, gets one `stale` event with reason `no_turn_end`, and with nudges on, one nudge asking for a status line. A user interrupt (Esc) ends a turn the same way, with no Stop hook, and is flagged the same. Only a lane that has made at least one turn end the fleet knows of is judged, and only after the watch saw it start working.
