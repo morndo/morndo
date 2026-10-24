@@ -47,11 +47,17 @@ mean**: the same steps are run on the release bench (`morndo/morndo-release-test
 lands on the wrong repository changes the settings that guard a key.
 
 ```sh
-REPO=morndo/morndo          # the repository you mean; the release bench is morndo/morndo-release-test
-repo() { echo "repository: $REPO (stop unless this is the repository you mean)" >&2; }
+# REPO is empty on purpose: pasting this block writes nowhere. Set it by hand to the repository you mean,
+# for example production (morndo/morndo) or the release bench (morndo/morndo-release-test).
+REPO=
+repo() {
+  [ -n "$REPO" ] || { echo "REPO is empty: set REPO=<owner>/<name> first" >&2; return 1; }
+  echo "repository: $REPO (stop unless this is the repository you mean)" >&2
+}
 ```
 
-Set both again in every new shell. `ORG=${REPO%%/*}` is the organisation part where a command needs it.
+With `REPO` empty every command below fails (`repos//...`) instead of writing somewhere, and `repo` says so. Set `REPO` and
+redefine `repo` again in every new shell. `${REPO%%/*}` is the organisation part where a command needs it.
 
 1. **Create `promote` and `withdraw` before the workflows that name them are merged.** A workflow that names a missing
    environment creates it with no reviewer and no branch rule, so the environment must be there first:
