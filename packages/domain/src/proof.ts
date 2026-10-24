@@ -40,7 +40,7 @@ export function parseProofRef(input: string): Result<ProofRef, ProofRefProblem> 
     const seen = new Set<string>();
     for (const raw of parts) {
       const t = raw.trim();
-      if (t === "" || t.length > 100 || /[\x00-\x1f\x7f]/.test(t)) return badRef();
+      if (t === "" || t.length > 100 || /[\x00-\x1f\x7f-\x9f]/.test(t)) return badRef();
       const id = /^id=(\d{1,12})$/.exec(t);
       const shape = id === null ? `name:${t}` : `id:${id[1]}`;
       if (seen.has(shape)) continue;                       // written twice: kept once, order kept

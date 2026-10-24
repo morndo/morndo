@@ -52,6 +52,12 @@ describe("a proof reference (B14)", () => {
     expect(refusal(parseProofRef("acme/shop#42\t@3e9d1a7"))?.problem).toBe("bad_ref");
   });
 
+  it("a check name with a C1 control character is refused like one with a C0 control", () => {
+    for (const c of ["\u0007", "\u007f", "\u0085", "\u009f"])
+      expect(refusal(parseProofRef(`acme/shop@3e9d1a7:ci${c}x`))?.problem, JSON.stringify(c)).toBe("bad_ref");
+    expect(parseProofRef("acme/shop@3e9d1a7:ci (linux),lint").ok).toBe(true);        // spaces and punctuation in a name are fine
+  });
+
   it("a ref without its repository is refused", () => {
     for (const bad of ["#119", "#119@3e9d1a7", "3e9d1a7:ci,lint"]) {
       expect(refusal(parseProofRef(bad))?.problem, bad).toBe("bad_ref");
