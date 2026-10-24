@@ -3,11 +3,13 @@
 // comes only through an agent token, named for an account (U1); per account the newest report sets the windows, and a
 // window missing from a report is kept until its reset time has passed (U2); the sessions reporting are kept while
 // fresh (U3); usage grants and decides nothing (U4): it is a read model, like Observation.
+import { cleanLength, cleanNote, takePercent } from "./usage-reading.ts";
+
 export type UsageWindow = { usedPercentage: number; resetsAt: number | null };            // resetsAt in ms
 export type SpendWindow = UsageWindow & { usedUsd: number | null; limitUsd: number | null; period: string | null };
 // A window the account names itself (Cursor's "Cursor models"), with the calendar date the provider printed
 // (`resetsOn`, YYYY-MM-DD) when the reset is a day rather than an instant.
-export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null };
+export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null; lengthMins?: number | null; rolling?: boolean; note?: string | null };
 export type SessionUsage = { sessionId: string; lane: string | null; model: string | null; contextUsed: number | null; at: number };
 
 // One status-line report, as the adapter translates it (the raw shape is the agent CLI's own).
@@ -16,6 +18,9 @@ export type UsageReport = {
   account: string; sessionId: string; lane: string | null; model: string | null; at: number;
   fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; spend: SpendWindow | null; contextUsed: number | null;
   limits: NamedWindow[] | null; onDemand: string | null;
+  // U14: windows this report carries but could not read (a percentage that is not one). They are unknown now: the number kept
+  // from before is not shown as if this report had said it. A window the report leaves out is not listed here.
+  unknown?: readonly ("fiveHour" | "sevenDay" | "spend")[];
 };
 // U5: what names an account besides its name, for the label. Only the hub sets it, from the pool's usage file; a
 // Report never does, and no part of it reaches the agent door's reply.
@@ -39,7 +44,18 @@ export type UsageLevel = "ok" | "warning" | "critical";
 export const usageLevel = (usedPercentage: number): UsageLevel => (usedPercentage >= USAGE_CRITICAL ? "critical" : usedPercentage >= USAGE_WARNING ? "warning" : "ok");
 
 const clampPct = (v: number) => Math.min(100, Math.max(0, v));
-const window = (w: UsageWindow | null): UsageWindow | null => (w ? { usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt } : null);
+// U14: a percentage that is not a finite number in 0..101 is not a reading of that window: dropped, never clamped
+// (contextUsed is not a limit window, so it keeps its clamp).
+const window = (w: UsageWindow | null): UsageWindow | null => {
+  if (!w) return null;
+  const usedPercentage = takePercent(w.usedPercentage);
+  return usedPercentage === null ? null : { usedPercentage, resetsAt: w.resetsAt };
+};
+const spendOf = (s: SpendWindow | null): SpendWindow | null => {
+  if (!s) return null;
+  const usedPercentage = takePercent(s.usedPercentage);
+  return usedPercentage === null ? null : { ...s, usedPercentage };
+};
 // A window kept from before is dropped once its reset time has passed (the CLI drops it then too).
 const keep = <W extends UsageWindow>(w: W | null, now: number): W | null => (w && (w.resetsAt === null || w.resetsAt > now) ? w : null);
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -87,8 +103,14 @@ export function resetsOnLabel(resetsOn: string | null): string | null {
 }
 const named = (w: NamedWindow): NamedWindow | null => {
   const label = labelOf(w.label);
-  if (!label || !Number.isFinite(w.usedPercentage)) return null;
-  return { label, usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
+  const usedPercentage = takePercent(w.usedPercentage);
+  if (!label || usedPercentage === null) return null;
+  // U14: the length, rolling flag and note are kept cleaned; a field that is absent stays absent.
+  const out: NamedWindow = { label, usedPercentage, resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
+  if (w.lengthMins !== undefined) out.lengthMins = cleanLength(w.lengthMins);
+  if (w.rolling !== undefined) out.rolling = w.rolling === true;
+  if (w.note !== undefined) out.note = cleanNote(w.note);
+  return out;
 };
 // An empty list is not named mode: every row dropped, or every window reset, falls back to the 5-hour and weekly rows.
 // A window that names no reset is kept for a day after the report that set it, not forever: nothing else would ever end it, and
@@ -112,6 +134,8 @@ export function takeNamed(raw: readonly NamedWindow[]): NamedWindow[] | null {
 };
 const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0;
 
+// A window the report carried (readable or not) is what the report says of it; only one it left out is kept from before.
+const settled = <W>(read: W | null, carried: boolean, kept: W | null): W | null => (carried ? read : kept);
 // U2: the account after one report. A report older than the account's last never moves the windows (reports from
 // several sessions of one account can cross), but its session is still noted when it is newer than that session's last.
 export function applyReport(current: AccountUsage | null, r: UsageReport, now: number): AccountUsage {
@@ -124,14 +148,15 @@ export function applyReport(current: AccountUsage | null, r: UsageReport, now: n
   const sessions = had && had.at > r.at ? base.sessions : [...base.sessions.filter(s => s.sessionId !== r.sessionId), session];
   if (!newer) return { ...base, sessions: pruneSessions(sessions, now) };
   // A report that names its windows replaces them. An empty list is not that report: the previous windows stay until each reset.
+  const unreadable = (w: "fiveHour" | "sevenDay" | "spend") => r.unknown?.includes(w) === true;
   const namedNow = r.limits == null ? null : takeNamed(r.limits);
   const limits = namedNow ?? keepNamed(base.limits, now, base.reportedAt);
   return {
     account: base.account,
     reportedAt: r.at,
-    fiveHour: window(r.fiveHour) ?? keep(base.fiveHour, now),
-    sevenDay: window(r.sevenDay) ?? keep(base.sevenDay, now),
-    spend: r.spend ? { ...r.spend, usedPercentage: clampPct(r.spend.usedPercentage) } : keep(base.spend, now),
+    fiveHour: settled(window(r.fiveHour), r.fiveHour !== null || unreadable("fiveHour"), keep(base.fiveHour, now)),
+    sevenDay: settled(window(r.sevenDay), r.sevenDay !== null || unreadable("sevenDay"), keep(base.sevenDay, now)),
+    spend: settled(spendOf(r.spend), r.spend !== null || unreadable("spend"), keep(base.spend, now)),
     limits,
     onDemand: namedNow ? demandOf(r.onDemand) : (limits === null ? null : base.onDemand),
     profile: base.profile ?? null,
