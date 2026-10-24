@@ -4022,7 +4022,7 @@ export const CONTROLS: Control[] = [
     find: `\n      if (task && method === "GET") {\n        const t = service.task(task[1] ?? "");\n        return t ? json(res, 200, { ...t, ...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {}) })`, replace: `\n      if (task && method === "GET") {\n        const t = service.task(task[1] ?? "");\n        return t ? json(res, 200, t)`,
     run: ["apps/hub/test/board.test.ts"], expect: "carries proof" },
   { id: "t406-accept-names-the-proof", task: "T-406", file: "apps/web/src/lib/desktop/board.ts",
-    find: `if (proof !== null && !proof.state.accepts)`, replace: `if (false)`,
+    find: `if (proof !== null && !proof.state.accepts && proof.mode === "on")`, replace: `if (false)`,
     run: ["apps/web/test/board-record.test.ts"], expect: "Accept anyway" },
   { id: "t406-forge-url-never-with-a-token", task: "T-406", file: "apps/hub/src/config.ts",
     find: `  const token = tokenFileOf(env);\n  if (token !== null)`, replace: `  const token = tokenFileOf(env);\n  if (false)`,
