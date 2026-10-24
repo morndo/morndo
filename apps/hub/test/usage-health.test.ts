@@ -208,6 +208,19 @@ describe("source health (plan 4.3)", () => {
     expect(await sourceState("app-server")).toMatchObject({ state: "available", asOf: t });
   });
 
+  it("a stamp from the future does not make an honest later reading look older (PR #125 fix round 2, finding 3a)", async () => {
+    expect((await reading({ windows: [fiveHour(31)], capturedAt: now + 5 * MIN })).status).toBe(200);   // stored as now plus the skew
+    let a = await accountOf();
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(31);
+    now += MIN;                                                                                          // the clock advances one minute
+    expect((await reading({ windows: [fiveHour(90)], capturedAt: now })).status).toBe(200);              // an honest reading, stamped at the new now
+    a = await accountOf();
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(90);                                      // not a late replay: accepted and shown
+    expect((await reading({ windows: [fiveHour(10)], capturedAt: now - 6 * MIN })).status).toBe(200);    // a true late replay, more than the skew before the stored stamp
+    a = await accountOf();
+    expect(((a as Body).fiveHour as Body).usedPercentage).toBe(90);                                      // still ignored
+  });
+
   it("an all-unreadable reading is a failure the principal sees, and a good reading clears it (PR #125 finding 4a)", async () => {
     const at = now;
     const r = await reading({ windows: [{ id: "five_hour", used_percent: 1_700_000_000, resets_at: Math.floor((now + HOUR) / 1000) }], capturedAt: at });

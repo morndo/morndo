@@ -8,6 +8,7 @@ import { UsageService } from "../src/application/usage-service.ts";
 let hub: InProcessHub;
 let now: number;
 let workerToken: string;
+let managerToken: string;
 const HOUR = 3_600_000, MIN = 60_000;
 type Body = Record<string, unknown>;
 
@@ -24,8 +25,9 @@ const reading = (o: {
     ...(o.windows === undefined ? {} : { windows: o.windows }), ...(o.failure === undefined ? {} : { failure: o.failure }),
   }),
 });
+// PR #125 fix round 2, finding 2: the limit route is a manager's, so this file's limit post carries a manager token.
 const limit = (body: unknown) => fetch(`${hub.base}/api/agent/usage/limit`, {
-  method: "POST", headers: { authorization: `Bearer ${workerToken}`, "content-type": "application/json", "x-morndo-lane": "builder" }, body: JSON.stringify(body),
+  method: "POST", headers: { authorization: `Bearer ${managerToken}`, "content-type": "application/json", "x-morndo-lane": "builder" }, body: JSON.stringify(body),
 });
 // A status line's report with the five-hour reset the caller names, so a run of reports keeps one cycle.
 const statusLine = (five: number, resetsAt: number, account = "seat-a") => fetch(`${hub.base}/api/agent/usage`, {
@@ -43,6 +45,7 @@ beforeEach(async () => {
   now = 1_700_000_000_000;
   hub = await startInProcessHub({ now: () => now });
   workerToken = hub.agents.issue("lanes", "worker").secret;
+  managerToken = hub.agents.issue("manager", "manager").secret;
 });
 afterEach(async () => { await hub.close(); });
 
@@ -146,5 +149,25 @@ describe("usage notices (plan 4.4)", () => {
     expect(await gone("app-server", "seat-a")).toEqual([]);
     expect(await gone("cli-screen", "seat-b")).toEqual([]);
     expect(await gone("claude-usage", "seat-c")).toHaveLength(1);
+  });
+
+  it("the plan watch is per source: two steady sources tell no plan change, and one source's own change is told once (PR #125 fix round 2, finding 1b)", async () => {
+    const reset = now + 2 * HOUR;
+    const post = async (source: string, plan: string, n: number) => {
+      now += MIN;
+      expect((await reading({ source, plan, windows: [fiveHour(20 + n, reset)], capturedAt: now })).status).toBe(200);
+    };
+    // Two sources, each steady on its own plan for several readings: no plan change is told.
+    await post("app-server", "A", 0);
+    await post("app-server", "A", 1);
+    await post("cli-screen", "B", 2);
+    await post("cli-screen", "B", 3);
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toEqual([]);
+    // One source changing its own plan, told by two agreeing readings: told once.
+    await post("app-server", "B", 4);
+    await post("app-server", "B", 5);
+    expect(((await viewOf()).notices as Body[]).filter(n => n.kind === "plan")).toEqual([
+      { id: expect.any(String), kind: "plan", account: "seat-a", at: expect.any(Number), text: 'seat-a: plan changed from "A" to "B".' },
+    ]);
   });
 });
