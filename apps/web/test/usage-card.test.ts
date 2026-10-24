@@ -17,8 +17,9 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
   const RESET = ${RESET};
   const HOUR = ${HOUR};
   const cursor = {
+    // S6: a named-only account — Cursor's status line names its windows and carries no fixed 5-hour or weekly one.
     account: "cursor", reportedAt: NOW - 60_000,
-    fiveHour: { usedPercentage: 40, resetsAt: NOW + 2 * HOUR }, sevenDay: null,
+    fiveHour: null, sevenDay: null,
     spend: { usedPercentage: 85, resetsAt: RESET, usedUsd: null, limitUsd: null, period: "included usage, monthly" },
     sessions: [{ sessionId: "cursor-plan", lane: "usage-collector", model: "Cursor Ultra · Auto 88% · API 45% · on-demand off", contextUsed: null, at: NOW }],
     limits: [
@@ -392,6 +393,93 @@ describe("Home usage card: the four states, a title, a seat, a disagreement, sou
       const box = await forget.boundingBox();
       expect(box?.height ?? 0).toBeGreaterThanOrEqual(30);                       // a tap target (the phone layout's own rule)
     }
+    await tab.close();
+  });
+});
+
+// S6 (plan 4.6, the board follow-up of slice 4): a mixed account — named windows beside a fixed 5-hour and weekly
+// pair (Codex with other limits) — shows both: the fixed rows first, the named ones after them under a small
+// "Other limits" caption. A named-only account keeps the rendering it has today.
+const MIXED_PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+  import { mount } from "svelte";
+  import Home from "/src/lib/desktop/HomeView.svelte";
+  const NOW = ${NOW};
+  const RESET = ${RESET};
+  const HOUR = ${HOUR};
+  const mixed = {
+    account: "mixed", reportedAt: NOW - 60_000,
+    fiveHour: { usedPercentage: 55, resetsAt: NOW + 2 * HOUR },
+    sevenDay: { usedPercentage: 30, resetsAt: NOW + 3 * 24 * HOUR },
+    spend: null, sessions: [],
+    limits: [
+      { label: "Burst", usedPercentage: 80, resetsAt: RESET, resetsOn: null },
+      { label: "Other models", usedPercentage: 45, resetsAt: RESET, resetsOn: "2026-11-07" },
+    ],
+    onDemand: null,
+  };
+  const namedOnly = {
+    account: "named-only", reportedAt: NOW - 60_000,
+    fiveHour: null, sevenDay: null, spend: null, sessions: [],
+    limits: [{ label: "Cursor models", usedPercentage: 88, resetsAt: RESET, resetsOn: "2026-11-07" }],
+    onDemand: "off",
+  };
+  const classic = {
+    account: "max-1", reportedAt: NOW - 120_000,
+    fiveHour: { usedPercentage: 23.5, resetsAt: NOW + 2 * HOUR }, sevenDay: null, spend: null, sessions: [],
+    limits: null, onDemand: null,
+  };
+  mount(Home, { target: document.body, props: { accounts: [mixed, namedOnly, classic], at: NOW, now: NOW, live: true, onOpenLane: () => {} } });
+</script></body></html>`;
+
+describe("Home usage card: a mixed account (S6)", () => {
+  let web: Web;
+  beforeAll(async () => { web = await startWeb(MIXED_PAGE); }, 60_000);
+  afterAll(async () => { await web?.close(); });
+
+  const norm = (s: string) => s.replace(/\s+/g, " ");
+
+  it("shows the fixed 5-hour and weekly rows first, then the named rows under an Other limits caption", async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 1280, height: 900 } });
+    const errors: string[] = [];
+    tab.on("pageerror", e => errors.push(e.message.split("\n")[0] ?? ""));
+    await tab.goto(web.url);
+    const mixed = tab.locator("[data-account='mixed']");
+    await mixed.waitFor();
+    const text = norm(await mixed.innerText());
+    expect(text).toContain("5-hour window");
+    expect(text).toContain("55%");
+    expect(text).toContain("Weekly window");
+    expect(text).toContain("30%");
+    expect(text).toContain("Other limits");
+    expect(text).toContain("Burst");
+    expect(text).toContain("80%");
+    expect(text).toContain("Other models");
+    expect(text).toContain("resets 7 Nov");
+    // the fixed rows come first, the named ones only after the caption
+    const at = (s: string) => text.indexOf(s);
+    expect(at("5-hour window")).toBeLessThan(at("Weekly window"));
+    expect(at("Weekly window")).toBeLessThan(at("Other limits"));
+    expect(at("Other limits")).toBeLessThan(at("Burst"));
+    // a named-only account keeps today's rendering: its own rows, no caption, no fixed rows
+    const named = norm(await tab.locator("[data-account='named-only']").innerText());
+    expect(named).toContain("Cursor models");
+    expect(named).toContain("on-demand off");
+    expect(named).not.toContain("5-hour window");
+    expect(named).not.toContain("Weekly window");
+    expect(named).not.toContain("Other limits");
+    // and the mixed account counts in the tightest tiles
+    const weekTile = tab.locator(".tile", { hasText: "Tightest weekly window" });
+    expect(await weekTile.innerText()).toContain("30%");
+    expect(await weekTile.innerText()).toContain("mixed");
+    expect(errors).toEqual([]);
+    await tab.close();
+  });
+
+  it("at 390 px the mixed card never widens the page", async () => {
+    const tab = await web.browser.newPage({ viewport: { width: 390, height: 844 } });
+    await tab.goto(web.url);
+    await tab.locator("[data-account='mixed']").waitFor();
+    expect(await tab.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     await tab.close();
   });
 });

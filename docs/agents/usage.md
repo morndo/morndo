@@ -101,7 +101,10 @@ The collector reads `~/.config/morndo/usage-claude.json` (path from `MORNDO_USAG
   "hub": "http://127.0.0.1:8787",
   "tokenFile": "/etc/morndo/usage-claude.token",
   "node": "pc",
-  "accounts": { "seat-a": { "configDir": "/path/to/seat-a-config-dir" } }
+  "accounts": {
+    "seat-a": { "configDir": "/path/to/seat-a-config-dir" },
+    "codex-a": { "kind": "codex", "codexHome": "/path/to/codex-home" }
+  }
 }
 ```
 
@@ -148,6 +151,45 @@ may post an *unleased* reading for any account. Such a reading cannot end a mark
 lease does either), but it does change the windows Home shows and the thresholds that watch them. Worker tokens are
 shared by lanes, so the token binding only detects a second, different token. The fix is per-lane worker tokens and
 leases bound to the accounts a node actually reports; it is the follow-up T-430 on the board, not part of this change.
+
+## Reading Codex usage
+
+The same collector reads a Codex subscription: an account entry with `"kind": "codex"` and `"codexHome"` (its
+`CODEX_HOME` directory) in the same config, and optionally `"codexBin"` when the `codex` on `PATH` is not the one to
+run (`MORNDO_CODEX_BIN` overrides it for a machine). It reads the app server's own `account/rateLimits/read` — the
+CLI's experimental JSON-RPC interface, `codex app-server` on stdio — and nothing else: never a token, never a
+credentials file. The reading carries the plan, every window the answer names (the 5-hour and weekly pair, and any
+other limit's windows under their limit's own name), and a digest of the account id — never the id itself.
+
+A codex account runs under the same lease as a claude one (source `app-server`): only a granted lease spawns a read,
+and the reading or the failure carries the lease id. How often it reads adapts to how full the fullest window is:
+every 15 minutes while it idles below 75%, every 5 from 75%, every 2 from 90%, once a minute from 99% — never faster
+than once a minute. The hub, not the collector, holds that rhythm through its lease.
+
+Two things only a leased reading may say. The plan watch (a changed plan name or identity, told once after two
+agreeing readings) sees leased readings only: an unleased reading never tells a change, never drops a derived seat
+mark and never moves the baseline the next leased reading is compared with, so no token can tell a change or poison
+it by posting readings of its own. A changed identity between two agreeing leased readings is an account change ("the
+account behind it changed"), and like a plan change it drops a derived seat mark. And Codex's own limit flags — `ordinary_usage_allowed` false, or any `rate_limit_reached_type`
+— mark the seat out at the soonest reset of a window at 100%; flags that say all is well end a derived mark again. A
+reading without a valid lease never marks and never clears from its flags, and the type string itself is never shown
+and never stored.
+
+Window identity is explicit. A reading's primary pair is the account's `five_hour` and `seven_day` windows; another
+limit's windows (a second limit under its own name) keep their own ids even at the same length, and are shown as named
+windows under "Other limits" — they never replace the main pair. A window nobody named explicitly is still read by its
+length (300 minutes is the 5-hour window, 10080 the weekly one), and of several such windows of one length the first
+is the main one. One edge: a reading that carries only another limit's windows and no primary pair would have the
+first of them read by length as the main window.
+
+Two accounts on one machine are told apart by their own directory (`codexHome` here, `configDir` for a claude
+account), so the collector refuses a config in which two names resolve to the same directory: it reads nothing and
+says which two. It also has no node-wide lock or semaphore for a codex read as the claude read does; a codex read is
+bounded by its 15-second timeout and the hub's lease cap of two.
+
+The app server also pushes `account/rateLimits/updated` notifications; Morndo maps one to the same reading body (a
+push needs no lease — it is nobody's rationed read). The long-lived app-server client that would receive those
+pushes is **not built yet**: until it is, Codex is read by the leased poll alone.
 
 ## Pool seats
 

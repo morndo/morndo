@@ -140,7 +140,10 @@ export function takeNamed(raw: readonly NamedWindow[]): NamedWindow[] | null {
   }
   return out.length ? out : null;
 };
-const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0;
+// S6 (plan 4.6): an account names its windows only when it has no fixed 5-hour or weekly one (Cursor's status line).
+// A mixed account — named windows beside the fixed pair (Codex with other limits) — counts both: its card shows the
+// fixed rows and the named ones after them.
+const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0 && a.fiveHour === null && a.sevenDay === null;
 
 // A window the report carried (readable or not) is what the report says of it; only one it left out is kept from before.
 const settled = <W>(read: W | null, carried: boolean, kept: W | null): W | null => (carried ? read : kept);
@@ -211,12 +214,19 @@ export function cleanProfile(p: { email?: unknown; org?: unknown; plan?: unknown
   return profile.email || profile.org || profile.plan ? profile : null;
 }
 
-// The notice's level: named windows count, and a hidden 5-hour or weekly row does not.
+// The notice's level: named windows count, and a hidden 5-hour or weekly row does not. A mixed account counts its
+// fixed windows, its named windows and its spend (S6); a fixed-only account counts its two fixed rows, as ever.
 const LEVEL_RANK: Record<UsageLevel, number> = { ok: 0, warning: 1, critical: 2 };
 export function shownLevel(accounts: readonly AccountUsage[]): UsageLevel {
   let worst: UsageLevel = "ok";
   for (const a of accounts) {
-    const windows: readonly (UsageWindow | null)[] = showsNamed(a) ? [...(a.limits ?? []), a.spend] : [a.fiveHour, a.sevenDay];
+    const named = showsNamed(a);
+    const mixed = !named && (a.limits?.length ?? 0) > 0;
+    const windows: readonly (UsageWindow | null)[] = named
+      ? [...(a.limits ?? []), a.spend]
+      : mixed
+        ? [...(a.limits ?? []), a.fiveHour, a.sevenDay, a.spend]
+        : [a.fiveHour, a.sevenDay];
     for (const w of windows) {
       if (!w) continue;
       const level = usageLevel(w.usedPercentage);
@@ -227,7 +237,8 @@ export function shownLevel(accounts: readonly AccountUsage[]): UsageLevel {
 }
 
 // The account nearest its limit on a window, for the headline tiles; null when no account reports that window.
-// A named account's 5-hour and weekly rows are not on its card, so they are not candidates.
+// A named-only account's 5-hour and weekly rows are not on its card, so they are not candidates; a mixed account's
+// are, since S6.
 export function tightestShown(accounts: readonly AccountUsage[], which: "fiveHour" | "sevenDay"): { account: string; window: UsageWindow } | null {
   return tightest(accounts.filter(a => !showsNamed(a)), which);
 }

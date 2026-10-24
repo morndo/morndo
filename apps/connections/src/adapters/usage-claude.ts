@@ -63,7 +63,7 @@ function findReport(v: unknown): unknown {
 // nothing else — the hash the first 8 hex characters of the sha256 of the last stdout line's first 120 characters,
 // enough to tell two broken shapes apart, never enough to repeat a word the CLI printed.
 const HINT_HEAD = 120;
-function hintOf(lastLine: string): string {
+export function hintOf(lastLine: string): string {
   return `unknown shape ${createHash("sha256").update(lastLine.slice(0, HINT_HEAD)).digest("hex").slice(0, 8)}`;
 }
 

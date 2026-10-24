@@ -6,15 +6,24 @@
 // tests and for QA).
 import { mkdirSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { productVersion } from "@morndo/service-kit";
+import type { UsageReason } from "@morndo/domain";
+import { childEnv } from "./runtime-claude.ts";
+import { hintOf } from "./usage-claude.ts";
 import { killActiveReads, readClaude } from "./usage-claude-run.ts";
+import { codexReadingBody, everyFor, readCodexLimits } from "./usage-codex.ts";
 
 export type UsageClaudeAccount = { configDir: string };
+// S6 (plan 4.6): a codex account in the same config — kind "codex", the CODEX_HOME directory it reads under, and
+// optionally the binary to run when the PATH's own codex is not the one (MORNDO_CODEX_BIN overrides it).
+export type UsageCodexAccount = { kind: "codex"; codexHome: string; codexBin?: string };
+export type UsageAccount = UsageClaudeAccount | UsageCodexAccount;
 export type UsageClaudeConfig = {
   hub: string;
   tokenFile: string;
   node: string;
-  accounts: Record<string, UsageClaudeAccount>;
+  accounts: Record<string, UsageAccount>;
 };
 
 const LOOP_MS = 30_000;
@@ -27,12 +36,96 @@ function loadConfig(path: string): UsageClaudeConfig | null {
   const c = raw as Record<string, unknown>;
   if (typeof c.hub !== "string" || typeof c.tokenFile !== "string" || typeof c.node !== "string"
     || typeof c.accounts !== "object" || c.accounts === null) return null;
-  const accounts: Record<string, UsageClaudeAccount> = {};
+  const accounts: Record<string, UsageAccount> = {};
   for (const [account, a] of Object.entries(c.accounts as Record<string, unknown>)) {
-    if (account === "" || typeof a !== "object" || a === null || typeof (a as Record<string, unknown>).configDir !== "string") return null;
-    accounts[account] = { configDir: (a as Record<string, unknown>).configDir as string };
+    if (account === "" || typeof a !== "object" || a === null) return null;
+    const e = a as Record<string, unknown>;
+    if (e.kind === undefined) {
+      // a claude account, as ever: its own config directory
+      if (typeof e.configDir !== "string") return null;
+      accounts[account] = { configDir: e.configDir };
+    } else if (e.kind === "codex") {
+      if (typeof e.codexHome !== "string") return null;
+      const codex: UsageCodexAccount = { kind: "codex", codexHome: e.codexHome };
+      if (e.codexBin !== undefined) {
+        if (typeof e.codexBin !== "string") return null;
+        codex.codexBin = e.codexBin;
+      }
+      accounts[account] = codex;
+    } else return null;
   }
   return { hub: c.hub, tokenFile: c.tokenFile, node: c.node, accounts };
+}
+
+// The first two accounts that read the same directory (slice 6 review): accounts on one machine are told apart by
+// their own config directory or CODEX_HOME, so two names on one directory would post one account's numbers under
+// both. Paths are compared resolved, so `/x/` and `/x/../x` are one.
+function sharedDirectory(accounts: Record<string, UsageAccount>): [string, string] | null {
+  const seen = new Map<string, string>();
+  for (const [name, a] of Object.entries(accounts)) {
+    const key = "kind" in a ? `codex|${resolve(a.codexHome)}` : `claude|${resolve(a.configDir)}`;
+    const first = seen.get(key);
+    if (first !== undefined) return [first, name];
+    seen.set(key, name);
+  }
+  return null;
+}
+
+// One codex account's pass (S6, plan 4.6): the same lease, read and post loop as a claude account, asking for source
+// "app-server" and reading the app server's own account/rateLimits (never a token, never a credentials file). The
+// binary is the entry's own codexBin, else the MORNDO_CODEX_BIN of the environment, else the PATH's codex; the child
+// runs under the account's CODEX_HOME with the same environment pool-cli's codexEnv builds. A refused read is
+// classified by its words, as the claude classifier does, with a redacted hint.
+export async function codexPass(o: {
+  account: string;
+  hub: string;
+  token: string;
+  node: string;
+  entry: UsageCodexAccount;
+  env: NodeJS.ProcessEnv;
+  now: () => number;
+  post: (hub: string, path: string, token: string, headers: Record<string, string>, body: unknown) => Promise<Record<string, unknown> | null>;
+}): Promise<boolean> {
+  const headers = { "x-morndo-account": o.account, "x-morndo-lane": "usage-claude" };
+  const lease = await o.post(o.hub, "/api/agent/usage/lease", o.token, headers, { account: o.account, source: "app-server", node: o.node });
+  if (lease === null) return false;                          // the hub could not be asked: the pass is not clean
+  if (lease.status !== "granted" || typeof lease.lease_id !== "string") return true;   // fresh or denied: nothing to do
+  const read = await readCodexLimits({
+    bin: o.entry.codexBin ?? o.env.MORNDO_CODEX_BIN ?? "codex",
+    env: childEnv(o.env, { CODEX_HOME: o.entry.codexHome }),
+    version: productVersion(),
+  });
+  const body: Record<string, unknown> = read.ok
+    ? {
+      ...codexReadingBody(read.limits, {
+        identity: read.limits.identity ?? null,
+        ordinaryUsageAllowed: read.limits.ordinaryUsageAllowed ?? null,
+        rateLimitReachedType: read.limits.rateLimitReachedType ?? null,
+        now: o.now(), node: o.node,
+      }),
+      lease_id: lease.lease_id,
+    }
+    : {
+      source: "app-server", node: o.node, captured_at: Math.floor(o.now() / 1000), lease_id: lease.lease_id,
+      every_s: everyFor(null),                              // a failed read retries at the idle pace
+      failure: { reason: codexReasonOf(read.problem), hint: codexHintOf(read.problem) },
+    };
+  return await o.post(o.hub, "/api/agent/usage/readings", o.token, headers, body) !== null;
+}
+
+// The read's own problem, classified by its words: a sign-in problem signed_out, a limit rate_limited, a timeout
+// timeout, anything else unknown_screen — the same closed list the hub keeps, never a free string.
+function codexReasonOf(problem: string): UsageReason {
+  const words = problem.toLowerCase();
+  if (words.includes("in time")) return "timeout";
+  if (words.includes("login") || words.includes("sign in") || words.includes("signed in") || words.includes("sign-in")
+    || words.includes("401") || words.includes("403") || words.includes("authentication")) return "signed_out";
+  if (words.includes("429") || words.includes("rate limit")) return "rate_limited";
+  return "unknown_screen";
+}
+// Only an unknown shape carries a hint, and only its redacted head.
+function codexHintOf(problem: string): string | null {
+  return codexReasonOf(problem) === "unknown_screen" ? hintOf(problem) : null;
 }
 
 // One POST to the hub, with the agent token in the header — never in a body and never in a line of output. The
@@ -64,6 +157,8 @@ export async function collectOnce(p: {
   const configPath = p.configPath ?? env.MORNDO_USAGE_CLAUDE_CONFIG ?? process.env.MORNDO_USAGE_CLAUDE_CONFIG ?? DEFAULT_CONFIG();
   const config = loadConfig(configPath);
   if (config === null) { stderr(`morndo-usage-claude: no readable config at ${configPath}\n`); return 1; }
+  const shared = sharedDirectory(config.accounts);
+  if (shared !== null) { stderr(`morndo-usage-claude: ${shared[0]} and ${shared[1]} read the same directory; fix the config, nothing was read\n`); return 1; }
   let token = "";
   try { token = readFileSync(config.tokenFile, "utf8").trim(); } catch { stderr("morndo-usage-claude: the token file cannot be read\n"); return 1; }
   if (token === "") { stderr("morndo-usage-claude: the token file is empty\n"); return 1; }
@@ -72,6 +167,11 @@ export async function collectOnce(p: {
   mkdirSync(lockDir, { recursive: true });
   let clean = true;
   for (const [account, a] of Object.entries(config.accounts)) {
+    if ("kind" in a) {
+      // S6 (plan 4.6): a codex account runs the same loop, reading the app server under the hub's lease.
+      if (!(await codexPass({ account, hub: config.hub, token, node: config.node, entry: a, env, now, post }))) clean = false;
+      continue;
+    }
     const headers = { "x-morndo-account": account, "x-morndo-lane": "usage-claude" };
     const lease = await post(config.hub, "/api/agent/usage/lease", token, headers, { account, source: "claude-usage", node: config.node });
     if (lease === null) { stderr(`morndo-usage-claude: the hub could not be asked about ${account}\n`); clean = false; continue; }
