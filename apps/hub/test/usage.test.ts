@@ -88,7 +88,7 @@ describe("reports under an agent token (U1)", () => {
     const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
     const body = {
       session_id: "cursor-plan", model: { display_name: "Cursor Ultra" },
-      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "included usage, monthly" } },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
       limits: [
         { label: "Cursor models", used_percentage: 88, resets_at: resets, resets_on: "2026-11-07" },
         { label: "Other models", used_percentage: 45, resets_at: resets, resets_on: "2026-11-07" },
@@ -109,7 +109,7 @@ describe("reports under an agent token (U1)", () => {
     const limits = [{ label: "", used_percentage: 1 }, ...Array.from({ length: 8 }, (_, i) => ({ label: `W${i}`, used_percentage: 10 + i, resets_at: resets }))];
     const posted = await post({
       session_id: "cursor-plan",
-      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "monthly" } },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
       limits, on_demand: "off",
     }, "cursor");
     expect(posted.status).toBe(200);

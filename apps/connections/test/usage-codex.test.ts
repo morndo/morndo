@@ -135,7 +135,7 @@ describe("codex usage: the reading body (S6, plan 4.6)", () => {
     expect("rate_limit_reached_type" in body).toBe(false);
   });
 
-  it("an unknown duration sends null, not a failure; another duration names the window by its minutes (AT-14)", () => {
+  it("sends length_mins with every window; an unknown duration sends null, not a failure (AT-14)", () => {
     const unknown = codexReadingBody({ primary: win(30, null), secondary: null, planType: null, others: [] }, { ...noFlags, node: null });
     expect(unknown.windows).toEqual([{ id: "Window", used_percent: 30, resets_at: 1_893_456_000, length_mins: null, rolling: false, note: null }]);
     expect(unknown.plan).toBeNull();
