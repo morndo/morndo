@@ -4345,6 +4345,9 @@ export const CONTROLS: Control[] = [
   { id: "t415s5r1-stale-lock-group-lives", task: "T-415", file: "apps/connections/src/adapters/usage-claude-run.ts",
     find: "  killLockGroup(lockPath);", replace: "",
     run: ["apps/connections/test/usage-claude-run.test.ts"] },
+  { id: "t415s5r1-killed-read-leaves-its-dir", task: "T-415", file: "apps/connections/src/adapters/usage-claude-run.ts",
+    find: "try { rmSync(cwd, { recursive: true, force: true }); } catch { /* the read's own cleanup will try again */ }", replace: "",
+    run: ["apps/connections/test/usage-claude-main.test.ts"] },
 ];
 
 // ---- the runner

@@ -45,13 +45,16 @@ const semaphore: { tail: Promise<unknown> } = { tail: Promise.resolve() };      
 const signedOutUntil = new Map<string, number>();                              // per account: when the auth gate opens again
 // Every headless read this process has running (fix round 2026-10-24, finding 4): the collector kills them all —
 // each by its whole process group — on SIGTERM, SIGINT and exit, so a collector that dies mid-read leaves nothing
-// running. Cleared as each read ends.
-const activeReads = new Set<Spawned>();
+// running, and removes the working directory each one was given (a process that exits does not run the read's own
+// cleanup). Each read is kept with that directory and cleared as it ends.
+const activeReads = new Map<Spawned, string>();
 
-// Kills every active read's whole process group (finding 4). Safe to call at any time, and from an exit handler.
+// Kills every active read's whole process group (finding 4) and removes its working directory. Safe to call at any
+// time, and from an exit handler.
 export function killActiveReads(): void {
-  for (const proc of [...activeReads]) {
+  for (const [proc, cwd] of [...activeReads]) {
     try { proc.kill("SIGKILL"); } catch { /* already gone */ }
+    try { rmSync(cwd, { recursive: true, force: true }); } catch { /* the read's own cleanup will try again */ }
   }
 }
 
@@ -178,7 +181,7 @@ export async function readClaude(opts: {
     const cwd = mkdtempSync(join(tmpdir(), "morndo-usage-claude-"));
     try {
       const proc = spawn(bin, CLAUDE_USAGE_ARGS, { env: childEnv, cwd, stdin: "ignore", stderr: "ignore", detached: true });
-      activeReads.add(proc);               // the collector's death kills this whole group (finding 4)
+      activeReads.set(proc, cwd);               // the collector's death kills this whole group (finding 4)
       if (proc.pid > 0) writeFileSync(lockPath, `${JSON.stringify({ pid: process.pid, pgid: proc.pid, startedAt: now })}\n`);
       const chunks: Uint8Array[] = [];
       const collect = (async () => { try { for await (const chunk of proc.stdout) chunks.push(chunk); } catch { /* a killed run's pipe */ } })();
