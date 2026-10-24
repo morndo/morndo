@@ -4026,7 +4026,7 @@ export const CONTROLS: Control[] = [
     run: ["apps/web/test/board-record.test.ts"], expect: "Accept anyway" },
   { id: "t406-forge-url-never-with-a-token", task: "T-406", file: "apps/hub/src/config.ts",
     find: `  const token = tokenFileOf(env);\n  if (token !== null)`, replace: `  const token = tokenFileOf(env);\n  if (false)`,
-    run: ["apps/hub/test/config-proof.test.ts"], expect: "cannot be used" },
+    run: ["apps/hub/test/config-proof.test.ts"], expect: "to throw an error" },
   // ---- Proof of work, fixes after the review of steps 1 to 4 (board T-406): the allowlist, staleness, who may brief, the credential, the merge ties.
   { id: "t406-allowlist-at-fetch", task: "T-406", file: "apps/hub/src/application/proof-service.ts",
     find: `if (forge === null || !allowed.has(ref.repo.toLowerCase())) return`, replace: `if (forge === null) return`,
