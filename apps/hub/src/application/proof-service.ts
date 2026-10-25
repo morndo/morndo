@@ -7,7 +7,7 @@
 // credential), judges the answer with the domain's pure functions, and stores the row. Triggers ride on the board's own
 // events (a move to review, a brief filed), a timer pass re-reads what is still pending or was rate-limited, and a Done
 // attempt re-reads first whatever has gone stale — all through `record`, so none of it ever writes a task or an event.
-import { MORNDO_REPO, YOUNG_MS, coverageOf, currentBrief, currentList, roundStart, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type CoverageItem, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type Task, type TaskActor, type TaskEvent } from "@morndo/domain";
+import { MORNDO_REPO, YOUNG_MS, coverageOf, readsAgain, currentBrief, currentList, roundStart, judgeCi, judgePr, parseProofRef, proofOf, type BriefInput, type CoverageItem, type Judged, type ProofBrief, type ProofGate, type ProofMode, type ProofRef, type ProofState, type RefResult, type Task, type TaskActor, type TaskEvent } from "@morndo/domain";
 import { redactKeyMaterial } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import { RETRYABLE_DETAIL, type ForgeChecks, type ForgeFailure } from "./ports.ts";
@@ -194,7 +194,7 @@ export class ProofService {
         const row = rows.get(ref);
         // A ref with no row reads as pending (proofOf) and is due at once, like one whose check never landed.
         if (row === undefined) return true;
-        if (row.state !== "pending" && !(row.state === "unfetchable" && RETRYABLE_DETAIL.test(row.detail ?? ""))) return false;
+        if (row.state !== "pending" && !(row.state === "unfetchable" && RETRYABLE_DETAIL.test(row.detail ?? "")) && !readsAgain(row.detail)) return false;
         return now - row.checkedAt >= interval;
       });
       if (refs.length > 0) due.push({ key: task.key, refs });

@@ -15,6 +15,9 @@ const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
 // branch requires fails, so the proof-list task needs a commit that is green for what its base branch requires).
 const PR_GREEN = "morndo/morndo#43@7b1c2d3";
 const FULL_GREEN = "7b1c2d3e4f5a69788796a5b4c3d2e1f0a9b8c7d6";
+// A third one: its required check passes and an optional one fails, which is a warning on the reference and holds nothing.
+const PR_WARN = "morndo/morndo#44@5d4c3b2";
+const FULL_WARN = "5d4c3b2a1f0e9d8c7b6a59483726150f4e3d2c1b";
 const RUN = "https://github.com/morndo/morndo/actions/runs/9";
 const { check, watch, finish } = checks(OUT);
 let code = 1;
@@ -48,6 +51,11 @@ try {
   fakeForge.runs("morndo/morndo", FULL, [
     { id: 1, name: "ci", status: "completed", conclusion: "success" },
     { id: 2, name: "lint", status: "completed", conclusion: "failure", url: RUN },
+  ]);
+  fakeForge.pr("morndo/morndo", 44, { head: FULL_WARN, base: "stable", required: ["ci"] });
+  fakeForge.runs("morndo/morndo", FULL_WARN, [
+    { id: 4, name: "ci", status: "completed", conclusion: "success" },
+    { id: 5, name: "e2e", status: "completed", conclusion: "failure", url: RUN },
   ]);
   office = await startOffice("board-proof", {
     MORNDO_FORGE_URL: fakeForge.base,
@@ -153,6 +161,30 @@ try {
     ).code === 0, "re-brief failed");
     await panel.locator('[data-proof-need][data-status="told"]').waitFor({ timeout: 10_000 });
     assert(manager("done", "T-2", "--why", "read the diff").code === 0, "done should pass once data is told");
+  });
+
+  await check("a green required check beside a failing optional one is a warning on the reference and does not hold the Done", async () => {
+    assert(manager("new", "Ship the warning", "--assign", "builder").code === 0, "new T-3 failed");
+    assert(builder("start", "T-3").code === 0, "start T-3 failed");
+    assert(builder("brief", "T-3", "--pr", PR_WARN, "--summary", "Totals row rounds to cents", "--left-out", "nothing", "--limit", "none known").code === 0, "brief T-3 failed");
+    assert(builder("review", "T-3").code === 0, "review T-3 failed");
+    const warning = `warning: optional check "e2e" failed ${RUN}`;
+    await waitFor(() => manager("show", "T-3").out.includes("1 of 1 green"), 20_000);
+    const shown = manager("show", "T-3").out;
+    assert(shown.includes(`⚠ ${PR_WARN} ${warning}`), `the CLI line should carry the warning: ${shown}`);
+
+    await page.locator(".rail").getByRole("button", { name: "Board" }).click();
+    await column(page, "review").locator('[data-task="T-3"]').waitFor({ timeout: 10_000 });
+    await cardOf(page, "T-3").click();
+    const panel = page.locator('[data-task-panel="T-3"]');
+    await panel.locator("[data-proof-line]").waitFor({ timeout: 10_000 });
+    const line = await panel.locator("[data-proof-line]").innerText();
+    assert(line.includes("1 of 1 green") && line.includes(`⚠ ${PR_WARN} ${warning}`), `the panel line should carry the warning: ${line}`);
+    const row = panel.locator('[data-proof-ref][data-state="green"]');
+    assert(await row.count() === 1 && await panel.locator('[data-proof-ref][data-state="red"]').count() === 0, "expected one green reference and no red one");
+    assert((await row.innerText()).includes(warning), `the green row should show the warning: ${await row.innerText()}`);
+    await page.screenshot({ path: join(OUT, "board-proof-warning.png") });
+    assert(manager("done", "T-3", "--why", "read the diff").code === 0, "done should pass: an optional check holds nothing");
   });
 
   code = finish();

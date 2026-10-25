@@ -81,13 +81,17 @@ Read from the code at 613f3853 by the product lane's review of the warn week. Ea
    requires** hold it (decided by the manager, 2026-10-25). The required set is the union of branch protection (the
    `protection` of `GET /repos/{r}/branches/{b}`) and the active rulesets (`GET /repos/{r}/rules/branches/{b}`), both
    readable with read access (Metadata) and, on a public repository, without a token; read once and kept ten minutes per
-   repository and branch. A required check failing is red, running is pending, not reported yet is pending while the brief
-   is young (YOUNG_MS) and ignored after. A failing or running **optional** check is a warning on the reference (`⚠`, green
-   state, the Done is not held). **If the required set cannot be read** (an error, a shape not understood, a base branch
-   not known) every check counts as required, and the line says "required checks not readable; every check counted": the
-   gate fails closed. Cost: up to three more forge reads per `pr` reference (the pull request's checks, and the two reads of
-   the required set, which the cache shares between tasks); a token that cannot read check runs leaves a `pr` reference
-   unfetchable (as it already did a `ci` one); a required check that is a commit status and not a check run is not seen.
+   repository and branch. A required check failing is red, running is pending, and one with **no result at all is pending
+   however old the brief is** (it never drops out: a required commit status that never reports holds the reference until the
+   manager overrides). A failing or running **optional** check is a warning on the reference (`⚠`, green state, the Done is
+   not held). **If there is no required set to go by** (the read failed, a shape was not understood, the base branch is not
+   known, or the branch requires nothing: no protection, or an empty set) every check counts as required and the line says
+   which: "required checks not readable" or "no required checks on the base branch". The gate fails closed. A read that
+   failed is not cached and the timer reads it again at its next pass, so that red does not outlive the outage. Cost: up to
+   three more forge reads per `pr` reference (the pull request's checks, and the two reads of the required set, which the
+   cache shares between tasks); a token that cannot read check runs leaves a `pr` reference unfetchable (as it already did a
+   `ci` one); a required check that is a commit status and not a check run holds the reference until overridden, because it
+   never appears among the check runs.
    Reason: a Done over unfinished required checks is the case the gate exists for, and the assigner's `ci` item was easy
    to leave off; an optional check should not hold it.
 2. **A `ci` reference that named only passing checks** passed while another check at the commit was red. The named

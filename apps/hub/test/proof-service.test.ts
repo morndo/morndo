@@ -705,6 +705,46 @@ describe("verifying (B14, B15)", () => {
         store.close();
       });
 
+      // T-450 fix round: no required set means every check counts; a required check never reported holds however long;
+      // a failed read of the required set is read again, so a fail-closed red does not outlive the outage.
+      it("a branch with no required checks counts every check", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: [] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const line = prLine(`0 of 1 green · ✗ morndo/morndo#42@3e9d1a7 checks: "e2e" failed (no required checks on the base branch; every check counted)`);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "failing", accepts: false, line });
+        expect(await doneBy(board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        store.close();
+      });
+
+      it("a required check that never reports holds the reference after the brief is no longer young", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci", "license/cla"] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }]);
+        const made = withForge({ mode: "on" });
+        atReview(made.board);
+        await made.proof.file("T-1", prOnly, lane);
+        await made.proof.idle();
+        clock = NOW + 20 * 60_000;                                                    // past YOUNG_MS (15 minutes)
+        await made.proof.verify("T-1");
+        const line = prLine(`0 of 1 green · … morndo/morndo#42@3e9d1a7 checks: required "license/cla" not reported yet`);
+        expect(made.proof.view("T-1")?.state).toMatchObject({ kind: "pending", accepts: false, line });
+        expect(await doneBy(made.board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        made.store.close();
+      });
+
+      it("a fail-closed result is read again by the timer once the required set can be read", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: null });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, proof } = await fileAndRead("on");
+        expect(proof.view("T-1")?.state.kind).toBe("failing");
+        fake.required("morndo/morndo", "main", { rules: ["ci"] });                    // the forge answers now
+        clock = NOW + 10 * 60_000 + 1;                                                // unauthenticated: ten minutes between re-reads
+        expect(await proof.tick()).toBe(1);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "verified", accepts: true });
+        expect(proof.view("T-1")?.state.line).toContain(`⚠ morndo/morndo#42@3e9d1a7 warning: optional check "e2e" failed`);
+        store.close();
+      });
+
       it("the required set of a branch is read once for a while, not once per reference", async () => {
         fake.pr("morndo/morndo", 42, { head: FULL });
         fake.runs("morndo/morndo", FULL, greenRuns());

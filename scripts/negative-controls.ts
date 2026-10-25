@@ -4781,12 +4781,19 @@ export const CONTROLS: Control[] = [
   { id: "t450-optional-checks-hold-nothing", task: "T-450", file: "packages/domain/src/proof.ts",
     find: `  const onRequiredRuns = runs.filter(r => requiredSet.has(r.name));`, replace: `  const onRequiredRuns = runs;`,
     run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "warning: optional check" },
-  { id: "t450-required-not-reported-yet", task: "T-450", file: "packages/domain/src/proof.ts",
-    find: `    const missing = required.find(name => !runs.some(r => r.name === name));`, replace: `    const missing = undefined as string | undefined;`,
-    run: ["packages/domain/test/proof.test.ts"], expect: "not reported yet" },
   { id: "t450-unreadable-required-set-fails-closed", task: "T-450", file: "apps/hub/src/application/proof-service.ts",
     find: `    if (!answer.ok) return null;\n    this.#requiredCache.set(`, replace: `    if (!answer.ok) return [];\n    this.#requiredCache.set(`,
     run: ["apps/hub/test/proof-service.test.ts"], expect: "required checks not readable" },
+  { id: "t450-empty-required-set-counts-all", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  if (required === null || required.length === 0) {`, replace: `  if (required === null) {`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "no required checks on the base branch" },
+  { id: "t450-required-check-never-drops-out", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  const missing = required.find(name => !runs.some(r => r.name === name));\n  if (missing !== undefined) return { state: "pending", detail: detailLine(\`checks: required "\${missing}" not reported yet\`) };`,
+    replace: `  const missing = young ? required.find(name => !runs.some(r => r.name === name)) : undefined;\n  if (missing !== undefined) return { state: "pending", detail: detailLine(\`checks: required "\${missing}" not reported yet\`) };`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "not reported yet" },
+  { id: "t450-fail-closed-read-is-read-again", task: "T-450", file: "apps/hub/src/application/proof-service.ts",
+    find: ` && !readsAgain(row.detail)) return false;`, replace: `) return false;`,
+    run: ["apps/hub/test/proof-service.test.ts"], expect: "toBe(1)" },
 ];
 
 // ---- the runner

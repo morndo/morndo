@@ -389,14 +389,15 @@ describe("judging a reference against what the forge said (B14)", () => {
   // repository with no checks, which the pull request reference does not ask to have any.
   it("judgePr: green pull request whose commit has a check running or failed is pending or red (T-450)", () => {
     const ref = value(parseProofRef(`acme/shop#42@${SHA}`)) as Parameters<typeof judgePr>[0];
-    const checks = (runs: CheckRunFacts[], young = false, required: string[] | null = ["ci", "lint"]) => ({ runs, young, required });
+    const checks = (runs: CheckRunFacts[], young = false, required: string[] | null = runs.length === 0 ? ["ci"] : runs.map(r => r.name)) => ({ runs, young, required });
     expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci", status: "in_progress", conclusion: null })])))
       .toEqual({ state: "pending", detail: `checks: "ci" in progress` });
     expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: "failure", url: RUN_URL })])))
       .toEqual({ state: "red", detail: `checks: "lint" failed ${RUN_URL}` });
     expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci" })]))).toEqual({ state: "green", detail: null });
     expect(judgePr(ref, prFacts(), [], checks([], true))).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
-    expect(judgePr(ref, prFacts(), [], checks([], false))).toEqual({ state: "green", detail: null });          // no checks exist for it
+    expect(judgePr(ref, prFacts(), [], checks([], false))).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });   // a required check never drops out
+    expect(judgePr(ref, prFacts(), [], checks([], false, []))).toEqual({ state: "green", detail: null });      // no checks required, none exist
     expect(judgePr(ref, prFacts(), [], checks([run({ conclusion: "skipped" })]))).toEqual({ state: "green", detail: null });
     // the pull request's own verdicts come first: a moved head is a mismatch whatever the checks say
     expect(judgePr(ref, prFacts({ headSha: MOVED }), [], checks([run({ conclusion: "failure" })])).state).toBe("mismatch");
@@ -419,7 +420,7 @@ describe("judging a reference against what the forge said (B14)", () => {
       expect(judge([run({ name: "ci" }), run({ id: 2, name: "a", status: "queued", conclusion: null }), run({ id: 3, name: "b", conclusion: "timed_out" })], ["ci"]).detail)
         .toBe(`warning: optional check "b" timed out`);                                 // red is the warning when both are
       expect(judge([run({ name: "ci" }), run({ id: 2, name: "e2e", conclusion: "skipped" })], ["ci"])).toEqual({ state: "green", detail: null });
-      expect(judge([E2E_FAILED], [])).toEqual({ state: "green", detail: `warning: optional check "e2e" failed ${RUN_URL}` });   // nothing is required
+      expect(judge([run({ name: "ci" })], ["ci"], false)).toEqual({ state: "green", detail: null });
     });
 
     it("a required check that is running or failed holds, whatever the optional ones say", () => {
@@ -429,14 +430,24 @@ describe("judging a reference against what the forge said (B14)", () => {
         .toEqual({ state: "red", detail: `checks: "ci" failed ${RUN_URL}` });
     });
 
-    it("a required check not reported yet is pending while the brief is young and ignored after", () => {
-      expect(judge([run({ id: 2, name: "e2e" })], ["ci"], true)).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
-      expect(judge([], ["ci"], true)).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
-      // one required check reported and another not: the missing one is awaited by name
-      expect(judge([run({ name: "ci" })], ["ci", "fleet"], true)).toEqual({ state: "pending", detail: `checks: required "fleet" not reported yet` });
-      expect(judge([run({ name: "ci" })], ["ci", "fleet"], false)).toEqual({ state: "green", detail: null });
-      expect(judge([], ["ci"], false)).toEqual({ state: "green", detail: null });
-      expect(judge([], [], true)).toEqual({ state: "green", detail: null });             // nothing required: nothing to wait for
+    // T-450 fix round: a required check with no result holds the reference however long, and never drops out.
+    it("a required check with no result is pending, however old the brief", () => {
+      for (const young of [true, false]) {
+        expect(judge([run({ id: 2, name: "e2e" })], ["ci"], young), `young ${young}`).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
+        expect(judge([], ["ci"], young), `young ${young}`).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
+        // one required check reported and another not: the missing one is awaited by name
+        expect(judge([run({ name: "ci" })], ["ci", "fleet"], young), `young ${young}`).toEqual({ state: "pending", detail: `checks: required "fleet" not reported yet` });
+      }
+    });
+
+    // T-450 fix round: no required set (no protection, or an empty one) means every check counts as required.
+    it("an empty required set counts every check, and the line says so", () => {
+      const NONE = "(no required checks on the base branch; every check counted)";
+      expect(judge([run({ name: "ci" }), E2E_FAILED], [])).toEqual({ state: "red", detail: `checks: "e2e" failed ${RUN_URL} ${NONE}` });
+      expect(judge([run({ id: 2, name: "e2e", status: "in_progress", conclusion: null })], [])).toEqual({ state: "pending", detail: `checks: "e2e" in progress ${NONE}` });
+      expect(judge([run({ name: "ci" }), run({ id: 2, name: "e2e", conclusion: "skipped" })], [])).toEqual({ state: "green", detail: null });
+      expect(judge([], [], true)).toEqual({ state: "pending", detail: `checks: no checks reported yet ${NONE}` });
+      expect(judge([], [], false)).toEqual({ state: "green", detail: null });             // a repository with no checks at all is not asked to have any
     });
 
     it("an unreadable required set counts every check and says so (fail closed)", () => {

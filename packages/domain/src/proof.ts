@@ -373,7 +373,12 @@ export type CheckRunFacts = { id: number; name: string; status: string; conclusi
 export const YOUNG_MS = 15 * 60_000;
 export const WARNING_PREFIX = "warning: ";
 export type Judged = { state: RefState; detail: string | null };
-const REQUIRED_UNREADABLE = "(required checks not readable; every check counted)";
+// The two notes a pull request reference carries when it counts every check: the required set could not be read (the hub
+// reads it again at the next pass, see readsAgain), or the base branch requires none.
+export const REQUIRED_UNREADABLE = "(required checks not readable; every check counted)";
+const REQUIRED_NONE = "(no required checks on the base branch; every check counted)";
+// A result that was judged without the required set because the read failed: the timer asks again, whatever its state.
+export const readsAgain = (detail: string | null): boolean => detail !== null && detail.endsWith(REQUIRED_UNREADABLE);
 
 // A pull request reference is green at the commit it names — the head, or the merge commit once it was merged (the head
 // moves on past it). Closed without a merge is the one thing a pull request is red at; a head somewhere else is a
@@ -404,22 +409,21 @@ export function judgePr(
   if (!at) return { state: "mismatch", detail: `head is ${facts.headSha.slice(0, 7)}, ref says ${ref.sha.slice(0, 7)}` };
   if (checks === undefined) return { state: "green", detail: null };
   const { runs, young, required } = checks;
-  if (required === null) {
+  // No required set to go by (unreadable, or the base branch requires nothing): every check counts as required.
+  if (required === null || required.length === 0) {
     const onCommit = judgeWildcardChecks(runs, young, "pr");
     if (onCommit.state === "green") return { state: "green", detail: null };
     const tail = onCommit.detail === "no checks reported yet" ? detailLine("checks: no checks reported yet") : `checks: ${onCommit.detail}`;
-    return { state: onCommit.state, detail: `${tail} ${REQUIRED_UNREADABLE}` };
+    return { state: onCommit.state, detail: `${tail} ${required === null ? REQUIRED_UNREADABLE : REQUIRED_NONE}` };
   }
   const requiredSet = new Set(required);
-  // A required check the forge has not reported yet is on its way while the brief is young; after that it is ignored (it may
-  // be a commit status, not a check run, which this reading does not see).
-  if (young) {
-    const missing = required.find(name => !runs.some(r => r.name === name));
-    if (missing !== undefined) return { state: "pending", detail: detailLine(`checks: required "${missing}" not reported yet`) };
-  }
+  // A required check failing or running is said first. One with no result at all holds the reference
+  // however old the brief is (it may be a commit status that never reports); it never drops out.
   const onRequiredRuns = runs.filter(r => requiredSet.has(r.name));
   const onRequired = onRequiredRuns.length === 0 ? { state: "green" as const, detail: null } : judgeWildcardChecks(onRequiredRuns, young, "pr");
   if (onRequired.state !== "green") return { state: onRequired.state, detail: detailLine(`checks: ${onRequired.detail}`) };
+  const missing = required.find(name => !runs.some(r => r.name === name));
+  if (missing !== undefined) return { state: "pending", detail: detailLine(`checks: required "${missing}" not reported yet`) };
   const optional = judgeOptionalWarnings(runs.filter(r => !requiredSet.has(r.name)));
   return optional === null ? { state: "green", detail: null } : { state: "green", detail: optional };
 }
