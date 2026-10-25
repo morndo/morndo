@@ -115,6 +115,41 @@ describe("signalFromText: what Claude Code prints (synthetic: its format is not 
   });
 });
 
+// Observed 2026-10-25: Claude Code 2.1.310 headless (-p) against a local stand-in for the Messages API (no real key, nothing leaves the
+// machine) answering the documented bodies. The credit refusal printed this one line on stdout and exited 1 after one request; the spend
+// limit printed the status and the API's message as plain text (no JSON) and exited 1 after four requests.
+describe("what Claude Code 2.1.310 printed for the documented refusals", () => {
+  const sig = (text: string) => anthropicClassifier.classify(signalFromText(text));
+  it("the credit refusal's line", () => {
+    expect(sig("Credit balance is too low\n")).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
+  });
+  it("the spend-limit refusal's line, with the date it names", () => {
+    expect(sig("API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.\n"))
+      .toEqual({ kind: "exhausted", reason: "spend-limit", resumeAt: Date.UTC(2026, 10, 1) });
+  });
+});
+
+// Observed the same day through `morndo-keys run --pool`, whose child prints a JSON result: the refusal is in "result", its status in
+// "api_error_status" (null when the run had no API error).
+describe("the JSON result a headless run prints", () => {
+  const sig = (text: string) => anthropicClassifier.classify(signalFromText(text));
+  const result = (status: number | null, message: string) => JSON.stringify({ type: "result", is_error: true, api_error_status: status, result: message });
+  it("reads the credit refusal and the spend-limit refusal from the result", () => {
+    expect(sig(result(400, "Credit balance is too low"))).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
+    expect(sig(result(400, "API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.")))
+      .toEqual({ kind: "exhausted", reason: "spend-limit", resumeAt: Date.UTC(2026, 10, 1) });
+  });
+  it("reads the status alone: 401 is a rejected key, 403 a denied one, 429 only a rate limit", () => {
+    expect(sig(result(401, "Invalid API key"))).toEqual({ kind: "failing", reason: "rejected" });
+    expect(sig(result(403, "Forbidden"))).toEqual({ kind: "failing", reason: "denied" });
+    expect(sig(result(429, "Too many requests"))).toEqual({ kind: "limited", retryAfterMs: null });
+  });
+  it("a result with no API error says nothing", () => {
+    expect(sig(JSON.stringify({ type: "result", is_error: true, api_error_status: null, result: "tests failed" }))).toEqual({ kind: "unknown" });
+    expect(sig(result(500, "Internal server error"))).toEqual({ kind: "unknown" });
+  });
+});
+
 describe("the catalog names the classifier as data", () => {
   const presets = VendorCatalog.parse(JSON.parse(readFileSync(join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json"), "utf8")));
   it("only the first-party preset hosts a key pool, with a dated terms revision and a terms line", () => {

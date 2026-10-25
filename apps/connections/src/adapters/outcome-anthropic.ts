@@ -9,6 +9,8 @@ const TEXT_LIMIT = 256;
 // "You will regain access on YYYY-MM-DD …" — the date is read from the whole message, not from the cut excerpt.
 const RESUME_DATE = /regain access on (\d{4}-\d{2}-\d{2})/;
 const API_ERROR = /API Error:\s*(\d{3})(?!\d)/;
+// The status a headless run prints in its JSON result (observed with Claude Code 2.1.310): "api_error_status":400, or null when there was none.
+const API_STATUS = /"api_error_status"\s*:\s*(\d{3})(?!\d)/;
 const ERROR_TYPE = /"type"\s*:\s*"([A-Za-z0-9_]+_error)"/;
 const ERROR_CODE = /"error_code"\s*:\s*"([A-Za-z0-9_]+)"/;
 const MESSAGE = /"message"\s*:\s*"(?:\\.|[^"\\])*"/;
@@ -18,7 +20,7 @@ const CREDIT = /credit balance (?:is )?too low/i;
 const SPEND = /you have reached your specified (?:workspace )?API usage limits/i;
 const SPEND_CODE = /enforced_spend_limit_reached/i;
 
-const TEXT_HITS: readonly RegExp[] = [API_ERROR, ERROR_TYPE, ERROR_CODE, MESSAGE, CREDIT, SPEND, HELD, SPEND_CODE];
+const TEXT_HITS: readonly RegExp[] = [API_ERROR, API_STATUS, ERROR_TYPE, ERROR_CODE, MESSAGE, CREDIT, SPEND, HELD, SPEND_CODE];
 
 function resumeDateIn(text: string): string | null {
   return RESUME_DATE.exec(text)?.[1] ?? null;
@@ -77,7 +79,7 @@ function firstHit(output: string): number | null {
 export function signalFromText(output: string): ProviderSignal {
   const at = firstHit(output);
   if (at === null) return { status: null, kind: null, text: null, retryAfterSeconds: null, code: null, resumeDate: null };
-  const statusText = API_ERROR.exec(output)?.[1];
+  const statusText = API_ERROR.exec(output)?.[1] ?? API_STATUS.exec(output)?.[1];
   return {
     status: statusText === undefined ? null : Number(statusText),
     kind: ERROR_TYPE.exec(output)?.[1] ?? null,
