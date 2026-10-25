@@ -2,7 +2,7 @@
 // helper hands the run to another member, and tells a report which member's key may have been in use. One history per rule.
 import { describe, expect, it } from "vitest";
 import {
-  addKey, closeGrant, createKeyPool, emptyDirectory, findConnection, attributeToGrant, joinKeyPool, leaveKeyPool, moveGrant, openGrant,
+  addKey, bindFilter, closeGrant, createKeyPool, emptyDirectory, findConnection, attributeToGrant, joinKeyPool, leaveKeyPool, moveGrant, openGrant,
   noteLent, noteSeen, touchGrant,
   type Actor, type Connection, type Grant, type KeyPool,
 } from "../src/index.ts";
@@ -196,5 +196,33 @@ describe("kp12 a grant and its events hold ids, names and times, never a secret"
     const json = JSON.stringify(p);
     expect(json).not.toContain(PLANTED_FP);
     expect(json).not.toContain("ref-k1");
+  });
+});
+
+describe("fix round 6: a grant is bound once to the filter socket of the run that holds it", () => {
+  const SOCK = "/run/user/1000/mf-4242-abcdef/f.sock";
+  it("a grant starts with no filter, and bindFilter records the path and changes nothing else", () => {
+    const p = ok(openGrant(pool(), grant(), T));
+    expect(p.grants[0]?.filter ?? null).toBeNull();
+    const bound = ok(bindFilter(p, "gl1", SOCK));
+    expect(bound.grants[0]).toEqual({ ...grant(), filter: SOCK });
+    expect(bound.events).toEqual(p.events);
+  });
+  it("is refused a second time, even to the same path, so no later caller can point the grant somewhere else", () => {
+    const bound = ok(bindFilter(ok(openGrant(pool(), grant(), T)), "gl1", SOCK));
+    expect(word(bindFilter(bound, "gl1", SOCK))).toBe("bound");
+    expect(word(bindFilter(bound, "gl1", "/tmp/own.sock"))).toBe("bound");
+    expect(bound.grants[0]?.filter).toBe(SOCK);
+  });
+  it("is refused for a grant that is not there and for an empty or relative path", () => {
+    const p = ok(openGrant(pool(), grant(), T));
+    expect(word(bindFilter(p, "nope", SOCK))).toBe("missing");
+    expect(word(bindFilter(p, "gl1", ""))).toBe("path");
+    expect(word(bindFilter(p, "gl1", "f.sock"))).toBe("path");
+    expect(p.grants[0]?.filter ?? null).toBeNull();
+  });
+  it("a hand-off keeps the binding: the grant moves to another member with the same filter", () => {
+    const bound = ok(bindFilter(ok(openGrant(pool(), grant(), T)), "gl1", SOCK));
+    expect(moved(bound, T + SEC).grants[0]?.filter).toBe(SOCK);
   });
 });

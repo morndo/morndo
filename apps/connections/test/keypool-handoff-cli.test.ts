@@ -2,7 +2,8 @@
 // the run to the next member once the first is reported dry, and the cap of the helper window survives the move. The runtime is the
 // fixture fake-keyed-runtime.mjs, which asks the helper as often as the job says. Every key is synthetic.
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer } from "node:net";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -65,7 +66,7 @@ async function world(n = 3, opts: { pool?: boolean; models?: boolean } = {}): Pr
 type Member = { credential: string; state: string; reason: string | null };
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; standing: string; lastPick: string | null; members: Member[] });
 const states = async (env: NodeJS.ProcessEnv) => (await pools(env))[0]?.members.map(m => m.state);
-type Answer = { exit: number; cmdsAfter?: { args: string[]; input?: string }[]; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string; cmds?: { args: string[]; input?: string }[] };
+type Answer = { exit: number; bypass?: { filter: string }[]; cmdsAfter?: { args: string[]; input?: string }[]; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string; cmds?: { args: string[]; input?: string }[] };
 const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
@@ -439,5 +440,77 @@ describe("the pool in the Priority and the engine layer", () => {
     const before = readFileSync(join(dir, "engines.json"), "utf8");
     expect((await cli(["keypool", "sync"], env)).code).toBe(0);
     expect(readFileSync(join(dir, "engines.json"), "utf8")).toBe(before);
+  });
+});
+
+describe("fix round 6: a helper call under a grant hands its key to that grant's own run filter, or prints nothing", () => {
+  const bypassOf = (dir: string): { filter: string; key: string; code: number; stderr: string }[] => {
+    try { return readFileSync(join(dir, "work", "record.jsonl.bypass"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { filter: string; key: string; code: number; stderr: string }); } catch { return []; }
+  };
+  it("a tool that runs the helper line without --filter gets no key, only a word", async () => {
+    const { env, dir } = await world(2);
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, bypass: [{ filter: "drop" }] } }));
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0]]);
+    const tried = bypassOf(dir);
+    expect(tried).toHaveLength(1);
+    expect(tried[0]).toMatchObject({ key: "", code: 1 });
+    expect(tried[0]?.stderr.trim()).toBe("filter");
+  });
+  it("a tool that points --filter at a listener of its own gets no key, and the listener is sent nothing", async () => {
+    const { env, dir } = await world(2);
+    const own = join(dir, "own.sock");
+    const received: string[] = [];
+    const server = createServer(socket => { socket.on("data", chunk => { received.push(String(chunk)); socket.end("ok\n"); }); });
+    await new Promise<void>(resolve => { server.listen(own, resolve); });
+    chmodSync(own, 0o600);
+    try {
+      const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, bypass: [{ filter: own }] } }));
+      expect(ran.code, ran.stderr).toBe(0);
+      const tried = bypassOf(dir);
+      expect(tried[0]).toMatchObject({ key: "", code: 1 });
+      expect(tried[0]?.stderr.trim()).toBe("filter");
+      expect(received).toEqual([]);
+    } finally { await new Promise<void>(resolve => { server.close(() => { resolve(); }); }); }
+  });
+  it("no key reaches the run's output or the helper's words through either bypass", async () => {
+    const { env, dir } = await world(2);
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, bypass: [{ filter: "drop" }, { filter: join(dir, "nowhere.sock") }] } }));
+    const said = JSON.stringify([ran.stdout, ran.stderr, bypassOf(dir)]);
+    for (const key of KEYS) expect(said).not.toContain(key);
+    expect(bypassOf(dir).map(item => item.code)).toEqual([1, 1]);
+  });
+});
+
+describe("fix round 6: a launcher killed outright leaves a socket directory the next start sweeps", () => {
+  const runtimeDir = (dir: string): string => {
+    const root = join(dir, "rt");
+    mkdirSync(root, { mode: 0o700 });
+    return root;
+  };
+  const left = (root: string): string[] => readdirSync(root).filter(name => name.startsWith("mf-"));
+  it("one directory is left by the kill and none after the next run", async () => {
+    const { env, dir } = await world(2);
+    const root = runtimeDir(dir);
+    const scoped = { ...env, XDG_RUNTIME_DIR: root };
+    const killed = await run(scoped, dir, job(dir, { [KEYS[0]]: { exit: 0, killParent: true } }));
+    expect(killed.code).not.toBe(0);
+    expect(left(root)).toHaveLength(1);
+    const next = await run(scoped, dir, job(dir, { [KEYS[0]]: { exit: 0 }, [KEYS[1]]: { exit: 0 } }));
+    expect(next.code, next.stderr).toBe(0);
+    expect(left(root)).toEqual([]);
+  });
+});
+
+describe("fix round 6: a temp directory too long for a socket path fails closed and says so", () => {
+  it("no child is started, no key is shown, and the error names the cause", async () => {
+    const { env, dir } = await world(2);
+    const long = join(dir, "t".repeat(60), "u".repeat(60));
+    mkdirSync(long, { recursive: true });
+    const ran = await run({ ...env, XDG_RUNTIME_DIR: "", TMPDIR: long }, dir, job(dir, { [KEYS[0]]: { exit: 0 } }));
+    expect(ran.code).not.toBe(0);
+    expect(ran.stderr).toMatch(/socket path is too long/);
+    expect(calls(dir)).toEqual([]);
+    for (const key of KEYS) expect(`${ran.stdout}${ran.stderr}`).not.toContain(key);
   });
 });

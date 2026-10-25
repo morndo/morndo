@@ -16,8 +16,10 @@ const operator: Actor = { kind: "operator" };
 const SEC = 1_000;
 const TTL = 60 * SEC;
 const holder: Holder = { node: "n1", pid: 10, startedAt: 1, bootId: "boot", lane: "lane-a" };
-const caller = { id: { pid: 10, startedAt: 1, bootId: "boot" }, ppid: 9 };
-const stranger = { id: { pid: 11, startedAt: 1, bootId: "boot" }, ppid: 9 };
+// The socket the run's output filter listens on. A helper call names it with --filter; the grant names it too (fix round 6).
+const SOCK = "/run/user/1000/mf-4242-abcdef/f.sock";
+const caller = { id: { pid: 10, startedAt: 1, bootId: "boot" }, ppid: 9, filter: SOCK };
+const stranger = { id: { pid: 11, startedAt: 1, bootId: "boot" }, ppid: 9, filter: SOCK };
 const REF = "ref-planted-vault-0001";
 const FP = "feedfacecafe";
 const dry: Outcome = { kind: "exhausted", reason: "credit", resumeAt: null };
@@ -610,5 +612,75 @@ describe("the existing pick is unchanged", () => {
     w.connections.turnOff("k1");
     const picked = await w.pools.pick("p", async member => w.leases.lease(member, runRequest));
     expect(picked.ok && picked.value.member).toBe("k2");
+  });
+});
+
+describe("fix round 6: a helper call under a grant hands its key to that grant's own run filter", () => {
+  const bound = async (w: World) => {
+    const run = await start(w);
+    expect(w.pools.bindFilter("p", run.grant, SOCK).ok).toBe(true);
+    return run;
+  };
+  it("the run binds its socket to the grant once, and the grant records it", async () => {
+    const w = await world();
+    const run = await start(w);
+    expect(grantOf(w).filter ?? null).toBeNull();
+    expect(w.pools.bindFilter("p", run.grant, SOCK).ok).toBe(true);
+    expect(grantOf(w).filter).toBe(SOCK);
+    expect(word(w.pools.bindFilter("p", run.grant, "/tmp/own.sock"))).toBe("filter_bound");
+    expect(word(w.pools.bindFilter("p", "nope", SOCK))).toBe("grant_missing");
+    expect(grantOf(w).filter).toBe(SOCK);
+  });
+  it("serves a call that names the grant's own socket", async () => {
+    const w = await world();
+    const run = await bound(w);
+    expect(await w.pools.handOff("p", run.grant, { ...caller, filter: SOCK })).toEqual({ ok: true, value: { connection: "k1", lease: run.lease } });
+  });
+  it("refuses a call with no --filter: nothing served, no lease taken, the call not counted", async () => {
+    const w = await world();
+    const run = await bound(w);
+    expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: null }))).toBe("filter");
+    expect(served(w)).toHaveLength(0);
+    expect(granted(w)).toBe(1);
+    expect(live(w, "k1")[0]).toMatchObject({ id: run.lease, calls: 0 });
+    expect(grantOf(w).window.calls).toBe(0);
+  });
+  it("refuses a call that names a different socket (a listener of its own), the same way", async () => {
+    const w = await world();
+    const run = await bound(w);
+    expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: "/tmp/own.sock" }))).toBe("filter");
+    expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: `${SOCK}x` }))).toBe("filter");
+    expect(served(w)).toHaveLength(0);
+    expect(granted(w)).toBe(1);
+  });
+  it("refuses a grant that was never bound, whatever socket the call names", async () => {
+    const w = await world();
+    const run = await start(w);
+    expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: SOCK }))).toBe("filter");
+    expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: null }))).toBe("filter");
+    expect(served(w)).toHaveLength(0);
+  });
+  it("refused calls do not use up the helper's cap: a proper call still serves after ten refusals", async () => {
+    const w = await world();
+    const run = await bound(w);
+    for (let i = 0; i < 10; i++) expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: null }))).toBe("filter");
+    expect((await w.pools.handOff("p", run.grant, { ...caller, filter: SOCK })).ok).toBe(true);
+    expect(live(w, "k1")[0]).toMatchObject({ calls: 1 });
+  });
+  it("the grant and caller are still checked first: a stranger is not_holder, a grant that is gone is grant_missing", async () => {
+    const w = await world();
+    const run = await bound(w);
+    expect(word(await w.pools.handOff("p", run.grant, { ...stranger, filter: null }))).toBe("not_holder");
+    expect(word(await w.pools.handOff("p", "nope", { ...caller, filter: null }))).toBe("grant_missing");
+  });
+  it("after a hand-off to another member the same socket is still the one that is accepted, and no other", async () => {
+    const w = await world();
+    const run = await bound(w);
+    expect((await w.pools.handOff("p", run.grant, caller)).ok).toBe(true);
+    dryUp(w, "k1");
+    expect((await w.pools.handOff("p", run.grant, { ...caller, filter: "/tmp/own.sock" })).ok).toBe(false);
+    const out = await w.pools.handOff("p", run.grant, caller);
+    expect(out.ok && out.value.connection).toBe("k2");
+    expect(grantOf(w).filter).toBe(SOCK);
   });
 });

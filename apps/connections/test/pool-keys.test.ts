@@ -8,7 +8,7 @@ import { findConnection, isKey, noteLent, openGrant, type Actor, type Grant, typ
 import { openHome, type Opened } from "../src/compose.ts";
 import { SqliteKeyPoolStore } from "../src/adapters/key-pool-store-sqlite.ts";
 import { streamRedactor } from "../src/adapters/redact.ts";
-import { FilterIncomplete, guardedRelay, watchPoolKeys } from "../src/pool-keys.ts";
+import { acceptsPoolKey, FilterIncomplete, guardedRelay, watchPoolKeys } from "../src/pool-keys.ts";
 
 const KEY1 = "sk-ant-synthetic-watch-key-0001";
 const KEY2 = "sk-ant-synthetic-watch-key-0002";
@@ -362,5 +362,70 @@ describe("the watch: every key the run may be, or was, handed", () => {
     expect(home.connections.turnOff("k3").ok).toBe(true);
     expect(await watch.learn()).toEqual([]);
     watch.close();
+  });
+});
+
+describe("fix round 6: the run's filter takes a key only if it is a key of the pool the run is on", () => {
+  const withGrant = async (lent: string[]) => {
+    const w = await world();
+    const store = new SqliteKeyPoolStore(w.home.db);
+    const loaded = store.load("p");
+    const grant: Grant = {
+      id: "gl1", member: "k1", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
+      request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
+      previous: null, seen: [], lent, filter: null,
+    };
+    const opened = openGrant(loaded.pool!, grant, 1);
+    if (!opened.ok) throw new Error("grant");
+    expect(store.save(opened.value, loaded.version)).toBe(true);
+    store.close();
+    return w;
+  };
+  const accepter = (w: { home: Opened; env: NodeJS.ProcessEnv }) => acceptsPoolKey({ db: w.home.db, pool: "p", grant: "gl1", open: () => openHome(w.env) });
+  const said = async (accepts: (key: string) => Promise<boolean>, key: string): Promise<boolean> => accepts(key).catch(() => false);
+
+  it("accepts the key of a member of the pool, and refuses a key that is nobody's and the key of a Connection that is not in the pool", async () => {
+    const w = await withGrant(["k1"]);
+    const acc = accepter(w);
+    expect(await said(acc.accepts, KEY1)).toBe(true);
+    expect(await said(acc.accepts, KEY2)).toBe(true);
+    expect(await said(acc.accepts, KEY3)).toBe(false);
+    expect(await said(acc.accepts, "sk-ant-synthetic-junk-key-9999")).toBe(false);
+    acc.close();
+  });
+  it("sees the pool as it is now: a member that joins is accepted from then on", async () => {
+    const w = await withGrant(["k1"]);
+    const acc = accepter(w);
+    expect(await said(acc.accepts, KEY3)).toBe(false);
+    expect(w.home.keypools.join("p", "k3", { confirmOwn: true }, ACTOR).ok).toBe(true);
+    expect(await said(acc.accepts, KEY3)).toBe(true);
+    acc.close();
+  });
+  it("a rotated member's new key is accepted and its old key, which no store holds any more, is not", async () => {
+    const w = await withGrant(["k1"]);
+    const NEW = "sk-ant-synthetic-watch-key-0007";
+    const fresh = `ref-k2-rotated`;
+    await w.home.seal(fresh, NEW);
+    expect((await w.home.connections.rotate("k2", fresh, ACTOR)).ok).toBe(true);
+    const acc = accepter(w);
+    expect(await said(acc.accepts, NEW)).toBe(true);
+    expect(await said(acc.accepts, KEY2)).toBe(false);
+    acc.close();
+  });
+  it("a member the run was lent still counts after it left the pool", async () => {
+    const w = await withGrant(["k1", "k2"]);
+    expect(w.home.keypools.leave("p", "k2", ACTOR).ok).toBe(true);
+    const acc = accepter(w);
+    expect(await said(acc.accepts, KEY2)).toBe(true);
+    acc.close();
+  });
+  it("a store it cannot read, or a grant that is gone, accepts nothing", async () => {
+    const w = await withGrant(["k1"]);
+    const broken = acceptsPoolKey({ db: w.home.db, pool: "p", grant: "gl1", open: () => ({ open: async () => { throw new Error("transient"); }, close: () => undefined }) });
+    expect(await said(broken.accepts, KEY1)).toBe(false);
+    broken.close();
+    const gone = acceptsPoolKey({ db: w.home.db, pool: "p", grant: "no-such-grant", open: () => openHome(w.env) });
+    expect(await said(gone.accepts, KEY1)).toBe(false);
+    gone.close();
   });
 });

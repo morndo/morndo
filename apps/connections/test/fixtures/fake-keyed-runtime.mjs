@@ -35,6 +35,18 @@ function commands(answer, list = answer.cmds) {
     appendFileSync(`${job.record}.cmds`, `${JSON.stringify({ args: cmd.args, code: out.status ?? 1, stderr: String(out.stderr ?? "") })}\n`);
   }
 }
+// `bypass: [{ filter }]`: what a tool of this run could do, as a child of it: call the helper line without its `--filter` (`"drop"`), or
+// with another socket (a path). Each answer is recorded in `<record>.bypass` (the key only if the helper printed one), never shown.
+function bypasses(answer) {
+  for (const item of answer.bypass ?? []) {
+    const args = parts.slice(1);
+    const at = args.indexOf("--filter");
+    if (item.filter === "drop") args.splice(at, 2);
+    else args[at + 1] = item.filter;
+    const out = spawnSync(parts[0], args, { encoding: "utf8", timeout: 10_000, input: "" });
+    appendFileSync(`${job.record}.bypass`, `${JSON.stringify({ filter: item.filter, key: out.status === 0 ? String(out.stdout ?? "").trim() : "", code: out.status ?? 1, stderr: String(out.stderr ?? "") })}\n`);
+  }
+}
 function reports(answer) {
   if (!answer.report) return;
   const tail = grantForm
@@ -48,6 +60,7 @@ let result = helper();
 record(result, false);
 const first = job.keys?.[result.key] ?? { exit: 0 };
 commands(first);
+bypasses(first);
 reports(first);
 // `killParent`: the run is killed before it can close its lease or its grant (what a SIGKILL of the launcher leaves behind).
 if (first.killParent) process.kill(process.ppid, "SIGKILL");
