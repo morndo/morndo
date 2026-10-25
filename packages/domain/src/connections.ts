@@ -442,6 +442,15 @@ export function recordSpend(dir: Directory, name: string, amount: number, source
   return ok(applyWarnings(replace(dir, next, event), next, at));
 }
 
+export type HelperWindow = { calls: number; windowStart: number };
+
+// The count a helper call applies: inside the window it adds one, past it the window starts over at one.
+export function nextHelperWindow(w: HelperWindow, limit: number, intervalMs: number, now: number): HelperWindow & { over: boolean } {
+  const inWindow = now - w.windowStart < intervalMs;
+  const calls = inWindow ? w.calls + 1 : 1;
+  return { calls, windowStart: inWindow ? w.windowStart : now, over: calls > limit };
+}
+
 export function noteHelper(
   dir: Directory, name: string, id: string, caller: Pick<Holder, "pid" | "startedAt" | "bootId">,
   ancestors: readonly Pick<Holder, "pid" | "startedAt" | "bootId">[], limit: number, intervalMs: number, now: number,
@@ -454,14 +463,40 @@ export function noteHelper(
     a.pid === b.pid && a.startedAt === b.startedAt && a.bootId === b.bootId;
   const holder = row.holder;
   if (!ancestors.some(a => matches(a, holder)) && !matches(caller, holder)) return refuse("helper");
-  const inWindow = now - row.windowStart < intervalMs;
-  const calls = inWindow ? row.calls + 1 : 1;
-  if (calls > limit) {
-    const next = endAuthority(c, id);
-    return ok(replace(dir, next, { type: "AuthorityEnded", name, lease: id, at: now, reason: "helper_limit" }));
-  }
-  const next = { ...c, leases: c.leases.map(l => l.id === id ? { ...l, calls, windowStart: inWindow ? l.windowStart : now } : l) };
+  const counted = nextHelperWindow(row, limit, intervalMs, now);
+  if (counted.over) return ok(replace(dir, endAuthority(c, id), { type: "AuthorityEnded", name, lease: id, at: now, reason: "helper_limit" }));
+  const next = { ...c, leases: c.leases.map(l => l.id === id ? { ...l, calls: counted.calls, windowStart: counted.windowStart } : l) };
   return ok({ ...dir, connections: dir.connections.map(x => x.name === name ? next : x) });
+}
+
+function heldLease(dir: Directory, name: string, id: string): Lease | null {
+  const c = findConnection(dir, name);
+  if (!c || !isMorndo(c)) return null;
+  return c.leases.find(l => l.id === id) ?? null;
+}
+
+function paintWindow(dir: Directory, name: string, id: string, window: HelperWindow): Directory {
+  const c = findConnection(dir, name);
+  if (!c || !isMorndo(c)) return dir;
+  const leases = c.leases.map(l => l.id === id ? { ...l, calls: window.calls, windowStart: window.windowStart } : l);
+  return { ...dir, connections: dir.connections.map(x => x.name === name ? { ...c, leases } : x) };
+}
+
+// The new lease is granted first. A gate refusal keeps the old lease and the LeaseRefused directory; any other refusal
+// carries no directory, so neither side of the hand-off is saved.
+export function swapLease(
+  dir: Directory, to: string, ask: LeaseAsk,
+  close: { connection: string; lease: string } | null, window: HelperWindow,
+): Result<Directory, Refusal> {
+  const old = close ? heldLease(dir, close.connection, close.lease) : null;
+  if (close && !old) return refuse("closed");
+  const granted = lease(dir, to, ask);
+  if (!granted.ok) return granted;
+  const next = paintWindow(granted.value, to, `l${dir.seq}`, window);
+  if (!close || !old) return ok(next);
+  const closed = closeLease(next, close.connection, old.id, "handoff", old.reservation, "estimate", { kind: "operator" }, ask.now, ask.now - old.start);
+  if (!closed.ok) return refuse(closed.error.problem);
+  return closed;
 }
 
 // One served key is one audit line with its caller, never a value (T-340): the bytes go only to the caller's stdout.

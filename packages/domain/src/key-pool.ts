@@ -1,6 +1,6 @@
 // Key pool: which key Connection serves the next request. Pure. Callers pass `now` (ms since epoch). A member holds a
 // Connection's name only; events hold names, reason words, times and command ids.
-import { CONNECTION_NAME, isKey, type Actor, type Connection, type TermsAck } from "./connections.ts";
+import { CONNECTION_NAME, isKey, type Actor, type Connection, type HelperWindow, type Holder, type TermsAck } from "./connections.ts";
 import { err, ok, unreachable, type Result } from "./shared.ts";
 
 export type RotationMode = "round-robin" | "drain";
@@ -29,6 +29,12 @@ export type KeyMember = {
 export type Names = { connections: readonly string[]; pools: readonly string[]; deleted: readonly string[] };
 export type Standing = "ok" | "empty" | "blocked";
 export type RecoverHow = "probe" | "report" | "revive" | "rotation";
+export type GrantRequest = { role: string; entry: string; workspacePath: string; limit: number; reserve: number; margin: number };
+export type GrantMoveWhy = "exhausted" | "refused" | "adopted" | "reopened";
+export type Grant = {
+  id: string; member: string; lease: string; holder: Holder; request: GrantRequest;
+  window: HelperWindow; previous: { member: string; movedAt: number } | null;
+};
 export type KeyPoolEvent =
   | { type: "KeyPoolCreated"; pool: string; at: number; command: string }
   | { type: "MemberJoined"; member: string; at: number; command: string }
@@ -44,9 +50,13 @@ export type KeyPoolEvent =
   | { type: "KeyRecovered"; member: string; how: RecoverHow; at: number }
   | { type: "PoolEmpty"; backAt: number | null; at: number }
   | { type: "PoolBlocked"; member: string; reason: FailingReason; at: number }
-  | { type: "PoolRefilled"; at: number };
+  | { type: "PoolRefilled"; at: number }
+  | { type: "GrantOpened"; grant: string; member: string; at: number }
+  | { type: "GrantMoved"; grant: string; from: string; to: string; why: GrantMoveWhy; at: number }
+  | { type: "GrantClosed"; grant: string; at: number };
 export type KeyPool = {
   name: string; runtime: string; vendor: string; policy: RotationPolicy; members: readonly KeyMember[];
+  grants: readonly Grant[];
   lastPick: string | null; terms: TermsAck | null; ownedOrgs: readonly string[]; standing: Standing;
   events: readonly KeyPoolEvent[]; seq: number;
 };
@@ -134,7 +144,7 @@ export function createKeyPool(
   if (names.connections.includes(input.name) || names.pools.includes(input.name) || names.deleted.includes(input.name)) return err("taken");
   const created: KeyPool = {
     name: input.name, runtime: input.runtime, vendor: input.vendor, policy: policy.value,
-    members: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
+    members: [], grants: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
   };
   return ok(settleKeyPool(withEvents(created, [{ type: "KeyPoolCreated", pool: input.name, at: now, command: who.value }]), now));
 }
@@ -180,9 +190,10 @@ export function leaveKeyPool(p: KeyPool, credential: string, now: number, why: "
   const index = p.members.findIndex(m => m.credential === credential);
   if (index < 0) return err("missing");
   const members = p.members.filter(m => m.credential !== credential);
+  const grants = p.grants.filter(g => g.member !== credential);
   const previous = members[index - 1];
   const lastPick = p.lastPick !== credential ? p.lastPick : index === 0 || previous === undefined ? null : previous.credential;
-  return ok(settleKeyPool(withEvents({ ...p, members, lastPick }, [{ type: "MemberLeft", member: credential, why, at: now }]), now));
+  return ok(settleKeyPool(withEvents({ ...p, members, grants, lastPick }, [{ type: "MemberLeft", member: credential, why, at: now }]), now));
 }
 
 export function moveKeyMember(
@@ -307,6 +318,52 @@ export function reviveKey(p: KeyPool, credential: string, actor: Actor, now: num
   if (!member) return err("missing");
   if (member.health.state === "active") return err("active");
   return ok(recover(p, credential, "revive", now));
+}
+
+function sameWindow(a: HelperWindow, b: HelperWindow): boolean {
+  return a.calls === b.calls && a.windowStart === b.windowStart;
+}
+
+export function openGrant(p: KeyPool, grant: Grant, now: number): Result<KeyPool, "missing" | "exists"> {
+  if (!p.members.some(m => m.credential === grant.member)) return err("missing");
+  if (p.grants.some(g => g.id === grant.id)) return err("exists");
+  return ok(withEvents({ ...p, grants: [...p.grants, grant] }, [{ type: "GrantOpened", grant: grant.id, member: grant.member, at: now }]));
+}
+
+export function moveGrant(
+  p: KeyPool, id: string, to: { member: string; lease: string; window: HelperWindow; movedAt: number }, why: GrantMoveWhy, now: number,
+): Result<KeyPool, "missing" | "no_member"> {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return err("missing");
+  if (!p.members.some(m => m.credential === to.member)) return err("no_member");
+  if (to.lease === grant.lease) return ok(p);
+  const previous = to.member === grant.member ? grant.previous : { member: grant.member, movedAt: to.movedAt };
+  const next: Grant = { ...grant, member: to.member, lease: to.lease, window: to.window, previous };
+  return ok(withEvents(
+    { ...p, grants: p.grants.map(g => g.id === id ? next : g) },
+    [{ type: "GrantMoved", grant: id, from: grant.member, to: to.member, why, at: now }],
+  ));
+}
+
+export function touchGrant(p: KeyPool, id: string, window: HelperWindow): KeyPool {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant || sameWindow(grant.window, window)) return p;
+  return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, window } : g) };
+}
+
+export function closeGrant(p: KeyPool, id: string, now: number): KeyPool {
+  if (!p.grants.some(g => g.id === id)) return p;
+  return withEvents({ ...p, grants: p.grants.filter(g => g.id !== id) }, [{ type: "GrantClosed", grant: id, at: now }]);
+}
+
+// A report inside the hand-off window still belongs to the member that gave the run up. Past it, the current member owns it.
+export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number): Result<{ pool: KeyPool; member: string }, "missing"> {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return err("missing");
+  const earlier = grant.previous;
+  if (earlier && at < earlier.movedAt + ttlMs) return ok({ pool: p, member: earlier.member });
+  if (!earlier) return ok({ pool: p, member: grant.member });
+  return ok({ pool: { ...p, grants: p.grants.map(g => g.id === id ? { ...g, previous: null } : g) }, member: grant.member });
 }
 
 export function keyRotated(p: KeyPool, credential: string, now: number): KeyPool {
