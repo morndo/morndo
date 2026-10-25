@@ -7,7 +7,7 @@ import {
 import { findPreset, floorOf } from "./catalog.ts";
 import { loginKeyRefused } from "./login-key.ts";
 import { blockedRemoval, syncRevoked } from "./providers.ts";
-import type { Deps, Failure } from "./ports.ts";
+import type { ConnectionLifecycle, Deps, Failure } from "./ports.ts";
 import { raiseThresholds } from "./thresholds.ts";
 
 type Out = Result<void, Failure>;
@@ -23,9 +23,14 @@ function offered(preset: { kinds: readonly string[]; custody: string; runtimes: 
 
 export class ConnectionsService {
   readonly #deps: Deps;
-  constructor(deps: Deps) { this.#deps = deps; }
+  readonly #life: ConnectionLifecycle | undefined;
+  constructor(deps: Deps, lifecycle?: ConnectionLifecycle) {
+    this.#deps = deps;
+    this.#life = lifecycle;
+  }
 
   addSubscription(input: { name: string; vendor: string; runtime: string; configDir: string | null }, actor: Actor): Out {
+    if (this.#life?.reserved(input.name)) return fail("taken");
     const preset = findPreset(this.#deps.catalog, input.vendor);
     if (!preset) return fail("missing");
     const offer = offered(preset, "subscription", "morndo", input.runtime);
@@ -41,6 +46,7 @@ export class ConnectionsService {
   }
 
   async addKey(input: { name: string; vendor: string; runtime: string; ref: string; billing: Billing; budget: Budget; expiry: number | null }, actor: Actor): Promise<Out> {
+    if (this.#life?.reserved(input.name)) return fail("taken");
     const preset = findPreset(this.#deps.catalog, input.vendor);
     if (!preset) return fail("missing");
     if (!this.#deps.vault.has(input.ref)) return fail("bad_ref");
@@ -61,6 +67,7 @@ export class ConnectionsService {
   }
 
   addLayer(input: { name: string; vendor: string; runtime: string; kind: Kind }, actor: Actor): Out {
+    if (this.#life?.reserved(input.name)) return fail("taken");
     const preset = findPreset(this.#deps.catalog, input.vendor);
     if (!preset) return fail("missing");
     const offer = offered(preset, input.kind, "engine-layer", input.runtime);
@@ -81,7 +88,9 @@ export class ConnectionsService {
     if (!this.#deps.vault.has(ref)) return fail("bad_ref");
     const fingerprint = await this.#deps.vault.fingerprint(ref);
     if (!fingerprint) return fail("bad_fingerprint");
-    return this.#dir(directory => domainRotate(directory, name, ref, fingerprint, actor, this.#deps.clock.now()));
+    const turned = this.#dir(directory => domainRotate(directory, name, ref, fingerprint, actor, this.#deps.clock.now()));
+    if (turned.ok) this.#life?.rotated(name);
+    return turned;
   }
 
   acknowledge(name: string, by: string, actor: Actor): Out {
@@ -161,10 +170,12 @@ export class ConnectionsService {
     const revoked = revoke(directory, name, actor, this.#deps.clock.now());
     if (!revoked.ok) {
       if (revoked.error.problem !== "revoked") return fail(revoked.error.problem);
-      return this.#layer(name, `revoke ${name}`, () => {
+      const done = this.#layer(name, `revoke ${name}`, () => {
         syncRevoked(directory, policy, this.#deps.engines);
         this.#availability(name);
       });
+      if (done.ok) this.#life?.revoked(name);
+      return done;
     }
     const known = revoked.value.connections.map(c => ({ name: c.name, kind: c.kind }));
     const gone = revokeName(policy, name, known, this.#deps.clock.now());
@@ -172,10 +183,12 @@ export class ConnectionsService {
     if (blocked) return fail(`${blocked.name} is still in ${blocked.roles.join(", ")}'s chain`);
     if (!this.#save(revoked.value, gone.policy, version)) return fail("conflict");
     for (const role of gone.kept) this.#deps.alerts.raise({ kind: "kept", name: role, detail: name });
-    return this.#layer(name, `revoke ${name}`, () => {
+    const done = this.#layer(name, `revoke ${name}`, () => {
       syncRevoked(revoked.value, gone.policy, this.#deps.engines);
       this.#availability(name);
     });
+    if (done.ok) this.#life?.revoked(name);
+    return done;
   }
 
   // Persist already happened. A failed engines update is reported, and the next save writes it again.

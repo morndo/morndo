@@ -23,6 +23,11 @@ const ALERT_DETAIL: Record<string, string> = {
   authority: "A run lost its holder",
   defaults: "A default pick was skipped",
   threshold: "A budget or expiry line was crossed",
+  "key-exhausted": "A pooled key ran out of credit or reached its spend limit",
+  "key-failing": "A pooled key or its account was refused",
+  "pool-empty": "Every key in a pool is out of credit",
+  "pool-blocked": "A pool is stopped until you act on a refused key",
+  unclassified: "A provider refusal was not recognised",
 };
 
 export function buildPage(input: {
