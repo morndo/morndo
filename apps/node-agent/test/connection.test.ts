@@ -2,6 +2,8 @@
 // authentication, welcome, every close code (4409's retry every 5 minutes on fake timers), reconnect with the same
 // instanceId, the ping watchdog (35 s by default), and the refusal of a plain ws:// URL to another machine.
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "@morndo/protocol";
 import { FleetConnection, UNSUPPORTED_RETRY_MS, type ConnectionOptions, type Welcomed } from "../src/conn/connection.ts";
@@ -11,6 +13,10 @@ import { startFakeFleet, type FakeFleet } from "./fake-fleet.ts";
 import { captureLog, until, wait } from "./helpers.ts";
 
 // UUIDs, as the protocol's Hello requires (the fake fleet closes 1008 on a hello that doesn't fit).
+// The version the product is: the root package.json's, read here directly, so the assertion checks the version the agent
+// reports against the file it is meant to come from, not against the function the agent itself calls.
+const ROOT_VERSION = (JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "..", "package.json"), "utf8")) as { version: string }).version;
+
 const INSTANCE = randomUUID();
 const STREAM = randomUUID();
 let fleet: FakeFleet;
@@ -57,7 +63,7 @@ describe("handshake", () => {
     expect(c.conn.status().connEpoch).toBe(7);
     expect(hellos()[0]).toMatchObject({
       v: 1, t: "hello", node: "pc", instanceId: INSTANCE, streamId: STREAM, proto: [1],
-      agent: { version: "0.0.0" }, claude: { version: "2.1.286" }, caps: ["inventory.get"],
+      agent: { version: ROOT_VERSION }, claude: { version: "2.1.286" }, caps: ["inventory.get"],
     });
     expect(String(hellos()[0]?.clientNonce)).toMatch(/^[A-Za-z0-9_-]{43}$/);   // 32 random bytes
     expect(fleet.received.some(r => r.msg.t === "proof")).toBe(true);          // the fake verified it, or it closes 4401

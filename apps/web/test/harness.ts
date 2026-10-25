@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { svelte } from "@sveltejs/vite-plugin-svelte";
 import { chromium, type Browser } from "playwright";
 import { afterAll } from "vitest";
-import { steady } from "./steady.ts";
+import { steady } from "../../../test/steady.ts";
 import { createServer, type Plugin, type ViteDevServer } from "vite";
 
 const WEB = join(import.meta.dirname, "..");

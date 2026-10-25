@@ -1,7 +1,7 @@
 // The release pipeline's shape (design §9, ADR-0019). These read the workflow files; they do not
 // call GitHub. A private scratch repository still has to run the real tag once the owner adds keys.
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -56,7 +56,10 @@ describe("release pipeline files", () => {
     expect(prepare).toContain("permission-contents: write");
     expect(prepare).toContain("permission-pull-requests: write");
     expect(prepare).toContain("steps.app.outputs.token");
-    expect(JSON.parse(readFileSync(".release-please-manifest.json", "utf8"))).toEqual({ ".": "0.0.0" });
+    // The manifest names the root package's own version: Release Please bumps both together in its release PR, so the
+    // test follows the package and pins neither.
+    const root = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
+    expect(JSON.parse(readFileSync(".release-please-manifest.json", "utf8"))).toEqual({ ".": root.version });
     expect(readFileSync("CHANGELOG.md", "utf8").startsWith("# Changelog\n")).toBe(true);
     expect(release).toContain(`googleapis/release-please-action@${RELEASE_PLEASE}`);
     expect(release).toContain("config-file: release-please-config.json");
@@ -489,6 +492,269 @@ export function keyViolations(text: string, jobs: Record<string, string>): strin
   return found;
 }
 
+describe("withdraw.yml", () => {
+  const text = () => readFileSync(".github/workflows/withdraw.yml", "utf8");
+  const feed = () => readFileSync(".github/workflows/feed.yml", "utf8");
+  type Step = { name?: string; uses?: string; run?: string; env?: Record<string, string> };
+  type Job = {
+    if?: string; needs?: unknown; environment?: unknown; permissions?: Record<string, string>;
+    concurrency?: { group?: string; "cancel-in-progress"?: boolean }; steps?: Step[];
+  };
+  type Doc = {
+    name?: string;
+    on?: { workflow_dispatch?: { inputs?: Record<string, { description?: string; required?: boolean; default?: boolean; type?: string }> } };
+    permissions?: { contents?: string };
+    concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+    jobs: Record<string, Job>;
+  };
+  const doc = () => parse(text()) as Doc;
+
+  it("withdraw.yml is manual only, with one required version input", () => {
+    const parsed = doc();
+    expect(parsed.name).toBe("Withdraw");
+    expect(Object.keys(parsed.on ?? {})).toEqual(["workflow_dispatch"]);
+    expect(text()).not.toMatch(/^on:\n(?:  .*\n)*  schedule:/m);
+    expect(text()).not.toMatch(/^on:\n(?:  .*\n)*  push:/m);
+    const inputs = parsed.on?.workflow_dispatch?.inputs ?? {};
+    expect(Object.keys(inputs)).toEqual(["version", "allow_empty_channel"]);
+    expect(inputs["version"]).toMatchObject({ required: true, type: "string" });
+    expect(inputs["version"]?.description).toEqual(expect.any(String));
+    expect(inputs["version"]?.description).not.toBe("");
+    expect(inputs["allow_empty_channel"]).toEqual({
+      description: "Allow withdrawing the last Version a channel offers (the channel then offers nothing)",
+      required: false,
+      default: false,
+      type: "boolean",
+    });
+  });
+
+  it("every withdraw job runs only on main", () => {
+    const jobs = doc().jobs;
+    expect(Object.keys(jobs)).toEqual(["withdraw-prepare", "withdraw-sign", "withdraw", "pages"]);
+    for (const [name, job] of Object.entries(jobs)) {
+      expect(job.if, name).toContain("github.ref == 'refs/heads/main'");
+    }
+  });
+
+  it("withdraw holds the feed key only in its sign job, behind the feed environment, and the preparation behind the withdraw environment", () => {
+    const jobs = doc().jobs;
+    expect(jobs["withdraw-prepare"]?.environment).toBe("withdraw");
+    expect(jobs["withdraw-sign"]?.environment).toBe("feed");
+    expect(jobs["withdraw"]?.environment).toBeUndefined();
+    expect(jobs["pages"]?.environment).toMatchObject({ name: "github-pages" });
+    expect(keyViolations(text(), { "withdraw-sign": "FEED_SSH_KEY" })).toEqual([]);
+    expect(job(text(), "withdraw-prepare")).not.toContain("FEED_SSH_KEY");
+    expect(job(text(), "withdraw-prepare")).not.toContain("SSH_KEY");
+    expect(job(text(), "withdraw-sign")).toContain("FEED_SSH_KEY");
+    expect(job(text(), "withdraw-sign")).not.toContain("npm ci");
+    expect(job(text(), "withdraw-prepare")).toContain("feed-withdraw-prepare");
+    expect(job(text(), "withdraw-prepare")).toContain("trust/feed_allowed_signers");
+    expect(job(text(), "withdraw-prepare")).not.toContain("status=absent");
+  });
+
+  it("withdraw writes contents in its commit job only, and pages permissions in its pages job only", () => {
+    const parsed = doc();
+    expect(parsed.permissions).toEqual({ contents: "read" });
+    expect(parsed.jobs["withdraw"]?.permissions).toEqual({ contents: "write" });
+    expect(parsed.jobs["pages"]?.permissions).toEqual({ contents: "read", pages: "write", "id-token": "write" });
+    expect(parsed.jobs["withdraw-prepare"]?.permissions).toEqual({ contents: "read" });
+    expect(parsed.jobs["withdraw-sign"]?.permissions).toEqual({ contents: "read" });
+    const writers = Object.entries(parsed.jobs).filter(([, job]) => job.permissions?.["contents"] === "write").map(([name]) => name);
+    expect(writers).toEqual(["withdraw"]);
+    const pages = Object.entries(parsed.jobs).filter(([, job]) => job.permissions?.["pages"] === "write" || job.permissions?.["id-token"] === "write").map(([name]) => name);
+    expect(pages).toEqual(["pages"]);
+  });
+
+  it("withdraw never writes the version input inside a run script", () => {
+    const parsed = doc();
+    const lines = text().split("\n").filter(line => line.includes("inputs."));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).toMatch(/^\s+\w+:\s+\$\{\{\s*inputs\.[A-Za-z0-9_]+\s*\}\}\s*$/);
+    const envHits: string[] = [];
+    for (const job of Object.values(parsed.jobs)) {
+      for (const step of job.steps ?? []) {
+        expect(step.run ?? "").not.toContain("inputs.");
+        for (const value of Object.values(step.env ?? {})) if (value.includes("inputs.")) envHits.push(value);
+      }
+    }
+    expect(envHits).toHaveLength(lines.length);
+  });
+
+  it("withdraw passes the empty-channel decision to the preparation and to the check", () => {
+    const parsed = doc();
+    const prepare = parsed.jobs["withdraw-prepare"]?.steps?.find(step => (step.run ?? "").includes("feed-withdraw-prepare"));
+    expect(prepare?.env?.["ALLOW_EMPTY"]).toBe("${{ inputs.allow_empty_channel }}");
+    expect(prepare?.run).toContain('--allow-empty-channel "$ALLOW_EMPTY"');
+    const check = parsed.jobs["withdraw-sign"]?.steps?.find(step => (step.run ?? "").includes("check-signing-feed.sh"));
+    expect(check?.env?.["ALLOW_EMPTY_CHANNEL"]).toBe("${{ inputs.allow_empty_channel }}");
+    expect(check?.run ?? "").not.toContain("allow_empty_channel");
+  });
+
+  it("every action in withdraw.yml is pinned by commit and is one feed.yml already uses", () => {
+    const feedUses = new Set([...feed().matchAll(/uses: (\S+)/g)].map(match => match[1]));
+    const used = [...text().matchAll(/uses: (\S+)/g)].map(match => match[1]);
+    expect(used.length).toBeGreaterThan(0);
+    for (const uses of used) {
+      expect(uses).toMatch(/@[0-9a-f]{40}$/);
+      expect(feedUses.has(uses)).toBe(true);
+    }
+  });
+
+  it("withdraw takes the feed concurrency group only in the job that writes the feed, and never cancels", () => {
+    const parsed = doc();
+    expect(parsed.concurrency).toBeUndefined();
+    expect(text()).not.toMatch(/^concurrency:/m);
+    expect(Object.entries(parsed.jobs).map(([name, job]) => [name, job.concurrency])).toEqual([
+      ["withdraw-prepare", undefined],
+      ["withdraw-sign", undefined],
+      ["withdraw", { group: "morndo-feed", "cancel-in-progress": false }],
+      ["pages", { group: "morndo-pages", "cancel-in-progress": false }],
+    ]);
+    expect(text()).not.toContain("cancel-in-progress: true");
+  });
+
+  it("the sign job checks what it signs before the key step", () => {
+    const sign = job(text(), "withdraw-sign");
+    expect(sign).toContain("MODE: withdraw");
+    expect(sign).toContain("/bin/sh scripts/release/check-signing-feed.sh");
+    expect(sign.indexOf("check-signing-feed.sh")).toBeLessThan(sign.indexOf("secrets.FEED_SSH_KEY"));
+    expect(sign.indexOf("Check what will be signed")).toBeLessThan(sign.indexOf("Sign the feeds"));
+  });
+
+  it("no other workflow names the withdraw environment", () => {
+    const files = readdirSync(".github/workflows").filter(name => name.endsWith(".yml") && name !== "withdraw.yml");
+    expect(files.length).toBeGreaterThan(0);
+    for (const name of files) {
+      const body = readFileSync(join(".github/workflows", name), "utf8");
+      expect(body, name).not.toMatch(/environment:\s*withdraw\b/);
+      expect(body, name).not.toMatch(/name:\s*withdraw\b/);
+    }
+  });
+});
+
+describe("promote.yml", () => {
+  const text = () => readFileSync(".github/workflows/promote.yml", "utf8");
+  const feed = () => readFileSync(".github/workflows/feed.yml", "utf8");
+  type Step = { name?: string; uses?: string; run?: string; env?: Record<string, string> };
+  type Job = {
+    if?: string; needs?: unknown; environment?: unknown; permissions?: Record<string, string>;
+    concurrency?: { group?: string; "cancel-in-progress"?: boolean }; steps?: Step[];
+  };
+  type Doc = {
+    name?: string;
+    on?: { workflow_dispatch?: { inputs?: Record<string, { description?: string; required?: boolean; type?: string }> } };
+    permissions?: { contents?: string };
+    concurrency?: { group?: string; "cancel-in-progress"?: boolean };
+    jobs: Record<string, Job>;
+  };
+  const doc = () => parse(text()) as Doc;
+
+  it("promote.yml is manual only, with one required version input", () => {
+    const parsed = doc();
+    expect(parsed.name).toBe("Promote");
+    expect(Object.keys(parsed.on ?? {})).toEqual(["workflow_dispatch"]);
+    expect(text()).not.toMatch(/^on:\n(?:  .*\n)*  schedule:/m);
+    expect(text()).not.toMatch(/^on:\n(?:  .*\n)*  push:/m);
+    const inputs = parsed.on?.workflow_dispatch?.inputs ?? {};
+    expect(Object.keys(inputs)).toEqual(["version"]);
+    expect(inputs["version"]).toMatchObject({ required: true, type: "string" });
+    expect(inputs["version"]?.description).toBe("Version to add to the stable feed");
+  });
+
+  it("every promote job runs only on main", () => {
+    const jobs = doc().jobs;
+    expect(Object.keys(jobs)).toEqual(["promote-prepare", "promote-sign", "promote", "pages"]);
+    for (const [name, job] of Object.entries(jobs)) {
+      expect(job.if, name).toContain("github.ref == 'refs/heads/main'");
+    }
+  });
+
+  it("promote holds the feed key only in its sign job, behind the feed environment, and the preparation behind the promote environment", () => {
+    const jobs = doc().jobs;
+    expect(jobs["promote-prepare"]?.environment).toBe("promote");
+    expect(jobs["promote-sign"]?.environment).toBe("feed");
+    expect(jobs["promote"]?.environment).toBeUndefined();
+    expect(jobs["pages"]?.environment).toMatchObject({ name: "github-pages" });
+    expect(keyViolations(text(), { "promote-sign": "FEED_SSH_KEY" })).toEqual([]);
+    expect(job(text(), "promote-prepare")).not.toContain("FEED_SSH_KEY");
+    expect(job(text(), "promote-prepare")).not.toContain("SSH_KEY");
+    expect(job(text(), "promote-sign")).toContain("FEED_SSH_KEY");
+    expect(job(text(), "promote-sign")).not.toContain("npm ci");
+    expect(job(text(), "promote-prepare")).toContain("feed-promote-prepare");
+    expect(job(text(), "promote-prepare")).toContain("trust/feed_allowed_signers");
+    expect(job(text(), "promote-prepare")).not.toContain("status=absent");
+  });
+
+  it("promote writes contents in its commit job only, and pages permissions in its pages job only", () => {
+    const parsed = doc();
+    expect(parsed.permissions).toEqual({ contents: "read" });
+    expect(parsed.jobs["promote"]?.permissions).toEqual({ contents: "write" });
+    expect(parsed.jobs["pages"]?.permissions).toEqual({ contents: "read", pages: "write", "id-token": "write" });
+    expect(parsed.jobs["promote-prepare"]?.permissions).toEqual({ contents: "read" });
+    expect(parsed.jobs["promote-sign"]?.permissions).toEqual({ contents: "read" });
+    const writers = Object.entries(parsed.jobs).filter(([, job]) => job.permissions?.["contents"] === "write").map(([name]) => name);
+    expect(writers).toEqual(["promote"]);
+    const pages = Object.entries(parsed.jobs).filter(([, job]) => job.permissions?.["pages"] === "write" || job.permissions?.["id-token"] === "write").map(([name]) => name);
+    expect(pages).toEqual(["pages"]);
+  });
+
+  it("promote never writes the version input inside a run script", () => {
+    const parsed = doc();
+    const lines = text().split("\n").filter(line => line.includes("inputs.version"));
+    expect(lines.length).toBeGreaterThan(0);
+    for (const line of lines) expect(line).toMatch(/^\s+\w+:\s+\$\{\{\s*inputs\.version\s*\}\}\s*$/);
+    const envHits: string[] = [];
+    for (const job of Object.values(parsed.jobs)) {
+      for (const step of job.steps ?? []) {
+        expect(step.run ?? "").not.toContain("inputs.version");
+        for (const value of Object.values(step.env ?? {})) if (value.includes("inputs.version")) envHits.push(value);
+      }
+    }
+    expect(envHits).toHaveLength(lines.length);
+  });
+
+  it("every action in promote.yml is pinned by commit and is one feed.yml already uses", () => {
+    const feedUses = new Set([...feed().matchAll(/uses: (\S+)/g)].map(match => match[1]));
+    const used = [...text().matchAll(/uses: (\S+)/g)].map(match => match[1]);
+    expect(used.length).toBeGreaterThan(0);
+    for (const uses of used) {
+      expect(uses).toMatch(/@[0-9a-f]{40}$/);
+      expect(feedUses.has(uses)).toBe(true);
+    }
+  });
+
+  it("promote takes the feed concurrency group only in the job that writes the feed, and never cancels", () => {
+    const parsed = doc();
+    expect(parsed.concurrency).toBeUndefined();
+    expect(text()).not.toMatch(/^concurrency:/m);
+    expect(Object.entries(parsed.jobs).map(([name, job]) => [name, job.concurrency])).toEqual([
+      ["promote-prepare", undefined],
+      ["promote-sign", undefined],
+      ["promote", { group: "morndo-feed", "cancel-in-progress": false }],
+      ["pages", { group: "morndo-pages", "cancel-in-progress": false }],
+    ]);
+    expect(text()).not.toContain("cancel-in-progress: true");
+  });
+
+  it("the promote sign job checks what it signs before the key step", () => {
+    const sign = job(text(), "promote-sign");
+    expect(sign).toContain("MODE: promote");
+    expect(sign).toContain("/bin/sh scripts/release/check-signing-feed.sh");
+    expect(sign.indexOf("check-signing-feed.sh")).toBeLessThan(sign.indexOf("secrets.FEED_SSH_KEY"));
+    expect(sign.indexOf("Check what will be signed")).toBeLessThan(sign.indexOf("Sign the feeds"));
+  });
+
+  it("no other workflow names the promote environment", () => {
+    const files = readdirSync(".github/workflows").filter(name => name.endsWith(".yml") && name !== "promote.yml");
+    expect(files.length).toBeGreaterThan(0);
+    for (const name of files) {
+      const body = readFileSync(join(".github/workflows", name), "utf8");
+      expect(body, name).not.toMatch(/environment:\s*promote\b/);
+      expect(body, name).not.toMatch(/name:\s*promote\b/);
+    }
+  });
+});
+
 describe("the Node pin is written three times and must agree", () => {
   it("node-pin.ts, the build job and the signing check name one version", () => {
     const release = readFileSync(".github/workflows/release.yml", "utf8");
@@ -554,5 +820,19 @@ describe("signing keys reach one shell-only step", () => {
       "sign: the step with RELEASE_SSH_KEY has no umask 077",
       "RELEASE_SSH_KEY is in sign, other, not only sign",
     ]);
+  });
+});
+
+// The release bench shortens the promotion wait to 20 minutes with a script (scripts/release/bench-overlay.sh), and it
+// removes this file from the bench's tree. In production the wait is seven days, pinned here by value, so an overlay
+// edit that leaked into production fails the pull request that carries it.
+describe("production constants the release bench overrides", () => {
+  it("the promotion wait is seven days by value, in the feed code and in the shell check", () => {
+    const feedTs = readFileSync("scripts/release/feed.ts", "utf8");
+    expect(feedTs).toContain("export const PROMOTION_WAIT_MS = 7 * 24 * 60 * 60 * 1000;");
+    expect(feedTs).toContain("export const FEED_TTL_MS = 14 * 24 * 60 * 60 * 1000;");
+    const check = readFileSync("scripts/release/check-signing-feed.sh", "utf8");
+    expect(check).toContain("PROMOTE_MIN_AGE=${PROMOTE_MIN_AGE:-604800}");
+    expect(check).toContain("== 1209600");
   });
 });

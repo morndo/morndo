@@ -72,6 +72,15 @@ export class LaneRegistry {
     return { kind: "ok", node: r.node, workerId: r.workerId };
   }
 
+  // The lane name a worker ID's window has in the nodes' latest inventories, a name in conflict included (both windows
+  // keep it). Null when no inventory lists that worker ID.
+  nameOfWorker(workerId: string): string | null {
+    for (const names of this.#claims.values()) {
+      for (const [name, ids] of names) if (ids.includes(workerId)) return name;
+    }
+    return null;
+  }
+
   #claimsOf(name: string, row: LaneRow | null): Claim[] {
     const claims: Claim[] = [];
     for (const [node, names] of this.#claims) for (const workerId of names.get(name) ?? []) claims.push({ node, workerId });

@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
-import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/domain";
-import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk } from "./config.ts";
+import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, type AccessPolicy } from "@morndo/domain";
+import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
 import { Store } from "./adapters/store.ts";
+import { GithubChecks } from "./adapters/github-checks.ts";
+import { readTokenFile } from "./adapters/token-file.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
 import { DatabaseUnreadable, NotLocalDisk, RevocationJournal, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, productStamp, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
@@ -21,7 +23,7 @@ import { updaterCli } from "./adapters/updater-cli.ts";
 import { UpdatesService } from "./application/updates-service.ts";
 import { passkeys } from "./adapters/passkeys.ts";
 import { denyConfigFromEnv, denyConfigWithClaudeDir, denyRoots, paneLock } from "@morndo/node-ops";
-import { CLIENT_API } from "@morndo/protocol";
+import { AGENT_SCOPES, CLIENT_API } from "@morndo/protocol";
 import type { HubPorts, Tmux } from "./application/ports.ts";
 import { startHttp } from "./adapters/http.ts";
 import { AccessService } from "./application/access-service.ts";
@@ -45,6 +47,7 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
+import { ProofService } from "./application/proof-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
 import { gitAncestry, gitHasCommit } from "./adapters/git-ancestry.ts";
@@ -66,6 +69,8 @@ import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
 import { readCodeLine, runMemory } from "./console/memory.ts";
 import { runUpdaterProgram } from "./console/update.ts";
+import { AUDIT_SYNOPSIS, AUDIT_USAGE, parseAuditArgs } from "./console/audit.ts";
+import { agentTokenLine, agentTokenMade } from "./console/agent-token.ts";
 import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -76,10 +81,10 @@ const HELP = `morndo: your agents, on your phone.
   morndo pair             show a one-time QR (10 minutes) to pair a phone or laptop
   morndo devices          list paired devices
   morndo revoke <id>      revoke a device; its sessions end at once
-  morndo audit            the latest device and session events
+  morndo audit [count]    the latest device and session events (morndo audit --help)
   morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
                           events (morndo lanes --help)
-  morndo agent-token new <name> --role manager|worker
+  morndo agent-token new <name> --role manager|worker [--scope usage-pool]
                           a token for the manager's lane, or one the worker lanes share (shown once)
   morndo agent-token list
   morndo agent-token revoke <id>
@@ -118,6 +123,10 @@ if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.ar
 // hub runs the updater's program, as it runs the engines CLI, and leaves with its exit code.
 if (process.argv[2] === "update" || process.argv[2] === "doctor" || process.argv[2] === "install")
   await exitAfterOutput(await runUpdaterProgram(process.argv.slice(2)));
+// `morndo audit`'s arguments are read here too: `--help` and a bad count need no hub (T-423, console/audit.ts).
+const auditArgs = process.argv[2] === "audit" ? parseAuditArgs(process.argv.slice(3)) : null;
+if (auditArgs?.kind === "help") { process.stdout.write(`${AUDIT_USAGE}\n`); await exitAfterOutput(0); }
+if (auditArgs?.kind === "refused") { process.stderr.write(`morndo audit: ${auditArgs.why} ${AUDIT_SYNOPSIS}\n`); await exitAfterOutput(2); }
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
 const config = loadConfig();
@@ -328,7 +337,25 @@ switch (cmd) {
       onChange: () => held.board?.runsChanged(),
     });
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null) });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null), standIn: config.forgeUrl != null });
+    // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows. Step
+    // 3: the rows come from the forge (github-checks.ts holds the credential; nothing else reads it), the mode and the
+    // checked repositories from MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS. A pass every minute re-reads what is still
+    // pending or was rate-limited; on stop the timer is cleared and the checks in flight are awaited — registered after
+    // the store's close, so they end before it runs.
+    const githubToken = readTokenFile(config.githubTokenFile ?? null, m => log.warn(m));
+    const standIn = standInNotice(config);
+    if (standIn !== null) log.warn(standIn);
+    const proof = new ProofService({
+      store, board, forge: new GithubChecks({
+        token: githubToken,
+        ...(config.forgeUrl ? { baseUrl: config.forgeUrl } : {}),
+      }), mode: config.proofGate ?? "warn",
+      allowedRepos: config.proofRepos ?? [MORNDO_REPO], authenticated: githubToken !== null, standIn: standIn !== null,
+    });
+    const proofTimer = setInterval(() => { void proof.tick().catch((e: unknown) => log.error("proof: the timer pass failed", e)); }, 60_000);
+    proofTimer.unref();
+    shutdown.onStop(async () => { clearInterval(proofTimer); await proof.idle(); });
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
@@ -344,12 +371,25 @@ switch (cmd) {
     // principal's view only. The file can change with every lane quiet, so it is looked at again every minute (never
     // blocking: ADR-0034).
     const pool = poolProfiles(config.poolUsageFile ?? null, log);
-    const usage = new UsageService({ store, profiles: pool.current });
+    // S3 (plan 4.5 item 4): a lane's node, from the observation loop's synchronous roster, for the lane records a
+    // report writes and a failure resolves through. Without a fleet the hub knows no lane's node: nothing changes.
+    const laneNode = fleet ? (lane: string) => observation.snapshot().workers.find(w => w.name === lane)?.node ?? null : undefined;
+    // S4 (plan 4.4): a usage notice the hub newly wrote raises one count-only Notification. Late-bound: the
+    // NotificationService is built above, and the closure only ever runs once the UsageService exists.
+    const usage = new UsageService({ store, profiles: pool.current, ...(laneNode ? { laneNode } : {}), onNotice: () => notifications.usage() });
+    // The fleet's usage taps (plan 4.5 item 4): a lane's start with an account, and its limit failures.
+    const stopUsageEvents = fleet ? fleet.client.events(e => { if (e.t !== "usage") return; try { usage.fromFleet(e.node, e.body); } catch (err) { log.warn("a usage tap from the fleet could not be taken", err); } }) : null;
+    if (stopUsageEvents) shutdown.onStop(stopUsageEvents);
     const lookAtPool = () => { void pool.refresh().then(changed => { if (changed) usage.refreshProfiles(); }, e => log.warn("the pool's usage file could not be looked at", e)); };
     lookAtPool();
     const poolRefresh = setInterval(lookAtPool, 60_000);
     poolRefresh.unref();
     shutdown.onStop(() => clearInterval(poolRefresh));
+    // Usage S2 (plan 4.3): the silence and forgetting pass — a source quiet for two weeks is forgotten, with one
+    // notice. Once a minute is plenty: nothing it decides is nearer than days.
+    const sweepUsage = setInterval(() => usage.sweep(), 60_000);
+    sweepUsage.unref();
+    shutdown.onStop(() => clearInterval(sweepUsage));
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
     // The runs read once, which applies what is due since the hub last ran; never in the way of the hub's start (a fleet
@@ -389,7 +429,7 @@ switch (cmd) {
     void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, store, files, inbox, reading, presence,
-      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs, queue, alerts,
+      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents, proof }, usage, jobs, queue, alerts,
       transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) }, updatesService,
     });
     shutdown.onStop(async () => { await http.idle(); await http.close(); });
@@ -465,7 +505,7 @@ switch (cmd) {
     break;
   }
   case "audit": {
-    for (const a of store.audit(Number(args[0] ?? 30)).reverse()) print(`${when(a.at)}  ${a.type}  ${JSON.stringify(a.body)}`);
+    for (const a of store.audit(auditArgs?.kind === "list" ? auditArgs.limit : 30).reverse()) print(`${when(a.at)}  ${a.type}  ${JSON.stringify(a.body)}`);
     store.close();
     break;
   }
@@ -474,22 +514,29 @@ switch (cmd) {
     // `agents` is the one the start already made, with the revocation journal (RL10).
     const [sub, ...rest] = args;
     if (sub === "new") {
-      // `--role R` and the name, in either order: the role's value is never taken as the name.
+      // `--role R`, any number of `--scope S` (U15: the closed list's words), and the name, in any order: a flag's
+      // value is never taken as the name.
       const roleAt = rest.indexOf("--role");
       const role = roleAt >= 0 ? rest[roleAt + 1] : undefined;
-      const name = rest.filter((a, i) => i !== roleAt && i !== roleAt + 1).find(a => !a.startsWith("--")) ?? "";
-      if (!name || (role !== "manager" && role !== "worker")) { process.stderr.write("usage: morndo agent-token new <name> --role manager|worker\n"); store.close(); throw await exitAfterOutput(2); }
-      const { token, secret } = agents.issue(name, role);
+      const scopeAt = rest.map((a, i) => [a, i] as const).filter(([a]) => a === "--scope").map(([, i]) => i);
+      const scopes = scopeAt.map(i => rest[i + 1]);
+      const used = new Set<number>([...(roleAt >= 0 ? [roleAt, roleAt + 1] : []), ...scopeAt, ...scopeAt.map(i => i + 1)]);
+      const name = rest.filter((a, i) => !used.has(i)).find(a => !a.startsWith("--")) ?? "";
+      if (!name || (role !== "manager" && role !== "worker") || scopes.some(s => !(AGENT_SCOPES as readonly string[]).includes(s ?? ""))) {
+        process.stderr.write(`usage: morndo agent-token new <name> --role manager|worker [--scope ${AGENT_SCOPES.join("|--scope ")}]\n`);
+        store.close(); throw await exitAfterOutput(2);
+      }
+      const { token, secret } = agents.issue(name, role, scopes as string[]);
       print(`${secret}`);
-      print(`Token ${token.id} (${token.name}, ${token.role}). Shown once: put it in MORNDO_AGENT_TOKEN for ${role === "manager" ? "the manager's lane" : "the worker lanes"}, with MORNDO_HUB=${config.origin}.`);
+      print(agentTokenMade(token, config.origin));
     } else if (sub === "list") {
-      for (const t of agents.list()) print(`${t.id}  ${t.name.padEnd(20)}  ${t.role.padEnd(7)}  made ${when(t.createdAt)}  last used ${when(t.lastUsedAt)}  ${t.revokedAt ? `REVOKED ${when(t.revokedAt)}` : "active"}`);
+      for (const t of agents.list()) print(agentTokenLine(t, when));
     } else if (sub === "revoke") {
       const id = rest[0];
       if (!id) { process.stderr.write("usage: morndo agent-token revoke <id>\n"); store.close(); throw await exitAfterOutput(2); }
       print(agents.revoke(id) ? `revoked ${id}` : `no active agent token ${id}`);
     } else {
-      process.stderr.write("usage: morndo agent-token new <name> --role manager|worker | list | revoke <id>\n");
+      process.stderr.write("usage: morndo agent-token new <name> --role manager|worker [--scope usage-pool] | list | revoke <id>\n");
       store.close();
       await exitAfterOutput(2);
     }

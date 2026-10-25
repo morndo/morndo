@@ -9,7 +9,7 @@
 // (orphans; the projector's, board-projector.ts), and a change of runs is pushed too, at most about once a second.
 // B11: each task's merges are kept with their liveness (merge-liveness.ts over the fleet's node builds), Done is judged
 // against them, and the view says for each task with merges where they stand ("merged, not live: pc on abc1234").
-import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
@@ -17,7 +17,8 @@ import type { Authenticated } from "./access-service.ts";
 // `runs` (ADR-0032 §6, BoardFrameSchema.runs): each lane's latest Run; empty without a fleet. `orphans`: the to do tasks
 // whose lane the fleet no longer lists (BoardProjector.orphans); empty without a fleet. `merged` (B11): one view per
 // shown task that has merges.
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[] };
+// `standIn`: set only when the hub reads its proof references from a stand-in forge, so every screen can say so (ADR-0035).
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[]; standIn?: true };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
 export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus; detail?: string };
@@ -25,6 +26,8 @@ export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: fal
 // Who recorded a merge (B11): the manager's or the lane's name, or the kind for the principal and the console. The board
 // itself records none (D5).
 const actorName = (a: TaskEvent["actor"]): string => a.kind === "manager" || a.kind === "worker" ? a.name : a.kind;
+
+export const PROOF_LIST_CHANGES_MAX = 100;
 
 export class BoardService {
   #store: Store;
@@ -34,25 +37,43 @@ export class BoardService {
   #runs: () => RunView[];
   #liveness: (sha: string) => Liveness;
   #knows: ((sha: string) => Promise<"yes" | "no" | "unknown">) | null;
+  #standIn: boolean;
   #orphans: (tasks: readonly Task[], now: number) => string[];
   #runsEveryMs: number;
   #runsTimer: NodeJS.Timeout | null = null;
   #toldAt = -Infinity;                                   // performance.now() of the last push, for the runs' throttle
   #listeners = new Set<(b: BoardView) => void>();
+  // ADR-0035 (B14 to B16): the proof service's two hooks on the board. The board itself knows nothing of a forge: the
+  // gate it hands the domain is whatever the proof service says the task's proof is, and the refresh is the hub's own
+  // re-reading of a brief's references before a Done is judged.
+  #proof: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null = null;
+  #eventListeners = new Set<(e: TaskEvent) => void>();
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
   // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
   // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits. `knows`:
   // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown"> }) {
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
     this.#knows = p.knows ?? null;
+    this.#standIn = p.standIn ?? false;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
+  // Each task event as it was written (B14: the proof triggers ride on the board's own events, never on a Run). Called
+  // after the transaction has committed and the board has been told, by whoever wrote the event (`act`, `create`,
+  // `follow` through `act`); one call per event.
+  onEvent(fn: (e: TaskEvent) => void): () => void {
+    this.#eventListeners.add(fn);
+    return () => { this.#eventListeners.delete(fn); };
+  }
+  // The proof service's hooks (ADR-0035): the gate the domain judges a Done and a brief against, and the refresh a
+  // Done attempt waits for first. null: none attached, Done is not held for proof.
+  attachProof(p: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null): void { this.#proof = p; }
+  #said(e: TaskEvent) { for (const l of this.#eventListeners) l(e); }
   // Every push carries the runs as they are then, so one due for the runs alone is dropped.
   #tell() {
     if (this.#runsTimer) { clearTimeout(this.#runsTimer); this.#runsTimer = null; }
@@ -76,7 +97,7 @@ export class BoardService {
   view(): BoardView {
     const now = this.#now();
     const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
-    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks) };
+    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks), ...(this.#standIn ? { standIn: true as const } : {}) };
   }
   task(key: string): { task: Task; events: TaskEvent[]; merged: MergedView | null } | null {
     const task = this.#store.task(key);
@@ -106,6 +127,7 @@ export class BoardService {
     });
     if (!r.ok) return { ok: false, ...r.error };
     this.#tell();
+    this.#said(r.value.event);
     return { ok: true, ...r.value };
   }
 
@@ -120,10 +142,24 @@ export class BoardService {
         ...action,
         ...(action.title !== undefined ? { title: action.title === redactKeyMaterial(task.title) ? task.title : action.title } : {}),
         ...(action.description !== undefined ? { description: action.description === redactKeyMaterial(task.description) ? task.description : action.description } : {}),
+      } : action.action === "proof_list" ? {
+        // B17: an item's words lose key material before they are judged and stored, as a brief's do (a drop is redacted the
+        // same way, so it finds the stored item).
+        ...action,
+        ...(action.add !== undefined ? { add: action.add.map(redactKeyMaterial) } : {}),
+        ...(action.drop !== undefined ? { drop: action.drop.map(redactKeyMaterial) } : {}),
       } : action;
-      // B5 needs only the tasks in progress, not the whole board. B11: Done is judged against the task's merges.
+      // B5 needs only the tasks in progress, not the whole board. B11: Done is judged against the task's merges. B16:
+      // the proof is in the gate only where the domain reads it — a brief (its repositories) and a move to Done.
+      const proof = this.#proof !== null && (action.action === "brief" || action.action === "proof_list" || (action.action === "move" && action.to === "done"))
+        ? this.#proof.gate(key) : undefined;
+      // Bounded: each change of a proof list is an event, so a lane takes at most PROOF_LIST_CHANGES_MAX of them on a task.
+      // Only the lane's own changes count and only the lane is held to it: it cannot spend a limit that locks the assigner out.
+      if (action.action === "proof_list" && actor.kind === "worker"
+        && this.#store.taskEvents(key).filter(e => e.change.kind === "proof_listed" && e.actor.kind === "worker").length >= PROOF_LIST_CHANGES_MAX)
+        return { ok: false as const, error: { problem: "too_many" as const, detail: "proof list changes" } };
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
-        { merges: this.#store.mergesOf(key), liveness: this.#liveness });
+        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}) });
       if (!applied.ok) return applied;
       this.#write(applied.value.task, applied.value.event);
       return applied;
@@ -131,6 +167,7 @@ export class BoardService {
     if (r === null) return { ok: false, problem: "unknown" };
     if (!r.ok) return { ok: false, ...r.error };
     this.#tell();
+    this.#said(r.value.event);
     return { ok: true, ...r.value };
   }
 
@@ -139,7 +176,10 @@ export class BoardService {
   // invents (a morndo/morndo record only). The manager's, the principal's and the console's records are not asked: they may come before the operator
   // brings the checkout up to date, and a refused record would leave the task with no merge to hold done for. "unknown"
   // (no checkout, git failing) takes the record.
+  // B16 (ADR-0035): a move to Done first re-reads the brief's references that have gone stale, so the Done is judged
+  // against what the forge says now, not what it said half an hour ago.
   async actChecked(key: string, action: TaskAction, actor: TaskActor): Promise<BoardResult> {
+    if (action.action === "move" && action.to === "done" && this.#proof) await this.#proof.refresh(key);
     if (action.action === "merged" && actor.kind === "worker" && this.#knows) {
       const sha = action.sha.trim().toLowerCase();
       // Only morndo/morndo: the checkout is a Morndo one and says nothing of another repo's commits.

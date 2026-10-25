@@ -8,7 +8,7 @@
 // The app server is experimental, "aren't supported for production workloads" (same page): an answer in any other shape
 // is "unavailable", never a guess. Its stderr is never read, and the caller hands it childEnv (no key variable).
 import { CONNECTION_WORDS } from "@morndo/protocol";
-import { askAppServer } from "./codex-account.ts";
+import { accountDigest, askAppServer } from "./codex-account.ts";
 
 export const CODEX_USAGE_TIMEOUT_MS = 15_000;
 const FIVE_HOURS = 300;
@@ -18,7 +18,7 @@ export type CodexWindow = { usedPercent: number; windowDurationMins: number | nu
 // `others`: the account's other limits, from rateLimitsByLimitId (v2/GetAccountRateLimitsResponse.json, a map of limit id to
 // snapshot; the default limit usually appears there under its own id too, and is not repeated).
 export type CodexOther = { limitId: string; name: string | null; primary: CodexWindow | null; secondary: CodexWindow | null };
-export type CodexLimits = { primary: CodexWindow | null; secondary: CodexWindow | null; planType: string | null; others: CodexOther[] };
+export type CodexLimits = { primary: CodexWindow | null; secondary: CodexWindow | null; planType: string | null; others: CodexOther[]; identity?: string; ordinaryUsageAllowed?: boolean; rateLimitReachedType?: string };
 export type CodexReading = { ok: true; limits: CodexLimits } | { ok: false; problem: string };
 type Row = { used_percentage: number; resets_at: number | null };
 export type CodexUsageBody = {
@@ -65,7 +65,18 @@ export function limitsFromResult(result: unknown): CodexLimits | null {
       if (p || q) others.push({ limitId, name, primary: p, secondary: q });
     }
   }
-  return { primary, secondary, planType, others };
+  // S6 (plan 4.6): who is behind the account (a digest of the answer's own account id, never the id) and Codex's own
+  // limit flags — kept only when the answer carries them, so an answer without a word on them stays as it was.
+  const accountId = typeof result.accountId === "string" && result.accountId.trim() !== "" ? result.accountId.trim() : null;
+  const allowed = typeof result.ordinaryUsageAllowed === "boolean" ? result.ordinaryUsageAllowed : null;
+  const reachedRaw = r.rateLimitReachedType;
+  const reached = typeof reachedRaw === "string" && reachedRaw.trim() !== "" ? reachedRaw.trim().slice(0, 40) : null;
+  return {
+    primary, secondary, planType, others,
+    ...(accountId !== null ? { identity: accountDigest(accountId) } : {}),
+    ...(allowed !== null ? { ordinaryUsageAllowed: allowed } : {}),
+    ...(reached !== null ? { rateLimitReachedType: reached } : {}),
+  };
 }
 
 export function windowLabel(mins: number | null): string {
@@ -110,4 +121,62 @@ export async function readCodexLimits(input: { bin: string; env: NodeJS.ProcessE
   if (!limits) return { ok: false, problem: "codex app-server answered in a shape this reader does not know" };
   if (!limits.primary && !limits.secondary && limits.others.length === 0) return { ok: false, problem: "Codex reported no usage window" };
   return { ok: true, limits };
+}
+
+// S6 (plan 4.6): the reading body a codex account posts to the hub's readings route — the same windows the status-line
+// report carries, plus who is behind the account (a digest, never an id) and Codex's own limit flags. Epoch seconds
+// here, as on the whole readings wire. A window the primary/secondary pair carries is named by its length (300 the
+// 5-hour one, 10080 the weekly one, any other length by its minutes, an unknown duration just "Window"); another
+// limit's window goes out under its limit's own name, cut to the wire's 40 characters.
+export type CodexReadingBody = {
+  source: "app-server";
+  node: string | null;
+  captured_at: number;            // seconds
+  every_s: number;
+  plan: string | null;
+  identity: string | null;
+  windows: { id: string; used_percent: number; resets_at: number | null; length_mins: number | null; rolling: false; note: null }[];
+  ordinary_usage_allowed?: boolean | null;
+  rate_limit_reached_type?: string | null;
+};
+const READING_ID_LIMIT = 40;
+const readingId = (mins: number | null): string =>
+  mins === FIVE_HOURS ? "five_hour" : mins === SEVEN_DAYS ? "seven_day" : mins === null ? "Window" : `Window ${mins} min`;
+export function codexReadingBody(limits: CodexLimits, o: {
+  identity: string | null; ordinaryUsageAllowed: boolean | null; rateLimitReachedType: string | null; now: number; node: string | null;
+}): CodexReadingBody {
+  const row = (id: string, w: CodexWindow) => ({ id, used_percent: w.usedPercent, resets_at: w.resetsAt, length_mins: w.windowDurationMins, rolling: false as const, note: null });
+  const windows = [
+    ...[limits.primary, limits.secondary].filter((w): w is CodexWindow => w !== null).map(w => row(readingId(w.windowDurationMins), w)),
+    ...limits.others.flatMap(other => [other.primary, other.secondary]
+      .filter((w): w is CodexWindow => w !== null)
+      .map(w => row(`${other.name ?? other.limitId}: ${windowLabel(w.windowDurationMins)}`.slice(0, READING_ID_LIMIT), w))),
+  ];
+  // The fullest window of them all — another limit's window may be the one that binds — sets how soon to read again.
+  let max: number | null = null;
+  for (const w of windows) max = max === null ? w.used_percent : Math.max(max, w.used_percent);
+  return {
+    source: "app-server", node: o.node, captured_at: Math.floor(o.now / 1000), every_s: everyFor(max),
+    plan: limits.planType, identity: o.identity, windows,
+    ...(o.ordinaryUsageAllowed !== null ? { ordinary_usage_allowed: o.ordinaryUsageAllowed } : {}),
+    ...(o.rateLimitReachedType !== null ? { rate_limit_reached_type: o.rateLimitReachedType } : {}),
+  };
+}
+
+// The adaptive read interval (AT-42), from the highest used percent over every window: 15 minutes idle, 5 from 75%,
+// 2 from 90%, once a minute from 99% — never faster than once a minute.
+export function everyFor(maxPercent: number | null): number {
+  if (maxPercent === null || maxPercent < 75) return 900;
+  if (maxPercent < 90) return 300;
+  if (maxPercent < 99) return 120;
+  return 60;
+}
+
+// A pushed `account/rateLimits/updated` notification (S6): an update in the same snapshot shape `account/rateLimits/read`
+// answers with, mapped to the same reading body — flagged pushed, no lease, because a push is nobody's rationed read.
+// The long-lived client that would deliver these notifications is not built in this slice.
+export function codexPushedReading(update: unknown, o: { identity: string | null; now: number; node: string | null }): CodexReadingBody & { pushed: true } {
+  const limits = limitsFromResult(update);
+  if (limits === null) throw new Error("a pushed update in a shape this reader does not know");
+  return { ...codexReadingBody(limits, { identity: o.identity, ordinaryUsageAllowed: null, rateLimitReachedType: null, now: o.now, node: o.node }), pushed: true };
 }

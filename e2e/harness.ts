@@ -6,11 +6,16 @@ import { appendFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Browser, BrowserContext, CDPSession, Page } from "playwright";
+import { chromium, type Browser, type BrowserContext, type CDPSession, type LaunchOptions, type Page } from "playwright";
+import { steady } from "../test/steady.ts";
 import { buildOffice } from "./office.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 export const HUB_MAIN = join(ROOT, "apps/hub/src/main.ts");
+
+// Chromium for a check: its pages load again when a network change (crbug.com/974711) cut their modules (test/steady.ts).
+// pairedPage and newDevice guard a browser they are given too, for a check that launches its own.
+export const launch = async (options?: LaunchOptions): Promise<Browser> => steady(await chromium.launch(options));
 
 export const freePort = () => new Promise<number>(r => {
   const s = createServer().listen(0, "127.0.0.1", () => { const p = (s.address() as { port: number }).port; s.close(() => r(p)); });
@@ -93,7 +98,7 @@ export type Paired = { context: BrowserContext; page: Page; cdp: CDPSession; err
 export async function pairedPage(browser: Browser, office: Pick<Office, "pairUrl">, o: {
   width?: number; height?: number; colorScheme?: "light" | "dark"; serviceWorkers?: "allow" | "block"; ready?: string; phone?: boolean; reducedMotion?: "reduce" | "no-preference"; init?: () => void;
 } = {}): Promise<Paired> {
-  const context = await browser.newContext({
+  const context = await steady(browser).newContext({
     viewport: { width: o.width ?? 1920, height: o.height ?? 908 }, colorScheme: o.colorScheme ?? "light", serviceWorkers: o.serviceWorkers ?? "allow",
     ...(o.phone ? { hasTouch: true, isMobile: true, deviceScaleFactor: 2 } : {}), ...(o.reducedMotion ? { reducedMotion: o.reducedMotion } : {}),
   });
@@ -117,7 +122,7 @@ export async function pairedPage(browser: Browser, office: Pick<Office, "pairUrl
 // minute).
 let devices = 0;
 export async function newDevice(browser: Browser, o: { width?: number; height?: number; serviceWorkers?: "allow" | "block" } = {}): Promise<Paired> {
-  const context = await browser.newContext({
+  const context = await steady(browser).newContext({
     viewport: { width: o.width ?? 1280, height: o.height ?? 860 }, serviceWorkers: o.serviceWorkers ?? "allow",
     extraHTTPHeaders: { "tailscale-user-login": `device-${++devices}@example.test` },
   });

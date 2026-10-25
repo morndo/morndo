@@ -4,7 +4,7 @@
 import * as z from "./z.ts";
 
 const count = () => z.int().check(z.gte(0), z.lte(10_000));
-export const PushPayload = z.strictObject({ kind: z.int().check(z.gte(0), z.lte(3)), decisions: count(), workers: count(), linked: count(), alerts: count() });
+export const PushPayload = z.strictObject({ kind: z.int().check(z.gte(0), z.lte(4)), decisions: count(), workers: count(), linked: count(), alerts: count(), usage: count() });
 export type PushPayload = z.output<typeof PushPayload>;
 
 // The subscription a browser hands over (PushSubscription.toJSON()), checked for shape and size before the hub keeps it.

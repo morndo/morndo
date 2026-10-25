@@ -1,5 +1,6 @@
-// The page guard of the web harness (harness.ts), apart so a unit test can drive it with a stand-in page
-// (steady.test.ts). Types only from playwright: this file starts no browser.
+// The page guard of every test that drives Chromium: the web component harness (apps/web/test/harness.ts) and the e2e
+// checks (e2e/harness.ts: launch(), pairedPage, newDevice), apart so a unit test can drive it with a stand-in page
+// (apps/web/test/steady.test.ts). Types only from playwright: this file starts no browser.
 import type { Browser, Page, Request as PageRequest } from "playwright";
 
 // Chromium fails every request in flight with net::ERR_NETWORK_CHANGED when an address comes or goes on any of the
@@ -16,8 +17,12 @@ import type { Browser, Page, Request as PageRequest } from "playwright";
 // address changes, and a load at once after a cut was cut again (5 of 50 runs beside two container churners). A
 // fourth load whose modules were cut too fails, naming the cut. The module check of a page that navigated meanwhile (a
 // redirect at boot) waits for the new document's load and asks it once more.
-// browser.newPage() makes its context with newContext too.
+// browser.newPage() makes its context with newContext too. A browser is guarded once, however many helpers ask: a
+// second guard would repeat what the first gave up on (4 loads, then 4 more).
+const guardedBrowsers = new WeakSet<Browser>();
 export function steady(browser: Browser): Browser {
+  if (guardedBrowsers.has(browser)) return browser;
+  guardedBrowsers.add(browser);
   const newContext = browser.newContext.bind(browser);
   browser.newContext = async (...args) => {
     const context = await newContext(...args);

@@ -74,7 +74,8 @@ export function askAppServer(input: AppServerInput, calls: readonly Call[]): Pro
   });
 }
 
-const digest = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 12);
+// Who is behind an account, as a digest of the id (or the email when the backend named no id): never the id itself (PL12).
+export const accountDigest = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 12);
 
 function windowsOf(snapshot: Record<string, unknown>): Body["windows"] | null {
   const out: { usedPercent: number; minutes: number | null; resetsAt: number | null }[] = [];
@@ -116,7 +117,7 @@ export function readingFromAnswers(account: unknown, limits: unknown): Body | nu
   if (windows === null || credits === undefined) return null;
   const id = typeof limits.accountId === "string" && limits.accountId !== "" ? limits.accountId : typeof who.email === "string" && who.email !== "" ? who.email : null;
   const allowed = typeof limits.ordinaryUsageAllowed === "boolean" ? limits.ordinaryUsageAllowed : null;
-  return { signedIn: true, identity: id === null ? null : digest(id), plan: who.planType, paid: !UNPAID.has(who.planType), windows, allowed, credits };
+  return { signedIn: true, identity: id === null ? null : accountDigest(id), plan: who.planType, paid: !UNPAID.has(who.planType), windows, allowed, credits };
 }
 
 // Reset-credit details are asked for here (`excludeResetCreditDetails: false`), so each credit's expiry arrives.

@@ -3,7 +3,7 @@
 import { generateKeyPairSync, randomBytes, sign, verify } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import {
-  ALERT_KINDS, AgentFrames, AgentMessage, CAP_LONG_TEXT, CLOSE, ERROR_EXECUTED, FleetFrames, FleetMessage, KEYED_OPS, LIMITS, OP_ARGS, OP_NAMES, OP_RESULTS, STEP_UP_OPS, SendBody,
+  ALERT_KINDS, AgentFrames, AgentMessage, CAP_LONG_TEXT, CLOSE, ERROR_EXECUTED, FleetFrames, FleetMessage, KEYED_OPS, LIMITS, LaneEventSchema, OP_ARGS, OP_NAMES, OP_RESULTS, STEP_UP_OPS, SendBody,
   decode, fleetSigPayload, fleetUrlOk, formatJoinString, nodeSigPayload, parseJoinString, type ErrorCode, type JoinString, type OpName,
 } from "../src/index.ts";
 import * as z from "../src/z.ts";
@@ -345,5 +345,13 @@ describe("memory.sync arguments (ADR-0031: Memory's own skills only, in parts un
     expect(sync({ ...good, version: "xyz" })).toBe(false);
     expect(sync({ ...good, part: 1, parts: 1 })).toBe(false);
     expect(sync({ ...good, files: [file("morndo-mem-x", "a".repeat(LIMITS.memorySkillBytes + 1))] })).toBe(false);
+  });
+});
+
+describe("a stale lane event's reason", () => {
+  const stale = { v: 1, t: "lane" as const, seq: 11, event: "stale" as const, node: "pc", window: "api", lane: "api", at: 5, reason: "no_turn_end" as const, since: 1, stalls: 1 };
+  it("parses no_turn_end and refuses an unknown reason", () => {
+    expect(z.parse(LaneEventSchema, stale)).toEqual(stale);
+    expect(z.safeParse(LaneEventSchema, { ...stale, reason: "gone" }).success).toBe(false);
   });
 });
