@@ -20,7 +20,7 @@ afterEach(async () => {
 });
 
 // A server that records every request and answers as `answer` says: a status, headers and a body (or never).
-async function api(answer: { status?: number; headers?: Record<string, string>; body?: string; never?: boolean } = {}): Promise<{ url: string; seen: Seen[] }> {
+async function api(answer: { status?: number; headers?: Record<string, string>; body?: string | undefined; never?: boolean } = {}): Promise<{ url: string; seen: Seen[] }> {
   const seen: Seen[] = [];
   const server = createServer((req, res) => {
     let body = "";
