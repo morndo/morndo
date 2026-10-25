@@ -21,7 +21,7 @@ import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
-import { FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
+import { acceptsPoolKey, FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
 import { filterSocketTrusted, sendToFilter, serveFilterChannel } from "./filter-channel.ts";
 import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
@@ -361,6 +361,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   const stopper = turnStopper(io);
   let hungUp = false;
   let watch: { close(): void } | null = null;
+  let vouched: { close(): void } | null = null;
   let relay: ReturnType<typeof guardedRelay> | null = null;
   let polling: ReturnType<typeof setInterval> | null = null;
   let channel: { close(): Promise<void> } | null = null;
@@ -377,7 +378,8 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     const secrets = [secret];
     const seen = new Set<string>();
     // Test seam: MORNDO_FILTER_WATCH=off uses neither the store watch nor its poll (the relay's learn returns []), so only the
-    // channel can teach the filter. Default is on. The watch takes the versions before the keys are read, so a later change is learned.
+    // channel can teach the filter. Default is on. That seam does not turn off the membership check below. The watch takes
+    // the versions before the keys are read, so a later change is learned.
     const watchOff = saved.MORNDO_FILTER_WATCH === "off";
     const watching = grant === null || watchOff ? null : watchPoolKeys({ db: home.db, pool: grant.pool, grant: grant.id, open: () => openHome(saved), seen });
     watch = watching;
@@ -401,7 +403,10 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       for (const key of more) if (key !== "" && !known.includes(key)) known.push(key);
     };
     if (grant !== null) {
-      const served = await serveFilterChannel({ add: remember });
+      // A key is added only when it is a key of this pool: a current member, the grant's member, or a name the grant lent.
+      const membership = acceptsPoolKey({ db: home.db, pool: grant.pool, grant: grant.id, open: () => openHome(saved) });
+      vouched = membership;
+      const served = await serveFilterChannel({ add: remember, accepts: key => membership.accepts(key) });
       const bound = home.keypools.bindFilter(grant.pool, grant.id, served.path);
       if (!bound.ok) {
         await served.close();
@@ -480,6 +485,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       io.stderr(errRedactor.flush());
     }
     watch?.close();
+    vouched?.close();
     const again = released ? openHome(saved) : home;
     try {
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";

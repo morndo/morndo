@@ -215,3 +215,56 @@ export function watchPoolKeys(input: {
     },
   };
 }
+
+// Whether a key just sent to the run's filter is one this pool would hand it: a current member, the grant's member, or a
+// name the grant has lent. Read at the call, never cached. A Connection of any status counts (a lent member may already
+// have left or been revoked; the run was already handed its key). A ref that does not open cannot match and is skipped.
+// Anything else unreadable is a no. A key and its ref are never logged and never put in an error here.
+export function acceptsPoolKey(input: {
+  db: string;
+  pool: string;
+  grant: string;
+  open: () => OpenedHome;
+}): { accepts: (key: string) => Promise<boolean>; close(): void } {
+  const store = new SqliteStore(input.db);
+  const pools = new SqliteKeyPoolStore(input.db);
+  return {
+    accepts: async (key: string): Promise<boolean> => {
+      let home: OpenedHome | null = null;
+      try {
+        const pool = pools.load(input.pool).pool;
+        if (pool === null) return false;
+        const directory = store.load().directory;
+        const grant = pool.grants.find(row => row.id === input.grant);
+        if (grant === undefined) return false;
+        // The key sent is nearly always the grant's member, or one the grant lent last: those are tried first, so a pool of many
+        // members does not cost many opens inside the two seconds the helper waits for its answer.
+        const names = new Set<string>([grant.member, ...[...grant.lent].reverse()]);
+        for (const member of pool.members) names.add(member.credential);
+        const refs: string[] = [];
+        for (const name of names) {
+          const connection = findConnection(directory, name);
+          // isKey: a morndo-custody api-key. Status is not consulted.
+          if (!connection || !isKey(connection)) continue;
+          if (!refs.includes(connection.ref)) refs.push(connection.ref);
+        }
+        if (refs.length === 0) return false;
+        home = input.open();
+        for (const ref of refs) {
+          try {
+            if (await home.open(ref) === key) return true;
+          } catch { /* an unreadable ref cannot be this key */ }
+        }
+        return false;
+      } catch {
+        return false;
+      } finally {
+        try { home?.close(); } catch { /* a failed close does not change the answer */ }
+      }
+    },
+    close(): void {
+      store.close();
+      pools.close();
+    },
+  };
+}

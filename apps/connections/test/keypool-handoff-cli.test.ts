@@ -66,7 +66,7 @@ async function world(n = 3, opts: { pool?: boolean; models?: boolean } = {}): Pr
 type Member = { credential: string; state: string; reason: string | null };
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; standing: string; lastPick: string | null; members: Member[] });
 const states = async (env: NodeJS.ProcessEnv) => (await pools(env))[0]?.members.map(m => m.state);
-type Answer = { exit: number; bypass?: { filter: string }[]; cmdsAfter?: { args: string[]; input?: string }[]; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string; cmds?: { args: string[]; input?: string }[] };
+type Answer = { exit: number; bypass?: ({ filter: string } | { loosen: true } | { junk: number })[]; cmdsAfter?: { args: string[]; input?: string }[]; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string; cmds?: { args: string[]; input?: string }[] };
 const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
@@ -472,6 +472,28 @@ describe("fix round 6: a helper call under a grant hands its key to that grant's
       expect(tried[0]?.stderr.trim()).toBe("filter");
       expect(received).toEqual([]);
     } finally { await new Promise<void>(resolve => { server.close(() => { resolve(); }); }); }
+  });
+  it("the run's own socket with its mode loosened is not trusted: the helper prints nothing and says so, and the next call works again", async () => {
+    const { env, dir } = await world(2);
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, bypass: [{ loosen: true }], rehelp: 1 } }));
+    expect(ran.code, ran.stderr).toBe(0);
+    const tried = bypassOf(dir);
+    expect(tried).toHaveLength(1);
+    expect(tried[0]).toMatchObject({ filter: "loosened", key: "", code: 1 });
+    expect(tried[0]?.stderr.trim()).toBe("filter_untrusted");
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[0]]);
+  });
+  it("seventy keys nobody holds, sent to the run's own socket, are all refused, and the run's next real hand-off still gets its key", async () => {
+    const { env, dir } = await world(3);
+    const ran = await run(env, dir, job(dir, {
+      [KEYS[0]]: { exit: 0, bypass: [{ junk: 70 }], report: ["p", "--outcome", "exhausted"], rehelp: 1 },
+      [KEYS[1]]: { exit: 0 },
+    }));
+    expect(ran.code, ran.stderr).toBe(0);
+    const tried = bypassOf(dir) as { answers?: Record<string, number> }[];
+    expect(tried[0]?.answers).toEqual({ no: 70 });
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[1]]);
+    expect(await states(env)).toEqual(["exhausted", "active", "active"]);
   });
   it("no key reaches the run's output or the helper's words through either bypass", async () => {
     const { env, dir } = await world(2);

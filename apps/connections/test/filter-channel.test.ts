@@ -12,7 +12,7 @@ const closers: (() => Promise<void> | void)[] = [];
 afterEach(async () => { for (const close of closers.splice(0)) await close(); });
 const serve = async (max?: number) => {
   const added: string[] = [];
-  const channel = await serveFilterChannel({ add: keys => { added.push(...keys); }, ...(max === undefined ? {} : { max }) });
+  const channel = await serveFilterChannel({ add: keys => { added.push(...keys); }, accepts: () => true, ...(max === undefined ? {} : { max }) });
   closers.push(() => channel.close());
   return { channel, added };
 };

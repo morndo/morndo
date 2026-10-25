@@ -1,11 +1,20 @@
 // The socket a pooled run listens on so its helper can hand a key to the output filter before the agent is given it.
 // One line of JSON in, `ok` or `no` out, and the connection ends. A key is never logged and never put in an error here.
+//
+// A same-user process that finds the socket can send keys. The channel takes one only when it is a sane length and
+// `accepts` says it belongs to the run's pool. There is no way to listen without that check. A refusal, a throw or a
+// rejection is `no` and adds nothing. A key already held is `ok` and is not asked about again. Two deliveries of one
+// new key at once add it once and both are told `ok`. The cap on the held set is only a bound on memory.
 import { createServer, connect, type Server, type Socket } from "node:net";
 import { chmodSync, lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
 const MAX_KEY = 1024;
+// Real provider keys are far longer. Anything shorter can make the redactor hide ordinary text.
+const MIN_KEY = 16;
+// A pool plus every rotation of its members stays far under this. It only stops the set growing without bound.
+const MAX_HELD = 1024;
 // A valid key survives JSON escaping (`\uXXXX` is the long form). Anything past this is a line that is too long.
 const MAX_LINE = MAX_KEY * 6 + 64;
 
@@ -14,15 +23,16 @@ function readKey(line: string): string | null {
   try { value = JSON.parse(line); } catch { return null; }
   if (typeof value !== "object" || value === null || !("key" in value)) return null;
   const key = (value as { key: unknown }).key;
-  if (typeof key !== "string" || key.length < 1 || key.length > MAX_KEY) return null;
+  if (typeof key !== "string" || key.length < MIN_KEY || key.length > MAX_KEY) return null;
   return key;
 }
 
 export async function serveFilterChannel(input: {
   add: (keys: readonly string[]) => void;
+  accepts: (key: string) => boolean | Promise<boolean>;
   max?: number;
 }): Promise<{ path: string; close(): Promise<void> }> {
-  const max = input.max ?? 64;
+  const max = input.max ?? MAX_HELD;
   const base = process.env.XDG_RUNTIME_DIR;
   const root = typeof base === "string" && base !== "" ? base : tmpdir();
   const dir = mkdtempSync(join(root, "mf-"));
@@ -37,14 +47,30 @@ export async function serveFilterChannel(input: {
     socket.setEncoding("utf8");
     let pending = "";
     let answered = false;
+    let deciding = false;
     const reply = (word: "ok" | "no"): void => {
       if (answered) return;
       answered = true;
       pending = "";
       socket.end(`${word}\n`);
     };
+    // Length is already enforced by readKey. Then the pool. After it answers, the set is checked again: the other
+    // delivery may have added this key while this one waited, and that one add is enough for both to be told ok.
+    const admit = async (key: string): Promise<void> => {
+      let allowed = false;
+      try { allowed = await input.accepts(key); }
+      catch { reply("no"); return; }
+      if (allowed !== true) { reply("no"); return; }
+      if (held.has(key)) { reply("ok"); return; }
+      if (held.size >= max) { reply("no"); return; }
+      held.add(key);
+      // The filter holds the key before the helper is told it may print it.
+      try { input.add([key]); }
+      catch { held.delete(key); reply("no"); return; }
+      reply("ok");
+    };
     socket.on("data", (chunk: string) => {
-      if (answered) return;
+      if (answered || deciding) return;
       pending += chunk;
       const nl = pending.indexOf("\n");
       if (nl === -1) {
@@ -56,12 +82,8 @@ export async function serveFilterChannel(input: {
       const key = readKey(line);
       if (key === null) { reply("no"); return; }
       if (held.has(key)) { reply("ok"); return; }
-      if (held.size >= max) { reply("no"); return; }
-      held.add(key);
-      // The filter holds the key before the helper is told it may print it.
-      try { input.add([key]); }
-      catch { held.delete(key); reply("no"); return; }
-      reply("ok");
+      deciding = true;
+      void admit(key).catch(() => { reply("no"); });
     });
   });
   try {
