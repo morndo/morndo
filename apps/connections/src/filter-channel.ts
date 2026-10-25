@@ -1,9 +1,9 @@
 // The socket a pooled run listens on so its helper can hand a key to the output filter before the agent is given it.
 // One line of JSON in, `ok` or `no` out, and the connection ends. A key is never logged and never put in an error here.
 import { createServer, connect, type Server, type Socket } from "node:net";
-import { chmodSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, lstatSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 const MAX_KEY = 1024;
 // A valid key survives JSON escaping (`\uXXXX` is the long form). Anything past this is a line that is too long.
@@ -125,4 +125,17 @@ export function sendToFilter(path: string, key: string, timeoutMs = 2000): Promi
     socket.on("close", () => { finish(yes()); });
     socket.on("connect", () => { socket.write(`${JSON.stringify({ key })}\n`); });
   });
+}
+
+// A socket the run itself would have made: owned by this user, mode 0600, in a directory owned by this user, mode 0700.
+// A symlink, a plain file, or anything missing is not that socket.
+export function filterSocketTrusted(path: string, uid: number = process.getuid?.() ?? -1): boolean {
+  try {
+    const sock = lstatSync(path);
+    if (sock.isSymbolicLink() || !sock.isSocket() || sock.uid !== uid || (sock.mode & 0o777) !== 0o600) return false;
+    const parent = lstatSync(dirname(path));
+    return !parent.isSymbolicLink() && parent.isDirectory() && parent.uid === uid && (parent.mode & 0o777) === 0o700;
+  } catch {
+    return false;
+  }
 }

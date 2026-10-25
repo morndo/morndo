@@ -16,11 +16,11 @@ function deleted(body: string): boolean {
   return value.deleted === true;
 }
 
-// A pool saved before it had grants, or a grant saved before it had seen and lent, loads with those empty.
-// Saving still writes the pool it was given.
+// A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
+// (the filter null). Saving still writes the pool it was given.
 function withHistory(pool: KeyPool): KeyPool {
-  const grants = ((pool.grants ?? []) as readonly (Grant & { seen?: Grant["seen"]; lent?: Grant["lent"] })[]).map(grant => ({
-    ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [],
+  const grants = ((pool.grants ?? []) as readonly (Grant & { seen?: Grant["seen"]; lent?: Grant["lent"]; filter?: Grant["filter"] })[]).map(grant => ({
+    ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [], filter: grant.filter ?? null,
   }));
   return { ...pool, grants };
 }

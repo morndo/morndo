@@ -131,7 +131,7 @@ describe("fix round 4: the filter is complete only when every key the grant lent
   const lentGrant = (member: string, lent: string[]): Grant => ({
     id: "gl1", member, lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
     request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
-    previous: null, seen: [], lent,
+    previous: null, seen: [], lent, filter: null,
   });
   const withGrant = async (lent: string[]) => {
     const w = await world();
@@ -188,7 +188,7 @@ describe("fix round 5: the watch's required set only grows, and a required thing
     const grant: Grant = {
       id: "gl1", member: "k1", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
       request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
-      previous: null, seen: [], lent: ["k1", "k2"],
+      previous: null, seen: [], lent: ["k1", "k2"], filter: null,
     };
     const opened = openGrant(loaded.pool!, grant, 1);
     if (!opened.ok) throw new Error("grant");
@@ -216,7 +216,7 @@ describe("fix round 5: the watch's required set only grows, and a required thing
     const grant: Grant = {
       id: "gl1", member: "k1", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
       request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
-      previous: null, seen: [], lent: ["k1", "ghost"],
+      previous: null, seen: [], lent: ["k1", "ghost"], filter: null,
     };
     const opened = openGrant(loaded.pool!, grant, 1);
     if (!opened.ok) throw new Error("grant");
@@ -337,7 +337,7 @@ describe("the watch: every key the run may be, or was, handed", () => {
       const grant: Grant = {
         id: "gl1", member: "k1", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
         request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
-        previous: null, seen: [], lent: [],
+        previous: null, seen: [], lent: [], filter: null,
       };
       const opened = openGrant(loaded.pool!, grant, 1);
       expect(opened.ok).toBe(true);

@@ -22,7 +22,7 @@ import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
 import { FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
-import { sendToFilter, serveFilterChannel } from "./filter-channel.ts";
+import { filterSocketTrusted, sendToFilter, serveFilterChannel } from "./filter-channel.ts";
 import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
@@ -115,7 +115,7 @@ morndo-keys check --pool <name>
   refusal through the agent CLI's own JSON result only (never the text the model and its tools printed), and dropped; one that ended on
   an exhausted key before doing any work (no cost, one turn) goes once more on another member. A lane reports only for its own run: with --grant
   (the member is the grant's) or, with --lease, for the member of its own open lease; the machine's principal needs neither. A pooled run's helper is \`helper --filter <socket> --pool <name> --grant <id>\`:
-  it moves the run to the next member when the one it is on is reported dry (within the 60 s cache), the helper's call cap carries over,
+  the filter is required and must be the grant's own socket. It moves the run to the next member when the one it is on is reported dry (within the 60 s cache), the helper's call cap carries over,
   and a refused helper says its word on stderr. A pool
   holds only keys of accounts you hold: every member needs --confirm-own-account, and create needs --by, who read the terms line it shows.
   Exit 75 with a word: pool_empty, pool_blocked, terms, or the gate's word.
@@ -402,6 +402,11 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     };
     if (grant !== null) {
       const served = await serveFilterChannel({ add: remember });
+      const bound = home.keypools.bindFilter(grant.pool, grant.id, served.path);
+      if (!bound.ok) {
+        await served.close();
+        throw new Error(bound.error.problem);
+      }
       channel = served;
       helperLine = [keys.command, ...keys.args, "helper", "--filter", served.path, "--pool", grant.pool, "--grant", grant.id].join(" ");
     }
@@ -727,9 +732,9 @@ async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<n
   } finally { home.close(); }
 }
 
-// `helper --pool P --grant G [--filter SOCKET]`: the pooled run's apiKeyHelper. One call asks the grant whether its member can still
-// serve and, when it cannot, moves the run. With --filter, the key is printed only after that socket has accepted it. A refusal
-// prints its word on stderr and exits 1 — never 75, because an apiKeyHelper treats every non-zero the same.
+// `helper --pool P --grant G --filter SOCKET`: the pooled run's apiKeyHelper. The filter is required and must be the grant's own
+// socket. One call asks the grant whether its member can still serve and, when it cannot, moves the run. The key is printed only
+// after that socket has accepted it. A refusal prints its word on stderr and exits 1 — never 75, because an apiKeyHelper treats every non-zero the same.
 async function helperPool(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
   const pool = parsed.get("pool");
   const grant = parsed.get("grant");
@@ -746,7 +751,7 @@ async function helperPool(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promi
     }
     // The gate of the member's lease is the one `run` used.
     home.runtime.current = gateRuntime(home, "claude");
-    const served = await home.keypools.handOff(pool, grant, { id: caller, ppid: process.ppid });
+    const served = await home.keypools.handOff(pool, grant, { id: caller, ppid: process.ppid, filter: parsed.get("filter") ?? null });
     if (!served.ok) {
       io.stderr(`${served.error.problem}\n`);
       return 1;
@@ -758,12 +763,14 @@ async function helperPool(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promi
     }
     const key = await home.open(connection.ref);
     const filter = parsed.get("filter");
-    if (filter !== undefined) {
-      // The audit line is already written: a miss here is an over-audit, never an under-audit.
-      if (!await sendToFilter(filter, key)) {
-        io.stderr("filter_unreachable\n");
-        return 1;
-      }
+    // The audit line is already written: a miss here is an over-audit, never an under-audit.
+    if (filter === undefined || !filterSocketTrusted(filter)) {
+      io.stderr("filter_untrusted\n");
+      return 1;
+    }
+    if (!await sendToFilter(filter, key)) {
+      io.stderr("filter_unreachable\n");
+      return 1;
     }
     io.stdout(`${key}\n`);
     return 0;

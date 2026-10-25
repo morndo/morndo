@@ -88,7 +88,7 @@ async function world(n = 3): Promise<World> {
 
 const runRequest = { role: "run", entry: "m", holder, workspacePath: "/work/repo", limit: 8, reserve: 1, margin: 0, probe: false };
 // What `run --pool` does: pick a member, take its run lease, and open the grant in the same save as the pick.
-async function start(w: World): Promise<{ grant: string; member: string; lease: string }> {
+async function openRun(w: World): Promise<{ grant: string; member: string; lease: string }> {
   const picked = await w.pools.pick("p", async member => w.leases.lease(member, runRequest), {
     grant: (_member: string, value: { id: string }) => ({
       lease: value.id, holder, startedAt: w.mem.clock.now(),
@@ -97,6 +97,12 @@ async function start(w: World): Promise<{ grant: string; member: string; lease: 
   });
   if (!picked.ok || !picked.value.grant) throw new Error(`no grant: ${JSON.stringify(picked)}`);
   return { grant: picked.value.grant, member: picked.value.member, lease: picked.value.value.id };
+}
+// The run then binds its own filter. A helper call under the grant has to name this socket.
+async function start(w: World): Promise<{ grant: string; member: string; lease: string }> {
+  const run = await openRun(w);
+  expect(w.pools.bindFilter("p", run.grant, SOCK).ok).toBe(true);
+  return run;
 }
 const pool = (w: World): KeyPool => {
   const { pool: loaded } = w.store.load("p");
@@ -162,7 +168,7 @@ describe("handOff on a healthy member serves it", () => {
     const w = await world();
     const run = await start(w);
     w.mem.processes.ancestors = () => [{ pid: 12, startedAt: 1, bootId: "boot" }, caller.id];
-    expect((await w.pools.handOff("p", run.grant, { id: { pid: 13, startedAt: 1, bootId: "boot" }, ppid: 12 })).ok).toBe(true);
+    expect((await w.pools.handOff("p", run.grant, { id: { pid: 13, startedAt: 1, bootId: "boot" }, ppid: 12, filter: SOCK })).ok).toBe(true);
   });
 });
 
@@ -420,7 +426,7 @@ describe("a grant's life", () => {
 // The helper's callers, as the process tree has them: the run (10) holds claude sessions 20 and 30; each helper call is a child of its session.
 const sessions: Record<number, number[]> = { 21: [21, 20, 10], 22: [22, 20, 10], 31: [31, 30, 10], 32: [32, 30, 10], 41: [41, 40, 10] };
 const proc = (pid: number) => ({ pid, startedAt: 1, bootId: "boot" });
-const helperOf = (pid: number, parent: number) => ({ id: proc(pid), ppid: parent });
+const helperOf = (pid: number, parent: number) => ({ id: proc(pid), ppid: parent, filter: SOCK });
 const inTree = (w: World) => { for (const [pid, chain] of Object.entries(sessions)) w.mem.processes.tree.set(Number(pid), chain); };
 
 describe("kp18 fix round 1: a report is the key its own session was served, not whoever the window names", () => {
@@ -617,13 +623,13 @@ describe("the existing pick is unchanged", () => {
 
 describe("fix round 6: a helper call under a grant hands its key to that grant's own run filter", () => {
   const bound = async (w: World) => {
-    const run = await start(w);
+    const run = await openRun(w);
     expect(w.pools.bindFilter("p", run.grant, SOCK).ok).toBe(true);
     return run;
   };
   it("the run binds its socket to the grant once, and the grant records it", async () => {
     const w = await world();
-    const run = await start(w);
+    const run = await openRun(w);
     expect(grantOf(w).filter ?? null).toBeNull();
     expect(w.pools.bindFilter("p", run.grant, SOCK).ok).toBe(true);
     expect(grantOf(w).filter).toBe(SOCK);
@@ -655,7 +661,7 @@ describe("fix round 6: a helper call under a grant hands its key to that grant's
   });
   it("refuses a grant that was never bound, whatever socket the call names", async () => {
     const w = await world();
-    const run = await start(w);
+    const run = await openRun(w);
     expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: SOCK }))).toBe("filter");
     expect(word(await w.pools.handOff("p", run.grant, { ...caller, filter: null }))).toBe("filter");
     expect(served(w)).toHaveLength(0);

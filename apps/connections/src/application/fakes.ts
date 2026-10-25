@@ -80,9 +80,10 @@ function tombstoneBody(body: string): boolean {
   return value.deleted === true;
 }
 
-// A pool saved before it had grants, or a grant saved before it had seen and lent, loads with those empty.
+// A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
+// (the filter null).
 function withHistory(pool: KeyPool): KeyPool {
-  const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [] }));
+  const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [], filter: grant.filter ?? null }));
   return { ...pool, grants };
 }
 

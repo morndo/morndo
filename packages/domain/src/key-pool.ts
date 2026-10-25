@@ -36,6 +36,7 @@ export type Grant = {
   window: HelperWindow; previous: { member: string; movedAt: number } | null;
   seen: readonly { session: string; member: string }[];
   lent: readonly string[];
+  filter: string | null;
 };
 export type KeyPoolEvent =
   | { type: "KeyPoolCreated"; pool: string; at: number; command: string }
@@ -330,6 +331,15 @@ export function openGrant(p: KeyPool, grant: Grant, now: number): Result<KeyPool
   if (!p.members.some(m => m.credential === grant.member)) return err("missing");
   if (p.grants.some(g => g.id === grant.id)) return err("exists");
   return ok(withEvents({ ...p, grants: [...p.grants, grant] }, [{ type: "GrantOpened", grant: grant.id, member: grant.member, at: now }]));
+}
+
+// The run's own filter socket, recorded once. No event: a later caller cannot point the grant somewhere else.
+export function bindFilter(p: KeyPool, id: string, path: string): Result<KeyPool, "missing" | "bound" | "path"> {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return err("missing");
+  if (path === "" || !path.startsWith("/")) return err("path");
+  if (grant.filter !== null) return err("bound");
+  return ok({ ...p, grants: p.grants.map(g => g.id === id ? { ...g, filter: path } : g) });
 }
 
 export function moveGrant(

@@ -4,7 +4,7 @@
 // the audit line, and the next call repairs a crash between those writes. Alerts name a member or the pool and a reason
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
-  LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, chooseKey, closeGrant as dropGrant, createKeyPool, err, findConnection, isKey,
+  LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, closeGrant as dropGrant, createKeyPool, err, findConnection, isKey,
   joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
   openGrant, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant,
   KEY_POOL_RECHECK_DEFAULT_MS,
@@ -45,7 +45,7 @@ type Deps = {
   helper: { limit: number; ttlMs: number };
 };
 export type GrantSeed = { lease: string; holder: Holder; request: GrantRequest; startedAt: number };
-type HandOffCaller = { id: ProcId; ppid: number | null };
+type HandOffCaller = { id: ProcId; ppid: number | null; filter: string | null };
 type Leases = Pick<LeaseService, "swap" | "refresh" | "helper" | "serve">;
 export type LaneProof = { kind: "lane"; lease: string; caller: { pid: number; startedAt: number; bootId: string } };
 export type ReportBy = Actor | LaneProof;
@@ -271,6 +271,16 @@ export class KeyPoolService implements ConnectionLifecycle {
     return this.#choose(pool, attempt, options);
   }
 
+  // The run's own filter socket, recorded once. A second call is refused, even for the same path.
+  bindFilter(pool: string, grant: string, path: string): Result<void, KeyPoolFailure> {
+    return this.#change(pool, current => {
+      const next = bindGrantFilter(current, grant, path);
+      if (next.ok) return { pool: next.value, result: ok(undefined) };
+      const problem = next.error === "missing" ? "grant_missing" : next.error === "bound" ? "filter_bound" : "filter_path";
+      return { pool: current, result: fail(problem) };
+    });
+  }
+
   // The pooled helper's call. The ring advances, the directory swaps, the pool saves the pick and the grant together,
   // then the audit line is written. A lost save, a lease another call already swapped, or a lease waiting to be adopted
   // starts the round again. A thrown error is the crash the next call repairs; it is not caught here.
@@ -287,6 +297,7 @@ export class KeyPoolService implements ConnectionLifecycle {
       const held = current.grants.find(row => row.id === grant);
       if (!held) return fail("grant_missing");
       if (!this.#holds(held.holder, caller.id)) return fail("not_holder");
+      if (held.filter === null || held.filter !== caller.filter) return fail("filter");
       const directory = this.#deps.connections.load().directory;
       const request: LeaseRequest = { ...held.request, holder: held.holder, probe: false };
       const found = keyLease(directory, held.lease);
@@ -534,7 +545,7 @@ export class KeyPoolService implements ConnectionLifecycle {
             if (seed && grantId) {
               const opened = openGrant(next, {
                 id: grantId, member: step.member, lease: seed.lease, holder: seed.holder, request: seed.request,
-                window: { calls: 0, windowStart: seed.startedAt }, previous: null, seen: [], lent: [],
+                window: { calls: 0, windowStart: seed.startedAt }, previous: null, seen: [], lent: [], filter: null,
               }, now);
               if (!opened.ok) return fail(opened.error);
               next = opened.value;

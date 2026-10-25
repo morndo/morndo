@@ -37,7 +37,7 @@ function pool(n = 3): KeyPool {
 const grant = (over: Partial<Grant> = {}): Grant => ({
   id: "gl1", member: "k1", lease: "l1", holder: { node: "n1", pid: 10, startedAt: 100, bootId: "boot", lane: "lane-a" },
   request: { role: "run", entry: "m", workspacePath: "/work/repo", limit: 8, reserve: 2, margin: 0 },
-  window: { calls: 1, windowStart: T }, previous: null, seen: [], lent: [], ...over,
+  window: { calls: 1, windowStart: T }, previous: null, seen: [], lent: [], filter: null, ...over,
 });
 const moved = (p: KeyPool, at: number, to = "k2", lease = "l2") =>
   ok(moveGrant(p, "gl1", { member: to, lease, window: { calls: 2, windowStart: T }, movedAt: at }, "exhausted", at));
