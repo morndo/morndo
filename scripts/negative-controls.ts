@@ -4767,6 +4767,20 @@ export const CONTROLS: Control[] = [
   { id: "t415s7r2-plan-omitted-drops-family", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "plan: plan ?? planWatch.baseline?.plan ?? null, identity,", replace: "plan, identity,",
     run: ["apps/hub/test/usage-cursor-periods.test.ts"] },
+  { id: "t449-handoff-adopts-a-swap", task: "T-449", file: "apps/connections/src/application/key-pool-service.ts",
+    find: "const adopted = adoptable(directory, current, held);", replace: "const adopted = null as ReturnType<typeof adoptable>;",
+    run: ["apps/connections/test/key-pool-handoff.test.ts"], expect: "the next call adopts it" },
+  { id: "t449-handoff-keeps-the-window", task: "T-449", file: "apps/connections/src/application/key-pool-service.ts",
+    find: "        const window = { calls: counted.calls, windowStart: counted.windowStart };\n        const reason = why ?? \"refused\";",
+    replace: "        const window = { calls: 1, windowStart: counted.windowStart };\n        const reason = why ?? \"refused\";",
+    run: ["apps/connections/test/key-pool-handoff.test.ts", "apps/connections/test/keypool-handoff-cli.test.ts"], expect: "does not reset the helper's cap" },
+  { id: "t449-pooled-helper-no-key-on-stderr", task: "T-449", file: "apps/connections/src/cli.ts",
+    find: "io.stdout(`${await home.open(connection.ref)}\\n`);",
+    replace: "{ const leaked = await home.open(connection.ref); io.stdout(`${leaked}\\n`); io.stderr(`${leaked}\\n`); }",
+    run: ["apps/connections/test/keypool-handoff-cli.test.ts"], expect: "no key is in the run's output" },
+  { id: "t449-handoff-sweeps-grants", task: "T-449", file: "apps/connections/src/cli.ts",
+    find: `if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") home.keypools.sweepGrants();`, replace: "",
+    run: ["apps/connections/test/keypool-handoff-cli.test.ts"], expect: "check --pool ends both" },
 ];
 
 // ---- the runner

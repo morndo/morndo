@@ -4,7 +4,7 @@
 // The helper line is `helper --lease <id>` (a single Connection) or `helper --pool <name> --grant <id>` (a pooled run). `report`:
 // what a lane's tool would do, as a child of this run: the pool report command with the lease or the grant the helper line names.
 // `rehelp: n`: as Claude Code does when its cached key has expired, ask the helper n more times; every call is recorded, and the
-// key of the last one decides how the run ends.
+// key of the last one decides how the run ends. `killParent: true`: SIGKILL the launcher after the first helper call.
 import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 
@@ -36,6 +36,8 @@ let result = helper();
 record(result, false);
 const first = job.keys?.[result.key] ?? { exit: 0 };
 reports(first);
+// `killParent`: the run is killed before it can close its lease or its grant (what a SIGKILL of the launcher leaves behind).
+if (first.killParent) process.kill(process.ppid, "SIGKILL");
 let answer = first;
 for (let i = 0; i < (first.rehelp ?? 0); i++) {
   result = helper();

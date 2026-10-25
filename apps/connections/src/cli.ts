@@ -142,12 +142,10 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
 async function command(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
   const home = openHome(env);
   try {
-    // A call killed with SIGKILL never closes its lease: the next lease, run or check ends the ones whose holder is gone,
-    // and the grants of a pooled run whose holder is gone.
-    if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") {
-      home.leases.sweep();
-      home.keypools.sweepGrants();
-    }
+    // A call killed with SIGKILL never closes its lease: the next lease, run or check ends the ones whose holder is gone.
+    if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") home.leases.sweep();
+    // The grants of a pooled run whose holder is gone go the same way.
+    if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") home.keypools.sweepGrants();
     const code = await dispatch(home, parsed, io);
     return code;
   } finally { home.close(); }

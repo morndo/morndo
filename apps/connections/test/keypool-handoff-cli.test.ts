@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
 
 const KEYS: [string, string, string] = ["sk-ant-synthetic-pool-key-0001", "sk-ant-synthetic-pool-key-0002", "sk-ant-synthetic-pool-key-0003"];
@@ -62,7 +63,7 @@ async function world(n = 3, opts: { pool?: boolean; models?: boolean } = {}): Pr
 type Member = { credential: string; state: string; reason: string | null };
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; standing: string; lastPick: string | null; members: Member[] });
 const states = async (env: NodeJS.ProcessEnv) => (await pools(env))[0]?.members.map(m => m.state);
-type Answer = { exit: number; report?: string[]; rehelp?: number };
+type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean };
 const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
@@ -161,6 +162,29 @@ describe("the hand-off: a session whose key is reported dry gets the next key fr
     }));
     expect(reportsOf(dir)).toEqual([{ code: 0, stderr: "" }, { code: 0, stderr: "" }]);
     expect(await states(env)).toEqual(["exhausted", "active", "active"]);
+  });
+});
+
+// The grants a pool holds, read from the database the way a later command sees it.
+const grantsOf = (dir: string): string[] => {
+  const db = new Database(join(dir, "connections.db"), { readonly: true });
+  try {
+    const row = db.prepare("SELECT body FROM key_pool WHERE name = ?").get("p") as { body: string };
+    return (JSON.parse(row.body) as { grants: { id: string }[] }).grants.map(g => g.id);
+  } finally { db.close(); }
+};
+
+describe("a grant outlives a run that was killed, until the next lease, run or check sweeps it", () => {
+  it("leaves the grant and its lease behind, and check --pool ends both", async () => {
+    const { env, dir } = await world(2);
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, killParent: true } }));
+    expect(ran.code).not.toBe(0);
+    expect(grantsOf(dir)).toHaveLength(1);
+    const swept = await cli(["check", "--pool", "p"], env);
+    expect(swept.code, swept.stderr).toBe(0);
+    expect(grantsOf(dir)).toEqual([]);
+    const lost = (await events(env, "k1")).filter(e => e.type === "LeaseLost");
+    expect(lost).toHaveLength(1);
   });
 });
 
