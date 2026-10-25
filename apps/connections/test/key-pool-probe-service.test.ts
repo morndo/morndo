@@ -60,6 +60,8 @@ async function world(n = 3, budget: number | null = 10): Promise<World> {
   mem.catalog.rows = [preset()];
   mem.catalog.keyPools = { "vendor-a": poolTerms };
   mem.catalog.keyPoolProbes = { "vendor-a": { model: "m-small" } };
+  // The file sink the bin uses keeps the last twenty alerts in view; the in-memory one keeps them all.
+  mem.alerts.recent = () => mem.alerts.raised.slice(-20);
   const store = new MemoryKeyPoolStore();
   // The meter the bin uses reports a run's own cost; the in-memory one ignores it.
   const leases = new LeaseService({ ...mem.deps, spend: { fromRun: (result: { cost: number | null }) => result.cost, reported: () => null } });
@@ -463,5 +465,71 @@ describe("rev-158: a claim whose probe never started is released at once", () =>
     await w.pools.probeMember("p", "k1", { why: "due", holder });
     expect(types(w)).not.toContain("ProbeReleased");
     expect(member(w, "k1").nextCheck).toBe(w.mem.clock.now() + DAY);
+  });
+});
+
+describe("rev-158b: an alert once per change, kept with the member, not found by scanning the last alerts", () => {
+  const flood = (w: World, n: number) => { for (let i = 0; i < n; i++) w.mem.alerts.raise({ kind: "threshold", name: `other-${i}`, detail: "x" }); };
+  const probeAgain = async (w: World) => { w.mem.clock.at += 31 * SEC; return w.pools.probeMember("p", "k1", { why: "manual", holder }); };
+  it("an unmatched answer is not alerted again after twenty-five other alerts pushed it out of the recent list", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.probe.answer = () => ({ signal: signalOf(418, { kind: "teapot_error" }) });
+    await probeAgain(w);
+    flood(w, 25);
+    await probeAgain(w);
+    expect(w.mem.alerts.raised.filter(a => a.kind === "unclassified")).toHaveLength(1);
+    expect(JSON.stringify(pool(w))).not.toContain("teapot");
+  });
+  it("after a good answer (a fix) the same unmatched answer alerts again", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.probe.answer = () => ({ signal: signalOf(418, { kind: "teapot_error" }) });
+    await probeAgain(w);
+    w.probe.answer = () => ({ signal: signalOf(400) });
+    await probeAgain(w);
+    w.probe.answer = () => ({ signal: signalOf(418, { kind: "teapot_error" }) });
+    await probeAgain(w);
+    expect(w.mem.alerts.raised.filter(a => a.kind === "unclassified")).toHaveLength(2);
+  });
+  it("a misconfigured answer is alerted once, not again after a flood, and again after a fix", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.probe.answer = () => ({ misconfigured: "model" });
+    await probeAgain(w);
+    flood(w, 25);
+    await probeAgain(w);
+    expect(w.mem.alerts.raised.filter(a => a.kind === "probe-config")).toHaveLength(1);
+    w.probe.answer = () => ({ signal: signalOf(400) });
+    await probeAgain(w);
+    w.probe.answer = () => ({ misconfigured: "model" });
+    await probeAgain(w);
+    expect(w.mem.alerts.raised.filter(a => a.kind === "probe-config")).toHaveLength(2);
+  });
+  it("an unreachable provider is no change: it neither clears nor raises", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.probe.answer = () => ({ misconfigured: "model" });
+    await probeAgain(w);
+    w.probe.answer = () => ({ unreachable: true });
+    await probeAgain(w);
+    w.probe.answer = () => ({ misconfigured: "model" });
+    await probeAgain(w);
+    expect(w.mem.alerts.raised.filter(a => a.kind === "probe-config")).toHaveLength(1);
+  });
+});
+
+describe("rev-158b: a due probe right after a manual one waits for the interval", () => {
+  it("recheck skips a member probed by hand a minute ago, and probes it once an interval has passed since that probe", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.probe.answer = () => ({ signal: signalOf(400) });
+    w.mem.clock.at += DAY - 5 * 60_000;
+    await w.pools.probeMember("p", "k1", { why: "manual", holder });
+    w.mem.clock.at += 5 * 60_000;
+    expect(await w.pools.recheck({ holder })).toEqual([]);
+    expect(w.probe.calls).toHaveLength(1);
+    w.mem.clock.at += DAY - 5 * 60_000;
+    expect((await w.pools.recheck({ holder })).map(r => r.outcome)).toEqual(["exhausted"]);
   });
 });

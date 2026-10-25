@@ -3,7 +3,7 @@
 // that date, and only a Messages answer brings a member back. Pure, `now` is the clock. Names, refs and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  addKey, claimProbe, createKeyPool, dueMembers, emptyDirectory, findConnection, joinKeyPool, releaseClaim, reportKeyOutcome,
+  addKey, alertOnce, claimProbe, clearAlerted, createKeyPool, dueMembers, emptyDirectory, findConnection, joinKeyPool, releaseClaim, reportKeyOutcome,
   KEY_POOL_RECHECK_MAX_MS, KEY_PROBE_CLAIM_MS,
   type Actor, type Connection, type KeyPool, type Outcome,
 } from "../src/index.ts";
@@ -324,5 +324,63 @@ describe("rev-158: a claim whose probe never started is released at once", () =>
     const p = dryAtT();
     expect(releaseClaim(p, "zz", T, { nextCheck: null, lastProbe: null }, T)).toEqual(p);
     expect(releaseClaim(p, "k1", T, { nextCheck: null, lastProbe: null }, T)).toEqual(p);
+  });
+});
+
+describe("rev-158b: a due probe respects the interval since the member's last probe, of whatever kind", () => {
+  it("a due claim right after a manual probe is refused (not_due) until one recheck interval has passed since that probe, then taken", () => {
+    const manual = ok(claimProbe(dryAtT(), "k1", T + DAY - 5 * 60_000, "manual"));
+    expect(word(claimProbe(manual, "k1", T + DAY, "due"))).toBe("not_due");
+    expect(word(claimProbe(manual, "k1", T + DAY - 5 * 60_000 + DAY - SEC, "due"))).toBe("not_due");
+    expect(member(ok(claimProbe(manual, "k1", T + DAY - 5 * 60_000 + DAY, "due")), "k1").lastProbe).toBe(T + DAY - 5 * 60_000 + DAY);
+  });
+  it("dueMembers does not list a member the claim would refuse, so a recheck or an inline probe is not woken for it", () => {
+    const manual = ok(claimProbe(dryAtT(), "k1", T + DAY - 5 * 60_000, "manual"));
+    expect(dueMembers(manual, T + DAY + 31 * SEC)).toEqual(["k2"]);
+    expect(dueMembers(manual, T + DAY - 5 * 60_000 + DAY)).toEqual(["k1", "k2"]);
+  });
+  it("the ordinary cadence is untouched: each due probe is at least one interval after the one before", () => {
+    let p = ok(claimProbe(dryAtT(), "k1", T + DAY, "due"));
+    p = ok(reportKeyOutcome(p, "k1", dry(), T + DAY, T + DAY + SEC, "probe", "due"));
+    const next = member(p, "k1").nextCheck as number;
+    expect(member(ok(claimProbe(p, "k1", next, "due")), "k1").lastProbe).toBe(next);
+  });
+  it("a past resume date on the first refusal gives one probe, not a suspect probe and a due probe thirty seconds later", () => {
+    // k3 is active; a suspect probe finds it dry and the refusal names a date already past: it is due at once, but it was just probed.
+    const claimed = ok(claimProbe(pool(3), "k3", T + HOUR, "suspect"));
+    const answered = ok(reportKeyOutcome(claimed, "k3", dry(T - DAY), T + HOUR, T + HOUR + SEC, "probe", "suspect"));
+    expect(member(answered, "k3")).toMatchObject({ health: { state: "exhausted" }, nextCheck: T - DAY });
+    expect(word(claimProbe(answered, "k3", T + HOUR + 31 * SEC, "due"))).toBe("not_due");
+    expect(dueMembers(answered, T + HOUR + 31 * SEC)).toEqual([]);
+    expect(dueMembers(answered, T + HOUR + DAY)).toEqual(["k3"]);
+  });
+});
+
+describe("rev-158b: an alert is raised once per change of what a member's probe says, kept per member and kind", () => {
+  it("the first detail raises, the same detail again does not, a different one does", () => {
+    const first = alertOnce(pool(2), "k1", "unclassified", "418 teapot_error");
+    expect(first.raise).toBe(true);
+    expect(alertOnce(first.pool, "k1", "unclassified", "418 teapot_error").raise).toBe(false);
+    expect(alertOnce(first.pool, "k1", "unclassified", "418 kettle_error").raise).toBe(true);
+  });
+  it("is per member and per kind", () => {
+    const first = alertOnce(pool(2), "k1", "unclassified", "418 teapot_error").pool;
+    expect(alertOnce(first, "k2", "unclassified", "418 teapot_error").raise).toBe(true);
+    expect(alertOnce(first, "k1", "probe-config", "418 teapot_error").raise).toBe(true);
+  });
+  it("clearAlerted forgets one kind of one member, so the same detail raises again after a fix", () => {
+    let p = alertOnce(pool(2), "k1", "probe-config", "model").pool;
+    p = alertOnce(p, "k1", "unclassified", "418 teapot_error").pool;
+    const cleared = clearAlerted(p, "k1", "probe-config");
+    expect(alertOnce(cleared, "k1", "probe-config", "model").raise).toBe(true);
+    expect(alertOnce(cleared, "k1", "unclassified", "418 teapot_error").raise).toBe(false);
+    expect(clearAlerted(p, "zz", "probe-config")).toEqual(p);
+  });
+  it("a member that is not there raises nothing and changes nothing", () => {
+    const p = pool(2);
+    expect(alertOnce(p, "zz", "unclassified", "x")).toEqual({ pool: p, raise: false });
+  });
+  it("a member starts with nothing alerted", () => {
+    expect(pool(2).members.every(m => Object.keys(m.alerted).length === 0)).toBe(true);
   });
 });

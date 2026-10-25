@@ -70,11 +70,11 @@ describe("a pool saved before probes (slice 2) has members with no probingUntil 
     db.prepare("INSERT INTO key_pool (name, version, body) VALUES (?, 1, ?)").run("before", oldBody(false, "before"));
     db.close();
     const loaded = store.load("before").pool;
-    expect(loaded?.members[0]).toMatchObject({ credential: "k1", probingUntil: null, failedProbes: 0, lastProbe: null });
+    expect(loaded?.members[0]).toMatchObject({ credential: "k1", probingUntil: null, failedProbes: 0, lastProbe: null, alerted: {} });
     store.close();
     const memory = new MemoryKeyPoolStore();
     expect(memory.save(JSON.parse(oldBody(false, "beforem")) as KeyPool, 0)).toBe(true);
-    expect(memory.load("beforem").pool?.members[0]).toMatchObject({ probingUntil: null, failedProbes: 0, lastProbe: null });
+    expect(memory.load("beforem").pool?.members[0]).toMatchObject({ probingUntil: null, failedProbes: 0, lastProbe: null, alerted: {} });
   });
 });
 
