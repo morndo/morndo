@@ -80,6 +80,12 @@ function tombstoneBody(body: string): boolean {
   return value.deleted === true;
 }
 
+// A pool saved before it had grants, or a grant saved before it had seen and lent, loads with those empty.
+function withHistory(pool: KeyPool): KeyPool {
+  const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [] }));
+  return { ...pool, grants };
+}
+
 // The same rules as the SQLite store: version 0 inserts once, a later save lands only on the version it read, and a
 // tombstone keeps the name. `beforeSave` runs once, if set, before that check, so a test can land another write first.
 export class MemoryKeyPoolStore implements KeyPoolStore {
@@ -90,7 +96,7 @@ export class MemoryKeyPoolStore implements KeyPoolStore {
   load(name: string): { pool: KeyPool | null; version: number } {
     const row = this.#rows.get(name);
     if (!row) return { pool: null, version: 0 };
-    return { pool: tombstoneBody(row.body) ? null : JSON.parse(row.body) as KeyPool, version: row.version };
+    return { pool: tombstoneBody(row.body) ? null : withHistory(JSON.parse(row.body) as KeyPool), version: row.version };
   }
 
   names(): { live: readonly string[]; deleted: readonly string[] } {

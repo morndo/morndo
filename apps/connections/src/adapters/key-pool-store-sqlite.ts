@@ -4,7 +4,7 @@
 // (better-sqlite3, "transaction(function) -> function", `.immediate`, https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md).
 // A deleted pool stays as a row, so its name cannot be inserted again.
 import type Database from "better-sqlite3";
-import type { KeyPool } from "@morndo/domain";
+import type { Grant, KeyPool } from "@morndo/domain";
 import type { KeyPoolStore } from "../application/ports.ts";
 import { openConnectionsDb } from "./store-sqlite.ts";
 
@@ -16,8 +16,17 @@ function deleted(body: string): boolean {
   return value.deleted === true;
 }
 
+// A pool saved before it had grants, or a grant saved before it had seen and lent, loads with those empty.
+// Saving still writes the pool it was given.
+function withHistory(pool: KeyPool): KeyPool {
+  const grants = ((pool.grants ?? []) as readonly (Grant & { seen?: Grant["seen"]; lent?: Grant["lent"] })[]).map(grant => ({
+    ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [],
+  }));
+  return { ...pool, grants };
+}
+
 function poolOf(body: string): KeyPool | null {
-  return deleted(body) ? null : JSON.parse(body) as KeyPool;
+  return deleted(body) ? null : withHistory(JSON.parse(body) as KeyPool);
 }
 
 export class SqliteKeyPoolStore implements KeyPoolStore {

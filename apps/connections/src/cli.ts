@@ -21,7 +21,7 @@ import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
-import { guardedRelay, watchPoolKeys } from "./pool-keys.ts";
+import { FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
 import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
@@ -364,12 +364,13 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let watch: { close(): void } | null = null;
   let relay: ReturnType<typeof guardedRelay> | null = null;
   let polling: ReturnType<typeof setInterval> | null = null;
+  let stopped: Error | null = null;
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
     // A pooled run may be moved to any member, so the filter knows every member's key, not only the first (a key the child prints
     // after a hand-off is then redacted too). A member that joins, or whose key is rotated, after the start is learned before
-    // the next chunk is written. A member the run was handed, and that has since left, is learned from the grant. A member whose
-    // key cannot be opened cannot be served either, and is left out.
+    // the next chunk is written. A member the run was handed, and that has since left, is learned from the grant. While a key
+    // the grant lent (or the grant's current member's) is missing, chunks are withheld; if that lasts, the run stops.
     const secrets = [secret];
     const seen = new Set<string>();
     // The watch takes the pool's and the directory's versions before the keys are read, so a change after this point is a change it learns.
@@ -406,6 +407,15 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
         add: keys => { outRedactor.add(keys); errRedactor.add(keys); },
         push: (stream, text) => (stream === "out" ? outRedactor : errRedactor).push(text),
         write: (stream, text) => { if (stream === "out") io.stdout(text); else io.stderr(text); },
+        onGiveUp: error => {
+          if (stopped !== null) return;
+          stopped = error;
+          const detail = error instanceof FilterIncomplete
+            ? `the key filter is incomplete for ${error.members.join(", ")}`
+            : "the key filter could not be read";
+          io.stderr(`morndo-keys: the run was stopped, ${detail}\n`);
+          stopper.stop();
+        },
       });
       relay = live;
       hooks.onStdout = (chunk: string) => { live.chunk("out", chunk); };
@@ -428,9 +438,11 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     stdout = child.stdout;
     output = child.stdout;
   } catch (error) {
-    failure = error instanceof Error ? error.message : "run failed";
-    if (isStatusRefusal(error)) refusal = 75;
-    io.stderr(errRedactor.push(failure));
+    if (stopped === null) {
+      failure = error instanceof Error ? error.message : "run failed";
+      if (isStatusRefusal(error)) refusal = 75;
+      io.stderr(errRedactor.push(failure));
+    }
     status = 1;
   } finally {
     await stopper.settle();                                  // what the agent started is gone before the books close
@@ -438,8 +450,11 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     hungUp = stopper.cut() && stopper.hungUp();
     if (polling !== null) clearInterval(polling);
     await relay?.settled();
-    io.stdout(outRedactor.flush());
-    io.stderr(errRedactor.flush());
+    if (stopped !== null) status = 1;                        // the filter gave up: the same end as a turn that was cut short
+    else {
+      io.stdout(outRedactor.flush());
+      io.stderr(errRedactor.flush());
+    }
     watch?.close();
     const again = released ? openHome(saved) : home;
     try {

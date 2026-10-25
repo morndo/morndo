@@ -6,8 +6,10 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, wr
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
+// Every case here starts the bin several times (a run is a launcher, an agent and a helper per call): on a busy box that is over the 20 s default.
+vi.setConfig({ testTimeout: 60_000 });
 const KEYS: [string, string, string] = ["sk-ant-synthetic-pool-key-0001", "sk-ant-synthetic-pool-key-0002", "sk-ant-synthetic-pool-key-0003"];
 const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 const fixture = join(import.meta.dirname, "fixtures/fake-keyed-runtime.mjs");
