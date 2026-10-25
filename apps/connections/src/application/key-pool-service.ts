@@ -85,7 +85,7 @@ function openKeyLease(directory: Directory, id: string): { name: string; holder:
 
 const MARKS = new Set<Outcome["kind"]>(["exhausted", "failing", "limited"]);
 
-// The process a run started, as a helper call or a report names it: pid, start ticks and boot id.
+// The run's own child (the agent), as a helper call or a report names it: pid, start ticks and boot id.
 export function sessionKey(id: ProcId): string {
   return `${id.pid}:${id.startedAt}:${id.bootId}`;
 }
