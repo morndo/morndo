@@ -355,3 +355,113 @@ describe("kp12 nothing the provider said, and no key, reaches the pool, its even
     expect(said).not.toContain(REF);
   });
 });
+
+describe("rev-158: recheck is the principal's, like the other operator commands", () => {
+  it("recheckBy refuses an operator and probes nothing; a principal gets the results", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.mem.clock.at += DAY;
+    const refused = await w.pools.recheckBy({ kind: "operator" }, { holder });
+    expect(refused.ok).toBe(false);
+    expect(!refused.ok && refused.error.problem).toBe("principal");
+    expect(w.probe.calls).toHaveLength(0);
+    const allowed = await w.pools.recheckBy(who, { holder });
+    expect(allowed).toEqual({ ok: true, value: [{ member: "k1", outcome: "recovered" }] });
+  });
+});
+
+describe("rev-158: a manual probe does not move the schedule", () => {
+  it("eight manual probes of a dry key, thirty-one seconds apart, leave nextCheck and failedProbes where they were", async () => {
+    const w = await world();
+    dry(w, "k1");
+    const before = member(w, "k1").nextCheck;
+    w.probe.answer = () => ({ signal: signalOf(400) });
+    for (let i = 0; i < 8; i++) {
+      w.mem.clock.at += 31 * SEC;
+      expect((await w.pools.probeMember("p", "k1", { why: "manual", holder })).outcome).toBe("exhausted");
+    }
+    expect(member(w, "k1")).toMatchObject({ failedProbes: 0, nextCheck: before });
+    expect(w.probe.calls).toHaveLength(8);
+  });
+});
+
+describe("rev-158: a resume date that is not in the future is no date", () => {
+  it("a probe answered with a date in the past waits the doubled interval, and recheck does not probe again at once", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.mem.clock.at += DAY;
+    const past = new Date(w.mem.clock.now() - 2 * DAY).toISOString().slice(0, 10);
+    w.probe.answer = () => ({ signal: signalOf(402, { resumeDate: past }) });
+    const now = w.mem.clock.now();
+    await w.pools.probeMember("p", "k1", { why: "due", holder });
+    expect(member(w, "k1").nextCheck).toBe(now + 2 * DAY);
+    w.mem.clock.at += 31 * SEC;
+    expect(await w.pools.recheck({ holder })).toEqual([]);
+    expect(w.probe.calls).toHaveLength(1);
+  });
+});
+
+describe("rev-158: an unknown 4xx alerts once per change", () => {
+  it("the same unmatched answer twice raises one alert; a different one raises another", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.probe.answer = () => ({ signal: signalOf(418, { kind: "teapot_error" }) });
+    for (let i = 0; i < 3; i++) {
+      w.mem.clock.at += 31 * SEC;
+      await w.pools.probeMember("p", "k1", { why: "manual", holder });
+    }
+    expect(w.mem.alerts.recent().filter(a => a.kind === "unclassified")).toHaveLength(1);
+    w.probe.answer = () => ({ signal: signalOf(418, { kind: "kettle_error" }) });
+    w.mem.clock.at += 31 * SEC;
+    await w.pools.probeMember("p", "k1", { why: "manual", holder });
+    expect(w.mem.alerts.recent().filter(a => a.kind === "unclassified").map(a => a.detail)).toEqual(["418 teapot_error", "418 kettle_error"]);
+  });
+});
+
+describe("rev-158: a model or version the provider does not know is a configuration error, not a verdict on the key", () => {
+  it("raises one probe-config alert (once, however often), leaves the member as it is, and says misconfigured with the word", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.probe.answer = () => ({ misconfigured: "model" });
+    const first = await w.pools.probeMember("p", "k1", { why: "manual", holder });
+    expect(first).toEqual({ member: "k1", outcome: "misconfigured", word: "model" });
+    w.mem.clock.at += 31 * SEC;
+    await w.pools.probeMember("p", "k1", { why: "manual", holder });
+    expect(w.mem.alerts.recent().filter(a => a.kind === "probe-config")).toEqual([expect.objectContaining({ name: "k1", detail: "model" })]);
+    expect(member(w, "k1")).toMatchObject({ health: { state: "exhausted" }, failedProbes: 0 });
+    expect(w.mem.alerts.recent().filter(a => a.kind === "unclassified")).toEqual([]);
+  });
+  it("a due probe that is misconfigured does not double the interval", async () => {
+    const w = await world();
+    dry(w, "k1");
+    const start = w.mem.clock.now();
+    w.mem.clock.at += DAY;
+    w.probe.answer = () => ({ misconfigured: "version" });
+    await w.pools.probeMember("p", "k1", { why: "due", holder });
+    expect(member(w, "k1")).toMatchObject({ failedProbes: 0, nextCheck: start + 2 * DAY });
+  });
+});
+
+describe("rev-158: a claim whose probe never started is released at once", () => {
+  it("a member that is off is declined, and the claim, the next check and the last probe are as they were: the next try is not skipped for an interval", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.mem.clock.at += DAY;
+    const before = { ...member(w, "k1") };
+    w.connections.turnOff("k1");
+    expect(await w.pools.probeMember("p", "k1", { why: "due", holder })).toEqual({ member: "k1", outcome: "declined", word: "off" });
+    expect(member(w, "k1")).toMatchObject({ probingUntil: null, nextCheck: before.nextCheck, lastProbe: before.lastProbe });
+    expect(types(w)).toContain("ProbeReleased");
+    w.connections.turnOn("k1");
+    expect((await w.pools.recheck({ holder }))[0]).toEqual({ member: "k1", outcome: "recovered" });
+  });
+  it("a probe that went out is not released: an unreachable provider keeps the claim and the moved next check", async () => {
+    const w = await world();
+    dry(w, "k1");
+    w.mem.clock.at += DAY;
+    w.probe.answer = () => ({ unreachable: true });
+    await w.pools.probeMember("p", "k1", { why: "due", holder });
+    expect(types(w)).not.toContain("ProbeReleased");
+    expect(member(w, "k1").nextCheck).toBe(w.mem.clock.now() + DAY);
+  });
+});

@@ -748,14 +748,30 @@ describe("slice 3, kp18: a report that fell back to the window claims one probe 
     expect(state(w, "k2")).toBe("exhausted");
     expect(pool(w).events.filter(e => e.type === "KeyExhausted" && e.member === "k2")).toHaveLength(1);
   });
-  it("probing the suspect that is healthy leaves it active and clears the claim", async () => {
+  it("probing the suspect that is healthy leaves it active, and the claim stays until it lapses (rev-158)", async () => {
     const { w, run, probe } = await moved();
     report(w, run, 41);
     const result = await w.pools.probeMember("p", "k2", { why: "suspect", holder });
     expect(result.outcome).toBe("healthy");
     expect(probe.calls).toEqual(["k2"]);
     expect(state(w, "k2")).toBe("active");
-    expect(pool(w).members.find(m => m.credential === "k2")?.probingUntil).toBeNull();
+    expect(pool(w).members.find(m => m.credential === "k2")?.probingUntil).not.toBeNull();
+    expect(await w.pools.probeMember("p", "k2", { why: "suspect", holder })).toEqual({ member: "k2", outcome: "skipped", word: "claimed" });
+  });
+  it("repeated grant reports inside the window fire one probe: past the thirty seconds the next is refused for the rest of the interval (rev-158)", async () => {
+    const { w, run, probe } = await moved();
+    for (let i = 0; i < 4; i++) {
+      const named = report(w, run, 41);
+      const suspect = named.ok ? named.value.suspect : null;
+      expect(suspect).toBe("k2");
+      const result = await w.pools.probeMember("p", "k2", { why: "suspect", holder });
+      expect(result.outcome).toBe(i === 0 ? "healthy" : "skipped");
+      w.mem.clock.at += 10 * SEC;
+    }
+    expect(probe.calls).toEqual(["k2"]);
+    w.mem.clock.at += 31 * SEC;
+    expect(await w.pools.probeMember("p", "k2", { why: "suspect", holder })).toEqual({ member: "k2", outcome: "skipped", word: "not_due" });
+    expect(probe.calls).toEqual(["k2"]);
   });
   it("two reports at once cause one probe: the second finds the claim", async () => {
     const { w, run, probe } = await moved();

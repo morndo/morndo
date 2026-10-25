@@ -286,10 +286,12 @@ describe("the recheck timer", () => {
     expect(service).toMatch(/^ExecStart=%h\/\.local\/bin\/morndo-keys keypool recheck$/m);
     expect(service).not.toMatch(/\[Install\]/);
   });
-  it("the timer fires five minutes after boot and then hourly, spread, and catches up after a sleep", () => {
+  it("the timer is a calendar timer, on the hour and spread: Persistent=true only has an effect on OnCalendar (systemd.timer(5)), and no monotonic line is left that it would not touch", () => {
     const timer = unit("morndo-keys-recheck.timer");
-    for (const line of ["OnBootSec=5min", "OnUnitActiveSec=1h", "RandomizedDelaySec=5min", "Persistent=true", "WantedBy=timers.target"]) {
+    for (const line of ["OnCalendar=hourly", "RandomizedDelaySec=5min", "Persistent=true", "WantedBy=timers.target"]) {
       expect(timer).toMatch(new RegExp(`^${line}$`, "m"));
     }
+    expect(timer).not.toMatch(/^OnBootSec=/m);
+    expect(timer).not.toMatch(/^OnUnitActiveSec=/m);
   });
 });

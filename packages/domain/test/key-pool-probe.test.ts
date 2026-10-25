@@ -3,7 +3,7 @@
 // that date, and only a Messages answer brings a member back. Pure, `now` is the clock. Names, refs and fingerprints are synthetic.
 import { describe, expect, it } from "vitest";
 import {
-  addKey, claimProbe, createKeyPool, dueMembers, emptyDirectory, findConnection, joinKeyPool, reportKeyOutcome,
+  addKey, claimProbe, createKeyPool, dueMembers, emptyDirectory, findConnection, joinKeyPool, releaseClaim, reportKeyOutcome,
   KEY_POOL_RECHECK_MAX_MS, KEY_PROBE_CLAIM_MS,
   type Actor, type Connection, type KeyPool, type Outcome,
 } from "../src/index.ts";
@@ -222,10 +222,11 @@ describe("a suspected member (kp18: its first report came right after a hand-off
     expect(member(p, "k3").probingUntil).toBeNull();
     expect(types(p).filter(t => t === "KeyExhausted")).toHaveLength(3);
   });
-  it("a probe that finds it healthy leaves it active and clears the claim", () => {
-    const p = ok(reportKeyOutcome(suspected(), "k3", good, T + HOUR, T + HOUR + SEC, "probe"));
-    expect(member(p, "k3")).toMatchObject({ health: { state: "active" }, probingUntil: null, nextCheck: null });
+  it("a probe that finds it healthy leaves it active, and the claim stays until it lapses: the thirty seconds are not given back (rev-158)", () => {
+    const p = ok(reportKeyOutcome(suspected(), "k3", good, T + HOUR, T + HOUR + SEC, "probe", "suspect"));
+    expect(member(p, "k3")).toMatchObject({ health: { state: "active" }, probingUntil: T + HOUR + KEY_PROBE_CLAIM_MS, nextCheck: null });
     expect(types(p)).toEqual(types(suspected()));
+    expect(word(claimProbe(p, "k3", T + HOUR + 10 * SEC, "suspect"))).toBe("claimed");
   });
 });
 
@@ -238,5 +239,86 @@ describe("kp12 a probe leaves no secret in the pool", () => {
     const json = JSON.stringify(p);
     expect(json).not.toContain(PLANTED_FP);
     expect(json).not.toContain(PLANTED_REF);
+  });
+});
+
+describe("rev-158: at most one probe per member per thirty seconds and per interval, by whatever path", () => {
+  it("every claim records when it was made (lastProbe), and a member starts with none", () => {
+    expect(pool(2).members.every(m => m.lastProbe === null)).toBe(true);
+    const claimed = ok(claimProbe(dryAtT(), "k1", T + DAY, "due"));
+    expect(member(claimed, "k1").lastProbe).toBe(T + DAY);
+  });
+  it("a suspect claim is refused (not_due) within one recheck interval of the member's last probe, whatever kind it was, and taken after it", () => {
+    const first = ok(claimProbe(dryAtT(), "k3", T + HOUR, "suspect"));
+    expect(word(claimProbe(first, "k3", T + HOUR + 31 * SEC, "suspect"))).toBe("not_due");
+    expect(word(claimProbe(first, "k3", T + HOUR + DAY - SEC, "suspect"))).toBe("not_due");
+    expect(member(ok(claimProbe(first, "k3", T + HOUR + DAY, "suspect")), "k3").lastProbe).toBe(T + HOUR + DAY);
+    const afterDue = ok(claimProbe(ok(reportKeyOutcome(pool(3), "k2", dry(), T, T)), "k2", T + DAY, "due"));
+    const revived = ok(reportKeyOutcome(afterDue, "k2", good, T + DAY, T + DAY + SEC, "probe", "due"));
+    expect(word(claimProbe(revived, "k2", T + DAY + HOUR, "suspect"))).toBe("not_due");
+  });
+  it("a manual claim does not move nextCheck, and a manual answer that finds the key dry changes nothing: eight manual probes leave the schedule where it was", () => {
+    let p = dryAtT();
+    const before = member(p, "k1").nextCheck;
+    for (let i = 0; i < 8; i++) {
+      const at = T + HOUR + i * 31 * SEC;
+      p = ok(claimProbe(p, "k1", at, "manual"));
+      expect(member(p, "k1").nextCheck).toBe(before);
+      p = ok(reportKeyOutcome(p, "k1", dry(), at, at + SEC, "probe", "manual"));
+    }
+    expect(member(p, "k1")).toMatchObject({ failedProbes: 0, nextCheck: before });
+  });
+  it("a manual answer that finds the key refused makes it failing, and a Messages ok recovers it, as for any probe", () => {
+    const p = ok(claimProbe(dryAtT(), "k1", T + HOUR, "manual"));
+    expect(member(ok(reportKeyOutcome(p, "k1", good, T + HOUR, T + HOUR + SEC, "probe", "manual")), "k1").health).toEqual({ state: "active" });
+    expect(member(ok(reportKeyOutcome(p, "k1", { kind: "failing", reason: "rejected" }, T + HOUR, T + HOUR + SEC, "probe", "manual")), "k1").health).toMatchObject({ state: "failing" });
+  });
+  it("a due probe that finds it dry still doubles, and only a due probe does", () => {
+    const p = ok(claimProbe(dryAtT(), "k1", T + DAY, "due"));
+    expect(member(ok(reportKeyOutcome(p, "k1", dry(), T + DAY, T + DAY + SEC, "probe", "due")), "k1").failedProbes).toBe(1);
+    expect(member(ok(reportKeyOutcome(p, "k1", dry(), T + DAY, T + DAY + SEC, "probe")), "k1").failedProbes).toBe(1);
+  });
+});
+
+describe("rev-158: a resume date that is not in the future is no date", () => {
+  it("a refusal that names a date already past makes the member due after the interval, not at once, when it first runs dry", () => {
+    const p = ok(reportKeyOutcome(pool(2), "k1", dry(T - DAY), T, T));
+    expect(member(p, "k1").nextCheck).toBe(T + DAY);
+    expect(member(p, "k1").health).toEqual({ state: "exhausted", reason: "spend-limit", resumeAt: null });
+    expect(dueMembers(p, T + 1)).toEqual([]);
+  });
+  it("a date equal to now is past too", () => {
+    expect(member(ok(reportKeyOutcome(pool(2), "k1", dry(T), T, T)), "k1").nextCheck).toBe(T + DAY);
+  });
+  it("a probe that is answered with a past date waits the doubled interval, not 'due again at once'", () => {
+    const p = ok(claimProbe(dryAtT(), "k1", T + DAY, "due"));
+    const after = ok(reportKeyOutcome(p, "k1", dry(T), T + DAY, T + DAY + SEC, "probe", "due"));
+    expect(member(after, "k1").nextCheck).toBe(T + DAY + SEC + 2 * DAY);
+    expect(dueMembers(after, T + DAY + 31 * SEC)).toEqual([]);
+  });
+  it("a date in the future still wins, as before", () => {
+    const resume = T + 10 * DAY;
+    expect(member(ok(reportKeyOutcome(pool(2), "k1", dry(resume), T, T)), "k1").nextCheck).toBe(resume);
+  });
+});
+
+describe("rev-158: a claim whose probe never started is released at once", () => {
+  it("restores the next check, the last probe and the claim as they were, and writes ProbeReleased", () => {
+    const before = dryAtT();
+    const claimed = ok(claimProbe(before, "k1", T + DAY, "due"));
+    const released = releaseClaim(claimed, "k1", T + DAY, { nextCheck: member(before, "k1").nextCheck, lastProbe: member(before, "k1").lastProbe }, T + DAY + SEC);
+    expect(member(released, "k1")).toMatchObject({ probingUntil: null, nextCheck: member(before, "k1").nextCheck, lastProbe: null });
+    expect(released.events.at(-1)).toEqual({ type: "ProbeReleased", member: "k1", at: T + DAY + SEC });
+    expect(dueMembers(released, T + DAY + 2 * SEC)).toEqual(["k1"]);
+  });
+  it("leaves another prober's claim alone: only the claim made at that instant is released", () => {
+    const claimed = ok(claimProbe(dryAtT(), "k1", T + DAY, "due"));
+    const later = ok(claimProbe(claimed, "k1", T + DAY + 31 * SEC, "manual"));
+    expect(releaseClaim(later, "k1", T + DAY, { nextCheck: T + DAY, lastProbe: null }, T + DAY + 32 * SEC)).toEqual(later);
+  });
+  it("a member that is gone, or has no claim, is left as it is", () => {
+    const p = dryAtT();
+    expect(releaseClaim(p, "zz", T, { nextCheck: null, lastProbe: null }, T)).toEqual(p);
+    expect(releaseClaim(p, "k1", T, { nextCheck: null, lastProbe: null }, T)).toEqual(p);
   });
 });

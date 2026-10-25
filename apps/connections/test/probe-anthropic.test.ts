@@ -201,3 +201,30 @@ describe("the guards on how the probe reads and where it sends", () => {
     expect(elsewhere.seen).toEqual([]);
   });
 });
+
+describe("rev-158: a model or version the provider does not know is told apart from a verdict on the key", () => {
+  const answerOf = async (status: number, type: string, message: string) => {
+    const { url } = await api({ status, body: errorBody(type, message) });
+    return ask(probeOf(), url);
+  };
+  it("a 404 not_found_error is a model problem", async () => {
+    expect(await answerOf(404, "not_found_error", "model: claude-haiku-5-5")).toEqual({ misconfigured: "model" });
+  });
+  it("a 400 that says the model is not valid is a model problem; one that says the version is is a version problem", async () => {
+    expect(await answerOf(400, "invalid_request_error", "model: claude-haiku-9 is not a valid model ID")).toEqual({ misconfigured: "model" });
+    expect(await answerOf(400, "invalid_request_error", "anthropic-version: 2030-01-01 is not supported")).toEqual({ misconfigured: "version" });
+  });
+  it("a credit refusal, a spend limit, a bad max_tokens, a refused key and a rate limit are signals, never misconfigured", async () => {
+    for (const [status, type, message] of [
+      [400, "invalid_request_error", "Your credit balance is too low to access the Anthropic API."],
+      [400, "invalid_request_error", "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC."],
+      [400, "invalid_request_error", "max_tokens: must be greater than or equal to 1"],
+      [401, "authentication_error", "invalid x-api-key"],
+      [403, "permission_error", "forbidden for the model owner"],
+      [429, "rate_limit_error", "slow down"],
+    ] as const) {
+      const answer = await answerOf(status, type, message);
+      expect("signal" in answer, `${status} ${message}`).toBe(true);
+    }
+  });
+});
