@@ -8,7 +8,7 @@ import type { Actor, ConnEvent, Directory, Grant, Holder, KeyPool, Outcome } fro
 import { findConnection, isKey } from "@morndo/domain";
 import {
   ConnectionsService, KeyPoolService, LeaseService, MemoryKeyPoolStore, NoProbe, memory,
-  type Failure, type Memory, type OutcomeClassifier,
+  type Failure, type Memory, type OutcomeClassifier, type ProbeAnswer, type ProviderProbe,
 } from "../src/application/index.ts";
 
 const who: Actor = { kind: "principal", command: "c1" };
@@ -34,7 +34,10 @@ function preset(): VendorPreset {
   };
 }
 const poolTerms: KeyPoolTerms = { errorDialect: "dialect-a", termsRevision: "kr1", termsLine: "Rotates only on exhausted credit; only keys of accounts you hold." };
-const classifier: OutcomeClassifier = { classify: () => ({ kind: "unknown" }) };
+// 200 is a Messages ok and 400 a credit refusal (what the probes of KP18 are answered with); anything else says nothing.
+const classifier: OutcomeClassifier = {
+  classify: signal => signal.status === 200 ? { kind: "ok", evidence: "messages" } : signal.status === 400 ? { kind: "exhausted", reason: "credit", resumeAt: null } : { kind: "unknown" },
+};
 
 // A pool store that can fail a save, as a process killed at that point would: the write never happens and the call never returns.
 class CrashingStore extends MemoryKeyPoolStore {
@@ -64,15 +67,16 @@ class CrashingLeases extends LeaseService {
 
 type World = { mem: Memory; pools: KeyPoolService; store: CrashingStore; connections: ConnectionsService; leases: CrashingLeases };
 
-async function world(n = 3): Promise<World> {
+async function world(n = 3, probe: ProviderProbe = new NoProbe()): Promise<World> {
   const mem = memory();
   mem.catalog.rows = [preset()];
   mem.catalog.keyPools = { "vendor-a": poolTerms };
+  mem.catalog.keyPoolProbes = { "vendor-a": { model: "m-small" } };
   const store = new CrashingStore();
   const leases = new CrashingLeases(mem.deps);
   const pools = new KeyPoolService({
     clock: mem.clock, store, connections: mem.store, catalog: mem.catalog, alerts: mem.alerts, processes: mem.processes,
-    classifiers: { for: d => (d === "dialect-a" ? classifier : null) }, leases, helper: { limit: 4, ttlMs: TTL }, probe: new NoProbe(),
+    classifiers: { for: d => (d === "dialect-a" ? classifier : null) }, leases, helper: { limit: 4, ttlMs: TTL }, probe,
   });
   const connections = new ConnectionsService(mem.deps, pools);
   for (let i = 1; i <= n; i++) {
@@ -688,5 +692,77 @@ describe("fix round 6: a helper call under a grant hands its key to that grant's
     const out = await w.pools.handOff("p", run.grant, caller);
     expect(out.ok && out.value.connection).toBe("k2");
     expect(grantOf(w).filter).toBe(SOCK);
+  });
+});
+
+// KP18's claimed probe (ADR-0037 decision 14, left open by slice 2): a report from a session the grant never served falls back to the window and
+// blames the old key, which hides a dry new one for a minute. The report names the current member as the one to suspect; probing it decides.
+class RecordingProbe implements ProviderProbe {
+  calls: string[] = [];
+  status = 200;
+  async probe(request: { connection: string }): Promise<ProbeAnswer> {
+    this.calls.push(request.connection);
+    return { signal: { status: this.status, kind: null, text: null, retryAfterSeconds: null, code: null, resumeDate: null } };
+  }
+}
+describe("slice 3, kp18: a report that fell back to the window claims one probe of the current member, which decides it", () => {
+  async function moved(): Promise<{ w: World; run: { grant: string }; probe: RecordingProbe }> {
+    const probe = new RecordingProbe();
+    const w = await world(3, probe);
+    inTree(w);
+    const run = await start(w);
+    expect((await w.pools.handOff("p", run.grant, helperOf(21, 20))).ok).toBe(true);
+    dryUp(w, "k1");
+    w.mem.clock.at += 10 * SEC;
+    expect((await w.pools.handOff("p", run.grant, helperOf(21, 20))).ok).toBe(true);
+    w.mem.clock.at += 5 * SEC;
+    return { w, run, probe };
+  }
+  const state = (w: World, name: string) => pool(w).members.find(m => m.credential === name)?.health.state;
+  const report = (w: World, run: { grant: string }, pid: number, outcome: Outcome = dry) =>
+    w.pools.reportByGrant("p", run.grant, outcome, w.mem.clock.now(), { kind: "holder", caller: proc(pid) });
+
+  it("an unseen session's refusal is the old key's and names k2 as the member to suspect", async () => {
+    const { w, run } = await moved();
+    expect(report(w, run, 41)).toEqual({ ok: true, value: { suspect: "k2" } });
+    expect(state(w, "k2")).toBe("active");
+  });
+  it("a session the grant has seen, a report that is not a refusal of credit, and a report past the window suspect nothing", async () => {
+    const { w, run } = await moved();
+    expect(report(w, run, 22)).toEqual({ ok: true, value: { suspect: null } });
+    const again = await moved();
+    expect(report(again.w, again.run, 41, { kind: "limited", retryAfterMs: null })).toEqual({ ok: true, value: { suspect: null } });
+    const late = await moved();
+    late.w.mem.clock.at += 2 * TTL;
+    expect(report(late.w, late.run, 41)).toEqual({ ok: true, value: { suspect: null } });
+  });
+  it("probing the suspect that is dry marks it exhausted at once, once; the probe goes to k2, never to k1", async () => {
+    const { w, run, probe } = await moved();
+    probe.status = 400;
+    const out = report(w, run, 41);
+    const suspect = out.ok ? out.value.suspect : null;
+    expect(suspect).toBe("k2");
+    const result = await w.pools.probeMember("p", "k2", { why: "suspect", holder });
+    expect(result).toEqual({ member: "k2", outcome: "exhausted" });
+    expect(probe.calls).toEqual(["k2"]);
+    expect(state(w, "k2")).toBe("exhausted");
+    expect(pool(w).events.filter(e => e.type === "KeyExhausted" && e.member === "k2")).toHaveLength(1);
+  });
+  it("probing the suspect that is healthy leaves it active and clears the claim", async () => {
+    const { w, run, probe } = await moved();
+    report(w, run, 41);
+    const result = await w.pools.probeMember("p", "k2", { why: "suspect", holder });
+    expect(result.outcome).toBe("healthy");
+    expect(probe.calls).toEqual(["k2"]);
+    expect(state(w, "k2")).toBe("active");
+    expect(pool(w).members.find(m => m.credential === "k2")?.probingUntil).toBeNull();
+  });
+  it("two reports at once cause one probe: the second finds the claim", async () => {
+    const { w, run, probe } = await moved();
+    report(w, run, 41);
+    report(w, run, 41);
+    const both = await Promise.all([w.pools.probeMember("p", "k2", { why: "suspect", holder }), w.pools.probeMember("p", "k2", { why: "suspect", holder })]);
+    expect(probe.calls).toEqual(["k2"]);
+    expect(both.map(r => r.outcome).sort()).toEqual(["healthy", "skipped"]);
   });
 });
