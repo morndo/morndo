@@ -113,6 +113,20 @@ describe("keypool create, list and the terms", () => {
     expect(await pools(env)).toEqual([]);
   });
 
+  it("re-check NEW 2: --by needs a real value: the literal true (what a bare flag would store) is no name, and a bare --by is refused with its word", async () => {
+    const { env } = await world(2, { pool: false });
+    const literal = await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", "true", "--confirm-own-account", "k1", "k2"], env);
+    expect(literal.code).toBe(1);
+    expect(literal.stderr).toMatch(/ack_needed/);
+    for (const args of [["--by", "--confirm-own-account", "k1"], ["--confirm-own-account", "k1", "--by"]]) {
+      const bare = await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", ...args], env);
+      expect(bare.code, args.join(" ")).toBe(1);
+      expect(bare.stderr).toMatch(/missing by/);
+      expect(bare.stderr).not.toMatch(/Node\.js v|\n\s+at /);                 // a refusal, not a stack trace
+    }
+    expect(await pools(env)).toEqual([]);
+  });
+
   it("refuses a member until --confirm-own-account (the organization cannot be read yet), and says why", async () => {
     const { env } = await world(2, { pool: false });
     const refused = await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", "owner", "k1", "k2"], env);

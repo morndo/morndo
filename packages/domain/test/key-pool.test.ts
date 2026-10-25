@@ -92,6 +92,17 @@ describe("kp1 names are unique across pools, Connections (revoked included) and 
     expect(word(createKeyPool(input("p"), NO_NAMES, operator, T))).toBe("principal");
     expect(word(createKeyPool(input("p"), NO_NAMES, { kind: "principal", command: "" }, T))).toBe("principal");
   });
+  it("re-check NEW 3: a command name that is only whitespace is no principal, for every widening step", () => {
+    const blank: Actor = { kind: "principal", command: " \t " };
+    const dir = keys(2);
+    const base = ok(createKeyPool({ name: "p", runtime: "r", vendor: "v" }, NO_NAMES, principal(), T));
+    expect(word(createKeyPool({ name: "p", runtime: "r", vendor: "v" }, NO_NAMES, blank, T))).toBe("principal");
+    expect(word(acknowledgeKeyPoolTerms(base, "r1", "ada", blank, T))).toBe("principal");
+    expect(word(joinKeyPool(base, conn(dir, "k1"), { elsewhere: [] }, null, true, blank, T))).toBe("principal");
+    const full = pool(2);
+    expect(word(moveKeyMember(full, "k2", 0, blank, T))).toBe("principal");
+    expect(word(reviveKey(mark(full, "k1", exhausted()), "k1", blank, T + 2 * MIN))).toBe("principal");
+  });
   it("refuses a recheck outside 1 h to 7 d and an unknown mode", () => {
     const bad = (policy: { mode: "round-robin" | "drain"; recheckEveryMs: number }) => word(createKeyPool({ ...input("p"), policy }, NO_NAMES, principal(), T));
     expect(bad({ mode: "drain", recheckEveryMs: HOUR - 1 })).toBe("bad_policy");

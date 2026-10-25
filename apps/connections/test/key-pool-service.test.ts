@@ -461,6 +461,23 @@ describe("review F2: who may do what", () => {
   });
 });
 
+describe("re-check NEW 3: join, move and revive need a named principal in the service too", () => {
+  const blank: Actor = { kind: "principal", command: "  " };
+  it("a whitespace-only command name changes nothing", async () => {
+    const w = await world(3);
+    create(w, ["k1", "k2"]);
+    w.pools.report("p", "k1", { kind: "exhausted", reason: "credit", resumeAt: null }, w.mem.clock.now(), who);
+    const saves = w.store.saves;
+    const word = (r: { ok: boolean; error?: { problem: string } }) => (r.ok ? "ok" : r.error?.problem);
+    expect(word(w.pools.join("p", "k3", { confirmOwn: true }, blank))).toBe("principal");
+    expect(word(w.pools.move("p", "k2", 0, blank))).toBe("principal");
+    expect(word(w.pools.revive("p", "k1", blank))).toBe("principal");
+    const made = w.pools.create({ name: "q", vendor: "vendor-a", runtime: "runtime-a", members: ["k3"], by: "ada", confirmOwn: true }, blank);
+    expect(word(made)).toBe("principal");
+    expect(w.store.saves).toBe(saves);
+  });
+});
+
 describe("review F3: leaving a member out of a pick", () => {
   it("a caller can skip the member whose key just failed: it is not picked though it is active", async () => {
     const w = await world();

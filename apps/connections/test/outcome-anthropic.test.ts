@@ -40,6 +40,16 @@ describe("the classifier, one fixture per row of the table", () => {
     expect(classify(status, text)).toEqual(expected);
   });
 
+  it("re-check NEW 1: the hold words mean a hold only from a 401 or 403, or a structured result with no status: a 400 that echoes them is unknown", () => {
+    for (const word of ["account_on_hold", "authentication_failed"]) {
+      expect(classify(400, body("invalid_request_error", `messages.0: your text said ${word}`))).toEqual({ kind: "unknown" });
+      expect(classify(404, body("not_found_error", word))).toEqual({ kind: "unknown" });
+      expect(classify(402, body("billing_error", word))).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });   // a 402 is still a billing refusal
+      expect(classify(401, body("authentication_error", word))).toEqual({ kind: "failing", reason: "held" });
+      expect(classify(403, body("permission_error", word))).toEqual({ kind: "failing", reason: "held" });
+    }
+  });
+
   it("a 2xx is ok from a Messages request", () => {
     expect(classify(200, "{}")).toEqual({ kind: "ok", evidence: "messages" });
   });
@@ -105,6 +115,12 @@ describe("the structured result of a failed headless run", () => {
     expect(readOutcome(record({ api_error_status: 403, result: "Forbidden" }))).toEqual({ kind: "failing", reason: "denied" });
     expect(readOutcome(record({ api_error_status: 429, result: "Too many requests" }))).toEqual({ kind: "limited", retryAfterMs: null });
     expect(readOutcome(record({ api_error_status: 500, result: "Internal server error" }))).toEqual({ kind: "unknown" });
+  });
+  it("re-check NEW 1: in a run's result the hold words count only with a 401, a 403, or no status; a 400 that echoes them is unknown", () => {
+    expect(readOutcome(record({ api_error_status: 400, result: "API Error: 400 account_on_hold in your request" }))).toEqual({ kind: "unknown" });
+    expect(readOutcome(record({ api_error_status: 400, result: "authentication_failed" }))).toEqual({ kind: "unknown" });
+    expect(readOutcome(record({ api_error_status: 403, result: "account_on_hold" }))).toEqual({ kind: "failing", reason: "held" });
+    expect(readOutcome(record({ api_error_status: null, result: "account_on_hold" }))).toEqual({ kind: "failing", reason: "held" });
   });
   it("a refusal the CLI reports with no status still reads from its text, when the CLI itself says it is an API error", () => {
     expect(readOutcome(record({ api_error_status: null, result: "Credit balance is too low" }))).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
