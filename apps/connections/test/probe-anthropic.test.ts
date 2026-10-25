@@ -162,3 +162,42 @@ describe("probe never writes the response text to disk or the alert file", () =>
     expect(readdirSync(dir)).toEqual([]);
   });
 });
+
+describe("the guards on how the probe reads and where it sends", () => {
+  // A response whose body is a counted stream of 1 KB chunks: how many chunks the adapter pulled is how much it read.
+  const counted = (status: number, chunks: number): { fetch: typeof fetch; pulled: () => number } => {
+    let pulled = 0;
+    const fake = (async () => {
+      let sent = 0;
+      const body = new ReadableStream<Uint8Array>({
+        pull(controller) {
+          if (sent >= chunks) { controller.close(); return; }
+          sent += 1;
+          pulled += 1;
+          controller.enqueue(new TextEncoder().encode("y".repeat(1024)));
+        },
+      }, { highWaterMark: 0 });
+      return new Response(body, { status });
+    }) as unknown as typeof fetch;
+    return { fetch: fake, pulled: () => pulled };
+  };
+  const withFetch = (fake: typeof fetch) => new AnthropicProbe({ refOf: () => "ref-k1", open: async () => KEY, fetch: fake });
+  it("a success body is cancelled unread: at most one chunk is pulled", async () => {
+    const { fetch: fake, pulled } = counted(200, 100);
+    await ask(withFetch(fake), "https://api.example.test");
+    expect(pulled()).toBeLessThanOrEqual(1);
+  });
+  it("an error body is read up to eight kilobytes and no further", async () => {
+    const { fetch: fake, pulled } = counted(500, 100);
+    await ask(withFetch(fake), "https://api.example.test");
+    expect(pulled()).toBeGreaterThanOrEqual(8);
+    expect(pulled()).toBeLessThanOrEqual(10);
+  });
+  it("a redirect is never followed: the answer is unreachable and the other host is sent nothing, least of all the key", async () => {
+    const elsewhere = await api();
+    const first = await api({ status: 302, headers: { location: `${elsewhere.url}/v1/messages` } });
+    expect(await ask(probeOf(), first.url)).toEqual({ unreachable: true });
+    expect(first.seen).toHaveLength(1);
+    expect(elsewhere.seen).toEqual([]);
+  });
+});

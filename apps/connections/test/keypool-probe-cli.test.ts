@@ -182,6 +182,14 @@ describe("keypool recheck", () => {
     expect(lines(out)).toEqual([{ pool: "p", member: "k1", outcome: "unreachable" }]);
     expect((await view(env)).members[0]!.state).toBe("exhausted");
   });
+  it("--member without a pool is a usage error, exit 1, and sends nothing", async () => {
+    const fake = await api();
+    const { env } = await world(fake.url);
+    await dry(env, "k1");
+    const out = await cli(["keypool", "recheck", "--member", "k1"], env);
+    expect([out.code, out.stderr.trim()]).toEqual([1, "usage"]);
+    expect(fake.seen).toEqual([]);
+  });
   it("an unknown pool or member is refused with its word and exit 1", async () => {
     const fake = await api();
     const { env } = await world(fake.url);
