@@ -227,30 +227,29 @@ function servable(m: KeyMember): boolean {
   return m.health.state === "active";
 }
 
-function ringFrom(p: KeyPool, start: number, skip: readonly string[]): KeyMember | undefined {
+// Who `chooseKey` tries, in that order, when nothing is skipped. A failing member yields none: the pool is blocked first.
+export function servableOrder(p: KeyPool): readonly string[] {
+  if (failingMember(p)) return [];
   const n = p.members.length;
+  if (n === 0) return [];
+  const lastAt = p.lastPick === null ? -1 : p.members.findIndex(m => m.credential === p.lastPick);
+  const start = p.policy.mode === "drain" && lastAt >= 0 ? lastAt : lastAt < 0 ? 0 : (lastAt + 1) % n;
+  const names: string[] = [];
   for (let step = 0; step < n; step++) {
-    const m = p.members[(start + step) % n];
-    if (m && servable(m) && !skip.includes(m.credential)) return m;
+    const member = p.members[(start + step) % n];
+    if (member && servable(member)) names.push(member.credential);
   }
-  return undefined;
+  return names;
 }
 
 export function chooseKey(p: KeyPool, skip: readonly string[] = []): Result<{ pool: KeyPool; member: string }, PickRefusal> {
   const blocked = failingMember(p);
   if (blocked) return err({ problem: "pool_blocked", member: blocked.credential, reason: blocked.health.reason });
   if (!p.members.some(servable)) return err({ problem: "pool_empty", backAt: keyPoolBackAt(p) });
-  const lastAt = p.lastPick === null ? -1 : p.members.findIndex(m => m.credential === p.lastPick);
-  let chosen: KeyMember | undefined;
-  if (p.policy.mode === "drain" && lastAt >= 0) {
-    const current = p.members[lastAt];
-    chosen = current && servable(current) && !skip.includes(current.credential) ? current : ringFrom(p, (lastAt + 1) % p.members.length, skip);
-  } else {
-    chosen = ringFrom(p, lastAt < 0 ? 0 : (lastAt + 1) % p.members.length, skip);
-  }
+  const chosen = servableOrder(p).find(name => !skip.includes(name));
   if (!chosen) return err({ problem: "none_left" });
-  if (p.lastPick === chosen.credential) return ok({ pool: p, member: chosen.credential });
-  return ok({ pool: { ...p, lastPick: chosen.credential }, member: chosen.credential });
+  if (p.lastPick === chosen) return ok({ pool: p, member: chosen });
+  return ok({ pool: { ...p, lastPick: chosen }, member: chosen });
 }
 
 export function releaseKey(p: KeyPool, member: string, previous: string | null): KeyPool {

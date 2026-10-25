@@ -5,7 +5,7 @@ import {
   type Directory, type Policy,
 } from "@morndo/domain";
 import { ConnectionsPage, CONNECTION_WORDS, type VendorPreset } from "@morndo/protocol";
-import type { Alert } from "./ports.ts";
+import type { Alert, PoolNames } from "./ports.ts";
 
 const LEVEL_AT = [[0.95, "full"], [0.8, "high"], [0.5, "half"]] as const;
 export type BudgetLevel = "steady" | "half" | "high" | "full";
@@ -39,8 +39,15 @@ export function buildPage(input: {
   outside: readonly OutsideChain[];
   usage: Readonly<Record<string, PageUsage>>;
   now: number;
+  pools?: readonly PoolNames[];
 }): ConnectionsPage {
   const known = input.directory.connections.filter(c => c.status !== "revoked").map(c => ({ name: c.name, kind: c.kind }));
+  const seen = new Set(known.map(row => row.name));
+  for (const pool of input.pools ?? []) {
+    if (seen.has(pool.name)) continue;
+    seen.add(pool.name);
+    known.push({ name: pool.name, kind: "api-key" });
+  }
   const connections = input.directory.connections.map(c => {
     const preset = input.presets.find(p => p.id === c.vendor);
     const spent = isKey(c) && c.budget.kind === "capped" && c.budget.amount > 0 ? spentOf(c.spend) / c.budget.amount : null;

@@ -7,6 +7,7 @@ import { bindCommands, type BoundCommands } from "./application/commands.ts";
 import { ConnectionsService } from "./application/connections-service.ts";
 import { LeaseService } from "./application/lease-service.ts";
 import { KeyPoolService } from "./application/key-pool-service.ts";
+import { PoolRoutingSync } from "./application/key-pool-routing.ts";
 import { PoolService } from "./application/pool-service.ts";
 import { RoutingService } from "./application/routing-service.ts";
 import { FileAlerts } from "./adapters/alerts-file.ts";
@@ -103,11 +104,16 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
     clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, processes, classifiers: builtinClassifiers,
     leases, helper: { limit: HELPER_LIMIT, ttlMs: HELPER_TTL_MS },
   });
+  const pools = () => keypools.routingPools();
+  const routing = new RoutingService(deps, pools);
+  keypools.attachRouting(new PoolRoutingSync({
+    routing, engines, catalog, models, store, clock, pools,
+  }));
   return {
     dir, db, vaultDir, identity, store, vault, catalog, engines, models, processes, runtime, env,
     connections: new ConnectionsService(deps, keypools),
-    routing: new RoutingService(deps),
-    commands: bindCommands(deps, () => readUsage(join(dir, "usage.json"))),
+    routing,
+    commands: bindCommands(deps, () => readUsage(join(dir, "usage.json")), pools, keypools),
     leases,
     pool: new PoolService({ clock, store: poolStore, connections: store, catalog, processes }),
     keypools,

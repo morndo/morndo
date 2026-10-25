@@ -5,14 +5,14 @@
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
   LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, chooseKey, closeGrant as dropGrant, createKeyPool, err, findConnection, isKey,
-  joinKeyPool, keyPicked, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, ok,
-  openGrant, releaseKey, reportKeyOutcome, reviveKey, setKeyPoolPolicy, settleKeyPool, touchGrant,
+  joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, ok,
+  openGrant, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant,
   KEY_POOL_RECHECK_DEFAULT_MS,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
   type Lease, type Names, type Outcome, type Result, type RotationMode, type RotationPolicy, type Standing,
 } from "@morndo/domain";
 import type { LeaseService } from "./lease-service.ts";
-import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, LeaseRequest, ProcId, Processes, ProviderSignal } from "./ports.ts";
+import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, LeaseRequest, PoolNames, PoolRouting, ProcId, Processes, ProviderSignal } from "./ports.ts";
 
 export type KeyPoolFailure = Failure & { backAt?: number | null; member?: string };
 export type PoolView = {
@@ -97,7 +97,51 @@ function leaveRevoked(pool: KeyPool, directory: Directory, now: number): KeyPool
 
 export class KeyPoolService implements ConnectionLifecycle {
   readonly #deps: Deps;
+  #routing: PoolRouting | null = null;
   constructor(deps: Deps) { this.#deps = deps; }
+
+  attachRouting(routing: PoolRouting): void { this.#routing = routing; }
+
+  routingPools(): readonly PoolNames[] {
+    const pools: PoolNames[] = [];
+    for (const name of this.#deps.store.names().live) {
+      const { pool } = this.#deps.store.load(name);
+      if (!pool || pool.members.length === 0) continue;
+      pools.push({ name: pool.name, members: pool.members.map(member => member.credential) });
+    }
+    return pools;
+  }
+
+  // Each live pool is folded again. The first failure is the answer; the rest still run.
+  sync(): Result<void, Failure> {
+    if (!this.#routing) return ok(undefined);
+    let first: Failure | null = null;
+    for (const pool of this.routingPools()) {
+      const result = this.#routing.joined(pool.name, pool.members);
+      if (!result.ok && !first) first = result.error;
+    }
+    return first ? err(first) : ok(undefined);
+  }
+
+  // Whether some member could serve now. The ring, the pick and the alerts stay as they are.
+  async canServe(pool: string, attempt: (member: string) => Promise<Result<unknown, Failure>>): Promise<Result<{ member: string }, KeyPoolFailure>> {
+    const loaded = this.#deps.store.load(pool);
+    if (!loaded.pool) return fail("missing");
+    const terms = this.#terms(loaded.pool);
+    if (!terms.ok) return err(terms.error);
+    const failing = loaded.pool.members.find(member => member.health.state === "failing");
+    if (failing) return err({ problem: "pool_blocked", exit: LEASE_REFUSED, member: failing.credential });
+    const order = servableOrder(loaded.pool);
+    if (order.length === 0) return err({ problem: "pool_empty", exit: LEASE_REFUSED, backAt: keyPoolBackAt(loaded.pool) });
+    let first: Failure | null = null;
+    for (const member of order) {
+      const result = await attempt(member);
+      if (result.ok) return ok({ member });
+      if (result.error.exit !== LEASE_REFUSED) return err(result.error);
+      if (!first) first = result.error;
+    }
+    return err(first ?? { problem: "none_left", exit: LEASE_REFUSED });
+  }
 
   create(input: CreateInput, actor: Actor): Result<void, Failure> {
     const terms = this.#deps.catalog.keyPool(input.vendor);
@@ -127,11 +171,11 @@ export class KeyPoolService implements ConnectionLifecycle {
     if (!acked.ok) return fail(acked.error);
     if (!this.#deps.store.save(acked.value, 0)) return fail("taken");
     this.#alerts({ ...acked.value, events: [], seq: 0 }, acked.value);
-    return ok(undefined);
+    return this.#joined(acked.value.name, acked.value.members.map(member => member.credential));
   }
 
   join(pool: string, member: string, own: { confirmOwn: boolean; organization?: string | null }, actor: Actor): Result<void, Failure> {
-    return this.#change(pool, (current, now) => {
+    const changed = this.#change(pool, (current, now) => {
       const connection = findConnection(this.#deps.connections.load().directory, member);
       if (!connection) return { pool: current, result: fail("missing") };
       const next = joinKeyPool(
@@ -139,14 +183,20 @@ export class KeyPoolService implements ConnectionLifecycle {
       );
       return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
     });
+    if (!changed.ok) return changed;
+    const members = this.#deps.store.load(pool).pool?.members.map(row => row.credential) ?? [];
+    return this.#joined(pool, members);
   }
 
   leave(pool: string, member: string, actor: Actor): Result<void, Failure> {
     if (!isPrincipal(actor)) return fail("principal");
-    return this.#change(pool, (current, now) => {
+    const changed = this.#change(pool, (current, now) => {
       const next = leaveKeyPool(current, member, now);
       return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
     });
+    if (!changed.ok) return changed;
+    const remaining = this.#deps.store.load(pool).pool?.members.map(row => row.credential) ?? [];
+    return this.#left(pool, [member], remaining);
   }
 
   move(pool: string, member: string, to: number, actor: Actor): Result<void, Failure> {
@@ -176,7 +226,9 @@ export class KeyPoolService implements ConnectionLifecycle {
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       const loaded = this.#deps.store.load(pool);
       if (!loaded.pool) return fail("missing");
-      if (this.#deps.store.tombstone(pool, loaded.version, this.#deps.clock.now())) return ok(undefined);
+      const members = loaded.pool.members.map(row => row.credential);
+      if (!this.#deps.store.tombstone(pool, loaded.version, this.#deps.clock.now())) continue;
+      return this.#left(pool, members, []);
     }
     return fail("conflict");
   }
@@ -385,10 +437,13 @@ export class KeyPoolService implements ConnectionLifecycle {
   revoked(name: string): void {
     const holder = this.poolOf(name);
     if (holder === null) return;
-    this.#change(holder, (pool, now) => {
+    const changed = this.#change(holder, (pool, now) => {
       const next = leaveKeyPool(pool, name, now, "revoked");
       return { pool: next.ok ? next.value : pool, result: ok(undefined) };
     });
+    if (!changed.ok) return;
+    const remaining = this.#deps.store.load(holder).pool?.members.map(row => row.credential) ?? [];
+    this.#left(holder, [], remaining);
   }
 
   rotated(name: string): void {
@@ -595,6 +650,16 @@ export class KeyPoolService implements ConnectionLifecycle {
         nextCheck: member.nextCheck,
       })),
     };
+  }
+
+  #joined(name: string, members: readonly string[]): Result<void, Failure> {
+    if (!this.#routing) return ok(undefined);
+    return this.#routing.joined(name, members);
+  }
+
+  #left(pool: string, leaving: readonly string[], remaining: readonly string[]): Result<void, Failure> {
+    if (!this.#routing) return ok(undefined);
+    return this.#routing.left(pool, leaving, remaining);
   }
 
   #alerts(before: KeyPool, after: KeyPool): void {

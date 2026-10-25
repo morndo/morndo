@@ -11,3 +11,4 @@ export * from "./page.ts";
 export * from "./commands.ts";
 export * from "./pool-service.ts";
 export * from "./key-pool-service.ts";
+export * from "./key-pool-routing.ts";

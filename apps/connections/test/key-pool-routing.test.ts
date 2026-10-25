@@ -6,7 +6,7 @@ import type { KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 import type { Actor, Holder, Outcome } from "@morndo/domain";
 import { engineText } from "@morndo/domain";
 import {
-  ConnectionsService, KeyPoolService, LeaseService, MemoryKeyPoolStore, PoolRoutingSync, RoutingService, memory,
+  ConnectionsService, KeyPoolService, LeaseService, MemoryKeyPoolStore, PoolRoutingSync, RoutingService, bindCommands, memory,
   type Failure, type Memory, type OutcomeClassifier,
 } from "../src/application/index.ts";
 
@@ -135,6 +135,17 @@ describe("leaving gives the member back", () => {
     expect(w.pools.routingPools()).toEqual([]);
     expect(order(w)).toEqual(["k3"]);
     expect(picks(w)).toEqual([]);
+  });
+});
+
+describe("a revoke from the page reaches the pool as a revoke at the machine does", () => {
+  it("the member leaves the pool and the order and picks follow", async () => {
+    const w = await world();
+    expect(create(w, ["k1", "k2"]).ok).toBe(true);
+    const commands = bindCommands(w.mem.deps, () => ({}), () => w.pools.routingPools(), w.pools);
+    expect(commands.revoke({ version: w.mem.store.load().version, name: "k1" }, "page")).toEqual({ ok: true });
+    expect(w.pools.routingPools()).toEqual([{ name: "p", members: ["k2"] }]);
+    expect(order(w)).toEqual(["p", "k3"]);
   });
 });
 
