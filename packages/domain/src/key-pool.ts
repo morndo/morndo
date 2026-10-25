@@ -30,7 +30,7 @@ export type Names = { connections: readonly string[]; pools: readonly string[]; 
 export type Standing = "ok" | "empty" | "blocked";
 export type RecoverHow = "probe" | "report" | "revive" | "rotation";
 export type GrantRequest = { role: string; entry: string; workspacePath: string; limit: number; reserve: number; margin: number };
-export type GrantMoveWhy = "exhausted" | "refused" | "adopted" | "reopened";
+export type GrantMoveWhy = "exhausted" | "refused" | "adopted" | "reopened" | "left";
 export type Grant = {
   id: string; member: string; lease: string; holder: Holder; request: GrantRequest;
   window: HelperWindow; previous: { member: string; movedAt: number } | null;
@@ -187,14 +187,14 @@ export function joinKeyPool(
   return ok(settleKeyPool(withEvents({ ...p, members: [...p.members, member], ownedOrgs }, events), now));
 }
 
+// The member's health leaves with them. A grant that named them stays, still naming them, so the run's next call can hand it off.
 export function leaveKeyPool(p: KeyPool, credential: string, now: number, why: "left" | "revoked" = "left"): Result<KeyPool, "missing"> {
   const index = p.members.findIndex(m => m.credential === credential);
   if (index < 0) return err("missing");
   const members = p.members.filter(m => m.credential !== credential);
-  const grants = p.grants.filter(g => g.member !== credential);
   const previous = members[index - 1];
   const lastPick = p.lastPick !== credential ? p.lastPick : index === 0 || previous === undefined ? null : previous.credential;
-  return ok(settleKeyPool(withEvents({ ...p, members, grants, lastPick }, [{ type: "MemberLeft", member: credential, why, at: now }]), now));
+  return ok(settleKeyPool(withEvents({ ...p, members, lastPick }, [{ type: "MemberLeft", member: credential, why, at: now }]), now));
 }
 
 export function moveKeyMember(

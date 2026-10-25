@@ -102,6 +102,13 @@ export class SqliteStore implements ConnectionStore {
     })();
   }
 
+  // The version `load` would report, without reading the directory. A store with no version row fails as `load` does.
+  version(): number {
+    const version = this.#readVersion.get() as { version: number } | undefined;
+    if (!version) throw new Error("store is empty");
+    return version.version;
+  }
+
   save(directory: Directory, policy: Policy, version: number): boolean {
     const directoryBody = JSON.stringify(directory);
     const policyBody = JSON.stringify(policy);

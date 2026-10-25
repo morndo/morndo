@@ -1,6 +1,6 @@
-export function streamRedactor(secrets: readonly string[]): { push(chunk: string): string; flush(): string } {
+export function streamRedactor(secrets: readonly string[]): { push(chunk: string): string; flush(): string; add(secrets: readonly string[]): void } {
   const needles = secrets.filter(secret => secret !== "");
-  const tail = needles.reduce((longest, secret) => Math.max(longest, secret.length - 1), 0);
+  let tail = needles.reduce((longest, secret) => Math.max(longest, secret.length - 1), 0);
   let pending = "";
   const next = (): { at: number; secret: string } | null => {
     let found: { at: number; secret: string } | null = null;
@@ -11,6 +11,10 @@ export function streamRedactor(secrets: readonly string[]): { push(chunk: string
     return found;
   };
   return {
+    add(more: readonly string[]): void {
+      for (const secret of more) if (secret !== "") needles.push(secret);
+      tail = needles.reduce((longest, secret) => Math.max(longest, secret.length - 1), 0);
+    },
     push(chunk: string): string {
       pending += chunk;
       let out = "";

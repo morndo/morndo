@@ -276,6 +276,10 @@ export class KeyPoolService implements ConnectionLifecycle {
   // starts the round again. A thrown error is the crash the next call repairs; it is not caught here.
   async handOff(pool: string, grant: string, caller: HandOffCaller): Promise<Result<{ connection: string; lease: string }, KeyPoolFailure>> {
     const { leases, helper } = this.#deps;
+    // A swap or a re-lease in this call already counted it. A later round that finds that lease still refreshes and
+    // re-checks its authority, and does not count the call again.
+    let countedCall = false;
+    const noteSwap = (): void => { countedCall = true; };
     for (let round = 0; round < ATTEMPTS; round++) {
       const loaded = this.#deps.store.load(pool);
       if (!loaded.pool) return fail("missing");
@@ -291,15 +295,21 @@ export class KeyPoolService implements ConnectionLifecycle {
         const capped = found.row.authority === "ended" && directory.events.some(event => event.type === "AuthorityEnded" && event.lease === found.row.id);
         if (capped) return fail("authority");
         const state = current.members.find(member => member.credential === held.member)?.health.state;
-        let why: "exhausted" | "refused" | null = found.row.authority === "ended" || state === "exhausted" ? (state === "exhausted" ? "exhausted" : "refused") : null;
+        // A member that has left or been revoked is no longer in the pool. Hand off as for an exhausted member; the
+        // swap closes the old lease, including one whose authority a revoke already ended.
+        let why: "exhausted" | "refused" | "left" | null = state === undefined
+          ? "left"
+          : found.row.authority === "ended" || state === "exhausted" ? (state === "exhausted" ? "exhausted" : "refused") : null;
         if (!why) {
           const refreshed = leases.refresh(found.name, found.row.id);
           if (!refreshed.ok) {
             if (!REFRESH_SWAP.has(refreshed.error.problem)) return err(refreshed.error);
             why = "refused";
           } else {
-            const noted = leases.helper(found.name, found.row.id, caller.id, helper.limit, helper.ttlMs);
-            if (!noted.ok) return err(noted.error);
+            if (!countedCall) {
+              const noted = leases.helper(found.name, found.row.id, caller.id, helper.limit, helper.ttlMs);
+              if (!noted.ok) return err(noted.error);
+            }
             const again = keyLease(this.#deps.connections.load().directory, found.row.id);
             if (!again || again.row.authority === "ended") return fail("authority");
             const served = this.#serve(leases, pool, held, again.name, again.row, caller);
@@ -314,7 +324,7 @@ export class KeyPoolService implements ConnectionLifecycle {
         }
         const window = { calls: counted.calls, windowStart: counted.windowStart };
         const reason = why ?? "refused";
-        const taken = await this.#reseat(pool, held, { name: held.member, id: held.lease }, request, window, reason, leases, caller);
+        const taken = await this.#reseat(pool, held, { name: held.member, id: held.lease }, request, window, reason, leases, caller, noteSwap);
         if (isRetry(taken)) continue;
         return taken;
       }
@@ -335,10 +345,12 @@ export class KeyPoolService implements ConnectionLifecycle {
       if (counted.over) return fail("authority");
       const window = { calls: counted.calls, windowStart: counted.windowStart };
       const state = current.members.find(member => member.credential === held.member)?.health.state;
-      let why: "exhausted" | "refused" = state === "exhausted" ? "exhausted" : "refused";
+      // Gone from the pool: do not re-lease that member. The next one is picked, as when the member is exhausted.
+      let why: "exhausted" | "refused" | "left" = state === undefined ? "left" : state === "exhausted" ? "exhausted" : "refused";
       if (state === "active") {
         const swapped = leases.swap(null, held.member, request, window, current.members.map(member => member.credential));
         if (swapped.ok) {
+          countedCall = true;
           const moved = this.#change(pool, (candidate, now) => {
             const next = moveGrant(candidate, held.id, { member: held.member, lease: swapped.value.id, window, movedAt: now }, "reopened", now);
             return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: candidate, result: fail(next.error) };
@@ -357,7 +369,7 @@ export class KeyPoolService implements ConnectionLifecycle {
         if (swapped.error.exit !== LEASE_REFUSED) return err(swapped.error);
         why = "refused";
       }
-      const taken = await this.#reseat(pool, held, null, request, window, why, leases, caller);
+      const taken = await this.#reseat(pool, held, null, request, window, why, leases, caller, noteSwap);
       if (isRetry(taken)) continue;
       return taken;
     }
@@ -390,6 +402,9 @@ export class KeyPoolService implements ConnectionLifecycle {
     const session = by.kind === "holder" ? this.#sessionKey(held.holder, by.caller.pid) : by.session;
     const member = this.attribute(pool, grant, session);
     if (!member.ok) return member;
+    // The member the grant names has left the pool. The report is accepted and changes nothing.
+    const there = this.#deps.store.load(pool).pool?.members.some(row => row.credential === member.value) ?? false;
+    if (!there) return ok(undefined);
     return this.report(pool, member.value, outcome, observedAt, { kind: "operator" });
   }
 
@@ -544,10 +559,14 @@ export class KeyPoolService implements ConnectionLifecycle {
   // Pick the next member and move the grant in the pick's save, then serve that lease without counting the call again.
   async #reseat(
     pool: string, held: Grant, from: { name: string; id: string } | null, request: LeaseRequest, window: HelperWindow,
-    why: "exhausted" | "refused", leases: Leases, caller: HandOffCaller,
+    why: "exhausted" | "refused" | "left", leases: Leases, caller: HandOffCaller, onSwap: () => void,
   ): Promise<Result<{ connection: string; lease: string }, KeyPoolFailure> | { retry: true }> {
     const names = this.#deps.store.load(pool).pool?.members.map(member => member.credential);
-    const taken = await this.#choose(pool, async member => leases.swap(from, member, request, window, from ? undefined : names), {
+    const taken = await this.#choose(pool, async member => {
+      const swapped = leases.swap(from, member, request, window, from ? undefined : names);
+      if (swapped.ok) onSwap();
+      return swapped;
+    }, {
       skip: [held.member],
       also: (current, member, value, now) => {
         const moved = moveGrant(current, held.id, { member, lease: value.id, window, movedAt: now }, why, now);

@@ -391,15 +391,13 @@ describe("kp18 a report right after a hand-off belongs to the member the old key
 });
 
 describe("a grant's life", () => {
-  it("closeGrant removes it; a member that leaves takes its grant, and a call on it says grant_missing", async () => {
+  it("closeGrant removes it, and a call on a grant that is gone says grant_missing", async () => {
     const w = await world();
     const run = await start(w);
     w.pools.closeGrant("p", run.grant);
     expect(pool(w).grants).toEqual([]);
     expect(types(pool(w)).at(-1)).toBe("GrantClosed");
-    const again = await start(w);
-    expect(w.pools.leave("p", again.member, who).ok).toBe(true);
-    expect(word(await w.pools.handOff("p", again.grant, caller))).toBe("grant_missing");
+    expect(word(await w.pools.handOff("p", run.grant, caller))).toBe("grant_missing");
   });
   it("sweepGrants removes the grants whose holder has gone", async () => {
     const w = await world();
