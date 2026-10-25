@@ -571,6 +571,27 @@ describe("fix round 2: one call is counted once when the grant save after a swap
   });
 });
 
+describe("fix round 3: a call is counted once when the count was not made by a swap either", () => {
+  it("a pool save lost after the count (the window is recorded) retries without counting the call again", async () => {
+    const w = await world();
+    const run = await start(w);
+    w.store.lose = { when: () => true, times: 8 };
+    const out = await w.pools.handOff("p", run.grant, caller);
+    expect(out.ok && out.value.connection).toBe("k1");
+    expect(live(w, "k1")[0]?.calls).toBe(1);
+    expect(grantOf(w).window.calls).toBe(1);
+    expect(served(w)).toHaveLength(1);
+  });
+  it("every member a call serves goes into the grant's history, with the key served once per print", async () => {
+    const w = await world();
+    const run = await start(w);
+    expect((await w.pools.handOff("p", run.grant, caller)).ok).toBe(true);
+    dryUp(w, "k1");
+    expect((await w.pools.handOff("p", run.grant, caller)).ok).toBe(true);
+    expect(grantOf(w).lent).toEqual(["k1", "k2"]);
+  });
+});
+
 describe("kp12 nothing secret reaches the grant, its events or the alerts", () => {
   it("after a hand-off the pool's JSON, the alerts and the KeyServed lines hold no fingerprint or vault ref", async () => {
     const w = await world();

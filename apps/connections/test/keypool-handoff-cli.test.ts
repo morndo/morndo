@@ -63,7 +63,7 @@ async function world(n = 3, opts: { pool?: boolean; models?: boolean } = {}): Pr
 type Member = { credential: string; state: string; reason: string | null };
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; standing: string; lastPick: string | null; members: Member[] });
 const states = async (env: NodeJS.ProcessEnv) => (await pools(env))[0]?.members.map(m => m.state);
-type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string; cmds?: { args: string[]; input?: string }[] };
+type Answer = { exit: number; cmdsAfter?: { args: string[]; input?: string }[]; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string; cmds?: { args: string[]; input?: string }[] };
 const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
@@ -254,6 +254,34 @@ describe("kp12 fix round 2: the output filter learns the key of a member the run
     expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], NEW_KEY]);
     expect(ran.code, ran.stderr).toBe(0);
     for (const key of [...KEYS, NEW_KEY]) expect(quiet(ran)).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
+  });
+});
+
+describe("kp12 fix round 3: a key handed to the run is redacted even when its member is gone or its key rotated before the key is printed", () => {
+  const dry = (member: string) => ({ args: ["keypool", "report", "p", "--member", member, "--outcome", "exhausted"] });
+  const joinThenMove = (after: { args: string[]; input?: string }) => ({
+    [KEYS[0]]: { exit: 0, cmds: [{ args: ["keypool", "add", "p", "k3", "--confirm-own-account"] }, dry("k1"), dry("k2")], rehelp: 1 },
+    [KEYS[2]]: { exit: 0, cmdsAfter: [after], say: `my key is ${KEYS[2]}` },
+  });
+  const setup = async () => {
+    const { env, dir } = await world(3, { pool: false });
+    expect((await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", "owner", "--confirm-own-account", "k1", "k2"], env)).code).toBe(0);
+    return { env, dir };
+  };
+  it("the member was removed from the pool after the hand-off", async () => {
+    const { env, dir } = await setup();
+    const ran = await run(env, dir, job(dir, joinThenMove({ args: ["keypool", "remove", "p", "k3"] })));
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[2]]);
+    for (const key of KEYS) expect(`${ran.stdout}${ran.stderr}`).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
+  });
+  it("the member's key was rotated after the hand-off (the old file is gone before the key is printed)", async () => {
+    const { env, dir } = await setup();
+    const ran = await run(env, dir, job(dir, joinThenMove({ args: ["rotate", "k3"], input: "sk-ant-synthetic-pool-key-0008" })));
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of KEYS) expect(`${ran.stdout}${ran.stderr}`).not.toContain(key);
     expect(ran.stdout).toContain("[redacted]");
   });
 });

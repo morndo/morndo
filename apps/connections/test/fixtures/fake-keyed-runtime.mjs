@@ -25,9 +25,9 @@ function record(result, again) {
 }
 // `cmds: [{ args, input? }]`: morndo-keys commands the run's child runs before it asks again (a member joining the pool, a key rotated, a member removed),
 // as a person at the machine would; each exit code is recorded.
-function commands(answer) {
+function commands(answer, list = answer.cmds) {
   const base = grantForm ? parts.slice(1, -5) : parts.slice(1, -3);
-  for (const cmd of answer.cmds ?? []) {
+  for (const cmd of list ?? []) {
     const out = spawnSync(parts[0], [...base, ...cmd.args], { encoding: "utf8", timeout: 20_000, input: cmd.input ?? "" });
     appendFileSync(`${job.record}.cmds`, `${JSON.stringify({ args: cmd.args, code: out.status ?? 1, stderr: String(out.stderr ?? "") })}\n`);
   }
@@ -55,6 +55,8 @@ for (let i = 0; i < (first.rehelp ?? 0); i++) {
   answer = job.keys?.[result.key] ?? { exit: 0 };
 }
 if (answer !== first) reports(answer);
+// `cmdsAfter`: commands run after the last helper call, before the child prints (a member removed or rotated once it was handed to).
+commands(answer, answer.cmdsAfter);
 if (answer.json) process.stdout.write(`${JSON.stringify(answer.json)}\n`);
 else if (answer.say) process.stdout.write(`${answer.say}\n`);
 if (answer.sayErr) process.stderr.write(`${answer.sayErr}\n`);
