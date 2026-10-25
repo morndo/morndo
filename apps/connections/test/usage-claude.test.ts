@@ -70,7 +70,7 @@ describe("maps the headless report (AT-31)", () => {
     if (r.ok) return;
     expect(r.reason).toBe("unknown_screen");
     expect(r.hint).toBe(`unknown shape ${createHash("sha256").update(lines[lines.length - 1]!.slice(0, 120)).digest("hex").slice(0, 8)}`);
-    expect(r.hint).not.toContain("Jack");
+    expect(r.hint).not.toContain("Ada");
     expect(r.hint).not.toContain("sk-ant");
     expect(r.hint).not.toContain("stats.example.test");
     expect(r.hint).not.toContain("123e4567");
