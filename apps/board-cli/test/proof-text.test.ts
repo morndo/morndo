@@ -65,11 +65,15 @@ describe("proofBlock", () => {
       "    Left out: nothing",
       "    Limits: none known",
     ]);
-    expect(proofBlock(view({ brief: brief({ noCode: "an analysis, no code changed" }) }))).toEqual([
+    expect(proofBlock(view({
+      brief: brief({ noCode: "an analysis, no code changed", attested: [{ kind: "manual", how: "read the memo" }] }),
+      list: [{ spec: "manual: read the memo", kind: "manual", repo: null, text: "read the memo", by: "assigner" }],
+    }))).toEqual([
       "  Proof: proof: attested only (no code change)",
       "    Brief (rev 4): Totals row rounds to cents",
       "    Left out: nothing",
       "    Limits: none known",
+      "    Attested (manual): read the memo  (the lane's word, not checked)",
       "    No code change: an analysis, no code changed",
     ]);
     expect(proofBlock(view({ brief: null }))).toEqual(["  Proof: proof: no brief"]);

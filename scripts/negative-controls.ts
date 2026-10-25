@@ -4932,6 +4932,33 @@ export const CONTROLS: Control[] = [
   { id: "t449-sweep-min-age", task: "T-449", file: "apps/connections/src/filter-channel.ts",
     find: "if (Date.now() - stat.mtimeMs < SWEEP_MIN_AGE_MS) continue;", replace: "",
     run: ["apps/connections/test/filter-channel.test.ts"], expect: "younger than a minute" },
+  // ---- Proof of work gate gaps (board T-450): a pull request's checks, the other checks of a ci reference, a no-code claim.
+  { id: "t450-pr-reads-its-checks", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  if (checks === undefined) return { state: "green", detail: null };`, replace: `  return { state: "green", detail: null };`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "checks:" },
+  { id: "t450-ci-other-checks", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  if (best === null || SELECTOR_RANK[other.state] < SELECTOR_RANK[best.state]) return other;`, replace: `  if (best === null) return other;`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "another check" },
+  { id: "t450-no-code-needs-the-assigner", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `      if (!list.some(i => i.by === "assigner"))`, replace: `      if (false)`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "the assigner listed no proof" },
+  // The manager's narrowing (T-450): a pull request reference is held only by the checks its base branch requires.
+  { id: "t450-optional-checks-hold-nothing", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  const onRequiredRuns = runs.filter(r => requiredSet.has(r.name));`, replace: `  const onRequiredRuns = runs;`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "warning: optional check" },
+  { id: "t450-unreadable-required-set-fails-closed", task: "T-450", file: "apps/hub/src/application/proof-service.ts",
+    find: `    if (!answer.ok) return null;\n    this.#requiredCache.set(`, replace: `    if (!answer.ok) return [];\n    this.#requiredCache.set(`,
+    run: ["apps/hub/test/proof-service.test.ts"], expect: "required checks not readable" },
+  { id: "t450-empty-required-set-counts-all", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  if (required === null || required.length === 0) {`, replace: `  if (required === null) {`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "no required checks on the base branch" },
+  { id: "t450-required-check-never-drops-out", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  const missing = required.find(name => !runs.some(r => r.name === name));\n  if (missing !== undefined) return { state: "pending", detail: detailLine(\`checks: required "\${missing}" not reported yet\`) };`,
+    replace: `  const missing = young ? required.find(name => !runs.some(r => r.name === name)) : undefined;\n  if (missing !== undefined) return { state: "pending", detail: detailLine(\`checks: required "\${missing}" not reported yet\`) };`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "not reported yet" },
+  { id: "t450-fail-closed-read-is-read-again", task: "T-450", file: "apps/hub/src/application/proof-service.ts",
+    find: ` && !readsAgain(row.detail)) return false;`, replace: `) return false;`,
+    run: ["apps/hub/test/proof-service.test.ts"], expect: "toBe(1)" },
 ];
 
 // ---- the runner

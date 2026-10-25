@@ -507,13 +507,13 @@ describe("the brief and the proof (B13 to B16)", () => {
     await builderSays(...briefCmd("T-1", "--pr", PR, "--ci", CI));
     await proofHub.proof.idle();
     const refused = await managerSays("done", "T-1", "--why", "read the diff");
-    expect(refused).toMatchObject({ code: 1, err: `refused: done is held: proof: 1 of 2 green · ✗ ${CI} "lint" failed; to accept it anyway: done T-12 --why "…" --proof-override "<what you looked at instead>"` });
+    expect(refused).toMatchObject({ code: 1, err: `refused: done is held: proof: 0 of 2 green · ✗ ${PR} checks: "lint" failed · ✗ ${CI} "lint" failed; to accept it anyway: done T-12 --why "…" --proof-override "<what you looked at instead>"` });
     expect(proofHub.board.task("T-1")?.task.status).toBe("review");
     const accepted = await managerSays("done", "T-1", "--why", "read the diff", "--proof-override", "read the diff at the merge; the lint failure is the known flake");
     expect(accepted.code).toBe(0);
     expect(proofHub.board.task("T-1")?.task.status).toBe("done");
     const shown = await managerSays("show", "T-1");
-    expect(shown.out).toContain("(proof: 1 of 2 green · ✗ morndo/morndo@3e9d1a7:ci,lint \"lint\" failed; override: read the diff at the merge; the lint failure is the known flake [mode on])");
+    expect(shown.out).toContain("(proof: 0 of 2 green · ✗ morndo/morndo#42@3e9d1a7 checks: \"lint\" failed · ✗ morndo/morndo@3e9d1a7:ci,lint \"lint\" failed; override: read the diff at the merge; the lint failure is the known flake [mode on])");
   });
 
   it("list prints the proof line under a task in review; show prints the Proof block with attested items marked as the lane's word", async () => {

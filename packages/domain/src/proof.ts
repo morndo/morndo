@@ -307,7 +307,11 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
   if (brief.refs.length === 0) {
     if (brief.noCode !== "" && merges.length > 0)
       return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: `proof: no code change claimed, but the task has a merge record (${merges[0]!.repo})` }, list, brief, results);
-    if (brief.noCode !== "") return overlayList({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" }, list, brief, results);
+    if (brief.noCode !== "") {
+      if (!list.some(i => i.by === "assigner"))
+        return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: no code change claimed, and the assigner listed no proof to check it against" }, list, brief, results);
+      return overlayList({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" }, list, brief, results);
+    }
     return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" }, list, brief, results);
   }
   // The merge record's repository, re-applied at every reading (not only when the brief was filed): a merge recorded
@@ -331,7 +335,11 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
     : states.some(s => s === "unfetchable") ? "unfetchable"
     : states.some(s => s === "pending") ? "pending"
     : states.some(s => s === "not_checked") ? "not_checked" : "verified";
-  const parts = brief.refs.map((ref, i) => states[i] === "green" ? "" : ` · ${MARK[states[i]!]} ${ref} ${latest.get(ref)?.detail ?? WORD[states[i]!]}`);
+  const parts = brief.refs.map((ref, i) => {
+    if (states[i] !== "green") return ` · ${MARK[states[i]!]} ${ref} ${latest.get(ref)?.detail ?? WORD[states[i]!]}`;
+    const detail = latest.get(ref)?.detail;
+    return detail !== null && detail !== undefined && detail.startsWith(WARNING_PREFIX) ? ` · ⚠ ${ref} ${detail}` : "";
+  });
   const whole = `proof: ${green} of ${brief.refs.length} green${parts.join("")}`;
   const base = { kind, green, total: brief.refs.length, accepts: kind === "verified", line: whole.length > 600 ? `${cutText(whole, 599)}…` : whole };
   return overlayList(base, list, brief, results);
@@ -358,17 +366,31 @@ export function currentBrief(events: readonly TaskEvent[]): { brief: ProofBrief;
 
 // B14: what the hub read of a reference, exactly as the adapter answered it, and the pure judging of those facts. The
 // hub reaches the forge and hands the facts in; these functions only decide, so every rule below is testable whole.
-export type PrFacts = { state: "open" | "closed"; merged: boolean; headSha: string; mergeSha: string | null };
+export type PrFacts = { state: "open" | "closed"; merged: boolean; headSha: string; mergeSha: string | null; baseRef: string | null };
 export type CheckRunFacts = { id: number; name: string; status: string; conclusion: string | null; url: string | null };
 // A named check that has not appeared yet reads as pending this long after the brief: a forge's report of a commit's
 // checks can trail the commit itself by minutes, so a young "not found" is still "on its way".
 export const YOUNG_MS = 15 * 60_000;
+export const WARNING_PREFIX = "warning: ";
 export type Judged = { state: RefState; detail: string | null };
+// The two notes a pull request reference carries when it counts every check: the required set could not be read (the hub
+// reads it again at the next pass, see readsAgain), or the base branch requires none.
+export const REQUIRED_UNREADABLE = "(required checks not readable; every check counted)";
+const REQUIRED_NONE = "(no required checks on the base branch; every check counted)";
+// A result that was judged without the required set because the read failed: the timer asks again, whatever its state.
+export const readsAgain = (detail: string | null): boolean => detail !== null && detail.endsWith(REQUIRED_UNREADABLE);
 
 // A pull request reference is green at the commit it names — the head, or the merge commit once it was merged (the head
 // moves on past it). Closed without a merge is the one thing a pull request is red at; a head somewhere else is a
-// mismatch, both shas said, so the person can see which moved.
-export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts, merges?: readonly { repo: string; sha: string }[]): Judged {
+// mismatch, both shas said, so the person can see which moved. When `checks` is given and the pull request itself is
+// green, that commit's check runs are judged like `checks: "*"` on a ci reference, except an empty report after the
+// brief is no longer young, or only skipped runs, reads as green — the reference does not ask a repository to have checks.
+export function judgePr(
+  ref: Extract<ProofRef, { kind: "pr" }>,
+  facts: PrFacts,
+  merges?: readonly { repo: string; sha: string }[],
+  checks?: { runs: readonly CheckRunFacts[]; young: boolean; required: readonly string[] | null },
+): Judged {
   if (facts.state === "closed" && !facts.merged) return { state: "red", detail: "closed without merge" };
   const taskMerges = (merges ?? []).filter(m => m.repo.toLowerCase() === ref.repo.toLowerCase());
   if (facts.merged && facts.mergeSha !== null && taskMerges.length > 0) {
@@ -384,9 +406,38 @@ export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts, 
   }
   const at = facts.headSha.toLowerCase().startsWith(ref.sha)
     || (facts.merged && facts.mergeSha !== null && facts.mergeSha.toLowerCase().startsWith(ref.sha));
-  return at ? { state: "green", detail: null }
-    : { state: "mismatch", detail: `head is ${facts.headSha.slice(0, 7)}, ref says ${ref.sha.slice(0, 7)}` };
+  if (!at) return { state: "mismatch", detail: `head is ${facts.headSha.slice(0, 7)}, ref says ${ref.sha.slice(0, 7)}` };
+  if (checks === undefined) return { state: "green", detail: null };
+  const { runs, young, required } = checks;
+  // No required set to go by (unreadable, or the base branch requires nothing): every check counts as required.
+  if (required === null || required.length === 0) {
+    const onCommit = judgeWildcardChecks(runs, young, "pr");
+    if (onCommit.state === "green") return { state: "green", detail: null };
+    const tail = onCommit.detail === "no checks reported yet" ? detailLine("checks: no checks reported yet") : `checks: ${onCommit.detail}`;
+    return { state: onCommit.state, detail: `${tail} ${required === null ? REQUIRED_UNREADABLE : REQUIRED_NONE}` };
+  }
+  const requiredSet = new Set(required);
+  // A required check failing or running is said first. One with no result at all holds the reference
+  // however old the brief is (it may be a commit status that never reports); it never drops out.
+  const onRequiredRuns = runs.filter(r => requiredSet.has(r.name));
+  const onRequired = onRequiredRuns.length === 0 ? { state: "green" as const, detail: null } : judgeWildcardChecks(onRequiredRuns, young, "pr");
+  if (onRequired.state !== "green") return { state: onRequired.state, detail: detailLine(`checks: ${onRequired.detail}`) };
+  const missing = required.find(name => !runs.some(r => r.name === name));
+  if (missing !== undefined) return { state: "pending", detail: detailLine(`checks: required "${missing}" not reported yet`) };
+  const optional = judgeOptionalWarnings(runs.filter(r => !requiredSet.has(r.name)));
+  return optional === null ? { state: "green", detail: null } : { state: "green", detail: optional };
 }
+
+const judgeOptionalWarnings = (runs: readonly CheckRunFacts[]): string | null => {
+  let worst: { verdict: RunVerdict; run: CheckRunFacts } | null = null;
+  for (const run of runs) {
+    const verdict = runVerdict(run);
+    if (verdict.state !== "red" && verdict.state !== "pending") continue;
+    if (worst === null || RUN_RANK[verdict.state] < RUN_RANK[worst.verdict.state]) worst = { verdict, run };
+  }
+  if (worst === null) return null;
+  return `${WARNING_PREFIX}${detailLine(withUrl(`optional check "${worst.run.name}" ${worst.verdict.word}`, worst.run.url))}`;
+};
 
 // One check run's own verdict: still running is pending, success is green, each failure has its word, and a run that
 // did not run (neutral, skipped, no conclusion read) is not evidence at all.
@@ -432,29 +483,57 @@ const judgeSelector = (label: string, runs: readonly CheckRunFacts[], young: boo
   return { state: "missing", detail: detailLine(`${label} ${w.verdict.word}`) };        // a check that did not run is not evidence
 };
 
+// `checks: "*"` on a commit: some check must have run and none may fail or still be running. `mode` `ci`: no runs after
+// the brief is no longer young, or only skipped runs, reads as missing; `pr`: the same reads as green.
+const judgeWildcardChecks = (runs: readonly CheckRunFacts[], young: boolean, mode: "ci" | "pr"): Judged => {
+  if (runs.length === 0) {
+    if (young) return { state: "pending", detail: "no checks reported yet" };
+    return mode === "pr" ? { state: "green", detail: null } : { state: "missing", detail: "no checks found" };
+  }
+  const verdicts = runs.map(runVerdict);
+  const first = (state: RunVerdict["state"]) => verdicts.findIndex(v => v.state === state);
+  const at = (state: RunVerdict["state"]) => first(state) === -1 ? null : { i: first(state)!, verdict: verdicts[first(state)!]! };
+  const red = at("red");
+  if (red !== null) return { state: "red", detail: detailLine(withUrl(`"${runs[red.i]!.name}" ${red.verdict.word}`, runs[red.i]!.url)) };
+  const pending = at("pending");
+  if (pending !== null) return { state: "pending", detail: detailLine(`"${runs[pending.i]!.name}" ${pending.verdict.word}`) };
+  if (at("green") !== null) return { state: "green", detail: null };
+  return mode === "pr" ? { state: "green", detail: null } : { state: "missing", detail: "no check ran" };
+};
+
+const runMatchesSelector = (run: CheckRunFacts, check: CheckSelector): boolean =>
+  "name" in check ? run.name === check.name : run.id === check.id;
+
+const judgeOtherChecks = (runs: readonly CheckRunFacts[]): Selected => {
+  let worst: { verdict: RunVerdict; run: CheckRunFacts } | null = null;
+  for (const run of runs) {
+    const verdict = runVerdict(run);
+    if (verdict.state !== "red" && verdict.state !== "pending") continue;
+    if (worst === null || RUN_RANK[verdict.state] < RUN_RANK[worst.verdict.state]) worst = { verdict, run };
+  }
+  if (worst === null) return { state: "green", detail: null };
+  const label = `another check "${worst.run.name}"`;
+  if (worst.verdict.state === "red") return { state: "red", detail: detailLine(withUrl(`${label} ${worst.verdict.word}`, worst.run.url)) };
+  return { state: "pending", detail: detailLine(`${label} ${worst.verdict.word}`) };
+};
+
 // B14: a commit's checks, judged. Named selectors match runs by exact name or by the forge's own number; `checks: "*"`
 // asks only that some check ran and none failed or is still running. `young`: the brief is young, so a check that has
 // not appeared yet is on its way (pending), not missing.
 export function judgeCi(ref: Extract<ProofRef, { kind: "ci" }>, runs: readonly CheckRunFacts[], young: boolean): Judged {
-  if (ref.checks === "*") {
-    if (runs.length === 0) return young ? { state: "pending", detail: "no checks reported yet" } : { state: "missing", detail: "no checks found" };
-    const verdicts = runs.map(runVerdict);
-    const first = (state: RunVerdict["state"]) => verdicts.findIndex(v => v.state === state);
-    const at = (state: RunVerdict["state"]) => first(state) === -1 ? null : { i: first(state)!, verdict: verdicts[first(state)!]! };
-    const red = at("red");
-    if (red !== null) return { state: "red", detail: detailLine(withUrl(`"${runs[red.i]!.name}" ${red.verdict.word}`, runs[red.i]!.url)) };
-    const pending = at("pending");
-    if (pending !== null) return { state: "pending", detail: detailLine(`"${runs[pending.i]!.name}" ${pending.verdict.word}`) };
-    if (at("green") !== null) return { state: "green", detail: null };
-    return { state: "missing", detail: "no check ran" };
-  }
+  if (ref.checks === "*") return judgeWildcardChecks(runs, young, "ci");
+  const selectors = ref.checks;
   let best: Selected | null = null;
-  for (const check of ref.checks) {
+  for (const check of selectors) {
     const label = "name" in check ? `"${check.name}"` : `id ${check.id}`;
-    const judged = judgeSelector(label, runs.filter(r => ("name" in check ? r.name === check.name : r.id === check.id)), young);
+    const judged = judgeSelector(label, runs.filter(r => runMatchesSelector(r, check)), young);
     if (best === null || SELECTOR_RANK[judged.state] < SELECTOR_RANK[best.state]) best = judged;
   }
-  return best!;
+  const matched = runs.filter(r => selectors.some(c => runMatchesSelector(r, c)));
+  const others = runs.filter(r => !matched.includes(r));
+  const other = judgeOtherChecks(others);
+  if (best === null || SELECTOR_RANK[other.state] < SELECTOR_RANK[best.state]) return other;
+  return best;
 }
 
 // What applyAction judges a Done against (B16): the brief as filed, the results the hub read for its references, and
