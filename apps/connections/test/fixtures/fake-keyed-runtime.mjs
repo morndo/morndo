@@ -5,7 +5,7 @@
 // what a lane's tool would do, as a child of this run: the pool report command with the lease or the grant the helper line names.
 // `rehelp: n`: as Claude Code does when its cached key has expired, ask the helper n more times; every call is recorded, and the
 // key of the last one decides how the run ends.
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { appendFileSync, readFileSync } from "node:fs";
 
 const argv = process.argv.slice(2);
@@ -16,13 +16,9 @@ const parts = String(settings.apiKeyHelper).split(" ");
 const grantForm = parts.at(-2) === "--grant";
 
 function helper() {
-  try {
-    const key = execFileSync(parts[0], parts.slice(1), { encoding: "utf8", timeout: 10_000, input: "", stdio: ["pipe", "pipe", "pipe"] }).trim();
-    return { key, code: 0, stderr: "" };
-  } catch (error) {
-    // A refused helper prints nothing; what it said on stderr is recorded, never shown.
-    return { key: "", code: error.status ?? 1, stderr: String(error.stderr ?? "") };
-  }
+  // What the helper said on stderr is recorded whether it succeeded or not, never shown: a test reads it for a leaked key.
+  const out = spawnSync(parts[0], parts.slice(1), { encoding: "utf8", timeout: 10_000, input: "" });
+  return { key: out.status === 0 ? String(out.stdout ?? "").trim() : "", code: out.status ?? 1, stderr: String(out.stderr ?? "") };
 }
 function record(result, again) {
   appendFileSync(job.record, `${JSON.stringify({ key: result.key, code: result.code, stderr: result.stderr, argv, again: again === true })}\n`);
