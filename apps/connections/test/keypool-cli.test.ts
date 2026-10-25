@@ -316,22 +316,23 @@ describe("keypool report", () => {
   });
 });
 
-describe("review F2: a lane reports only for the member of its own live lease", () => {
-  // The fixture runtime runs `keypool report … --lease <the lease it was given>` as a child of the run, as a lane's tool would.
+describe("review F2: a lane reports only for the member of its own run", () => {
+  // The fixture runtime runs `keypool report … --grant <the grant its helper line names>` as a child of the run, as a lane's tool would
+  // (slice 2: a pooled run's helper is bound to a grant, not to one lease). The member is never named by the lane: the grant knows it.
   it("a lane reports its own member exhausted", async () => {
     const { env, dir } = await world(3);
-    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, report: ["p", "--member", "k1", "--outcome", "exhausted"] } }));
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, report: ["p", "--outcome", "exhausted"] } }));
     expect(ran.code, ran.stderr).toBe(0);
     expect(reportsOf(dir)).toEqual([{ code: 0, stderr: "" }]);
     expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["exhausted", "active", "active"]);
   });
-  it("a lane cannot report another member, nor ok", async () => {
+  it("a lane cannot name a member (the grant's is the one), nor report ok", async () => {
     const { env, dir } = await world(3);
     const other = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, report: ["p", "--member", "k2", "--outcome", "exhausted"] } }));
     expect(other.code, other.stderr).toBe(0);
     expect(reportsOf(dir)[0]?.code).toBe(1);
-    expect(reportsOf(dir)[0]?.stderr).toMatch(/lease_other_member/);
-    const ok = await run(env, dir, job(dir, { [KEYS[1]]: { exit: 0, report: ["p", "--member", "k2", "--outcome", "ok"] } }));
+    expect(reportsOf(dir)[0]?.stderr).toMatch(/usage/);
+    const ok = await run(env, dir, job(dir, { [KEYS[1]]: { exit: 0, report: ["p", "--outcome", "ok"] } }));
     expect(ok.code, ok.stderr).toBe(0);
     expect(reportsOf(dir)[1]?.code).toBe(1);
     expect(reportsOf(dir)[1]?.stderr).toMatch(/not_allowed/);
