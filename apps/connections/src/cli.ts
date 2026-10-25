@@ -25,6 +25,7 @@ import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/sp
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
+import { sessionKey } from "./application/key-pool-service.ts";
 import { FileRefused } from "./adapters/file-mode.ts";
 import { parsePin, pinFor, procReader, verifyClaudeParent } from "./adapters/caller-proof.ts";
 import { CLAUDE_RELEASE_FINGERPRINT, CLAUDE_RELEASE_FIRST_SIGNED } from "./adapters/claude-release-key.ts";
@@ -354,6 +355,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let output = "";
   let failure = "";
   let attributed: string | null = null;
+  let childSession: string | null = null;
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
   const stopper = turnStopper(io);
@@ -367,7 +369,11 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     const hooks = {
       onStdout: (chunk: string) => { io.stdout(outRedactor.push(chunk)); },
       onStderr: (chunk: string) => { io.stderr(errRedactor.push(chunk)); },
-      onStart: (pid: number) => { stopper.started(pid); },
+      onStart: (pid: number) => {
+        stopper.started(pid);
+        const id = home.processes.identity(pid);
+        if (id) childSession = sessionKey(id);
+      },
       proceed: () => stopper.proceed(),
     };
     const codexHelper = helperParts(keys.command, lease.id);
@@ -404,14 +410,10 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       again.leases.close(tracked?.member ?? name, tracked?.lease ?? lease.id, outcome, cost);
       if (grant !== null) {
         if (status !== 0) {
-          // A grant that still names its first lease has not handed off, so the member is that lease's. After a move,
-          // attribute applies the hand-off window (KP18) before the grant closes.
-          const moved = tracked !== null && (tracked.member !== name || tracked.lease !== lease.id);
-          if (!moved) attributed = tracked?.member ?? name;
-          else {
-            const found = again.keypools.attribute(grant.pool, grant.id);
-            if (found.ok) attributed = found.value;
-          }
+          // The child's session is the run the grant served. attribute answers that session's member, and the window
+          // when the grant has not seen it (KP18), before the grant closes.
+          const found = again.keypools.attribute(grant.pool, grant.id, childSession);
+          if (found.ok) attributed = found.value;
         }
         again.keypools.closeGrant(grant.pool, grant.id);
       }
@@ -841,12 +843,12 @@ function publishNew(home: Opened): void {
   const directory = home.store.load().directory;
   publishOwned(
     { ...directory, connections: directory.connections.filter(connection => !have.has(connection.name)) },
-    home.catalog, home.models, home.engines,
+    home.catalog, home.models, home.engines, home.keypools.routingPools(),
   );
 }
 
 function publish(home: Opened): void {
-  publishOwned(home.store.load().directory, home.catalog, home.models, home.engines);
+  publishOwned(home.store.load().directory, home.catalog, home.models, home.engines, home.keypools.routingPools());
 }
 
 function gate(home: Opened, parsed: Parsed, io: Io): number {

@@ -438,7 +438,8 @@ describe("kp18 fix round 1: a report is the key its own session was served, not 
   const state = (w: World, name: string) => pool(w).members.find(m => m.credential === name)?.health.state;
   it("the grant remembers which member each session was last served", async () => {
     const { w } = await twoSessions();
-    expect(grantOf(w).seen).toEqual([{ session: "20:1:boot", member: "k2" }, { session: "30:1:boot", member: "k1" }]);
+    // A changed entry goes last: session 20 was served k1, then 30 k1, then 20 was moved to k2.
+    expect(grantOf(w).seen).toEqual([{ session: "30:1:boot", member: "k1" }, { session: "20:1:boot", member: "k2" }]);
   });
   it("a refusal from the session that was moved to k2 marks k2, inside the window: a dry new key does not stay in service", async () => {
     const { w, run } = await twoSessions();
@@ -457,10 +458,10 @@ describe("kp18 fix round 1: a report is the key its own session was served, not 
   });
   it("a lane cannot pick which member it blames: a report is about the key its own session holds, whatever it says", async () => {
     const { w, run } = await twoSessions();
-    // Session 30 holds k1 (already dry): its failing report is k1's and cannot touch k2.
+    // Session 30 holds k1 (already dry): its failing report is k1's (a refused key beats an exhausted one) and cannot touch k2.
     expect(w.pools.reportByGrant("p", run.grant, { kind: "failing", reason: "rejected" }, w.mem.clock.now(), { kind: "holder", caller: proc(32) }).ok).toBe(true);
     expect(state(w, "k2")).toBe("active");
-    expect(pool(w).members.find(m => m.credential === "k1")?.health.state).toBe("exhausted");
+    expect(pool(w).members.find(m => m.credential === "k1")?.health.state).toBe("failing");
   });
   it("the run wrapper names its child's session: attribute answers that session's member, and without one the window's", async () => {
     const { w, run } = await twoSessions();

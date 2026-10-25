@@ -34,6 +34,7 @@ export type GrantMoveWhy = "exhausted" | "refused" | "adopted" | "reopened";
 export type Grant = {
   id: string; member: string; lease: string; holder: Holder; request: GrantRequest;
   window: HelperWindow; previous: { member: string; movedAt: number } | null;
+  seen: readonly { session: string; member: string }[];
 };
 export type KeyPoolEvent =
   | { type: "KeyPoolCreated"; pool: string; at: number; command: string }
@@ -350,15 +351,31 @@ export function touchGrant(p: KeyPool, id: string, window: HelperWindow): KeyPoo
   return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, window } : g) };
 }
 
+const SEEN_KEEP = 16;
+
+// One row per session: the member it was last served. A new session, or one whose member changed, is written last.
+// The grant keeps the last sixteen. Nothing is written when the grant is gone or the row is already so.
+export function noteSeen(p: KeyPool, id: string, session: string, member: string): KeyPool {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return p;
+  const at = grant.seen.findIndex(row => row.session === session);
+  if (at >= 0 && grant.seen[at]?.member === member) return p;
+  const seen = [...grant.seen.filter(row => row.session !== session), { session, member }].slice(-SEEN_KEEP);
+  return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, seen } : g) };
+}
+
 export function closeGrant(p: KeyPool, id: string, now: number): KeyPool {
   if (!p.grants.some(g => g.id === id)) return p;
   return withEvents({ ...p, grants: p.grants.filter(g => g.id !== id) }, [{ type: "GrantClosed", grant: id, at: now }]);
 }
 
-// A report inside the hand-off window still belongs to the member that gave the run up. Past it, the current member owns it.
-export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number): Result<{ pool: KeyPool; member: string }, "missing"> {
+// A session the grant has served is that session's member, and the window is left as it is. Otherwise a report inside the
+// hand-off window still belongs to the member that gave the run up. Past it, the current member owns it.
+export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number, session?: string | null): Result<{ pool: KeyPool; member: string }, "missing"> {
   const grant = p.grants.find(g => g.id === id);
   if (!grant) return err("missing");
+  const known = session ? grant.seen.find(row => row.session === session) : undefined;
+  if (known) return ok({ pool: p, member: known.member });
   const earlier = grant.previous;
   if (earlier && at < earlier.movedAt + ttlMs) return ok({ pool: p, member: earlier.member });
   if (!earlier) return ok({ pool: p, member: grant.member });

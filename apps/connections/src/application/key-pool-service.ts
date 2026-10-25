@@ -5,7 +5,7 @@
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
   LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, chooseKey, closeGrant as dropGrant, createKeyPool, err, findConnection, isKey,
-  joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, ok,
+  joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteSeen, ok,
   openGrant, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant,
   KEY_POOL_RECHECK_DEFAULT_MS,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
@@ -84,6 +84,11 @@ function openKeyLease(directory: Directory, id: string): { name: string; holder:
 }
 
 const MARKS = new Set<Outcome["kind"]>(["exhausted", "failing", "limited"]);
+
+// The process a run started, as a helper call or a report names it: pid, start ticks and boot id.
+export function sessionKey(id: ProcId): string {
+  return `${id.pid}:${id.startedAt}:${id.bootId}`;
+}
 
 function leaveRevoked(pool: KeyPool, directory: Directory, now: number): KeyPool | null {
   for (const member of pool.members) {
@@ -332,7 +337,7 @@ export class KeyPoolService implements ConnectionLifecycle {
       const state = current.members.find(member => member.credential === held.member)?.health.state;
       let why: "exhausted" | "refused" = state === "exhausted" ? "exhausted" : "refused";
       if (state === "active") {
-        const swapped = leases.swap(null, held.member, request, window);
+        const swapped = leases.swap(null, held.member, request, window, current.members.map(member => member.credential));
         if (swapped.ok) {
           const moved = this.#change(pool, (candidate, now) => {
             const next = moveGrant(candidate, held.id, { member: held.member, lease: swapped.value.id, window, movedAt: now }, "reopened", now);
@@ -348,7 +353,7 @@ export class KeyPoolService implements ConnectionLifecycle {
           if (isRetry(served)) continue;
           return served;
         }
-        if (swapped.error.problem === "conflict" || swapped.error.problem === "closed") continue;
+        if (swapped.error.problem === "conflict" || swapped.error.problem === "closed" || swapped.error.problem === "held") continue;
         if (swapped.error.exit !== LEASE_REFUSED) return err(swapped.error);
         why = "refused";
       }
@@ -364,24 +369,26 @@ export class KeyPoolService implements ConnectionLifecycle {
     return held ? { member: held.member, lease: held.lease } : null;
   }
 
-  attribute(pool: string, grant: string): Result<string, Failure> {
+  attribute(pool: string, grant: string, session?: string | null): Result<string, Failure> {
     const helper = this.#deps.helper;
     return this.#change(pool, (current, now) => {
-      const next = attributeToGrant(current, grant, now, helper.ttlMs);
+      const next = attributeToGrant(current, grant, now, helper.ttlMs, session);
       if (!next.ok) return { pool: current, result: fail("grant_missing") };
       return { pool: next.value.pool, result: ok(next.value.member) };
     });
   }
 
   // The grant is checked before the caller, and the caller before the outcome, so a stranger's refusal is not applied.
-  reportByGrant(pool: string, grant: string, outcome: Outcome, observedAt: number, by: { kind: "operator" } | { kind: "holder"; caller: ProcId }): Result<void, Failure> {
+  // A holder's report is about the session under the grant; an operator may name that session.
+  reportByGrant(pool: string, grant: string, outcome: Outcome, observedAt: number, by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId }): Result<void, Failure> {
     const held = this.#deps.store.load(pool).pool?.grants.find(row => row.id === grant);
     if (!held) return fail("grant_missing");
     if (by.kind === "holder") {
       if (!this.#holds(held.holder, by.caller)) return fail("not_holder");
       if (!MARKS.has(outcome.kind)) return fail("not_allowed");
     }
-    const member = this.attribute(pool, grant);
+    const session = by.kind === "holder" ? this.#sessionKey(held.holder, by.caller.pid) : by.session;
+    const member = this.attribute(pool, grant, session);
     if (!member.ok) return member;
     return this.report(pool, member.value, outcome, observedAt, { kind: "operator" });
   }
@@ -511,7 +518,7 @@ export class KeyPoolService implements ConnectionLifecycle {
             if (seed && grantId) {
               const opened = openGrant(next, {
                 id: grantId, member: step.member, lease: seed.lease, holder: seed.holder, request: seed.request,
-                window: { calls: 0, windowStart: seed.startedAt }, previous: null,
+                window: { calls: 0, windowStart: seed.startedAt }, previous: null, seen: [],
               }, now);
               if (!opened.ok) return fail(opened.error);
               next = opened.value;
@@ -539,7 +546,8 @@ export class KeyPoolService implements ConnectionLifecycle {
     pool: string, held: Grant, from: { name: string; id: string } | null, request: LeaseRequest, window: HelperWindow,
     why: "exhausted" | "refused", leases: Leases, caller: HandOffCaller,
   ): Promise<Result<{ connection: string; lease: string }, KeyPoolFailure> | { retry: true }> {
-    const taken = await this.#choose(pool, async member => leases.swap(from, member, request, window), {
+    const names = this.#deps.store.load(pool).pool?.members.map(member => member.credential);
+    const taken = await this.#choose(pool, async member => leases.swap(from, member, request, window, from ? undefined : names), {
       skip: [held.member],
       also: (current, member, value, now) => {
         const moved = moveGrant(current, held.id, { member, lease: value.id, window, movedAt: now }, why, now);
@@ -547,7 +555,7 @@ export class KeyPoolService implements ConnectionLifecycle {
       },
     });
     if (!taken.ok) {
-      if (taken.error.problem === "closed" || taken.error.problem === "conflict") return { retry: true };
+      if (taken.error.problem === "closed" || taken.error.problem === "conflict" || taken.error.problem === "held") return { retry: true };
       return taken;
     }
     const fresh = keyLease(this.#deps.connections.load().directory, taken.value.value.id);
@@ -558,7 +566,11 @@ export class KeyPoolService implements ConnectionLifecycle {
   // The audit line is written before this returns, so the caller prints after it. The window is recorded only when it changed.
   #serve(leases: Pick<LeaseService, "serve">, pool: string, held: Grant, connection: string, row: Lease, caller: HandOffCaller): Result<{ connection: string; lease: string }, KeyPoolFailure> | { retry: true } {
     const window = { calls: row.calls, windowStart: row.windowStart };
-    const touched = this.#change(pool, current => ({ pool: touchGrant(current, held.id, window), result: ok(undefined) }));
+    const session = this.#session(held.holder, caller.id.pid);
+    const touched = this.#change(pool, current => {
+      const noted = touchGrant(current, held.id, window);
+      return { pool: session ? noteSeen(noted, held.id, sessionKey(session), connection) : noted, result: ok(undefined) };
+    });
     if (!touched.ok) return touched.error.problem === "conflict" ? { retry: true } : touched;
     const served = leases.serve(connection, row.id, {
       pid: caller.id.pid, ppid: caller.ppid, lane: held.holder.lane, workspace: held.request.workspacePath,
@@ -584,6 +596,19 @@ export class KeyPoolService implements ConnectionLifecycle {
   #holds(holder: Holder, caller: ProcId): boolean {
     const same = (id: ProcId) => id.pid === holder.pid && id.startedAt === holder.startedAt && id.bootId === holder.bootId;
     return same(caller) || this.#deps.processes.ancestors(caller.pid).some(same);
+  }
+
+  // Ancestors are child first and include the caller's own pid. The session is the entry just below the holder.
+  #session(holder: Holder, pid: number): ProcId | null {
+    const chain = this.#deps.processes.ancestors(pid);
+    const at = chain.findIndex(row => row.pid === holder.pid && row.startedAt === holder.startedAt && row.bootId === holder.bootId);
+    if (at <= 0) return null;
+    return chain[at - 1] ?? null;
+  }
+
+  #sessionKey(holder: Holder, pid: number): string | null {
+    const session = this.#session(holder, pid);
+    return session ? sessionKey(session) : null;
   }
 
   #rewind(name: string, member: string, previous: string | null): Result<void, Failure> {

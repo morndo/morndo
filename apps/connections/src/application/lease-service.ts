@@ -53,9 +53,9 @@ export class LeaseService {
     return err({ problem: "conflict" });
   }
 
-  // The same compare-and-save as `lease`, with the old lease closed in that one directory write. A `closed` refusal has
-  // no directory: the lease was already swapped, and nothing here is saved.
-  swap(from: { name: string; id: string } | null, to: string, request: LeaseRequest, window: HelperWindow): Result<{ id: string }, Failure> {
+  // The same compare-and-save as `lease`, with the old lease closed in that one directory write. A `closed` or `held`
+  // refusal has no directory: the lease was already swapped, or this holder already has a live one, and nothing here is saved.
+  swap(from: { name: string; id: string } | null, to: string, request: LeaseRequest, window: HelperWindow, alone?: readonly string[]): Result<{ id: string }, Failure> {
     const workspace = this.#deps.repos.inspect(request.workspacePath);
     const runtime = { isolation: this.#deps.runtime.isolation(), dialects: this.#deps.runtime.dialects() };
     const close = from ? { connection: from.name, lease: from.id } : null;
@@ -80,9 +80,10 @@ export class LeaseService {
         role: request.role,
         entry: request.entry,
         runtimeName: current.runtime,
-      }, close, window);
+      }, close, window, alone ? { holder: request.holder, members: alone } : undefined);
       if (!asked.ok) {
         if (asked.error.problem === "closed") return err({ problem: "closed" });
+        if (asked.error.problem === "held") return err({ problem: "held" });
         if (asked.error.directory && !this.#deps.store.save(asked.error.directory, policy, version)) continue;
         const exit = GATE.has(asked.error.problem) ? LEASE_REFUSED : undefined;
         return err(exit === undefined ? { problem: asked.error.problem } : { problem: asked.error.problem, exit });

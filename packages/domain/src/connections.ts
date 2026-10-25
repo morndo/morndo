@@ -75,7 +75,7 @@ export const emptyDirectory = (): Directory => ({ connections: [], events: [], s
 
 export type Refusal = { problem: Problem; directory?: Directory };
 export type Problem = "bad_name" | "taken" | "fingerprint" | "bad_fingerprint" | "bad_ref" | "expiry" | "floor"
-  | "principal" | "same" | "revoked" | "missing" | "custody" | "closed" | "helper" | "kind" | GateReason;
+  | "principal" | "same" | "revoked" | "missing" | "custody" | "closed" | "held" | "helper" | "kind" | GateReason;
 export type GateReason = "off" | "terms" | "expired" | "repo" | "isolation" | "dialect" | "leases" | "budget";
 
 const RANK: Record<Isolation, number> = { none: 0, rules: 1, os: 2 };
@@ -482,12 +482,29 @@ function paintWindow(dir: Directory, name: string, id: string, window: HelperWin
   return { ...dir, connections: dir.connections.map(x => x.name === name ? { ...c, leases } : x) };
 }
 
+function sameProc(a: Pick<Holder, "pid" | "startedAt" | "bootId">, b: Pick<Holder, "pid" | "startedAt" | "bootId">): boolean {
+  return a.pid === b.pid && a.startedAt === b.startedAt && a.bootId === b.bootId;
+}
+
+// A live lease this holder already has on one of these connections. Checked only when nothing is being closed.
+function alreadyHeld(dir: Directory, alone: { holder: Holder; members: readonly string[] }): boolean {
+  for (const name of alone.members) {
+    const c = findConnection(dir, name);
+    if (!c || !isMorndo(c)) continue;
+    if (c.leases.some(row => row.authority === "live" && sameProc(row.holder, alone.holder))) return true;
+  }
+  return false;
+}
+
 // The new lease is granted first. A gate refusal keeps the old lease and the LeaseRefused directory; any other refusal
-// carries no directory, so neither side of the hand-off is saved.
+// carries no directory, so neither side of the hand-off is saved. With nothing to close, a holder who already has a live
+// lease on the named connections is refused before the gate: two callers must not each grant one.
 export function swapLease(
   dir: Directory, to: string, ask: LeaseAsk,
   close: { connection: string; lease: string } | null, window: HelperWindow,
+  alone?: { holder: Holder; members: readonly string[] },
 ): Result<Directory, Refusal> {
+  if (!close && alone && alreadyHeld(dir, alone)) return refuse("held");
   const old = close ? heldLease(dir, close.connection, close.lease) : null;
   if (close && !old) return refuse("closed");
   const granted = lease(dir, to, ask);
