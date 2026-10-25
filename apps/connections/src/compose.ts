@@ -98,7 +98,7 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
     repos: new GitRepos(), alerts: new FileAlerts(join(dir, "alerts.log")), processes, engines,
   };
   const keypools = new KeyPoolService({
-    clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, classifiers: builtinClassifiers,
+    clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, processes, classifiers: builtinClassifiers,
   });
   return {
     dir, db, vaultDir, identity, store, vault, catalog, engines, models, processes, runtime, env,

@@ -1,6 +1,6 @@
 // In-memory ports. Tests move the clock and the runtime by hand. No ambient I/O.
 import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type Isolation, type KeyPool, type Policy } from "@morndo/domain";
-import type { VendorPreset } from "@morndo/protocol";
+import type { KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 import { chainHolders } from "./providers.ts";
 import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type KeyPoolStore, type ModelLister, type ModelRow, type ProcId, type Processes, type ProviderEntry, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
 import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, WorkspaceRoots } from "./ports.ts";
@@ -50,7 +50,9 @@ export class MemorySpend implements SpendMeter {
 
 export class MemoryCatalog implements Catalog {
   rows: readonly VendorPreset[] = [];
+  keyPools: Readonly<Record<string, KeyPoolTerms>> = {};
   presets(): readonly VendorPreset[] { return this.rows; }
+  keyPool(vendor: string): KeyPoolTerms | null { return this.keyPools[vendor] ?? null; }
 }
 
 export class MemoryStore implements ConnectionStore {

@@ -2,14 +2,13 @@
 // save up to 8 times. Creating a pool is one save. A pick saves the ring position before the attempt, and writes the pick
 // after it returns. Alerts name a member or the pool and a reason word; a provider's text never lands here.
 import {
-  LEASE_REFUSED, acknowledgeKeyPoolTerms, chooseKey, createKeyPool, err, findConnection, joinKeyPool, keyPicked, keyRotated,
-  leaveKeyPool, moveKeyMember, newKeyPoolEvents, ok, reportKeyOutcome, reviveKey, setKeyPoolPolicy, settleKeyPool,
+  LEASE_REFUSED, acknowledgeKeyPoolTerms, chooseKey, createKeyPool, err, findConnection, isKey, joinKeyPool, keyPicked, keyRotated,
+  leaveKeyPool, moveKeyMember, newKeyPoolEvents, ok, releaseKey, reportKeyOutcome, reviveKey, setKeyPoolPolicy, settleKeyPool,
   KEY_POOL_RECHECK_DEFAULT_MS,
   type Actor, type Directory, type KeyPool, type KeyPoolEvent, type Names, type Outcome, type Result, type RotationMode,
   type RotationPolicy, type Standing,
 } from "@morndo/domain";
-import { findPreset } from "./catalog.ts";
-import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, ProviderSignal } from "./ports.ts";
+import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, Processes, ProviderSignal } from "./ports.ts";
 
 export type KeyPoolFailure = Failure & { backAt?: number | null; member?: string };
 export type PoolView = {
@@ -36,8 +35,11 @@ type Deps = {
   connections: ConnectionStore;
   catalog: Catalog;
   alerts: AlertSink;
+  processes: Processes;
   classifiers: Classifiers;
 };
+export type LaneProof = { kind: "lane"; lease: string; caller: { pid: number; startedAt: number; bootId: string } };
+export type ReportBy = Actor | LaneProof;
 type CreateInput = {
   name: string;
   vendor: string;
@@ -50,12 +52,27 @@ type CreateInput = {
   organizations?: Readonly<Record<string, string | null>>;
 };
 type Advance =
-  | { kind: "go"; member: string }
+  | { kind: "go"; member: string; previous: string | null }
   | { kind: "empty" }
   | { kind: "stop"; error: KeyPoolFailure };
 
 const ATTEMPTS = 8;
 const fail = (problem: string): Result<never, Failure> => err({ problem });
+
+function isPrincipal(actor: Actor): boolean {
+  return actor.kind === "principal" && actor.command.trim() !== "";
+}
+
+function openKeyLease(directory: Directory, id: string): { name: string; holder: { pid: number; startedAt: number; bootId: string } } | null {
+  for (const connection of directory.connections) {
+    if (!isKey(connection)) continue;
+    const row = connection.leases.find(lease => lease.id === id && lease.authority === "live");
+    if (row) return { name: connection.name, holder: row.holder };
+  }
+  return null;
+}
+
+const MARKS = new Set<Outcome["kind"]>(["exhausted", "failing", "limited"]);
 
 function leaveRevoked(pool: KeyPool, directory: Directory, now: number): KeyPool | null {
   for (const member of pool.members) {
@@ -72,9 +89,10 @@ export class KeyPoolService implements ConnectionLifecycle {
   constructor(deps: Deps) { this.#deps = deps; }
 
   create(input: CreateInput, actor: Actor): Result<void, Failure> {
-    const preset = findPreset(this.#deps.catalog, input.vendor);
-    if (!preset?.keyPool) return fail("no_classifier");
-    if (input.by === "") return fail("ack_needed");
+    const terms = this.#deps.catalog.keyPool(input.vendor);
+    if (!terms) return fail("no_classifier");
+    const by = input.by.trim();
+    if (by === "") return fail("ack_needed");
     const now = this.#deps.clock.now();
     const specified = input.mode !== undefined || input.recheckEveryMs !== undefined;
     const created = createKeyPool({
@@ -94,7 +112,7 @@ export class KeyPoolService implements ConnectionLifecycle {
       if (!joined.ok) return fail(joined.error);
       pool = joined.value;
     }
-    const acked = acknowledgeKeyPoolTerms(pool, preset.keyPool.termsRevision, input.by, actor, now);
+    const acked = acknowledgeKeyPoolTerms(pool, terms.termsRevision, by, actor, now);
     if (!acked.ok) return fail(acked.error);
     if (!this.#deps.store.save(acked.value, 0)) return fail("taken");
     this.#alerts({ ...acked.value, events: [], seq: 0 }, acked.value);
@@ -112,7 +130,8 @@ export class KeyPoolService implements ConnectionLifecycle {
     });
   }
 
-  leave(pool: string, member: string): Result<void, Failure> {
+  leave(pool: string, member: string, actor: Actor): Result<void, Failure> {
+    if (!isPrincipal(actor)) return fail("principal");
     return this.#change(pool, (current, now) => {
       const next = leaveKeyPool(current, member, now);
       return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
@@ -126,9 +145,10 @@ export class KeyPoolService implements ConnectionLifecycle {
     });
   }
 
-  setPolicy(pool: string, change: Partial<RotationPolicy>, by: string | null): Result<void, Failure> {
+  setPolicy(pool: string, change: Partial<RotationPolicy>, actor: Actor): Result<void, Failure> {
+    if (!isPrincipal(actor)) return fail("principal");
     return this.#change(pool, (current, now) => {
-      const next = setKeyPoolPolicy(current, change, by, now);
+      const next = setKeyPoolPolicy(current, change, actor.kind === "principal" ? actor.command : null, now);
       return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
     });
   }
@@ -140,7 +160,8 @@ export class KeyPoolService implements ConnectionLifecycle {
     });
   }
 
-  delete(pool: string): Result<void, Failure> {
+  delete(pool: string, actor: Actor): Result<void, Failure> {
+    if (!isPrincipal(actor)) return fail("principal");
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       const loaded = this.#deps.store.load(pool);
       if (!loaded.pool) return fail("missing");
@@ -149,7 +170,9 @@ export class KeyPoolService implements ConnectionLifecycle {
     return fail("conflict");
   }
 
-  report(pool: string, member: string, outcome: Outcome, observedAt: number, via?: "probe" | "report"): Result<void, Failure> {
+  report(pool: string, member: string, outcome: Outcome, observedAt: number, by: ReportBy, via?: "probe" | "report"): Result<void, Failure> {
+    const allowed = this.#mayReport(member, outcome, by);
+    if (!allowed.ok) return allowed;
     return this.#change(pool, (current, now) => {
       const next = via === undefined
         ? reportKeyOutcome(current, member, outcome, observedAt, now)
@@ -161,34 +184,37 @@ export class KeyPoolService implements ConnectionLifecycle {
   reportSignal(pool: string, member: string, signal: ProviderSignal, observedAt: number): Result<Outcome, Failure> {
     const loaded = this.#deps.store.load(pool);
     if (!loaded.pool) return fail("missing");
-    const preset = findPreset(this.#deps.catalog, loaded.pool.vendor);
-    const dialect = preset?.keyPool?.errorDialect;
+    const dialect = this.#deps.catalog.keyPool(loaded.pool.vendor)?.errorDialect;
     if (!dialect) return fail("no_classifier");
     const classifier = this.#deps.classifiers.for(dialect);
     if (!classifier) return fail("no_classifier");
     const outcome = classifier.classify(signal);
     if (outcome.kind === "unknown" && signal.status !== null && signal.status >= 400 && signal.status <= 499) {
-      this.#deps.alerts.raise({ kind: "unclassified", name: member, detail: `${signal.status} ${signal.kind ?? "-"}` });
+      const kind = (signal.kind ?? "-").slice(0, 64);
+      this.#deps.alerts.raise({ kind: "unclassified", name: member, detail: `${signal.status} ${kind}` });
     }
-    const reported = this.report(pool, member, outcome, observedAt);
+    const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" });
     return reported.ok ? ok(outcome) : reported;
   }
 
   // Everything before the first `await` is synchronous, so two picks started together each see the ring position the
-  // other already saved. A gate refusal (exit 75) tries the next member; any other failure stops.
-  async pick<T>(pool: string, attempt: (member: string) => Promise<Result<T, Failure>>): Promise<Result<{ member: string; value: T }, KeyPoolFailure>> {
+  // other already saved. A refusal puts that reservation back before the next member is tried, or before the call returns.
+  async pick<T>(pool: string, attempt: (member: string) => Promise<Result<T, Failure>>, options?: { skip?: readonly string[] }): Promise<Result<{ member: string; value: T }, KeyPoolFailure>> {
+    const heldBack = options?.skip ?? [];
     const declined: { member: string; word: string }[] = [];
     let first: Failure | null = null;
     for (;;) {
-      const step = this.#advance(pool, declined.map(row => row.member));
+      const step = this.#advance(pool, [...heldBack, ...declined.map(row => row.member)]);
       if (step.kind === "stop") return err(step.error);
       if (step.kind === "empty") return err(first ?? { problem: "none_left", exit: LEASE_REFUSED });
       const result = await attempt(step.member);
       if (result.ok) {
-        const noted = this.#note(pool, step.member, declined);
+        const noted = this.#note(pool, step.member, declined, step.previous);
         if (!noted.ok) return noted;
         return ok({ member: step.member, value: result.value });
       }
+      const restored = this.#rewind(pool, step.member, step.previous);
+      if (!restored.ok) return restored;
       if (result.error.exit === LEASE_REFUSED) {
         if (!first) first = result.error;
         declined.push({ member: step.member, word: result.error.problem });
@@ -268,21 +294,45 @@ export class KeyPoolService implements ConnectionLifecycle {
         }
         return { kind: "stop", error: { problem: "pool_blocked", exit: LEASE_REFUSED, member: decision.error.member } };
       }
+      const previous = loaded.pool.lastPick;
       if (decision.value.pool !== loaded.pool) {
         if (!this.#deps.store.save(decision.value.pool, loaded.version)) { attempt += 1; continue; }
         this.#alerts(loaded.pool, decision.value.pool);
       }
-      return { kind: "go", member: decision.value.member };
+      return { kind: "go", member: decision.value.member, previous };
     }
     return { kind: "stop", error: { problem: "conflict" } };
   }
 
-  #note(name: string, member: string, declined: readonly { member: string; word: string }[]): Result<void, Failure> {
-    return this.#change(name, (pool, now) => ({ pool: keyPicked(pool, member, declined, now), result: ok(undefined) }));
+  #note(name: string, member: string, declined: readonly { member: string; word: string }[], previous: string | null): Result<void, Failure> {
+    return this.#change(name, (pool, now) => {
+      const restored = pool.policy.mode === "drain" && declined.length > 0 ? releaseKey(pool, member, previous) : pool;
+      return { pool: keyPicked(restored, member, declined, now), result: ok(undefined) };
+    });
+  }
+
+  #rewind(name: string, member: string, previous: string | null): Result<void, Failure> {
+    return this.#change(name, pool => ({ pool: releaseKey(pool, member, previous), result: ok(undefined) }));
+  }
+
+  #mayReport(member: string, outcome: Outcome, by: ReportBy): Result<void, Failure> {
+    if (by.kind === "operator") return ok(undefined);
+    if (by.kind === "principal") {
+      if (!isPrincipal(by)) return fail("principal");
+      return MARKS.has(outcome.kind) ? ok(undefined) : fail("not_allowed");
+    }
+    if (!MARKS.has(outcome.kind)) return fail("not_allowed");
+    const open = openKeyLease(this.#deps.connections.load().directory, by.lease);
+    if (!open) return fail("lease_missing");
+    if (open.name !== member) return fail("lease_other_member");
+    const same = (id: { pid: number; startedAt: number; bootId: string }) =>
+      id.pid === open.holder.pid && id.startedAt === open.holder.startedAt && id.bootId === open.holder.bootId;
+    if (same(by.caller) || this.#deps.processes.ancestors(by.caller.pid).some(same)) return ok(undefined);
+    return fail("not_holder");
   }
 
   #terms(pool: KeyPool): Result<void, KeyPoolFailure> {
-    const revision = findPreset(this.#deps.catalog, pool.vendor)?.keyPool?.termsRevision;
+    const revision = this.#deps.catalog.keyPool(pool.vendor)?.termsRevision;
     if (!revision || pool.terms?.revision !== revision) return err({ problem: "terms", exit: LEASE_REFUSED });
     return ok(undefined);
   }

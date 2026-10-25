@@ -8,6 +8,7 @@ export type RotationPolicy = { mode: RotationMode; recheckEveryMs: number };
 export const KEY_POOL_RECHECK_MIN_MS = 3_600_000;
 export const KEY_POOL_RECHECK_MAX_MS = 7 * 86_400_000;
 export const KEY_POOL_RECHECK_DEFAULT_MS = 86_400_000;
+export const KEY_POOL_RESUME_MAX_MS = 365 * 86_400_000;
 
 export type ExhaustedReason = "credit" | "spend-limit";
 export type FailingReason = "rejected" | "denied" | "held" | "cap";
@@ -138,10 +139,12 @@ export function createKeyPool(
   return ok(settleKeyPool(withEvents(created, [{ type: "KeyPoolCreated", pool: input.name, at: now, command: who.value }]), now));
 }
 
-export function acknowledgeKeyPoolTerms(p: KeyPool, revision: string, by: string, actor: Actor, now: number): Result<KeyPool, "principal"> {
+export function acknowledgeKeyPoolTerms(p: KeyPool, revision: string, by: string, actor: Actor, now: number): Result<KeyPool, "principal" | "ack_needed"> {
   const who = commandOf(actor);
   if (!who.ok) return who;
-  const next = withEvents({ ...p, terms: { by, at: now, revision } }, [{ type: "TermsAcknowledged", revision, by, at: now, command: who.value }]);
+  const name = by.trim();
+  if (name === "") return err("ack_needed");
+  const next = withEvents({ ...p, terms: { by: name, at: now, revision } }, [{ type: "TermsAcknowledged", revision, by: name, at: now, command: who.value }]);
   return ok(settleKeyPool(next, now));
 }
 
@@ -239,8 +242,19 @@ export function chooseKey(p: KeyPool, skip: readonly string[] = []): Result<{ po
   return ok({ pool: { ...p, lastPick: chosen.credential }, member: chosen.credential });
 }
 
+export function releaseKey(p: KeyPool, member: string, previous: string | null): KeyPool {
+  if (p.lastPick !== member) return p;
+  return { ...p, lastPick: previous };
+}
+
 export function keyPicked(p: KeyPool, member: string, declined: readonly { member: string; word: string }[], now: number): KeyPool {
-  return settleKeyPool(withEvents({ ...p, lastPick: member }, [{ type: "MemberPicked", member, declined, at: now }]), now);
+  const lastPick = p.policy.mode === "drain" && declined.length > 0 ? p.lastPick : member;
+  return settleKeyPool(withEvents({ ...p, lastPick }, [{ type: "MemberPicked", member, declined, at: now }]), now);
+}
+
+function cappedResume(resumeAt: number | null, now: number): number | null {
+  if (resumeAt !== null && resumeAt > now + KEY_POOL_RESUME_MAX_MS) return now + KEY_POOL_RESUME_MAX_MS;
+  return resumeAt;
 }
 
 function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report"): KeyPool | null {
@@ -255,12 +269,14 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
     case "ok":
       if (member.health.state !== "exhausted" || outcome.evidence !== "messages") return null;
       return withEvents(withMember(p, member.credential, { state: "active" }, observedAt, null), [{ type: "KeyRecovered", member: member.credential, how: via, at: now }]);
-    case "exhausted":
+    case "exhausted": {
       if (member.health.state !== "active") return null;
+      const resumeAt = cappedResume(outcome.resumeAt, now);
       return withEvents(
-        withMember(p, member.credential, { state: "exhausted", reason: outcome.reason, resumeAt: outcome.resumeAt }, observedAt, outcome.resumeAt ?? observedAt + p.policy.recheckEveryMs),
-        [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt: outcome.resumeAt, at: now }],
+        withMember(p, member.credential, { state: "exhausted", reason: outcome.reason, resumeAt }, observedAt, resumeAt ?? observedAt + p.policy.recheckEveryMs),
+        [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt, at: now }],
       );
+    }
     case "failing":
       if (member.health.state === "failing") return null;
       return withEvents(withMember(p, member.credential, { state: "failing", reason: outcome.reason }, observedAt, null), [{ type: "KeyFailed", member: member.credential, reason: outcome.reason, at: now }]);

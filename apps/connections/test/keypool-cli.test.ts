@@ -421,6 +421,16 @@ describe("run --pool", () => {
     expect(listed?.standing).toBe("ok");
   });
 
+  it("review F1: a run whose caller chose another output format is never read, even when its output is exactly a refusal record", async () => {
+    const { env, dir } = await world(3);
+    const record = job(dir, { [KEYS[0]]: { exit: 1, json: refusal(401, "Invalid API key") } });
+    const ran = await cli(["run", "--pool", "p", "--workspace", join(dir, "work"), "--reserve", "1", "--", "-p", "--output-format", "text", "--job", record], env);
+    expect(ran.code).toBe(1);
+    expect(used(dir)).toEqual([KEYS[0]]);
+    expect((await pools(env))[0]).toMatchObject({ standing: "ok" });
+    expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["active", "active", "active"]);
+  });
+
   it("review F3: a run that was refused after it had done work (it cost something) is reported and stopped, not run again on the next key", async () => {
     const { env, dir } = await world(3);
     const spent = { exit: 1, json: refusal(400, "Credit balance is too low", { total_cost_usd: 0.12, num_turns: 4, modelUsage: { "model-a": { inputTokens: 900 } } }) };

@@ -16,7 +16,7 @@ import { readCodexLimits, usageReport } from "./adapters/usage-codex.ts";
 import { productVersion } from "@morndo/service-kit";
 import { poolCommand } from "./pool-cli.ts";
 import { keyPoolCommand } from "./keypool-cli.ts";
-import { signalFromText } from "./adapters/outcome-anthropic.ts";
+import { readRunFailure } from "./adapters/outcome-anthropic.ts";
 import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
@@ -39,8 +39,6 @@ const PIN_FILE = "claude-pin.json";
 // The signed-release pin (T-346): the key, the directory releases are installed in, the lowest version.
 const RELEASE_PIN_FILE = "claude-release-pin.json";
 const USAGE_WORDS = new Set(["missing argument", "isolation"]);
-// How much of a run's last output a key pool reads a refusal from: the end of each stream, never stored.
-const RUN_TAIL = 8192;
 
 // `gone`: aborted when the reader of stdout or stderr has closed its end (reader-gone.ts); a run then stops its turn.
 // `tty`: the command runs at an interactive terminal (stdin and stdout), which only pin-claude asks for.
@@ -99,7 +97,7 @@ morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [-
 morndo-keys keypool create <name> --vendor V --runtime R --by <who> [--mode round-robin|drain] [--recheck 24h] [--confirm-own-account] <key-connection>...
 morndo-keys keypool add|remove|revive <pool> <connection> [--confirm-own-account]    keypool move <pool> <connection> --to N
 morndo-keys keypool policy <pool> [--mode …] [--recheck …]    keypool list    keypool delete <pool>
-morndo-keys keypool report <pool> --member M --outcome exhausted|failing|limited|ok [--reason R]
+morndo-keys keypool report <pool> --member M --outcome exhausted|failing|limited [--reason R] [--lease <id>]
 morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role R] [--workspace DIR] [--reserve USD] -- <agent arguments>
   A key pool groups two or more of your API-key connections of one vendor and runtime behind one name (opt in; ADR-0037). It holds
   connection names and health, never a key. lease --pool and run --pool take the next member that can serve, in join order (round-robin) or
@@ -107,8 +105,10 @@ morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role
   refuses is passed over. Naming a pool, never a key, is all a caller can do: lease --pool refuses --connection and --member.
   A member the provider refuses for lack of credit, or at a spend limit you set, is marked exhausted and skipped. A refused key or
   account (401, 403, on hold, the tier's monthly cap) marks it failing, which stops the whole pool until you revive that member
-  or rotate its key: traffic never moves to another account because one account was refused. A run that fails is read for such a refusal
-  (the text is classified and dropped); a headless run (-p) that ended on an exhausted key goes once more on the next member. A pool
+  or rotate its key: traffic never moves to another account because one account was refused. A failed headless run is read for such a
+  refusal through the agent CLI's own JSON result only (never the text the model and its tools printed), and dropped; one that ended on
+  an exhausted key before doing any work (no cost, one turn) goes once more on another member. A lane reports only with --lease, for the
+  member of its own open lease; the machine's principal needs no lease. A pool
   holds only keys of accounts you hold: every member needs --confirm-own-account, and create needs --by, who read the terms line it shows.
   Exit 75 with a word: pool_empty, pool_blocked, terms, or the gate's word.
 `;
@@ -257,8 +257,9 @@ type RunPrep = {
   name: string; connection: SubscriptionConnection | KeyConnection; preset: VendorPreset; baseUrl: string; party: string;
   choice: { model: string; effort: string }; model: string; small: string;
 };
-// A run's end: its exit code, and the tail of what it printed, for a pool to read a refusal from and drop (ADR-0037).
-type RunEnd = { code: number; text: string };
+// A run's end: its exit code, and what the child printed on stdout, for a pool to read the CLI's structured result from and drop (ADR-0037).
+// Stderr and a thrown failure are never kept: they hold the model's and the tools' words as well as the provider's.
+type RunEnd = { code: number; output: string };
 
 const failed = (problem: string, exit?: number): Failed => ({ ok: false, error: exit === undefined ? { problem } : { problem, exit } });
 
@@ -321,7 +322,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let refusal: number | null = null;
   let status = 1;
   let stdout = "";
-  let text = "";
+  let output = "";
   let failure = "";
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
@@ -350,10 +351,9 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
         : await new ClaudeRuntime(bin, helperLine, saved, baseUrl, party).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
-    text = `${child.stdout.slice(-RUN_TAIL)}\n${child.stderr.slice(-RUN_TAIL)}`;
+    output = child.stdout;
   } catch (error) {
     failure = error instanceof Error ? error.message : "run failed";
-    text = failure;
     if (isStatusRefusal(error)) refusal = 75;
     io.stderr(errRedactor.push(failure));
     status = 1;
@@ -373,40 +373,55 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); stopper.done(); }
   }
-  if (refusal !== null) return { code: refusal, text };
-  if (hungUp) return { code: 129, text };                  // the terminal went away (SIGHUP): 128 + 1
+  if (refusal !== null) return { code: refusal, output };
+  if (hungUp) return { code: 129, output };                  // the terminal went away (SIGHUP): 128 + 1
   // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
-  return { code: status === 70 || status === 75 || status === 78 ? 1 : status, text };
+  return { code: status === 70 || status === 75 || status === 78 ? 1 : status, output };
 }
 
 // `morndo-keys run --pool <name>` (ADR-0037): the pool picks the member (the last pick is saved, the member's gate runs, one MemberPicked is
-// written), the run goes on it, and a run that failed is read for a refusal of the key. A credit or spend-limit refusal marks the member
-// exhausted; a refused key or account marks it failing, which blocks the pool; anything else changes nothing. A headless turn (-p) that
-// ended on an exhausted key goes once more, on the next member. What the child printed is classified and dropped.
+// written), the run goes on it, and a run that failed is read for a refusal of the key. Only the agent CLI's own structured result is read
+// (readRunFailure), never the free text the model and its tools printed: a credit or spend-limit refusal marks the member exhausted, a
+// refused key or account marks it failing (which blocks the pool), anything else, or output that is not that record, changes nothing. A
+// headless turn (-p) that ended on an exhausted key, before it did any work (no cost, no model use, one turn), goes once more, on another
+// member; one that had done work is reported and stopped, so it never pays or edits twice. What the child printed is dropped.
 async function launchPooled(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   const pool = need(parsed.get("pool"));
   if (parsed.get("connection") !== undefined) return fail(io, "usage");
   const headless = parsed.rest.includes("-p") || parsed.rest.includes("--print");
+  // The launcher asks the agent CLI for its JSON result. A caller who sets another output format (text, say) gets output a model can
+  // write any line of: such a run is never read for a refusal.
+  const structured = !parsed.rest.some(arg => arg === "--output-format" || arg.startsWith("--output-format="));
   let current = home;
+  let skip: readonly string[] = [];
+  let first: number | null = null;
   try {
-    for (let attempt = 0; ; attempt++) {
+    for (;;) {
       const began = current.now();
-      const picked = await current.keypools.pick(pool, async member => startRun(current, parsed, member));
-      if (!picked.ok) return fail(io, picked.error.problem, picked.error.exit);
+      const picked = await current.keypools.pick(pool, async member => startRun(current, parsed, member), { skip });
+      if (!picked.ok) {
+        // A retry that finds no other member leaves the first run's result as the answer, with the word beside it.
+        if (first === null) return fail(io, picked.error.problem, picked.error.exit);
+        io.stderr(`${picked.error.problem}\n`);
+        return first;
+      }
       const { member, value } = picked.value;
       const end = await runLeased(current, parsed, io, value.prep, value.lease);
       // runLeased closed its home when the key went to the child: the report is made in a home of its own.
       const after = openHome(home.env);
-      let exhausted = false;
+      let retry = false;
       try {
-        if (end.code !== 0) {
-          const reported = after.keypools.reportSignal(pool, member, signalFromText(end.text), began);
-          exhausted = reported.ok && reported.value.kind === "exhausted";
+        const failure = end.code !== 0 && structured ? readRunFailure(end.output) : null;
+        if (failure) {
+          const reported = after.keypools.reportSignal(pool, member, failure.signal, began);
+          retry = reported.ok && reported.value.kind === "exhausted" && failure.beforeWork && headless && first === null;
         }
       } finally { after.close(); }
-      if (!exhausted || !headless || attempt > 0) return end.code;
+      if (!retry) return end.code;
+      first = end.code;
+      skip = [...skip, member];
       current.close();
       current = openHome(home.env);
     }

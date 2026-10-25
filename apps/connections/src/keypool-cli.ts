@@ -2,9 +2,10 @@
 // is empty or blocked, a gate says no) exits 75, as `lease` and `run` do. `create`, `add`, `move` and `revive` are the principal's
 // (KP10): the command id is "cli", as every other command of this bin.
 import type { Actor, Outcome } from "@morndo/domain";
+import type { ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
 import { fail, need, type Io, type Parsed } from "./cli.ts";
-import { findPreset } from "./application/catalog.ts";
+import { selfId } from "./adapters/processes.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const HOUR = 3_600_000;
@@ -56,12 +57,12 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
   switch (sub) {
     case "create": return create(home, need(pool), parsed.positionals.slice(2), parsed, io);
     case "add": return done(home.keypools.join(need(pool), need(member), { confirmOwn }, ACTOR), io);
-    case "remove": return done(home.keypools.leave(need(pool), need(member)), io);
+    case "remove": return done(home.keypools.leave(need(pool), need(member), ACTOR), io);
     case "move": return done(home.keypools.move(need(pool), need(member), Number(need(parsed.get("to"))), ACTOR), io);
     case "policy": {
       const mode = modeOf(parsed.get("mode"));
       const recheckEveryMs = durationOf(parsed.get("recheck"));
-      return done(home.keypools.setPolicy(need(pool), { ...(mode === undefined ? {} : { mode }), ...(recheckEveryMs === undefined ? {} : { recheckEveryMs }) }, "cli"), io);
+      return done(home.keypools.setPolicy(need(pool), { ...(mode === undefined ? {} : { mode }), ...(recheckEveryMs === undefined ? {} : { recheckEveryMs }) }, ACTOR), io);
     }
     case "list":
       for (const view of home.keypools.list()) io.stdout(`${JSON.stringify(view)}\n`);
@@ -69,10 +70,16 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
     case "report": {
       const outcome = outcomeOf(parsed.get("outcome"), parsed.get("reason"));
       if (outcome === null) return fail(io, "outcome");
-      return done(home.keypools.report(need(pool), need(parsed.get("member")), outcome, home.now()), io);
+      // With --lease the caller is a lane, and may report only for the member of that open lease, as the process that holds it or one of its
+      // children; without it the caller is the principal at the machine (the same trust as every other command of this bin).
+      const lease = parsed.get("lease");
+      const caller = lease === undefined ? null : selfId();
+      if (lease !== undefined && caller === null) return fail(io, "holder");
+      const by: ReportBy = lease === undefined || caller === null ? ACTOR : { kind: "lane", lease, caller: { pid: caller.pid, startedAt: caller.startedAt, bootId: caller.bootId } };
+      return done(home.keypools.report(need(pool), need(parsed.get("member")), outcome, home.now(), by), io);
     }
     case "revive": return done(home.keypools.revive(need(pool), need(member), ACTOR), io);
-    case "delete": return done(home.keypools.delete(need(pool)), io);
+    case "delete": return done(home.keypools.delete(need(pool), ACTOR), io);
     default: return fail(io, "usage");
   }
 }
@@ -82,7 +89,7 @@ function create(home: Opened, name: string, members: readonly string[], parsed: 
   const vendor = need(parsed.get("vendor"));
   const by = parsed.get("by") ?? "";
   if (by.trim() === "") {
-    const line = findPreset(home.catalog, vendor)?.keyPool?.termsLine;
+    const line = home.catalog.keyPool(vendor)?.termsLine;
     if (line) io.stderr(`${line}\n`);
   }
   const mode = modeOf(parsed.get("mode"));

@@ -1,6 +1,7 @@
 // The first-party error dialect (ADR-0037): a refusal becomes a key-pool outcome. A body is the error document
-// {type:"error", error:{type, message, details?}, request_id}. A printed line is undocumented, so the text reader
-// accepts the same words wherever they sit. A signal keeps at most 256 characters of that text; the outcome keeps none.
+// {type:"error", error:{type, message, details?}, request_id}. A failed headless run is read only through the agent CLI's own structured
+// result (readRunFailure), never through free text, which holds the model's and the tools' words too (review F1). A signal keeps at most
+// 256 characters of the provider's message; the outcome keeps none.
 import type { Outcome } from "@morndo/domain";
 import type { OutcomeClassifier, ProviderSignal } from "../application/ports.ts";
 
@@ -8,19 +9,10 @@ const TEXT_LIMIT = 256;
 
 // "You will regain access on YYYY-MM-DD …" — the date is read from the whole message, not from the cut excerpt.
 const RESUME_DATE = /regain access on (\d{4}-\d{2}-\d{2})/;
-const API_ERROR = /API Error:\s*(\d{3})(?!\d)/;
-// The status a headless run prints in its JSON result (observed with Claude Code 2.1.310): "api_error_status":400, or null when there was none.
-const API_STATUS = /"api_error_status"\s*:\s*(\d{3})(?!\d)/;
-const ERROR_TYPE = /"type"\s*:\s*"([A-Za-z0-9_]+_error)"/;
-const ERROR_CODE = /"error_code"\s*:\s*"([A-Za-z0-9_]+)"/;
-const MESSAGE = /"message"\s*:\s*"(?:\\.|[^"\\])*"/;
 // Only the identifiers: ordinary words ("authentication failed" from git or ssh) in a run's output say nothing about the key.
 const HELD = /account_on_hold|authentication_failed/i;
 const CREDIT = /credit balance (?:is )?too low/i;
 const SPEND = /you have reached your specified (?:workspace )?API usage limits/i;
-const SPEND_CODE = /enforced_spend_limit_reached/i;
-
-const TEXT_HITS: readonly RegExp[] = [API_ERROR, API_STATUS, ERROR_TYPE, ERROR_CODE, MESSAGE, CREDIT, SPEND, HELD, SPEND_CODE];
 
 function resumeDateIn(text: string): string | null {
   return RESUME_DATE.exec(text)?.[1] ?? null;
@@ -67,27 +59,53 @@ export function signalFromBody(status: number | null, body: string | null, retry
   };
 }
 
-function firstHit(output: string): number | null {
-  let at: number | null = null;
-  for (const pattern of TEXT_HITS) {
-    const found = pattern.exec(output);
-    if (found && (at === null || found.index < at)) at = found.index;
-  }
-  return at;
+export type RunFailure = { signal: ProviderSignal; beforeWork: boolean };
+
+// The agent CLI prints one JSON value: a result record, or a list of records whose result is last. Anything else is not a refusal.
+export function readRunFailure(stdout: string): RunFailure | null {
+  const trimmed = stdout.trim();
+  if (trimmed === "") return null;
+  let parsed: unknown;
+  try { parsed = JSON.parse(trimmed); } catch { return null; }
+  const row = resultRecord(parsed);
+  if (!row || row.type !== "result" || row.is_error !== true) return null;
+  const status = typeof row.api_error_status === "number" && Number.isInteger(row.api_error_status) ? row.api_error_status : null;
+  if (status === null && row.terminal_reason !== "api_error") return null;
+  const text = typeof row.result === "string" ? row.result : null;
+  return {
+    signal: {
+      status,
+      kind: null,
+      text: text === null ? null : clip(text),
+      retryAfterSeconds: null,
+      code: null,
+      resumeDate: text === null ? null : resumeDateIn(text),
+    },
+    beforeWork: beforeWork(row),
+  };
 }
 
-export function signalFromText(output: string): ProviderSignal {
-  const at = firstHit(output);
-  if (at === null) return { status: null, kind: null, text: null, retryAfterSeconds: null, code: null, resumeDate: null };
-  const statusText = API_ERROR.exec(output)?.[1] ?? API_STATUS.exec(output)?.[1];
-  return {
-    status: statusText === undefined ? null : Number(statusText),
-    kind: ERROR_TYPE.exec(output)?.[1] ?? null,
-    text: clip(output, at),
-    retryAfterSeconds: null,
-    code: ERROR_CODE.exec(output)?.[1] ?? null,
-    resumeDate: resumeDateIn(output),
-  };
+function resultRecord(value: unknown): Record<string, unknown> | null {
+  if (!Array.isArray(value)) return record(value);
+  for (let i = value.length - 1; i >= 0; i -= 1) {
+    const row = record(value[i]);
+    if (row?.type === "result") return row;
+  }
+  return null;
+}
+
+function beforeWork(row: Record<string, unknown>): boolean {
+  if (row.total_cost_usd !== 0) return false;
+  if (typeof row.num_turns !== "number" || !(row.num_turns <= 1)) return false;
+  if ("modelUsage" in row) {
+    const usage = record(row.modelUsage);
+    if (!usage || Object.keys(usage).length > 0) return false;
+  }
+  if ("usage" in row) {
+    const usage = record(row.usage);
+    if (!usage || usage.input_tokens !== 0 || usage.output_tokens !== 0) return false;
+  }
+  return true;
 }
 
 function resumeAt(resumeDate: string | null): number | null {
