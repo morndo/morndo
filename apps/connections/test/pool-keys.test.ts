@@ -8,7 +8,7 @@ import { findConnection, isKey, noteLent, openGrant, type Actor, type Grant, typ
 import { openHome, type Opened } from "../src/compose.ts";
 import { SqliteKeyPoolStore } from "../src/adapters/key-pool-store-sqlite.ts";
 import { streamRedactor } from "../src/adapters/redact.ts";
-import { guardedRelay, watchPoolKeys } from "../src/pool-keys.ts";
+import { FilterIncomplete, guardedRelay, watchPoolKeys } from "../src/pool-keys.ts";
 
 const KEY1 = "sk-ant-synthetic-watch-key-0001";
 const KEY2 = "sk-ant-synthetic-watch-key-0002";
@@ -126,6 +126,125 @@ const keyConn = (home: Opened, name: string): KeyConnection => {
   if (!c || !isKey(c)) throw new Error(`no key ${name}`);
   return c;
 };
+
+describe("fix round 4: the filter is complete only when every key the grant lent the run is loaded", () => {
+  const lentGrant = (member: string, lent: string[]): Grant => ({
+    id: "gl1", member, lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
+    request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
+    previous: null, seen: [], lent,
+  });
+  const withGrant = async (lent: string[]) => {
+    const w = await world();
+    const store = new SqliteKeyPoolStore(w.home.db);
+    const loaded = store.load("p");
+    const opened = openGrant(loaded.pool!, lentGrant("k1", lent), 1);
+    if (!opened.ok) throw new Error("grant");
+    expect(store.save(opened.value, loaded.version)).toBe(true);
+    store.close();
+    return w;
+  };
+  // A home whose open() fails for the named refs while `failing` holds; everything else is the real home.
+  const flaky = (env: NodeJS.ProcessEnv, refs: string[], failing: { on: boolean }) => () => {
+    const real = openHome(env);
+    return { open: async (ref: string) => { if (failing.on && refs.includes(ref)) throw new Error("transient"); return real.open(ref); }, close: () => real.close() };
+  };
+
+  it("one key that fails to open is not skipped: learn says which member (never the key), keeps the others it opened, and the next call loads the rest", async () => {
+    const { home, env, refs } = await withGrant(["k1", "k2"]);
+    const seen = new Set<string>();
+    const failing = { on: true };
+    const watch = watchPoolKeys({ db: home.db, pool: "p", grant: "gl1", open: flaky(env, [refs.k2 ?? ""], failing), seen });
+    expect(home.keypools.join("p", "k3", { confirmOwn: true }, ACTOR).ok).toBe(true);
+    const first = await watch.learn().catch((error: unknown) => error);
+    expect(first).toBeInstanceOf(FilterIncomplete);
+    expect((first as FilterIncomplete).members).toEqual(["k2"]);
+    expect(String((first as FilterIncomplete).message)).not.toContain(KEY2);
+    expect(seen.has(refs.k2 ?? "")).toBe(false);
+    await expect(watch.learn()).rejects.toBeInstanceOf(FilterIncomplete);
+    failing.on = false;
+    const done = await watch.learn();
+    expect([...done].sort()).toEqual([KEY1, KEY2, KEY3].sort());
+    expect(await watch.learn()).toEqual([]);
+    watch.close();
+  });
+
+  it("a current member the run was never lent that cannot be opened does not hold the output back", async () => {
+    const { home, env, refs } = await withGrant(["k1"]);
+    const failing = { on: true };
+    const watch = watchPoolKeys({ db: home.db, pool: "p", grant: "gl1", open: flaky(env, [refs.k2 ?? ""], failing), seen: new Set() });
+    expect(home.keypools.join("p", "k3", { confirmOwn: true }, ACTOR).ok).toBe(true);
+    const learned = await watch.learn();
+    expect(learned).toContain(KEY1);
+    expect(learned).not.toContain(KEY2);
+    watch.close();
+  });
+});
+
+describe("fix round 4: the relay marks a withheld stretch once and ends the run instead of writing unfiltered", () => {
+  const rig = (learn: () => Promise<readonly string[]>, extra: { giveUpAfterMs?: number; now?: () => number } = {}) => {
+    const written: { stream: string; text: string }[] = [];
+    const gave: Error[] = [];
+    const relay = guardedRelay({
+      learn, add: () => undefined, push: (_stream, text) => text, write: (stream, text) => { written.push({ stream, text }); },
+      attempts: 1, pauseMs: 1, giveUpAfterMs: extra.giveUpAfterMs ?? 1000, now: extra.now ?? (() => 0), onGiveUp: error => { gave.push(error); },
+    });
+    return { relay, written, gave };
+  };
+
+  it("one marker for a whole stretch of withheld chunks, a new one for the next stretch", async () => {
+    let healthy = false;
+    const { relay, written } = rig(async () => { if (!healthy) throw new Error("busy"); return []; });
+    for (const text of ["a", "b", "c"]) relay.chunk("out", text);
+    await relay.settled();
+    expect(written).toHaveLength(1);
+    expect(written[0]?.text).toMatch(/withheld/);
+    healthy = true;
+    relay.chunk("out", "d");
+    await relay.settled();
+    expect(written.map(w => w.text).slice(1)).toEqual(["d"]);
+    healthy = false;
+    relay.chunk("out", "e");
+    await relay.settled();
+    expect(written.filter(w => /withheld/.test(w.text))).toHaveLength(2);
+  });
+
+  it("after the bounded time it gives up once, naming the member from the error, writes nothing more and drops what follows", async () => {
+    let clock = 0;
+    const { relay, written, gave } = rig(async () => { throw new FilterIncomplete(["k3"]); }, { now: () => clock });
+    relay.chunk("out", "a");
+    await relay.settled();
+    clock = 500;
+    relay.chunk("out", "b");
+    await relay.settled();
+    expect(written).toHaveLength(1);
+    expect(gave).toHaveLength(0);
+    clock = 1500;
+    relay.chunk("out", `c ${KEY3}`);
+    relay.chunk("err", `d ${KEY3}`);
+    await relay.settled();
+    expect(gave).toHaveLength(1);
+    expect(gave[0]).toBeInstanceOf(FilterIncomplete);
+    expect(written).toHaveLength(1);
+    expect(JSON.stringify(written)).not.toContain(KEY3);
+  });
+
+  it("a read that works clears the clock: a stretch that ends in time is not a give-up", async () => {
+    let clock = 0;
+    let healthy = false;
+    const { relay, gave } = rig(async () => { if (!healthy) throw new Error("busy"); return []; }, { now: () => clock });
+    relay.chunk("out", "a");
+    await relay.settled();
+    healthy = true;
+    clock = 900;
+    relay.chunk("out", "b");
+    await relay.settled();
+    healthy = false;
+    clock = 1800;
+    relay.chunk("out", "c");
+    await relay.settled();
+    expect(gave).toHaveLength(0);
+  });
+});
 
 describe("the watch: every key the run may be, or was, handed", () => {
   it("a read that fails does not count as seen: the next read still learns the member that joined", async () => {
