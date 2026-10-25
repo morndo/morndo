@@ -114,6 +114,13 @@ describe("dueMembers", () => {
     const claimed = ok(claimProbe(p, "k2", T + DAY + 2 * HOUR, "due"));
     expect(dueMembers(claimed, T + DAY + 2 * HOUR + SEC)).toEqual(["k1", "k3"]);
   });
+  it("never lists a member whose claim is live, even if a stored pool has its next check in the past (the claim normally moves it on)", () => {
+    const p = ok(reportKeyOutcome(pool(2), "k1", dry(), T, T));
+    const odd = { ...p, members: p.members.map(m => m.credential === "k1" ? { ...m, probingUntil: T + DAY + 10 * SEC } : m) };
+    expect(member(odd, "k1").nextCheck).toBeLessThanOrEqual(T + DAY);
+    expect(dueMembers(odd, T + DAY)).toEqual([]);
+    expect(dueMembers(odd, T + DAY + 10 * SEC)).toEqual(["k1"]);
+  });
   it("never lists an active or a failing member", () => {
     let p = pool(3);
     p = ok(reportKeyOutcome(p, "k1", dry(), T, T));
