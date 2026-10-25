@@ -216,6 +216,12 @@ describe("fix round 6: a launcher killed outright leaves a directory the next st
     expect(existsSync(dead)).toBe(false);
     expect(existsSync(alive)).toBe(true);
   });
+  it("keeps the directory of another process that is alive (the launcher's own parent), not only its own", async () => {
+    useRoot();
+    const other = leftBehind(`mf-${process.ppid}-aaaaaa`);
+    await serve();
+    expect(existsSync(other)).toBe(true);
+  });
   it("leaves alone what it did not make: another name, a directory with other files in it, an old-format name, a symlink", async () => {
     useRoot();
     const other = leftBehind("somebody-else");

@@ -6,7 +6,7 @@
 // rejection is `no` and adds nothing. A key already held is `ok` and is not asked about again. Two deliveries of one
 // new key at once add it once and both are told `ok`. The cap on the held set is only a bound on memory.
 import { createServer, connect, type Server, type Socket } from "node:net";
-import { chmodSync, lstatSync, mkdtempSync, rmSync } from "node:fs";
+import { chmodSync, lstatSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
@@ -17,6 +17,39 @@ const MIN_KEY = 16;
 const MAX_HELD = 1024;
 // A valid key survives JSON escaping (`\uXXXX` is the long form). Anything past this is a line that is too long.
 const MAX_LINE = MAX_KEY * 6 + 64;
+// A directory this module made: `mf-<pid>-<6 chars>`. An older name (`mf-` and six characters only) is not this.
+const FILTER_DIR = /^mf-(\d+)-[A-Za-z0-9]{6}$/;
+// sockaddr_un.sun_path is 108 bytes on Linux and 104 on macOS, and one byte is the terminating NUL.
+const MAX_FILTER_SOCKET_PATH = process.platform === "darwin" ? 103 : 107;
+
+// Alive, or not provably gone. EPERM means the process exists and we may not signal it. Only ESRCH means it is gone.
+function processGone(pid: number): boolean {
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
+
+// A launcher killed outright cannot remove its socket directory. The next start removes one only when it is a real
+// directory this module named, owned by this user, whose process is gone, and which holds nothing but the socket.
+// A failure here never stops the channel that is about to listen, and a symlink is never followed or removed.
+function sweepStaleFilterDirs(root: string): void {
+  let names: string[];
+  try { names = readdirSync(root); } catch { return; }
+  const uid = process.getuid?.() ?? -1;
+  for (const name of names) {
+    try {
+      const text = FILTER_DIR.exec(name)?.[1];
+      if (text === undefined) continue;
+      const pid = Number(text);
+      if (!Number.isSafeInteger(pid) || pid <= 0 || String(pid) !== text || pid === process.pid) continue;
+      const dir = join(root, name);
+      const stat = lstatSync(dir);
+      if (stat.isSymbolicLink() || !stat.isDirectory() || stat.uid !== uid) continue;
+      if (!processGone(pid)) continue;
+      if (readdirSync(dir).some(entry => entry !== "f.sock")) continue;
+      rmSync(dir, { recursive: true, force: true });
+    } catch { /* leave this entry; the new channel still starts */ }
+  }
+}
 
 function readKey(line: string): string | null {
   let value: unknown;
@@ -35,7 +68,13 @@ export async function serveFilterChannel(input: {
   const max = input.max ?? MAX_HELD;
   const base = process.env.XDG_RUNTIME_DIR;
   const root = typeof base === "string" && base !== "" ? base : tmpdir();
-  const dir = mkdtempSync(join(root, "mf-"));
+  const socketPath = join(root, "mf-" + process.pid + "-XXXXXX", "f.sock");
+  const socketBytes = Buffer.byteLength(socketPath);
+  if (socketBytes > MAX_FILTER_SOCKET_PATH) {
+    throw new Error(`the filter socket path is too long (${socketBytes} bytes, at most ${MAX_FILTER_SOCKET_PATH}): set XDG_RUNTIME_DIR or TMPDIR to a shorter directory`);
+  }
+  sweepStaleFilterDirs(root);
+  const dir = mkdtempSync(join(root, `mf-${process.pid}-`));
   chmodSync(dir, 0o700);
   const path = join(dir, "f.sock");
   const held = new Set<string>();

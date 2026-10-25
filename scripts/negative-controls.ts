@@ -4901,6 +4901,18 @@ export const CONTROLS: Control[] = [
   { id: "t449-cli-asks-the-pool", task: "T-449", file: "apps/connections/src/cli.ts",
     find: "accepts: key => membership.accepts(key) }", replace: "accepts: () => true }",
     run: ["apps/connections/test/keypool-handoff-cli.test.ts"], expect: "seventy keys nobody holds" },
+  { id: "t449-sweep-runs-at-start", task: "T-449", file: "apps/connections/src/filter-channel.ts",
+    find: "sweepStaleFilterDirs(root);", replace: "",
+    run: ["apps/connections/test/filter-channel.test.ts", "apps/connections/test/keypool-handoff-cli.test.ts"], expect: "removes the directory of a process that is gone" },
+  { id: "t449-sweep-keeps-live-owner", task: "T-449", file: "apps/connections/src/filter-channel.ts",
+    find: "if (!processGone(pid)) continue;", replace: "",
+    run: ["apps/connections/test/filter-channel.test.ts"], expect: "keeps the directory of another process that is alive" },
+  { id: "t449-sweep-only-what-it-made", task: "T-449", file: "apps/connections/src/filter-channel.ts",
+    find: 'if (readdirSync(dir).some(entry => entry !== "f.sock")) continue;', replace: "",
+    run: ["apps/connections/test/filter-channel.test.ts"], expect: "leaves alone what it did not make" },
+  { id: "t449-long-path-says-so", task: "T-449", file: "apps/connections/src/filter-channel.ts",
+    find: "if (socketBytes > MAX_FILTER_SOCKET_PATH) {", replace: "if (false as boolean) {",
+    run: ["apps/connections/test/filter-channel.test.ts", "apps/connections/test/keypool-handoff-cli.test.ts"], expect: "fails closed with an error that says so" },
 ];
 
 // ---- the runner
