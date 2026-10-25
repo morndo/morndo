@@ -4,7 +4,8 @@
 import { describe, expect, it } from "vitest";
 import {
   acknowledgeKeyPoolTerms, addKey, addLayer, addSubscription, chooseKey, createKeyPool, joinKeyPool, keyPicked, keyPoolStanding,
-  keyPoolBackAt, keyRotated, leaveKeyPool, moveKeyMember, reportKeyOutcome, reviveKey, revoke, setKeyPoolPolicy, settleKeyPool,
+  keyPoolBackAt, keyRotated, leaveKeyPool, moveKeyMember, releaseKey, reportKeyOutcome, reviveKey, revoke, setKeyPoolPolicy, settleKeyPool,
+  KEY_POOL_RESUME_MAX_MS,
   type Actor, type Connection, type Directory, type KeyPool, type Names, type Outcome,
   emptyDirectory, findConnection, newKeyPoolEvents,
 } from "../src/index.ts";
@@ -168,6 +169,11 @@ describe("terms acknowledgement (CN4 pattern)", () => {
     expect(a.events.at(-1)).toEqual({ type: "TermsAcknowledged", revision: "2026-10-25", by: "ada", at: T + 1, command: "c2" });
     expect(ok(acknowledgeKeyPoolTerms(a, "2027-01-01", "bo", principal(), T + 2)).terms?.revision).toBe("2027-01-01");
   });
+  it("needs a name: a blank or whitespace-only one is no acknowledgement, and a name is kept trimmed", () => {
+    const p = ok(createKeyPool({ name: "p", runtime: "r", vendor: "v" }, NO_NAMES, principal(), T));
+    for (const by of ["", " ", "\t\n  "]) expect(word(acknowledgeKeyPoolTerms(p, "r1", by, principal(), T))).toBe("ack_needed");
+    expect(ok(acknowledgeKeyPoolTerms(p, "r1", "  ada ", principal(), T)).terms?.by).toBe("ada");
+  });
 });
 
 describe("kp3 an exhausted member is never picked; a failing member blocks the pool", () => {
@@ -314,6 +320,21 @@ describe("kp7 how a member is left", () => {
   });
 });
 
+describe("review F5: a resume date is capped", () => {
+  it("a date past a year from now (an injected 9999-12-31, say) is held to a year, for the health, the next check and the event", () => {
+    const far = Date.UTC(9999, 11, 31);
+    const p = ok(reportKeyOutcome(pool(2), "k1", exhausted("spend-limit", far), T + MIN, T + MIN));
+    expect(p.members[0]?.health).toEqual({ state: "exhausted", reason: "spend-limit", resumeAt: T + MIN + KEY_POOL_RESUME_MAX_MS });
+    expect(p.members[0]?.nextCheck).toBe(T + MIN + KEY_POOL_RESUME_MAX_MS);
+    expect(p.events.find(e => e.type === "KeyExhausted")).toMatchObject({ resumeAt: T + MIN + KEY_POOL_RESUME_MAX_MS });
+    expect(KEY_POOL_RESUME_MAX_MS).toBe(365 * DAY);
+  });
+  it("a date inside the year, and one already past, are kept as they are", () => {
+    expect(ok(reportKeyOutcome(pool(2), "k1", exhausted("spend-limit", T + 30 * DAY), T + MIN, T + MIN)).members[0]?.nextCheck).toBe(T + 30 * DAY);
+    expect(ok(reportKeyOutcome(pool(2), "k1", exhausted("spend-limit", T - DAY), T + MIN, T + MIN)).members[0]?.nextCheck).toBe(T - DAY);
+  });
+});
+
 describe("outcomes: what each one does to a member", () => {
   it("exhausted records the reason, when it may be tried again, and one KeyExhausted", () => {
     const p = mark(pool(2), "k1", exhausted("spend-limit", T + 2 * DAY), T + MIN);
@@ -387,11 +408,37 @@ describe("kp9 a gate refusal does not change health, moves the lastPick to the m
     expect(noted.members.map(m => m.health)).toEqual(p.members.map(m => m.health));
     expect(noted.events.filter(e => e.type === "MemberPicked")).toEqual([{ type: "MemberPicked", member: "k2", declined: [{ member: "k1", word: "budget" }], at: T + MIN }]);
   });
-  it("drain does not return to a declined member on the next pick", () => {
-    const p = pool(3, "drain");
-    const second = ok(chooseKey(ok(chooseKey(p)).pool, ["k1"]));
+  it("round-robin keeps the member finally leased as the last pick, so the next caller goes on from it", () => {
+    const second = ok(chooseKey(ok(chooseKey(pool(3))).pool, ["k1"]));
+    const noted = keyPicked(second.pool, "k2", [{ member: "k1", word: "repo" }], T + MIN);
+    expect(noted.lastPick).toBe("k2");
+    expect(ok(chooseKey(noted)).member).toBe("k3");
+  });
+  it("review F6: drain stays on one member until it is out: a caller another member was given to does not move the pool", () => {
+    const base = pool(3, "drain");
+    const first = ok(chooseKey(base));                                  // reserves k1 for a caller whose gate refuses it
+    const second = ok(chooseKey(first.pool, ["k1"]));                   // so that caller is given k2
     expect(second.member).toBe("k2");
-    expect(ok(chooseKey(second.pool)).member).toBe("k2");
+    const released = releaseKey(second.pool, "k2", base.lastPick);      // the service puts the pointer back
+    const noted = keyPicked(released, "k2", [{ member: "k1", word: "repo" }], T + MIN);
+    expect(noted.lastPick).toBeNull();
+    expect(noted.events.at(-1)).toMatchObject({ type: "MemberPicked", member: "k2", declined: [{ member: "k1", word: "repo" }] });
+    expect(ok(chooseKey(noted)).member).toBe("k1");                     // the next caller, allowed on k1, gets it
+  });
+  it("drain with no refusal keeps the member as the last pick, and stays on it", () => {
+    const first = ok(chooseKey(pool(3, "drain")));
+    const noted = keyPicked(first.pool, "k1", [], T + MIN);
+    expect(noted.lastPick).toBe("k1");
+    expect(ok(chooseKey(noted)).member).toBe("k1");
+  });
+  it("review F6: releaseKey undoes a reservation, and only while the pointer is still on it", () => {
+    const base = pool(3);
+    const reserved = ok(chooseKey(base));
+    expect(reserved.pool.lastPick).toBe("k1");
+    expect(releaseKey(reserved.pool, "k1", null).lastPick).toBeNull();
+    expect(releaseKey(reserved.pool, "k1", "k3").lastPick).toBe("k3");
+    const moved = ok(chooseKey(reserved.pool)).pool;                    // another pick moved it on, to k2
+    expect(releaseKey(moved, "k1", null)).toBe(moved);
   });
 });
 

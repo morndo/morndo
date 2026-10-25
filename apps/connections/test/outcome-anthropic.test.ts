@@ -1,13 +1,9 @@
 // The first-party error classifier (ADR-0037, plan 3.1): what a refusal from the provider means to a key pool. Fixtures follow the
-// error pages as read on 2026-10-25 (platform.claude.com/docs/en/api/errors and .../rate-limits); request ids are made up. Claude
-// Code's own printed lines are not documented, so those fixtures are synthetic and say so. A malformed request must never exhaust a key.
+// error pages as read on 2026-10-25 (platform.claude.com/docs/en/api/errors and .../rate-limits); request ids are made up. A run's own
+// result record is read only as the agent CLI's structured result (review F1): never free text. A malformed request must never exhaust a key.
 import { describe, expect, it } from "vitest";
 import type { Outcome } from "@morndo/domain";
-import { VendorCatalog } from "@morndo/protocol";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
-import { builtinClassifiers } from "../src/adapters/classifiers.ts";
-import { anthropicClassifier, signalFromBody, signalFromText } from "../src/adapters/outcome-anthropic.ts";
+import { anthropicClassifier, readRunFailure, signalFromBody } from "../src/adapters/outcome-anthropic.ts";
 
 const body = (type: string, message: string, details?: Record<string, string>): string =>
   JSON.stringify({ type: "error", error: { type, message, ...(details ? { details } : {}) }, request_id: "req_011TESTTESTTESTTEST" });
@@ -81,90 +77,83 @@ describe("signalFromBody keeps a bounded signal, never the text", () => {
   });
 });
 
-describe("signalFromText: what Claude Code prints (synthetic: its format is not documented)", () => {
-  const sig = (text: string) => anthropicClassifier.classify(signalFromText(text));
-  it("reads an API error line with its JSON body", () => {
-    expect(sig(`API Error: 400 ${body("invalid_request_error", CREDIT)}`)).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
-    expect(sig(`API Error: 400 ${body("invalid_request_error", LIMIT)}`)).toEqual({ kind: "exhausted", reason: "spend-limit", resumeAt: Date.UTC(2026, 10, 1) });
-    expect(sig(`API Error: 401 ${body("authentication_error", "invalid x-api-key")}`)).toEqual({ kind: "failing", reason: "rejected" });
-    expect(sig(`API Error: 429 ${body("rate_limit_error", CAP, { error_code: "enforced_spend_limit_reached" })}`)).toEqual({ kind: "failing", reason: "cap" });
-  });
-  it("reads the shorter lines it prints without a status", () => {
-    expect(sig(CODE_LINE)).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
-    expect(sig(`some output\n${CODE_LINE}\nmore output`)).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
-    expect(sig("Credit balance is too low")).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
-    expect(sig("account_on_hold")).toEqual({ kind: "failing", reason: "held" });
-    expect(sig("authentication_failed")).toEqual({ kind: "failing", reason: "held" });
-  });
-  it("is unknown for output that says nothing about a refusal, and keeps no text of it", () => {
-    expect(sig("Done. All tests passed.")).toEqual({ kind: "unknown" });
-    expect(sig("")).toEqual({ kind: "unknown" });
-    expect(signalFromText("Done. sk-planted-secret-0001")).toMatchObject({ status: null, kind: null, text: null });
-  });
-  it("ordinary words from a run's own tools (git or ssh failing to authenticate) say nothing about the key", () => {
-    expect(sig("fatal: Authentication failed for 'https://example.com/team/repo.git'")).toEqual({ kind: "unknown" });
-    expect(sig("ssh: account on hold, try again later")).toEqual({ kind: "unknown" });
-  });
-  it("a 400 line for another reason stays unknown", () => {
-    expect(sig(`API Error: 400 ${body("invalid_request_error", "max_tokens: Input should be greater than or equal to 1")}`)).toEqual({ kind: "unknown" });
-  });
-  it("the excerpt it keeps is bounded", () => {
-    const s = signalFromText(`${"y".repeat(5000)} ${CODE_LINE} ${"z".repeat(5000)}`);
-    expect((s.text ?? "").length).toBeLessThanOrEqual(256);
-    expect(anthropicClassifier.classify(s)).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
-  });
+// A headless run prints one JSON result (observed 2026-10-25 with agent CLI 2.1.310 against a local stand-in API, no real key). When the
+// provider refused, is_error is true, terminal_reason "api_error" and api_error_status the HTTP status; "result" is the CLI's rendering of
+// the refusal. A run that did work has a cost, more than one turn or model usage. Only this record is read (review F1).
+const record = (over: Record<string, unknown> = {}): string => JSON.stringify({
+  type: "result", subtype: "success", is_error: true, api_error_status: 400, terminal_reason: "api_error", num_turns: 1,
+  total_cost_usd: 0, modelUsage: {}, usage: { input_tokens: 0, output_tokens: 0 }, result: "Credit balance is too low", ...over,
 });
+const readOutcome = (stdout: string): Outcome | null => {
+  const failure = readRunFailure(stdout);
+  return failure ? anthropicClassifier.classify(failure.signal) : null;
+};
 
-// Observed 2026-10-25: Claude Code 2.1.310 headless (-p) against a local stand-in for the Messages API (no real key, nothing leaves the
-// machine) answering the documented bodies. The credit refusal printed this one line on stdout and exited 1 after one request; the spend
-// limit printed the status and the API's message as plain text (no JSON) and exited 1 after four requests.
-describe("what Claude Code 2.1.310 printed for the documented refusals", () => {
-  const sig = (text: string) => anthropicClassifier.classify(signalFromText(text));
-  it("the credit refusal's line", () => {
-    expect(sig("Credit balance is too low\n")).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
+describe("the structured result of a failed headless run", () => {
+  it("reads the credit refusal, and says the run had done no work", () => {
+    const failure = readRunFailure(record());
+    expect(failure?.beforeWork).toBe(true);
+    expect(failure?.signal).toMatchObject({ status: 400, retryAfterSeconds: null });
+    expect(readOutcome(record())).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
   });
-  it("the spend-limit refusal's line, with the date it names", () => {
-    expect(sig("API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.\n"))
-      .toEqual({ kind: "exhausted", reason: "spend-limit", resumeAt: Date.UTC(2026, 10, 1) });
+  it("reads the spend-limit refusal with the date it names", () => {
+    const text = "API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.";
+    expect(readOutcome(record({ result: text }))).toEqual({ kind: "exhausted", reason: "spend-limit", resumeAt: Date.UTC(2026, 10, 1) });
   });
-});
+  it("reads the status alone: 401 rejected, 403 denied, 429 only a rate limit", () => {
+    expect(readOutcome(record({ api_error_status: 401, result: "Invalid API key" }))).toEqual({ kind: "failing", reason: "rejected" });
+    expect(readOutcome(record({ api_error_status: 403, result: "Forbidden" }))).toEqual({ kind: "failing", reason: "denied" });
+    expect(readOutcome(record({ api_error_status: 429, result: "Too many requests" }))).toEqual({ kind: "limited", retryAfterMs: null });
+    expect(readOutcome(record({ api_error_status: 500, result: "Internal server error" }))).toEqual({ kind: "unknown" });
+  });
+  it("a refusal the CLI reports with no status still reads from its text, when the CLI itself says it is an API error", () => {
+    expect(readOutcome(record({ api_error_status: null, result: "Credit balance is too low" }))).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
+  });
+  it("takes the result record when the output is a list of records", () => {
+    expect(readOutcome(JSON.stringify([{ type: "system", subtype: "init" }, JSON.parse(record())]))).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
+  });
 
-// Observed the same day through `morndo-keys run --pool`, whose child prints a JSON result: the refusal is in "result", its status in
-// "api_error_status" (null when the run had no API error).
-describe("the JSON result a headless run prints", () => {
-  const sig = (text: string) => anthropicClassifier.classify(signalFromText(text));
-  const result = (status: number | null, message: string) => JSON.stringify({ type: "result", is_error: true, api_error_status: status, result: message });
-  it("reads the credit refusal and the spend-limit refusal from the result", () => {
-    expect(sig(result(400, "Credit balance is too low"))).toEqual({ kind: "exhausted", reason: "credit", resumeAt: null });
-    expect(sig(result(400, "API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.")))
-      .toEqual({ kind: "exhausted", reason: "spend-limit", resumeAt: Date.UTC(2026, 10, 1) });
+  it("review F3: the run had done work when it cost something, took more than one turn, or used a model", () => {
+    for (const over of [{ total_cost_usd: 0.12 }, { num_turns: 3 }, { modelUsage: { "model-a": { inputTokens: 5 } } }, { usage: { input_tokens: 5, output_tokens: 2 } }]) {
+      expect(readRunFailure(record(over))?.beforeWork, JSON.stringify(over)).toBe(false);
+    }
   });
-  it("reads the status alone: 401 is a rejected key, 403 a denied one, 429 only a rate limit", () => {
-    expect(sig(result(401, "Invalid API key"))).toEqual({ kind: "failing", reason: "rejected" });
-    expect(sig(result(403, "Forbidden"))).toEqual({ kind: "failing", reason: "denied" });
-    expect(sig(result(429, "Too many requests"))).toEqual({ kind: "limited", retryAfterMs: null });
+  it("review F3: a run that does not say what it cost is not known to have done no work", () => {
+    const bare = JSON.parse(record()) as Record<string, unknown>;
+    delete bare.total_cost_usd;
+    expect(readRunFailure(JSON.stringify(bare))?.beforeWork).toBe(false);
+    delete bare.num_turns;
+    expect(readRunFailure(JSON.stringify(bare))?.beforeWork).toBe(false);
   });
-  it("a result with no API error says nothing", () => {
-    expect(sig(JSON.stringify({ type: "result", is_error: true, api_error_status: null, result: "tests failed" }))).toEqual({ kind: "unknown" });
-    expect(sig(result(500, "Internal server error"))).toEqual({ kind: "unknown" });
-  });
-});
 
-describe("the catalog names the classifier as data", () => {
-  const presets = VendorCatalog.parse(JSON.parse(readFileSync(join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json"), "utf8")));
-  it("only the first-party preset hosts a key pool, with a dated terms revision and a terms line", () => {
-    const hosts = presets.filter(p => p.keyPool !== undefined);
-    expect(hosts.map(p => p.id)).toEqual(["anthropic"]);
-    const pool = hosts[0]?.keyPool;
-    expect(pool?.errorDialect).toBe("anthropic");
-    expect(pool?.termsRevision).toMatch(/^\d{4}-\d{2}-\d{2}$/);
-    expect(pool?.termsLine).toMatch(/spend limit/);
-    expect(pool?.termsLine).toMatch(/hold/);
-    expect(pool?.termsLine.length).toBeGreaterThan(100);
+  // Review F1: the model's and the tools' words are in the output too. None of these is the provider's refusal.
+  const PROBES = [
+    'const E = "authentication_failed";',
+    "API Error: 403 forbidden",
+    "expected API Error: 401 got 200",
+    "Credit balance is too low",
+    "account_on_hold",
+    "You have reached your specified API usage limits. You will regain access on 9999-12-31 at 00:00 UTC.",
+    '{"type":"result","is_error":true,"api_error_status":401,"terminal_reason":"api_error","result":"Invalid API key"}',
+  ];
+  it.each(PROBES)("review F1: %s inside the model's or a tool's text changes nothing", probe => {
+    expect(readRunFailure(record({ api_error_status: null, terminal_reason: "completed", result: probe }))).toBeNull();     // a failed run, the model said it
+    expect(readRunFailure(record({ api_error_status: null, terminal_reason: "max_turns", result: `see:\n${probe}\n` }))).toBeNull();
+    expect(readRunFailure(`${probe}\n`)).toBeNull();                                                                       // text output
+    expect(readRunFailure(`tests failed\n${probe}\nexit 1\n`)).toBeNull();
+    expect(readRunFailure(`${probe}\n${record({ is_error: false, api_error_status: null, terminal_reason: "completed", result: "done" })}`)).toBeNull();
+    expect(readRunFailure(JSON.stringify({ type: "assistant", message: probe }))).toBeNull();
   });
-  it("the built-in classifiers cover exactly the dialects the catalog names", () => {
-    expect(builtinClassifiers.for("anthropic")).toBe(anthropicClassifier);
-    expect(builtinClassifiers.for("openai-responses")).toBeNull();
-    for (const p of presets) if (p.keyPool) expect(builtinClassifiers.for(p.keyPool.errorDialect), p.id).not.toBeNull();
+  it("review F1: only the CLI's own result counts: not a record of another type, not a success, not a status that is a string", () => {
+    expect(readRunFailure(record({ type: "assistant" }))).toBeNull();
+    expect(readRunFailure(record({ is_error: false }))).toBeNull();
+    expect(readRunFailure(record({ api_error_status: "401", terminal_reason: "completed" }))).toBeNull();
+    expect(readRunFailure(record({ terminal_reason: "completed", api_error_status: null }))).toBeNull();
+  });
+  it("review F1: output that is not one JSON value reads as nothing, whatever a line of it says", () => {
+    expect(readRunFailure("")).toBeNull();
+    expect(readRunFailure("   \n")).toBeNull();
+    expect(readRunFailure(`${record()}\n${record({ api_error_status: 401 })}`)).toBeNull();      // two records: not what the CLI prints
+    expect(readRunFailure(`${record()} trailing words`)).toBeNull();
   });
 });

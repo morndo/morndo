@@ -10,7 +10,6 @@ const KEYS: [string, string, string] = ["sk-ant-synthetic-pool-key-0001", "sk-an
 const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 const fixture = join(import.meta.dirname, "fixtures/fake-keyed-runtime.mjs");
 const main = join(import.meta.dirname, "../src/main.ts");
-const CREDIT = "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
@@ -59,7 +58,16 @@ async function world(n = 3, opts: { pool?: boolean; mode?: string } = {}): Promi
 }
 const lease = (env: NodeJS.ProcessEnv, pool = "p", extra: string[] = []) => cli(["lease", "--pool", pool, "--isolation", "rules", ...extra], env);
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; mode: string; standing: string; lastPick: string | null; members: { credential: string; state: string; reason: string | null }[] });
-const job = (dir: string, keys: Record<string, { exit: number; say?: string; sayErr?: string }>): string => {
+// What the agent CLI prints as the result of a headless run the provider refused (observed 2026-10-25 with 2.1.310): one JSON record.
+const refusal = (status: number | null, message: string, over: Record<string, unknown> = {}): Record<string, unknown> => ({
+  type: "result", subtype: "success", is_error: true, api_error_status: status, terminal_reason: "api_error", num_turns: 1,
+  total_cost_usd: 0, modelUsage: {}, usage: { input_tokens: 0, output_tokens: 0 }, result: message, ...over,
+});
+type Answer = { exit: number; say?: string; sayErr?: string; json?: Record<string, unknown>; report?: string[] };
+const reportsOf = (dir: string): { code: number; stderr: string }[] => {
+  try { return readFileSync(join(dir, "work", "record.jsonl.report"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { code: number; stderr: string }); } catch { return []; }
+};
+const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
   return path;
@@ -93,6 +101,16 @@ describe("keypool create, list and the terms", () => {
     expect(refused.stderr).toMatch(/ack_needed/);
     expect(refused.stderr).toMatch(/spend limit/);
     expect((await pools(env))).toEqual([]);
+  });
+
+  it("review F4: a blank --by is no acknowledgement either", async () => {
+    const { env } = await world(2, { pool: false });
+    for (const by of ["", " ", "   "]) {
+      const refused = await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", by, "--confirm-own-account", "k1", "k2"], env);
+      expect(refused.code, by).toBe(1);
+      expect(refused.stderr).toMatch(/ack_needed/);
+    }
+    expect(await pools(env)).toEqual([]);
   });
 
   it("refuses a member until --confirm-own-account (the organization cannot be read yet), and says why", async () => {
@@ -229,12 +247,14 @@ describe("lease --pool", () => {
     expect(blocked).toMatchObject({ code: 75, stdout: "" });
     expect(blocked.stderr).toMatch(/pool_blocked/);
     await cli(["keypool", "revive", "p", "k2"], env);
-    const catalog = JSON.parse(readFileSync(catalogPath, "utf8")) as { id: string; keyPool?: { termsRevision: string } }[];
-    const anthropic = catalog.find(p => p.id === "anthropic");
-    if (!anthropic?.keyPool) throw new Error("preset");
-    anthropic.keyPool.termsRevision = "2099-01-01";
-    const changed = join(dir, "changed-catalog.json");
-    writeFileSync(changed, JSON.stringify(catalog));
+    // The key-pool terms are their own file beside the catalog (review F7): a copy of both, with the revision moved on.
+    const copy = join(dir, "changed");
+    mkdirSync(copy);
+    writeFileSync(join(copy, "vendors.json"), readFileSync(catalogPath));
+    const entries = JSON.parse(readFileSync(join(import.meta.dirname, "../../../packages/protocol/catalog/key-pools.json"), "utf8")) as { termsRevision: string }[];
+    for (const entry of entries) entry.termsRevision = "2099-01-01";
+    writeFileSync(join(copy, "key-pools.json"), JSON.stringify(entries));
+    const changed = join(copy, "vendors.json");
     const moved = await lease({ ...env, MORNDO_CATALOG: changed });
     expect(moved).toMatchObject({ code: 75, stdout: "" });
     expect(moved.stderr).toMatch(/terms/);
@@ -269,14 +289,46 @@ describe("keypool report", () => {
     expect((await cli(["keypool", "report", "p", "--member", "k1", "--outcome", "exhausted", "--reason", "denied"], env)).code).toBe(1);
   });
 
-  it("revive brings an exhausted member back; ok from a real request does too", async () => {
+  it("revive brings an exhausted member back; ok is refused, a recovery is a revive or a real request (review F2)", async () => {
     const { env } = await world(2);
     await cli(["keypool", "report", "p", "--member", "k1", "--outcome", "exhausted"], env);
     expect((await cli(["keypool", "revive", "p", "k1"], env)).code).toBe(0);
     expect((await pools(env))[0]?.members[0]?.state).toBe("active");
     await cli(["keypool", "report", "p", "--member", "k2", "--outcome", "exhausted"], env);
-    expect((await cli(["keypool", "report", "p", "--member", "k2", "--outcome", "ok"], env)).code).toBe(0);
-    expect((await pools(env))[0]?.members[1]?.state).toBe("active");
+    const ok = await cli(["keypool", "report", "p", "--member", "k2", "--outcome", "ok"], env);
+    expect(ok.code).toBe(1);
+    expect(ok.stderr).toMatch(/not_allowed/);
+    expect((await pools(env))[0]?.members[1]?.state).toBe("exhausted");
+  });
+});
+
+describe("review F2: a lane reports only for the member of its own live lease", () => {
+  // The fixture runtime runs `keypool report … --lease <the lease it was given>` as a child of the run, as a lane's tool would.
+  it("a lane reports its own member exhausted", async () => {
+    const { env, dir } = await world(3);
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, report: ["p", "--member", "k1", "--outcome", "exhausted"] } }));
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(reportsOf(dir)).toEqual([{ code: 0, stderr: "" }]);
+    expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["exhausted", "active", "active"]);
+  });
+  it("a lane cannot report another member, nor ok", async () => {
+    const { env, dir } = await world(3);
+    const other = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, report: ["p", "--member", "k2", "--outcome", "exhausted"] } }));
+    expect(other.code, other.stderr).toBe(0);
+    expect(reportsOf(dir)[0]?.code).toBe(1);
+    expect(reportsOf(dir)[0]?.stderr).toMatch(/lease_other_member/);
+    const ok = await run(env, dir, job(dir, { [KEYS[1]]: { exit: 0, report: ["p", "--member", "k2", "--outcome", "ok"] } }));
+    expect(ok.code, ok.stderr).toBe(0);
+    expect(reportsOf(dir)[1]?.code).toBe(1);
+    expect(reportsOf(dir)[1]?.stderr).toMatch(/not_allowed/);
+    expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["active", "active", "active"]);
+  });
+  it("a report naming a lease that is not open is refused", async () => {
+    const { env } = await world(2);
+    const gone = await cli(["keypool", "report", "p", "--member", "k1", "--outcome", "exhausted", "--lease", "l99"], env);
+    expect(gone.code).toBe(1);
+    expect(gone.stderr).toMatch(/lease_missing/);
+    expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["active", "active"]);
   });
 });
 
@@ -299,7 +351,7 @@ describe("run --pool", () => {
 
   it("a headless run that is refused for credit reports the key exhausted and continues once on the next member", async () => {
     const { env, dir } = await world(3);
-    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, say: `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"${CREDIT}"}}` } }));
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, json: refusal(400, "Credit balance is too low") } }));
     expect(ran.code, ran.stderr).toBe(0);
     expect(used(dir)).toEqual([KEYS[0], KEYS[1]]);
     const [listed] = await pools(env);
@@ -309,7 +361,7 @@ describe("run --pool", () => {
 
   it("an interactive run (no -p) that is refused reports the key and does not retry: the session is the owner's", async () => {
     const { env, dir } = await world(3);
-    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, say: CREDIT } }), [], false);
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, json: refusal(400, "Credit balance is too low") } }), [], false);
     expect(ran.code).toBe(1);
     expect(used(dir)).toEqual([KEYS[0]]);
     expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["exhausted", "active", "active"]);
@@ -317,7 +369,7 @@ describe("run --pool", () => {
 
   it("retries once only: a second refusal is reported too, a third member is not tried, and the run fails", async () => {
     const { env, dir } = await world(3);
-    const dry = { exit: 1, say: CREDIT };
+    const dry = { exit: 1, json: refusal(400, "Credit balance is too low") };
     const ran = await run(env, dir, job(dir, { [KEYS[0]]: dry, [KEYS[1]]: dry }));
     expect(ran.code).toBe(1);
     expect(used(dir)).toEqual([KEYS[0], KEYS[1]]);
@@ -326,7 +378,7 @@ describe("run --pool", () => {
 
   it("a refused key (401) blocks the pool: reported failing, no retry, and the next lease says pool_blocked", async () => {
     const { env, dir } = await world(3);
-    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, say: `API Error: 401 {"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}` } }));
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, json: refusal(401, "Invalid API key") } }));
     expect(ran.code).toBe(1);
     expect(used(dir)).toEqual([KEYS[0]]);
     expect((await pools(env))[0]).toMatchObject({ standing: "blocked" });
@@ -343,9 +395,55 @@ describe("run --pool", () => {
     expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["active", "active", "active"]);
   });
 
+  // Review F1: the model's and the tools' words are in a failed run's output. Only the CLI's structured result counts.
+  const PROBES = [
+    "authentication_failed",
+    "API Error: 403 forbidden",
+    "account_on_hold",
+    "Credit balance is too low",
+    "You have reached your specified API usage limits. You will regain access on 9999-12-31 at 00:00 UTC.",
+  ];
+  it("review F1: a failed run whose output merely says a refusal word, as text or inside the model's result, changes nothing and is not retried", async () => {
+    const { env, dir } = await world(3);
+    let runs = 0;
+    for (const probe of PROBES) {
+      const asText: Answer = { exit: 1, say: `tests failed\n${probe}\nexit 1` };
+      const inResult: Answer = { exit: 1, json: refusal(null, probe, { terminal_reason: "completed", total_cost_usd: 0.3, num_turns: 4 }) };
+      for (const answer of [asText, inResult]) {
+        const ran = await run(env, dir, job(dir, { [KEYS[0]]: answer, [KEYS[1]]: answer, [KEYS[2]]: answer }));
+        expect(ran.code, probe).toBe(1);
+        runs += 1;
+      }
+    }
+    expect(used(dir)).toHaveLength(runs);                      // one key each time: never a retry
+    const [listed] = await pools(env);
+    expect(listed?.members.map(m => m.state)).toEqual(["active", "active", "active"]);
+    expect(listed?.standing).toBe("ok");
+  });
+
+  it("review F3: a run that was refused after it had done work (it cost something) is reported and stopped, not run again on the next key", async () => {
+    const { env, dir } = await world(3);
+    const spent = { exit: 1, json: refusal(400, "Credit balance is too low", { total_cost_usd: 0.12, num_turns: 4, modelUsage: { "model-a": { inputTokens: 900 } } }) };
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: spent }));
+    expect(ran.code).toBe(1);
+    expect(used(dir)).toEqual([KEYS[0]]);
+    expect((await pools(env))[0]?.members.map(m => m.state)).toEqual(["exhausted", "active", "active"]);
+  });
+
+  it("review F3: the retry goes on another member, never back to the one that was refused", async () => {
+    const { env, dir } = await world(2);
+    const dry = { exit: 1, json: refusal(400, "Credit balance is too low") };
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: dry }));
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(used(dir)).toEqual([KEYS[0], KEYS[1]]);
+    const again = await run(env, dir, job(dir, { [KEYS[0]]: dry }));          // k1 is out: the next run does not even try it
+    expect(again.code, again.stderr).toBe(0);
+    expect(used(dir)).toEqual([KEYS[0], KEYS[1], KEYS[1]]);
+  });
+
   it("a run that succeeds is never read for a refusal, even when its output talks about one", async () => {
     const { env, dir } = await world(2);
-    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, say: `Summary: the log said "${CREDIT}" and account_on_hold, but this run worked.` } }));
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, say: `Summary: the log said "Credit balance is too low" and account_on_hold, but this run worked.` } }));
     expect(ran.code, ran.stderr).toBe(0);
     expect(used(dir)).toEqual([KEYS[0]]);
     expect((await pools(env))[0]).toMatchObject({ standing: "ok" });
@@ -373,8 +471,8 @@ describe("the planted secret", () => {
   it("a refusal whose text carries the key and a planted token leaves neither in the database, the alert log, the listing or the page", async () => {
     const { env, dir } = await world(3);
     const PLANTED = "planted-refusal-detail-9f3a7c";
-    const leak = `API Error: 400 {"type":"error","error":{"type":"invalid_request_error","message":"${CREDIT} ${PLANTED} key=${KEYS[0]}"}}`;
-    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, say: leak, sayErr: `${PLANTED} ${KEYS[0]}` } }));
+    const leak = refusal(400, `Credit balance is too low ${PLANTED} key=${KEYS[0]}`);
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 1, json: leak, sayErr: `${PLANTED} ${KEYS[0]}` } }));
     expect(ran.code, ran.stderr).toBe(0);
     expect(ran.stdout).not.toContain(KEYS[0]);                      // the relay filters the exact key
     expect(ran.stderr).not.toContain(KEYS[0]);
