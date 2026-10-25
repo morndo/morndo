@@ -2,10 +2,10 @@
 // is empty or blocked, a gate says no) exits 75, as `lease` and `run` do. `create`, `add`, `move` and `revive` are the principal's
 // (KP10): the command id is "cli", as every other command of this bin.
 import type { Actor, Outcome } from "@morndo/domain";
-import type { ReportBy } from "./application/key-pool-service.ts";
+import type { ProbeResult, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
-import { fail, need, type Io, type Parsed } from "./cli.ts";
-import { selfId } from "./adapters/processes.ts";
+import { fail, gateRuntime, need, type Io, type Parsed } from "./cli.ts";
+import { selfHolder, selfId } from "./adapters/processes.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const HOUR = 3_600_000;
@@ -87,10 +87,35 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
       return done(home.keypools.report(need(pool), need(parsed.get("member")), outcome, home.now(), by), io);
     }
     case "sync": return done(home.keypools.sync(), io);
+    case "recheck": return recheck(home, parsed, io);
     case "revive": return done(home.keypools.revive(need(pool), need(member), ACTOR), io);
     case "delete": return done(home.keypools.delete(need(pool), ACTOR), io);
     default: return fail(io, "usage");
   }
+}
+
+// One JSON line per probe: the pool, then the service's result, words only. Exit 0 once the command has run.
+// `--member` probes that member now and needs the pool; with no pool, every live pool's due members are probed.
+async function recheck(home: Opened, parsed: Parsed, io: Io): Promise<number> {
+  const pool = parsed.positionals[1];
+  const member = parsed.get("member");
+  if (member !== undefined && pool === undefined) return fail(io, "usage");
+  if (pool !== undefined && home.keypools.state(pool) === null) return fail(io, "missing");
+  const holder = selfHolder(null);
+  if (!holder) return fail(io, "holder");
+  const names = pool === undefined ? home.keypools.list().map(view => view.name) : [pool];
+  for (const name of names) {
+    // The probe lease takes the gate `run` uses for that pool's runtime.
+    home.runtime.current = gateRuntime(home, home.keypools.state(name)?.runtime ?? "claude");
+    const results = await home.keypools.recheck({ holder, pool: name, ...(member === undefined ? {} : { member }) });
+    for (const result of results) io.stdout(probeLine(name, result));
+  }
+  return 0;
+}
+
+function probeLine(pool: string, result: ProbeResult): string {
+  const line = { pool, member: result.member, outcome: result.outcome, ...(result.word === undefined ? {} : { word: result.word }) };
+  return `${JSON.stringify(line)}\n`;
 }
 
 // The terms line is shown when it is asked for and not yet acknowledged: `--by` says who read it.
