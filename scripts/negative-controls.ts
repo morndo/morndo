@@ -4807,6 +4807,20 @@ export const CONTROLS: Control[] = [
   { id: "t449-filter-every-member", task: "T-449", file: "apps/connections/src/cli.ts",
     find: "outRedactor = streamRedactor(secrets);", replace: "outRedactor = streamRedactor([secret]);",
     run: ["apps/connections/test/keypool-handoff-cli.test.ts"], expect: "the output filter knows every key" },
+  { id: "t449-filter-learns-new-keys", task: "T-449", file: "apps/connections/src/cli.ts",
+    find: "try { learned = await watching.learn(); } catch { learned = []; }", replace: "learned = [];",
+    run: ["apps/connections/test/keypool-handoff-cli.test.ts"], expect: "the output filter learns the key of a member the run is handed to" },
+  { id: "t449-left-member-hand-off", task: "T-449", file: "apps/connections/src/application/key-pool-service.ts",
+    find: "let why: \"exhausted\" | \"refused\" | \"left\" | null = state === undefined\n          ? \"left\"",
+    replace: "let why: \"exhausted\" | \"refused\" | \"left\" | null = false\n          ? \"left\"",
+    run: ["apps/connections/test/key-pool-handoff.test.ts"], expect: "does not strand the run on it" },
+  { id: "t449-grants-survive-leaving", task: "T-449", file: "packages/domain/src/key-pool.ts",
+    find: "withEvents({ ...p, members, lastPick }, [{ type: \"MemberLeft\"",
+    replace: "withEvents({ ...p, members, grants: p.grants.filter(g => g.member !== credential), lastPick }, [{ type: \"MemberLeft\"",
+    run: ["packages/domain/test/key-pool-grants.test.ts", "apps/connections/test/key-pool-handoff.test.ts"], expect: "does not strand" },
+  { id: "t449-call-counted-once", task: "T-449", file: "apps/connections/src/application/key-pool-service.ts",
+    find: "if (!countedCall) {", replace: "if (true) {",
+    run: ["apps/connections/test/key-pool-handoff.test.ts"], expect: "counted once" },
 ];
 
 // ---- the runner
