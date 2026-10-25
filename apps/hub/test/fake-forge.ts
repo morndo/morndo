@@ -4,7 +4,9 @@
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
 
-export type ForgeFacts = { state?: string; merged?: boolean; head?: string; merge?: string | null };
+// `base`: the branch the pull request targets (default main). `required`: the checks its base branch requires, served by
+// a ruleset (default ci and lint, the names most tests use); null registers nothing, so the hub cannot read the set.
+export type ForgeFacts = { state?: string; merged?: boolean; head?: string; merge?: string | null; base?: string; required?: string[] | null };
 export type ForgeRun = { id: number; name: string; status: string; conclusion: string | null; url?: string };
 // `query` is the search string as sent (`per_page=100&page=2`), so a test can read the paging itself.
 export type ForgeRequest = { method: string; path: string; query: string; headers: Record<string, string | string[] | undefined> };
@@ -22,6 +24,9 @@ export type FakeForge = {
   requests: ForgeRequest[];
   // The pull request answer: defaults leave an open, unmerged request at the head sha the test's refs point at.
   pr(repo: string, number: number, facts?: ForgeFacts, opts?: { headers?: Record<string, string> }): void;
+  // The checks one branch requires, as the forge reports them: `rules` from the active rulesets
+  // (GET /repos/{r}/rules/branches/{b}), `classic` from branch protection (the `protection` of GET /repos/{r}/branches/{b}).
+  required(repo: string, branch: string, sets: { rules?: string[]; classic?: string[] }): void;
   // The check runs of one commit; registering again replaces what that commit said before.
   runs(repo: string, sha: string, list: ForgeRun[], opts?: { total?: number; headers?: Record<string, string> }): void;
   fail(path: string, status: number, headers?: Record<string, string>): void;
@@ -78,12 +83,26 @@ export function startFakeForge(): Promise<FakeForge> {
   });
   return new Promise(resolve => {
     server.listen(0, "127.0.0.1", () => {
+      const registerRequired: FakeForge["required"] = (repo, branch, sets) => {
+        const classic = sets.classic ?? [];
+        const rules = sets.rules ?? [];
+        put({ path: `/repos/${repo}/branches/${branch}`, status: 200, headers: { ...JSON_HEADERS }, body: JSON.stringify({
+          name: branch, protected: classic.length > 0 || rules.length > 0,
+          protection: { enabled: classic.length > 0, required_status_checks: { enforcement_level: classic.length > 0 ? "everyone" : "off", contexts: classic, checks: classic.map(context => ({ context, app_id: null })) } },
+        }) });
+        put({ path: `/repos/${repo}/rules/branches/${branch}`, status: 200, headers: { ...JSON_HEADERS }, body: JSON.stringify(
+          rules.length === 0 ? [{ type: "deletion" }] : [{ type: "required_status_checks", parameters: { strict_required_status_checks_policy: false, required_status_checks: rules.map(context => ({ context })) } }],
+        ) });
+      };
       resolve({
         base: `http://127.0.0.1:${(server.address() as AddressInfo).port}`,
         requests,
+        required: registerRequired,
         pr: (repo, number, facts = {}, opts = {}) => {
-          const f = { state: "open", merged: false, head: FULL, merge: null as string | null, ...facts };
-          put({ path: `/repos/${repo}/pulls/${number}`, status: 200, headers: { ...JSON_HEADERS, ...(opts.headers ?? {}) }, body: JSON.stringify({ state: f.state, merged: f.merged, head: { sha: f.head }, merge_commit_sha: f.merge }) });
+          const { required = ["ci", "lint"], base = "main", ...rest } = facts;
+          const f = { state: "open", merged: false, head: FULL, merge: null as string | null, ...rest };
+          put({ path: `/repos/${repo}/pulls/${number}`, status: 200, headers: { ...JSON_HEADERS, ...(opts.headers ?? {}) }, body: JSON.stringify({ state: f.state, merged: f.merged, head: { sha: f.head }, base: { ref: base }, merge_commit_sha: f.merge }) });
+          if (required !== null) registerRequired(repo, base, { rules: required });
         },
         runs: (repo, sha, list, opts = {}) => put({ path: `/repos/${repo}/commits/${sha}/check-runs`, status: 200, headers: { ...JSON_HEADERS, ...(opts.headers ?? {}) }, body: "", runs: list, ...(opts.total !== undefined ? { total: opts.total } : {}) }),
         privateRepo: (repo, token) => { locked.set(repo.toLowerCase(), token); },

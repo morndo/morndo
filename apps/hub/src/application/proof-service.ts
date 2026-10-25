@@ -19,6 +19,7 @@ import type { BoardResult, BoardService } from "./board-service.ts";
 export type ProofView = { rev: number | null; brief: ProofBrief | null; results: RefResult[]; mode: ProofMode; standIn: boolean; coverage: CoverageItem[]; state: ProofState };
 
 const AUTO_WINDOW_MS = 3_600_000;
+const REQUIRED_CACHE_MS = 10 * 60_000;
 const BRIEFS_MAX = 20;
 const BRIEFS_LIFETIME_MAX = 200;
 const GREEN_HOLD_MS = 3_600_000;
@@ -40,6 +41,7 @@ export class ProofService {
   #whole = new Map<string, Promise<void>>();     // a whole-brief check out or waiting: what a refresh joins
   #verifyAll = new Map<string, Promise<void>>(); // the one that re-reads every reference: what a second verify joins
   #running = new Set<Promise<void>>();           // every check begun, for idle()
+  #requiredCache = new Map<string, { names: string[]; at: number }>();
 
   constructor(p: { store: Store; board: BoardService; now?: () => number; forge?: ForgeChecks | null; mode?: ProofMode; allowedRepos?: readonly string[]; authenticated?: boolean; standIn?: boolean; autoBudget?: { perTask?: number; hub?: number } }) {
     this.#store = p.store; this.#board = p.board; this.#now = p.now ?? Date.now;
@@ -256,7 +258,9 @@ export class ProofService {
         const answer = await forge.pullRequest(ref.repo, ref.number);
         if (!answer.ok) return this.#unread(answer.failure);
         const checks = await forge.checkRuns(ref.repo, ref.sha);
-        return checks.ok ? judgePr(ref, answer.value, merges, { runs: checks.value, young }) : this.#unread(checks.failure);
+        if (!checks.ok) return this.#unread(checks.failure);
+        const required = await this.#requiredChecks(ref.repo, answer.value.baseRef);
+        return judgePr(ref, answer.value, merges, { runs: checks.value, young, required });
       }
       const answer = await forge.checkRuns(ref.repo, ref.sha);
       return answer.ok ? judgeCi(ref, answer.value, young) : this.#unread(answer.failure);
@@ -293,6 +297,23 @@ export class ProofService {
       if (e.change.kind === "unmerged") held.delete(`${e.change.repo.toLowerCase()}|${e.change.sha}`);
     }
     return [...held.values()];
+  }
+
+  // The checks a base branch requires, for a pull request reference (the manager's narrowing, T-450): read once per repository
+  // and branch for REQUIRED_CACHE_MS, successes only. null means unreadable (no base branch known, or the forge failed): the
+  // caller then counts every check, so a read that fails can only hold a Done, never let one through.
+  async #requiredChecks(repo: string, baseRef: string | null): Promise<string[] | null> {
+    if (baseRef === null) return null;
+    const key = `${repo.toLowerCase()}|${baseRef}`;
+    const now = this.#now();
+    const cached = this.#requiredCache.get(key);
+    if (cached !== undefined && now - cached.at < REQUIRED_CACHE_MS) return cached.names;
+    const forge = this.#forge;
+    if (forge === null) return null;
+    const answer = await forge.requiredChecks(repo, baseRef);
+    if (!answer.ok) return null;
+    this.#requiredCache.set(key, { names: answer.value, at: now });
+    return answer.value;
   }
 
   // A forge failure as a row. Without a credential the forge answers 404 for a private repository as it does for one that

@@ -47,7 +47,7 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 - One new table (migration 28), one adapter, one application service, one domain file; the board's rules D1 to D6 do
   not change.
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
-- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged) and, since the amendment below, that the commit's checks are neither failing nor running; it does not ask a repository to have checks.
+- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged) and, since the amendment below, that the checks its base branch requires are neither failing nor running at that commit; it does not ask a repository to require checks.
 - Two trade-offs of the caps, kept on purpose. A green row stays when the forge cannot be reached (a rate limit, a timeout,
   the network), for at most an hour, without being refreshed: the Done's refresh may therefore accept a row up to an hour old
   while GitHub is unreachable; the row says `last read hh:mm UTC; the forge could not be reached since`, and an hour later
@@ -77,11 +77,19 @@ Read from the code at 613f3853 by the product lane's review of the warn week. Ea
 `warn` by default; nothing here switches it.
 
 1. **A brief naming only the pull request while the checks run** passed, by design of the first decision. It no longer
-   does: a `pr` reference reads the commit's check runs as well. Failing is red, running is pending, and none yet is
-   pending while the brief is young (YOUNG_MS) and green after (a repository without checks). Reason: a Done over
-   unfinished checks is the case the gate exists for, and the assigner's `ci` item was easy to leave off.
-   Cost: one more forge request per `pr` reference, and a token that cannot read check runs now leaves a `pr`
-   reference unfetchable (as it already did a `ci` one).
+   does: a `pr` reference reads the commit's check runs too, but only the checks the pull request's **base branch
+   requires** hold it (decided by the manager, 2026-10-25). The required set is the union of branch protection (the
+   `protection` of `GET /repos/{r}/branches/{b}`) and the active rulesets (`GET /repos/{r}/rules/branches/{b}`), both
+   readable with read access (Metadata) and, on a public repository, without a token; read once and kept ten minutes per
+   repository and branch. A required check failing is red, running is pending, not reported yet is pending while the brief
+   is young (YOUNG_MS) and ignored after. A failing or running **optional** check is a warning on the reference (`⚠`, green
+   state, the Done is not held). **If the required set cannot be read** (an error, a shape not understood, a base branch
+   not known) every check counts as required, and the line says "required checks not readable; every check counted": the
+   gate fails closed. Cost: up to three more forge reads per `pr` reference (the pull request's checks, and the two reads of
+   the required set, which the cache shares between tasks); a token that cannot read check runs leaves a `pr` reference
+   unfetchable (as it already did a `ci` one); a required check that is a commit status and not a check run is not seen.
+   Reason: a Done over unfinished required checks is the case the gate exists for, and the assigner's `ci` item was easy
+   to leave off; an optional check should not hold it.
 2. **A `ci` reference that named only passing checks** passed while another check at the commit was red. The named
    list still says what must exist and be green; it no longer hides a failing or running check at the same commit.
    Skipped and neutral others are ignored. Cost: a known-flaky optional check blocks until overridden with a reason.

@@ -36,7 +36,8 @@ the agents' prompts. The blocks are printed by `morndo-board prompt --role manag
      like any reference that is not green.
 
    The gate holds a Done over: a reference that is not green (a pull request whose commit has a check failing or still
-   running; a `ci` reference whose named checks passed while another check at that commit failed or is running);
+   running that its base branch requires, branch protection or ruleset, while an optional one shows as a ⚠ warning on the
+   reference and holds nothing, and every check counts when the hub cannot read the required set; a `ci` reference whose named checks passed while another check at that commit failed or is running);
    a proof-list item nothing in the brief answers; and a brief that claims no code change on a task whose assigner
    listed no proof (the claim is the lane's word, so it needs the assigner's list to be checked against).
 

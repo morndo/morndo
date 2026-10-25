@@ -281,7 +281,7 @@ describe("judging a reference against what the forge said (B14)", () => {
   // Facts as the hub read them, never fetched here: a pull request as the adapter answered it, and one check run by its
   // id, name, status, conclusion and address.
   const MOVED = "9c8b7a6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b";
-  const prFacts = (o: Partial<PrFacts> = {}): PrFacts => ({ state: "open", merged: false, headSha: FULL, mergeSha: null, ...o });
+  const prFacts = (o: Partial<PrFacts> = {}): PrFacts => ({ state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: null, ...o });
   const run = (o: Partial<CheckRunFacts> = {}): CheckRunFacts => ({ id: 1, name: "ci", status: "completed", conclusion: "success", url: null, ...o });
   const RUN_URL = "https://github.com/acme/shop/actions/runs/99";
 
@@ -389,18 +389,74 @@ describe("judging a reference against what the forge said (B14)", () => {
   // repository with no checks, which the pull request reference does not ask to have any.
   it("judgePr: green pull request whose commit has a check running or failed is pending or red (T-450)", () => {
     const ref = value(parseProofRef(`acme/shop#42@${SHA}`)) as Parameters<typeof judgePr>[0];
-    const checks = (runs: CheckRunFacts[], young = false) => ({ runs, young });
+    const checks = (runs: CheckRunFacts[], young = false, required: string[] | null = ["ci", "lint"]) => ({ runs, young, required });
     expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci", status: "in_progress", conclusion: null })])))
       .toEqual({ state: "pending", detail: `checks: "ci" in progress` });
     expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: "failure", url: RUN_URL })])))
       .toEqual({ state: "red", detail: `checks: "lint" failed ${RUN_URL}` });
     expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci" })]))).toEqual({ state: "green", detail: null });
-    expect(judgePr(ref, prFacts(), [], checks([], true))).toEqual({ state: "pending", detail: "checks: no checks reported yet" });
+    expect(judgePr(ref, prFacts(), [], checks([], true))).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
     expect(judgePr(ref, prFacts(), [], checks([], false))).toEqual({ state: "green", detail: null });          // no checks exist for it
     expect(judgePr(ref, prFacts(), [], checks([run({ conclusion: "skipped" })]))).toEqual({ state: "green", detail: null });
     // the pull request's own verdicts come first: a moved head is a mismatch whatever the checks say
     expect(judgePr(ref, prFacts({ headSha: MOVED }), [], checks([run({ conclusion: "failure" })])).state).toBe("mismatch");
     expect(judgePr(ref, prFacts({ state: "closed", merged: false }), [], checks([])).state).toBe("red");
+  });
+
+  // T-450 (manager's narrowing): a pull request reference is red or pending only for checks its base branch requires
+  // (branch protection or a ruleset). A failing or running optional check is a warning on the reference and holds nothing.
+  // When the required set cannot be read, every check counts and the line says so (fail closed).
+  describe("judgePr: required and optional checks (T-450)", () => {
+    const ref = value(parseProofRef(`acme/shop#42@${SHA}`)) as Parameters<typeof judgePr>[0];
+    const judge = (runs: CheckRunFacts[], required: string[] | null, young = false) => judgePr(ref, prFacts(), [], { runs, young, required });
+    const E2E_FAILED = run({ id: 2, name: "e2e", conclusion: "failure", url: RUN_URL });
+    const NOT_READ = "(required checks not readable; every check counted)";
+
+    it("an optional red check with the required one green is green with a warning", () => {
+      expect(judge([run({ name: "ci" }), E2E_FAILED], ["ci"])).toEqual({ state: "green", detail: `warning: optional check "e2e" failed ${RUN_URL}` });
+      expect(judge([run({ name: "ci" }), run({ id: 2, name: "e2e", status: "in_progress", conclusion: null })], ["ci"]))
+        .toEqual({ state: "green", detail: `warning: optional check "e2e" in progress` });
+      expect(judge([run({ name: "ci" }), run({ id: 2, name: "a", status: "queued", conclusion: null }), run({ id: 3, name: "b", conclusion: "timed_out" })], ["ci"]).detail)
+        .toBe(`warning: optional check "b" timed out`);                                 // red is the warning when both are
+      expect(judge([run({ name: "ci" }), run({ id: 2, name: "e2e", conclusion: "skipped" })], ["ci"])).toEqual({ state: "green", detail: null });
+      expect(judge([E2E_FAILED], [])).toEqual({ state: "green", detail: `warning: optional check "e2e" failed ${RUN_URL}` });   // nothing is required
+    });
+
+    it("a required check that is running or failed holds, whatever the optional ones say", () => {
+      expect(judge([run({ name: "ci", status: "in_progress", conclusion: null }), E2E_FAILED], ["ci"]))
+        .toEqual({ state: "pending", detail: `checks: "ci" in progress` });
+      expect(judge([run({ name: "ci", conclusion: "failure", url: RUN_URL }), run({ id: 2, name: "e2e" })], ["ci", "e2e"]))
+        .toEqual({ state: "red", detail: `checks: "ci" failed ${RUN_URL}` });
+    });
+
+    it("a required check not reported yet is pending while the brief is young and ignored after", () => {
+      expect(judge([run({ id: 2, name: "e2e" })], ["ci"], true)).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
+      expect(judge([], ["ci"], true)).toEqual({ state: "pending", detail: `checks: required "ci" not reported yet` });
+      // one required check reported and another not: the missing one is awaited by name
+      expect(judge([run({ name: "ci" })], ["ci", "fleet"], true)).toEqual({ state: "pending", detail: `checks: required "fleet" not reported yet` });
+      expect(judge([run({ name: "ci" })], ["ci", "fleet"], false)).toEqual({ state: "green", detail: null });
+      expect(judge([], ["ci"], false)).toEqual({ state: "green", detail: null });
+      expect(judge([], [], true)).toEqual({ state: "green", detail: null });             // nothing required: nothing to wait for
+    });
+
+    it("an unreadable required set counts every check and says so (fail closed)", () => {
+      expect(judge([run({ name: "ci" }), E2E_FAILED], null)).toEqual({ state: "red", detail: `checks: "e2e" failed ${RUN_URL} ${NOT_READ}` });
+      expect(judge([run({ id: 2, name: "e2e", status: "in_progress", conclusion: null })], null)).toEqual({ state: "pending", detail: `checks: "e2e" in progress ${NOT_READ}` });
+      expect(judge([run({ name: "ci" })], null)).toEqual({ state: "green", detail: null });
+      expect(judge([], null, true)).toEqual({ state: "pending", detail: `checks: no checks reported yet ${NOT_READ}` });
+    });
+
+    it("the pull request's own verdicts still come first", () => {
+      expect(judgePr(ref, prFacts({ headSha: MOVED }), [], { runs: [E2E_FAILED], young: false, required: ["ci"] }).state).toBe("mismatch");
+    });
+  });
+
+  it("proofOf: a green reference with a warning stays accepted and the line names the warning (T-450)", () => {
+    const warning = `warning: optional check "e2e" failed`;
+    expect(proofOf(brief({ refs: [PR] }), [seen(PR, "green", warning)]))
+      .toEqual({ kind: "verified", green: 1, total: 1, accepts: true, line: `proof: 1 of 1 green · ⚠ ${PR} ${warning}` });
+    // a held-green row's own detail (the forge could not be reached) is not a warning and stays out of the line
+    expect(proofOf(brief({ refs: [PR] }), [seen(PR, "green", "last read 10:00 UTC; the forge could not be reached since")]).line).toBe("proof: 1 of 1 green");
   });
 
   it("judgeCi: a run address is kept only when it is a github.com one", () => {

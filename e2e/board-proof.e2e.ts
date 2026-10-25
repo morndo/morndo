@@ -11,8 +11,8 @@ const CLI = join(import.meta.dirname, "../apps/board-cli/src/main.ts");
 const PR = "morndo/morndo#42@3e9d1a7";
 const CI = "morndo/morndo@3e9d1a7:ci,lint";
 const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
-// A second pull request whose commit has only passing checks (T-450: a pull request reference is red while its commit's
-// checks fail, so the proof-list task needs a commit that is green).
+// A second pull request whose commit has only passing checks (T-450: a pull request reference is red while a check its base
+// branch requires fails, so the proof-list task needs a commit that is green for what its base branch requires).
 const PR_GREEN = "morndo/morndo#43@7b1c2d3";
 const FULL_GREEN = "7b1c2d3e4f5a69788796a5b4c3d2e1f0a9b8c7d6";
 const RUN = "https://github.com/morndo/morndo/actions/runs/9";
@@ -43,7 +43,7 @@ const waitFor = async (fn: () => boolean, ms: number, step = 500) => {
 try {
   fakeForge = await startFakeForge();
   fakeForge.pr("morndo/morndo", 42, { head: FULL });
-  fakeForge.pr("morndo/morndo", 43, { head: FULL_GREEN });
+  fakeForge.pr("morndo/morndo", 43, { head: FULL_GREEN, base: "release", required: ["ci"] });   // its own base branch: it requires only ci
   fakeForge.runs("morndo/morndo", FULL_GREEN, [{ id: 3, name: "ci", status: "completed", conclusion: "success" }]);
   fakeForge.runs("morndo/morndo", FULL, [
     { id: 1, name: "ci", status: "completed", conclusion: "success" },

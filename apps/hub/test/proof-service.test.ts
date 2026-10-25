@@ -241,11 +241,13 @@ describe("verifying (B14, B15)", () => {
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW },
     ]);
     expect(proof.view("T-1")?.state.kind).toBe("verified");
-    expect(fake.requests).toHaveLength(3);
+    expect(fake.requests).toHaveLength(5);
     expect(asked(fake)).toEqual([
+      "/repos/morndo/morndo/branches/main",
       "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
       "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
       "/repos/morndo/morndo/pulls/42",
+      "/repos/morndo/morndo/rules/branches/main",
     ]);
     store.close();
   });
@@ -317,7 +319,7 @@ describe("verifying (B14, B15)", () => {
     ]);
     expect(store.tasksIn("review").map(t => t.key)).toEqual(["T-1"]);
     expect(await proof.tick()).toBe(0);                                             // the interval (2 min) has not passed
-    expect(fake.requests).toHaveLength(3);
+    expect(fake.requests).toHaveLength(5);
     clock = NOW + 120_000;
     fake.runs("morndo/morndo", FULL, greenRuns());                                  // the run finished since
     expect(await proof.tick()).toBe(2);                                             // both refs still pending on the commit's checks
@@ -360,7 +362,12 @@ describe("verifying (B14, B15)", () => {
     fake.pr("morndo/morndo", 43, { head: FULL });
     fake.runs("morndo/morndo", FULL, greenRuns());
     expect(await proof.tick()).toBe(1);                                             // the rate limit is retried, T-1's 500 is not
-    expect(fake.requests.map(r => r.path)).toEqual(["/repos/morndo/morndo/pulls/43", "/repos/morndo/morndo/commits/3e9d1a7/check-runs"]);
+    expect(fake.requests.map(r => r.path)).toEqual([
+      "/repos/morndo/morndo/pulls/43",
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/branches/main",
+      "/repos/morndo/morndo/rules/branches/main",
+    ]);
     expect(store.proofResultsOf("T-2", 4)).toEqual([
       { ref: "morndo/morndo#43@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 20 * 60_000 },
     ]);
@@ -388,7 +395,7 @@ describe("verifying (B14, B15)", () => {
     fake.pr("morndo/morndo", 42, { head: FULL });
     fake.runs("morndo/morndo", FULL, greenRuns());
     await proof.verify("T-1");
-    expect(fake.requests).toHaveLength(5);
+    expect(fake.requests).toHaveLength(7);
     expect(proof.view("T-1")?.state.kind).toBe("verified");
     store.close();
   });
@@ -489,7 +496,7 @@ describe("verifying (B14, B15)", () => {
     expect(proof.view("T-1")?.state.line).toBe(RED_LINE);
     const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
     expect(r).toEqual({ ok: false, problem: "proof_not_green", detail: RED_LINE });
-    expect(fake.requests).toHaveLength(3);                                          // the rows are fresh: nothing was re-checked
+    expect(fake.requests).toHaveLength(5);                                          // the rows are fresh: nothing was re-checked
     expect(store.task("T-1")?.status).toBe("review");                               // a refused done moves nothing
     expect(store.taskEvents("T-1")).toHaveLength(4);
     store.close();
@@ -531,7 +538,7 @@ describe("verifying (B14, B15)", () => {
       "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
       "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
       "/repos/morndo/morndo/pulls/42",
-    ]);   // 31 s old: both refs re-read first
+    ]);   // 31 s old: both refs re-read first; required set still cached
     store.close();
   });
 
@@ -604,7 +611,7 @@ describe("verifying (B14, B15)", () => {
 
     it("a brief naming only the pull request while the commit's checks run (case 1)", async () => {
       for (const mode of ["on", "warn"] as const) {
-        fake.pr("morndo/morndo", 42, { head: FULL });
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
         fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "in_progress", conclusion: null }]);
         const { store, board, proof } = withForge({ mode });
         atReview(board);
@@ -620,7 +627,7 @@ describe("verifying (B14, B15)", () => {
     });
 
     it("a pull request reference turns green when its checks finish, and red when one failed", async () => {
-      fake.pr("morndo/morndo", 42, { head: FULL });
+      fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
       fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "failure", url: RUN_URL }]);
       const { store, board, proof } = withForge({ mode: "on" });
       atReview(board);
@@ -652,6 +659,70 @@ describe("verifying (B14, B15)", () => {
         else { expect(r.ok, mode).toBe(true); expect(lastSeen(store), mode).toContain("[mode warn: would have been refused]"); }
         store.close();
       }
+    });
+
+    // The manager's narrowing: only the checks the base branch requires hold a pull request reference.
+    describe("required and optional checks", () => {
+      const prOnly: BriefInput = { ...brief, refs: ["morndo/morndo#42@3e9d1a7"] };
+      const prLine = (tail: string) => `proof: ${tail}`;
+      const fileAndRead = async (mode: ProofMode) => {
+        const made = withForge({ mode });
+        atReview(made.board);
+        await made.proof.file("T-1", prOnly, lane);
+        await made.proof.idle();
+        return made;
+      };
+
+      it("an optional failing check with the required one green passes with a warning on the reference", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure", url: RUN_URL }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const warning = `warning: optional check "e2e" failed ${RUN_URL}`;
+        expect(proof.view("T-1")?.state).toEqual({ kind: "verified", green: 1, total: 1, accepts: true, line: prLine(`1 of 1 green · ⚠ morndo/morndo#42@3e9d1a7 ${warning}`) });
+        expect(store.proofResultsOf("T-1", 4)[0]).toMatchObject({ state: "green", detail: warning });
+        expect((await doneBy(board)).ok).toBe(true);
+        expect(lastSeen(store)).toBe(`${prLine(`1 of 1 green · ⚠ morndo/morndo#42@3e9d1a7 ${warning}`)} [mode on]`);
+        store.close();
+      });
+
+      it("a required check still running holds the Done, an optional one failing next to it changes nothing", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "in_progress", conclusion: null }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const line = prLine(`0 of 1 green · … morndo/morndo#42@3e9d1a7 checks: "ci" in progress`);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "pending", accepts: false, line });
+        expect(await doneBy(board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        store.close();
+      });
+
+      it("a required set that cannot be read counts every check and the line says so (fail closed)", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: null });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const line = prLine(`0 of 1 green · ✗ morndo/morndo#42@3e9d1a7 checks: "e2e" failed (required checks not readable; every check counted)`);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "failing", accepts: false, line });
+        expect(await doneBy(board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        store.close();
+      });
+
+      it("the required set of a branch is read once for a while, not once per reference", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL });
+        fake.runs("morndo/morndo", FULL, greenRuns());
+        const { store, board, proof } = withForge({ mode: "warn" });
+        atReview(board);
+        board.create({ title: "A second task", assignee: "builder" }, manager);
+        board.act("T-2", { action: "move", to: "doing" }, lane);
+        board.act("T-2", { action: "move", to: "review" }, lane);
+        await proof.file("T-1", prOnly, lane);
+        await proof.file("T-2", prOnly, lane);
+        await proof.idle();
+        const asks = () => fake.requests.filter(r => r.path.includes("/rules/branches/") || r.path.endsWith("/branches/main")).length;
+        expect(asks()).toBe(2);                                                       // the branch and the rulesets, once for both tasks
+        clock = NOW + 11 * 60_000;
+        await proof.verify("T-1");
+        expect(asks()).toBe(4);                                                       // ten minutes on, read again
+        store.close();
+      });
     });
 
     it("a no-code brief on a task with no proof list from the assigner (case 3)", async () => {
@@ -832,7 +903,7 @@ describe("verifying (B14, B15)", () => {
       await proof.file("T-1", { ...brief, ...priv }, lane);
       await proof.idle();
       expect(proof.view("T-1")?.state.kind).toBe("verified");
-      expect(fake.requests).toHaveLength(3);
+      expect(fake.requests).toHaveLength(5);
       expect(fake.requests.every(r => r.headers["authorization"] === `Bearer ${TOKEN}`)).toBe(true);
       expect(await board.actChecked("T-1", { action: "move", to: "done", reason: "shipped" }, manager)).toMatchObject({ ok: true, task: { status: "done" } });
       store.close();
@@ -889,11 +960,12 @@ describe("a held green is a snapshot too (B13, B16)", () => {
     let asked = 0;
     const forge: ForgeChecks = {
       pullRequest: async () => {
-        if (++asked === 1) return { ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null } };
+        if (++asked === 1) return { ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: "main" } };
         await held;                                                 // the second read is still out when the Done lands
         return { ok: false, failure: { reason: "rate_limited", detail: "rate limit, retry 00:10 UTC" } };
       },
       checkRuns: async () => ({ ok: true, value: [{ id: 1, name: "ci", status: "completed", conclusion: "success", url: null }] }),
+      requiredChecks: async () => ({ ok: true, value: ["ci"] }),
     };
     const proof = new ProofService({ store, board, now: () => NOW + 5_000, forge, mode: "off" });
     atReview(board);
@@ -925,15 +997,21 @@ describe("a stand-in forge is hub-wide, not only per task (B14)", () => {
 describe("a Done task is a snapshot (B13, B16)", () => {
   const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
   const greenForge = (): ForgeChecks => ({
-    pullRequest: async () => ({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null } }),
+    pullRequest: async () => ({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: "main" } }),
     checkRuns: async () => ({ ok: true, value: [{ id: 1, name: "ci", status: "completed", conclusion: "success", url: null }, { id: 2, name: "lint", status: "completed", conclusion: "success", url: null }] }),
+    requiredChecks: async () => ({ ok: true, value: ["ci", "lint"] }),
   });
 
   it("a merge recorded after the Done changes neither the card's line nor its rows, and asks the forge nothing", async () => {
     const store = new Store(tempDir());
     const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
     const calls: string[] = [];
-    const forge: ForgeChecks = { pullRequest: (...a) => { calls.push("pr"); return greenForge().pullRequest(...a); }, checkRuns: (...a) => { calls.push("ci"); return greenForge().checkRuns(...a); } };
+    const gf = greenForge();
+    const forge: ForgeChecks = {
+      pullRequest: (...a) => { calls.push("pr"); return gf.pullRequest(...a); },
+      checkRuns: (...a) => { calls.push("ci"); return gf.checkRuns(...a); },
+      requiredChecks: (...a) => gf.requiredChecks(...a),
+    };
     const proof = new ProofService({ store, board, now: () => NOW, forge, mode: "on" });
     atReview(board);
     await proof.file("T-1", brief, lane);
@@ -955,9 +1033,11 @@ describe("a Done task is a snapshot (B13, B16)", () => {
     const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
     let release!: () => void;
     const held = new Promise<void>(r => { release = r; });
+    const gf = greenForge();
     const slow: ForgeChecks = {
-      pullRequest: async (...a) => { await held; return greenForge().pullRequest(...a); },
-      checkRuns: async (...a) => { await held; return greenForge().checkRuns(...a); },
+      pullRequest: async (...a) => { await held; return gf.pullRequest(...a); },
+      checkRuns: async (...a) => { await held; return gf.checkRuns(...a); },
+      requiredChecks: async (...a) => gf.requiredChecks(...a),
     };
     const proof = new ProofService({ store, board, now: () => NOW + 5_000, forge: slow, mode: "off" });
     atReview(board);

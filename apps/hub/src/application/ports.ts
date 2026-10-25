@@ -132,6 +132,7 @@ export type ForgeAnswer<T> = { ok: true; value: T } | { ok: false; failure: Forg
 export interface ForgeChecks {
   pullRequest(repo: string, number: number): Promise<ForgeAnswer<PrFacts>>;
   checkRuns(repo: string, sha: string): Promise<ForgeAnswer<CheckRunFacts[]>>;
+  requiredChecks(repo: string, branch: string): Promise<ForgeAnswer<string[]>>;
 }
 // An unfetchable result whose detail starts so is one the proof timer tries again later; the rest (not found, denied,
 // an unknown commit, an answer of no shape) stay as they are until a person looks at the card.
