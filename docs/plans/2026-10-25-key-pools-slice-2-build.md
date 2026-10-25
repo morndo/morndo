@@ -19,7 +19,7 @@ the choices the plan left open. Checked 2026-10-25 against `origin/feat/key-pool
 7. **Pool changes are re-derived through hooks**, so `revoke` and the lifecycle follow: a failed engine write after the pool is saved reports
    `saved, engine layer not updated (retry: morndo-keys keypool sync)`; `keypool sync` is the idempotent retry.
 
-## Steps (tests first, red; Cursor writes the code, at most two rounds a step; I read every diff and the commit author)
+## Steps (tests first, red; an executor model writes the code, at most two rounds a step; the lane reads every diff and the commit author)
 
 ### Step 1: domain
 Code: `connections.ts` gains `swapLease` and `nextHelperWindow`; `key-pool.ts` gains `Grant`, `grants`, `openGrant`, `moveGrant`, `touchGrant`, `closeGrant`,
@@ -57,3 +57,13 @@ the report`; `a pooled helper cannot reset the call cap by handing off`; **plant
 
 ### Step 5: docs, QA, hand-over
 ADR-0037 and `docs/domain.md` (grant, KP17-KP19), manual QA with the real agent CLI against a local stand-in API (no real key), `morndo-memory remember`.
+
+## As built (2026-10-25)
+
+All five steps landed in that order, tests committed red first (`c1015be3`, `128ace03`). Differences from the plan above, and what was added on the way:
+- `leases` and `helper` are required dependencies of `KeyPoolService` (the executor first made them optional; reversed), and the slice-1 service test passes them.
+- A revoke from the page (`bindCommands`) now tells the pools as a revoke at the machine does; before, the page's `ConnectionsService` had no lifecycle, so the member stayed in the pool until a pick healed it and the Priority kept the pool name. Test: `a revoke from the page reaches the pool`.
+- `review F1` in `keypool-cli.test.ts` (ten pooled runs) takes 15 s alone and failed once of two runs at slice 1's own head under the 20 s default; it now has a 60 s timeout. Not caused by the grant.
+- The fake runtime records the helper's stderr on success as well, so the planted-secret test can see a key on stderr (checked with a deliberate leak: red, then green without it).
+- Negative controls run: adoption removed (the two KP19 tests fail), the window not carried over (the service test and the CLI cap test fail), the key echoed on stderr (the planted-secret test fails).
+- Slice 1's lane-report tests ("review F2") use `--grant` now: a lane of a pooled run no longer knows a lease id.
