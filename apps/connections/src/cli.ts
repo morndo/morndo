@@ -21,7 +21,7 @@ import { CodexRuntime, helperParts } from "./adapters/runtime-codex.ts";
 import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
-import { watchPoolKeys } from "./pool-keys.ts";
+import { guardedRelay, watchPoolKeys } from "./pool-keys.ts";
 import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
@@ -362,17 +362,18 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   const stopper = turnStopper(io);
   let hungUp = false;
   let watch: { close(): void } | null = null;
-  // One chain for both streams, so a chunk is written only after the filter has learned, and in the order it arrived.
-  let pending = Promise.resolve();
+  let relay: ReturnType<typeof guardedRelay> | null = null;
+  let polling: ReturnType<typeof setInterval> | null = null;
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
     // A pooled run may be moved to any member, so the filter knows every member's key, not only the first (a key the child prints
     // after a hand-off is then redacted too). A member that joins, or whose key is rotated, after the start is learned before
-    // the next chunk is written. A member whose key cannot be opened cannot be served either, and is left out.
+    // the next chunk is written. A member the run was handed, and that has since left, is learned from the grant. A member whose
+    // key cannot be opened cannot be served either, and is left out.
     const secrets = [secret];
     const seen = new Set<string>();
     // The watch takes the pool's and the directory's versions before the keys are read, so a change after this point is a change it learns.
-    const watching = grant === null ? null : watchPoolKeys({ db: home.db, pool: grant.pool, open: () => openHome(saved), seen });
+    const watching = grant === null ? null : watchPoolKeys({ db: home.db, pool: grant.pool, grant: grant.id, open: () => openHome(saved), seen });
     watch = watching;
     if (grant !== null) {
       if (connection.kind === "api-key") seen.add(connection.ref);
@@ -400,20 +401,19 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       proceed: () => stopper.proceed(),
     };
     if (watching !== null) {
-      const write = (chunk: string, stream: "out" | "err"): void => {
-        pending = pending.then(async () => {
-          let learned: readonly string[] = [];
-          try { learned = await watching.learn(); } catch { learned = []; }
-          if (learned.length > 0) {
-            outRedactor.add(learned);
-            errRedactor.add(learned);
-          }
-          if (stream === "out") io.stdout(outRedactor.push(chunk));
-          else io.stderr(errRedactor.push(chunk));
-        });
-      };
-      hooks.onStdout = (chunk: string) => { write(chunk, "out"); };
-      hooks.onStderr = (chunk: string) => { write(chunk, "err"); };
+      const live = guardedRelay({
+        learn: () => watching.learn(),
+        add: keys => { outRedactor.add(keys); errRedactor.add(keys); },
+        push: (stream, text) => (stream === "out" ? outRedactor : errRedactor).push(text),
+        write: (stream, text) => { if (stream === "out") io.stdout(text); else io.stderr(text); },
+      });
+      relay = live;
+      hooks.onStdout = (chunk: string) => { live.chunk("out", chunk); };
+      hooks.onStderr = (chunk: string) => { live.chunk("err", chunk); };
+      // Nothing may be printing when a key rotates and its file goes. A poll learns that key before the file is gone.
+      const timer = setInterval(() => { live.poll(); }, 150);
+      timer.unref();
+      polling = timer;
     }
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
@@ -436,7 +436,8 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     await stopper.settle();                                  // what the agent started is gone before the books close
     if (stopper.cut() && status === 0) status = 1;           // a launcher may exit 0 on SIGTERM: a turn cut short is not done
     hungUp = stopper.cut() && stopper.hungUp();
-    try { await pending; } catch { /* a chunk that failed to write does not keep the run's lease */ }
+    if (polling !== null) clearInterval(polling);
+    await relay?.settled();
     io.stdout(outRedactor.flush());
     io.stderr(errRedactor.flush());
     watch?.close();

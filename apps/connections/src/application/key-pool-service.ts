@@ -5,7 +5,7 @@
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
   LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, chooseKey, closeGrant as dropGrant, createKeyPool, err, findConnection, isKey,
-  joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteSeen, ok,
+  joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
   openGrant, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant,
   KEY_POOL_RECHECK_DEFAULT_MS,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
@@ -276,8 +276,8 @@ export class KeyPoolService implements ConnectionLifecycle {
   // starts the round again. A thrown error is the crash the next call repairs; it is not caught here.
   async handOff(pool: string, grant: string, caller: HandOffCaller): Promise<Result<{ connection: string; lease: string }, KeyPoolFailure>> {
     const { leases, helper } = this.#deps;
-    // A swap or a re-lease in this call already counted it. A later round that finds that lease still refreshes and
-    // re-checks its authority, and does not count the call again.
+    // A swap, a re-lease, or this call's helper count already counted it. A later round that finds that lease still
+    // refreshes and re-checks its authority, and does not count the call again.
     let countedCall = false;
     const noteSwap = (): void => { countedCall = true; };
     for (let round = 0; round < ATTEMPTS; round++) {
@@ -309,6 +309,7 @@ export class KeyPoolService implements ConnectionLifecycle {
             if (!countedCall) {
               const noted = leases.helper(found.name, found.row.id, caller.id, helper.limit, helper.ttlMs);
               if (!noted.ok) return err(noted.error);
+              countedCall = true;
             }
             const again = keyLease(this.#deps.connections.load().directory, found.row.id);
             if (!again || again.row.authority === "ended") return fail("authority");
@@ -533,7 +534,7 @@ export class KeyPoolService implements ConnectionLifecycle {
             if (seed && grantId) {
               const opened = openGrant(next, {
                 id: grantId, member: step.member, lease: seed.lease, holder: seed.holder, request: seed.request,
-                window: { calls: 0, windowStart: seed.startedAt }, previous: null, seen: [],
+                window: { calls: 0, windowStart: seed.startedAt }, previous: null, seen: [], lent: [],
               }, now);
               if (!opened.ok) return fail(opened.error);
               next = opened.value;
@@ -582,13 +583,15 @@ export class KeyPoolService implements ConnectionLifecycle {
     return this.#serve(leases, pool, held, fresh.name, fresh.row, caller);
   }
 
-  // The audit line is written before this returns, so the caller prints after it. The window is recorded only when it changed.
+  // The audit line is written before this returns, so the caller prints after it. The window, the session and the member
+  // lent are recorded in one save, and only when one of them changed.
   #serve(leases: Pick<LeaseService, "serve">, pool: string, held: Grant, connection: string, row: Lease, caller: HandOffCaller): Result<{ connection: string; lease: string }, KeyPoolFailure> | { retry: true } {
     const window = { calls: row.calls, windowStart: row.windowStart };
     const session = this.#session(held.holder, caller.id.pid);
     const touched = this.#change(pool, current => {
       const noted = touchGrant(current, held.id, window);
-      return { pool: session ? noteSeen(noted, held.id, sessionKey(session), connection) : noted, result: ok(undefined) };
+      const withSession = session ? noteSeen(noted, held.id, sessionKey(session), connection) : noted;
+      return { pool: noteLent(withSession, held.id, connection), result: ok(undefined) };
     });
     if (!touched.ok) return touched.error.problem === "conflict" ? { retry: true } : touched;
     const served = leases.serve(connection, row.id, {

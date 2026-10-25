@@ -35,6 +35,7 @@ export type Grant = {
   id: string; member: string; lease: string; holder: Holder; request: GrantRequest;
   window: HelperWindow; previous: { member: string; movedAt: number } | null;
   seen: readonly { session: string; member: string }[];
+  lent: readonly string[];
 };
 export type KeyPoolEvent =
   | { type: "KeyPoolCreated"; pool: string; at: number; command: string }
@@ -188,6 +189,7 @@ export function joinKeyPool(
 }
 
 // The member's health leaves with them. A grant that named them stays, still naming them, so the run's next call can hand it off.
+// The members that grant has lent stay listed on it.
 export function leaveKeyPool(p: KeyPool, credential: string, now: number, why: "left" | "revoked" = "left"): Result<KeyPool, "missing"> {
   const index = p.members.findIndex(m => m.credential === credential);
   if (index < 0) return err("missing");
@@ -352,6 +354,7 @@ export function touchGrant(p: KeyPool, id: string, window: HelperWindow): KeyPoo
 }
 
 const SEEN_KEEP = 16;
+const LENT_KEEP = 32;
 
 // One row per session: the member it was last served. A new session, or one whose member changed, is written last.
 // The grant keeps the last sixteen. Nothing is written when the grant is gone or the row is already so.
@@ -362,6 +365,15 @@ export function noteSeen(p: KeyPool, id: string, session: string, member: string
   if (at >= 0 && grant.seen[at]?.member === member) return p;
   const seen = [...grant.seen.filter(row => row.session !== session), { session, member }].slice(-SEEN_KEEP);
   return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, seen } : g) };
+}
+
+// Every member the run was handed, once, in the order it was handed. The grant keeps the last thirty-two.
+// Nothing is written when the grant is gone or the member is already there.
+export function noteLent(p: KeyPool, id: string, member: string): KeyPool {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant || grant.lent.includes(member)) return p;
+  const lent = [...grant.lent, member].slice(-LENT_KEEP);
+  return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, lent } : g) };
 }
 
 export function closeGrant(p: KeyPool, id: string, now: number): KeyPool {

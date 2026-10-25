@@ -23,9 +23,9 @@ afterEach(() => {
 });
 
 describe("the relay: a chunk is written only once the filter is current", () => {
-  const rig = (learn: () => Promise<readonly string[]>, attempts = 3) => {
-    const out = streamRedactor([KEY1]);
-    const err = streamRedactor([KEY1]);
+  const rig = (learn: () => Promise<readonly string[]>, attempts = 3, seed = KEY1) => {
+    const out = streamRedactor([seed]);
+    const err = streamRedactor([seed]);
     const written: { stream: string; text: string }[] = [];
     const relay = guardedRelay({
       learn,
@@ -82,7 +82,8 @@ describe("the relay: a chunk is written only once the filter is current", () => 
 
   it("keeps the order of chunks across both streams, and a poll learns a key with no chunk in sight", async () => {
     const seen: string[] = [];
-    const { relay, written } = rig(async () => { seen.push("learn"); return []; });
+    // No needle at all, so nothing is held back and the text shows the order.
+    const { relay, written } = rig(async () => { seen.push("learn"); return []; }, 3, "");
     relay.chunk("out", "a");
     relay.chunk("err", "b");
     relay.chunk("out", "c");
@@ -171,7 +172,7 @@ describe("the watch: every key the run may be, or was, handed", () => {
   it("a member that never was lent to the run and is not in the pool is not opened", async () => {
     const { home, env, refs } = await world();
     const watch = watchPoolKeys({ db: home.db, pool: "p", grant: "gnone", open: () => openHome(env), seen: new Set([refs.k1 ?? "", refs.k2 ?? ""]) });
-    expect(home.connections.setBudget("k3", { kind: "unlimited" }, ACTOR).ok).toBe(true);
+    expect(home.connections.turnOff("k3").ok).toBe(true);
     expect(await watch.learn()).toEqual([]);
     watch.close();
   });
