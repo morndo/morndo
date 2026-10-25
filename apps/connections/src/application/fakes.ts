@@ -88,10 +88,12 @@ function tombstoneBody(body: string): boolean {
 }
 
 // A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
-// (the filter null). A member saved before probes loads with probingUntil null and failedProbes 0.
+// (the filter null). A member saved before probes loads with probingUntil null, failedProbes 0 and lastProbe null.
 function withHistory(pool: KeyPool): KeyPool {
   const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [], filter: grant.filter ?? null }));
-  const members = (pool.members ?? []).map(member => ({ ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0 }));
+  const members = (pool.members ?? []).map(member => ({
+    ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0, lastProbe: member.lastProbe ?? null,
+  }));
   return { ...pool, grants, members };
 }
 

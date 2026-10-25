@@ -1,8 +1,10 @@
 // One POST to the Messages endpoint of the given base URL (ADR-0037). The key is opened here and never returned.
 // A success body is cancelled unread. An error body is read only up to a fixed byte limit, then reduced to a signal.
+// A 404 whose kind is not_found_error, or a 400 invalid_request_error that names the model or the API version and is not a
+// credit or spend refusal, is a configuration answer. Everything else stays a signal.
 // A timeout, a network failure, a redirect, or a base URL that is not http(s) with a host is unreachable, and no error text is kept.
 // The API version the docs list first and recommend: https://platform.claude.com/docs/en/api/versioning, read 2026-10-25.
-import { signalFromBody } from "./outcome-anthropic.ts";
+import { CREDIT, SPEND, signalFromBody } from "./outcome-anthropic.ts";
 import type { ProbeAnswer, ProbeRequest, ProviderProbe, ProviderSignal } from "../application/ports.ts";
 
 export const PROBE_VERSION = "2026-10-21";
@@ -19,6 +21,16 @@ function messagesUrl(baseUrl: string): string | null {
   try { parsed = new URL(trimmed); } catch { return null; }
   if ((parsed.protocol !== "http:" && parsed.protocol !== "https:") || parsed.host === "") return null;
   return `${trimmed.replace(/\/+$/u, "")}/v1/messages`;
+}
+
+function configuration(signal: ProviderSignal): "model" | "version" | null {
+  if (signal.status === 404 && signal.kind === "not_found_error") return "model";
+  if (signal.status !== 400 || signal.kind !== "invalid_request_error") return null;
+  const text = signal.text ?? "";
+  if (CREDIT.test(text) || SPEND.test(text)) return null;
+  if (/anthropic-version/i.test(text)) return "version";
+  if (/\bmodel\b/i.test(text)) return "model";
+  return null;
 }
 
 function redact(signal: ProviderSignal, secret: string): ProviderSignal {
@@ -102,6 +114,8 @@ export class AnthropicProbe implements ProviderProbe {
       }
       const body = await limitedText(response, BODY_LIMIT);
       const signal = signalFromBody(response.status, body, response.headers.get("retry-after"));
+      const word = configuration(signal);
+      if (word !== null) return { misconfigured: word };
       return { signal: redact(signal, secret) };
     } catch {
       return { unreachable: true };

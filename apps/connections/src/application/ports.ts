@@ -239,7 +239,7 @@ export type ProviderSignal = {
   resumeDate: string | null;
 };
 export type ProbeRequest = { connection: string; model: string; baseUrl: string };
-export type ProbeAnswer = { signal: ProviderSignal } | { unreachable: true };
+export type ProbeAnswer = { signal: ProviderSignal } | { unreachable: true } | { misconfigured: "model" | "version" };
 export type ProviderProbe = { probe(request: ProbeRequest): Promise<ProbeAnswer> };
 export type OutcomeClassifier = { classify(signal: ProviderSignal): Outcome };
 export type Classifiers = { for(dialect: string): OutcomeClassifier | null };

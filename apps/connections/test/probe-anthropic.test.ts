@@ -218,6 +218,8 @@ describe("rev-158: a model or version the provider does not know is told apart f
     for (const [status, type, message] of [
       [400, "invalid_request_error", "Your credit balance is too low to access the Anthropic API."],
       [400, "invalid_request_error", "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC."],
+      [400, "invalid_request_error", "Your credit balance is too low to use this model."],
+      [400, "invalid_request_error", "You have reached your specified API usage limits for this model."],
       [400, "invalid_request_error", "max_tokens: must be greater than or equal to 1"],
       [401, "authentication_error", "invalid x-api-key"],
       [403, "permission_error", "forbidden for the model owner"],

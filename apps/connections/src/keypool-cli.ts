@@ -117,8 +117,9 @@ async function recheck(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   for (const name of names) {
     // The probe lease takes the gate `run` uses for that pool's runtime.
     home.runtime.current = gateRuntime(home, home.keypools.state(name)?.runtime ?? "claude");
-    const results = await home.keypools.recheck({ holder, pool: name, ...(member === undefined ? {} : { member }) });
-    for (const result of results) io.stdout(probeLine(name, result));
+    const results = await home.keypools.recheckBy(ACTOR, { holder, pool: name, ...(member === undefined ? {} : { member }) });
+    if (!results.ok) return fail(io, results.error.problem);
+    for (const result of results.value) io.stdout(probeLine(name, result));
   }
   return 0;
 }

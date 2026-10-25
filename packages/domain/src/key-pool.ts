@@ -28,7 +28,8 @@ export type Outcome =
   | { kind: "unknown" };
 export type KeyMember = {
   credential: string; joined: number; health: KeyHealth; since: number; lastChange: number;
-  nextCheck: number | null; probingUntil: number | null; failedProbes: number; organization: string | null;
+  nextCheck: number | null; probingUntil: number | null; failedProbes: number; lastProbe: number | null;
+  organization: string | null;
 };
 export type ProbeWhy = "due" | "manual" | "suspect";
 export type Names = { connections: readonly string[]; pools: readonly string[]; deleted: readonly string[] };
@@ -57,6 +58,7 @@ export type KeyPoolEvent =
   | { type: "KeyLimited"; member: string; retryAfterSeconds: number | null; at: number }
   | { type: "KeyRecovered"; member: string; how: RecoverHow; at: number }
   | { type: "ProbeClaimed"; member: string; why: ProbeWhy; at: number }
+  | { type: "ProbeReleased"; member: string; at: number }
   | { type: "PoolEmpty"; backAt: number | null; at: number }
   | { type: "PoolBlocked"; member: string; reason: FailingReason; at: number }
   | { type: "PoolRefilled"; at: number }
@@ -191,7 +193,7 @@ export function joinKeyPool(
   }
   const member: KeyMember = {
     credential: connection.name, joined: now, health: { state: "active" }, since: now, lastChange: now,
-    nextCheck: null, probingUntil: null, failedProbes: 0, organization,
+    nextCheck: null, probingUntil: null, failedProbes: 0, lastProbe: null, organization,
   };
   events.push({ type: "MemberJoined", member: connection.name, at: now, command: who.value });
   return ok(settleKeyPool(withEvents({ ...p, members: [...p.members, member], ownedOrgs }, events), now));
@@ -279,12 +281,22 @@ function cappedResume(resumeAt: number | null, now: number): number | null {
   return resumeAt;
 }
 
+// A probe's answer that names a date that is not in the future names no date: the member waits the interval, not
+// "due again at once". One that is in the future is held to a year. (The first refusal keeps a past date: the member is
+// due at once, once, and the claim then moves its next check.)
+function futureResume(resumeAt: number | null, now: number): number | null {
+  if (resumeAt === null || resumeAt <= now) return null;
+  return cappedResume(resumeAt, now);
+}
+
 // How long until the next probe. Each time a probe finds the member still dry, the wait doubles, up to a week.
 function probeInterval(failedProbes: number, policy: RotationPolicy): number {
   return Math.min(policy.recheckEveryMs * 2 ** failedProbes, KEY_POOL_RECHECK_MAX_MS);
 }
 
-function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report"): KeyPool | null {
+function applyOutcome(
+  p: KeyPool, member: KeyMember, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report", why?: ProbeWhy,
+): KeyPool | null {
   switch (outcome.kind) {
     case "unknown":
       return null;
@@ -298,9 +310,7 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
       if (member.health.state === "exhausted") {
         return withEvents(withMember(p, member.credential, { state: "active" }, observedAt, null), [{ type: "KeyRecovered", member: member.credential, how: via, at: now }]);
       }
-      if (member.health.state === "active" && via === "probe" && member.probingUntil !== null) {
-        return { ...p, members: p.members.map(m => m.credential === member.credential ? { ...m, probingUntil: null } : m) };
-      }
+      // An active member that answers a probe stays as it is, claim included. The claim lapses by itself.
       return null;
     case "exhausted": {
       if (member.health.state === "active") {
@@ -310,13 +320,13 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
           [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt, at: now }],
         );
       }
-      // Still dry, and this answer is the probe's: not a new transition (KP11). since and lastChange stay, and so does the claim,
-      // which lapses by itself, so a manual probe cannot run more than once in thirty seconds. A report of the same refusal
-      // changes nothing, so the interval is not doubled twice.
+      // Still dry. Only a due probe counts: it is not a new transition (KP11), so since and lastChange stay, and so does
+      // the claim, which lapses by itself. A manual probe, and a report of the same refusal, change nothing.
       if (member.health.state === "exhausted" && via === "probe") {
+        if (why !== "due") return null;
         const failedProbes = member.failedProbes + 1;
-        const resumeAt = cappedResume(outcome.resumeAt, now);
-        const nextCheck = outcome.resumeAt === null ? now + probeInterval(failedProbes, p.policy) : resumeAt;
+        const resumeAt = futureResume(outcome.resumeAt, now);
+        const nextCheck = resumeAt === null ? now + probeInterval(failedProbes, p.policy) : resumeAt;
         const health: KeyHealth = { state: "exhausted", reason: outcome.reason, resumeAt };
         return {
           ...p,
@@ -334,18 +344,19 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
 }
 
 export function reportKeyOutcome(
-  p: KeyPool, credential: string, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report" = "report",
+  p: KeyPool, credential: string, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report" = "report", why?: ProbeWhy,
 ): Result<KeyPool, "missing"> {
   const member = p.members.find(m => m.credential === credential);
   if (!member) return err("missing");
   if (observedAt < member.lastChange) return ok(p);
-  const changed = applyOutcome(p, member, outcome, observedAt, now, via);
+  const changed = applyOutcome(p, member, outcome, observedAt, now, via, via === "probe" ? why ?? "due" : why);
   if (!changed) return ok(p);
   return ok(settleKeyPool(changed, now));
 }
 
-// A probe is claimed before it is made. The claim and the next check are one write. A claim still in the future is
-// refused; one whose time has passed can be taken. A claim is not a health change, so since and lastChange stay.
+// A probe is claimed before it is made. A due claim moves the next check in the same write; a manual claim and a suspect
+// claim leave it. Every claim records when it was made. A claim still in the future is refused. A suspect claim inside
+// one recheck interval of the last probe is not due. A claim is not a health change, so since and lastChange stay.
 export function claimProbe(
   p: KeyPool, credential: string, now: number, why: ProbeWhy,
 ): Result<KeyPool, "missing" | "claimed" | "not_due" | "state"> {
@@ -364,9 +375,25 @@ export function claimProbe(
   }
   if (member.probingUntil !== null && member.probingUntil > now) return err("claimed");
   if (why === "due" && (member.nextCheck === null || member.nextCheck > now)) return err("not_due");
-  const nextCheck = why === "suspect" ? member.nextCheck : now + probeInterval(member.failedProbes, p.policy);
-  const members = p.members.map(m => m.credential === credential ? { ...m, probingUntil: now + KEY_PROBE_CLAIM_MS, nextCheck } : m);
+  if (why === "suspect" && member.lastProbe !== null && now - member.lastProbe < p.policy.recheckEveryMs) return err("not_due");
+  const nextCheck = why === "due" ? now + probeInterval(member.failedProbes, p.policy) : member.nextCheck;
+  const members = p.members.map(m => m.credential === credential
+    ? { ...m, probingUntil: now + KEY_PROBE_CLAIM_MS, nextCheck, lastProbe: now }
+    : m);
   return ok(withEvents({ ...p, members }, [{ type: "ProbeClaimed", member: credential, why, at: now }]));
+}
+
+// A claim whose probe never started is given back: only that claim, matched by the instant it was taken. Another
+// prober's claim, a missing member, or a member with no claim, is left as the same pool.
+export function releaseClaim(
+  p: KeyPool, credential: string, claimedAt: number, before: { nextCheck: number | null; lastProbe: number | null }, now: number,
+): KeyPool {
+  const member = p.members.find(m => m.credential === credential);
+  if (!member || member.probingUntil !== claimedAt + KEY_PROBE_CLAIM_MS) return p;
+  const members = p.members.map(m => m.credential === credential
+    ? { ...m, probingUntil: null, nextCheck: before.nextCheck, lastProbe: before.lastProbe }
+    : m);
+  return withEvents({ ...p, members }, [{ type: "ProbeReleased", member: credential, at: now }]);
 }
 
 // Exhausted members whose next check has arrived and that nobody is probing now, in ring order.

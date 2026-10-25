@@ -142,14 +142,18 @@ describe("keypool recheck", () => {
   it("a key that is still dry stays exhausted and its next check moves out", async () => {
     const fake = await api();
     fake.answers[KEYS[0]] = { status: 400, body: creditBody() };
-    const { env } = await world(fake.url);
+    const { dir, env } = await world(fake.url);
     await dry(env, "k1");
+    makeDue(dir, "k1");
     const before = (await view(env)).members[0]!.nextCheck as number;
-    const out = await cli(["keypool", "recheck", "p", "--member", "k1"], env);
+    const out = await cli(["keypool", "recheck"], env);
     expect(lines(out)).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
     const after = (await view(env)).members[0]!;
     expect(after.state).toBe("exhausted");
     expect(after.nextCheck as number).toBeGreaterThan(before);
+    // A manual probe of the same key does not move the schedule again.
+    const manual = await cli(["keypool", "recheck", "p", "--member", "k1"], env);
+    expect(lines(manual)).toEqual([{ pool: "p", member: "k1", outcome: "skipped", word: "claimed" }]);
   });
   it("a plain recheck probes the members that are due and no other", async () => {
     const fake = await api();

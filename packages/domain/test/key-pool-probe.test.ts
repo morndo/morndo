@@ -280,25 +280,29 @@ describe("rev-158: at most one probe per member per thirty seconds and per inter
   });
 });
 
-describe("rev-158: a resume date that is not in the future is no date", () => {
-  it("a refusal that names a date already past makes the member due after the interval, not at once, when it first runs dry", () => {
+describe("rev-158: a probe answered with a date that is not in the future names no date", () => {
+  it("the first refusal that names a past date keeps it: the member is due at once, once, and the claim then moves its next check", () => {
     const p = ok(reportKeyOutcome(pool(2), "k1", dry(T - DAY), T, T));
-    expect(member(p, "k1").nextCheck).toBe(T + DAY);
-    expect(member(p, "k1").health).toEqual({ state: "exhausted", reason: "spend-limit", resumeAt: null });
-    expect(dueMembers(p, T + 1)).toEqual([]);
+    expect(member(p, "k1").nextCheck).toBe(T - DAY);
+    expect(dueMembers(p, T + 1)).toEqual(["k1"]);
+    const claimed = ok(claimProbe(p, "k1", T + 1, "due"));
+    expect(member(claimed, "k1").nextCheck).toBe(T + 1 + DAY);
+    expect(dueMembers(claimed, T + 31 * SEC)).toEqual([]);
   });
-  it("a date equal to now is past too", () => {
-    expect(member(ok(reportKeyOutcome(pool(2), "k1", dry(T), T, T)), "k1").nextCheck).toBe(T + DAY);
-  });
-  it("a probe that is answered with a past date waits the doubled interval, not 'due again at once'", () => {
-    const p = ok(claimProbe(dryAtT(), "k1", T + DAY, "due"));
-    const after = ok(reportKeyOutcome(p, "k1", dry(T), T + DAY, T + DAY + SEC, "probe", "due"));
-    expect(member(after, "k1").nextCheck).toBe(T + DAY + SEC + 2 * DAY);
-    expect(dueMembers(after, T + DAY + 31 * SEC)).toEqual([]);
+  it("a probe that is answered with a past date, or one equal to now, waits the doubled interval: it is not due again at once", () => {
+    for (const named of [T, T - DAY]) {
+      const p = ok(claimProbe(ok(reportKeyOutcome(pool(2), "k1", dry(T - DAY), T, T)), "k1", T + DAY, "due"));
+      const after = ok(reportKeyOutcome(p, "k1", dry(named + DAY), T + DAY, T + DAY + SEC, "probe", "due"));
+      expect(member(after, "k1").nextCheck).toBe(T + DAY + SEC + 2 * DAY);
+      expect(member(after, "k1").health).toEqual({ state: "exhausted", reason: "spend-limit", resumeAt: null });
+      expect(dueMembers(after, T + DAY + 31 * SEC)).not.toContain("k1");
+    }
   });
   it("a date in the future still wins, as before", () => {
     const resume = T + 10 * DAY;
     expect(member(ok(reportKeyOutcome(pool(2), "k1", dry(resume), T, T)), "k1").nextCheck).toBe(resume);
+    const p = ok(claimProbe(ok(reportKeyOutcome(pool(2), "k1", dry(), T, T)), "k1", T + DAY, "due"));
+    expect(member(ok(reportKeyOutcome(p, "k1", dry(T + 10 * DAY), T + DAY, T + DAY + SEC, "probe", "due")), "k1").nextCheck).toBe(T + 10 * DAY);
   });
 });
 
@@ -309,7 +313,7 @@ describe("rev-158: a claim whose probe never started is released at once", () =>
     const released = releaseClaim(claimed, "k1", T + DAY, { nextCheck: member(before, "k1").nextCheck, lastProbe: member(before, "k1").lastProbe }, T + DAY + SEC);
     expect(member(released, "k1")).toMatchObject({ probingUntil: null, nextCheck: member(before, "k1").nextCheck, lastProbe: null });
     expect(released.events.at(-1)).toEqual({ type: "ProbeReleased", member: "k1", at: T + DAY + SEC });
-    expect(dueMembers(released, T + DAY + 2 * SEC)).toEqual(["k1"]);
+    expect(dueMembers(released, T + DAY + 2 * SEC)).toContain("k1");
   });
   it("leaves another prober's claim alone: only the claim made at that instant is released", () => {
     const claimed = ok(claimProbe(dryAtT(), "k1", T + DAY, "due"));

@@ -452,7 +452,7 @@ describe("rev-158: a claim whose probe never started is released at once", () =>
     expect(await w.pools.probeMember("p", "k1", { why: "due", holder })).toEqual({ member: "k1", outcome: "declined", word: "off" });
     expect(member(w, "k1")).toMatchObject({ probingUntil: null, nextCheck: before.nextCheck, lastProbe: before.lastProbe });
     expect(types(w)).toContain("ProbeReleased");
-    w.connections.turnOn("k1");
+    w.connections.turnOn("k1", who);
     expect((await w.pools.recheck({ holder }))[0]).toEqual({ member: "k1", outcome: "recovered" });
   });
   it("a probe that went out is not released: an unreachable provider keeps the claim and the moved next check", async () => {
