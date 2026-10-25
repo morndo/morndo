@@ -45,7 +45,7 @@ async function world(n = 3, opts: { budgetOf?: Record<string, number> } = {}): P
   mem.catalog.rows = [preset()];
   mem.catalog.keyPools = { "vendor-a": poolTerms() };
   const store = new MemoryKeyPoolStore();
-  const pools = new KeyPoolService({ clock: mem.clock, store, connections: mem.store, catalog: mem.catalog, alerts: mem.alerts, processes: mem.processes, classifiers: { for: d => (d === "dialect-a" ? classifier : null) } });
+  const pools = new KeyPoolService({ clock: mem.clock, store, connections: mem.store, catalog: mem.catalog, alerts: mem.alerts, processes: mem.processes, classifiers: { for: d => (d === "dialect-a" ? classifier : null) }, leases: new LeaseService(mem.deps), helper: { limit: 4, ttlMs: 60_000 } });
   const connections = new ConnectionsService(mem.deps, pools);
   for (let i = 1; i <= n; i++) {
     mem.vault.put(i === 1 ? REF : `ref-k${i}`, i === 1 ? FP : `0123456789a${i}`);

@@ -17,6 +17,7 @@ import { FileEngines } from "./adapters/engines-file.ts";
 import { FileModels } from "./adapters/models.ts";
 import { ProcProcesses } from "./adapters/processes.ts";
 import { GitRepos } from "./adapters/repos.ts";
+import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { RunSpend } from "./adapters/spend.ts";
 import { SqliteKeyPoolStore } from "./adapters/key-pool-store-sqlite.ts";
 import { SqlitePoolStore } from "./adapters/pool-store-sqlite.ts";
@@ -97,15 +98,17 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
     clock, vault, runtime, models, spend: new RunSpend(), catalog, store,
     repos: new GitRepos(), alerts: new FileAlerts(join(dir, "alerts.log")), processes, engines,
   };
+  const leases = new LeaseService(deps);
   const keypools = new KeyPoolService({
     clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, processes, classifiers: builtinClassifiers,
+    leases, helper: { limit: HELPER_LIMIT, ttlMs: HELPER_TTL_MS },
   });
   return {
     dir, db, vaultDir, identity, store, vault, catalog, engines, models, processes, runtime, env,
     connections: new ConnectionsService(deps, keypools),
     routing: new RoutingService(deps),
     commands: bindCommands(deps, () => readUsage(join(dir, "usage.json"))),
-    leases: new LeaseService(deps),
+    leases,
     pool: new PoolService({ clock, store: poolStore, connections: store, catalog, processes }),
     keypools,
     now: () => clock.now(),

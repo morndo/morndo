@@ -1,14 +1,18 @@
 // The key pool's service (ADR-0037): load the pool, apply one domain function, save on the version read, and retry a lost
 // save up to 8 times. Creating a pool is one save. A pick saves the ring position before the attempt, and writes the pick
-// after it returns. Alerts name a member or the pool and a reason word; a provider's text never lands here.
+// after it returns; a pooled run opens its grant in that same save. A hand-off writes the directory, then the grant, then
+// the audit line, and the next call repairs a crash between those writes. Alerts name a member or the pool and a reason
+// word; a provider's text never lands here. A hand-off never sees a key.
 import {
-  LEASE_REFUSED, acknowledgeKeyPoolTerms, chooseKey, createKeyPool, err, findConnection, isKey, joinKeyPool, keyPicked, keyRotated,
-  leaveKeyPool, moveKeyMember, newKeyPoolEvents, ok, releaseKey, reportKeyOutcome, reviveKey, setKeyPoolPolicy, settleKeyPool,
+  LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, chooseKey, closeGrant as dropGrant, createKeyPool, err, findConnection, isKey,
+  joinKeyPool, keyPicked, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, ok,
+  openGrant, releaseKey, reportKeyOutcome, reviveKey, setKeyPoolPolicy, settleKeyPool, touchGrant,
   KEY_POOL_RECHECK_DEFAULT_MS,
-  type Actor, type Directory, type KeyPool, type KeyPoolEvent, type Names, type Outcome, type Result, type RotationMode,
-  type RotationPolicy, type Standing,
+  type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
+  type Lease, type Names, type Outcome, type Result, type RotationMode, type RotationPolicy, type Standing,
 } from "@morndo/domain";
-import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, Processes, ProviderSignal } from "./ports.ts";
+import type { LeaseService } from "./lease-service.ts";
+import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, LeaseRequest, ProcId, Processes, ProviderSignal } from "./ports.ts";
 
 export type KeyPoolFailure = Failure & { backAt?: number | null; member?: string };
 export type PoolView = {
@@ -37,7 +41,12 @@ type Deps = {
   alerts: AlertSink;
   processes: Processes;
   classifiers: Classifiers;
+  leases: Leases;
+  helper: { limit: number; ttlMs: number };
 };
+export type GrantSeed = { lease: string; holder: Holder; request: GrantRequest; startedAt: number };
+type HandOffCaller = { id: ProcId; ppid: number | null };
+type Leases = Pick<LeaseService, "swap" | "refresh" | "helper" | "serve">;
 export type LaneProof = { kind: "lane"; lease: string; caller: { pid: number; startedAt: number; bootId: string } };
 export type ReportBy = Actor | LaneProof;
 type CreateInput = {
@@ -58,6 +67,8 @@ type Advance =
 
 const ATTEMPTS = 8;
 const fail = (problem: string): Result<never, Failure> => err({ problem });
+// A refresh refused for one of these swaps. Anything else (a missing lease, a lost save) is returned as it is.
+const REFRESH_SWAP = new Set(["budget", "expired", "off", "terms"]);
 
 function isPrincipal(actor: Actor): boolean {
   return actor.kind === "principal" && actor.command.trim() !== "";
@@ -199,29 +210,149 @@ export class KeyPoolService implements ConnectionLifecycle {
 
   // Everything before the first `await` is synchronous, so two picks started together each see the ring position the
   // other already saved. A refusal puts that reservation back before the next member is tried, or before the call returns.
-  async pick<T>(pool: string, attempt: (member: string) => Promise<Result<T, Failure>>, options?: { skip?: readonly string[] }): Promise<Result<{ member: string; value: T }, KeyPoolFailure>> {
-    const heldBack = options?.skip ?? [];
-    const declined: { member: string; word: string }[] = [];
-    let first: Failure | null = null;
-    for (;;) {
-      const step = this.#advance(pool, [...heldBack, ...declined.map(row => row.member)]);
-      if (step.kind === "stop") return err(step.error);
-      if (step.kind === "empty") return err(first ?? { problem: "none_left", exit: LEASE_REFUSED });
-      const result = await attempt(step.member);
-      if (result.ok) {
-        const noted = this.#note(pool, step.member, declined, step.previous);
-        if (!noted.ok) return noted;
-        return ok({ member: step.member, value: result.value });
+  async pick<T>(pool: string, attempt: (member: string) => Promise<Result<T, Failure>>, options?: { skip?: readonly string[]; grant?: (member: string, value: T) => GrantSeed }): Promise<Result<{ member: string; value: T; grant?: string }, KeyPoolFailure>> {
+    return this.#choose(pool, attempt, options);
+  }
+
+  // The pooled helper's call. The ring advances, the directory swaps, the pool saves the pick and the grant together,
+  // then the audit line is written. A lost save, a lease another call already swapped, or a lease waiting to be adopted
+  // starts the round again. A thrown error is the crash the next call repairs; it is not caught here.
+  async handOff(pool: string, grant: string, caller: HandOffCaller): Promise<Result<{ connection: string; lease: string }, KeyPoolFailure>> {
+    const { leases, helper } = this.#deps;
+    for (let round = 0; round < ATTEMPTS; round++) {
+      const loaded = this.#deps.store.load(pool);
+      if (!loaded.pool) return fail("missing");
+      const current = loaded.pool;
+      const held = current.grants.find(row => row.id === grant);
+      if (!held) return fail("grant_missing");
+      if (!this.#holds(held.holder, caller.id)) return fail("not_holder");
+      const directory = this.#deps.connections.load().directory;
+      const request: LeaseRequest = { ...held.request, holder: held.holder, probe: false };
+      const found = keyLease(directory, held.lease);
+      if (found) {
+        if (keyPoolStanding(current) === "blocked") return blocked(current);
+        const capped = found.row.authority === "ended" && directory.events.some(event => event.type === "AuthorityEnded" && event.lease === found.row.id);
+        if (capped) return fail("authority");
+        const state = current.members.find(member => member.credential === held.member)?.health.state;
+        let why: "exhausted" | "refused" | null = found.row.authority === "ended" || state === "exhausted" ? (state === "exhausted" ? "exhausted" : "refused") : null;
+        if (!why) {
+          const refreshed = leases.refresh(found.name, found.row.id);
+          if (!refreshed.ok) {
+            if (!REFRESH_SWAP.has(refreshed.error.problem)) return err(refreshed.error);
+            why = "refused";
+          } else {
+            const noted = leases.helper(found.name, found.row.id, caller.id, helper.limit, helper.ttlMs);
+            if (!noted.ok) return err(noted.error);
+            const again = keyLease(this.#deps.connections.load().directory, found.row.id);
+            if (!again || again.row.authority === "ended") return fail("authority");
+            const served = this.#serve(leases, pool, held, again.name, again.row, caller);
+            if (isRetry(served)) continue;
+            return served;
+          }
+        }
+        const counted = nextHelperWindow(found.row, helper.limit, helper.ttlMs, this.#deps.clock.now());
+        if (counted.over) {
+          leases.helper(found.name, found.row.id, caller.id, helper.limit, helper.ttlMs);
+          return fail("authority");
+        }
+        const window = { calls: counted.calls, windowStart: counted.windowStart };
+        const reason = why ?? "refused";
+        const taken = await this.#reseat(pool, held, { name: held.member, id: held.lease }, request, window, reason, leases, caller);
+        if (isRetry(taken)) continue;
+        return taken;
       }
-      const restored = this.#rewind(pool, step.member, step.previous);
-      if (!restored.ok) return restored;
-      if (result.error.exit === LEASE_REFUSED) {
-        if (!first) first = result.error;
-        declined.push({ member: step.member, word: result.error.problem });
+      const adopted = adoptable(directory, current, held);
+      if (adopted) {
+        const moved = this.#change(pool, (candidate, now) => {
+          const next = moveGrant(candidate, held.id, {
+            member: adopted.name, lease: adopted.row.id,
+            window: { calls: adopted.row.calls, windowStart: adopted.row.windowStart }, movedAt: adopted.row.start,
+          }, "adopted", now);
+          return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: candidate, result: fail(next.error) };
+        });
+        if (!moved.ok && moved.error.problem !== "conflict") return moved;
         continue;
       }
-      return err(result.error);
+      if (keyPoolStanding(current) === "blocked") return blocked(current);
+      const counted = nextHelperWindow(held.window, helper.limit, helper.ttlMs, this.#deps.clock.now());
+      if (counted.over) return fail("authority");
+      const window = { calls: counted.calls, windowStart: counted.windowStart };
+      const state = current.members.find(member => member.credential === held.member)?.health.state;
+      let why: "exhausted" | "refused" = state === "exhausted" ? "exhausted" : "refused";
+      if (state === "active") {
+        const swapped = leases.swap(null, held.member, request, window);
+        if (swapped.ok) {
+          const moved = this.#change(pool, (candidate, now) => {
+            const next = moveGrant(candidate, held.id, { member: held.member, lease: swapped.value.id, window, movedAt: now }, "reopened", now);
+            return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: candidate, result: fail(next.error) };
+          });
+          if (!moved.ok) {
+            if (moved.error.problem === "conflict") continue;
+            return moved;
+          }
+          const fresh = keyLease(this.#deps.connections.load().directory, swapped.value.id);
+          if (!fresh) return fail("missing");
+          const served = this.#serve(leases, pool, held, fresh.name, fresh.row, caller);
+          if (isRetry(served)) continue;
+          return served;
+        }
+        if (swapped.error.problem === "conflict" || swapped.error.problem === "closed") continue;
+        if (swapped.error.exit !== LEASE_REFUSED) return err(swapped.error);
+        why = "refused";
+      }
+      const taken = await this.#reseat(pool, held, null, request, window, why, leases, caller);
+      if (isRetry(taken)) continue;
+      return taken;
     }
+    return fail("conflict");
+  }
+
+  grantOf(pool: string, grant: string): { member: string; lease: string } | null {
+    const held = this.#deps.store.load(pool).pool?.grants.find(row => row.id === grant);
+    return held ? { member: held.member, lease: held.lease } : null;
+  }
+
+  attribute(pool: string, grant: string): Result<string, Failure> {
+    const helper = this.#deps.helper;
+    return this.#change(pool, (current, now) => {
+      const next = attributeToGrant(current, grant, now, helper.ttlMs);
+      if (!next.ok) return { pool: current, result: fail("grant_missing") };
+      return { pool: next.value.pool, result: ok(next.value.member) };
+    });
+  }
+
+  // The grant is checked before the caller, and the caller before the outcome, so a stranger's refusal is not applied.
+  reportByGrant(pool: string, grant: string, outcome: Outcome, observedAt: number, by: { kind: "operator" } | { kind: "holder"; caller: ProcId }): Result<void, Failure> {
+    const held = this.#deps.store.load(pool).pool?.grants.find(row => row.id === grant);
+    if (!held) return fail("grant_missing");
+    if (by.kind === "holder") {
+      if (!this.#holds(held.holder, by.caller)) return fail("not_holder");
+      if (!MARKS.has(outcome.kind)) return fail("not_allowed");
+    }
+    const member = this.attribute(pool, grant);
+    if (!member.ok) return member;
+    return this.report(pool, member.value, outcome, observedAt, { kind: "operator" });
+  }
+
+  closeGrant(pool: string, grant: string): void {
+    this.#change(pool, (current, now) => ({ pool: dropGrant(current, grant, now), result: ok(undefined) }));
+  }
+
+  sweepGrants(): number {
+    let dropped = 0;
+    for (const name of this.#deps.store.names().live) {
+      const result = this.#change(name, (pool, now) => {
+        let next = pool;
+        for (const grant of pool.grants) {
+          const holder = grant.holder;
+          if (this.#deps.processes.alive({ pid: holder.pid, startedAt: holder.startedAt, bootId: holder.bootId })) continue;
+          next = dropGrant(next, grant.id, now);
+        }
+        return { pool: next, result: ok(pool.grants.length - next.grants.length) };
+      });
+      if (result.ok) dropped += result.value;
+    }
+    return dropped;
   }
 
   list(): readonly PoolView[] {
@@ -304,11 +435,100 @@ export class KeyPoolService implements ConnectionLifecycle {
     return { kind: "stop", error: { problem: "conflict" } };
   }
 
-  #note(name: string, member: string, declined: readonly { member: string; word: string }[], previous: string | null): Result<void, Failure> {
+  async #choose<T>(
+    pool: string, attempt: (member: string) => Promise<Result<T, Failure>>,
+    options?: { skip?: readonly string[]; grant?: (member: string, value: T) => GrantSeed; also?: (pool: KeyPool, member: string, value: T, now: number) => Result<KeyPool, Failure> },
+  ): Promise<Result<{ member: string; value: T; grant?: string }, KeyPoolFailure>> {
+    const heldBack = options?.skip ?? [];
+    const declined: { member: string; word: string }[] = [];
+    let first: Failure | null = null;
+    for (;;) {
+      const step = this.#advance(pool, [...heldBack, ...declined.map(row => row.member)]);
+      if (step.kind === "stop") return err(step.error);
+      if (step.kind === "empty") return err(first ?? { problem: "none_left", exit: LEASE_REFUSED });
+      const result = await attempt(step.member);
+      if (result.ok) {
+        const seed = options?.grant?.(step.member, result.value);
+        const grantId = seed ? `g${seed.lease}` : undefined;
+        const extra = seed || options?.also
+          ? (current: KeyPool, now: number): Result<KeyPool, Failure> => {
+            let next = current;
+            if (seed && grantId) {
+              const opened = openGrant(next, {
+                id: grantId, member: step.member, lease: seed.lease, holder: seed.holder, request: seed.request,
+                window: { calls: 0, windowStart: seed.startedAt }, previous: null,
+              }, now);
+              if (!opened.ok) return fail(opened.error);
+              next = opened.value;
+            }
+            return options?.also ? options.also(next, step.member, result.value, now) : ok(next);
+          }
+          : undefined;
+        const noted = this.#note(pool, step.member, declined, step.previous, extra);
+        if (!noted.ok) return noted;
+        return ok(grantId ? { member: step.member, value: result.value, grant: grantId } : { member: step.member, value: result.value });
+      }
+      const restored = this.#rewind(pool, step.member, step.previous);
+      if (!restored.ok) return restored;
+      if (result.error.exit === LEASE_REFUSED) {
+        if (!first) first = result.error;
+        declined.push({ member: step.member, word: result.error.problem });
+        continue;
+      }
+      return err(result.error);
+    }
+  }
+
+  // Pick the next member and move the grant in the pick's save, then serve that lease without counting the call again.
+  async #reseat(
+    pool: string, held: Grant, from: { name: string; id: string } | null, request: LeaseRequest, window: HelperWindow,
+    why: "exhausted" | "refused", leases: Leases, caller: HandOffCaller,
+  ): Promise<Result<{ connection: string; lease: string }, KeyPoolFailure> | { retry: true }> {
+    const taken = await this.#choose(pool, async member => leases.swap(from, member, request, window), {
+      skip: [held.member],
+      also: (current, member, value, now) => {
+        const moved = moveGrant(current, held.id, { member, lease: value.id, window, movedAt: now }, why, now);
+        return moved.ok ? ok(moved.value) : fail(moved.error);
+      },
+    });
+    if (!taken.ok) {
+      if (taken.error.problem === "closed" || taken.error.problem === "conflict") return { retry: true };
+      return taken;
+    }
+    const fresh = keyLease(this.#deps.connections.load().directory, taken.value.value.id);
+    if (!fresh) return fail("missing");
+    return this.#serve(leases, pool, held, fresh.name, fresh.row, caller);
+  }
+
+  // The audit line is written before this returns, so the caller prints after it. The window is recorded only when it changed.
+  #serve(leases: Pick<LeaseService, "serve">, pool: string, held: Grant, connection: string, row: Lease, caller: HandOffCaller): Result<{ connection: string; lease: string }, KeyPoolFailure> | { retry: true } {
+    const window = { calls: row.calls, windowStart: row.windowStart };
+    const touched = this.#change(pool, current => ({ pool: touchGrant(current, held.id, window), result: ok(undefined) }));
+    if (!touched.ok) return touched.error.problem === "conflict" ? { retry: true } : touched;
+    const served = leases.serve(connection, row.id, {
+      pid: caller.id.pid, ppid: caller.ppid, lane: held.holder.lane, workspace: held.request.workspacePath,
+      isolation: row.isolation, proof: "claimed",
+    });
+    if (!served.ok) return err(served.error);
+    return ok({ connection, lease: row.id });
+  }
+
+  #note(
+    name: string, member: string, declined: readonly { member: string; word: string }[], previous: string | null,
+    extra?: (pool: KeyPool, now: number) => Result<KeyPool, Failure>,
+  ): Result<void, Failure> {
     return this.#change(name, (pool, now) => {
       const restored = pool.policy.mode === "drain" && declined.length > 0 ? releaseKey(pool, member, previous) : pool;
-      return { pool: keyPicked(restored, member, declined, now), result: ok(undefined) };
+      const picked = keyPicked(restored, member, declined, now);
+      if (!extra) return { pool: picked, result: ok(undefined) };
+      const more = extra(picked, now);
+      return more.ok ? { pool: more.value, result: ok(undefined) } : { pool, result: more };
     });
+  }
+
+  #holds(holder: Holder, caller: ProcId): boolean {
+    const same = (id: ProcId) => id.pid === holder.pid && id.startedAt === holder.startedAt && id.bootId === holder.bootId;
+    return same(caller) || this.#deps.processes.ancestors(caller.pid).some(same);
   }
 
   #rewind(name: string, member: string, previous: string | null): Result<void, Failure> {
@@ -400,4 +620,39 @@ export class KeyPoolService implements ConnectionLifecycle {
     }
     return fail("conflict");
   }
+}
+
+function keyLease(directory: Directory, id: string): { name: string; row: Lease } | null {
+  for (const connection of directory.connections) {
+    if (!isKey(connection)) continue;
+    const row = connection.leases.find(lease => lease.id === id);
+    if (row) return { name: connection.name, row };
+  }
+  return null;
+}
+
+function sameHolder(a: Holder, b: Holder): boolean {
+  return a.node === b.node && a.pid === b.pid && a.startedAt === b.startedAt && a.bootId === b.bootId && a.lane === b.lane;
+}
+
+// A live lease of this holder on a pool member the grant does not already name: the swap that landed, whose grant save did not.
+function adoptable(directory: Directory, pool: KeyPool, held: Grant): { name: string; row: Lease } | null {
+  const members = new Set(pool.members.map(member => member.credential));
+  for (const connection of directory.connections) {
+    if (!isKey(connection) || !members.has(connection.name)) continue;
+    for (const row of connection.leases) {
+      if (row.authority !== "live" || row.id === held.lease || !sameHolder(row.holder, held.holder)) continue;
+      return { name: connection.name, row };
+    }
+  }
+  return null;
+}
+
+function blocked(pool: KeyPool): Result<never, KeyPoolFailure> {
+  const member = pool.members.find(row => row.health.state === "failing");
+  return err({ problem: "pool_blocked", exit: LEASE_REFUSED, ...(member ? { member: member.credential } : {}) });
+}
+
+function isRetry(result: { retry: true } | Result<unknown, Failure>): result is { retry: true } {
+  return "retry" in result;
 }
