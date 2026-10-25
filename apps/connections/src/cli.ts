@@ -114,7 +114,12 @@ morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role
 `;
 
 export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: Io): Promise<number> {
-  const parsed = parse(argv);
+  let parsed: Parsed;
+  try { parsed = parse(argv); } catch (error) {
+    // A flag with no value (`--by` last, or before another flag) is a refusal with its word, not a stack trace.
+    io.stderr(`${error instanceof Error ? error.message : "failed"}\n`);
+    return 1;
+  }
   if (parsed.cmd === "help") { io.stdout(HELP); return 0; }
   try {
     if (parsed.cmd === "helper") return await helper(env, parsed, io);

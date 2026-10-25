@@ -59,7 +59,7 @@ export type CreateKeyPool = { name: string; runtime: string; vendor: string; pol
 const EVENT_LIMIT = 500;
 
 function commandOf(actor: Actor): Result<string, "principal"> {
-  return actor.kind === "principal" && actor.command ? ok(actor.command) : err("principal");
+  return actor.kind === "principal" && actor.command.trim() !== "" ? ok(actor.command) : err("principal");
 }
 
 function modeOk(mode: string): mode is RotationMode {

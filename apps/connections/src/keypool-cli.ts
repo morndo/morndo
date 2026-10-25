@@ -87,7 +87,9 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
 // The terms line is shown when it is asked for and not yet acknowledged: `--by` says who read it.
 function create(home: Opened, name: string, members: readonly string[], parsed: Parsed, io: Io): number {
   const vendor = need(parsed.get("vendor"));
-  const by = parsed.get("by") ?? "";
+  // "true" is what a bare flag stores, never somebody's name.
+  const given = parsed.get("by") ?? "";
+  const by = given === "true" ? "" : given;
   if (by.trim() === "") {
     const line = home.catalog.keyPool(vendor)?.termsLine;
     if (line) io.stderr(`${line}\n`);

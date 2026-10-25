@@ -123,7 +123,8 @@ export const anthropicClassifier: OutcomeClassifier = {
   classify(signal): Outcome {
     const { status } = signal;
     if (status !== null && status >= 200 && status <= 299) return { kind: "ok", evidence: "messages" };
-    if (matches(signal.text, HELD)) return { kind: "failing", reason: "held" };
+    // A hold is the provider's word on a 401 or 403, or on a structured result that names no status; a 400 that echoes the words is the caller's text.
+    if ((status === null || status === 401 || status === 403) && matches(signal.text, HELD)) return { kind: "failing", reason: "held" };
     if ((status === null || status === 400 || status === 402) && matches(signal.text, CREDIT)) {
       return { kind: "exhausted", reason: "credit", resumeAt: null };
     }
