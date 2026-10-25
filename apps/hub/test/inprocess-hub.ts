@@ -32,6 +32,7 @@ import { enginesCli } from "../src/adapters/engines-cli.ts";
 import { EnginesService } from "../src/application/engines-service.ts";
 import { BoardService } from "../src/application/board-service.ts";
 import { ProofService } from "../src/application/proof-service.ts";
+import { WaitWatch } from "../src/application/wait-watch.ts";
 import { AgentAccess } from "../src/application/agent-access.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
@@ -49,6 +50,7 @@ export type InProcessHub = {
   notifications: NotificationService;
   board: BoardService;
   proof: ProofService;
+  waits: WaitWatch;                                            // B18: a test runs its passes (tick) itself
   agents: AgentAccess;
   briefs: BriefService;
   escalations: EscalationService;
@@ -155,12 +157,15 @@ export async function startInProcessHub(o: {
   const vapid = loadOrCreateVapid(dir, "mailto:test@example.test");
   // ADR-0015: the board, with the lanes a test's observation lists (none by default). `liveness`: a merge's liveness as
   // the fleet's builds would tell it (B11); without one the hub can never say a merge is live.
-  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}), ...(o.standIn ? { standIn: true } : {}) });
+  const board = new BoardService({ store, policy: () => access.policy(), ...(o.now ? { now: o.now } : {}), lanes: () => (o.observation?.snapshot().workers ?? []).map(w => w.name), ...(o.runs ? { runs: o.runs } : {}), ...(o.orphans ? { orphans: o.orphans } : {}), ...(o.liveness ? { liveness: o.liveness } : {}), ...(o.knows ? { knows: o.knows } : {}), ...(o.standIn ? { standIn: true } : {}), ...(o.proofRepos ? { repos: () => o.proofRepos ?? [] } : {}) });
   // ADR-0035: the proof of work, over the same store, wired as main.ts wires it.
   const proof = new ProofService({
     store, board, ...(o.now ? { now: o.now } : {}), ...(o.forge ? { forge: o.forge } : {}),
     ...(o.proofMode ? { mode: o.proofMode } : {}), ...(o.proofRepos ? { allowedRepos: o.proofRepos } : {}),
   });
+  // B18, D7: the wait watch over the same forge, wired as main.ts wires it, without its timer.
+  const waits = new WaitWatch({ board, forge: o.forge ?? null, ledger: null, ...(o.now ? { now: o.now } : {}) });
+  board.attachWaits(waits);
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}), ...(o.laneNode ? { laneNode: o.laneNode } : {}) });
   const queue = o.queue ? o.queue(store) : null;
@@ -201,7 +206,7 @@ export async function startInProcessHub(o: {
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
   const cookieSessions: { secret: string; endpointId: string }[] = [];
   return {
-    base, store, access, dir, identity, notifications, board, proof, agents, briefs, escalations, usage, jobs, pushes,
+    base, store, access, dir, identity, notifications, board, proof, waits, agents, briefs, escalations, usage, jobs, pushes,
     async cookie() {
       // Each call pairs a fresh device, as the linking tests count on — but a device whose session the test's fake
       // clock has since expired is revoked first, so a test that looks at the principal's side many times across

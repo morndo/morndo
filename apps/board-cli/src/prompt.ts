@@ -35,6 +35,11 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - A wrong sha: \`morndo-board unmerged T-12 <sha>\`, then record the right one.
 - Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.
+- When a block waits on something the board can see, name it, so nobody has to remember to look:
+  \`morndo-board block T-12 --why "…" --on T-11 --on #93 --on ny-530 --on until:2026-10-28T09:00+01:00\` (a task done, a
+  pull request merged or closed, the principal's card closed, a time reached). The board reads them itself and moves
+  the task back to to do when all are over (\`board (D7)\`). A block of words only that sat two days is flagged in the
+  list: check it, or name its waits.
 - Proposals (tasks in the backlog nobody is assigned to) come from lanes. Triage them: assign, or comment why not.
 - Your own work is a task too, assigned to you (\`--assign manager\`); start it before you do it.
 - Talk through comments on the task (\`morndo-board comment T-12 "…"\`), short, one fact per line, so the record
@@ -58,6 +63,8 @@ your turns. The principal reads the board instead of asking you.
   \`STATUS: NEEDS DECISION T-12 checkpoint: <what>\`, which the board moves to blocked with that line as the reason; the
   manager decides whether you go on.
 - Work on one task at a time; the board refuses a second in progress. When a block clears: \`morndo-board resume T-12\`.
+  If you block on something the board can see, name it: \`morndo-board block T-12 --why "…" --on #93\` (also a task,
+  a card ny-530 or until:<time>); the board moves the task back to to do when it is over.
 - Work only on tasks assigned to you. If you find work that isn't on the board, file it as a proposal:
   \`morndo-board new "<what>" --desc "<why>"\`. It lands in the backlog for the manager; don't start it yourself.
 - Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;

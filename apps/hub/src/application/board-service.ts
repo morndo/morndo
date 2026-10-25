@@ -9,7 +9,9 @@
 // (orphans; the projector's, board-projector.ts), and a change of runs is pushed too, at most about once a second.
 // B11: each task's merges are kept with their liveness (merge-liveness.ts over the fleet's node builds), Done is judged
 // against them, and the view says for each task with merges where they stand ("merged, not live: pc on abc1234").
-import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type Liveness, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+// B18 (ADR-0038): a block's waits are judged against the repositories the hub reads (`repos`), the view carries what
+// the wait watch last read for each (wait-watch.ts), and a block of words only that sat too long is flagged.
+import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, isStaleBlock, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type JudgedWait, type Liveness, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
@@ -18,7 +20,9 @@ import type { Authenticated } from "./access-service.ts";
 // whose lane the fleet no longer lists (BoardProjector.orphans); empty without a fleet. `merged` (B11): one view per
 // shown task that has merges.
 // `standIn`: set only when the hub reads its proof references from a stand-in forge, so every screen can say so (ADR-0035).
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[]; standIn?: true };
+// `waits` (B18): for each blocked task that names waits, what the wait watch last read of them; `staleBlocks`: the blocked
+// tasks of words only that nobody changed for STALE_BLOCK_MS. Both absent when there are none.
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[]; standIn?: true; waits?: { key: string; readings: JudgedWait[] }[]; staleBlocks?: string[] };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
 export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus; detail?: string };
@@ -48,18 +52,22 @@ export class BoardService {
   // re-reading of a brief's references before a Done is judged.
   #proof: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null = null;
   #eventListeners = new Set<(e: TaskEvent) => void>();
+  #repos: () => readonly string[];
+  #waits: { readings(key: string): JudgedWait[] | null } | null = null;
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
   // fleet no longer lists (BoardProjector.orphans; none without a fleet). `runsEveryMs`: the runs' throttle.
   // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits. `knows`:
   // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean }) {
+  // `repos` (B18): the repositories whose pull requests the hub reads (MORNDO_PROOF_REPOS); morndo/morndo when absent.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean; repos?: () => readonly string[] }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
     this.#knows = p.knows ?? null;
     this.#standIn = p.standIn ?? false;
+    this.#repos = p.repos ?? (() => [MORNDO_REPO]);
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -73,6 +81,8 @@ export class BoardService {
   // The proof service's hooks (ADR-0035): the gate the domain judges a Done and a brief against, and the refresh a
   // Done attempt waits for first. null: none attached, Done is not held for proof.
   attachProof(p: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null): void { this.#proof = p; }
+  // The wait watch's readings (B18, wait-watch.ts), shown in the view. null: none attached, the view says nothing of them.
+  attachWaits(w: { readings(key: string): JudgedWait[] | null } | null): void { this.#waits = w; }
   #said(e: TaskEvent) { for (const l of this.#eventListeners) l(e); }
   // Every push carries the runs as they are then, so one due for the runs alone is dropped.
   #tell() {
@@ -97,17 +107,29 @@ export class BoardService {
   view(): BoardView {
     const now = this.#now();
     const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
-    return { tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks), ...(this.#standIn ? { standIn: true as const } : {}) };
+    const waits = this.#waits === null ? [] : tasks.flatMap(t => {
+      const readings = t.status === "blocked" && (t.waits ?? []).length > 0 ? this.#waits?.readings(t.key) ?? null : null;
+      return readings === null ? [] : [{ key: t.key, readings }];
+    });
+    const staleBlocks = tasks.filter(t => isStaleBlock(t, now)).map(t => t.key);
+    return {
+      tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks),
+      ...(this.#standIn ? { standIn: true as const } : {}), ...(waits.length > 0 ? { waits } : {}), ...(staleBlocks.length > 0 ? { staleBlocks } : {}),
+    };
   }
-  task(key: string): { task: Task; events: TaskEvent[]; merged: MergedView | null } | null {
+  // `waitsRead` (B18): for a blocked task that names waits, what the wait watch last read of them.
+  task(key: string): { task: Task; events: TaskEvent[]; merged: MergedView | null; waitsRead?: JudgedWait[] } | null {
     const task = this.#store.task(key);
     if (!task) return null;
     const merges = this.#store.mergesOf(key);
-    return { task, events: this.#store.taskEvents(key), merged: merges.length > 0 ? mergedView(task.key, merges, this.#liveness) : null };
+    const read = task.status === "blocked" && (task.waits ?? []).length > 0 ? this.#waits?.readings(key) ?? null : null;
+    return { task, events: this.#store.taskEvents(key), merged: merges.length > 0 ? mergedView(task.key, merges, this.#liveness) : null, ...(read ? { waitsRead: read } : {}) };
   }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
   openTasksOf(lane: string): Task[] { return this.#store.openTasksOf(lane); }
   tasksInProgress(): Task[] { return this.#store.tasksInProgress(); }
+  // The blocked tasks, each with the waits its block named (B18): what the wait watch reads.
+  blockedTasks(): Task[] { return this.#store.tasksIn("blocked"); }
 
   // The principal's own changes are Commands (AC7): past the step-up window they are refused until he verifies again.
   principal(a: Authenticated): BoardActor | { problem: "step_up" } {
@@ -159,7 +181,7 @@ export class BoardService {
         && this.#store.taskEvents(key).filter(e => e.change.kind === "proof_listed" && e.actor.kind === "worker").length >= PROOF_LIST_CHANGES_MAX)
         return { ok: false as const, error: { problem: "too_many" as const, detail: "proof list changes" } };
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
-        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}) });
+        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}), repos: this.#repos() });
       if (!applied.ok) return applied;
       this.#write(applied.value.task, applied.value.event);
       return applied;

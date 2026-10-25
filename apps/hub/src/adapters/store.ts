@@ -556,7 +556,7 @@ export class Store {
   }
   // The tasks the board shows: every open one, and Done since `doneAfter` (a week, DONE_SHOWN_MS).
   shownTasks(doneAfter: number): Task[] {
-    return (this.db.prepare("SELECT * FROM board_tasks WHERE status != 'done' OR done_at > ? ORDER BY n").all(doneAfter) as Row[]).map(taskFrom);
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE status != 'done' OR done_at > ? ORDER BY n").all(doneAfter) as Row[]).map(r => this.#withWaits(taskFrom(r)));
   }
   // The tasks in progress now (B5), by the (status, assignee) index.
   tasksInProgress(): Task[] {
@@ -564,7 +564,7 @@ export class Store {
   }
   // Every task in one status (the proof timer asks for review), ordered by the board's own number.
   tasksIn(status: TaskStatus): Task[] {
-    return (this.db.prepare("SELECT * FROM board_tasks WHERE status = ? ORDER BY n").all(status) as Row[]).map(taskFrom);
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE status = ? ORDER BY n").all(status) as Row[]).map(r => this.#withWaits(taskFrom(r)));
   }
   taskInProgressOf(lane: string): Task | null {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE status = 'doing' AND assignee = ? ORDER BY n LIMIT 1").get(lane) as Row | undefined;
@@ -572,11 +572,21 @@ export class Store {
   }
   // A lane's open tasks (every status but done): what the board's own moves read for that lane (ADR-0032, D1 to D4).
   openTasksOf(lane: string): Task[] {
-    return (this.db.prepare("SELECT * FROM board_tasks WHERE assignee = ? AND status <> 'done' ORDER BY n").all(lane) as Row[]).map(taskFrom);
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE assignee = ? AND status <> 'done' ORDER BY n").all(lane) as Row[]).map(r => this.#withWaits(taskFrom(r)));
   }
   task(key: string): Task | null {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE key = ?").get(key) as Row | undefined;
-    return r ? taskFrom(r) : null;
+    return r ? this.#withWaits(taskFrom(r)) : null;
+  }
+  // B18 (ADR-0038): a blocked task's waits are the ones its latest move named, read from that event. The record is the
+  // one place they live, so no column can keep waits an older hub's later block knew nothing of (an older hub's block
+  // writes a move without waits, and that move is then the latest).
+  #withWaits(t: Task): Task {
+    if (t.status !== "blocked") return t;
+    const r = this.db.prepare("SELECT change FROM board_events WHERE key = ? AND json_extract(change, '$.kind') = 'moved' ORDER BY rev DESC LIMIT 1").get(t.key) as Row | undefined;
+    if (!r) return t;
+    const change = JSON.parse(r.change as string) as { to?: string; waits?: unknown };
+    return change.to === "blocked" && Array.isArray(change.waits) && change.waits.length > 0 ? { ...t, waits: change.waits as NonNullable<Task["waits"]> } : t;
   }
   // The next task number, and taking it: the counter only grows, and is written in the same transaction as the task,
   // only once the task is accepted (a refused filing burns no number).
@@ -590,7 +600,7 @@ export class Store {
       VALUES (@key, @n, @title, @description, @status, @assignee, @priority, @blockedReason, @createdAt, @updatedAt, @stateChangedAt, @createdBy, @rev, @doneAt, @comments)
       ON CONFLICT(key) DO UPDATE SET title = excluded.title, description = excluded.description, status = excluded.status, assignee = excluded.assignee,
         priority = excluded.priority, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at, state_changed_at = excluded.state_changed_at, rev = excluded.rev, done_at = excluded.done_at, comments = excluded.comments`)
-      .run({ ...t, createdBy: JSON.stringify(t.createdBy) });
+      .run({ ...withoutWaits(t), createdBy: JSON.stringify(t.createdBy) });
   }
   saveTaskEvent(e: TaskEvent) {
     this.db.prepare("INSERT INTO board_events (key, rev, at, actor, change) VALUES (?, ?, ?, ?, ?)").run(e.key, e.rev, e.at, JSON.stringify(e.actor), JSON.stringify(e.change));
@@ -908,6 +918,8 @@ export class Store {
   close() { this.db.close(); }
 }
 
+// A task's waits are not a column (they live in its latest move, #withWaits), so they are never bound as one.
+const withoutWaits = ({ waits: _waits, ...row }: Task) => row;
 const taskFrom = (r: Row): Task => ({
   key: r.key as Task["key"], n: r.n as number, title: r.title as string, description: r.description as string, status: r.status as Task["status"],
   assignee: (r.assignee as string | null) ?? null, priority: r.priority as Task["priority"], blockedReason: (r.blocked_reason as string | null) ?? null,
