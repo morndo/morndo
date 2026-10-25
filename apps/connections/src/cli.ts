@@ -98,7 +98,10 @@ morndo-keys keypool create <name> --vendor V --runtime R --by <who> [--mode roun
 morndo-keys keypool add|remove|revive <pool> <connection> [--confirm-own-account]    keypool move <pool> <connection> --to N
 morndo-keys keypool policy <pool> [--mode …] [--recheck …]    keypool list    keypool delete <pool>
 morndo-keys keypool report <pool> --member M --outcome exhausted|failing|limited [--reason R] [--lease <id>]
+morndo-keys keypool report <pool> --outcome exhausted|failing|limited --grant <id>
+morndo-keys keypool sync
 morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role R] [--workspace DIR] [--reserve USD] -- <agent arguments>
+morndo-keys check --pool <name>
   A key pool groups two or more of your API-key connections of one vendor and runtime behind one name (opt in; ADR-0037). It holds
   connection names and health, never a key. lease --pool and run --pool take the next member that can serve, in join order (round-robin) or
   the same member until it is out (drain); the member's own gate (terms, expiry, repo, isolation, budget) still runs, and a member the gate
@@ -107,8 +110,10 @@ morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role
   account (401, 403, on hold, the tier's monthly cap) marks it failing, which stops the whole pool until you revive that member
   or rotate its key: traffic never moves to another account because one account was refused. A failed headless run is read for such a
   refusal through the agent CLI's own JSON result only (never the text the model and its tools printed), and dropped; one that ended on
-  an exhausted key before doing any work (no cost, one turn) goes once more on another member. A lane reports only with --lease, for the
-  member of its own open lease; the machine's principal needs no lease. A pool
+  an exhausted key before doing any work (no cost, one turn) goes once more on another member. A lane reports only for its own run: with --grant
+  (the member is the grant's) or, with --lease, for the member of its own open lease; the machine's principal needs neither. A pooled run's helper is \`helper --pool <name> --grant <id>\`:
+  it moves the run to the next member when the one it is on is reported dry (within the 60 s cache), the helper's call cap carries over,
+  and a refused helper says its word on stderr. A pool
   holds only keys of accounts you hold: every member needs --confirm-own-account, and create needs --by, who read the terms line it shows.
   Exit 75 with a word: pool_empty, pool_blocked, terms, or the gate's word.
 `;
@@ -137,8 +142,12 @@ export async function run(argv: readonly string[], env: NodeJS.ProcessEnv, io: I
 async function command(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
   const home = openHome(env);
   try {
-    // A call killed with SIGKILL never closes its lease: the next lease, run or check ends the ones whose holder is gone.
-    if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") home.leases.sweep();
+    // A call killed with SIGKILL never closes its lease: the next lease, run or check ends the ones whose holder is gone,
+    // and the grants of a pooled run whose holder is gone.
+    if (parsed.cmd === "lease" || parsed.cmd === "run" || parsed.cmd === "check") {
+      home.leases.sweep();
+      home.keypools.sweepGrants();
+    }
     const code = await dispatch(home, parsed, io);
     return code;
   } finally { home.close(); }
@@ -158,7 +167,7 @@ async function dispatch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
     case "budget": return done(home.connections.setBudget(need(name), budgetOf(parsed.positionals[1]), ACTOR), io);
     case "expiry": return done(home.connections.setExpiry(need(name), expiryOf(parsed.positionals[1]), ACTOR), io);
     case "models": return models(home, need(name), io);
-    case "check": return check(home, need(parsed.get("connection") ?? name), parsed, io);
+    case "check": return check(home, parsed.get("connection") ?? name, parsed, io);
     case "run": return launch(home, parsed, io);
     case "lease": return leaseKey(home, parsed, io);
     case "pin-claude": return pinClaude(home, parsed, io);
@@ -248,10 +257,23 @@ function models(home: Opened, name: string, io: Io): Promise<number> {
   });
 }
 
-function check(home: Opened, name: string, parsed: Parsed, io: Io): number {
-  const granted = ask(home, name, parsed, true, 0);
+async function check(home: Opened, name: string | undefined, parsed: Parsed, io: Io): Promise<number> {
+  const pool = parsed.get("pool");
+  if (pool !== undefined) {
+    if (parsed.get("connection") !== undefined) return fail(io, "usage");
+    // The same probe a `check --connection` takes, on each servable member, without moving the ring.
+    const served = await home.keypools.canServe(pool, async member => {
+      const granted = ask(home, member, parsed, true, 0);
+      if (!granted.ok) return { ok: false, error: { problem: granted.problem, ...(granted.exit === undefined ? {} : { exit: granted.exit }) } };
+      const closed = home.leases.close(member, granted.id, "done", null);
+      return closed.ok ? { ok: true, value: undefined } : { ok: false, error: closed.error };
+    });
+    return served.ok ? 0 : fail(io, served.error.problem, served.error.exit);
+  }
+  const target = need(name);
+  const granted = ask(home, target, parsed, true, 0);
   if (!granted.ok) return fail(io, granted.problem, granted.exit);
-  const closed = home.leases.close(name, granted.id, "done", null);
+  const closed = home.leases.close(target, granted.id, "done", null);
   return closed.ok ? 0 : fail(io, closed.error.problem, closed.error.exit);
 }
 
@@ -264,7 +286,8 @@ type RunPrep = {
 };
 // A run's end: its exit code, and what the child printed on stdout, for a pool to read the CLI's structured result from and drop (ADR-0037).
 // Stderr and a thrown failure are never kept: they hold the model's and the tools' words as well as the provider's.
-type RunEnd = { code: number; output: string };
+// `attributed` is the member a pooled run's grant named for a failure (KP18), read before the grant closed. Null when there was no grant.
+type RunEnd = { code: number; output: string; attributed: string | null };
 
 const failed = (problem: string, exit?: number): Failed => ({ ok: false, error: exit === undefined ? { problem } : { problem, exit } });
 
@@ -273,7 +296,7 @@ async function launch(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   if (parsed.get("pool") !== undefined) return launchPooled(home, parsed, io);
   const started = startRun(home, parsed, need(parsed.get("connection")));
   if (!started.ok) return fail(io, started.error.problem, started.error.exit);
-  return (await runLeased(home, parsed, io, started.value.prep, started.value.lease)).code;
+  return (await runLeased(home, parsed, io, started.value.prep, started.value.lease, null)).code;
 }
 
 // The checks before a run and its lease: the Connection, the preset, the base URL, the model, then the gate. A refusal names its word
@@ -306,13 +329,16 @@ function startRun(home: Opened, parsed: Parsed, name: string): Started {
 
 // The run on a lease already granted, to its end. The key is released to the child, so `home` is closed once the child starts and the
 // lease is closed in a home of its own.
-async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, lease: Lease): Promise<RunEnd> {
+async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, lease: Lease, grant: { pool: string; id: string } | null): Promise<RunEnd> {
   const { name, connection, preset, baseUrl, party, choice, model, small } = prep;
   const keys = keysProgram(home.env.HOME ?? "", home.env.MORNDO_KEYS, existsSync, {
     command: process.execPath,
     args: ["--experimental-strip-types", join(import.meta.dirname, "main.ts")],
   });
-  const helperLine = [keys.command, ...keys.args, "helper", "--lease", lease.id].join(" ");
+  // A pooled claude run is bound to the grant, so a later helper call can move the session. Every other run stays on its lease.
+  const helperLine = (grant === null
+    ? [keys.command, ...keys.args, "helper", "--lease", lease.id]
+    : [keys.command, ...keys.args, "helper", "--pool", grant.pool, "--grant", grant.id]).join(" ");
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
@@ -329,6 +355,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let stdout = "";
   let output = "";
   let failure = "";
+  let attributed: string | null = null;
   let outRedactor = streamRedactor([""]);
   let errRedactor = streamRedactor([""]);
   const stopper = turnStopper(io);
@@ -373,17 +400,33 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";
       const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl, party);
       const cost = catalogPrices ? catalogTokenCost(stdout, preset.prices, model) : costFromOutput(stdout);
-      again.leases.close(name, lease.id, outcome, cost);
+      // The cost is an estimate and goes to the lease the grant names now (the last member). The first lease is the fallback
+      // when the grant is gone. A failed run is attributed before the grant closes, so the wrapper can report that member (KP18).
+      const tracked = grant === null ? null : again.keypools.grantOf(grant.pool, grant.id);
+      again.leases.close(tracked?.member ?? name, tracked?.lease ?? lease.id, outcome, cost);
+      if (grant !== null) {
+        if (status !== 0) {
+          // A grant that still names its first lease has not handed off, so the member is that lease's. After a move,
+          // attribute applies the hand-off window (KP18) before the grant closes.
+          const moved = tracked !== null && (tracked.member !== name || tracked.lease !== lease.id);
+          if (!moved) attributed = tracked?.member ?? name;
+          else {
+            const found = again.keypools.attribute(grant.pool, grant.id);
+            if (found.ok) attributed = found.value;
+          }
+        }
+        again.keypools.closeGrant(grant.pool, grant.id);
+      }
       const seen = modelFromOutput(stdout);
       if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); stopper.done(); }
   }
-  if (refusal !== null) return { code: refusal, output };
-  if (hungUp) return { code: 129, output };                  // the terminal went away (SIGHUP): 128 + 1
+  if (refusal !== null) return { code: refusal, output, attributed };
+  if (hungUp) return { code: 129, output, attributed };       // the terminal went away (SIGHUP): 128 + 1
   // 70, 75 and 78 are this launcher's own words (§8.4: one meaning per exit code) — its file refusal, its deferral,
   // its refusal of a store from a newer helper — so a child that exits one of them comes out as a plain failure.
   // The old wrapper's fallback on 70 then still means only what the launcher itself decided.
-  return { code: status === 70 || status === 75 || status === 78 ? 1 : status, output };
+  return { code: status === 70 || status === 75 || status === 78 ? 1 : status, output, attributed };
 }
 
 // `morndo-keys run --pool <name>` (ADR-0037): the pool picks the member (the last pick is saved, the member's gate runs, one MemberPicked is
@@ -405,7 +448,19 @@ async function launchPooled(home: Opened, parsed: Parsed, io: Io): Promise<numbe
   try {
     for (;;) {
       const began = current.now();
-      const picked = await current.keypools.pick(pool, async member => startRun(current, parsed, member), { skip });
+      const claude = current.keypools.state(pool)?.runtime === "claude";
+      const workspace = parsed.get("workspace") ?? current.env.PWD ?? process.cwd();
+      const picked = await current.keypools.pick(pool, async member => startRun(current, parsed, member), claude ? {
+        skip,
+        // The grant remembers the request the first lease was gated with, so a hand-off runs that gate again (CN8).
+        grant: (_member, value) => ({
+          lease: value.lease.id, holder: value.lease.holder, startedAt: value.lease.start,
+          request: {
+            role: parsed.get("role") ?? "run", entry: value.prep.choice.model || "default", workspacePath: workspace,
+            limit: LEASES, reserve: Number(parsed.get("reserve") ?? "5"), margin: 0,
+          },
+        }),
+      } : { skip });
       if (!picked.ok) {
         // A retry that finds no other member leaves the first run's result as the answer, with the word beside it.
         if (first === null) return fail(io, picked.error.problem, picked.error.exit);
@@ -413,15 +468,20 @@ async function launchPooled(home: Opened, parsed: Parsed, io: Io): Promise<numbe
         return first;
       }
       const { member, value } = picked.value;
-      const end = await runLeased(current, parsed, io, value.prep, value.lease);
+      const grant = picked.value.grant === undefined ? null : { pool, id: picked.value.grant };
+      const end = await runLeased(current, parsed, io, value.prep, value.lease, grant);
       // runLeased closed its home when the key went to the child: the report is made in a home of its own.
       const after = openHome(home.env);
       let retry = false;
       try {
         const failure = end.code !== 0 && structured ? readRunFailure(end.output) : null;
         if (failure) {
-          const reported = after.keypools.reportSignal(pool, member, failure.signal, began);
-          retry = reported.ok && reported.value.kind === "exhausted" && failure.beforeWork && headless && first === null;
+          // A claude run reports the member its grant attributed (KP18); every other runtime reports the member it was picked on.
+          const who = grant === null ? member : end.attributed;
+          if (who !== null) {
+            const reported = after.keypools.reportSignal(pool, who, failure.signal, began);
+            retry = reported.ok && reported.value.kind === "exhausted" && failure.beforeWork && headless && first === null;
+          }
         }
       } finally { after.close(); }
       if (!retry) return end.code;
@@ -570,6 +630,7 @@ async function claudeReleases(home: Opened, parsed: Parsed, io: Io): Promise<num
 }
 
 async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
+  if (parsed.get("pool") !== undefined) return helperPool(env, parsed, io);
   const home = openHome(env);
   try {
     const id = parsed.get("lease");
@@ -585,6 +646,39 @@ async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<n
     const after = leased(home.store.load().directory, id);
     if (!after || after.lease.authority !== "live") return 1;
     io.stdout(`${await home.open(found.connection.ref)}\n`);
+    return 0;
+  } finally { home.close(); }
+}
+
+// `helper --pool P --grant G`: the pooled run's apiKeyHelper. One call asks the grant whether its member can still serve and, when it
+// cannot, moves the run. A refusal prints its word on stderr and exits 1 — never 75, because an apiKeyHelper treats every non-zero the same.
+async function helperPool(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
+  const pool = parsed.get("pool");
+  const grant = parsed.get("grant");
+  if (pool === undefined || grant === undefined || parsed.get("lease") !== undefined) {
+    io.stderr("usage\n");
+    return 1;
+  }
+  const home = openHome(env);
+  try {
+    const caller = selfId();
+    if (!caller) {
+      io.stderr("holder\n");
+      return 1;
+    }
+    // The gate of the member's lease is the one `run` used.
+    home.runtime.current = gateRuntime(home, "claude");
+    const served = await home.keypools.handOff(pool, grant, { id: caller, ppid: process.ppid });
+    if (!served.ok) {
+      io.stderr(`${served.error.problem}\n`);
+      return 1;
+    }
+    const connection = findConnection(home.store.load().directory, served.value.connection);
+    if (!connection || connection.custody !== "morndo" || connection.kind !== "api-key") {
+      io.stderr("missing\n");
+      return 1;
+    }
+    io.stdout(`${await home.open(connection.ref)}\n`);
     return 0;
   } finally { home.close(); }
 }

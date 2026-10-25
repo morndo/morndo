@@ -70,6 +70,14 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
     case "report": {
       const outcome = outcomeOf(parsed.get("outcome"), parsed.get("reason"));
       if (outcome === null) return fail(io, "outcome");
+      const grant = parsed.get("grant");
+      if (grant !== undefined) {
+        // The grant names the member. A lane may not also name a member or a lease.
+        if (parsed.get("member") !== undefined || parsed.get("lease") !== undefined) return fail(io, "usage");
+        const caller = selfId();
+        if (caller === null) return fail(io, "holder");
+        return done(home.keypools.reportByGrant(need(pool), grant, outcome, home.now(), { kind: "holder", caller }), io);
+      }
       // With --lease the caller is a lane, and may report only for the member of that open lease, as the process that holds it or one of its
       // children; without it the caller is the principal at the machine (the same trust as every other command of this bin).
       const lease = parsed.get("lease");
@@ -78,6 +86,7 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
       const by: ReportBy = lease === undefined || caller === null ? ACTOR : { kind: "lane", lease, caller: { pid: caller.pid, startedAt: caller.startedAt, bootId: caller.bootId } };
       return done(home.keypools.report(need(pool), need(parsed.get("member")), outcome, home.now(), by), io);
     }
+    case "sync": return done(home.keypools.sync(), io);
     case "revive": return done(home.keypools.revive(need(pool), need(member), ACTOR), io);
     case "delete": return done(home.keypools.delete(need(pool), ACTOR), io);
     default: return fail(io, "usage");

@@ -434,7 +434,7 @@ describe("run --pool", () => {
     const [listed] = await pools(env);
     expect(listed?.members.map(m => m.state)).toEqual(["active", "active", "active"]);
     expect(listed?.standing).toBe("ok");
-  });
+  }, 60_000);                                                   // ten pooled runs: 15 s alone, over the 20 s default under load (slice 1 too)
 
   it("review F1: a run whose caller chose another output format is never read, even when its output is exactly a refusal record", async () => {
     const { env, dir } = await world(3);
