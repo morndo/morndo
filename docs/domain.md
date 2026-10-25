@@ -676,7 +676,7 @@ Several API-key Connections of one provider and runtime behind one name, served 
 | Standing | The pool's state as a whole: ok, empty (no member can serve) or blocked (a member is failing). | A member's health. |
 | Terms acknowledgement | Who read which revision of the catalog's key-pool line, and when. | Connection terms (CN4), which are the provider's. |
 | Own account | The principal's confirmation that a member is a key of an account he holds, recorded as OwnerConfirmed. | A proof of ownership. |
-| Grant | A pooled `run`'s hold on the pool: the member it is on, the lease it holds, its holder, the request its lease gate needs again, the helper window, and the member it came from. Replaced, not renewed, when the run is moved. | A Secrets Grant; a lease; a capability (who may use it is the holder's process tree). |
+| Grant | A pooled `run`'s hold on the pool: the member it is on, the lease it holds, its holder, the request its lease gate needs again, the helper window, the member it came from, and the socket of its run's key filter (bound once, before the child starts; a helper call under the grant must name exactly that socket). Replaced, not renewed, when the run is moved. | A Secrets Grant; a lease; a capability (who may use it is the holder's process tree). |
 | Hand-off | The pooled helper moving a run to the next member when the one it is on cannot serve: the old lease closed and the new one granted in one directory save, the window carried over. | A pick (a hand-off is not a rotation); a rotation on a refusal. |
 | Previous member | The member a grant came from, with when it moved: a refusal reported within the helper's cache lifetime of the move belongs to it. | The current member. |
 
