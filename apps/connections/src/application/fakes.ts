@@ -2,7 +2,7 @@
 import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type Isolation, type KeyPool, type Policy } from "@morndo/domain";
 import type { KeyPoolProbe, KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 import { chainHolders } from "./providers.ts";
-import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type KeyPoolStore, type ModelLister, type ModelRow, type ProcId, type Processes, type ProviderEntry, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
+import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type KeyPoolStore, type ModelLister, type ModelRow, type ProbeAnswer, type ProcId, type Processes, type ProviderEntry, type ProviderProbe, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
 import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, WorkspaceRoots } from "./ports.ts";
 import { savedVaultRefs } from "./vault-refs.ts";
 
@@ -39,6 +39,11 @@ export class MemoryModels implements ModelLister {
     this.asked.push(connection.name);
     return this.rows;
   }
+}
+
+// A probe that is never sent. Callers that do not probe still satisfy the service's required port.
+export class NoProbe implements ProviderProbe {
+  probe(): Promise<ProbeAnswer> { return Promise.resolve({ unreachable: true }); }
 }
 
 export class MemorySpend implements SpendMeter {

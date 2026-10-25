@@ -310,8 +310,9 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
           [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt, at: now }],
         );
       }
-      // Still dry, and this answer is the probe's: not a new transition (KP11). since and lastChange stay. A report of the
-      // same refusal changes nothing, so the interval is not doubled twice.
+      // Still dry, and this answer is the probe's: not a new transition (KP11). since and lastChange stay, and so does the claim,
+      // which lapses by itself, so a manual probe cannot run more than once in thirty seconds. A report of the same refusal
+      // changes nothing, so the interval is not doubled twice.
       if (member.health.state === "exhausted" && via === "probe") {
         const failedProbes = member.failedProbes + 1;
         const resumeAt = cappedResume(outcome.resumeAt, now);
@@ -319,7 +320,7 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
         const health: KeyHealth = { state: "exhausted", reason: outcome.reason, resumeAt };
         return {
           ...p,
-          members: p.members.map(m => m.credential === member.credential ? { ...m, failedProbes, probingUntil: null, health, nextCheck } : m),
+          members: p.members.map(m => m.credential === member.credential ? { ...m, failedProbes, health, nextCheck } : m),
         };
       }
       return null;

@@ -128,12 +128,13 @@ describe("a probe's answer (reported via probe, observed when the probe began)",
   const answer = (p: KeyPool, outcome: Outcome, observedAt = claimedAt, now = claimedAt + 2 * SEC) =>
     ok(reportKeyOutcome(p, "k1", outcome, observedAt, now, "probe"));
 
-  it("dry again: the interval doubles from the claim, nothing is raised, health and lastChange stay (KP11)", () => {
+  it("dry again: the interval doubles from the claim, nothing is raised, health and lastChange stay (KP11), and the claim stays until it lapses", () => {
     const p = answer(claimed(), dry());
     const m = member(p, "k1");
     expect(m.failedProbes).toBe(1);
     expect(m.nextCheck).toBe(claimedAt + 2 * SEC + 2 * DAY);
-    expect(m.probingUntil).toBeNull();
+    // The claim is left to lapse on its own: a manual probe cannot run more than once in thirty seconds, answered or not.
+    expect(m.probingUntil).toBe(claimedAt + KEY_PROBE_CLAIM_MS);
     expect(m.health).toMatchObject({ state: "exhausted", reason: "credit" });
     expect(m.lastChange).toBe(T);
     expect(types(p).filter(t => t === "KeyExhausted")).toHaveLength(2);

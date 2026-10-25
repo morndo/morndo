@@ -5,7 +5,7 @@
 import { describe, expect, it } from "vitest";
 import type { KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 import type { Actor, ConnEvent, Holder, KeyPool, Outcome } from "@morndo/domain";
-import { findConnection, isKey, KEY_POOL_RECHECK_MAX_MS, KEY_PROBE_CLAIM_MS, KEY_PROBE_COST_USD } from "@morndo/domain";
+import { findConnection, isKey, recordSpend, KEY_POOL_RECHECK_MAX_MS, KEY_PROBE_CLAIM_MS, KEY_PROBE_COST_USD } from "@morndo/domain";
 import {
   ConnectionsService, KeyPoolService, LeaseService, MemoryKeyPoolStore, memory,
   type Failure, type Memory, type OutcomeClassifier, type ProbeAnswer, type ProbeRequest, type ProviderProbe, type ProviderSignal,
@@ -61,7 +61,8 @@ async function world(n = 3, budget: number | null = 10): Promise<World> {
   mem.catalog.keyPools = { "vendor-a": poolTerms };
   mem.catalog.keyPoolProbes = { "vendor-a": { model: "m-small" } };
   const store = new MemoryKeyPoolStore();
-  const leases = new LeaseService(mem.deps);
+  // The meter the bin uses reports a run's own cost; the in-memory one ignores it.
+  const leases = new LeaseService({ ...mem.deps, spend: { fromRun: (result: { cost: number | null }) => result.cost, reported: () => null } });
   const probe = new FakeProbe();
   const pools = new KeyPoolService({
     clock: mem.clock, store, connections: mem.store, catalog: mem.catalog, alerts: mem.alerts, processes: mem.processes,
@@ -86,7 +87,7 @@ const pool = (w: World): KeyPool => {
 };
 const member = (w: World, name: string) => pool(w).members.find(m => m.credential === name)!;
 const types = (w: World) => pool(w).events.map(e => e.type);
-const dirEvents = (w: World): ConnEvent[] => w.mem.store.load().directory.events;
+const dirEvents = (w: World): readonly ConnEvent[] => w.mem.store.load().directory.events;
 const word = (r: { ok: boolean; error?: Failure }) => (r.ok ? "ok" : r.error?.problem);
 
 describe("probeMember: claim, gate, request, classify, report", () => {
@@ -101,7 +102,7 @@ describe("probeMember: claim, gate, request, classify, report", () => {
     expect(types(w).filter(t => t === "ProbeClaimed")).toHaveLength(1);
     expect(w.probe.calls).toEqual([{ connection: "k1", model: "m-small", baseUrl: "https://api.example.test" }]);
   });
-  it("is made under a gated probe lease that is closed, with the cost of one probe on the member's Connection and no KeyServed", async () => {
+  it("is made under a gated probe lease that is closed, with the cost of one probe on the lease and on the member's Connection, and no KeyServed", async () => {
     const w = await world();
     dry(w, "k1");
     w.mem.clock.at += DAY;
@@ -110,10 +111,10 @@ describe("probeMember: claim, gate, request, classify, report", () => {
     expect(events.filter(e => e.type === "LeaseGranted" && e.name === "k1")).toHaveLength(1);
     expect(events.filter(e => e.type === "LeaseClosed" && e.name === "k1")).toHaveLength(1);
     expect(events.filter(e => e.type === "KeyServed")).toHaveLength(0);
-    const spend = events.filter(e => e.type === "SpendRecorded" && e.name === "k1");
-    expect(spend.map(e => e.type === "SpendRecorded" && e.amount)).toEqual([KEY_PROBE_COST_USD]);
+    expect(events.filter(e => e.type === "LeaseClosed" && e.name === "k1").map(e => e.type === "LeaseClosed" && [e.outcome, e.amount])).toEqual([["done", KEY_PROBE_COST_USD]]);
     const c = findConnection(w.mem.store.load().directory, "k1");
     expect(c && isKey(c) && c.leases).toEqual([]);
+    expect(c && isKey(c) && c.spend.map(row => [row.amount, row.source])).toEqual([[KEY_PROBE_COST_USD, "estimate"]]);
   });
   it("dry again: still exhausted, failedProbes 1, the interval doubled, and no second alert (KP11)", async () => {
     const w = await world();
@@ -123,7 +124,7 @@ describe("probeMember: claim, gate, request, classify, report", () => {
     w.probe.answer = () => ({ signal: signalOf(400) });
     const out = await w.pools.probeMember("p", "k1", { why: "due", holder });
     expect(out).toEqual({ member: "k1", outcome: "exhausted" });
-    expect(member(w, "k1")).toMatchObject({ health: { state: "exhausted" }, failedProbes: 1, nextCheck: start + DAY + 2 * DAY, probingUntil: null });
+    expect(member(w, "k1")).toMatchObject({ health: { state: "exhausted" }, failedProbes: 1, nextCheck: start + DAY + 2 * DAY, probingUntil: start + DAY + KEY_PROBE_CLAIM_MS });
     expect(w.mem.alerts.recent().filter(a => a.kind === "key-exhausted")).toHaveLength(1);
   });
   it("a probe that finds the key refused blocks the pool: pool-blocked alert once", async () => {
@@ -154,16 +155,20 @@ describe("probeMember: claim, gate, request, classify, report", () => {
     w.probe.answer = () => ({ unreachable: true });
     expect(await w.pools.probeMember("p", "k1", { why: "due", holder })).toEqual({ member: "k1", outcome: "unreachable" });
     expect(member(w, "k1")).toMatchObject({ health: { state: "exhausted" }, failedProbes: 0, nextCheck: start + 2 * DAY });
-    expect(dirEvents(w).filter(e => e.type === "SpendRecorded")).toEqual([]);
+    const c = findConnection(w.mem.store.load().directory, "k1");
+    expect(c && isKey(c) && c.spend).toEqual([]);
+    expect(dirEvents(w).filter(e => e.type === "LeaseClosed" && e.name === "k1").map(e => e.type === "LeaseClosed" && [e.outcome, e.amount])).toEqual([["failed", 0]]);
     expect(types(w)).not.toContain("KeyRecovered");
   });
   it("a spend-limit refusal that names a date waits for the date", async () => {
     const w = await world();
     dry(w, "k1");
     w.mem.clock.at += DAY;
-    w.probe.answer = () => ({ signal: signalOf(402, { resumeDate: "2026-12-01" }) });
+    // A date ten days out from the manual clock (a date more than a year out is capped, KP: resumeAt).
+    const date = new Date(w.mem.clock.now() + 10 * DAY).toISOString().slice(0, 10);
+    w.probe.answer = () => ({ signal: signalOf(402, { resumeDate: date }) });
     await w.pools.probeMember("p", "k1", { why: "due", holder });
-    expect(member(w, "k1").nextCheck).toBe(Date.parse("2026-12-01T00:00:00Z"));
+    expect(member(w, "k1").nextCheck).toBe(Date.parse(`${date}T00:00:00Z`));
   });
 });
 
@@ -190,9 +195,13 @@ describe("a probe is made only when it may be", () => {
     expect(await w.pools.probeMember("p", "k1", { why: "due", holder })).toEqual({ member: "k1", outcome: "declined", word: "off" });
     expect(w.probe.calls).toHaveLength(0);
   });
-  it("a member whose own budget cannot carry one probe is declined with budget and not probed", async () => {
-    const w = await world(3, 0.00001);
+  it("a member whose own budget is spent is declined with budget and not probed", async () => {
+    const w = await world(3, 1);
     dry(w, "k1");
+    const loaded = w.mem.store.load();
+    const spent = recordSpend(loaded.directory, "k1", 1, "estimate", { kind: "operator" }, w.mem.clock.now());
+    if (!spent.ok) throw new Error("spend");
+    expect(w.mem.store.save(spent.value, loaded.policy, loaded.version)).toBe(true);
     w.mem.clock.at += DAY;
     expect(await w.pools.probeMember("p", "k1", { why: "due", holder })).toEqual({ member: "k1", outcome: "declined", word: "budget" });
     expect(w.probe.calls).toHaveLength(0);

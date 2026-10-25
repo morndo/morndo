@@ -7,7 +7,7 @@ import type { KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 import type { Actor, ConnEvent, Directory, Grant, Holder, KeyPool, Outcome } from "@morndo/domain";
 import { findConnection, isKey } from "@morndo/domain";
 import {
-  ConnectionsService, KeyPoolService, LeaseService, MemoryKeyPoolStore, memory,
+  ConnectionsService, KeyPoolService, LeaseService, MemoryKeyPoolStore, NoProbe, memory,
   type Failure, type Memory, type OutcomeClassifier,
 } from "../src/application/index.ts";
 
@@ -72,7 +72,7 @@ async function world(n = 3): Promise<World> {
   const leases = new CrashingLeases(mem.deps);
   const pools = new KeyPoolService({
     clock: mem.clock, store, connections: mem.store, catalog: mem.catalog, alerts: mem.alerts, processes: mem.processes,
-    classifiers: { for: d => (d === "dialect-a" ? classifier : null) }, leases, helper: { limit: 4, ttlMs: TTL },
+    classifiers: { for: d => (d === "dialect-a" ? classifier : null) }, leases, helper: { limit: 4, ttlMs: TTL }, probe: new NoProbe(),
   });
   const connections = new ConnectionsService(mem.deps, pools);
   for (let i = 1; i <= n; i++) {
