@@ -44,6 +44,13 @@ class CrashingStore extends MemoryKeyPoolStore {
 }
 class CrashingLeases extends LeaseService {
   crashServe = false;
+  // Runs once, just before the next swap: another process's write landing between this call's read and its swap.
+  beforeSwap: (() => void) | null = null;
+  override swap(...args: Parameters<LeaseService["swap"]>): ReturnType<LeaseService["swap"]> {
+    const hook = this.beforeSwap;
+    if (hook) { this.beforeSwap = null; hook(); }
+    return super.swap(...args);
+  }
   override serve(...args: Parameters<LeaseService["serve"]>): ReturnType<LeaseService["serve"]> {
     if (this.crashServe) { this.crashServe = false; throw new Error("crash"); }
     return super.serve(...args);
@@ -404,6 +411,105 @@ describe("a grant's life", () => {
     const run = await start(w);
     expect(w.pools.grantOf("p", run.grant)).toEqual({ member: "k1", lease: run.lease });
     expect(w.pools.grantOf("p", "nope")).toBeNull();
+  });
+});
+
+// The helper's callers, as the process tree has them: the run (10) holds claude sessions 20 and 30; each helper call is a child of its session.
+const sessions: Record<number, number[]> = { 21: [21, 20, 10], 22: [22, 20, 10], 31: [31, 30, 10], 32: [32, 30, 10], 41: [41, 40, 10] };
+const proc = (pid: number) => ({ pid, startedAt: 1, bootId: "boot" });
+const helperOf = (pid: number, parent: number) => ({ id: proc(pid), ppid: parent });
+const inTree = (w: World) => { for (const [pid, chain] of Object.entries(sessions)) w.mem.processes.tree.set(Number(pid), chain); };
+
+describe("kp18 fix round 1: a report is the key its own session was served, not whoever the window names", () => {
+  // Session 20 and session 30 are both served k1; k1 runs dry; session 20 asks again and is moved to k2. Session 30 still holds the old key.
+  async function twoSessions(): Promise<{ w: World; run: { grant: string } }> {
+    const w = await world();
+    inTree(w);
+    const run = await start(w);
+    expect((await w.pools.handOff("p", run.grant, helperOf(21, 20))).ok).toBe(true);
+    expect((await w.pools.handOff("p", run.grant, helperOf(31, 30))).ok).toBe(true);
+    dryUp(w, "k1");
+    w.mem.clock.at += 10 * SEC;
+    const moved = await w.pools.handOff("p", run.grant, helperOf(21, 20));
+    expect(moved.ok && moved.value.connection).toBe("k2");
+    w.mem.clock.at += 5 * SEC;
+    return { w, run };
+  }
+  const state = (w: World, name: string) => pool(w).members.find(m => m.credential === name)?.health.state;
+  it("the grant remembers which member each session was last served", async () => {
+    const { w } = await twoSessions();
+    expect(grantOf(w).seen).toEqual([{ session: "20:1:boot", member: "k2" }, { session: "30:1:boot", member: "k1" }]);
+  });
+  it("a refusal from the session that was moved to k2 marks k2, inside the window: a dry new key does not stay in service", async () => {
+    const { w, run } = await twoSessions();
+    expect(w.pools.reportByGrant("p", run.grant, dry, w.mem.clock.now(), { kind: "holder", caller: proc(22) }).ok).toBe(true);
+    expect(state(w, "k2")).toBe("exhausted");
+  });
+  it("a refusal from the session that still holds the old key is the old key's: k2 stays active", async () => {
+    const { w, run } = await twoSessions();
+    expect(w.pools.reportByGrant("p", run.grant, dry, w.mem.clock.now(), { kind: "holder", caller: proc(32) }).ok).toBe(true);
+    expect(state(w, "k2")).toBe("active");
+  });
+  it("a process of the run the grant has never served falls back to the window: the old key's", async () => {
+    const { w, run } = await twoSessions();
+    expect(w.pools.reportByGrant("p", run.grant, dry, w.mem.clock.now(), { kind: "holder", caller: proc(41) }).ok).toBe(true);
+    expect(state(w, "k2")).toBe("active");
+  });
+  it("a lane cannot pick which member it blames: a report is about the key its own session holds, whatever it says", async () => {
+    const { w, run } = await twoSessions();
+    // Session 30 holds k1 (already dry): its failing report is k1's and cannot touch k2.
+    expect(w.pools.reportByGrant("p", run.grant, { kind: "failing", reason: "rejected" }, w.mem.clock.now(), { kind: "holder", caller: proc(32) }).ok).toBe(true);
+    expect(state(w, "k2")).toBe("active");
+    expect(pool(w).members.find(m => m.credential === "k1")?.health.state).toBe("exhausted");
+  });
+  it("the run wrapper names its child's session: attribute answers that session's member, and without one the window's", async () => {
+    const { w, run } = await twoSessions();
+    expect(w.pools.attribute("p", run.grant, "20:1:boot")).toEqual({ ok: true, value: "k2" });
+    expect(w.pools.attribute("p", run.grant, "30:1:boot")).toEqual({ ok: true, value: "k1" });
+    expect(w.pools.attribute("p", run.grant)).toEqual({ ok: true, value: "k1" });
+  });
+  it("a session served again on the same member keeps one entry", async () => {
+    const w = await world();
+    inTree(w);
+    const run = await start(w);
+    for (let i = 0; i < 3; i++) expect((await w.pools.handOff("p", run.grant, helperOf(21, 20))).ok).toBe(true);
+    expect(grantOf(w).seen).toEqual([{ session: "20:1:boot", member: "k1" }]);
+  });
+});
+
+describe("fix round 1: two helper processes re-leasing a swept member do not leave two leases", () => {
+  it("a lease that landed between the read and the swap is adopted: the late call takes none and serves that one", async () => {
+    const w = await world();
+    const run = await start(w);
+    w.mem.processes.dead.add(holder.pid);
+    expect(w.leases.sweep().ok).toBe(true);
+    expect(live(w, "k1")).toHaveLength(0);
+    let theirs = "";
+    w.leases.beforeSwap = () => {
+      const granted = w.leases.lease("k1", runRequest);
+      if (granted.ok) theirs = granted.value.id;
+    };
+    const out = await w.pools.handOff("p", run.grant, caller);
+    expect(theirs).not.toBe("");
+    expect(out).toEqual({ ok: true, value: { connection: "k1", lease: theirs } });
+    expect(live(w, "k1").map(l => l.id)).toEqual([theirs]);
+    expect(granted(w)).toBe(2);
+    expect(grantOf(w).lease).toBe(theirs);
+  });
+  it("the same when the member is exhausted and the next one is picked", async () => {
+    const w = await world();
+    const run = await start(w);
+    w.mem.processes.dead.add(holder.pid);
+    w.leases.sweep();
+    dryUp(w, "k1");
+    let theirs = "";
+    w.leases.beforeSwap = () => {
+      const granted = w.leases.lease("k2", runRequest);
+      if (granted.ok) theirs = granted.value.id;
+    };
+    const out = await w.pools.handOff("p", run.grant, caller);
+    expect(out).toEqual({ ok: true, value: { connection: "k2", lease: theirs } });
+    expect(live(w, "k2").map(l => l.id)).toEqual([theirs]);
   });
 });
 

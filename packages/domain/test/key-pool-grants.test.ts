@@ -3,7 +3,7 @@
 import { describe, expect, it } from "vitest";
 import {
   addKey, closeGrant, createKeyPool, emptyDirectory, findConnection, attributeToGrant, joinKeyPool, leaveKeyPool, moveGrant, openGrant,
-  touchGrant,
+  noteSeen, touchGrant,
   type Actor, type Connection, type Grant, type KeyPool,
 } from "../src/index.ts";
 
@@ -37,7 +37,7 @@ function pool(n = 3): KeyPool {
 const grant = (over: Partial<Grant> = {}): Grant => ({
   id: "gl1", member: "k1", lease: "l1", holder: { node: "n1", pid: 10, startedAt: 100, bootId: "boot", lane: "lane-a" },
   request: { role: "run", entry: "m", workspacePath: "/work/repo", limit: 8, reserve: 2, margin: 0 },
-  window: { calls: 1, windowStart: T }, previous: null, ...over,
+  window: { calls: 1, windowStart: T }, previous: null, seen: [], ...over,
 });
 const moved = (p: KeyPool, at: number, to = "k2", lease = "l2") =>
   ok(moveGrant(p, "gl1", { member: to, lease, window: { calls: 2, windowStart: T }, movedAt: at }, "exhausted", at));
@@ -113,6 +113,41 @@ describe("kp18 a report right after a hand-off belongs to the member the old key
   it("a grant that never moved is its member's, and a grant that is not there is refused", () => {
     expect(ok(attributeToGrant(ok(openGrant(pool(), grant(), T)), "gl1", T + SEC, TTL)).member).toBe("k1");
     expect(word(attributeToGrant(pool(), "nope", T, TTL))).toBe("missing");
+  });
+});
+
+describe("kp18 fix round 1: a report from a session the grant has seen is that session's key's", () => {
+  const open = () => moved(ok(openGrant(pool(), grant(), T)), T + 10 * SEC);
+  it("noteSeen records which member a session was last served, replaces it, and says nothing when it did not change", () => {
+    const p = noteSeen(ok(openGrant(pool(), grant(), T)), "gl1", "20:1:boot", "k1");
+    expect(p.grants[0]?.seen).toEqual([{ session: "20:1:boot", member: "k1" }]);
+    expect(noteSeen(p, "gl1", "20:1:boot", "k1")).toBe(p);
+    const later = noteSeen(p, "gl1", "20:1:boot", "k2");
+    expect(later.grants[0]?.seen).toEqual([{ session: "20:1:boot", member: "k2" }]);
+    expect(noteSeen(p, "nope", "20:1:boot", "k2")).toBe(p);
+  });
+  it("keeps the last sixteen sessions", () => {
+    let p = ok(openGrant(pool(), grant(), T));
+    for (let i = 0; i < 20; i++) p = noteSeen(p, "gl1", `s${i}`, "k1");
+    expect(p.grants[0]?.seen).toHaveLength(16);
+    expect(p.grants[0]?.seen[0]?.session).toBe("s4");
+  });
+  it("inside the window a session served the new key is the new key's; a session served the old key is the old key's", () => {
+    const p = noteSeen(noteSeen(open(), "gl1", "s-new", "k2"), "gl1", "s-old", "k1");
+    expect(ok(attributeToGrant(p, "gl1", T + 20 * SEC, TTL, "s-new")).member).toBe("k2");
+    expect(ok(attributeToGrant(p, "gl1", T + 20 * SEC, TTL, "s-old")).member).toBe("k1");
+  });
+  it("a session the grant has not seen, or none, falls back to the window", () => {
+    const p = noteSeen(open(), "gl1", "s-new", "k2");
+    expect(ok(attributeToGrant(p, "gl1", T + 20 * SEC, TTL, "s-unknown")).member).toBe("k1");
+    expect(ok(attributeToGrant(p, "gl1", T + 20 * SEC, TTL, null)).member).toBe("k1");
+    expect(ok(attributeToGrant(p, "gl1", T + 20 * SEC, TTL)).member).toBe("k1");
+    expect(ok(attributeToGrant(p, "gl1", T + 10 * SEC + TTL, TTL, "s-unknown")).member).toBe("k2");
+  });
+  it("an exact answer clears nothing: the window still serves the sessions that are not known", () => {
+    const p = noteSeen(open(), "gl1", "s-new", "k2");
+    const hit = ok(attributeToGrant(p, "gl1", T + 20 * SEC, TTL, "s-new"));
+    expect(hit.pool).toBe(p);
   });
 });
 

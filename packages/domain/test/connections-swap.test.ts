@@ -102,6 +102,33 @@ describe("kp19 swapLease: the old lease closed and the new one granted in one di
   });
 });
 
+describe("fix round 1: a lease with no old one to close is granted only when the holder has none already on the pool", () => {
+  const alone = { holder, members: ["k1", "k2"] };
+  it("refuses with held, and nothing to save, when the holder already has a live lease on a member", () => {
+    const { dir } = running();
+    const refused = swapLease(dir, "k2", ask(), null, { calls: 1, windowStart: T }, alone);
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.error.problem).toBe("held");
+    expect(refused.error.directory).toBeUndefined();
+  });
+  it("grants when the holder has none, when the lease it has is another holder's, or when its authority has ended", () => {
+    expect(swapLease(keys(), "k2", ask(), null, { calls: 1, windowStart: T }, alone).ok).toBe(true);
+    const { dir } = running();
+    const other = { ...alone, holder: { ...holder, pid: 99 } };
+    expect(swapLease(dir, "k2", ask(), null, { calls: 1, windowStart: T }, other).ok).toBe(true);
+    const ancestors = [{ pid: holder.pid, startedAt: holder.startedAt, bootId: holder.bootId }];
+    const id = leases(dir, "k1")[0]?.id ?? "";
+    const ended = value(noteHelper(dir, "k1", id, ancestors[0]!, ancestors, 3, 60 * SEC, T + 5 * SEC));
+    expect(leases(ended, "k1")[0]?.authority).toBe("ended");
+    expect(swapLease(ended, "k2", ask(), null, { calls: 1, windowStart: T }, alone).ok).toBe(true);
+  });
+  it("is not asked of a swap that closes an old lease: that one is serialised by the old lease", () => {
+    const { dir, id } = running();
+    expect(swapLease(dir, "k2", ask(), { connection: "k1", lease: id }, { calls: 4, windowStart: T }, alone).ok).toBe(true);
+  });
+});
+
 describe("kp17 the new lease keeps the call count and the window start", () => {
   it("a swap does not reset the cap: the next call in the window is over it", () => {
     const { dir, id } = running();

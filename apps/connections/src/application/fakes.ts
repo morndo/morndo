@@ -145,7 +145,9 @@ export class MemoryProcesses implements Processes {
   readonly dead = new Set<number>();
   checks = 0;
   identity(pid: number): ProcId { return { pid, startedAt: 1, bootId: "boot" }; }
-  ancestors(): readonly ProcId[] { return []; }
+  // pid -> its own pid and its parents', child first; a pid with no entry has no ancestors.
+  readonly tree = new Map<number, readonly number[]>();
+  ancestors(pid: number): readonly ProcId[] { return (this.tree.get(pid) ?? []).map(id => this.identity(id)); }
   alive(id: ProcId): boolean { this.checks += 1; return !this.dead.has(id.pid); }
 }
 

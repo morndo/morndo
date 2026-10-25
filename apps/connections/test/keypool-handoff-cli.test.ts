@@ -63,7 +63,7 @@ async function world(n = 3, opts: { pool?: boolean; models?: boolean } = {}): Pr
 type Member = { credential: string; state: string; reason: string | null };
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; standing: string; lastPick: string | null; members: Member[] });
 const states = async (env: NodeJS.ProcessEnv) => (await pools(env))[0]?.members.map(m => m.state);
-type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean };
+type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown> };
 const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
@@ -154,14 +154,24 @@ describe("the hand-off: a session whose key is reported dry gets the next key fr
     expect(calls(dir)[1]?.stderr).toMatch(/pool_blocked/);
     expect((await pools(env))[0]?.standing).toBe("blocked");
   });
-  it("kp18: a refusal reported right after the hand-off is the first key's, and the second member stays active", async () => {
+  it("kp18 fix round 1: a refusal reported by the session that was served the new key is the new key's, even inside the window", async () => {
     const { env, dir } = await world(3);
     await run(env, dir, job(dir, {
       [KEYS[0]]: { exit: 0, report: ["p", "--outcome", "exhausted"], rehelp: 1 },
       [KEYS[1]]: { exit: 0, report: ["p", "--outcome", "exhausted"] },
     }));
     expect(reportsOf(dir)).toEqual([{ code: 0, stderr: "" }, { code: 0, stderr: "" }]);
-    expect(await states(env)).toEqual(["exhausted", "active", "active"]);
+    expect(await states(env)).toEqual(["exhausted", "exhausted", "active"]);
+  });
+  it("kp18 fix round 1: the run wrapper blames the key its child was last served, so a new key that is already dry is marked and the run goes on", async () => {
+    const { env, dir } = await world(3);
+    const ran = await run(env, dir, job(dir, {
+      [KEYS[0]]: { exit: 0, report: ["p", "--outcome", "exhausted"], rehelp: 1 },
+      [KEYS[1]]: { exit: 1, json: { type: "result", subtype: "success", is_error: true, api_error_status: 400, terminal_reason: "api_error", num_turns: 1, total_cost_usd: 0, modelUsage: {}, usage: { input_tokens: 0, output_tokens: 0 }, result: "Credit balance is too low" } },
+    }));
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(await states(env)).toEqual(["exhausted", "exhausted", "active"]);
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[1], KEYS[2]]);
   });
 });
 
@@ -258,6 +268,19 @@ describe("the pool in the Priority and the engine layer", () => {
     expect(engines(dir).providers.find(p => p.name === "p")).toBeUndefined();
     for (const name of ["k1", "k2", "k3"]) expect(engines(dir).providers.find(p => p.name === name)?.enabled).toBe(true);
     expect(await order(env)).toEqual(["k1", "k3", "k2"]);
+  });
+  it("fix round 1: a priority, picks or role change from the CLI keeps the members off and the pool on", async () => {
+    const { env, dir } = await world(3, { models: true });
+    const off = () => ["k1", "k2", "k3"].map(name => engines(dir).providers.find(p => p.name === name)?.enabled);
+    expect(off()).toEqual([false, false, false]);
+    expect((await cli(["priority", "set", "keys-first"], env)).code).toBe(0);
+    expect(off()).toEqual([false, false, false]);
+    const added = await cli(["picks", "implement", "add", "p:sonnet-5.5"], env);
+    expect(added.code, added.stderr).toBe(0);
+    expect(off()).toEqual([false, false, false]);
+    expect((await cli(["role", "implement", "follow"], env)).code).toBe(0);
+    expect(off()).toEqual([false, false, false]);
+    expect(engines(dir).providers.find(p => p.name === "p")?.enabled).toBe(true);
   });
   it("keypool sync is the retry and changes nothing when nothing is out of step", async () => {
     const { env, dir } = await world(2, { models: true });
