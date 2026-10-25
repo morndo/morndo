@@ -8,6 +8,9 @@ import { REPO_NAME, type CheckRunFacts, type PrFacts } from "@morndo/domain";
 import type { ForgeAnswer, ForgeChecks } from "../application/ports.ts";
 
 const hhmm = (at: number) => new Date(at).toISOString().slice(11, 16);   // UTC hours and minutes, as the detail says them
+const BRANCH_NAME = /^[A-Za-z0-9][A-Za-z0-9._/-]{0,199}$/;
+const branchOk = (branch: string) =>
+  BRANCH_NAME.test(branch) && !branch.includes("..") && !branch.startsWith("/") && !branch.endsWith("/") && !branch.includes("//");
 
 export class GithubChecks implements ForgeChecks {
   #token: string | null;
@@ -33,12 +36,56 @@ export class GithubChecks implements ForgeChecks {
     if (!answer.ok) return answer;
     let body: unknown;
     try { body = await answer.value.json(); } catch { return { ok: false, failure: { reason: "unexpected", detail: "unexpected answer" } }; }
-    const b = body as { state?: unknown; merged?: unknown; head?: { sha?: unknown }; merge_commit_sha?: unknown };
+    const b = body as { state?: unknown; merged?: unknown; head?: { sha?: unknown }; merge_commit_sha?: unknown; base?: { ref?: unknown } };
     const merge = b.merge_commit_sha ?? null;
+    const baseRef = typeof b.base?.ref === "string" ? b.base.ref : null;
     if ((b.state !== "open" && b.state !== "closed") || typeof b.merged !== "boolean" || typeof b.head?.sha !== "string"
       || (merge !== null && typeof merge !== "string"))
       return { ok: false, failure: { reason: "unexpected", detail: "unexpected answer" } };
-    return { ok: true, value: { state: b.state, merged: b.merged, headSha: b.head.sha, mergeSha: merge } };
+    return { ok: true, value: { state: b.state, merged: b.merged, headSha: b.head.sha, mergeSha: merge, baseRef } };
+  }
+
+  async requiredChecks(repo: string, branch: string): Promise<ForgeAnswer<string[]>> {
+    if (!REPO_NAME.test(repo) || !branchOk(branch))
+      return { ok: false, failure: { reason: "unexpected", detail: "not a reference" } };
+    const branchAnswer = await this.#get(`/repos/${repo}/branches/${branch}`);
+    if (!branchAnswer.ok) return branchAnswer;
+    let branchBody: unknown;
+    try { branchBody = await branchAnswer.value.json(); } catch { return { ok: false, failure: { reason: "unexpected", detail: "unexpected answer" } }; }
+    const protection = (branchBody as { protection?: unknown }).protection;
+    if (typeof protection !== "object" || protection === null)
+      return { ok: false, failure: { reason: "unexpected", detail: "unexpected answer" } };
+    const names = new Set<string>();
+    const p = protection as { enabled?: unknown; required_status_checks?: { contexts?: unknown; checks?: unknown } };
+    if (p.enabled === true) {
+      const rsc = p.required_status_checks;
+      if (Array.isArray(rsc?.contexts)) {
+        for (const c of rsc.contexts) if (typeof c === "string") names.add(c);
+      }
+      if (Array.isArray(rsc?.checks)) {
+        for (const raw of rsc.checks) {
+          const ctx = (raw as { context?: unknown }).context;
+          if (typeof ctx === "string") names.add(ctx);
+        }
+      }
+    }
+    const rulesAnswer = await this.#get(`/repos/${repo}/rules/branches/${branch}?per_page=100`);
+    if (!rulesAnswer.ok) return rulesAnswer;
+    let rulesBody: unknown;
+    try { rulesBody = await rulesAnswer.value.json(); } catch { return { ok: false, failure: { reason: "unexpected", detail: "unexpected answer" } }; }
+    // One page of 100 rules: a branch with that many is not read whole, and a required set that may be short is no set.
+    if (!Array.isArray(rulesBody) || rulesBody.length >= 100) return { ok: false, failure: { reason: "unexpected", detail: "unexpected answer" } };
+    for (const item of rulesBody) {
+      const t = (item as { type?: unknown }).type;
+      if (t !== "required_status_checks") continue;
+      const list = (item as { parameters?: { required_status_checks?: unknown } }).parameters?.required_status_checks;
+      if (!Array.isArray(list)) continue;
+      for (const raw of list) {
+        const ctx = (raw as { context?: unknown }).context;
+        if (typeof ctx === "string") names.add(ctx);
+      }
+    }
+    return { ok: true, value: [...names].sort() };
   }
 
   async checkRuns(repo: string, sha: string): Promise<ForgeAnswer<CheckRunFacts[]>> {
