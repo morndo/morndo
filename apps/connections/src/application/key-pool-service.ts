@@ -6,7 +6,7 @@
 import {
   KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
   joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
-  openGrant, releaseClaim, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant, unreachable,
+  alertOnce, clearAlerted, openGrant, releaseClaim, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant, unreachable,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
   type Lease, type Names, type Outcome, type ProbeWhy, type Result, type RotationMode, type RotationPolicy, type Standing,
 } from "@morndo/domain";
@@ -267,7 +267,9 @@ export class KeyPoolService implements ConnectionLifecycle {
     const outcome = classifier.classify(signal);
     if (outcome.kind === "unknown" && signal.status !== null && signal.status >= 400 && signal.status <= 499) {
       const kind = (signal.kind ?? "-").slice(0, 64);
-      this.#once({ kind: "unclassified", name: member, detail: `${signal.status} ${kind}` });
+      this.#alertOnce(pool, member, "unclassified", `${signal.status} ${kind}`);
+    } else if (signal.status !== null) {
+      this.#clearAlert(pool, member, "unclassified");
     }
     const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" }, via, why);
     return reported.ok ? ok(outcome) : reported;
@@ -302,10 +304,11 @@ export class KeyPoolService implements ConnectionLifecycle {
     }
     const answer = await this.#ask(member, granted.value.id, { connection: member, model, baseUrl });
     if ("misconfigured" in answer) {
-      this.#once({ kind: "probe-config", name: member, detail: answer.misconfigured });
+      this.#alertOnce(pool, member, "probe-config", answer.misconfigured);
       return { member, outcome: "misconfigured", word: answer.misconfigured };
     }
     if (!("signal" in answer)) return { member, outcome: "unreachable" };
+    this.#clearAlert(pool, member, "probe-config");
     const reported = this.reportSignal(pool, member, answer.signal, at, "probe", input.why);
     if (!reported.ok) return { member, outcome: "skipped", word: reported.error.problem };
     const active = this.#deps.store.load(pool).pool?.members.find(row => row.credential === member)?.health.state === "active";
@@ -825,9 +828,18 @@ export class KeyPoolService implements ConnectionLifecycle {
     for (const event of newKeyPoolEvents(before, after)) this.#raise(after.name, event);
   }
 
-  #once(alert: { kind: string; name: string; detail: string }): void {
-    const same = this.#deps.alerts.recent().some(row => row.kind === alert.kind && row.name === alert.name && row.detail === alert.detail);
-    if (!same) this.#deps.alerts.raise(alert);
+  // A probe alert is raised once per change of what the member's probe says: the last detail alerted is kept with the member
+  // (not read back from the recent alerts), and a good answer clears it.
+  #alertOnce(pool: string, member: string, kind: string, detail: string): void {
+    const changed = this.#change(pool, current => {
+      const next = alertOnce(current, member, kind, detail);
+      return { pool: next.pool, result: ok(next.raise) };
+    });
+    if (changed.ok && changed.value) this.#deps.alerts.raise({ kind, name: member, detail });
+  }
+
+  #clearAlert(pool: string, member: string, kind: string): void {
+    this.#change(pool, current => ({ pool: clearAlerted(current, member, kind), result: ok(undefined) }));
   }
 
   #raise(pool: string, event: KeyPoolEvent): void {

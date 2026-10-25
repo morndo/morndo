@@ -92,7 +92,7 @@ function tombstoneBody(body: string): boolean {
 function withHistory(pool: KeyPool): KeyPool {
   const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [], filter: grant.filter ?? null }));
   const members = (pool.members ?? []).map(member => ({
-    ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0, lastProbe: member.lastProbe ?? null,
+    ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0, lastProbe: member.lastProbe ?? null, alerted: member.alerted ?? {},
   }));
   return { ...pool, grants, members };
 }

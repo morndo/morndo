@@ -97,8 +97,8 @@ const dry = async (env: NodeJS.ProcessEnv, member: string) => {
 function makeDue(dir: string, ...members: string[]): void {
   const db = new Database(join(dir, "connections.db"));
   const row = db.prepare("SELECT version, body FROM key_pool WHERE name = 'p'").get() as { version: number; body: string };
-  const body = JSON.parse(row.body) as { members: { credential: string; nextCheck: number | null }[] };
-  for (const m of body.members) if (members.includes(m.credential)) m.nextCheck = Date.now() - 1000;
+  const body = JSON.parse(row.body) as { members: { credential: string; nextCheck: number | null; lastProbe: number | null }[] };
+  for (const m of body.members) if (members.includes(m.credential)) { m.nextCheck = Date.now() - 1000; m.lastProbe = null; }
   db.prepare("UPDATE key_pool SET body = ?, version = version + 1 WHERE name = 'p'").run(JSON.stringify(body));
   db.close();
 }

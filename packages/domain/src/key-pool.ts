@@ -29,6 +29,9 @@ export type Outcome =
 export type KeyMember = {
   credential: string; joined: number; health: KeyHealth; since: number; lastChange: number;
   nextCheck: number | null; probingUntil: number | null; failedProbes: number; lastProbe: number | null;
+  // A mark of the last detail alerted for each kind of probe alert (`unclassified`, `probe-config`). A hash, not the detail:
+  // the detail holds a status code and the provider's error type, which the pool never keeps (KP12).
+  alerted: Readonly<Record<string, string>>;
   organization: string | null;
 };
 export type ProbeWhy = "due" | "manual" | "suspect";
@@ -193,7 +196,7 @@ export function joinKeyPool(
   }
   const member: KeyMember = {
     credential: connection.name, joined: now, health: { state: "active" }, since: now, lastChange: now,
-    nextCheck: null, probingUntil: null, failedProbes: 0, lastProbe: null, organization,
+    nextCheck: null, probingUntil: null, failedProbes: 0, lastProbe: null, alerted: {}, organization,
   };
   events.push({ type: "MemberJoined", member: connection.name, at: now, command: who.value });
   return ok(settleKeyPool(withEvents({ ...p, members: [...p.members, member], ownedOrgs }, events), now));
@@ -355,8 +358,8 @@ export function reportKeyOutcome(
 }
 
 // A probe is claimed before it is made. A due claim moves the next check in the same write; a manual claim and a suspect
-// claim leave it. Every claim records when it was made. A claim still in the future is refused. A suspect claim inside
-// one recheck interval of the last probe is not due. A claim is not a health change, so since and lastChange stay.
+// claim leave it. Every claim records when it was made. A claim still in the future is refused. A due or suspect claim inside
+// one recheck interval of the last probe, of whatever kind, is not due (a manual claim is the principal's, held by the claim alone). A claim is not a health change, so since and lastChange stay.
 export function claimProbe(
   p: KeyPool, credential: string, now: number, why: ProbeWhy,
 ): Result<KeyPool, "missing" | "claimed" | "not_due" | "state"> {
@@ -375,7 +378,7 @@ export function claimProbe(
   }
   if (member.probingUntil !== null && member.probingUntil > now) return err("claimed");
   if (why === "due" && (member.nextCheck === null || member.nextCheck > now)) return err("not_due");
-  if (why === "suspect" && member.lastProbe !== null && now - member.lastProbe < p.policy.recheckEveryMs) return err("not_due");
+  if (why !== "manual" && member.lastProbe !== null && now - member.lastProbe < p.policy.recheckEveryMs) return err("not_due");
   const nextCheck = why === "due" ? now + probeInterval(member.failedProbes, p.policy) : member.nextCheck;
   const members = p.members.map(m => m.credential === credential
     ? { ...m, probingUntil: now + KEY_PROBE_CLAIM_MS, nextCheck, lastProbe: now }
@@ -396,12 +399,40 @@ export function releaseClaim(
   return withEvents({ ...p, members }, [{ type: "ProbeReleased", member: credential, at: now }]);
 }
 
+// A short mark of a detail, to compare two without keeping the text (FNV-1a over the UTF-16 units, with the length).
+function detailMark(detail: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < detail.length; i++) hash = Math.imul(hash ^ detail.charCodeAt(i), 0x01000193) >>> 0;
+  return `${detail.length}-${hash.toString(16)}`;
+}
+
+// Whether a probe alert of this kind and detail is news for the member: the first one, or one that differs from the last
+// alerted. The mark of the detail is kept with the member, so it neither repeats after other alerts push it out of view
+// nor stays silent after a fix (clearAlerted).
+export function alertOnce(p: KeyPool, credential: string, kind: string, detail: string): { pool: KeyPool; raise: boolean } {
+  const member = p.members.find(m => m.credential === credential);
+  const mark = detailMark(detail);
+  if (!member || member.alerted[kind] === mark) return { pool: p, raise: false };
+  const members = p.members.map(m => m.credential === credential ? { ...m, alerted: { ...m.alerted, [kind]: mark } } : m);
+  return { pool: { ...p, members }, raise: true };
+}
+
+// A good answer, or one of another kind, is the fix: the same detail is news again afterwards.
+export function clearAlerted(p: KeyPool, credential: string, kind: string): KeyPool {
+  const member = p.members.find(m => m.credential === credential);
+  if (!member || !(kind in member.alerted)) return p;
+  const rest = Object.fromEntries(Object.entries(member.alerted).filter(([name]) => name !== kind));
+  return { ...p, members: p.members.map(m => m.credential === credential ? { ...m, alerted: rest } : m) };
+}
+
 // Exhausted members whose next check has arrived and that nobody is probing now, in ring order.
 export function dueMembers(p: KeyPool, now: number): string[] {
   const names: string[] = [];
   for (const member of p.members) {
     if (member.health.state !== "exhausted" || member.nextCheck === null || member.nextCheck > now) continue;
     if (member.probingUntil !== null && member.probingUntil > now) continue;
+    // A claim would refuse a member probed less than one interval ago, so it is not listed.
+    if (member.lastProbe !== null && now - member.lastProbe < p.policy.recheckEveryMs) continue;
     names.push(member.credential);
   }
   return names;

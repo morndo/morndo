@@ -380,6 +380,11 @@ describe("rev-158b: an alert is raised once per change of what a member's probe 
     const p = pool(2);
     expect(alertOnce(p, "zz", "unclassified", "x")).toEqual({ pool: p, raise: false });
   });
+  it("keeps a mark of the detail, not the detail: no status code or provider text is in the pool", () => {
+    const p = alertOnce(pool(2), "k1", "unclassified", "418 teapot_error").pool;
+    expect(JSON.stringify(p)).not.toContain("teapot");
+    expect(JSON.stringify(p)).not.toContain("418");
+  });
   it("a member starts with nothing alerted", () => {
     expect(pool(2).members.every(m => Object.keys(m.alerted).length === 0)).toBe(true);
   });
