@@ -7,6 +7,7 @@ import { bindCommands, type BoundCommands } from "./application/commands.ts";
 import { ConnectionsService } from "./application/connections-service.ts";
 import { LeaseService } from "./application/lease-service.ts";
 import { KeyPoolService } from "./application/key-pool-service.ts";
+import { PoolRoutingSync } from "./application/key-pool-routing.ts";
 import { PoolService } from "./application/pool-service.ts";
 import { RoutingService } from "./application/routing-service.ts";
 import { FileAlerts } from "./adapters/alerts-file.ts";
@@ -17,6 +18,7 @@ import { FileEngines } from "./adapters/engines-file.ts";
 import { FileModels } from "./adapters/models.ts";
 import { ProcProcesses } from "./adapters/processes.ts";
 import { GitRepos } from "./adapters/repos.ts";
+import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { RunSpend } from "./adapters/spend.ts";
 import { SqliteKeyPoolStore } from "./adapters/key-pool-store-sqlite.ts";
 import { SqlitePoolStore } from "./adapters/pool-store-sqlite.ts";
@@ -97,15 +99,22 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
     clock, vault, runtime, models, spend: new RunSpend(), catalog, store,
     repos: new GitRepos(), alerts: new FileAlerts(join(dir, "alerts.log")), processes, engines,
   };
+  const leases = new LeaseService(deps);
   const keypools = new KeyPoolService({
     clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, processes, classifiers: builtinClassifiers,
+    leases, helper: { limit: HELPER_LIMIT, ttlMs: HELPER_TTL_MS },
   });
+  const pools = () => keypools.routingPools();
+  const routing = new RoutingService(deps, pools);
+  keypools.attachRouting(new PoolRoutingSync({
+    routing, engines, catalog, models, store, clock, pools,
+  }));
   return {
     dir, db, vaultDir, identity, store, vault, catalog, engines, models, processes, runtime, env,
     connections: new ConnectionsService(deps, keypools),
-    routing: new RoutingService(deps),
-    commands: bindCommands(deps, () => readUsage(join(dir, "usage.json"))),
-    leases: new LeaseService(deps),
+    routing,
+    commands: bindCommands(deps, () => readUsage(join(dir, "usage.json")), pools, keypools),
+    leases,
     pool: new PoolService({ clock, store: poolStore, connections: store, catalog, processes }),
     keypools,
     now: () => clock.now(),

@@ -1,6 +1,6 @@
 // Ports for the connections application (ADR-0018). No secret bytes cross a port: a vault answers
 // whether a ref exists and what its fingerprint is, and nothing else.
-import type { Directory, Holder, Isolation, KeyPool, Outcome, Policy, Pool, SecretDirectory } from "@morndo/domain";
+import type { Directory, Holder, Isolation, KeyPool, Outcome, Policy, Pool, Result, SecretDirectory } from "@morndo/domain";
 import type { KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 
 export type Clock = { now(): number };
@@ -114,6 +114,13 @@ export type Deps = {
 };
 
 export type Failure = { problem: string; role?: string; exit?: number };
+
+// A pool is a routing name like a Connection. `joined` and `left` re-derive the Priority after the pool itself is saved.
+export type PoolNames = { name: string; members: readonly string[] };
+export type PoolRouting = {
+  joined(pool: string, members: readonly string[]): Result<void, Failure>;
+  left(pool: string, leaving: readonly string[], remaining: readonly string[]): Result<void, Failure>;
+};
 
 export type LeaseRequest = {
   role: string;

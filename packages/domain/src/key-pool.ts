@@ -1,6 +1,6 @@
 // Key pool: which key Connection serves the next request. Pure. Callers pass `now` (ms since epoch). A member holds a
 // Connection's name only; events hold names, reason words, times and command ids.
-import { CONNECTION_NAME, isKey, type Actor, type Connection, type TermsAck } from "./connections.ts";
+import { CONNECTION_NAME, isKey, type Actor, type Connection, type HelperWindow, type Holder, type TermsAck } from "./connections.ts";
 import { err, ok, unreachable, type Result } from "./shared.ts";
 
 export type RotationMode = "round-robin" | "drain";
@@ -29,6 +29,15 @@ export type KeyMember = {
 export type Names = { connections: readonly string[]; pools: readonly string[]; deleted: readonly string[] };
 export type Standing = "ok" | "empty" | "blocked";
 export type RecoverHow = "probe" | "report" | "revive" | "rotation";
+export type GrantRequest = { role: string; entry: string; workspacePath: string; limit: number; reserve: number; margin: number };
+export type GrantMoveWhy = "exhausted" | "refused" | "adopted" | "reopened" | "left";
+export type Grant = {
+  id: string; member: string; lease: string; holder: Holder; request: GrantRequest;
+  window: HelperWindow; previous: { member: string; movedAt: number } | null;
+  seen: readonly { session: string; member: string }[];
+  lent: readonly string[];
+  filter: string | null;
+};
 export type KeyPoolEvent =
   | { type: "KeyPoolCreated"; pool: string; at: number; command: string }
   | { type: "MemberJoined"; member: string; at: number; command: string }
@@ -44,9 +53,13 @@ export type KeyPoolEvent =
   | { type: "KeyRecovered"; member: string; how: RecoverHow; at: number }
   | { type: "PoolEmpty"; backAt: number | null; at: number }
   | { type: "PoolBlocked"; member: string; reason: FailingReason; at: number }
-  | { type: "PoolRefilled"; at: number };
+  | { type: "PoolRefilled"; at: number }
+  | { type: "GrantOpened"; grant: string; member: string; at: number }
+  | { type: "GrantMoved"; grant: string; from: string; to: string; why: GrantMoveWhy; at: number }
+  | { type: "GrantClosed"; grant: string; at: number };
 export type KeyPool = {
   name: string; runtime: string; vendor: string; policy: RotationPolicy; members: readonly KeyMember[];
+  grants: readonly Grant[];
   lastPick: string | null; terms: TermsAck | null; ownedOrgs: readonly string[]; standing: Standing;
   events: readonly KeyPoolEvent[]; seq: number;
 };
@@ -134,7 +147,7 @@ export function createKeyPool(
   if (names.connections.includes(input.name) || names.pools.includes(input.name) || names.deleted.includes(input.name)) return err("taken");
   const created: KeyPool = {
     name: input.name, runtime: input.runtime, vendor: input.vendor, policy: policy.value,
-    members: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
+    members: [], grants: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
   };
   return ok(settleKeyPool(withEvents(created, [{ type: "KeyPoolCreated", pool: input.name, at: now, command: who.value }]), now));
 }
@@ -176,6 +189,8 @@ export function joinKeyPool(
   return ok(settleKeyPool(withEvents({ ...p, members: [...p.members, member], ownedOrgs }, events), now));
 }
 
+// The member's health leaves with them. A grant that named them stays, still naming them, so the run's next call can hand it off.
+// The members that grant has lent stay listed on it.
 export function leaveKeyPool(p: KeyPool, credential: string, now: number, why: "left" | "revoked" = "left"): Result<KeyPool, "missing"> {
   const index = p.members.findIndex(m => m.credential === credential);
   if (index < 0) return err("missing");
@@ -216,30 +231,29 @@ function servable(m: KeyMember): boolean {
   return m.health.state === "active";
 }
 
-function ringFrom(p: KeyPool, start: number, skip: readonly string[]): KeyMember | undefined {
+// Who `chooseKey` tries, in that order, when nothing is skipped. A failing member yields none: the pool is blocked first.
+export function servableOrder(p: KeyPool): readonly string[] {
+  if (failingMember(p)) return [];
   const n = p.members.length;
+  if (n === 0) return [];
+  const lastAt = p.lastPick === null ? -1 : p.members.findIndex(m => m.credential === p.lastPick);
+  const start = p.policy.mode === "drain" && lastAt >= 0 ? lastAt : lastAt < 0 ? 0 : (lastAt + 1) % n;
+  const names: string[] = [];
   for (let step = 0; step < n; step++) {
-    const m = p.members[(start + step) % n];
-    if (m && servable(m) && !skip.includes(m.credential)) return m;
+    const member = p.members[(start + step) % n];
+    if (member && servable(member)) names.push(member.credential);
   }
-  return undefined;
+  return names;
 }
 
 export function chooseKey(p: KeyPool, skip: readonly string[] = []): Result<{ pool: KeyPool; member: string }, PickRefusal> {
   const blocked = failingMember(p);
   if (blocked) return err({ problem: "pool_blocked", member: blocked.credential, reason: blocked.health.reason });
   if (!p.members.some(servable)) return err({ problem: "pool_empty", backAt: keyPoolBackAt(p) });
-  const lastAt = p.lastPick === null ? -1 : p.members.findIndex(m => m.credential === p.lastPick);
-  let chosen: KeyMember | undefined;
-  if (p.policy.mode === "drain" && lastAt >= 0) {
-    const current = p.members[lastAt];
-    chosen = current && servable(current) && !skip.includes(current.credential) ? current : ringFrom(p, (lastAt + 1) % p.members.length, skip);
-  } else {
-    chosen = ringFrom(p, lastAt < 0 ? 0 : (lastAt + 1) % p.members.length, skip);
-  }
+  const chosen = servableOrder(p).find(name => !skip.includes(name));
   if (!chosen) return err({ problem: "none_left" });
-  if (p.lastPick === chosen.credential) return ok({ pool: p, member: chosen.credential });
-  return ok({ pool: { ...p, lastPick: chosen.credential }, member: chosen.credential });
+  if (p.lastPick === chosen) return ok({ pool: p, member: chosen });
+  return ok({ pool: { ...p, lastPick: chosen }, member: chosen });
 }
 
 export function releaseKey(p: KeyPool, member: string, previous: string | null): KeyPool {
@@ -307,6 +321,87 @@ export function reviveKey(p: KeyPool, credential: string, actor: Actor, now: num
   if (!member) return err("missing");
   if (member.health.state === "active") return err("active");
   return ok(recover(p, credential, "revive", now));
+}
+
+function sameWindow(a: HelperWindow, b: HelperWindow): boolean {
+  return a.calls === b.calls && a.windowStart === b.windowStart;
+}
+
+export function openGrant(p: KeyPool, grant: Grant, now: number): Result<KeyPool, "missing" | "exists"> {
+  if (!p.members.some(m => m.credential === grant.member)) return err("missing");
+  if (p.grants.some(g => g.id === grant.id)) return err("exists");
+  return ok(withEvents({ ...p, grants: [...p.grants, grant] }, [{ type: "GrantOpened", grant: grant.id, member: grant.member, at: now }]));
+}
+
+// The run's own filter socket, recorded once. No event: a later caller cannot point the grant somewhere else.
+export function bindFilter(p: KeyPool, id: string, path: string): Result<KeyPool, "missing" | "bound" | "path"> {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return err("missing");
+  if (path === "" || !path.startsWith("/")) return err("path");
+  if (grant.filter !== null) return err("bound");
+  return ok({ ...p, grants: p.grants.map(g => g.id === id ? { ...g, filter: path } : g) });
+}
+
+export function moveGrant(
+  p: KeyPool, id: string, to: { member: string; lease: string; window: HelperWindow; movedAt: number }, why: GrantMoveWhy, now: number,
+): Result<KeyPool, "missing" | "no_member"> {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return err("missing");
+  if (!p.members.some(m => m.credential === to.member)) return err("no_member");
+  if (to.lease === grant.lease) return ok(p);
+  const previous = to.member === grant.member ? grant.previous : { member: grant.member, movedAt: to.movedAt };
+  const next: Grant = { ...grant, member: to.member, lease: to.lease, window: to.window, previous };
+  return ok(withEvents(
+    { ...p, grants: p.grants.map(g => g.id === id ? next : g) },
+    [{ type: "GrantMoved", grant: id, from: grant.member, to: to.member, why, at: now }],
+  ));
+}
+
+export function touchGrant(p: KeyPool, id: string, window: HelperWindow): KeyPool {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant || sameWindow(grant.window, window)) return p;
+  return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, window } : g) };
+}
+
+const SEEN_KEEP = 16;
+const LENT_KEEP = 32;
+
+// One row per session: the member it was last served. A new session, or one whose member changed, is written last.
+// The grant keeps the last sixteen. Nothing is written when the grant is gone or the row is already so.
+export function noteSeen(p: KeyPool, id: string, session: string, member: string): KeyPool {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return p;
+  const at = grant.seen.findIndex(row => row.session === session);
+  if (at >= 0 && grant.seen[at]?.member === member) return p;
+  const seen = [...grant.seen.filter(row => row.session !== session), { session, member }].slice(-SEEN_KEEP);
+  return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, seen } : g) };
+}
+
+// Every member the run was handed, once, in the order it was handed. The grant keeps the last thirty-two.
+// Nothing is written when the grant is gone or the member is already there.
+export function noteLent(p: KeyPool, id: string, member: string): KeyPool {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant || grant.lent.includes(member)) return p;
+  const lent = [...grant.lent, member].slice(-LENT_KEEP);
+  return { ...p, grants: p.grants.map(g => g.id === id ? { ...g, lent } : g) };
+}
+
+export function closeGrant(p: KeyPool, id: string, now: number): KeyPool {
+  if (!p.grants.some(g => g.id === id)) return p;
+  return withEvents({ ...p, grants: p.grants.filter(g => g.id !== id) }, [{ type: "GrantClosed", grant: id, at: now }]);
+}
+
+// A session the grant has served is that session's member, and the window is left as it is. Otherwise a report inside the
+// hand-off window still belongs to the member that gave the run up. Past it, the current member owns it.
+export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number, session?: string | null): Result<{ pool: KeyPool; member: string }, "missing"> {
+  const grant = p.grants.find(g => g.id === id);
+  if (!grant) return err("missing");
+  const known = session ? grant.seen.find(row => row.session === session) : undefined;
+  if (known) return ok({ pool: p, member: known.member });
+  const earlier = grant.previous;
+  if (earlier && at < earlier.movedAt + ttlMs) return ok({ pool: p, member: earlier.member });
+  if (!earlier) return ok({ pool: p, member: grant.member });
+  return ok({ pool: { ...p, grants: p.grants.map(g => g.id === id ? { ...g, previous: null } : g) }, member: grant.member });
 }
 
 export function keyRotated(p: KeyPool, credential: string, now: number): KeyPool {

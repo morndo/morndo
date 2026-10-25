@@ -80,6 +80,13 @@ function tombstoneBody(body: string): boolean {
   return value.deleted === true;
 }
 
+// A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
+// (the filter null).
+function withHistory(pool: KeyPool): KeyPool {
+  const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [], filter: grant.filter ?? null }));
+  return { ...pool, grants };
+}
+
 // The same rules as the SQLite store: version 0 inserts once, a later save lands only on the version it read, and a
 // tombstone keeps the name. `beforeSave` runs once, if set, before that check, so a test can land another write first.
 export class MemoryKeyPoolStore implements KeyPoolStore {
@@ -90,7 +97,7 @@ export class MemoryKeyPoolStore implements KeyPoolStore {
   load(name: string): { pool: KeyPool | null; version: number } {
     const row = this.#rows.get(name);
     if (!row) return { pool: null, version: 0 };
-    return { pool: tombstoneBody(row.body) ? null : JSON.parse(row.body) as KeyPool, version: row.version };
+    return { pool: tombstoneBody(row.body) ? null : withHistory(JSON.parse(row.body) as KeyPool), version: row.version };
   }
 
   names(): { live: readonly string[]; deleted: readonly string[] } {
@@ -145,7 +152,9 @@ export class MemoryProcesses implements Processes {
   readonly dead = new Set<number>();
   checks = 0;
   identity(pid: number): ProcId { return { pid, startedAt: 1, bootId: "boot" }; }
-  ancestors(): readonly ProcId[] { return []; }
+  // pid -> its own pid and its parents', child first; a pid with no entry has no ancestors.
+  readonly tree = new Map<number, readonly number[]>();
+  ancestors(pid: number): readonly ProcId[] { return (this.tree.get(pid) ?? []).map(id => this.identity(id)); }
   alive(id: ProcId): boolean { this.checks += 1; return !this.dead.has(id.pid); }
 }
 

@@ -62,6 +62,7 @@ export type TurnStopper = {
   cut(): boolean;                      // the turn was stopped before it completed, whatever status it ends with
   hungUp(): boolean;                   // the bin was told its terminal is gone (SIGHUP)
   done(): void;                        // the run is over, lease closed
+  stop(): void;                        // stop the agent and what it started, as when the reader goes away
 };
 
 export function turnStopper(io: Io, graceMs = STOP_GRACE_MS): TurnStopper {
@@ -86,6 +87,7 @@ export function turnStopper(io: Io, graceMs = STOP_GRACE_MS): TurnStopper {
     async settle() { pid = null; await reap.settle(); ended = true; },
     cut: () => delivered || prevented || hangupCut,
     hungUp: () => hangup,
+    stop,
     done() {
       io.gone?.removeEventListener("abort", stop);
       process.off("SIGHUP", onHangup);
