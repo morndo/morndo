@@ -201,7 +201,9 @@ export type OpResult = {
   "lane.stop": { ok: true };
   "worktree.list": { worktrees: { path: string; branch: string | null }[] };
   "worktree.add": { path: string };
-  "pane.capture": { text: string | null; truncated: boolean };
+  // scrollbackMissing: the pane is on tmux's alternate screen (no scrollback there) and more lines were asked for than
+  // it shows. Absent otherwise, and never false: an older node sends neither.
+  "pane.capture": { text: string | null; truncated: boolean; scrollbackMissing?: true };
   "lane.deliver": { delivery: Delivery };
   "delivery.cancel": { delivery: Delivery };
   "memory.sync": { committed: boolean; written: number; removed: number; skillDirs: string[]; conflicts: string[] };
@@ -525,7 +527,7 @@ export const OP_RESULTS = {
   "lane.stop": z.object({ ok: z.literal(true) }),
   "worktree.list": z.object({ worktrees: z.array(z.object({ path: text(), branch: z.nullable(text()) })) }),
   "worktree.add": z.object({ path: text() }),
-  "pane.capture": z.object({ text: z.nullable(text()), truncated: z.boolean() }),
+  "pane.capture": z.object({ text: z.nullable(text()), truncated: z.boolean(), scrollbackMissing: z.exactOptional(z.literal(true)) }),
   "lane.deliver": z.object({ delivery: DeliverySchema }),
   "delivery.cancel": z.object({ delivery: DeliverySchema }),
   "memory.sync": z.object({ committed: z.boolean(), written: count(), removed: count(), skillDirs: z.array(text()), conflicts: z.array(text()) }),

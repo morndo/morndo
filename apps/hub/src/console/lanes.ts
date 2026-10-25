@@ -4,7 +4,8 @@
 // - list: each lane's name, node, worker id, window, session status, pid, folder, title, and its session's topic and
 //   last prompt (reconciliation ruling 13; each online node's inventory; a node that isn't online lists the registry's
 //   rows, offline);
-// - peek: the screen's last lines (pane.capture);
+// - peek: the screen's last lines (pane.capture); on tmux's alternate screen (Claude Code's fullscreen renderer), which
+//   keeps no scrollback, the end of the lane's session transcript when more lines are asked for than the screen shows;
 // - send: a delivery (§4), waited for with --wait; --direct types at once (pane.send), for a lane without Claude Code;
 // - keys: pane.keys by key name (the protocol's allow-list);
 // - start, stop: lane.start (with a first prompt typed once the lane can take it; on a Role's engine with --role, or a
@@ -36,6 +37,7 @@ import { Store } from "../adapters/store.ts";
 import { BoardService } from "../application/board-service.ts";
 import { dataDirOf } from "../config.ts";
 import { briefLines } from "./brief.ts";
+import { transcriptTail } from "./transcript-tail.ts";
 
 export const EXIT = { ok: 0, usage: 2, late: 3, notDelivered: 4, inDoubt: 5, unavailable: 69 } as const;
 
@@ -76,6 +78,8 @@ export const USAGE = `usage: morndo lanes [--json]
        morndo lanes events [--json]
        morndo lanes brief [--json]
 send - reads the text from stdin. Keys are tmux key names: ${KEY_NAMES.join(" ")}.
+peek --lines past a pane on the alternate screen reads the end of its session's transcript instead (tmux keeps no
+scrollback there).
 stop closes the lane's window once its agent has exited; --keep-window leaves it at its shell. The manager is refused.
 start --task assigns that task to the new lane first (the hub's board, MORNDO_HOME); its first turn moves it into progress.
 Exit codes: 0 accepted (with --wait: delivered; stop: stopped), 3 not delivered in time (stop: not seen to stop),
@@ -221,8 +225,27 @@ async function peek(client: FleetClient, io: LanesIo, rest: string[], v: Values)
   const lane = await laneNamed(client, name);
   const r = await client.op({ workerId: lane.workerId }, "pane.capture", { workerId: lane.workerId, lines }, { timeoutMs: 5000 });
   if (!r.ok) throw new FleetOpFailed("pane.capture", r.error);
-  if (r.result.text === null) throw new NotDone(`refused: no_pane: "${name}" has no pane any more`);
-  await io.out(v.json ? JSON.stringify(r.result) : r.result.text);
+  const text = r.result.text;
+  if (text === null) throw new NotDone(`refused: no_pane: "${name}" has no pane any more`);
+  // The alternate screen keeps no scrollback (tmux(1) capture-pane -S: "negative numbers are lines in the history", and
+  // there is none there), so past the screen the lane's session transcript is what can be read. Without one, or when it
+  // can't be read, the screen is printed as before and one note says why there is no more.
+  if (r.result.scrollbackMissing === true) {
+    const screen = async () => { await io.out(v.json ? JSON.stringify(r.result) : text); return EXIT.ok; };
+    if (lane.sessionId === null) {
+      await io.err("note: this pane keeps no scrollback (it is on the alternate screen) and the lane has no session transcript");
+      return screen();
+    }
+    const tail = await transcriptTail(client, lane.node, lane.sessionId, lines);
+    if (!tail.ok) {
+      await io.err(`note: this pane keeps no scrollback (it is on the alternate screen) and ${tail.note}`);
+      return screen();
+    }
+    if (v.json) await io.out(JSON.stringify({ text: tail.lines.join("\n"), truncated: false, source: "transcript" }));
+    else await io.out(`-- transcript text (the last ${lines} lines; this pane is on the alternate screen, which keeps no scrollback) --\n${tail.lines.join("\n")}`);
+    return EXIT.ok;
+  }
+  await io.out(v.json ? JSON.stringify(r.result) : text);
   return EXIT.ok;
 }
 

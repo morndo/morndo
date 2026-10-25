@@ -24,6 +24,10 @@ export type Tmux = {
   // last `o.lines` lines (1 to LIMITS.captureMaxLines), with tmux's attribute escapes when `o.attributes`, and wrapped
   // lines joined unless `o.join` is false. null: no such pane, or a count out of range.
   capture(id: string, o?: { lines: number; attributes?: boolean; join?: boolean }): Promise<string | null>;
+  // The pane's height when the pane's application switched to tmux's alternate screen (Claude Code's fullscreen renderer
+  // draws there), where capture-pane -S has no history to reach ("negative numbers are lines in the history", and the
+  // alternate screen keeps none). null: not on the alternate screen, no such pane, or a tmux that failed or answered oddly.
+  altScreenRows(id: string): Promise<number | null>;
   // `engineLane`: the pane runs a lane of the engine layer (engine-sessions.ts), whose input line is the last line on screen
   // (engineLaneBoxOnScreen) and which has no menus. Only a caller that knows that from the lane's own registry says so: a
   // shell prompt can be drawn the same way.
@@ -38,6 +42,9 @@ export type Tmux = {
 
 const KEYS = new Set<string>(KEY_NAMES);
 const PANE_ID = /^%\d+$/;
+// display-message -p's format for altScreenRows: the alternate-screen flag and the pane's height. A constant, so no
+// format is ever built from outside data (tmux-cli.ts's rule for -F and display-message -p).
+const ALT_FORMAT = "#{alternate_on} #{pane_height}";
 
 // Text into a pane as one tmux command list, so no other tmux client's keys land between its parts: load it into a private
 // buffer from stdin (load-buffer: "If path is '-', the contents are read from stdin"), paste it (-p: "paste bracket control
@@ -283,6 +290,16 @@ export function tmuxAdapter(opts: { socket: string | null; session: string | nul
         return lines.slice(-o.lines).join("\n");
       } catch {
         return null;                                      // the pane went away between list and capture
+      }
+    },
+    async altScreenRows(id) {
+      if (!PANE_ID.test(id)) return null;
+      try {
+        // "#{alternate_on}": 1 once the pane's application switched to the alternate screen; the height follows it.
+        const [alt, rows, ...rest] = (await tmux(["display-message", "-p", "-t", id, ALT_FORMAT])).trim().split(" ");
+        return alt === "1" && rest.length === 0 && /^\d+$/.test(rows ?? "") ? Number(rows) : null;
+      } catch {
+        return null;
       }
     },
     async sendKeyNames(paneId, names) {

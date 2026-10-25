@@ -148,11 +148,11 @@ describe("morndo lanes peek --lines past the screen, on the alternate screen (T-
     const big = jsonl(rows);
     expect(big.length).toBeGreaterThan(LIMITS.chunkBytes);
     await start({ transcripts: { "s-alt": big } });
-    const r = await lanes(["peek", "alt", "--lines", "3"]);
+    const r = await lanes(["peek", "alt", "--lines", "4"]);          // more than the screen's 3 rows
     expect(r.code, r.err).toBe(0);
     const [label, ...body] = r.out.trimEnd().split("\n");
     expect(label).toMatch(LABEL);
-    expect(body).toEqual([expect.stringContaining("reply 3997"), "user: ask 3998", expect.stringContaining("reply 3999")]);
+    expect(body).toEqual(["user: ask 3996", expect.stringContaining("reply 3997"), "user: ask 3998", expect.stringContaining("reply 3999")]);
   });
 
   it("--json: the text, and where it came from", async () => {

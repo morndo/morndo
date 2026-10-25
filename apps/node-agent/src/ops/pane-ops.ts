@@ -10,7 +10,9 @@
 // pane.capture (fleet clients spec §5, "Reading") is a read: one pane's last lines, at most 2000 (args.ts), with tmux's
 // attribute escapes when asked and wrapped lines joined unless `join` is false (RECONCILIATION.md ruling 10), in an
 // answer of at most 256 KiB measured as it travels (LIMITS.captureMaxBytes, one bulk chunk; agent.ts sends it on the bulk
-// lane). pane.captureMany keeps its 6 KiB a pane.
+// lane). pane.captureMany keeps its 6 KiB a pane. A pane on tmux's alternate screen (Claude Code's fullscreen renderer),
+// asked for more lines than it shows, answers scrollbackMissing: the alternate screen keeps no history, so the caller
+// reads the session's transcript instead.
 import { LIMITS, parseWorkerId, type Expect, type WorkerRef } from "@morndo/protocol";
 import type { PaneLock, SessionInfo, Terminal, Tmux } from "@morndo/node-ops";
 import type { Policy } from "../config.ts";
@@ -97,8 +99,11 @@ export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.c
       if (!snap.lanes.some(l => l.workerId === a.workerId)) snap = await d.inventory.refresh();
       const lane = snap.lanes.find(l => l.workerId === a.workerId);
       const text = lane ? await d.tmux.capture(lane.pane, { lines: a.lines, attributes: a.attributes === true, join: a.join !== false }) : null;
-      if (text === null) return ok<"pane.capture">({ text: null, truncated: false });
-      return ok<"pane.capture">(capCapture(text, LIMITS.captureMaxBytes));
+      if (text === null || lane === undefined) return ok<"pane.capture">({ text: null, truncated: false });
+      // tmux keeps no scrollback on the alternate screen (capture-pane -S: "negative numbers are lines in the history",
+      // and there is none there), so more lines than the pane shows cannot come from tmux: said, never guessed at.
+      const rows = await d.tmux.altScreenRows(lane.pane);
+      return ok<"pane.capture">({ ...capCapture(text, LIMITS.captureMaxBytes), ...(rows !== null && a.lines > rows ? { scrollbackMissing: true } : {}) });
     }),
 
     "pane.frame": read(async a => {
