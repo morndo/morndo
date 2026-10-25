@@ -63,7 +63,7 @@ async function world(n = 3, opts: { pool?: boolean; models?: boolean } = {}): Pr
 type Member = { credential: string; state: string; reason: string | null };
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; standing: string; lastPick: string | null; members: Member[] });
 const states = async (env: NodeJS.ProcessEnv) => (await pools(env))[0]?.members.map(m => m.state);
-type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown> };
+type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string };
 const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
@@ -208,6 +208,19 @@ describe("kp12 the keys reach nothing but the helper's stdout", () => {
       const bytes = readFileSync(file).toString("latin1");
       for (const key of KEYS) expect(bytes.includes(key), `${key} in ${file}`).toBe(false);
     }
+  });
+});
+
+describe("kp12 fix round 1: the output filter knows every key the run may be moved to, not only the first", () => {
+  it("a key the child prints after a hand-off is redacted from the run's output (the second member's, here)", async () => {
+    const { env, dir } = await world(3);
+    const ran = await run(env, dir, job(dir, {
+      [KEYS[0]]: { exit: 0, report: ["p", "--outcome", "exhausted"], rehelp: 1 },
+      [KEYS[1]]: { exit: 0, say: `my key is ${KEYS[1]}` },
+    }));
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of KEYS) expect(`${ran.stdout}${ran.stderr}`).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
   });
 });
 

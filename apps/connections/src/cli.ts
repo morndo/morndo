@@ -362,8 +362,18 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let hungUp = false;
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
-    outRedactor = streamRedactor([secret]);
-    errRedactor = streamRedactor([secret]);
+    // A pooled run may be moved to any member, so the filter knows every member's key, not only the first (a key the child prints
+    // after a hand-off is then redacted too). A member whose key cannot be opened cannot be served either, and is left out.
+    const secrets = [secret];
+    if (grant !== null) {
+      for (const row of home.keypools.state(grant.pool)?.members ?? []) {
+        const member = findConnection(home.store.load().directory, row.credential);
+        if (!member || member.custody !== "morndo" || member.kind !== "api-key" || member.ref === (connection.kind === "api-key" ? connection.ref : "")) continue;
+        try { secrets.push(await home.open(member.ref)); } catch { /* not servable */ }
+      }
+    }
+    outRedactor = streamRedactor(secrets);
+    errRedactor = streamRedactor(secrets);
     home.close();
     released = true;
     const hooks = {
