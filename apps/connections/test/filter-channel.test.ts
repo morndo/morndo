@@ -1,7 +1,8 @@
 // The channel a pooled run's helper uses to give the run's output filter a key before the agent is given it (ADR-0037, decision 18): the run listens on a
 // private socket, the helper sends the key and waits for the answer, no answer means no key. The keys are synthetic.
-import { createServer, connect } from "node:net";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { createServer, connect, type Socket } from "node:net";
+import { spawn } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -79,7 +80,7 @@ describe("the filter channel", () => {
 
 // Fix round 6. A same-user process that finds the socket can send it keys, and a helper under a grant must hand its key to that grant's own filter.
 const accepting = (...keys: string[]) => (key: string): boolean => keys.includes(key);
-const serveFor = async (accepts: (key: string) => boolean | Promise<boolean>, extra: { max?: number } = {}) => {
+const serveFor = async (accepts: (key: string) => boolean | Promise<boolean>, extra: { max?: number; idleMs?: number; maxOpen?: number; maxQueue?: number } = {}) => {
   const added: string[] = [];
   const channel = await serveFilterChannel({ add: list => { added.push(...list); }, accepts, ...extra });
   closers.push(() => channel.close());
@@ -197,10 +198,23 @@ describe("fix round 6: a launcher killed outright leaves a directory the next st
       rmSync(root, { recursive: true, force: true });
     });
   };
-  const leftBehind = (name: string, files: string[] = ["f.sock"]) => {
+  // Old enough that the sweep may take it (it keeps anything younger than a minute: a launcher may still be starting).
+  const age = (dir: string, seconds = 120) => { const past = new Date(Date.now() - seconds * 1000); utimesSync(dir, past, past); };
+  const leftBehind = (name: string, files: string[] = ["f.sock"], seconds = 120) => {
     const dir = join(root, name);
     mkdirSync(dir, { mode: 0o700 });
     for (const file of files) writeFileSync(join(dir, file), "");
+    age(dir, seconds);
+    return dir;
+  };
+  // What a launcher killed with SIGKILL leaves: a real socket file nobody listens on, in a directory named after a pid that is gone.
+  const killedLauncher = async (): Promise<string> => {
+    const script = `const net=require("net"),fs=require("fs"),path=require("path");const dir=path.join(process.argv[1],"mf-"+process.pid+"-stalex");fs.mkdirSync(dir,{mode:0o700});net.createServer().listen(path.join(dir,"f.sock"),()=>{console.log(dir)});setInterval(()=>{},1000);`;
+    const child = spawn(process.execPath, ["-e", script, root], { stdio: ["ignore", "pipe", "ignore"] });
+    const dir = await new Promise<string>(resolve => { child.stdout.once("data", chunk => { resolve(String(chunk).trim()); }); });
+    const exited = new Promise<void>(resolve => { child.once("exit", () => { resolve(); }); });
+    child.kill("SIGKILL");
+    await exited;
     return dir;
   };
   it("names its directory after the launcher's process, so a later start can tell whose it was", async () => {
@@ -215,6 +229,32 @@ describe("fix round 6: a launcher killed outright leaves a directory the next st
     await serve();
     expect(existsSync(dead)).toBe(false);
     expect(existsSync(alive)).toBe(true);
+  });
+  it("removes the directory a killed launcher left, with its real stale socket, once it is old enough", async () => {
+    useRoot();
+    const dir = await killedLauncher();
+    expect(existsSync(join(dir, "f.sock"))).toBe(true);
+    age(dir);
+    await serve();
+    expect(existsSync(dir)).toBe(false);
+  });
+  it("keeps a directory younger than a minute even when its process is gone and nobody listens: a launcher may be starting", async () => {
+    useRoot();
+    const dir = await killedLauncher();
+    await serve();
+    expect(existsSync(dir)).toBe(true);
+  });
+  it("keeps the directory of a launcher in another pid namespace: its pid is invisible here, but its socket answers", async () => {
+    useRoot();
+    const dir = leftBehind(`mf-${DEAD}-nsproc`, []);
+    const received: string[] = [];
+    const live = createServer(socket => { socket.on("data", chunk => { received.push(String(chunk)); }); });
+    await new Promise<void>(resolve => { live.listen(join(dir, "f.sock"), resolve); });
+    closers.push(() => new Promise<void>(resolve => { live.close(() => { resolve(); }); }));
+    age(dir);
+    await serve();
+    expect(existsSync(dir)).toBe(true);
+    expect(received).toEqual([]);
   });
   it("keeps the directory of another process that is alive (the launcher's own parent), not only its own", async () => {
     useRoot();
@@ -250,5 +290,96 @@ describe("fix round 6: a launcher killed outright leaves a directory the next st
     expect((error as Error).message).toMatch(/socket path is too long/);
     expect((error as Error).message).toMatch(/TMPDIR|XDG_RUNTIME_DIR/);
     expect(readdirSync(long)).toEqual([]);
+  });
+});
+
+// Final round (review rev-156g). Junk senders must not be able to make the real helper's two seconds lapse: a socket that does not say its
+// piece is cut loose, there is a cap on open sockets (the oldest one still silent makes room), and membership checks run one at a time
+// with a bounded line.
+describe("final round: junk senders cannot starve the real helper", () => {
+  const REAL = "sk-ant-synthetic-member-key-0001";
+  const pause = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); });
+  const within = <T,>(promise: Promise<T>, ms: number) => Promise.race([promise, pause(ms).then(() => "late" as const)]);
+  const raw = (path: string) => new Promise<{ socket: Socket; closed: Promise<void> }>(resolve => {
+    const socket = connect(path);
+    socket.setEncoding("utf8");
+    socket.on("error", () => undefined);
+    const closed = new Promise<void>(done => { socket.on("close", () => { done(); }); });
+    socket.on("connect", () => { resolve({ socket, closed }); });
+    closers.push(() => { socket.destroy(); });
+  });
+  const keyed = (n: number) => `sk-ant-synthetic-flood-key-${String(n).padStart(4, "0")}`;
+  const gated = () => {
+    let release: () => void = () => undefined;
+    const gate = new Promise<boolean>(resolve => { release = () => { resolve(true); }; });
+    return { gate, release: () => { release(); } };
+  };
+
+  it("cuts loose a socket that never sends, and one that sends half a line and stops", async () => {
+    const { channel } = await serveFor(() => true, { idleMs: 150 });
+    const silent = await raw(channel.path);
+    const half = await raw(channel.path);
+    half.socket.write("{\"key\":\"sk-ant-synth");
+    expect(await within(silent.closed, 1500)).not.toBe("late");
+    expect(await within(half.closed, 1500)).not.toBe("late");
+  });
+  it("does not cut a sender that said its piece at once but waits for a slow membership check", async () => {
+    const { channel } = await serveFor(async () => { await pause(400); return true; }, { idleMs: 150 });
+    expect(await sendToFilter(channel.path, REAL, 3000)).toBe(true);
+  });
+  it("at the cap on open sockets the oldest one still silent makes room, so the real helper is served", async () => {
+    const { channel } = await serveFor(() => true, { idleMs: 60_000, maxOpen: 3 });
+    const first = await raw(channel.path);
+    const second = await raw(channel.path);
+    const third = await raw(channel.path);
+    expect(await sendToFilter(channel.path, REAL)).toBe(true);
+    expect(await within(first.closed, 1000)).not.toBe("late");
+    expect(await within(third.closed, 100)).toBe("late");
+    void second;
+  });
+  it("at the cap with every open socket deciding, a new one is refused at once and the deciding ones are answered when the pool is", async () => {
+    const { gate, release } = gated();
+    const { channel } = await serveFor(() => gate, { idleMs: 60_000, maxOpen: 2 });
+    const one = sendToFilter(channel.path, keyed(1), 5000);
+    const two = sendToFilter(channel.path, keyed(2), 5000);
+    await pause(150);
+    expect(await within(sendToFilter(channel.path, keyed(3), 5000), 1500)).toBe(false);
+    release();
+    expect(await one).toBe(true);
+    expect(await two).toBe(true);
+  });
+  it("asks the pool about one key at a time", async () => {
+    let running = 0;
+    let peak = 0;
+    const { channel } = await serveFor(async () => {
+      running += 1;
+      peak = Math.max(peak, running);
+      await pause(30);
+      running -= 1;
+      return true;
+    });
+    const answers = await Promise.all(Array.from({ length: 6 }, (_, i) => sendToFilter(channel.path, keyed(i), 5000)));
+    expect(answers).toEqual([true, true, true, true, true, true]);
+    expect(peak).toBe(1);
+  });
+  it("lets only so many keys wait for the pool at once: the rest are refused at once, the ones in line are answered", async () => {
+    const { gate, release } = gated();
+    const { channel } = await serveFor(() => gate, { maxQueue: 3 });
+    const settled: boolean[] = [];
+    const sent = Array.from({ length: 5 }, (_, i) => sendToFilter(channel.path, keyed(i), 5000).then(answer => { settled.push(answer); return answer; }));
+    await pause(300);
+    expect(settled).toEqual([false, false]);
+    release();
+    const all = await Promise.all(sent);
+    expect(all.filter(Boolean)).toHaveLength(3);
+  });
+  it("a flood of silent sockets does not stop the real helper from getting its key within its two seconds", async () => {
+    const { channel, added } = await serveFor(accepting(REAL), { idleMs: 200, maxOpen: 8 });
+    for (let i = 0; i < 50; i++) void raw(channel.path);
+    await pause(100);
+    const started = Date.now();
+    expect(await sendToFilter(channel.path, REAL, 2000)).toBe(true);
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(added).toEqual([REAL]);
   });
 });

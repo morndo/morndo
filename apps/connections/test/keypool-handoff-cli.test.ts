@@ -3,7 +3,7 @@
 // fixture fake-keyed-runtime.mjs, which asks the helper as often as the job says. Every key is synthetic.
 import { spawn } from "node:child_process";
 import { createServer } from "node:net";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
@@ -518,6 +518,8 @@ describe("fix round 6: a launcher killed outright leaves a socket directory the 
     const killed = await run(scoped, dir, job(dir, { [KEYS[0]]: { exit: 0, killParent: true } }));
     expect(killed.code).not.toBe(0);
     expect(left(root)).toHaveLength(1);
+    // The sweep keeps anything younger than a minute (a launcher may be starting): the directory is made old enough first.
+    for (const name of left(root)) utimesSync(join(root, name), new Date(Date.now() - 120_000), new Date(Date.now() - 120_000));
     const next = await run(scoped, dir, job(dir, { [KEYS[0]]: { exit: 0 }, [KEYS[1]]: { exit: 0 } }));
     expect(next.code, next.stderr).toBe(0);
     expect(left(root)).toEqual([]);
