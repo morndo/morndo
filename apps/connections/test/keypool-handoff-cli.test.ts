@@ -288,6 +288,65 @@ describe("kp12 fix round 3: a key handed to the run is redacted even when its me
   });
 });
 
+describe("kp12 fix round 5: the key reaches the output filter from the hand-out itself, not from a later read of the store", () => {
+  // MORNDO_FILTER_WATCH=off switches the store watch (and its poll) off, so only the helper's hand-over to the run can have taught the filter the key.
+  const dry = (member: string) => ({ args: ["keypool", "report", "p", "--member", member, "--outcome", "exhausted"] });
+  const NEW_KEY = "sk-ant-synthetic-pool-key-0008";
+  const quiet = (out: Out) => `${out.stdout}${out.stderr}`;
+  const setup = async () => {
+    const { env, dir } = await world(3, { pool: false });
+    expect((await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", "owner", "--confirm-own-account", "k1", "k2"], env)).code).toBe(0);
+    return { env: { ...env, MORNDO_FILTER_WATCH: "off" }, dir };
+  };
+  const moved = (after: { args: string[]; input?: string }) => ({
+    [KEYS[0]]: { exit: 0, cmds: [{ args: ["keypool", "add", "p", "k3", "--confirm-own-account"] }, dry("k1"), dry("k2")], rehelp: 1 },
+    [KEYS[2]]: { exit: 0, cmdsAfter: [after], say: `my key is ${KEYS[2]}` },
+  });
+  it("a member that joined mid-run and was removed again", async () => {
+    const { env, dir } = await setup();
+    const ran = await run(env, dir, job(dir, moved({ args: ["keypool", "remove", "p", "k3"] })));
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of KEYS) expect(quiet(ran)).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
+  });
+  it("a member that joined mid-run and whose key was rotated at once (no read can find the old key any more)", async () => {
+    const { env, dir } = await setup();
+    const ran = await run(env, dir, job(dir, moved({ args: ["rotate", "k3"], input: NEW_KEY })));
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of [...KEYS, NEW_KEY]) expect(quiet(ran)).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
+  });
+  it("a member that joined mid-run and whose pool was deleted before the next read", async () => {
+    const { env, dir } = await setup();
+    const ran = await run(env, dir, job(dir, moved({ args: ["keypool", "delete", "p"] })));
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of KEYS) expect(quiet(ran)).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
+  });
+});
+
+describe("kp12 fix round 5: a model id from the output is written into an engine mark only if it is one", () => {
+  const marks = (dir: string): string => {
+    try { return JSON.stringify((JSON.parse(readFileSync(join(dir, "engines.json"), "utf8")) as { marks?: unknown }).marks ?? []); } catch { return "[]"; }
+  };
+  it("a key printed as the model is not in the engine file", async () => {
+    const { env, dir } = await world(2, { models: true });
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, say: `{"model":"${KEYS[0]}","type":"result"}` } }));
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of KEYS) expect(marks(dir)).not.toContain(key);
+    for (const file of homeFiles(dir)) {
+      if (!file.endsWith("engines.json")) continue;
+      for (const key of KEYS) expect(readFileSync(file, "utf8")).not.toContain(key);
+    }
+  });
+  it("a model id the run was not asked for is still marked", async () => {
+    const { env, dir } = await world(2, { models: true });
+    const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, say: `{"model":"other-model-9","type":"result"}` } }));
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(marks(dir)).toContain("other-model-9");
+  });
+});
+
 describe("kp8 fix round 2: a member removed while the run is on it does not end the run's keys", () => {
   it("the next helper call hands the run to another member, and every lease the run took is closed at its end", async () => {
     const { env, dir } = await world(3);

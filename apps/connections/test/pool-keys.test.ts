@@ -180,6 +180,57 @@ describe("fix round 4: the filter is complete only when every key the grant lent
   });
 });
 
+describe("fix round 5: the watch's required set only grows, and a required thing that is gone is a failure", () => {
+  it("a lent member it has seen stays required after the pool is deleted: its key is still loaded, or the read throws", async () => {
+    const w = await world();
+    const store = new SqliteKeyPoolStore(w.home.db);
+    const loaded = store.load("p");
+    const grant: Grant = {
+      id: "gl1", member: "k1", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
+      request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
+      previous: null, seen: [], lent: ["k1", "k2"],
+    };
+    const opened = openGrant(loaded.pool!, grant, 1);
+    if (!opened.ok) throw new Error("grant");
+    expect(store.save(opened.value, loaded.version)).toBe(true);
+    store.close();
+    let failing = true;
+    const seen = new Set<string>();
+    const watch = watchPoolKeys({
+      db: w.home.db, pool: "p", grant: "gl1",
+      open: () => { const real = openHome(w.env); return { open: async (ref: string) => { if (failing && ref === w.refs.k2) throw new Error("transient"); return real.open(ref); }, close: () => real.close() }; },
+      seen,
+    });
+    await expect(watch.learn()).rejects.toBeInstanceOf(FilterIncomplete);
+    expect(w.home.keypools.delete("p", ACTOR).ok).toBe(true);
+    failing = false;
+    const learned = await watch.learn();
+    expect(learned).toContain(KEY2);
+    watch.close();
+  });
+
+  it("a required name with no key Connection (gone or not a key) counts as failed, never as nothing to learn", async () => {
+    const w = await world();
+    const store = new SqliteKeyPoolStore(w.home.db);
+    const loaded = store.load("p");
+    const grant: Grant = {
+      id: "gl1", member: "k1", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
+      request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
+      previous: null, seen: [], lent: ["k1", "ghost"],
+    };
+    const opened = openGrant(loaded.pool!, grant, 1);
+    if (!opened.ok) throw new Error("grant");
+    expect(store.save(opened.value, loaded.version)).toBe(true);
+    store.close();
+    const watch = watchPoolKeys({ db: w.home.db, pool: "p", grant: "gl1", open: () => openHome(w.env), seen: new Set([w.refs.k1 ?? ""]) });
+    expect(w.home.keypools.join("p", "k3", { confirmOwn: true }, ACTOR).ok).toBe(true);
+    const error = await watch.learn().catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(FilterIncomplete);
+    expect((error as FilterIncomplete).members).toEqual(["ghost"]);
+    watch.close();
+  });
+});
+
 describe("fix round 4: the relay marks a withheld stretch once and ends the run instead of writing unfiltered", () => {
   const rig = (learn: () => Promise<readonly string[]>, extra: { giveUpAfterMs?: number; now?: () => number } = {}) => {
     const written: { stream: string; text: string }[] = [];
@@ -226,6 +277,23 @@ describe("fix round 4: the relay marks a withheld stretch once and ends the run 
     expect(gave[0]).toBeInstanceOf(FilterIncomplete);
     expect(written).toHaveLength(1);
     expect(JSON.stringify(written)).not.toContain(KEY3);
+  });
+
+  it("a poll that works clears the clock too, so a fresh blip is not an old stretch", async () => {
+    let clock = 0;
+    let healthy = false;
+    const { relay, gave } = rig(async () => { if (!healthy) throw new Error("busy"); return []; }, { now: () => clock });
+    relay.chunk("out", "a");
+    await relay.settled();
+    healthy = true;
+    clock = 900;
+    relay.poll();
+    await relay.settled();
+    healthy = false;
+    clock = 1800;
+    relay.chunk("out", "b");
+    await relay.settled();
+    expect(gave).toHaveLength(0);
   });
 
   it("a read that works clears the clock: a stretch that ends in time is not a give-up", async () => {

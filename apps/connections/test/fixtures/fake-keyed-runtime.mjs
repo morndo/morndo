@@ -13,7 +13,10 @@ const jobAt = argv.indexOf("--job");
 const job = JSON.parse(readFileSync(argv[jobAt + 1], "utf8"));
 const settings = JSON.parse(argv[argv.indexOf("--settings") + 1]);
 const parts = String(settings.apiKeyHelper).split(" ");
-const grantForm = parts.at(-2) === "--grant";
+// The helper line is `<bin> … helper [--filter <socket>] --lease <id>` or `… helper [--filter <socket>] --pool <name> --grant <id>`.
+const helperAt = parts.indexOf("helper");
+const grantForm = parts.includes("--grant");
+const baseArgs = parts.slice(1, helperAt);
 
 function helper() {
   // What the helper said on stderr is recorded whether it succeeded or not, never shown: a test reads it for a leaked key.
@@ -26,7 +29,7 @@ function record(result, again) {
 // `cmds: [{ args, input? }]`: morndo-keys commands the run's child runs before it asks again (a member joining the pool, a key rotated, a member removed),
 // as a person at the machine would; each exit code is recorded.
 function commands(answer, list = answer.cmds) {
-  const base = grantForm ? parts.slice(1, -5) : parts.slice(1, -3);
+  const base = baseArgs;
   for (const cmd of list ?? []) {
     const out = spawnSync(parts[0], [...base, ...cmd.args], { encoding: "utf8", timeout: 20_000, input: cmd.input ?? "" });
     appendFileSync(`${job.record}.cmds`, `${JSON.stringify({ args: cmd.args, code: out.status ?? 1, stderr: String(out.stderr ?? "") })}\n`);
@@ -35,8 +38,8 @@ function commands(answer, list = answer.cmds) {
 function reports(answer) {
   if (!answer.report) return;
   const tail = grantForm
-    ? [...parts.slice(1, -5), "keypool", "report", ...answer.report, "--grant", parts.at(-1)]
-    : [...parts.slice(1, -3), "keypool", "report", ...answer.report, "--lease", parts.at(-1)];
+    ? [...baseArgs, "keypool", "report", ...answer.report, "--grant", parts.at(-1)]
+    : [...baseArgs, "keypool", "report", ...answer.report, "--lease", parts.at(-1)];
   try { execFileSync(parts[0], tail, { encoding: "utf8", timeout: 20_000, input: "", stdio: ["pipe", "pipe", "pipe"] }); appendFileSync(`${job.record}.report`, `${JSON.stringify({ code: 0, stderr: "" })}\n`); }
   catch (error) { appendFileSync(`${job.record}.report`, `${JSON.stringify({ code: error.status ?? 1, stderr: String(error.stderr ?? "") })}\n`); }
 }
