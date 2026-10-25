@@ -148,7 +148,7 @@ describe("the watch: every key the run may be, or was, handed", () => {
       const store = new SqliteKeyPoolStore(home.db);
       const loaded = store.load("p");
       const grant: Grant = {
-        id: "gl1", member: "k3", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
+        id: "gl1", member: "k1", lease: "l1", holder: { node: "n", pid: 1, startedAt: 1, bootId: "b", lane: null },
         request: { role: "run", entry: "m", workspacePath: "/w", limit: 8, reserve: 1, margin: 0 }, window: { calls: 1, windowStart: 1 },
         previous: null, seen: [], lent: [],
       };

@@ -3,12 +3,11 @@
 // does not have yet, and only when that signature changed: the members in the pool, and every member the grant has
 // lent the run, including one that has since left or been revoked. A key is never logged and never put in an error here.
 // guardedRelay writes a chunk only after that read worked. When every try failed, the chunk is withheld.
-import { findConnection, isKey, type Directory } from "@morndo/domain";
+import { findConnection, isKey } from "@morndo/domain";
 import { SqliteKeyPoolStore } from "./adapters/key-pool-store-sqlite.ts";
 import { SqliteStore } from "./adapters/store-sqlite.ts";
 
 type OpenedHome = {
-  store: { load(): { directory: Directory } };
   open(ref: string): Promise<string>;
   close(): void;
 };
@@ -73,39 +72,45 @@ export function watchPoolKeys(input: {
     async learn(): Promise<string[]> {
       const next = versions();
       if (next === signature) return [];
+      // A throw anywhere here leaves the signature and `seen` as they were, so the next call tries the same change again.
+      // What is wanted is worked out from this watch's own reads; a full home is opened only when there is a key to read.
+      const loaded = pools.load(input.pool);
+      const members = loaded.pool?.members ?? [];
+      const grant = loaded.pool?.grants.find(row => row.id === input.grant);
+      const directory = store.load().directory;
+      // A name the grant lent is opened by the Connection it is now, revoked or gone from the pool included.
+      // A current member the run was never handed still skips a revoked Connection.
+      const history = new Set<string>();
+      if (grant) {
+        for (const name of grant.lent) history.add(name);
+        history.add(grant.member);
+      }
+      const wanted: string[] = [];
+      const consider = (name: string, handed: boolean): void => {
+        const connection = findConnection(directory, name);
+        if (!connection || !isKey(connection) || wanted.includes(connection.ref) || input.seen.has(connection.ref)) return;
+        if (!handed && connection.status === "revoked") return;
+        wanted.push(connection.ref);
+      };
+      const listed = new Set<string>();
+      for (const member of members) {
+        listed.add(member.credential);
+        consider(member.credential, history.has(member.credential));
+      }
+      for (const name of history) if (!listed.has(name)) consider(name, true);
+      if (wanted.length === 0) {
+        signature = next;
+        return [];
+      }
       const home = input.open();
       const found: string[] = [];
       const opened: string[] = [];
       try {
-        // A throw here leaves the signature and `seen` as they were, so the next call tries the same change again.
-        const loaded = pools.load(input.pool);
-        const members = loaded.pool?.members ?? [];
-        const grant = loaded.pool?.grants.find(row => row.id === input.grant);
-        const directory = home.store.load().directory;
-        // A name the grant lent is opened by the Connection it is now, revoked or gone from the pool included.
-        // A current member the run was never handed still skips a revoked Connection.
-        const history = new Set<string>();
-        if (grant) {
-          for (const name of grant.lent) history.add(name);
-          history.add(grant.member);
-        }
-        const listed = new Set<string>();
-        const consider = async (name: string, handed: boolean): Promise<void> => {
-          const connection = findConnection(directory, name);
-          if (!connection || !isKey(connection) || opened.includes(connection.ref) || input.seen.has(connection.ref)) return;
-          if (!handed && connection.status === "revoked") return;
+        for (const ref of wanted) {
           try {
-            const key = await home.open(connection.ref);
-            opened.push(connection.ref);
-            found.push(key);
+            found.push(await home.open(ref));
+            opened.push(ref);
           } catch { /* a key that cannot be opened cannot be served */ }
-        };
-        for (const member of members) {
-          listed.add(member.credential);
-          await consider(member.credential, history.has(member.credential));
-        }
-        for (const name of history) {
-          if (!listed.has(name)) await consider(name, true);
         }
       } finally {
         home.close();
