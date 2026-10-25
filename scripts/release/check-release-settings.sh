@@ -1,41 +1,54 @@
 #!/bin/sh
-# check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets]: proves,
-# read-only, the GitHub settings a release depends on; it never changes a setting (GitHub API GETs through gh api
-# only) and never prints a secret value (secret NAMES only). The environments release, feed, promote and withdraw
-# must each have exactly one required reviewer, the second account, named by its id (--reviewer-id: a team, the
-# maintainer account or a second reviewer fails), Prevent self-review on, administrator bypass off (can_admins_bypass
-# false: the account the lanes run as is a repository administrator, and with the bypass on it could skip the
-# reviewer), and deployments from the branch main only; github-pages must allow main only too (it serves documents the
-# clients verify, so it needs no reviewer). The workflows are read from main through the API, not from a checkout, and
-# every environment they name must already exist, because a workflow that names a missing one creates it with no
-# reviewer and no branch rule. A tag ruleset must hold refs/tags/v* with only the release App, by its id (--app-id),
-# as its bypass actor, so nobody else, administrators included, can create or move a release tag. A key secret is a
-# secret a job uses in one of the four environments (a `secrets.NAME` of that job in the workflows on main, not a name
-# pattern): it must be a secret of that environment and of no other, and neither a repository nor an organisation
-# secret, because a repository secret is readable by any workflow from any branch. The release App's own two secrets,
-# used by a job with no environment, are printed as KNOWN (the exposure of decision 10, until they move into an
-# environment limited to main); any other secret such a job uses is printed as INFO. Every problem is one FAIL line on
-# stdout, and the exit status is 1 when there was one, 2 for a usage error; INFO and KNOWN lines never fail. The check
-# runs before every release and every Monday, on a machine with an administrator token, never inside Actions (the
-# Actions token cannot read environment secrets, rulesets or reviewers). gh, jq and awk come from the caller's PATH,
-# which the administrator's machine provides. Endpoints and response shapes, read 2026-10-24:
+# check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets] [--allow-main-bypass]: proves,
+# read-only, the GitHub settings a release depends on; it never changes a setting (GitHub API GETs through gh api only)
+# and never prints a secret value (secret NAMES only). The environments release, feed, promote and withdraw must each
+# have exactly one required reviewer, the second account, named by its id (--reviewer-id: a team, the maintainer account
+# or a second reviewer fails), Prevent self-review on, administrator bypass off (can_admins_bypass false: the account
+# the lanes run as is a repository administrator, and with the bypass on it could skip the reviewer), and deployments
+# from the branch main only; github-pages must allow main only too (it serves documents the clients verify, so it needs
+# no reviewer). The environment release-please holds the release App's secrets RELEASE_APP_ID and
+# RELEASE_APP_PRIVATE_KEY: it must exist, allow the branch main only, and have no required reviewer (the job that uses
+# it runs on every push to main). Its branch rule keeps every other branch and every tag from reading those secrets but
+# does not wall off main. The workflows are read from main through the API, not from a checkout, and every environment
+# they name must already exist, because a workflow that names a missing one creates it with no reviewer and no branch
+# rule. A tag ruleset must hold refs/tags/v* with only the release App, by its id (--app-id), as its bypass actor, so
+# nobody else, administrators included, can create or move a release tag. The feed branch needs its own ruleset: active,
+# include exactly refs/heads/feed with an empty exclude, the non_fast_forward and deletion rules, and no bypass actor,
+# so nobody, administrators included, can force-push or delete it. .github/CODEOWNERS on main must give each trust
+# file (trust/keys.json, trust/keys.json.sig, trust/release_allowed_signers, trust/feed_allowed_signers) a last
+# matching line that names an @owner and the trust directory; a later generic line takes that file over. The entry
+# reviews nothing unless an active ruleset on main requires code-owner review, its include covers main, its exclude is
+# empty and it has no bypass actor. --allow-main-bypass accepts a bypass actor on that ruleset and warns instead of
+# failing; an exclude is never accepted. A key secret is a secret a job uses in one of
+# the four environments (a `secrets.NAME` of that job in the workflows on main, not a name pattern): it must be a secret
+# of that environment and of no other, and neither a repository nor an organisation secret, because a repository secret
+# is readable by any workflow from any branch. RELEASE_SSH_KEY, FEED_SSH_KEY, RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY
+# are keys by name as well, and the App's two must be secrets of the environment release-please and of no other place.
+# Any other secret a job with no environment uses is printed as INFO. Every problem is one FAIL line on stdout, and the
+# exit status is 1 when there was one, 2 for a usage error; INFO and WARN lines never fail. The check runs before every release
+# and every Monday, on a machine with an administrator token, never inside Actions (the Actions token cannot read
+# environment secrets, rulesets or reviewers). gh, jq and awk come from the caller's PATH, which the administrator's
+# machine provides. Endpoints and response shapes, read 2026-10-24:
 # https://docs.github.com/en/rest/deployments/environments,
 # https://docs.github.com/en/rest/deployments/branch-policies,
-# https://docs.github.com/en/rest/repos/rules, https://docs.github.com/en/rest/actions/secrets and
-# https://docs.github.com/en/rest/repos/contents (the raw media type). can_admins_bypass is in the live response of
+# https://docs.github.com/en/rest/repos/rules, https://docs.github.com/en/rest/actions/secrets,
+# https://docs.github.com/en/rest/repos/contents (the raw media type, for the workflows and for CODEOWNERS) and
+# https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+# (CODEOWNERS). can_admins_bypass is in the live response of
 # the environments endpoints (read 2026-10-24) but not in the REST description.
 set -eu
 
 problems=0
 fail() { printf 'FAIL: %s\n' "$*"; problems=$((problems + 1)); }
 info() { printf 'INFO: %s\n' "$*"; }
-known() { printf 'KNOWN: %s\n' "$*"; }
+warn() { printf 'WARN: %s\n' "$*"; }
 
-usage='usage: check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets]'
+usage='usage: check-release-settings.sh --reviewer-id <id> --app-id <id> [--repo <owner/name>] [--no-org-secrets] [--allow-main-bypass]'
 repo=morndo/morndo
 reviewer_id=
 app_id=
 org_secrets=1
+allow_main_bypass=0
 number() { case $1 in ''|*[!0-9]*) return 1 ;; esac; }
 while [ $# -gt 0 ]; do
   case $1 in
@@ -43,6 +56,7 @@ while [ $# -gt 0 ]; do
     --reviewer-id) [ $# -ge 2 ] && number "$2" || { echo "$usage" >&2; exit 2; }; reviewer_id=$2; shift 2 ;;
     --app-id) [ $# -ge 2 ] && number "$2" || { echo "$usage" >&2; exit 2; }; app_id=$2; shift 2 ;;
     --no-org-secrets) org_secrets=0; shift ;;
+    --allow-main-bypass) allow_main_bypass=1; shift ;;
     *) echo "$usage" >&2; exit 2 ;;
   esac
 done
@@ -76,16 +90,21 @@ exists() { # exists <environment>: true when the environments list names it
 
 # The environments release, feed, promote and withdraw hold a key or move a release, so each needs the one reviewer,
 # administrator bypass off and the branch main only; github-pages serves documents the clients verify, so it needs
-# no reviewer (and is not failed for having one, or for the bypass). A missing environment is reported once and
-# nothing else is checked for it; when the list itself could not be read, the environments are not reported missing
-# on top of that.
-for name in release feed promote withdraw github-pages; do
+# no reviewer (and is not failed for having one, or for the bypass). release-please holds the App's secrets and its
+# job runs on every push to main, so it allows main only and must not have a required reviewer (Prevent self-review
+# and the administrator bypass are not required of it). A missing environment is reported once and nothing else is
+# checked for it; when the list itself could not be read, the environments are not reported missing on top of that.
+for name in release feed promote withdraw github-pages release-please; do
   [ "$have_envs" = 1 ] || continue
   if ! exists "$name"; then
     fail "environment $name does not exist"
     continue
   fi
-  if [ "$name" != "github-pages" ]; then
+  if [ "$name" = "release-please" ]; then
+    found=$(jq -r --arg n "$name" \
+      '[.environments[] | select(.name == $n) | .protection_rules[]? | select(.type == "required_reviewers")][0].reviewers // [] | map("\(.type):\(.reviewer.id)") | join(", ")' "$tmp/environments")
+    [ -z "$found" ] || fail "environment $name has a required reviewer ($found); the job that uses it runs on every push to main"
+  elif [ "$name" != "github-pages" ]; then
     count=$(jq -r --arg n "$name" \
       '[.environments[] | select(.name == $n) | .protection_rules[]? | select(.type == "required_reviewers")][0].reviewers // [] | length' "$tmp/environments")
     if [ "$count" -eq 0 ]; then
@@ -215,6 +234,14 @@ tag_ruleset_problems() { # <ruleset file>: one line per unmet condition of the t
        else "must have exactly one bypass actor, the release App (Integration:\($app))" end)' "$1"
 }
 
+feed_ruleset_problems() { # <ruleset file>: one line per unmet condition of a feed-branch candidate (include is already refs/heads/feed)
+  jq -e '.enforcement == "active"' "$1" >/dev/null || echo "is not active"
+  jq -e '((.conditions.ref_name.exclude // []) | length) == 0' "$1" >/dev/null || echo "has an exclude"
+  jq -e '((.rules // []) | map(.type) | index("non_fast_forward")) != null' "$1" >/dev/null || echo "lacks non_fast_forward"
+  jq -e '((.rules // []) | map(.type) | index("deletion")) != null' "$1" >/dev/null || echo "lacks deletion"
+  jq -e '((.bypass_actors // []) | length) == 0' "$1" >/dev/null || jq -r '"has bypass actors: \([.bypass_actors[] | "\(.actor_type):\(.actor_id)"] | join(", "))"' "$1"
+}
+
 if [ "$have_rulesets" = 1 ]; then
   # The branch rulesets' bypass actors, printed for the owner to read: the account the lanes run as is a repository
   # administrator and bypasses the review rule (decision 9), so he decides knowing who else can.
@@ -250,13 +277,179 @@ if [ "$have_rulesets" = 1 ]; then
       done
     fi
   fi
+  # The feed branch. The detail calls above already read every branch ruleset. A candidate includes exactly
+  # refs/heads/feed; one that meets every condition is enough, so a disabled one beside a passing one is fine.
+  feed_ok=0
+  feed_seen=0
+  for id in $(jq -r '.[]? | select(.target == "branch") | .id' "$tmp/rulesets"); do
+    [ -f "$tmp/ruleset-$id" ] || continue
+    include=$(jq -c '.conditions.ref_name.include // []' "$tmp/ruleset-$id")
+    [ "$include" = '["refs/heads/feed"]' ] || continue
+    feed_seen=1
+    feed_ruleset_problems "$tmp/ruleset-$id" >"$tmp/feed-$id.problems"
+    if [ ! -s "$tmp/feed-$id.problems" ]; then feed_ok=1; fi
+  done
+  [ "$feed_ok" = 1 ] || [ "$feed_seen" = 1 ] || fail "no ruleset protects the feed branch (it needs an active branch ruleset on refs/heads/feed with non_fast_forward and deletion rules and no bypass actor)"
+  if [ "$feed_ok" = 0 ] && [ "$feed_seen" = 1 ]; then
+    for id in $(jq -r '.[]? | select(.target == "branch") | .id' "$tmp/rulesets"); do
+      [ -s "$tmp/feed-$id.problems" ] || continue
+      name=$(jq -r '.name // "?"' "$tmp/ruleset-$id")
+      while IFS= read -r line; do fail "feed ruleset '$name' $line"; done <"$tmp/feed-$id.problems"
+    done
+  fi
+  # A CODEOWNERS entry is a required review only when an active ruleset on main requires code-owner review: a
+  # pull_request rule with require_code_owner_review true, an include that covers main, an empty exclude (an exclude
+  # may drop main) and no bypass actor. --allow-main-bypass lets a bypass actor through and warns; an exclude is
+  # never accepted. Without such a ruleset the /trust/ line below reviews nothing.
+  owners_rule=0
+  for id in $(jq -r '.[]? | select(.target == "branch") | .id' "$tmp/rulesets"); do
+    [ -f "$tmp/ruleset-$id" ] || continue
+    if jq -e '.enforcement == "active"
+        and ((.conditions.ref_name.include // []) | any(. == "~DEFAULT_BRANCH" or . == "~ALL" or . == "refs/heads/main"))
+        and ((.rules // []) | any(.type == "pull_request" and (.parameters.require_code_owner_review == true)))' "$tmp/ruleset-$id" >/dev/null; then
+      name=$(jq -r '.name // "?"' "$tmp/ruleset-$id")
+      exclude=$(jq -r '(.conditions.ref_name.exclude // []) | join(", ")' "$tmp/ruleset-$id")
+      actors=$(jq -r '[.bypass_actors[]? | "\(.actor_type):\(.actor_id):\(.bypass_mode)"] | join(", ")' "$tmp/ruleset-$id")
+      if [ -n "$exclude" ]; then
+        fail "ruleset '$name' requires code-owner review but has an exclude ($exclude): it may drop main"
+      fi
+      if [ -n "$actors" ] && [ "$allow_main_bypass" != 1 ]; then
+        fail "ruleset '$name' requires code-owner review but has a bypass actor ($actors): the review can be skipped"
+      fi
+      if [ -z "$exclude" ] && { [ -z "$actors" ] || [ "$allow_main_bypass" = 1 ]; }; then
+        owners_rule=1
+        if [ -n "$actors" ]; then
+          warn "main's code-owner review can be bypassed by $actors (accepted with --allow-main-bypass)"
+        fi
+      fi
+    fi
+  done
+  [ "$owners_rule" = 1 ] || fail "no active ruleset on main requires code-owner review (a pull_request rule with require_code_owner_review true), so the CODEOWNERS entry for /trust/ reviews nothing"
+fi
+
+# .github/CODEOWNERS on main, through the contents API with the raw media type, the same call the workflows use.
+# Last match wins per trust file. The last non-comment line whose gitignore pattern covers that file must name an
+# @owner and must name the trust directory (a path component that globs "trust" and has a literal in it). A later
+# generic line (*, **, /**, **/*, *.json, *.sig) decides the owner instead, so the trust entry reviews nothing.
+# *, **, /** and **/* keep the sentence that names "*", which is asserted; every other pattern is named. A comment
+# is not an entry. A line that comes before the trust line does not count: it is overridden.
+if gh api "repos/$repo/contents/.github/CODEOWNERS?ref=main" -H "Accept: application/vnd.github.raw+json" >"$tmp/codeowners" 2>/dev/null; then
+  awk '
+    function esc(c) {
+      if (c == "." || c == "^" || c == "$" || c == "+" || c == "|" || c == "(" || c == ")" || c == "{" || c == "}" || c == "[" || c == "]" || c == "\\") return "\\" c
+      return c
+    }
+    function pat2re(pat,    s, anchored, re, i, n, c) {
+      s = pat
+      sub(/\/$/, "", s)
+      anchored = (index(s, "/") > 0)
+      if (substr(s, 1, 1) == "/") s = substr(s, 2)
+      re = ""
+      n = length(s)
+      i = 1
+      while (i <= n) {
+        if (substr(s, i, 3) == "**/") { re = re "(.*/)?"; i += 3; continue }
+        if (substr(s, i, 2) == "**") { re = re ".*"; i += 2; continue }
+        c = substr(s, i, 1)
+        if (c == "*") { re = re "[^/]*"; i++; continue }
+        if (c == "?") { re = re "[^/]"; i++; continue }
+        re = re esc(c)
+        i++
+      }
+      if (anchored) return "^" re "$"
+      return "(^|.*/)" re "$"
+    }
+    function covers(pat, file,    re, dir) {
+      re = pat2re(pat)
+      if (file ~ re) return 1
+      dir = file
+      while (dir ~ /\//) {
+        sub(/\/[^/]*$/, "", dir)
+        if (dir ~ re) return 1
+      }
+      return 0
+    }
+    function comp2re(comp,    re, i, n, c) {
+      re = "^"
+      n = length(comp)
+      i = 1
+      while (i <= n) {
+        if (substr(comp, i, 2) == "**") { re = re ".*"; i += 2; continue }
+        c = substr(comp, i, 1)
+        if (c == "*") { re = re "[^/]*"; i++; continue }
+        if (c == "?") { re = re "[^/]"; i++; continue }
+        re = re esc(c)
+        i++
+      }
+      return re "$"
+    }
+    function names_trust(pat,    s, n, i, comp, lit, parts) {
+      s = pat
+      sub(/^\/+/, "", s)
+      sub(/\/+$/, "", s)
+      n = split(s, parts, "/")
+      for (i = 1; i <= n; i++) {
+        comp = parts[i]
+        if (comp == "" || comp == "**") continue
+        lit = comp
+        gsub(/[*?]/, "", lit)
+        if (lit == "") continue
+        if ("trust" ~ comp2re(comp)) return 1
+      }
+      return 0
+    }
+    function showpat(pat) {
+      if (pat ~ /^(\*|\*\*|\/\*\*|\*\*\/\*)$/) return "*"
+      return pat
+    }
+    function add(msg) {
+      if (msg != "" && !seen[msg]) { seen[msg] = 1; print msg }
+    }
+    BEGIN { nfiles = split("trust/keys.json trust/keys.json.sig trust/release_allowed_signers trust/feed_allowed_signers", files, " ") }
+    /^[ \t]*$/ { next }
+    /^[ \t]*#/ { next }
+    {
+      n = split($0, f)
+      nt = n
+      for (i = 1; i <= n; i++) if (f[i] ~ /^#/) { nt = i - 1; break }
+      if (nt < 1) next
+      owned = 0
+      for (i = 2; i <= nt; i++) if (f[i] ~ /^@/) owned = 1
+      lc++
+      pats[lc] = f[1]
+      owns[lc] = owned
+    }
+    END {
+      for (fi = 1; fi <= nfiles; fi++) {
+        found = 0
+        explicit_before = 0
+        was_explicit = 0
+        last_owned = 0
+        last_pat = ""
+        for (li = 1; li <= lc; li++) {
+          if (!covers(pats[li], files[fi])) continue
+          if (found && was_explicit) explicit_before = 1
+          found = 1
+          last_pat = pats[li]
+          last_owned = owns[li]
+          was_explicit = names_trust(pats[li])
+        }
+        if (!found || !last_owned || (!was_explicit && !explicit_before)) add("CODEOWNERS has no entry for /trust/ with an owner")
+        else if (!was_explicit) add("CODEOWNERS: a later line for " showpat(last_pat) " takes over /trust/, so its entry reviews nothing")
+      }
+    }
+  ' "$tmp/codeowners" >"$tmp/codeowners-problems"
+  while IFS= read -r line; do fail "$line"; done <"$tmp/codeowners-problems"
+else
+  rm -f "$tmp/codeowners"
+  fail "cannot read repos/$repo/contents/.github/CODEOWNERS?ref=main"
 fi
 
 # Where the secrets live, by name only (never a value). The environment secrets of an environment that already failed
 # the existence check are not fetched: its 404 would report the same problem twice. Organisation secrets need an
 # administrator token (admin:org); --no-org-secrets leaves them out and says so.
 if fetch repo-secrets "repos/$repo/actions/secrets"; then :; fi
-for name in release feed promote withdraw github-pages; do
+for name in release feed promote withdraw github-pages release-please; do
   if exists "$name"; then
     fetch "secrets-$name" "repos/$repo/environments/$name/secrets" || :
   fi
@@ -275,13 +468,23 @@ has_name() { # has_name <file> <secret name>: the secrets list in <file> holds t
 }
 places() { # places <secret name>: where the name was found, "environment <env>" for each, then repository, organisation
   found=""
-  for env in release feed promote withdraw github-pages; do
+  for env in release feed promote withdraw github-pages release-please; do
     if has_name "$tmp/secrets-$env" "$1"; then found="${found:+$found, }environment $env"; fi
   done
   if has_name "$tmp/repo-secrets" "$1"; then found="${found:+$found, }repository"; fi
   if has_name "$tmp/org-secrets" "$1"; then found="${found:+$found, }organisation"; fi
   printf '%s' "$found"
 }
+
+# RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY belong to the environment release-please and to nowhere else. A missing
+# release-please is already a failure, and nothing else is checked for it.
+if exists release-please; then
+  for key in RELEASE_APP_ID RELEASE_APP_PRIVATE_KEY; do
+    where=$(places "$key")
+    [ "$where" = "environment release-please" ] ||
+      fail "$key must be a secret of environment release-please only (found in: ${where:-nowhere})"
+  done
+fi
 
 # A key secret is one a job uses in release, feed, promote or withdraw. It must be a secret of exactly that
 # environment: not of another, not a repository secret, not an organisation secret.
@@ -306,17 +509,16 @@ if [ -s "$tmp/key-uses" ] && [ "$have_envs" = 1 ]; then
   while IFS= read -r line; do printf '%s\n' "$line"; problems=$((problems + 1)); done <"$tmp/key-failures"
 fi
 
-# The release App's two secrets are used by a job with no environment, so they are repository secrets by necessity:
-# the known exposure of decision 10. Any other secret such a job uses is only reported.
+# A job with no environment that reads a key fails below. Any other secret such a job uses is only reported.
 awk -F'\t' '$1 == "secret" && $4 == "-" { print $5 "\t" $3 "\t" $2 }' "$tmp/facts" | sort -t "$(printf '\t')" -k1,1 -u >"$tmp/open-uses"
-# A key is RELEASE_SSH_KEY or FEED_SSH_KEY, a secret a job reads in release, feed, promote or withdraw, or one those
-# environments hold: it lives in its main-only environment, so a job with no environment must not read it by name (it
-# would get nothing, or a repository secret of that name, which the check above already fails). Every such job is a
-# FAIL, not an INFO.
+# A key is RELEASE_SSH_KEY, FEED_SSH_KEY, RELEASE_APP_ID or RELEASE_APP_PRIVATE_KEY, a secret a job reads in release,
+# feed, promote or withdraw, or one those environments hold: it lives in its main-only environment, so a job with no
+# environment must not read it by name (it would get nothing, or a repository secret of that name, which the check
+# above already fails). Every such job is a FAIL, not an INFO.
 {
-  # The two signing keys are keys by name, whatever the settings and the workflows say: a sign job that lost its
-  # `environment:` line while the key sits as a repository secret must not look like a job with no key at all.
-  printf '%s\n' RELEASE_SSH_KEY FEED_SSH_KEY
+  # The signing keys and the release App's two secrets are keys by name, whatever the settings and the workflows say:
+  # a job that lost its `environment:` line must not look like a job with no key at all.
+  printf '%s\n' RELEASE_SSH_KEY FEED_SSH_KEY RELEASE_APP_ID RELEASE_APP_PRIVATE_KEY
   cut -f1 "$tmp/key-uses"
   for env in release feed promote withdraw; do
     if [ -f "$tmp/secrets-$env" ]; then jq -r '.secrets[]?.name' "$tmp/secrets-$env"; fi
@@ -328,17 +530,10 @@ while IFS="$(printf '\t')" read -r name job file; do
     fail "job $job of $file reads key secret $name without an environment (a key is a secret of its own main-only environment; a job outside it must not read it)"
   fi
 done <"$tmp/open-uses-all"
-app_known=0
 while IFS="$(printf '\t')" read -r name job file; do
   grep -qxF -- "$name" "$tmp/key-names" && continue
-  case $name in
-    RELEASE_APP_ID|RELEASE_APP_PRIVATE_KEY) app_known=1 ;;
-    *) info "job $job of $file uses repository secret $name (no environment)" ;;
-  esac
+  info "job $job of $file uses repository secret $name (no environment)"
 done <"$tmp/open-uses"
-if [ "$app_known" = 1 ]; then
-  known "RELEASE_APP_PRIVATE_KEY and RELEASE_APP_ID are repository secrets (decision 10: move them to an environment limited to main)"
-fi
 
 # Every repository and organisation secret no workflow on main uses is listed, so a stray one (a key kept as a backup,
 # say) is seen: not judged by its name, but not silent. A secret a workflow uses is not listed, whatever the job.
@@ -357,4 +552,4 @@ if [ "$problems" -gt 0 ]; then
   printf 'check-release-settings: %d problem(s)\n' "$problems"
   exit 1
 fi
-echo "check-release-settings: ok ($repo: release, feed, promote and withdraw have the one reviewer, no administrator bypass and allow the branch main only, github-pages allows main only, the tag ruleset holds refs/tags/v* for the release App, the signing keys are secrets of the environments that use them)"
+echo "check-release-settings: ok ($repo: release, feed, promote and withdraw have the one reviewer, no administrator bypass and allow the branch main only, github-pages allows main only, release-please allows the branch main only and has no required reviewer, the tag ruleset holds refs/tags/v* for the release App, the feed branch ruleset blocks force pushes and deletion with nobody bypassing it, CODEOWNERS names an owner for /trust/, the signing keys are secrets of the environments that use them and the App's secrets are secrets of release-please)"
