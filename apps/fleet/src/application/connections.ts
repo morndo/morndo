@@ -276,7 +276,17 @@ export class Connections {
       return Promise.resolve(failed("unknown_op", op === "lane.start"
         ? `${node}'s agent takes a first prompt of at most ${LIMITS.maxSendText} characters; update Morndo on it`
         : `${node}'s agent takes messages of at most ${LIMITS.maxSendText} characters; update Morndo on it`));
-    if (!BULK_OPS.has(op)) return this.#send(node, op, args, o);
+    if (!BULK_OPS.has(op)) {
+      // A lane started with an account (plan 4.5 item 4): the account it will work under, told as a usage tap once the
+      // start's outcome is ok — a refused or failed start says nothing.
+      const a = args as { name?: unknown; account?: unknown } | null;
+      const start = op === "lane.start" && typeof a?.name === "string" && typeof a?.account === "string" ? { name: a.name, account: a.account } : null;
+      const out = this.#send(node, op, args, o);
+      return start === null ? out : out.then(r => {
+        if (r.ok) this.#events.emit({ t: "usage", node, body: { kind: "lane_account", lane: start.name, account: start.account, at: this.#now() } });
+        return r;
+      });
+    }
     const q = this.#bulk.get(node) ?? { running: false, waiting: [] };
     this.#bulk.set(node, q);
     if (!q.running) {

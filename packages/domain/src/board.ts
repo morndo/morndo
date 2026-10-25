@@ -6,9 +6,11 @@
 // grows by one (B6), keys are never reused (B7), and the board grants nothing (B8): a status is never a Mandate, a
 // Decision, Evidence or a Verdict. Done is the manager's (or the principal's) acceptance of a lane's word, not proof; the
 // manager's says what it checked (B9). The board also moves a task by itself, following its assignee's Run, along the
-// fixed edges of B10 (D1 to D6, ADR-0032): never to Done, never an assignment.
+// fixed edges of B10 (D1 to D6, ADR-0032): never to Done, never an assignment. The lane files a brief with references
+// the board verifies itself, and Done waits for them or a recorded override (B13 to B16, ADR-0035).
 import type { Run } from "./run.ts";
-import { err, ok, type EndpointId, type Result, type SessionId } from "./shared.ts";
+import { LIST_MAX, MERGE_SHA, REPO_NAME, checkBrief, parseItemSpec, proofOf, type BriefInput, type ProofBrief, type ProofGate } from "./proof.ts";
+import { cutText, err, ok, type EndpointId, type Result, type SessionId } from "./shared.ts";
 
 export type TaskKey = string & { readonly __brand: "TaskKey" };
 export const taskKey = (n: number) => `T-${n}` as TaskKey;
@@ -52,22 +54,26 @@ export type Task = {
 
 export type TaskChange =
   | { kind: "created"; status: TaskStatus; assignee: string | null }
-  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string }
+  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string; proofSeen?: string }
   | { kind: "assigned"; from: string | null; to: string | null }
   | { kind: "edited"; title?: string; description?: string; priority?: TaskPriority }
   | { kind: "commented"; text: string }
+  | { kind: "briefed"; brief: ProofBrief }
   | { kind: "merged"; repo: string; sha: string }
-  | { kind: "unmerged"; repo: string; sha: string };
+  | { kind: "unmerged"; repo: string; sha: string }
+  | { kind: "proof_listed"; add: string[]; drop: string[] };
 export type TaskEvent = { key: TaskKey; rev: number; at: number; actor: TaskActor; change: TaskChange };
 
 export type NewTask = { title: string; description?: string; assignee?: string | null; priority?: TaskPriority; status?: TaskStatus };
 export type TaskAction =
-  | { action: "move"; to: TaskStatus; reason?: string; notLive?: string; ifRev?: number }
+  | { action: "move"; to: TaskStatus; reason?: string; notLive?: string; proofOverride?: string; ifRev?: number }
   | { action: "assign"; to: string | null; ifRev?: number }
   | { action: "edit"; title?: string; description?: string; priority?: TaskPriority; ifRev?: number }
   | { action: "comment"; text: string }
+  | { action: "brief"; brief: BriefInput }
   | { action: "merged"; sha: string; repo?: string }
-  | { action: "unmerged"; sha: string; repo?: string };
+  | { action: "unmerged"; sha: string; repo?: string }
+  | { action: "proof_list"; add?: string[]; drop?: string[] };
 
 export type BoardProblem =
   | "not_allowed"       // a worker tried what only the manager or the principal may (B2, B3)
@@ -83,7 +89,10 @@ export type BoardProblem =
   | "no_merge"          // the merge named to clear is not on the task (B11)
   | "too_many"          // the task already holds MAX_MERGES merge records (B11)
   | "no_commit"         // a lane named a commit the hub's checkout does not hold (B11; judged by the hub, which has the checkout)
-  | "empty" | "too_long" | "bad_name" | "bad_text";
+  | "proof_not_green"   // done waits for the proof: a reference is not green, or there is none to check (B16)
+  | "bad_ref" | "ref_unrelated" | "ref_repo"  // a brief's reference isn't one, hangs off no pull request or merge of the task, or names a repository the board does not check (B14)
+  | "empty" | "too_long" | "bad_name" | "bad_text"
+  | "bad_item" | "no_item";
 // `other`: the task in the way (one_doing); `from`: where the task is (bad_transition), so a refusal can say so;
 // `detail`: the not_live label, so a refusal can say what the board sees (B11).
 export type BoardRefusal = { problem: BoardProblem; other?: TaskKey; from?: TaskStatus; detail?: string };
@@ -157,9 +166,10 @@ export const workingOn = (board: readonly Task[], laneName: string): Task | null
 // B11: the repository whose merges the board follows onto the nodes, a task's merge record, and liveness: a merge is
 // live when it is an ancestor of (or equal to) every enrolled node's build. Unknown is never live: nothing says it is.
 export const MORNDO_REPO = "morndo/morndo";
-export const REPO_NAME = /^[A-Za-z0-9._-]{1,100}\/[A-Za-z0-9._-]{1,100}$/;
-export const MERGE_SHA = /^[0-9a-f]{7,40}$/;
 export const PRINCIPAL_NOT_LIVE = "accepted by the principal";
+// B16: the principal's own click is the proof gate's override too, recorded in the Done event all the same.
+export const PRINCIPAL_PROOF_ACCEPT = "accepted by the principal";
+export const PROOF_SEEN_MAX = 900;
 // A task holds this many merge records at most: each one is a git check per node, and a lane can record any sha it likes.
 export const MAX_MERGES = 5;
 export const isMorndoRepo = (repo: string) => repo.toLowerCase() === MORNDO_REPO;
@@ -215,8 +225,9 @@ export function mergedView(key: TaskKey, merges: readonly MergeRecord[], livenes
 }
 
 // What applyAction judges a move to done against (B11): the task's recorded merges, and liveness per sha. Absent: done
-// is not held for any merge (a board without the fleet knows none).
-export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness };
+// is not held for any merge (a board without the fleet knows none). `proof` (B16, ADR-0035): the brief and the results
+// the hub read for its references, in a mode; absent: done is not held for proof either (the hub passes none yet).
+export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate };
 
 // `board`: the tasks in progress now, for B5 when a task is filed straight into progress.
 export function createTask(input: NewTask, actor: BoardActor | { kind: "console" }, n: number, now: number, board: readonly Task[] = []): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
@@ -291,8 +302,32 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
           }
         }
       }
+      // B16 (ADR-0035): done waits for the verified proof. The manager may accept what is not green, saying why, and the
+      // principal's click is the recorded override, as for a merge that is not live. Warn mode accepts and records what
+      // the board saw; off mode, no gate or no proof in the gate changes nothing and writes no proofSeen.
+      let proofSeen: string | undefined;
+      if (action.to === "done" && gate?.proof !== undefined && gate.proof.mode !== "off") {
+        const mergeShas = gate.merges.map(m => ({ repo: m.repo, sha: m.sha }));
+        const seen = proofOf(gate.proof.brief, gate.proof.results, mergeShas, gate.proof.list ?? []);
+        const mode = gate.proof.mode;
+        const warnSuffix = " [mode warn: would have been refused]";
+        const fit = (line: string, suffix: string) => {
+          const whole = `${line}${suffix}`;
+          if (whole.length <= PROOF_SEEN_MAX) return whole;
+          const budget = PROOF_SEEN_MAX - suffix.length;
+          return `${budget <= 1 ? "" : `${cutText(line, budget - 1)}…`}${suffix}`;
+        };
+        if (seen.accepts) proofSeen = fit(seen.line, ` [mode ${mode}]`);
+        else if ((action.proofOverride ?? "").trim() !== "") {
+          const why = line(action.proofOverride ?? "", REASON_MAX);
+          if (!why.ok) return why;
+          proofSeen = fit(seen.line, `; override: ${why.value} [mode ${mode === "on" ? "on" : "warn: would have been refused"}]`);
+        } else if (actor.kind === "principal") proofSeen = fit(seen.line, `; ${PRINCIPAL_PROOF_ACCEPT} [mode ${mode === "on" ? "on" : "warn: would have been refused"}]`);
+        else if (mode === "on") return refuse("proof_not_green", undefined, undefined, seen.line);
+        else proofSeen = fit(seen.line, warnSuffix);
+      }
       const moved: Task = { ...task, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null };
-      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }) });
+      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }) });
     }
     case "assign": {
       if (!runsTheBoard(actor)) return refuse("not_allowed");                // D5: never the board
@@ -331,6 +366,21 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       if (!r.ok) return r;
       return next({ ...task, comments: task.comments + 1 }, { kind: "commented", text: r.value }, false);
     }
+    case "brief": {
+      // B13 (ADR-0035): the brief is the assignee's word, its own action, never the board's (D5). Like a comment it
+      // changes no state, so it needs no ifRev and races with nothing; it is filed while the task is in progress or in
+      // review. Its references are judged against the repositories the board checks (B14): configured allowlist only —
+      // task data never widens what the hub may read.
+      if (actor.kind === "board") return refuse("not_allowed");
+      if (actor.kind === "worker" && !mine) return refuse("not_yours");
+      if (task.status !== "doing" && task.status !== "review") return refuse("bad_transition", undefined, task.status);
+      const r = checkBrief(action.brief, {
+        allowedRepos: gate?.proof?.allowedRepos ?? [MORNDO_REPO],
+        merges: gate?.merges ?? [],
+      });
+      if (!r.ok) return refuse(r.error.problem, undefined, undefined, r.error.detail);
+      return next(task, { kind: "briefed", brief: r.value }, false);
+    }
     case "merged": {
       // B11: a merge record is not a change of state. Who may record one is who may comment on the work: the board's
       // hands, or the lane the task is assigned to (never the board itself, D5).
@@ -355,6 +405,41 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       if (!REPO_NAME.test(repo)) return refuse("bad_repo");
       if (!gate?.merges.some(m => m.repo.toLowerCase() === repo.toLowerCase() && m.sha === sha)) return refuse("no_merge");
       return next(task, { kind: "unmerged", repo, sha }, false);
+    }
+    case "proof_list": {
+      // B17: the assigner's requirement list — no state change, like a comment; never the board itself (D5).
+      if (actor.kind === "board") return refuse("not_allowed");
+      if (actor.kind === "worker" && !mine) return refuse("not_yours");
+      if (task.status === "done") return refuse("bad_transition", undefined, task.status);
+      const adds = action.add ?? [];
+      const drops = action.drop ?? [];
+      if (adds.length === 0 && drops.length === 0) return refuse("empty");
+      const current = gate?.proof?.list ?? [];
+      const bySpec = new Map(current.map(i => [i.spec, i] as const));
+      const toAdd: string[] = [];
+      for (const raw of adds) {
+        const parsed = parseItemSpec(raw);
+        if (!parsed.ok) return refuse("bad_item", undefined, undefined, parsed.error.detail);
+        const have = bySpec.get(parsed.value.spec);
+        // A repeat is ignored, except the assigner's add of what the lane listed first: that makes it the assigner's.
+        if (have !== undefined && !(have.by === "lane" && actor.kind !== "worker")) continue;
+        toAdd.push(parsed.value.spec);
+      }
+      const toDrop: string[] = [];
+      for (const raw of drops) {
+        const parsed = parseItemSpec(raw);
+        if (!parsed.ok) return refuse("bad_item", undefined, undefined, parsed.error.detail);
+        const spec = parsed.value.spec;
+        const item = bySpec.get(spec);
+        if (item === undefined) return refuse("no_item", undefined, undefined, spec);
+        if (actor.kind === "worker" && item.by !== "lane") return refuse("not_allowed");
+        toDrop.push(spec);
+      }
+      if (toAdd.length === 0 && toDrop.length === 0) return refuse("same");
+      // A re-own (the assigner adding what the lane listed first) is not growth: only items not yet on the list count.
+      const nextCount = current.length + toAdd.filter(sp => !bySpec.has(sp)).length - toDrop.length;
+      if (nextCount > LIST_MAX) return refuse("too_many", undefined, undefined, "proof list");
+      return next(task, { kind: "proof_listed", add: toAdd, drop: toDrop }, false);
     }
   }
 }

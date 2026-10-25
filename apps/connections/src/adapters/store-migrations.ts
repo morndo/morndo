@@ -1,5 +1,6 @@
 // Schema for the connections directory (with its events) and the routing policy (ADR-0008 A1, design section 5), from
-// migration 2 the node's Secrets (ADR-0022; secret-requests design §6), and from migration 3 the account pool (ADR-0029).
+// migration 2 the node's Secrets (ADR-0022; secret-requests design §6), from migration 3 the account pool (ADR-0029),
+// and from migration 4 the key pool (ADR-0037).
 // The store has no service that could be stopped for an update — its helper runs whenever an agent CLI needs a key —
 // so its migrations are additive forever (ADR-0019 §11): the floor stays at 0 and any version's store opens.
 import type Database from "better-sqlite3";
@@ -101,6 +102,16 @@ export const MIGRATIONS: readonly Migration[] = [
     // ADR-0029. The Pool aggregate is one JSON body per runtime; `version` is the compare-and-swap the service retries on.
     up: db => {
       db.exec("CREATE TABLE pool (runtime TEXT PRIMARY KEY, version INTEGER NOT NULL, body TEXT NOT NULL);");
+    },
+  },
+  {
+    version: 4,
+    name: "key pools: one versioned row per pool",
+    compat: "additive",
+    // ADR-0037. One JSON body per pool name; `version` is the compare-and-swap the service retries on. A deleted pool
+    // stays as a row so its name is never taken again.
+    up: db => {
+      db.exec("CREATE TABLE key_pool (name TEXT PRIMARY KEY, version INTEGER NOT NULL, body TEXT NOT NULL);");
     },
   },
 ];

@@ -1,7 +1,7 @@
 // The hub's ports onto the machines its workers run on (fleet core §3.1, ADR-0012). Each has a local implementation,
 // this machine as the one node "local" (adapters/local-node.ts), and a fleet one (Task 14), chosen in main.ts by
 // MORNDO_FLEET_SOCKET. Worker IDs are opaque here: "%N" locally, "<node>.<server>.<pane>" in a fleet.
-import type { Upload } from "@morndo/domain";
+import type { CheckRunFacts, PrFacts, Upload } from "@morndo/domain";
 import type { Frame, SendProblem, SessionInfo, Terminal as PaneTerminal } from "@morndo/node-ops";
 import type { Delivery, ErrorCode, RunView } from "@morndo/protocol";
 
@@ -122,3 +122,18 @@ export type RunsSource = {
   runs(): Promise<RunView[]>;
   subscribe(on: (r: RunView) => void, onOpen: () => void): () => void;
 };
+
+// The forge the hub reads a brief's references from (ADR-0035 step 3, B14): a pull request as it stands, and one
+// commit's check runs. The adapter (adapters/github-checks.ts) speaks the forge's own web api and holds the credential;
+// this port is all the proof service takes, so the application layer holds no address and no token. A failure is a
+// reason and a detail, never a thrown error, and the detail never carries the credential.
+export type ForgeFailure = { reason: "not_found" | "denied" | "bad_sha" | "rate_limited" | "timeout" | "network" | "unexpected" | "too_many"; detail: string };
+export type ForgeAnswer<T> = { ok: true; value: T } | { ok: false; failure: ForgeFailure };
+export interface ForgeChecks {
+  pullRequest(repo: string, number: number): Promise<ForgeAnswer<PrFacts>>;
+  checkRuns(repo: string, sha: string): Promise<ForgeAnswer<CheckRunFacts[]>>;
+  requiredChecks(repo: string, branch: string): Promise<ForgeAnswer<string[]>>;
+}
+// An unfetchable result whose detail starts so is one the proof timer tries again later; the rest (not found, denied,
+// an unknown commit, an answer of no shape) stay as they are until a person looks at the card.
+export const RETRYABLE_DETAIL = /^(rate limit|timeout|network)/;

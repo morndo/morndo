@@ -201,6 +201,36 @@ describe("the update store (§4.6, §5)", () => {
     store.close();
   });
 
+  it("retiring staged records above a named Version leaves the records of Versions the machine has run", () => {
+    const stage = (s: ReturnType<typeof open>, version: string, at: number): void => {
+      s.recordStaged({ version, manifestSha256: "a".repeat(64), filesSha256: "b".repeat(64), at, manifest: MANIFEST_TEXT });
+    };
+    // highest committed is 0.1.0; 0.3.0 and 0.4.0 sit above the named 0.2.0 and above that ceiling
+    const low = open();
+    low.recordCommitted("0.1.0", 1, null);
+    stage(low, "0.2.0", 10);
+    stage(low, "0.3.0", 20);
+    stage(low, "0.4.0", 30);
+    low.retireStagedAbove("0.2.0");
+    expect(low.versionRecord("0.3.0")).toBeNull();
+    expect(low.versionRecord("0.4.0")).toBeNull();
+    expect(low.versionRecord("0.2.0")?.version).toBe("0.2.0");
+    expect(low.highestCommitted()).toBe("0.1.0");
+    low.close();
+
+    // highest committed is 0.5.0, which this machine has run: nothing at or below it leaves the record
+    const high = openUpdateStore({ db: join(state, "rolled.db"), lock: join(state, "rolled.lock") });
+    high.recordCommitted("0.5.0", 1, null);
+    stage(high, "0.2.0", 10);
+    stage(high, "0.3.0", 20);
+    stage(high, "0.5.0", 30);
+    const kept = ["0.2.0", "0.3.0", "0.5.0"].map(version => high.versionRecord(version));
+    high.retireStagedAbove("0.2.0");
+    expect(["0.2.0", "0.3.0", "0.5.0"].map(version => high.versionRecord(version))).toEqual(kept);
+    expect(high.highestCommitted()).toBe("0.5.0");
+    high.close();
+  });
+
   it("badVersions(): everything ever marked bad here (RL7)", () => {
     const store = open();
     const raw = new Database(join(state, "update.db"));

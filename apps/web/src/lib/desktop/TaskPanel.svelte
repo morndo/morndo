@@ -12,7 +12,8 @@
   import Picker, { type PickerOption } from "./Picker.svelte";
   import StatusIcon from "./StatusIcon.svelte";
   import "./board-controls.css";
-  import { COLUMNS, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, whoOf, type MergedView, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
+  import ProofSection from "./ProofSection.svelte";
+  import { acceptLabel, COLUMNS, decodeProof, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, whoOf, type MergedView, type ProofView, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
   import { clock } from "./grouping.ts";
 
   let { task, lanes, now, merged = null, pendingBlock = false, notice = null, onAct, onOpenLane, onClose }: {
@@ -26,6 +27,7 @@
   } = $props();
 
   let events = $state<TaskEvent[]>([]);
+  let proof = $state<ProofView | null>(null);
   let loadFailed = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -42,14 +44,20 @@
   // that read it would run on every change anywhere on the board.
   const key = $derived(task.key);
   const rev = $derived(task.rev);
-  // The record, when the task opens and when it changes (its rev), not when any other task does.
+  const status = $derived(task.status);
+  const accept = $derived(acceptLabel(proof, merged));
+  // The record and proof, when the task opens and when it changes (its rev); in review, proof is re-read on a timer
+  // because a re-check changes rows without bumping the task's rev.
   $effect(() => {
     void rev;
+    void status;
     let gone = false;
-    api.get<{ task: Task; events: TaskEvent[] }>(`/api/board/tasks/${encodeURIComponent(key)}`, { "x-morndo-background": "1" })
-      .then(r => { if (!gone) { events = r.events; loadFailed = false; } }, () => { if (!gone) loadFailed = true; })
+    const load = () => api.get<{ task: Task; events: TaskEvent[]; proof?: unknown }>(`/api/board/tasks/${encodeURIComponent(key)}`, { "x-morndo-background": "1" })
+      .then(r => { if (!gone) { events = r.events; proof = decodeProof(r.proof); loadFailed = false; } }, () => { if (!gone) loadFailed = true; })
       .catch(() => {});
-    return () => { gone = true; };
+    void load();
+    const timer = status === "review" ? setInterval(() => { void load(); }, 20_000) : null;
+    return () => { gone = true; if (timer) clearInterval(timer); };
   });
   // The panel is remounted per task ({#key}); these only answer what the board hands in: a drop on Blocked asks why,
   // and a refused drop shows its words. Neither touches a draft (a comment, a reason, an edit) in progress.
@@ -140,7 +148,7 @@
         <dt>Status</dt>
         <dd>
           <Picker value={task.status} options={statusOptions} label="Status" size="sm" disabled={busy} onPick={v => void move(v as TaskStatus)} />
-          {#if task.status === "review"}<button class="bd-btn primary sm" disabled={busy} title={merged?.live === false ? "Its merge is not live on every node; this is recorded as accepted by you" : undefined} onclick={() => void act({ action: "move", to: "done", ifRev: task.rev })}><CircleCheckBig size={14} />{merged?.live === false ? "Accept anyway" : "Accept as done"}</button>{/if}
+          {#if task.status === "review"}<button class="bd-btn primary sm" disabled={busy} title={accept.title} onclick={() => void act({ action: "move", to: "done", ifRev: task.rev })}><CircleCheckBig size={14} />{accept.label}</button>{/if}
           {#if merged}<p class="merge" class:bad={merged.live === false} data-merge-label>{merged.label}</p>{/if}
           {#each merged?.merges.filter(m => m.override !== null) ?? [] as m}
             <p class="merge bad" data-merge-override>Accepted while not live: {m.override}</p>
@@ -160,6 +168,8 @@
       </form>
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
+
+    {#if proof}<ProofSection {proof} status={task.status} />{/if}
 
     <h3>Record</h3>
     {#if loadFailed}<p class="ph">Couldn't load the record.</p>{/if}

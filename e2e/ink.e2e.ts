@@ -8,10 +8,11 @@ import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, type Browser, type Page } from "playwright";
+import type { Browser, Page } from "playwright";
 import { themes } from "@morndo/brand";
 // @ts-expect-error apca-w3 ships no types (packages/brand/test/apca-w3.d.ts declares them for the brand tests only)
 import { APCAcontrast, sRGBtoY } from "apca-w3";
+import { launch } from "./harness.ts";
 import { buildOffice } from "./office.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -129,7 +130,7 @@ const consoleErrors: string[] = [];                                     // conso
 try {
   hub = spawn(process.execPath, [hubMain, "serve"], { env, stdio: ["ignore", "pipe", "inherit"] });
   await new Promise<void>((res, rej) => { hub?.stdout?.on("data", d => { if (String(d).includes("morndo hub on")) res(); }); hub?.once("exit", c => rej(new Error(`hub exited ${c}`))); });
-  browser = await chromium.launch();
+  browser = await launch();
   for (const scheme of ["light", "dark"] as const) {
     const context = await browser.newContext({ viewport: { width: 1920, height: 908 }, colorScheme: scheme });
     const page = await context.newPage();

@@ -21,6 +21,27 @@ the agents' prompts. The blocks are printed by `morndo-board prompt --role manag
    block in every worker lane's (a `CLAUDE.md`, an agent definition, a system prompt: wherever that engine takes
    standing instructions). Paste it, or generate it: `morndo-board prompt --role worker >> CLAUDE.md`.
 
+4. **Proof of work: which repositories the board checks** (settings of the hub process, read once at start: set them in
+   the hub's environment, then restart it). A brief's `--pr` and `--ci` references are fetched by the hub itself
+   ([ADR-0035](../adr/0035-proof-refs-on-review.md)), and only from repositories the settings list:
+   - `MORNDO_PROOF_REPOS`: `owner/repository` names, comma-separated, for example `acme/shop,acme/api`. **Unset, the
+     default is only `morndo/morndo`**, so on your own install every brief naming your repository is refused when it is
+     filed (`ref_repo`) until you set this. A name must be whole (`owner/repo`); a hub given a bad one does not start.
+     Task data never adds a repository: a merge record or a lane's words cannot widen the list.
+   - `MORNDO_PROOF_GATE`: `off`, `warn` (the default) or `on`. In `warn` a Done is accepted and the Done event records
+     what the board saw, with "would have been refused" where `on` would have held it; `on` refuses it
+     (`proof_not_green`) unless the manager overrides with a reason.
+   - `MORNDO_GITHUB_TOKEN_FILE`: an absolute path to a mode-600 file holding a read-only token, for private
+     repositories. Without it a private repository's references read `not checked`, and the gate holds a Done over them
+     like any reference that is not green.
+
+   The gate holds a Done over: a reference that is not green (a pull request whose commit has a check failing or still
+   running that its base branch requires, branch protection or ruleset, while an optional one shows as a ⚠ warning on the
+   reference and holds nothing; a required check that never reports holds it, and every check counts when the hub cannot read
+   the required set or the branch requires none; a `ci` reference whose named checks passed while another check at that commit failed or is running);
+   a proof-list item nothing in the brief answers; and a brief that claims no code change on a task whose assigner
+   listed no proof (the claim is the lane's word, so it needs the assigner's list to be checked against).
+
 What a lane may do is the hub's rule, not the prompt's: a worker token can't assign or mark done whatever the prompt
 says, and the record keeps who changed what. The prompt is there so the agents keep the board true without being
 told each time.
@@ -37,6 +58,7 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - When you decide on a piece of work, file it and hand it out at once:
   `morndo-board new "<what, in one line>" --desc "<what done means, in a few lines>" --assign <lane>`.
   One task is one outcome a lane can finish on its own. Put the acceptance check in the description.
+- When you assign a task, say what proof it needs: `morndo-board new "<title>" --assign <lane> --proof "pr@owner/repo: the pull request" --proof "ci@owner/repo: CI green" --proof "data: a sample of 30 rows"`, or later `morndo-board proof T-12 --add "<kind[@owner/repo]: text>"`. Kinds pr and ci the board checks itself; tests, manual, ui, data and infra are the lane's word. An item nothing in the brief answers shows `not covered` and holds the done when the gate is on.
 - Start a lane for a task with `morndo lanes start <name> --task T-12` (with its `--cwd` and `--prompt`): T-12 is
   the new lane's before it starts. When a lane that runs needs a task, assign it: `morndo-board assign T-12 <lane>`.
 - The board moves tasks itself as lanes work, and its record names the rule (`board (D1, <lane>)`): into progress
@@ -47,6 +69,11 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
   `morndo-board done T-12 --why "<what you checked>"`, or send it back with
   `morndo-board move T-12 doing --why "<what is missing>"` and a comment saying what you found.
+- A task in review shows its proof line in `morndo-board list` and `show`: references the board checked itself are
+  marked ✓ ✗ ≠ ? ! … ○; the lane's own checks are only its word. When the gate is on, a done with a reference that is
+  not green is refused (`proof_not_green`); accept it only with `--proof-override "<what you looked at instead>"`, and
+  never over a red reference without saying what you saw. `done --why` names a commit or `#n` the board did not verify:
+  it warns, and still sends.
 - When a task's PR has merged, record it: `morndo-board merged T-12 <sha>`. Done is then refused until the merge is on every
   node's build; the board says which node is behind. Accept it earlier only with `--not-live "<why>"`.
 - A wrong sha: `morndo-board unmerged T-12 <sha>`, then record the right one.
@@ -82,6 +109,13 @@ your turns. The principal reads the board instead of asking you.
   `morndo-board new "<what>" --desc "<why>"`. It lands in the backlog for the manager; don't start it yourself.
 - Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;
   the manager does, after checking. Don't claim it is done elsewhere before the board says so.
+- The manager may list the proof your task needs (`morndo-board proof T-12`). Answer every item in your brief: a `--pr` or `--ci` reference in that repository for pr and ci items, a `--test`, `--manual`, `--ui`, `--data` or `--infra` line of the same kind for the rest. You may add items of your own (`morndo-board proof T-12 --add "…"`); you cannot remove the manager's.
+- File your brief before you end the turn, at the latest when the task is in review: `morndo-board brief T-12
+  --summary "<what changed, for whom>" --left-out nothing --limit "none known" --pr owner/repo#42@<sha> --ci
+  owner/repo@<sha>:ci,lint --test "<command: result>"`. A reference is whole (repository, number, sha) and the board
+  checks it itself; what you ran yourself goes in `--test`, `--manual`, `--ui`, `--data` or `--infra` and is shown as
+  your word, never as verified. A task with no code change says `--no-code "<what it is>"`. `morndo-board brief T-12
+  --show` says how each reference checked out.
 - Keep the task's comments as your log: `morndo-board comment T-12 "<one fact>"` for a finding, a decision you
   made, a thing the manager must know, what you ran and its result. Short, one fact per line. Never a secret.
 - If you need to stop work on a task without finishing: `morndo-board todo T-12` and a comment on where it stands.
@@ -107,3 +141,6 @@ your turns. The principal reads the board instead of asking you.
   than the board can.
 - **Comments as a log, one fact per line.** The record is read by the principal on the desktop and by the next
   lane that picks the task up; prose written for a chat doesn't survive that.
+- **The brief is the lane's word, the references are the board's.** The lane names references (a pull request at a
+  commit, that commit's checks) and the board fetches them itself, so a claim of green is never an input: what the
+  lane ran on its own machine is shown as its word, and a done is held until the board's own checks are green.

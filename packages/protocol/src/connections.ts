@@ -147,6 +147,17 @@ export const VendorPreset = z.strictObject({
 });
 export const VendorCatalog = z.array(VendorPreset).check(z.minLength(1));
 
+export type KeyPoolTerms = { errorDialect: string; termsRevision: string; termsLine: string };
+export const KeyPoolEntry = z.strictObject({
+  vendor: name(),
+  errorDialect: text(64),
+  termsRevision: text(64),
+  termsLine: text(1500),
+});
+export const KeyPoolCatalog = z.array(KeyPoolEntry).check(z.refine(
+  (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
+));
+
 const mode = z.enum(["subscriptions-first", "keys-first", "subscriptions-only", "keys-only", "custom"]);
 const budgetLevel = z.enum(["steady", "half", "high", "full"]);
 const spendSource = z.enum(["estimate", "provider", "manual", "balance"]);
@@ -227,6 +238,7 @@ export type ConnectionView = z.output<typeof ConnectionView>;
 export type LeaseView = z.output<typeof LeaseView>;
 export type PolicyView = z.output<typeof PolicyView>;
 export type VendorPreset = z.output<typeof VendorPreset>;
+export type KeyPoolEntry = z.output<typeof KeyPoolEntry>;
 export type ConnectionsPage = z.output<typeof ConnectionsPage>;
 export type PriorityCommand = z.output<typeof PriorityCommand>;
 export type RoleCommand = z.output<typeof RoleCommand>;
@@ -235,5 +247,10 @@ export type NarrowCommand = z.output<typeof NarrowCommand>;
 
 export function parseVendorCatalog(value: unknown): VendorPreset[] | null {
   const parsed = z.safeParse(VendorCatalog, value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseKeyPoolCatalog(value: unknown): KeyPoolEntry[] | null {
+  const parsed = z.safeParse(KeyPoolCatalog, value);
   return parsed.success ? parsed.data : null;
 }

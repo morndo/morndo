@@ -1,4 +1,5 @@
-// The client API (spec 5.6): HTTP and WebSocket on a Unix socket only, for the hub, kira and `lanes`. Every route is
+// The client API (spec 5.6): HTTP and WebSocket on a Unix socket only, for the hub, kira and `lanes`. A second socket
+// beside it (workerSocket, fleet-worker.sock) serves the same routes to a caller that reaches the fleet through a forward, and refuses what that scope may not do. Every route is
 // under /v<N>/ with N the current or the previous API version; GET /v1/caps lists them.
 //   GET  /v1/caps                      { api: number[], stickyLanes: string[] }
 //   GET  /v1/nodes                     [{ name, status, health, agent }]
@@ -33,17 +34,17 @@
 //                                      Version the control plane doesn't run itself
 //   POST /v1/rollout/halt              { version, machine, reason } → { ok: true, rollout }
 //   POST /v1/rollout/resume            { version } → { ok: true, rollout }; 409 not_halted when nothing is halted
-//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run" | "rollout", node, body };
+//   WS   /v1/events                    { t: "inventory" | "health" | "status" | "conflict" | "alert" | "delivery" | "lane" | "job" | "run" | "rollout" | "usage", node, body };
 //                                      a client more than eventsBufferBytes behind is closed with 1013 (it reconnects
 //                                      and gets the current state first)
 // The path is split on "/" before any segment is decoded, so a name or path holding "/" (as %2F) stays one segment
 // (Review Focus 1). Over a Unix socket the server listens with node:http's listen(path)
 // (https://nodejs.org/docs/latest-v24.x/api/net.html#serverlistenpath-backlog-callback, read 2026-10-06).
 import { chmodSync, unlinkSync } from "node:fs";
-import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery, type PrincipalAsk } from "@morndo/protocol";
+import { CLIENT_API, JobsQuerySchema, LIMITS, NODE_NAME, parseBody, parseWorkerId, type DeliveryState, type JobView, type JobsQuery, type Pane, type PrincipalAsk } from "@morndo/protocol";
 import { Flight, productStamp } from "@morndo/service-kit";
 import type { Connections } from "../application/connections.ts";
 import type { Deliveries } from "../application/deliveries.ts";
@@ -53,7 +54,9 @@ import type { EventHub, FleetEvent } from "../application/events.ts";
 import type { JobMirror } from "../application/job-mirror.ts";
 import type { LaneRegistry } from "../application/lane-registry.ts";
 import { SIDE_EFFECT_OPS, opError, type Outcome } from "../application/requests.ts";
-import type { Router } from "../application/router.ts";
+import type { Router, Target } from "../application/router.ts";
+import type { ProtectedIdentity } from "../application/protected-identity.ts";
+import { redactAlert, redactDelivery, redactEvent, redactPanes, visibleLaneEvents, visibleLaneWatch, visibleRuns, workerDeliveryCancelVerdict, workerDeliveryVerdict, workerOpVerdict, type Hide, type WorkerLook, type WorkerScope } from "../application/worker-scope.ts";
 import type { Rollouts } from "../application/rollouts.ts";
 import type { Runs } from "../application/runs.ts";
 import type { Audit } from "./audit.ts";
@@ -83,8 +86,14 @@ export type ClientApiDeps = {
   rolloutAuthority: RolloutAuthority;
   eventsBufferBytes?: number;
   updates?: { schema?: number; held: () => boolean; flight: Flight };
+  // The worker socket, when the service opens one. Its scope is decided here; the lookups come from the lane registry,
+  // and the identity is what the fleet remembers of a protected lane after a rename.
+  worker?: { socketPath: string; scope: WorkerScope; identity: ProtectedIdentity };
 };
 export type ClientApi = { close(): Promise<void> };
+
+// The socket that accepted the request. The worker kind carries its policy, so a worker request cannot run without one.
+type Scope = { kind: "owner" } | { kind: "worker"; policy: WorkerScope };
 
 // Who may move a Rollout forward (review of #107, finding 3). `updater`: the control plane's updater reporting its
 // commit or halt. `principal`: the owner's resume and update.apply, through the hub — one request, one signed
@@ -197,7 +206,41 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   const answerOp = (res: ServerResponse, ran: { status: number; outcome: Outcome }) =>
     json(res, ran.status, ran.outcome, ran.status === 503 ? { "Retry-After": "1" } : {});
 
-  async function route(req: IncomingMessage, res: ServerResponse, s: string[]): Promise<void> {
+  // Lookups for the worker policy come from the lane registry and from what the fleet remembers of a protected lane.
+  // The policy itself rides on the request's scope. The owner socket never asks these.
+  const look: WorkerLook = {
+    nameOfWorker: id => d.lanes.nameOfWorker(id),
+    nodeOfLane: name => { const r = d.lanes.resolve(name); return r.kind === "ok" ? r.node : null; },
+    workerOfLane: name => { const r = d.lanes.resolve(name); return r.kind === "ok" ? r.workerId : null; },
+    isProtectedWorker: id => {
+      const name = d.lanes.nameOfWorker(id);
+      return (name !== null && (d.worker?.scope.protectedLanes.has(name) ?? false)) || (d.worker?.identity.hasWorker(id) ?? false);
+    },
+    isProtectedPath: (node, path) => d.worker?.identity.isProtectedPath(node, path) ?? false,
+  };
+  const hide: Hide = {
+    lane: name => {
+      if (name === null || d.worker === undefined) return false;
+      if (d.worker.scope.protectedLanes.has(name)) return true;
+      const id = look.workerOfLane(name);
+      return id !== null && look.isProtectedWorker(id);
+    },
+    worker: id => look.isProtectedWorker(id),
+    session: id => d.worker?.identity.hasSession(id) ?? false,
+  };
+  // One refusal, one audit row. A fleet.db that won't take it is logged and never changes the answer already decided.
+  function noteRefused(what: string, node: string | null, reason: string, req: IncomingMessage): void {
+    const detail = { what, reason, client: clientOf(req) };
+    try { d.audit.record("worker", "refused", node, detail); }
+    catch (e) { d.log.error(`audit: refused ${what} on ${node ?? "?"} could not be recorded (fleet.db busy or full?): ${JSON.stringify(detail)}`, e); }
+  }
+  const targetNode = (target: Target): string | null => "node" in target ? target.node : "workerId" in target ? (parseWorkerId(target.workerId)?.node ?? null) : look.nodeOfLane(target.lane);
+  const asked = (req: IncomingMessage, b: { key?: string; timeoutMs?: number }, scope: Scope) => ({
+    client: clientOf(req), ...(scope.kind === "worker" ? { actor: "worker" } : {}),
+    ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
+  });
+
+  async function route(req: IncomingMessage, res: ServerResponse, s: string[], scope: Scope): Promise<void> {
     const method = req.method ?? "GET";
     const [first, second, third] = s;
     if (method === "GET" && s.length === 1 && first === "health") {
@@ -208,6 +251,11 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
     if (method === "POST" && s.length === 3 && first === "nodes" && third === "revoke") {
       const name = second ?? "";
       if (!NODE_NAME.test(name)) throw new HttpError(400, "not a node name");
+      if (scope.kind === "worker") {
+        const message = "revoking a node is not allowed on the worker socket";
+        noteRefused("node.revoke", name, message, req);
+        return json(res, 403, { error: "not_allowed", message });
+      }
       const revoked = d.nodes.revoke(name);
       if (revoked) d.audit.record("client", "node.revoke", name, { client: clientOf(req) });
       d.connections.revoke(name);                                     // closes it, and its lanes go (serve.ts)
@@ -218,7 +266,10 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const lane = d.lanes.get(second ?? "");
       return lane ? json(res, 200, lane) : json(res, 404, { error: "no_such_lane" });
     }
-    if (method === "GET" && s.length === 1 && first === "alerts") return json(res, 200, d.audit.recentAlerts());
+    if (method === "GET" && s.length === 1 && first === "alerts") {
+      const alerts = d.audit.recentAlerts();
+      return json(res, 200, scope.kind === "worker" ? alerts.map(a => redactAlert(a, hide)) : alerts);
+    }
     if (method === "GET" && s.length === 1 && first === "jobs") {
       const q = jobsQuery(req.url);
       const jobs = d.jobs.list(q);
@@ -241,6 +292,15 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const parsed = parseOpBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message), store: null, storeSeq: null });
       const b = parsed.body;
+      let args = b.args;
+      if (scope.kind === "worker") {
+        const verdict = workerOpVerdict(scope.policy, { target: b.target, op: b.op, args: b.args }, look);
+        if (!verdict.ok) {
+          noteRefused(`op.${b.op}`, targetNode(b.target), verdict.reason, req);
+          return json(res, 200, { ok: false, error: opError("not_allowed", verdict.reason), store: null, storeSeq: null });
+        }
+        if (verdict.args) args = verdict.args;
+      }
       if (b.op === "update.apply") {
         // The proof is for exactly this ask (§5.4) — one node, one Version. args' shape the router checks only
         // after this gate, so a version that is not a string here is simply an ask no honest proof names.
@@ -263,9 +323,7 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         if (refusal) return answerOp(res, refusal);
         const stored = d.jobs.report(node, id, notice);
         if (!stored) return json(res, 200, { ok: false, error: opError("denied", "missing"), store: null, storeSeq: null });
-        const ran = await runOp({ node: stored.node }, b.op, { id, notice }, {
-          client: clientOf(req), ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
-        });
+        const ran = await runOp({ node: stored.node }, b.op, { id, notice }, asked(req, b, scope));
         if (ran.outcome.ok) d.jobs.holdNotice(stored.node, stored.id, notice);
         return answerOp(res, ran);
       }
@@ -273,22 +331,41 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
         const id = typeof b.args.id === "string" ? b.args.id : "";
         const owned = jobOwner(d, id, b.target);
         if (!owned) return json(res, 200, { ok: false, error: opError("denied", "missing"), store: null, storeSeq: null });
-        return answerOp(res, await runOp({ node: owned.node }, b.op, b.args, {
-          client: clientOf(req), ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
-        }));
+        return answerOp(res, await runOp({ node: owned.node }, b.op, args, asked(req, b, scope)));
       }
-      return answerOp(res, await runOp(b.target, b.op, b.args, {
-        client: clientOf(req), ...(b.key === undefined ? {} : { key: b.key }), ...(b.timeoutMs === undefined ? {} : { timeoutMs: b.timeoutMs }),
-      }));
+      const ran = await runOp(b.target, b.op, args, asked(req, b, scope));
+      if (scope.kind === "worker" && b.op === "inventory.get") return answerOp(res, { status: ran.status, outcome: shownInventory(ran.outcome) });
+      return answerOp(res, ran);
     }
-    if (method === "GET" && s.length === 3 && first === "files") return streamFile(res, d.router, second ?? "", third ?? "");
+    if (method === "GET" && s.length === 3 && first === "files") {
+      const node = second ?? "";
+      if (scope.kind === "worker" && !scope.policy.startNodes.has(node)) {
+        const message = "reading a file is not allowed on the worker socket: that node is not one the worker socket may read";
+        noteRefused("files", node, message, req);
+        return json(res, 403, { error: "not_allowed", message });
+      }
+      const filePath = third ?? "";
+      if (scope.kind === "worker" && look.isProtectedPath(node, filePath)) {
+        const message = "reading a file is not allowed on the worker socket: that path belongs to a protected lane";
+        noteRefused("files", node, message, req);
+        return json(res, 403, { error: "not_allowed", message });
+      }
+      return streamFile(res, d.router, node, filePath);
+    }
     if (method === "GET" && s.length === 1 && first === "lane-events") {
       const since = queryOf(req.url).get("since") ?? "0";
       if (!/^\d{1,15}$/.test(since)) throw new HttpError(400, "since must be a lane event's seq (a whole number, 0 for the oldest kept)");
-      return json(res, 200, { events: d.laneEvents.since(Number(since)) });
+      const events = d.laneEvents.since(Number(since));
+      return json(res, 200, { events: scope.kind === "worker" ? visibleLaneEvents(events, hide) : events });
     }
-    if (method === "GET" && s.length === 1 && first === "lane-watch") return json(res, 200, { lanes: d.laneWatch?.view() ?? [] });
-    if (method === "GET" && s.length === 1 && first === "runs") return json(res, 200, { runs: d.runs?.view() ?? [] });
+    if (method === "GET" && s.length === 1 && first === "lane-watch") {
+      const lanes = d.laneWatch?.view() ?? [];
+      return json(res, 200, { lanes: scope.kind === "worker" ? visibleLaneWatch(lanes, hide) : lanes });
+    }
+    if (method === "GET" && s.length === 1 && first === "runs") {
+      const runs = d.runs?.view() ?? [];
+      return json(res, 200, { runs: scope.kind === "worker" ? visibleRuns(runs, hide) : runs });
+    }
     // The Rollout the fleet carries (updates §7): reads answer however the fleet stands; the writes share the ops'
     // hold refusal (RL9) — nothing moves while the fleet updates itself.
     if (method === "GET" && s.length === 1 && first === "rollout") {
@@ -298,6 +375,11 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       });
     }
     if (method === "POST" && s.length === 2 && first === "rollout" && (second === "committed" || second === "halt" || second === "resume")) {
+      if (scope.kind === "worker") {
+        const message = `rollout ${second} is not allowed on the worker socket`;
+        noteRefused(`rollout.${second}`, null, message, req);
+        return json(res, 403, { error: "not_allowed", message });
+      }
       if (held()) return json(res, 503, { error: "updating", message: "the fleet is not taking new work while it updates" }, { "Retry-After": "1" });
       let body: unknown;
       try { body = await readJson(req); }
@@ -338,6 +420,15 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       }
       const parsed = parseDeliveryBody(body);
       if (!parsed.ok) return json(res, 400, { ok: false, error: opError("bad_args", parsed.message) });
+      if (scope.kind === "worker") {
+        const verdict = workerDeliveryVerdict(scope.policy, parsed.body, look);
+        if (!verdict.ok) {
+          const node = "workerId" in parsed.body ? (parseWorkerId(parsed.body.workerId)?.node ?? null) : look.nodeOfLane(parsed.body.lane);
+          noteRefused("delivery.post", node, verdict.reason, req);
+          return json(res, 200, { ok: false, error: opError("not_allowed", verdict.reason) });
+        }
+        return json(res, 200, await d.deliveries.post(parsed.body, clientOf(req), "worker"));
+      }
       return json(res, 200, await d.deliveries.post(parsed.body, clientOf(req)));
     }
     if (method === "GET" && s.length === 1 && first === "deliveries") {
@@ -345,13 +436,26 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       const lane = q.get("lane") || undefined;
       const state = q.get("state") || undefined;
       if (state !== undefined && !STATES.has(state)) throw new HttpError(400, `state must be one of ${[...STATES].join(", ")}`);
-      return json(res, 200, { deliveries: d.deliveries.list({ ...(lane === undefined ? {} : { lane }), ...(state === undefined ? {} : { state: state as DeliveryState }) }) });
+      const deliveries = d.deliveries.list({ ...(lane === undefined ? {} : { lane }), ...(state === undefined ? {} : { state: state as DeliveryState }) });
+      return json(res, 200, { deliveries: scope.kind === "worker" ? deliveries.map(x => redactDelivery(x, hide)) : deliveries });
     }
     if (method === "GET" && s.length === 2 && first === "deliveries") {
       const one = d.deliveries.get(second ?? "");
-      return one ? json(res, 200, one) : json(res, 404, { error: "no_such_delivery" });
+      if (!one) return json(res, 404, { error: "no_such_delivery" });
+      return json(res, 200, scope.kind === "worker" ? { ...one, delivery: redactDelivery(one.delivery, hide) } : one);
     }
     if (method === "POST" && s.length === 3 && first === "deliveries" && third === "cancel") {
+      if (scope.kind === "worker") {
+        const one = d.deliveries.get(second ?? "");
+        if (!one) return json(res, 404, { error: "no_such_delivery" });
+        const verdict = workerDeliveryCancelVerdict(scope.policy, one.delivery.target, look);
+        if (!verdict.ok) {
+          noteRefused("delivery.cancel", one.delivery.node, verdict.reason, req);
+          return json(res, 200, { ok: false, error: opError("not_allowed", verdict.reason) });
+        }
+        const answer = await d.deliveries.cancel(second ?? "", clientOf(req), "worker");
+        return answer ? json(res, 200, answer) : json(res, 404, { error: "no_such_delivery" });
+      }
       const answer = await d.deliveries.cancel(second ?? "", clientOf(req));
       return answer ? json(res, 200, answer) : json(res, 404, { error: "no_such_delivery" });
     }
@@ -359,12 +463,11 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   }
 
   // Each request is handled to its end here, with its own catch, so the promise is dropped on purpose.
-  const server = createServer((req, res) => void handle(req, res));
-  async function handle(req: IncomingMessage, res: ServerResponse) {
+  async function handle(req: IncomingMessage, res: ServerResponse, scope: Scope) {
     try {
       const s = segments(req.url);
       if (s === null) return json(res, 404, { error: "unsupported_api", api: API_VERSIONS });
-      await route(req, res, s);
+      await route(req, res, s, scope);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
       if (status === 500) d.log.error(`client API: ${req.method ?? "?"} failed`, e);
@@ -378,7 +481,25 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
   // eventsBufferBytes it is closed with 1013 and unsubscribed, and gets the current state again when it reconnects.
   const wss = new WebSocketServer({ noServer: true, maxPayload: 4096 });
   const clients = new Set<WebSocket>();
-  server.on("upgrade", (req: IncomingMessage, socket: Duplex, head: Buffer) => {
+  // An inventory answer the worker socket may show: remember the panes, then drop a protected lane's words. The outcome's
+  // store and storeSeq stay; only result.panes changes.
+  function shownInventory(outcome: Outcome): Outcome {
+    if (!outcome.ok || d.worker === undefined) return outcome;
+    const result = outcome.result;
+    if (typeof result !== "object" || result === null || !("panes" in result) || !Array.isArray(result.panes)) return outcome;
+    const panes = result.panes as Pane[];
+    d.worker.identity.observe(panes);
+    return { ...outcome, result: { ...result, panes: redactPanes(panes, hide) } };
+  }
+  // A live event for a worker socket: remember an inventory's panes, then redact. Null is an event that socket does not see.
+  function workerEvent(e: FleetEvent): FleetEvent | null {
+    if (e.t === "inventory" && d.worker !== undefined) {
+      const body = e.body;
+      if (typeof body === "object" && body !== null && "panes" in body && Array.isArray(body.panes)) d.worker.identity.observe(body.panes as Pane[]);
+    }
+    return redactEvent(e, hide);
+  }
+  const onUpgrade = (req: IncomingMessage, socket: Duplex, head: Buffer, scope: Scope) => {
     socket.on("error", () => socket.destroy());
     let s: string[] | null;
     try { s = segments(req.url); } catch { s = null; }
@@ -388,13 +509,15 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       let unsubscribe = () => {};
       const send = (e: FleetEvent) => {
         if (ws.readyState !== ws.OPEN) return;
+        const event = scope.kind === "worker" ? workerEvent(e) : e;
+        if (event === null) return;
         if (ws.bufferedAmount > eventsBufferBytes) {
           unsubscribe();
           d.log.warn(`events socket: a client is ${ws.bufferedAmount} bytes behind; closing it (1013)`);
           ws.close(1013, "too far behind; reconnect for the current state");
           return;
         }
-        ws.send(JSON.stringify(e));
+        ws.send(JSON.stringify(event));
       };
       const nodes = d.connections.list();
       for (const n of nodes) send({ t: "status", node: n.name, body: { status: n.status } });
@@ -409,33 +532,58 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
       ws.on("error", e => d.log.warn(`events socket: ${e.message}`));
       ws.on("close", () => { clients.delete(ws); unsubscribe(); });
     });
-  });
+  };
 
-  await new Promise<void>((resolve, reject) => {
-    server.once("error", reject);
-    server.listen(socketPath, () => { server.off("error", reject); resolve(); });
-  });
-  chmodSync(socketPath, 0o600);
-  return {
-    // server.close() stops accepting and closes the idle connections; one still answering (a POST /v1/op whose outcome
-    // Connections.stop() has just settled) keeps its socket until its reply is written, so the client gets the outcome
-    // and its store instead of "socket hang up", and is closed as soon as it is idle again (closeIdleConnections, every
-    // 20 ms). Whatever is still open after CLOSE_DRAIN_MS is closed then by closeAllConnections(), which takes "active
-    // connections connected to this server which are sending a request or waiting for a response" too, called after
-    // server.close() as the docs recommend (https://nodejs.org/docs/latest-v24.x/api/http.html#servercloseallconnections,
-    // read 2026-10-07).
-    close: () => new Promise<void>(resolve => {
-      for (const ws of clients) ws.terminate();
-      wss.close();
+  // One HTTP server per socket (the owner, and the worker when configured). They share the events clients.
+  const sockets: { server: Server; path: string }[] = [];
+  async function listen(path: string, scope: Scope): Promise<void> {
+    prepareSocketDir(path);
+    await clearStaleSocket(path);
+    const server = createServer((req, res) => void handle(req, res, scope));
+    server.on("upgrade", (req, socket, head) => onUpgrade(req, socket, head, scope));
+    try {
+      await new Promise<void>((resolve, reject) => {
+        server.once("error", reject);
+        server.listen(path, () => { server.off("error", reject); resolve(); });
+      });
+    } catch (e) {
+      server.close();
+      try { unlinkSync(path); } catch { /* not listening */ }
+      throw e;
+    }
+    chmodSync(path, 0o600);
+    sockets.push({ server, path });
+  }
+  // server.close() stops accepting and closes the idle connections; one still answering (a POST /v1/op whose outcome
+  // Connections.stop() has just settled) keeps its socket until its reply is written, so the client gets the outcome
+  // and its store instead of "socket hang up", and is closed as soon as it is idle again (closeIdleConnections, every
+  // 20 ms). Whatever is still open after CLOSE_DRAIN_MS is closed then by closeAllConnections(), which takes "active
+  // connections connected to this server which are sending a request or waiting for a response" too, called after
+  // server.close() as the docs recommend (https://nodejs.org/docs/latest-v24.x/api/http.html#servercloseallconnections,
+  // read 2026-10-07). Both sockets close, and both socket files go.
+  const close = () => new Promise<void>(resolve => {
+    for (const ws of clients) ws.terminate();
+    wss.close();
+    if (sockets.length === 0) { resolve(); return; }
+    let left = sockets.length;
+    for (const { server, path } of sockets) {
       const reap = setInterval(() => server.closeIdleConnections(), 20);
       const drain = setTimeout(() => server.closeAllConnections(), CLOSE_DRAIN_MS);
       server.close(() => {
         clearInterval(reap);
         clearTimeout(drain);
-        try { unlinkSync(socketPath); } catch { /* already gone */ }
-        resolve();
+        try { unlinkSync(path); } catch { /* already gone */ }
+        if (--left === 0) resolve();
       });
       server.closeIdleConnections();
-    }),
-  };
+    }
+  });
+  try {
+    await listen(socketPath, { kind: "owner" });
+    if (d.worker) await listen(d.worker.socketPath, { kind: "worker", policy: d.worker.scope });
+  } catch (e) {
+    await close();
+    throw e;
+  }
+  return { close };
 }

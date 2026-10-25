@@ -5,7 +5,7 @@ import {
   type Directory, type Policy,
 } from "@morndo/domain";
 import { ConnectionsPage, CONNECTION_WORDS, type VendorPreset } from "@morndo/protocol";
-import type { Alert } from "./ports.ts";
+import type { Alert, PoolNames } from "./ports.ts";
 
 const LEVEL_AT = [[0.95, "full"], [0.8, "high"], [0.5, "half"]] as const;
 export type BudgetLevel = "steady" | "half" | "high" | "full";
@@ -23,6 +23,11 @@ const ALERT_DETAIL: Record<string, string> = {
   authority: "A run lost its holder",
   defaults: "A default pick was skipped",
   threshold: "A budget or expiry line was crossed",
+  "key-exhausted": "A pooled key ran out of credit or reached its spend limit",
+  "key-failing": "A pooled key or its account was refused",
+  "pool-empty": "Every key in a pool is out of credit",
+  "pool-blocked": "A pool is stopped until you act on a refused key",
+  unclassified: "A provider refusal was not recognised",
 };
 
 export function buildPage(input: {
@@ -34,8 +39,15 @@ export function buildPage(input: {
   outside: readonly OutsideChain[];
   usage: Readonly<Record<string, PageUsage>>;
   now: number;
+  pools?: readonly PoolNames[];
 }): ConnectionsPage {
   const known = input.directory.connections.filter(c => c.status !== "revoked").map(c => ({ name: c.name, kind: c.kind }));
+  const seen = new Set(known.map(row => row.name));
+  for (const pool of input.pools ?? []) {
+    if (seen.has(pool.name)) continue;
+    seen.add(pool.name);
+    known.push({ name: pool.name, kind: "api-key" });
+  }
   const connections = input.directory.connections.map(c => {
     const preset = input.presets.find(p => p.id === c.vendor);
     const spent = isKey(c) && c.budget.kind === "capped" && c.budget.amount > 0 ? spentOf(c.spend) / c.budget.amount : null;

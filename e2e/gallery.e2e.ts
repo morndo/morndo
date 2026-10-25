@@ -3,8 +3,7 @@
 // That the gallery is absent from a production build is the build's own check (apps/web/scripts/check-build.ts).
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { chromium } from "playwright";
-import { assert, checks, freePort, outDir } from "./harness.ts";
+import { assert, checks, freePort, launch, outDir } from "./harness.ts";
 
 const OUT = outDir("gallery");
 const WEB = join(import.meta.dirname, "../apps/web");
@@ -25,7 +24,7 @@ for (const end = Date.now() + 60_000; ; await new Promise(r => setTimeout(r, 250
 }
 
 const { check, watch, finish } = checks(OUT);
-const browser = await chromium.launch();
+const browser = await launch();
 let code = 1;
 const SENDS = ["Queued", "Waiting to send…", "Sending…", "Sent", "Sent, not seen in the conversation yet", "Not sent", "May have been sent", "Waiting for the message above", "Queued, it will be delivered"];
 const PILLS = ["Connecting", "Live", "Reconnecting", "Offline", "Signed out"];

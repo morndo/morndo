@@ -4,13 +4,12 @@ import Database from "better-sqlite3";
 import { spawn } from "node:child_process";
 import { appendFileSync } from "node:fs";
 import { join } from "node:path";
-import { chromium } from "playwright";
-import { assert, checks, newDevice, outDir, pairedPage, startOffice } from "./harness.ts";
+import { assert, checks, launch, newDevice, outDir, pairedPage, startOffice } from "./harness.ts";
 
 const OUT = outDir("signal");
 const office = await startOffice("signal");
 const { check, watch, finish } = checks(OUT);
-const browser = await chromium.launch();
+const browser = await launch();
 let code = 1;
 try {
   // Service workers blocked: the reload check holds a POST with page.route, which can't see requests made under the

@@ -216,3 +216,83 @@ describe("the lane watch in the fleet: activity by the hook's own time, retries,
     expect(delivered(pc.reqs).map(d => d.id).sort()).toEqual([`fleet:nudge:pc.3fa2c1d0.1:${T0 + 1}`, `fleet:nudge:pc.3fa2c1d0.2:${T0 + 1}`]);
   });
 });
+
+// A Stop that never arrived (T-422): the session goes idle after work the watch saw start, and no turn end follows.
+// The fleet's clock is the test's; each inventory is given a moment to be taken before the clock moves.
+describe("a turn end the fleet never received (T-422)", () => {
+  const NUDGING = { laneEvents: TO_MANAGER, laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: true } };
+  const api = (status: "busy" | "idle") => [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w", sessionId: SID, status, pid: 1 }];
+  const taken = () => new Promise(r => setTimeout(r, 50));
+  const texts = (reqs: Req[]) => reqs.filter(q => q.op === "lane.deliver").map(q => (q.args as { text: string }).text);
+
+  it("flags a blocked lane that went back to work and idle with no Stop, once, and sends no resume nudge", async () => {
+    let clock = T0;
+    const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: NUDGING });
+    const pc = await fleet.online("pc");
+    pc.inventory(api("idle"));
+    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"), { timeout: 10_000 });
+    pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: BLOCKED T-1 x" }, { window: "api" });
+    expect(await pc.acked(1)).toBe(1);
+    clock = T0 + MIN;
+    pc.inventory(api("busy"));
+    await taken();
+    clock = T0 + 30 * MIN;
+    pc.inventory(api("idle"));
+    await taken();
+    clock = T0 + 35 * MIN;
+    await vi.waitFor(() => {
+      const rows = fleet.db.prepare("SELECT event FROM lane_events ORDER BY seq").all() as { event: string }[];
+      expect(rows.map(r => r.event)).toEqual(["finished", "stale"]);
+    });
+    const rows = fleet.db.prepare("SELECT event, body FROM lane_events ORDER BY seq").all() as { event: string; body: string }[];
+    expect(rows.map(r => r.event)).toEqual(["finished", "stale"]);
+    expect(JSON.parse(rows[1]?.body ?? "{}")).toMatchObject({ reason: "no_turn_end", stalls: 1 });
+    await new Promise(r => setTimeout(r, 150));
+    expect(pc.reqs.filter(q => q.op === "lane.deliver")).toEqual([]);
+  });
+
+  it("does not flag when a Stop arrives after the lane went busy", async () => {
+    let clock = T0;
+    const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: NUDGING });
+    const pc = await fleet.online("pc");
+    pc.inventory(api("idle"));
+    await vi.waitFor(() => expect(fleet.lanes.get("api")?.workerId).toBe("pc.3fa2c1d0.1"), { timeout: 10_000 });
+    pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: BLOCKED T-1 x" }, { window: "api" });
+    expect(await pc.acked(1)).toBe(1);
+    clock = T0 + MIN;
+    pc.inventory(api("busy"));
+    await taken();
+    // Taken while the fleet clock is still the busy inventory's time. `at` is the node's clock.
+    pc.hook(2, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: DONE\nshipped" }, { window: "api", at: clock + 1_000 });
+    expect(await pc.acked(2)).toBe(2);
+    clock = T0 + 30 * MIN;
+    pc.inventory(api("idle"));
+    await taken();
+    clock = T0 + 35 * MIN;
+    await new Promise(r => setTimeout(r, 150));
+    const events = (fleet.db.prepare("SELECT event FROM lane_events ORDER BY seq").all() as { event: string }[]).map(r => r.event);
+    expect(events).toEqual(["finished", "finished"]);
+    expect(texts(pc.reqs).join("\n")).not.toContain("never received its end");
+  });
+
+  it("a window named like the manager gets nothing", async () => {
+    let clock = T0;
+    const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: NUDGING });
+    const pc = await fleet.online("pc");
+    const manager = (status: "busy" | "idle") => [{ workerId: "pc.3fa2c1d0.2", window: "manager", cwd: "/m", sessionId: SID, status, pid: 2 }];
+    pc.inventory(manager("idle"));
+    await vi.waitFor(() => expect(fleet.lanes.get("manager")).toBeTruthy(), { timeout: 10_000 });
+    pc.hook(1, "/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: "STATUS: BLOCKED T-1 x" }, { window: "manager" });
+    expect(await pc.acked(1)).toBe(1);
+    clock = T0 + MIN;
+    pc.inventory(manager("busy"));
+    await taken();
+    clock = T0 + 30 * MIN;
+    pc.inventory(manager("idle"));
+    await taken();
+    clock = T0 + 35 * MIN;
+    await new Promise(r => setTimeout(r, 150));
+    expect((fleet.db.prepare("SELECT event FROM lane_events").all() as { event: string }[])).toEqual([]);
+    expect(texts(pc.reqs).join("\n")).not.toContain("never received its end");
+  });
+});

@@ -19,6 +19,10 @@ beforeEach(async () => { fleet = await startFakeFleet(); });
 afterEach(async () => { await fleet.close(); for (const h of homes.splice(0)) h.cleanup(); });
 function home() { const h = tempHome(); homes.push(h); return h.home; }
 // Nothing of the agent's on disk: no config or state directory at all.
+// The version the product is: the root package.json's, read here directly, so the assertion checks the version the agent
+// reports against the file it is meant to come from, not against the function the agent itself calls.
+const ROOT_VERSION = (JSON.parse(readFileSync(joinPath(import.meta.dirname, "..", "..", "..", "package.json"), "utf8")) as { version: string }).version;
+
 const untouched = (h: string) => !existsSync(joinPath(h, ".config")) && !existsSync(joinPath(h, ".local"));
 
 describe("join", () => {
@@ -37,7 +41,7 @@ describe("join", () => {
       expect(config).toMatchObject({ node: "pc", fleetUrl: fleet.url, fleetKey: fleet.fleetKey, relayPort: 8787 });
       // The key the fleet was given is the key on disk, and only this user can read it.
       const sent = fleet.received.find(r => r.msg.t === "join")?.msg;
-      expect(sent).toMatchObject({ v: 1, t: "join", node: "pc", proto: [1], agent: { version: "0.0.0" } });
+      expect(sent).toMatchObject({ v: 1, t: "join", node: "pc", proto: [1], agent: { version: ROOT_VERSION } });
       expect(sent?.publicKey).toBe(loadNodeKey(config.keyPath).publicKey);
       expect(statSync(config.keyPath).mode & 0o777).toBe(0o600);
       expect(statSync(agentPaths(h).configFile).mode & 0o777).toBe(0o600);

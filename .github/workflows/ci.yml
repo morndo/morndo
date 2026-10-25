@@ -149,6 +149,12 @@ jobs:
         env: { E2E_OUT: "${{ runner.temp }}/e2e/home" }
         run: node e2e/home.e2e.ts
 
+      # Slice 5 of the usage plan: the headless reader (a fake CLI), the hub's lease and on-demand rule, Home.
+      - name: e2e usage-claude
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/usage-claude" }
+        run: node e2e/usage-claude.e2e.ts
+
       - name: e2e phone-chat
         if: ${{ !cancelled() && steps.deps.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/phone-chat" }
@@ -162,6 +168,11 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/briefs" }
         run: node e2e/briefs.e2e.ts
+      # ADR-0035 step 5: proof in the desktop task panel, stand-in forge and morndo-board.
+      - name: e2e board-proof
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/board-proof" }
+        run: node e2e/board-proof.e2e.ts
 
       # The screenshots, passing or failing, for QA and for reading a failure (review L2).
       - name: Keep the e2e screenshots

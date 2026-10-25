@@ -3,11 +3,11 @@
 // while he is attending on any device. Pure.
 import { describe, expect, it } from "vitest";
 import {
-  ATTENDING_INPUT_MS, NOTIFY_DEBOUNCE_MS, NotificationQueue, anyAttending, isAttending, kindCode, payloadOf, raises, reasonCode,
+  ATTENDING_INPUT_MS, NOTIFY_DEBOUNCE_MS, NotificationQueue, anyAttending, isAttending, kindCode, payloadOf, raises, reasonCode, suppressedWhileAttending,
 } from "../src/index.ts";
 
 const NOW = 1_000_000;
-const counts = { decisions: 2, workers: 1, linked: 0, alerts: 0 };
+const counts = { decisions: 2, workers: 1, linked: 0, alerts: 0, usage: 0 };
 
 describe("a push service's reason for a refusal (N1: codes, never text)", () => {
   it("keeps a short code of letters and digits, and nothing else", () => {
@@ -19,9 +19,12 @@ describe("a push service's reason for a refusal (N1: codes, never text)", () => 
 describe("the payload (N1)", () => {
   it("is numbers only: the kind as its number, then the counts", () => {
     const p = payloadOf("worker", counts);
-    expect(p).toEqual({ kind: 1, decisions: 2, workers: 1, linked: 0, alerts: 0 });
+    expect(p).toEqual({ kind: 1, decisions: 2, workers: 1, linked: 0, alerts: 0, usage: 0 });
     expect(Object.values(p).every(v => typeof v === "number")).toBe(true);
-    expect([kindCode("decision"), kindCode("worker"), kindCode("linked"), kindCode("alert")]).toEqual([0, 1, 2, 3]);
+    expect([kindCode("decision"), kindCode("worker"), kindCode("linked"), kindCode("alert"), kindCode("usage")]).toEqual([0, 1, 2, 3, 4]);
+  });
+  it("a usage notice (S4, plan 4.4): appended, so the older kind codes stay what they were; the count rides along", () => {
+    expect(payloadOf("usage", { ...counts, usage: 3 })).toEqual({ kind: 4, decisions: 2, workers: 1, linked: 0, alerts: 0, usage: 3 });
   });
 });
 
@@ -46,6 +49,9 @@ describe("what raises one (N2)", () => {
   it("a device linked (AC13)", () => {
     expect(raises({ kind: "linked" })).toBe(true);
   });
+  it("a usage notice the hub wrote (S4): always", () => {
+    expect(raises({ kind: "usage" })).toBe(true);
+  });
 });
 
 describe("attending (N3, the product lane's amendment 3)", () => {
@@ -55,6 +61,11 @@ describe("attending (N3, the product lane's amendment 3)", () => {
     expect(isAttending({ attending: false, at: NOW }, NOW)).toBe(false);
     expect(anyAttending([{ attending: false, at: NOW }, { attending: true, at: NOW - 1000 }], NOW)).toBe(true);
     expect(anyAttending([], NOW)).toBe(false);
+  });
+  it("a usage notification is suppressed while he is attending, like a Decision (S4); a linked one never is", () => {
+    expect(suppressedWhileAttending("usage")).toBe(true);
+    expect(suppressedWhileAttending("decision")).toBe(true);
+    expect(suppressedWhileAttending("linked")).toBe(false);
   });
 });
 

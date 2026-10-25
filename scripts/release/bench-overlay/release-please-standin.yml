@@ -1,0 +1,35 @@
+  # BENCH: this job stands in for Release Please. The org does not let Actions open pull requests and the bench has no
+  # release app, so the real job cannot run here. It makes what Release Please makes with draft and force-tag-creation:
+  # the tag on this commit, then a draft release for it, and gives the same four outputs. Every job after it is the
+  # pipeline's own. The version is the one the overlay script was given (--version): a published release in the bench
+  # is immutable and locks its tag, so each run takes the next free one.
+  release-please:
+    needs: signers
+    if: needs.signers.outputs.ready == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    outputs:
+      release_created: ${{ steps.cut.outputs.release_created }}
+      tag_name: ${{ steps.cut.outputs.tag_name }}
+      sha: ${{ steps.cut.outputs.sha }}
+      version: ${{ steps.cut.outputs.version }}
+    steps:
+      - id: cut
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          version=__VERSION__
+          tag="v${version}"
+          gh api "repos/${GITHUB_REPOSITORY}/git/refs" -f "ref=refs/tags/${tag}" -f "sha=${GITHUB_SHA}" >/dev/null
+          gh release create "$tag" --draft --verify-tag --title "$tag (bench)" --notes "Release bench run. Not a product: nothing should install from this."
+          {
+            echo "release_created=true"
+            echo "tag_name=${tag}"
+            echo "sha=${GITHUB_SHA}"
+            echo "version=${version}"
+          } >> "$GITHUB_OUTPUT"
+

@@ -79,7 +79,7 @@ describe("pushes", () => {
     await hub.post("/api/pair/verify", { flowId: options.flowId, response: { id: "x", type: "public-key", response: {} } });
     await wait(1300);
     await hub.notifications.settled();
-    expect(hub.pushes).toEqual([{ endpoint: "https://fcm.googleapis.com/fcm/send/abc", payload: { kind: 2, decisions: 0, workers: 0, linked: 1, alerts: 0 } }]);
+    expect(hub.pushes).toEqual([{ endpoint: "https://fcm.googleapis.com/fcm/send/abc", payload: { kind: 2, decisions: 0, workers: 0, linked: 1, alerts: 0, usage: 0 } }]);
     expect(hub.store.audit().find(a => a.type === "NotificationSent")?.body).toMatchObject({ kind: "linked", devices: 1 });
   });
   const decide = (ids: string[]) => hub.notifications.board(ids.map(id => ({ id, status: "open", need: "decision" })));
