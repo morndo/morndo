@@ -131,6 +131,18 @@ describe("morndo lanes peek --lines past the screen, on the alternate screen (T-
     expect(r.err).toBe("");
   });
 
+  it("reads the transcript through the fleet's transcript.size and transcript.read ops, on the lane's node, as the lanes client", async () => {
+    // Through the client socket it was started with, so that socket's scope decides (a worker socket is refused both, below).
+    await start();
+    const before = fleet.calls.length;
+    const r = await lanes(["peek", "alt", "--lines", "100"]);
+    expect(r.code, r.err).toBe(0);
+    const ops = fleet.calls.slice(before).filter(c => c.op.startsWith("transcript."));
+    expect(ops.map(c => c.op)).toEqual(["transcript.size", "transcript.read"]);
+    expect(ops.every(c => c.node === "pc" && c.args && (c.args as { sessionId?: string }).sessionId === "s-alt")).toBe(true);
+    expect(new Set(fleet.clients)).toEqual(new Set(["lanes"]));
+  });
+
   it("keeps only the last N lines of that text, and redacts key material in it", async () => {
     await start();
     const r = await lanes(["peek", "alt", "--lines", "5"]);
