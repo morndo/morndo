@@ -63,7 +63,7 @@ describe("an older saved pool", () => {
 });
 
 describe("a pool saved before probes (slice 2) has members with no probingUntil and no failedProbes", () => {
-  it("SQLite and the in-memory store load them with null and 0, and the claim works on a loaded member", () => {
+  it("SQLite and the in-memory store load them with null and 0", () => {
     const path = file();
     const store = new SqliteKeyPoolStore(path);
     const db = new Database(path);

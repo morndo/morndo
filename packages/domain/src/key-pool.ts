@@ -9,6 +9,10 @@ export const KEY_POOL_RECHECK_MIN_MS = 3_600_000;
 export const KEY_POOL_RECHECK_MAX_MS = 7 * 86_400_000;
 export const KEY_POOL_RECHECK_DEFAULT_MS = 86_400_000;
 export const KEY_POOL_RESUME_MAX_MS = 365 * 86_400_000;
+export const KEY_PROBE_CLAIM_MS = 30_000;
+// The recorded estimate of one probe, about 10 input and 1 output token on the probe model, a margin over the Haiku
+// prices read 2026-10-25, which also covers the older dearer Haiku 4.5.
+export const KEY_PROBE_COST_USD = 0.00002;
 
 export type ExhaustedReason = "credit" | "spend-limit";
 export type FailingReason = "rejected" | "denied" | "held" | "cap";
@@ -24,8 +28,9 @@ export type Outcome =
   | { kind: "unknown" };
 export type KeyMember = {
   credential: string; joined: number; health: KeyHealth; since: number; lastChange: number;
-  nextCheck: number | null; organization: string | null;
+  nextCheck: number | null; probingUntil: number | null; failedProbes: number; organization: string | null;
 };
+export type ProbeWhy = "due" | "manual" | "suspect";
 export type Names = { connections: readonly string[]; pools: readonly string[]; deleted: readonly string[] };
 export type Standing = "ok" | "empty" | "blocked";
 export type RecoverHow = "probe" | "report" | "revive" | "rotation";
@@ -51,6 +56,7 @@ export type KeyPoolEvent =
   | { type: "KeyFailed"; member: string; reason: FailingReason; at: number }
   | { type: "KeyLimited"; member: string; retryAfterSeconds: number | null; at: number }
   | { type: "KeyRecovered"; member: string; how: RecoverHow; at: number }
+  | { type: "ProbeClaimed"; member: string; why: ProbeWhy; at: number }
   | { type: "PoolEmpty"; backAt: number | null; at: number }
   | { type: "PoolBlocked"; member: string; reason: FailingReason; at: number }
   | { type: "PoolRefilled"; at: number }
@@ -96,7 +102,9 @@ function withEvents(p: KeyPool, events: readonly KeyPoolEvent[]): KeyPool {
 }
 
 function withMember(p: KeyPool, credential: string, health: KeyHealth, at: number, nextCheck: number | null): KeyPool {
-  const members = p.members.map(m => m.credential === credential ? { ...m, health, since: at, lastChange: at, nextCheck } : m);
+  const members = p.members.map(m => m.credential === credential
+    ? { ...m, health, since: at, lastChange: at, nextCheck, probingUntil: null, failedProbes: 0 }
+    : m);
   return { ...p, members };
 }
 
@@ -183,7 +191,7 @@ export function joinKeyPool(
   }
   const member: KeyMember = {
     credential: connection.name, joined: now, health: { state: "active" }, since: now, lastChange: now,
-    nextCheck: null, organization,
+    nextCheck: null, probingUntil: null, failedProbes: 0, organization,
   };
   events.push({ type: "MemberJoined", member: connection.name, at: now, command: who.value });
   return ok(settleKeyPool(withEvents({ ...p, members: [...p.members, member], ownedOrgs }, events), now));
@@ -271,6 +279,11 @@ function cappedResume(resumeAt: number | null, now: number): number | null {
   return resumeAt;
 }
 
+// How long until the next probe. Each time a probe finds the member still dry, the wait doubles, up to a week.
+function probeInterval(failedProbes: number, policy: RotationPolicy): number {
+  return Math.min(policy.recheckEveryMs * 2 ** failedProbes, KEY_POOL_RECHECK_MAX_MS);
+}
+
 function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report"): KeyPool | null {
   switch (outcome.kind) {
     case "unknown":
@@ -281,15 +294,35 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
         retryAfterSeconds: outcome.retryAfterMs === null ? null : outcome.retryAfterMs / 1000, at: now,
       }]);
     case "ok":
-      if (member.health.state !== "exhausted" || outcome.evidence !== "messages") return null;
-      return withEvents(withMember(p, member.credential, { state: "active" }, observedAt, null), [{ type: "KeyRecovered", member: member.credential, how: via, at: now }]);
+      if (outcome.evidence !== "messages") return null;
+      if (member.health.state === "exhausted") {
+        return withEvents(withMember(p, member.credential, { state: "active" }, observedAt, null), [{ type: "KeyRecovered", member: member.credential, how: via, at: now }]);
+      }
+      if (member.health.state === "active" && via === "probe" && member.probingUntil !== null) {
+        return { ...p, members: p.members.map(m => m.credential === member.credential ? { ...m, probingUntil: null } : m) };
+      }
+      return null;
     case "exhausted": {
-      if (member.health.state !== "active") return null;
-      const resumeAt = cappedResume(outcome.resumeAt, now);
-      return withEvents(
-        withMember(p, member.credential, { state: "exhausted", reason: outcome.reason, resumeAt }, observedAt, resumeAt ?? observedAt + p.policy.recheckEveryMs),
-        [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt, at: now }],
-      );
+      if (member.health.state === "active") {
+        const resumeAt = cappedResume(outcome.resumeAt, now);
+        return withEvents(
+          withMember(p, member.credential, { state: "exhausted", reason: outcome.reason, resumeAt }, observedAt, resumeAt ?? observedAt + p.policy.recheckEveryMs),
+          [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt, at: now }],
+        );
+      }
+      // Still dry, and this answer is the probe's: not a new transition (KP11). since and lastChange stay. A report of the
+      // same refusal changes nothing, so the interval is not doubled twice.
+      if (member.health.state === "exhausted" && via === "probe") {
+        const failedProbes = member.failedProbes + 1;
+        const resumeAt = cappedResume(outcome.resumeAt, now);
+        const nextCheck = outcome.resumeAt === null ? now + probeInterval(failedProbes, p.policy) : resumeAt;
+        const health: KeyHealth = { state: "exhausted", reason: outcome.reason, resumeAt };
+        return {
+          ...p,
+          members: p.members.map(m => m.credential === member.credential ? { ...m, failedProbes, probingUntil: null, health, nextCheck } : m),
+        };
+      }
+      return null;
     }
     case "failing":
       if (member.health.state === "failing") return null;
@@ -308,6 +341,42 @@ export function reportKeyOutcome(
   const changed = applyOutcome(p, member, outcome, observedAt, now, via);
   if (!changed) return ok(p);
   return ok(settleKeyPool(changed, now));
+}
+
+// A probe is claimed before it is made. The claim and the next check are one write. A claim still in the future is
+// refused; one whose time has passed can be taken. A claim is not a health change, so since and lastChange stay.
+export function claimProbe(
+  p: KeyPool, credential: string, now: number, why: ProbeWhy,
+): Result<KeyPool, "missing" | "claimed" | "not_due" | "state"> {
+  const member = p.members.find(m => m.credential === credential);
+  if (!member) return err("missing");
+  switch (why) {
+    case "due":
+    case "manual":
+      if (member.health.state !== "exhausted") return err("state");
+      break;
+    case "suspect":
+      if (member.health.state !== "active") return err("state");
+      break;
+    default:
+      return unreachable(why);
+  }
+  if (member.probingUntil !== null && member.probingUntil > now) return err("claimed");
+  if (why === "due" && (member.nextCheck === null || member.nextCheck > now)) return err("not_due");
+  const nextCheck = why === "suspect" ? member.nextCheck : now + probeInterval(member.failedProbes, p.policy);
+  const members = p.members.map(m => m.credential === credential ? { ...m, probingUntil: now + KEY_PROBE_CLAIM_MS, nextCheck } : m);
+  return ok(withEvents({ ...p, members }, [{ type: "ProbeClaimed", member: credential, why, at: now }]));
+}
+
+// Exhausted members whose next check has arrived and that nobody is probing now, in ring order.
+export function dueMembers(p: KeyPool, now: number): string[] {
+  const names: string[] = [];
+  for (const member of p.members) {
+    if (member.health.state !== "exhausted" || member.nextCheck === null || member.nextCheck > now) continue;
+    if (member.probingUntil !== null && member.probingUntil > now) continue;
+    names.push(member.credential);
+  }
+  return names;
 }
 
 function recover(p: KeyPool, credential: string, how: "revive" | "rotation", now: number): KeyPool {

@@ -81,10 +81,11 @@ function tombstoneBody(body: string): boolean {
 }
 
 // A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
-// (the filter null).
+// (the filter null). A member saved before probes loads with probingUntil null and failedProbes 0.
 function withHistory(pool: KeyPool): KeyPool {
   const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [], filter: grant.filter ?? null }));
-  return { ...pool, grants };
+  const members = (pool.members ?? []).map(member => ({ ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0 }));
+  return { ...pool, grants, members };
 }
 
 // The same rules as the SQLite store: version 0 inserts once, a later save lands only on the version it read, and a
