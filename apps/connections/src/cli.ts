@@ -8,7 +8,7 @@ import { findPreset as presetOf, firstPartyHost, floorOf } from "./application/c
 import { loginKeyRefused } from "./application/login-key.ts";
 import { LOGIN_KEY_REFUSAL } from "./login-refusal.ts";
 import { openHome, type Opened } from "./compose.ts";
-import { fetchModelIds, launchChoice, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
+import { fetchModelIds, launchChoice, markableModel, modelMissing, sameModel, smallModel, wantedModel } from "./adapters/models.ts";
 import { turnStopper } from "./reader-gone.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 import { baseUrlProblem, childEnv, ClaudeRuntime, isStatusRefusal, isThirdPartyAnthropicBase, keysProgram, loginEnv } from "./adapters/runtime-claude.ts";
@@ -22,6 +22,7 @@ import { CursorRuntime } from "./adapters/runtime-cursor.ts";
 import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
 import { FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
+import { sendToFilter, serveFilterChannel } from "./filter-channel.ts";
 import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
@@ -113,7 +114,7 @@ morndo-keys check --pool <name>
   or rotate its key: traffic never moves to another account because one account was refused. A failed headless run is read for such a
   refusal through the agent CLI's own JSON result only (never the text the model and its tools printed), and dropped; one that ended on
   an exhausted key before doing any work (no cost, one turn) goes once more on another member. A lane reports only for its own run: with --grant
-  (the member is the grant's) or, with --lease, for the member of its own open lease; the machine's principal needs neither. A pooled run's helper is \`helper --pool <name> --grant <id>\`:
+  (the member is the grant's) or, with --lease, for the member of its own open lease; the machine's principal needs neither. A pooled run's helper is \`helper --filter <socket> --pool <name> --grant <id>\`:
   it moves the run to the next member when the one it is on is reported dry (within the 60 s cache), the helper's call cap carries over,
   and a refused helper says its word on stderr. A pool
   holds only keys of accounts you hold: every member needs --confirm-own-account, and create needs --by, who read the terms line it shows.
@@ -335,10 +336,8 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     command: process.execPath,
     args: ["--experimental-strip-types", join(import.meta.dirname, "main.ts")],
   });
-  // A pooled claude run is bound to the grant, so a later helper call can move the session. Every other run stays on its lease.
-  const helperLine = (grant === null
-    ? [keys.command, ...keys.args, "helper", "--lease", lease.id]
-    : [keys.command, ...keys.args, "helper", "--pool", grant.pool, "--grant", grant.id]).join(" ");
+  // A single-connection run stays on its lease. A pooled run's line is filled in once its filter channel is listening.
+  let helperLine = [keys.command, ...keys.args, "helper", "--lease", lease.id].join(" ");
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
@@ -364,17 +363,23 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let watch: { close(): void } | null = null;
   let relay: ReturnType<typeof guardedRelay> | null = null;
   let polling: ReturnType<typeof setInterval> | null = null;
+  let channel: { close(): Promise<void> } | null = null;
   let stopped: Error | null = null;
+  // Every key this run's filter holds: the start set, whatever the watch learns, and whatever the helper hands across.
+  const known: string[] = [];
   try {
     const secret = connection.kind === "api-key" ? await home.open(connection.ref) : "";
     // A pooled run may be moved to any member, so the filter knows every member's key, not only the first (a key the child prints
-    // after a hand-off is then redacted too). A member that joins, or whose key is rotated, after the start is learned before
-    // the next chunk is written. A member the run was handed, and that has since left, is learned from the grant. While a key
-    // the grant lent (or the grant's current member's) is missing, chunks are withheld; if that lasts, the run stops.
+    // after a hand-off is then redacted too). The helper sends the key it is about to print and waits for this run to accept it.
+    // A member that joins, or whose key is rotated, after the start is learned before the next chunk is written. A member the
+    // run was handed, and that has since left, is learned from the grant. While a key the grant lent (or the grant's current
+    // member's) is missing, chunks are withheld; if that lasts, the run stops.
     const secrets = [secret];
     const seen = new Set<string>();
-    // The watch takes the pool's and the directory's versions before the keys are read, so a change after this point is a change it learns.
-    const watching = grant === null ? null : watchPoolKeys({ db: home.db, pool: grant.pool, grant: grant.id, open: () => openHome(saved), seen });
+    // Test seam: MORNDO_FILTER_WATCH=off uses neither the store watch nor its poll (the relay's learn returns []), so only the
+    // channel can teach the filter. Default is on. The watch takes the versions before the keys are read, so a later change is learned.
+    const watchOff = saved.MORNDO_FILTER_WATCH === "off";
+    const watching = grant === null || watchOff ? null : watchPoolKeys({ db: home.db, pool: grant.pool, grant: grant.id, open: () => openHome(saved), seen });
     watch = watching;
     if (grant !== null) {
       if (connection.kind === "api-key") seen.add(connection.ref);
@@ -389,6 +394,17 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     }
     outRedactor = streamRedactor(secrets);
     errRedactor = streamRedactor(secrets);
+    for (const key of secrets) if (key !== "" && !known.includes(key)) known.push(key);
+    const remember = (more: readonly string[]): void => {
+      outRedactor.add(more);
+      errRedactor.add(more);
+      for (const key of more) if (key !== "" && !known.includes(key)) known.push(key);
+    };
+    if (grant !== null) {
+      const served = await serveFilterChannel({ add: remember });
+      channel = served;
+      helperLine = [keys.command, ...keys.args, "helper", "--filter", served.path, "--pool", grant.pool, "--grant", grant.id].join(" ");
+    }
     home.close();
     released = true;
     const hooks = {
@@ -401,10 +417,10 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       },
       proceed: () => stopper.proceed(),
     };
-    if (watching !== null) {
+    if (grant !== null) {
       const live = guardedRelay({
-        learn: () => watching.learn(),
-        add: keys => { outRedactor.add(keys); errRedactor.add(keys); },
+        learn: () => watching === null ? Promise.resolve([]) : watching.learn(),
+        add: remember,
         push: (stream, text) => (stream === "out" ? outRedactor : errRedactor).push(text),
         write: (stream, text) => { if (stream === "out") io.stdout(text); else io.stderr(text); },
         onGiveUp: error => {
@@ -420,10 +436,12 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       relay = live;
       hooks.onStdout = (chunk: string) => { live.chunk("out", chunk); };
       hooks.onStderr = (chunk: string) => { live.chunk("err", chunk); };
-      // Nothing may be printing when a key rotates and its file goes. A poll learns that key before the file is gone.
-      const timer = setInterval(() => { live.poll(); }, 150);
-      timer.unref();
-      polling = timer;
+      if (watching !== null) {
+        // Nothing may be printing when a key rotates and its file goes. A poll learns that key before the file is gone.
+        const timer = setInterval(() => { live.poll(); }, 150);
+        timer.unref();
+        polling = timer;
+      }
     }
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
@@ -450,6 +468,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     hungUp = stopper.cut() && stopper.hungUp();
     if (polling !== null) clearInterval(polling);
     await relay?.settled();
+    await channel?.close();
     if (stopped !== null) status = 1;                        // the filter gave up: the same end as a turn that was cut short
     else {
       io.stdout(outRedactor.flush());
@@ -475,7 +494,8 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
         again.keypools.closeGrant(grant.pool, grant.id);
       }
       const seen = modelFromOutput(stdout);
-      if (seen && model !== "" && !sameModel(model, seen, preset.idPatterns ?? {})) again.engines.mark(name, `model ${seen} missing`, again.now() + 3_600_000);
+      const marked = seen === null ? null : markableModel(seen, known);
+      if (marked !== null && model !== "" && !sameModel(model, marked, preset.idPatterns ?? {})) again.engines.mark(name, `model ${marked} missing`, again.now() + 3_600_000);
     } finally { if (released) again.close(); stopper.done(); }
   }
   if (refusal !== null) return { code: refusal, output, attributed };
@@ -707,8 +727,9 @@ async function helper(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<n
   } finally { home.close(); }
 }
 
-// `helper --pool P --grant G`: the pooled run's apiKeyHelper. One call asks the grant whether its member can still serve and, when it
-// cannot, moves the run. A refusal prints its word on stderr and exits 1 — never 75, because an apiKeyHelper treats every non-zero the same.
+// `helper --pool P --grant G [--filter SOCKET]`: the pooled run's apiKeyHelper. One call asks the grant whether its member can still
+// serve and, when it cannot, moves the run. With --filter, the key is printed only after that socket has accepted it. A refusal
+// prints its word on stderr and exits 1 — never 75, because an apiKeyHelper treats every non-zero the same.
 async function helperPool(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promise<number> {
   const pool = parsed.get("pool");
   const grant = parsed.get("grant");
@@ -735,7 +756,16 @@ async function helperPool(env: NodeJS.ProcessEnv, parsed: Parsed, io: Io): Promi
       io.stderr("missing\n");
       return 1;
     }
-    io.stdout(`${await home.open(connection.ref)}\n`);
+    const key = await home.open(connection.ref);
+    const filter = parsed.get("filter");
+    if (filter !== undefined) {
+      // The audit line is already written: a miss here is an over-audit, never an under-audit.
+      if (!await sendToFilter(filter, key)) {
+        io.stderr("filter_unreachable\n");
+        return 1;
+      }
+    }
+    io.stdout(`${key}\n`);
     return 0;
   } finally { home.close(); }
 }

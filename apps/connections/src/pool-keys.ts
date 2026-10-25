@@ -1,12 +1,14 @@
 // Keys a pooled run may still be handed. The filter starts with the members present at the start. A member that joins,
 // or whose key is rotated, changes the directory version or the pool version. learn() opens only the refs the filter
-// does not have yet: every member the grant has lent the run and the grant's current member, whatever their state, and
-// the other current members (a revoked one of those is skipped). A required key that does not open withholds output —
-// FilterIncomplete names that member, never the key — and is tried again; keys that did open are kept for the next
-// call that returns. A key is never logged and never put in an error here.
+// does not have yet. Required names are every name the grant has lent and the grant's member; that set only grows for
+// the life of the watch, and a later call still requires all of it when the pool or the grant can no longer be read,
+// plus whatever that call can read now. The other current members are best-effort (a revoked one of those is skipped).
+// A required name with no key Connection of morndo custody, or a required key that does not open, withholds output —
+// FilterIncomplete names that member, never the key — and is tried again. A required key already seen is done. Keys
+// that did open are kept for the next call that returns. A key is never logged and never put in an error here.
 // guardedRelay writes a chunk only after that read worked. When every try failed, the chunk is withheld (one marker
 // per stream for the stretch) and, after a bounded wait, the run is given up.
-import { findConnection, isKey } from "@morndo/domain";
+import { findConnection, isKey, type Directory, type KeyPool } from "@morndo/domain";
 import { SqliteKeyPoolStore } from "./adapters/key-pool-store-sqlite.ts";
 import { SqliteStore } from "./adapters/store-sqlite.ts";
 
@@ -89,11 +91,16 @@ export function guardedRelay(input: {
         input.write(stream, input.push(stream, text));
       });
     },
-    // A poll learns a key and nothing more: it does not start the give-up clock and it does not write.
+    // A poll learns a key and nothing more: it does not start the give-up clock and it does not write. One that worked
+    // ends a withheld stretch, so the next miss is timed and marked on its own.
     poll(): void {
       enqueue(async () => {
         const keys = await refreshed(1);
-        if (keys !== undefined && keys.length > 0) input.add(keys);
+        if (keys === undefined) return;
+        blockedSince = null;
+        marked.out = false;
+        marked.err = false;
+        if (keys.length > 0) input.add(keys);
       });
     },
     settled(): Promise<void> { return chain; },
@@ -117,27 +124,40 @@ export function watchPoolKeys(input: {
   // Keys opened by a call that then found a required key missing. The next call that returns hands them on first.
   const carry: string[] = [];
   const take = (): string[] => carry.splice(0, carry.length);
+  // Every name ever required. A call adds the grant's lent names and its member when it can read them, then requires the whole set.
+  const required = new Set<string>();
   return {
     async learn(): Promise<string[]> {
-      const next = versions();
-      if (next === signature && synced) return [];
-      // A throw from the read, or from opening the home, leaves the signature and `seen` as they were.
-      // What is wanted is worked out from this watch's own reads; a full home is opened only when there is a key to read.
-      const loaded = pools.load(input.pool);
-      const members = loaded.pool?.members ?? [];
-      const grant = loaded.pool?.grants.find(row => row.id === input.grant);
-      const directory = store.load().directory;
-      // Required: the names the grant lent, and the grant's current member, whatever state that Connection is in.
-      // Best-effort: any other current member. A revoked Connection is skipped only for those.
-      const required = new Set<string>();
+      let next: string | undefined;
+      try { next = versions(); } catch { next = undefined; }
+      if (next !== undefined && next === signature && synced) return [];
+      // A throw from opening the home leaves the signature and `seen` as they were. The pool or the directory being
+      // unreadable does not: the names already required still have to be learned. A full home is opened only when there is a key to read.
+      let pool: KeyPool | null = null;
+      let directory: Directory | null = null;
+      try { pool = pools.load(input.pool).pool; } catch { pool = null; }
+      try { directory = store.load().directory; } catch { directory = null; }
+      const grant = pool?.grants.find(row => row.id === input.grant);
       if (grant) {
         for (const name of grant.lent) required.add(name);
         required.add(grant.member);
       }
       const wanted: { ref: string; names: string[]; required: boolean }[] = [];
+      const failed: string[] = [];
+      const fail = (name: string): void => { if (!failed.includes(name)) failed.push(name); };
+      // Required: the names gathered above, whatever state that Connection is in. A missing one, or one that is not a
+      // key of morndo custody, is a failure. Best-effort: any other current member. A revoked Connection is skipped only for those.
       const consider = (name: string, must: boolean): void => {
+        if (directory === null) {
+          if (must) fail(name);
+          return;
+        }
         const connection = findConnection(directory, name);
-        if (!connection || !isKey(connection) || input.seen.has(connection.ref)) return;
+        if (!connection || !isKey(connection)) {
+          if (must) fail(name);
+          return;
+        }
+        if (input.seen.has(connection.ref)) return;
         if (!must && connection.status === "revoked") return;
         const existing = wanted.find(item => item.ref === connection.ref);
         if (existing) {
@@ -148,20 +168,22 @@ export function watchPoolKeys(input: {
         wanted.push({ ref: connection.ref, names: must ? [name] : [], required: must });
       };
       const listed = new Set<string>();
-      for (const member of members) {
+      for (const member of pool?.members ?? []) {
         listed.add(member.credential);
         consider(member.credential, required.has(member.credential));
       }
       for (const name of required) if (!listed.has(name)) consider(name, true);
       if (wanted.length === 0) {
-        signature = next;
-        synced = true;
+        if (failed.length > 0) throw new FilterIncomplete(failed);
+        if (next !== undefined) {
+          signature = next;
+          synced = true;
+        }
         return take();
       }
       const home = input.open();
       const found: string[] = [];
       const opened: string[] = [];
-      const failed: string[] = [];
       try {
         for (const item of wanted) {
           try {
@@ -169,7 +191,7 @@ export function watchPoolKeys(input: {
             opened.push(item.ref);
           } catch {
             // A best-effort key that cannot be opened is not served and is not remembered. A required one is named below.
-            if (item.required) for (const name of item.names) if (!failed.includes(name)) failed.push(name);
+            if (item.required) for (const name of item.names) fail(name);
           }
         }
       } finally {
@@ -181,8 +203,10 @@ export function watchPoolKeys(input: {
         throw new FilterIncomplete(failed);
       }
       for (const ref of opened) input.seen.add(ref);
-      signature = next;
-      synced = true;
+      if (next !== undefined) {
+        signature = next;
+        synced = true;
+      }
       return [...take(), ...found];
     },
     close(): void {

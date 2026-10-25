@@ -106,7 +106,7 @@ describe("run --pool binds its child's helper to a grant", () => {
     const { env, dir } = await world(2);
     const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0 } }));
     expect(ran.code, ran.stderr).toBe(0);
-    expect(helperOf(calls(dir)[0] as Call)).toMatch(/ helper --pool p --grant g\S+$/);
+    expect(helperOf(calls(dir)[0] as Call)).toMatch(/ helper --filter \S+ --pool p --grant g\S+$/);
   });
   it("characterisation: run --connection keeps helper --lease", async () => {
     const { env, dir } = await world(2, { pool: false });
