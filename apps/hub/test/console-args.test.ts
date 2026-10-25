@@ -36,6 +36,7 @@ const COMMANDS: { name: string; argv: string[]; usage: RegExp; refused: string[]
   { name: "agent-token", argv: ["agent-token"], usage: /usage: morndo agent-token new <name> --role manager\|worker/, refused: [
     [], ["--bogus"], ["frobnicate"],
     ["new"], ["new", "--bogus", "x", "--role", "worker"], ["new", "x"], ["new", "x", "--role", "admin"], ["new", "x", "y", "--role", "worker"],
+    ["new", "x", "--role", "worker", "--scope"], ["new", "x", "--role", "worker", "--scope", "everything"], ["new", "x", "--role", "worker", "--scope", "--bogus"],
     ["list", "--bogus"], ["list", "extra"],
     ["revoke"], ["revoke", "--bogus"], ["revoke", "a", "b"],
   ] },
@@ -94,6 +95,22 @@ describe("morndo agent-token: arguments that are right still work", () => {
     const revoked = morndo(["agent-token", "revoke", id]);
     expect(revoked.code, revoked.err).toBe(0);
     expect(revoked.out.trim()).toBe(`revoked ${id}`);
+  });
+});
+
+describe("morndo agent-token: a token's scope (U15) still goes through", () => {
+  // The usage-pool collector's own token (docs/agents/usage.md), as the e2e harnesses issue it; the parser came before
+  // --scope existed and refused it (review of #143, 2026-10-26).
+  it.each([
+    ["agent-token", "new", "pool", "--role", "worker", "--scope", "usage-pool"],
+    ["agent-token", "new", "--scope", "usage-pool", "--role", "worker", "pool"],
+  ])("%s %s %s %s %s %s %s", (...argv) => {
+    const made = morndo(argv);
+    expect(made.code, made.err).toBe(0);
+    expect(made.out).toMatch(/Token \S+ \(pool, worker, usage-pool\)/);
+  });
+  it("names --scope in the usage", () => {
+    expect(morndo(["agent-token", "--help"]).out).toMatch(/--scope usage-pool/);
   });
 });
 

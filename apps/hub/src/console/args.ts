@@ -1,14 +1,16 @@
 // `serve`, `pair`, `devices`, `revoke` and `agent-token` answer `--help` before main.ts reads settings or the database:
 // `revoke --help` is usage, not a device named "--help". A command this file does not know is left to run.
+import { AGENT_SCOPES } from "@morndo/protocol";
+
 export type ConsoleArgs =
   | { kind: "run" }
   | { kind: "help"; usage: string }
   | { kind: "refused"; command: string; why: string; synopsis: string };
 
-const AGENT_USAGE = `usage: morndo agent-token new <name> --role manager|worker
+const AGENT_USAGE = `usage: morndo agent-token new <name> --role manager|worker [--scope ${AGENT_SCOPES.join("|")}]
        morndo agent-token list
        morndo agent-token revoke <id>`;
-const AGENT_SYNOPSIS = "usage: morndo agent-token new <name> --role manager|worker | list | revoke <id>";
+const AGENT_SYNOPSIS = `usage: morndo agent-token new <name> --role manager|worker [--scope ${AGENT_SCOPES.join("|")}] | list | revoke <id>`;
 
 const asksForHelp = (args: readonly string[]) => args.includes("--help") || args.includes("-h");
 const run = (): ConsoleArgs => ({ kind: "run" });
@@ -37,7 +39,8 @@ function oneId(command: string, synopsis: string, args: readonly string[], noun:
   return run();
 }
 
-// The name and `--role` may come in either order. A word that starts with "-" is never a name.
+// The name, `--role` and any number of `--scope` (U15: the closed list's words, as main.ts reads them) may come in any
+// order. A word that starts with "-" is never a name.
 function agentNew(args: readonly string[]): ConsoleArgs {
   let role: string | undefined;
   const names: string[] = [];
@@ -47,6 +50,13 @@ function agentNew(args: readonly string[]): ConsoleArgs {
       if (role !== undefined) return refused("agent-token", `unknown option "--role".`, AGENT_SYNOPSIS);
       const value = args[i + 1];
       if (value !== undefined && !value.startsWith("-")) { role = value; i++; }
+      continue;
+    }
+    if (a === "--scope") {
+      const value = args[i + 1];
+      if (value === undefined || value.startsWith("-")) return refused("agent-token", `--scope needs one of: ${AGENT_SCOPES.join(", ")}.`, AGENT_SYNOPSIS);
+      if (!(AGENT_SCOPES as readonly string[]).includes(value)) return refused("agent-token", `unknown scope "${value}"; the scopes are: ${AGENT_SCOPES.join(", ")}.`, AGENT_SYNOPSIS);
+      i++;
       continue;
     }
     if (a.startsWith("-")) return refused("agent-token", `unknown option "${a}".`, AGENT_SYNOPSIS);
