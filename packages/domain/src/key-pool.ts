@@ -461,17 +461,20 @@ export function closeGrant(p: KeyPool, id: string, now: number): KeyPool {
   return withEvents({ ...p, grants: p.grants.filter(g => g.id !== id) }, [{ type: "GrantClosed", grant: id, at: now }]);
 }
 
-// A session the grant has served is that session's member, and the window is left as it is. Otherwise a report inside the
-// hand-off window still belongs to the member that gave the run up. Past it, the current member owns it.
-export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number, session?: string | null): Result<{ pool: KeyPool; member: string }, "missing"> {
+// A session the grant has served is that session's member, and nothing is suspected. A session it has not seen, inside
+// the hand-off window, still belongs to the member that gave the run up, and the current member is suspected when the
+// two differ. Past the window, or with no earlier member, the current member owns the report and nothing is suspected.
+export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number, session?: string | null): Result<{ pool: KeyPool; member: string; suspect: string | null }, "missing"> {
   const grant = p.grants.find(g => g.id === id);
   if (!grant) return err("missing");
   const known = session ? grant.seen.find(row => row.session === session) : undefined;
-  if (known) return ok({ pool: p, member: known.member });
+  if (known) return ok({ pool: p, member: known.member, suspect: null });
   const earlier = grant.previous;
-  if (earlier && at < earlier.movedAt + ttlMs) return ok({ pool: p, member: earlier.member });
-  if (!earlier) return ok({ pool: p, member: grant.member });
-  return ok({ pool: { ...p, grants: p.grants.map(g => g.id === id ? { ...g, previous: null } : g) }, member: grant.member });
+  if (earlier && at < earlier.movedAt + ttlMs) {
+    return ok({ pool: p, member: earlier.member, suspect: earlier.member === grant.member ? null : grant.member });
+  }
+  if (!earlier) return ok({ pool: p, member: grant.member, suspect: null });
+  return ok({ pool: { ...p, grants: p.grants.map(g => g.id === id ? { ...g, previous: null } : g) }, member: grant.member, suspect: null });
 }
 
 export function keyRotated(p: KeyPool, credential: string, now: number): KeyPool {

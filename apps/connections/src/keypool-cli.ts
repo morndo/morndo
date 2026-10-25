@@ -76,7 +76,17 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
         if (parsed.get("member") !== undefined || parsed.get("lease") !== undefined) return fail(io, "usage");
         const caller = selfId();
         if (caller === null) return fail(io, "holder");
-        return done(home.keypools.reportByGrant(need(pool), grant, outcome, home.now(), { kind: "holder", caller }), io);
+        const name = need(pool);
+        const reported = home.keypools.reportByGrant(name, grant, outcome, home.now(), { kind: "holder", caller });
+        if (reported.ok && reported.value.suspect !== null) {
+          const runtime = home.keypools.state(name)?.runtime;
+          if (runtime !== undefined) {
+            home.runtime.current = gateRuntime(home, runtime);
+            const holder = selfHolder(null);
+            if (holder) await home.keypools.probeMember(name, reported.value.suspect, { why: "suspect", holder });
+          }
+        }
+        return done(reported, io);
       }
       // With --lease the caller is a lane, and may report only for the member of that open lease, as the process that holds it or one of its
       // children; without it the caller is the principal at the machine (the same trust as every other command of this bin).

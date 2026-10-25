@@ -35,7 +35,7 @@ export type PoolView = {
 };
 export type ProbeResult = {
   member: string;
-  outcome: "recovered" | "exhausted" | "failing" | "limited" | "unknown" | "unreachable" | "declined" | "skipped";
+  outcome: "recovered" | "healthy" | "exhausted" | "failing" | "limited" | "unknown" | "unreachable" | "declined" | "skipped";
   word?: string;
 };
 
@@ -304,7 +304,7 @@ export class KeyPoolService implements ConnectionLifecycle {
     const reported = this.reportSignal(pool, member, answer.signal, at, "probe");
     if (!reported.ok) return { member, outcome: "skipped", word: reported.error.problem };
     const active = this.#deps.store.load(pool).pool?.members.find(row => row.credential === member)?.health.state === "active";
-    return probed(member, reported.value, active);
+    return probed(member, reported.value, active, input.why);
   }
 
   // One pool, or every live pool. A named member is probed now; otherwise only the members that are due, in ring order.
@@ -457,17 +457,14 @@ export class KeyPoolService implements ConnectionLifecycle {
   }
 
   attribute(pool: string, grant: string, session?: string | null): Result<string, Failure> {
-    const helper = this.#deps.helper;
-    return this.#change(pool, (current, now) => {
-      const next = attributeToGrant(current, grant, now, helper.ttlMs, session);
-      if (!next.ok) return { pool: current, result: fail("grant_missing") };
-      return { pool: next.value.pool, result: ok(next.value.member) };
-    });
+    const found = this.#attributed(pool, grant, session);
+    return found.ok ? ok(found.value.member) : found;
   }
 
   // The grant is checked before the caller, and the caller before the outcome, so a stranger's refusal is not applied.
-  // A holder's report is about the session under the grant; an operator may name that session.
-  reportByGrant(pool: string, grant: string, outcome: Outcome, observedAt: number, by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId }): Result<void, Failure> {
+  // A holder's report is about the session under the grant; an operator may name that session. A credit refusal that
+  // fell back to the hand-off window names the current member to suspect, when that member was not the one credited.
+  reportByGrant(pool: string, grant: string, outcome: Outcome, observedAt: number, by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId }): Result<{ suspect: string | null }, Failure> {
     const held = this.#deps.store.load(pool).pool?.grants.find(row => row.id === grant);
     if (!held) return fail("grant_missing");
     if (by.kind === "holder") {
@@ -475,12 +472,16 @@ export class KeyPoolService implements ConnectionLifecycle {
       if (!MARKS.has(outcome.kind)) return fail("not_allowed");
     }
     const session = by.kind === "holder" ? this.#sessionKey(held.holder, by.caller.pid) : by.session;
-    const member = this.attribute(pool, grant, session);
-    if (!member.ok) return member;
+    const found = this.#attributed(pool, grant, session);
+    if (!found.ok) return found;
     // The member the grant names has left the pool. The report is accepted and changes nothing.
-    const there = this.#deps.store.load(pool).pool?.members.some(row => row.credential === member.value) ?? false;
-    if (!there) return ok(undefined);
-    return this.report(pool, member.value, outcome, observedAt, { kind: "operator" });
+    const there = this.#deps.store.load(pool).pool?.members.some(row => row.credential === found.value.member) ?? false;
+    if (!there) return ok({ suspect: null });
+    const reported = this.report(pool, found.value.member, outcome, observedAt, { kind: "operator" });
+    if (!reported.ok) return reported;
+    const suspect = found.value.suspect;
+    const named = outcome.kind === "exhausted" && suspect !== null && found.value.member !== suspect ? suspect : null;
+    return ok({ suspect: named });
   }
 
   closeGrant(pool: string, grant: string): void {
@@ -819,6 +820,15 @@ export class KeyPoolService implements ConnectionLifecycle {
     else if (event.type === "PoolBlocked") this.#deps.alerts.raise({ kind: "pool-blocked", name: event.member, detail: event.reason });
   }
 
+  #attributed(pool: string, grant: string, session?: string | null): Result<{ member: string; suspect: string | null }, Failure> {
+    const helper = this.#deps.helper;
+    return this.#change(pool, (current, now) => {
+      const next = attributeToGrant(current, grant, now, helper.ttlMs, session);
+      if (!next.ok) return { pool: current, result: fail("grant_missing") };
+      return { pool: next.value.pool, result: ok({ member: next.value.member, suspect: next.value.suspect }) };
+    });
+  }
+
   #change<T>(name: string, step: (pool: KeyPool, now: number) => { pool: KeyPool; result: Result<T, Failure> }): Result<T, Failure> {
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       const loaded = this.#deps.store.load(name);
@@ -864,9 +874,11 @@ function probeBase(catalog: Catalog, pool: KeyPool): string {
   return runtime?.baseUrl ?? "";
 }
 
-function probed(member: string, outcome: Outcome, active: boolean): ProbeResult {
+function probed(member: string, outcome: Outcome, active: boolean, why: ProbeWhy): ProbeResult {
   switch (outcome.kind) {
-    case "ok": return { member, outcome: active ? "recovered" : "unknown" };
+    case "ok":
+      if (why === "suspect" && outcome.evidence === "messages" && active) return { member, outcome: "healthy" };
+      return { member, outcome: active ? "recovered" : "unknown" };
     case "exhausted": return { member, outcome: "exhausted" };
     case "failing": return { member, outcome: "failing" };
     case "limited": return { member, outcome: "limited" };
