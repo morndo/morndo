@@ -43,7 +43,7 @@ I'm a software engineer at a startup, and we live in Slack all day. When I thoug
 
 ## Status
 
-Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Releases are verified before anything is installed (signed files, and an updater that checks them), but none is published yet; verifying an agent's work, the proof the worker didn't produce, is designed and written down, but not built yet. This is one person's project, a few weeks old, and it is not installable by anyone else yet: from source today; from the first release by the commands in Install and update.
+Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Releases are verified before anything is installed (signed files, and an updater that checks them), but none is published yet; verifying an agent's work, the proof the worker didn't produce, is built and in a trial period: the board checks a task's pull request and CI itself and, for now, only records the Dones it would have refused (setup: `docs/agents/board.md`). This is one person's project, a few weeks old, and it is not installable by anyone else yet: from source today; from the first release by the commands in Install and update.
 
 ## Run locally
 

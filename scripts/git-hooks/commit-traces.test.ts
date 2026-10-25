@@ -291,7 +291,7 @@ describe("release-commits-verified", () => {
 
   it("lists nothing for a commit GitHub does not call verified, or signed by anyone but web-flow", () => {
     expect(list({ commit: { verification: { verified: false, reason: "unsigned" } }, committer: { login: "web-flow" } }, [GOOD_PR]).listed).toEqual([]);
-    expect(list({ commit: { verification: { verified: true } }, committer: { login: "jacksnxly" } }, [GOOD_PR]).listed).toEqual([]);
+    expect(list({ commit: { verification: { verified: true } }, committer: { login: "ada-dev" } }, [GOOD_PR]).listed).toEqual([]);
     expect(list({ commit: { verification: { verified: "true" } }, committer: { login: "web-flow" } }, [GOOD_PR]).listed).toEqual([]);
     expect(list({ commit: {}, committer: { login: "web-flow" } }, [GOOD_PR]).listed).toEqual([]);
     expect(list({ message: "No commit found for SHA", status: "422" }, [GOOD_PR]).listed).toEqual([]);
@@ -299,7 +299,7 @@ describe("release-commits-verified", () => {
 
   it("lists nothing when the commit is in no pull request, or none of them is the App's", () => {
     expect(list(GOOD_COMMIT, []).listed).toEqual([]);
-    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "jacksnxly", type: "User" } }]).listed).toEqual([]);                    // a lane's own PR on a release-please branch
+    expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "ada-dev", type: "User" } }]).listed).toEqual([]);                    // a lane's own PR on a release-please branch
     expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "morndo-release[bot]", type: "User" } }]).listed).toEqual([]);          // the name without being a Bot
     expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "dependabot[bot]", type: "Bot" } }]).listed).toEqual([]);              // another bot
     expect(list(GOOD_COMMIT, [{ ...GOOD_PR, user: { login: "x-morndo-release[bot]", type: "Bot" } }]).listed).toEqual([]);
@@ -313,7 +313,7 @@ describe("release-commits-verified", () => {
   });
 
   it("lists the commit when any one of several pull requests is the App's", () => {
-    const lane = { ...GOOD_PR, number: 7, user: { login: "jacksnxly", type: "User" } };
+    const lane = { ...GOOD_PR, number: 7, user: { login: "ada-dev", type: "User" } };
     expect(list(GOOD_COMMIT, [lane, GOOD_PR]).listed).toHaveLength(1);
   });
 

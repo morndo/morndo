@@ -47,7 +47,7 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 - One new table (migration 28), one adapter, one application service, one domain file; the board's rules D1 to D6 do
   not change.
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
-- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged), by design and not that its checks passed: that is a `ci` reference's job, which the assigner's proof list can require.
+- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged) and, since the amendment below, that the checks its base branch requires are neither failing nor running at that commit; it does not ask a repository to require checks.
 - Two trade-offs of the caps, kept on purpose. A green row stays when the forge cannot be reached (a rate limit, a timeout,
   the network), for at most an hour, without being refreshed: the Done's refresh may therefore accept a row up to an hour old
   while GitHub is unreachable; the row says `last read hh:mm UTC; the forge could not be reached since`, and an hour later
@@ -69,3 +69,35 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 - The assigner's proof list (what proof the work needs, set when the task is assigned, matched against the brief, with
   `not covered` shown for what has nothing against it) is the next decision, in the same pull request, and is not part of
   this one.
+
+## Amendment, 2026-10-25 (T-450): three Dones that still passed, closed before `on`
+
+Read from the code at 613f3853 by the product lane's review of the warn week. Each is now held in `on` and recorded as
+"would have been refused" in `warn`; the manager's override and the principal's click pass them as before. The mode stays
+`warn` by default; nothing here switches it.
+
+1. **A brief naming only the pull request while the checks run** passed, by design of the first decision. It no longer
+   does: a `pr` reference reads the commit's check runs too, but only the checks the pull request's **base branch
+   requires** hold it (decided by the manager, 2026-10-25). The required set is the union of branch protection (the
+   `protection` of `GET /repos/{r}/branches/{b}`) and the active rulesets (`GET /repos/{r}/rules/branches/{b}`), both
+   readable with read access (Metadata) and, on a public repository, without a token; read once and kept ten minutes per
+   repository and branch. A required check failing is red, running is pending, and one with **no result at all is pending
+   however old the brief is** (it never drops out: a required commit status that never reports holds the reference until the
+   manager overrides). A failing or running **optional** check is a warning on the reference (`⚠`, green state, the Done is
+   not held). **If there is no required set to go by** (the read failed, a shape was not understood, the base branch is not
+   known, or the branch requires nothing: no protection, or an empty set) every check counts as required and the line says
+   which: "required checks not readable" or "no required checks on the base branch". The gate fails closed. A read that
+   failed is not cached and the timer reads it again at its next pass, so that red does not outlive the outage. Cost: up to
+   three more forge reads per `pr` reference (the pull request's checks, and the two reads of the required set, which the
+   cache shares between tasks); a token that cannot read check runs leaves a `pr` reference unfetchable (as it already did a
+   `ci` one); a required check that is a commit status and not a check run holds the reference until overridden, because it
+   never appears among the check runs.
+   Reason: a Done over unfinished required checks is the case the gate exists for, and the assigner's `ci` item was easy
+   to leave off; an optional check should not hold it.
+2. **A `ci` reference that named only passing checks** passed while another check at the commit was red. The named
+   list still says what must exist and be green; it no longer hides a failing or running check at the same commit.
+   Skipped and neutral others are ignored. Cost: a known-flaky optional check blocks until overridden with a reason.
+3. **A brief with no code change on a task with no proof list** passed on the lane's word alone. A no-code claim is now
+   accepted only against at least one item the assigner filed; with none it reads `unchecked`. Reason: with nothing
+   listed, nothing can contradict the claim, and a lane cannot be both the claimant and the list. Cost: a research
+   task needs one list item (for example `manual: read the memo`) or a recorded override.
