@@ -62,6 +62,22 @@ describe("an older saved pool", () => {
   });
 });
 
+describe("a pool saved before probes (slice 2) has members with no probingUntil and no failedProbes", () => {
+  it("SQLite and the in-memory store load them with null and 0, and the claim works on a loaded member", () => {
+    const path = file();
+    const store = new SqliteKeyPoolStore(path);
+    const db = new Database(path);
+    db.prepare("INSERT INTO key_pool (name, version, body) VALUES (?, 1, ?)").run("before", oldBody(false, "before"));
+    db.close();
+    const loaded = store.load("before").pool;
+    expect(loaded?.members[0]).toMatchObject({ credential: "k1", probingUntil: null, failedProbes: 0 });
+    store.close();
+    const memory = new MemoryKeyPoolStore();
+    expect(memory.save(JSON.parse(oldBody(false, "beforem")) as KeyPool, 0)).toBe(true);
+    expect(memory.load("beforem").pool?.members[0]).toMatchObject({ probingUntil: null, failedProbes: 0 });
+  });
+});
+
 describe("the store waits for a lock", () => {
   it("every adapter that opens the connections database sets a busy timeout of at least a second", () => {
     const path = file();
