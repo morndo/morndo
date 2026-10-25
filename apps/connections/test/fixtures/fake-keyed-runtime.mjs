@@ -23,6 +23,15 @@ function helper() {
 function record(result, again) {
   appendFileSync(job.record, `${JSON.stringify({ key: result.key, code: result.code, stderr: result.stderr, argv, again: again === true })}\n`);
 }
+// `cmds: [{ args, input? }]`: morndo-keys commands the run's child runs before it asks again (a member joining the pool, a key rotated, a member removed),
+// as a person at the machine would; each exit code is recorded.
+function commands(answer) {
+  const base = grantForm ? parts.slice(1, -5) : parts.slice(1, -3);
+  for (const cmd of answer.cmds ?? []) {
+    const out = spawnSync(parts[0], [...base, ...cmd.args], { encoding: "utf8", timeout: 20_000, input: cmd.input ?? "" });
+    appendFileSync(`${job.record}.cmds`, `${JSON.stringify({ args: cmd.args, code: out.status ?? 1, stderr: String(out.stderr ?? "") })}\n`);
+  }
+}
 function reports(answer) {
   if (!answer.report) return;
   const tail = grantForm
@@ -35,6 +44,7 @@ function reports(answer) {
 let result = helper();
 record(result, false);
 const first = job.keys?.[result.key] ?? { exit: 0 };
+commands(first);
 reports(first);
 // `killParent`: the run is killed before it can close its lease or its grant (what a SIGKILL of the launcher leaves behind).
 if (first.killParent) process.kill(process.ppid, "SIGKILL");

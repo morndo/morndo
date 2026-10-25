@@ -37,8 +37,11 @@ const classifier: OutcomeClassifier = { classify: () => ({ kind: "unknown" }) };
 // A pool store that can fail a save, as a process killed at that point would: the write never happens and the call never returns.
 class CrashingStore extends MemoryKeyPoolStore {
   crashWhen: (() => boolean) | null = null;
+  // The next `times` saves made while `when` holds lose the version race (another writer got there first).
+  lose: { when: () => boolean; times: number } | null = null;
   override save(pool: KeyPool, version: number): boolean {
     if (this.crashWhen?.()) { this.crashWhen = null; throw new Error("crash"); }
+    if (this.lose && this.lose.times > 0 && this.lose.when()) { this.lose.times -= 1; return false; }
     return super.save(pool, version);
   }
 }
@@ -511,6 +514,62 @@ describe("fix round 1: two helper processes re-leasing a swept member do not lea
     const out = await w.pools.handOff("p", run.grant, caller);
     expect(out).toEqual({ ok: true, value: { connection: "k2", lease: theirs } });
     expect(live(w, "k2").map(l => l.id)).toEqual([theirs]);
+  });
+});
+
+describe("kp8 fix round 2: a member that leaves or is revoked does not strand the run on it", () => {
+  const after = async (how: "leave" | "revoke") => {
+    const w = await world();
+    const run = await start(w);
+    expect((await w.pools.handOff("p", run.grant, caller)).ok).toBe(true);
+    const old = grantOf(w).lease;
+    if (how === "leave") expect(w.pools.leave("p", "k1", who).ok).toBe(true);
+    else expect(w.connections.revoke("k1", who).ok).toBe(true);
+    const out = await w.pools.handOff("p", run.grant, caller);
+    return { w, run, out, old };
+  };
+  for (const how of ["leave", "revoke"] as const) {
+    it(`${how}: the next helper call moves the run to another member, closes the removed member's lease and serves the new key`, async () => {
+      const { w, out, old } = await after(how);
+      expect(out.ok && out.value.connection).toBe("k2");
+      expect(grantOf(w)).toMatchObject({ member: "k2", previous: { member: "k1" } });
+      expect(live(w, "k1")).toHaveLength(0);
+      expect(live(w, "k2")).toHaveLength(1);
+      expect(dir(w).events.some(e => e.type === "LeaseClosed" && e.lease === old && e.outcome === "handoff")).toBe(true);
+      expect(types(pool(w)).filter(t => t === "GrantMoved")).toHaveLength(1);
+      expect(served(w).at(-1)).toMatchObject({ type: "KeyServed", name: "k2" });
+    });
+  }
+  it("a report credited to the member that left is accepted and changes nothing", async () => {
+    const { w, run } = await after("leave");
+    expect(w.pools.reportByGrant("p", run.grant, dry, w.mem.clock.now(), { kind: "holder", caller: caller.id }).ok).toBe(true);
+    expect(pool(w).members.find(m => m.credential === "k2")?.health.state).toBe("active");
+  });
+  it("when no member is left the call says pool_empty and the lease of the removed member is still the run's to close", async () => {
+    const w = await world(2);
+    const run = await start(w);
+    expect(w.pools.leave("p", "k2", who).ok).toBe(true);
+    expect(w.pools.leave("p", "k1", who).ok).toBe(true);
+    const out = await w.pools.handOff("p", run.grant, caller);
+    expect(out.ok).toBe(false);
+    expect(w.pools.grantOf("p", run.grant)).toEqual({ member: "k1", lease: run.lease });
+  });
+});
+
+describe("fix round 2: one call is counted once when the grant save after a swap is lost", () => {
+  it("the retry adopts the new lease and serves it without counting the call a second time", async () => {
+    const w = await world();
+    const run = await start(w);
+    expect((await w.pools.handOff("p", run.grant, caller)).ok).toBe(true);
+    dryUp(w, "k1");
+    const swaps = granted(w);
+    w.store.lose = { when: () => granted(w) > swaps, times: 8 };
+    const out = await w.pools.handOff("p", run.grant, caller);
+    expect(out.ok && out.value.connection).toBe("k2");
+    expect(live(w, "k2")).toHaveLength(1);
+    expect(live(w, "k2")[0]?.calls).toBe(2);
+    expect(grantOf(w).window.calls).toBe(2);
+    expect(granted(w)).toBe(swaps + 1);
   });
 });
 

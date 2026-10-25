@@ -151,13 +151,21 @@ describe("kp18 fix round 1: a report from a session the grant has seen is that s
   });
 });
 
-describe("kp8 leaving takes the member's grants with it", () => {
-  it("a grant on the member that leaves is dropped, another member's grant stays", () => {
+describe("kp8 fix round 2: leaving takes the member's health, not the run's grant", () => {
+  it("a grant on the member that leaves stays, naming the member it was on, so the next helper call can hand it off", () => {
     let p = ok(openGrant(pool(), grant(), T));
     p = ok(openGrant(p, grant({ id: "gl2", member: "k3", lease: "l2" }), T));
-    const left = ok(leaveKeyPool(p, "k1", T + SEC));
-    expect(left.grants.map(g => g.id)).toEqual(["gl2"]);
-    expect(ok(leaveKeyPool(p, "k1", T + SEC, "revoked")).grants.map(g => g.id)).toEqual(["gl2"]);
+    for (const why of ["left", "revoked"] as const) {
+      const left = ok(leaveKeyPool(p, "k1", T + SEC, why));
+      expect(left.grants.map(g => [g.id, g.member])).toEqual([["gl1", "k1"], ["gl2", "k3"]]);
+      expect(left.members.map(m => m.credential)).toEqual(["k2", "k3"]);
+    }
+  });
+  it("a grant of a member that left can move to a member that is there, and keeps the one it left as previous", () => {
+    const left = ok(leaveKeyPool(ok(openGrant(pool(), grant(), T)), "k1", T + SEC));
+    const next = ok(moveGrant(left, "gl1", { member: "k2", lease: "l2", window: { calls: 2, windowStart: T }, movedAt: T + 2 * SEC }, "left", T + 2 * SEC));
+    expect(next.grants[0]).toMatchObject({ member: "k2", previous: { member: "k1" } });
+    expect(next.events.at(-1)).toEqual({ type: "GrantMoved", grant: "gl1", from: "k1", to: "k2", why: "left", at: T + 2 * SEC });
   });
 });
 

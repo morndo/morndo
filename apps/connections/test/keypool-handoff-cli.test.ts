@@ -63,7 +63,7 @@ async function world(n = 3, opts: { pool?: boolean; models?: boolean } = {}): Pr
 type Member = { credential: string; state: string; reason: string | null };
 const pools = async (env: NodeJS.ProcessEnv) => (await cli(["keypool", "list"], env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as { name: string; standing: string; lastPick: string | null; members: Member[] });
 const states = async (env: NodeJS.ProcessEnv) => (await pools(env))[0]?.members.map(m => m.state);
-type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string };
+type Answer = { exit: number; report?: string[]; rehelp?: number; killParent?: boolean; json?: Record<string, unknown>; say?: string; cmds?: { args: string[]; input?: string }[] };
 const job = (dir: string, keys: Record<string, Answer>): string => {
   const path = join(dir, "work", `job-${Math.random().toString(16).slice(2)}.json`);
   writeFileSync(path, JSON.stringify({ record: join(dir, "work", "record.jsonl"), keys }));
@@ -221,6 +221,56 @@ describe("kp12 fix round 1: the output filter knows every key the run may be mov
     expect(ran.code, ran.stderr).toBe(0);
     for (const key of KEYS) expect(`${ran.stdout}${ran.stderr}`).not.toContain(key);
     expect(ran.stdout).toContain("[redacted]");
+  });
+});
+
+describe("kp12 fix round 2: the output filter learns the key of a member the run is handed to, whenever it joined or was rotated", () => {
+  const NEW_KEY = "sk-ant-synthetic-pool-key-0009";
+  const cmdsOf = (dir: string): { args: string[]; code: number; stderr: string }[] => {
+    try { return readFileSync(join(dir, "work", "record.jsonl.cmds"), "utf8").trim().split("\n").map(line => JSON.parse(line) as { args: string[]; code: number; stderr: string }); } catch { return []; }
+  };
+  const dry = (member: string) => ({ args: ["keypool", "report", "p", "--member", member, "--outcome", "exhausted"] });
+  const quiet = (out: Out) => `${out.stdout}${out.stderr}`;
+  it("a member that joined the pool after the run started: its key, printed after the hand-off, is redacted", async () => {
+    const { env, dir } = await world(3, { pool: false });
+    expect((await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", "owner", "--confirm-own-account", "k1", "k2"], env)).code).toBe(0);
+    const ran = await run(env, dir, job(dir, {
+      [KEYS[0]]: { exit: 0, cmds: [{ args: ["keypool", "add", "p", "k3", "--confirm-own-account"] }, dry("k1"), dry("k2")], rehelp: 1 },
+      [KEYS[2]]: { exit: 0, say: `my key is ${KEYS[2]}` },
+    }));
+    expect(cmdsOf(dir).map(c => c.code)).toEqual([0, 0, 0]);
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[2]]);
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of KEYS) expect(quiet(ran)).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
+  });
+  it("a member whose key was rotated after the run started: the new key, printed after the hand-off, is redacted", async () => {
+    const { env, dir } = await world(2);
+    const ran = await run(env, dir, job(dir, {
+      [KEYS[0]]: { exit: 0, cmds: [{ args: ["rotate", "k2"], input: NEW_KEY }, dry("k1")], rehelp: 1 },
+      [NEW_KEY]: { exit: 0, say: `my key is ${NEW_KEY}` },
+    }));
+    expect(cmdsOf(dir).map(c => c.code)).toEqual([0, 0]);
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], NEW_KEY]);
+    expect(ran.code, ran.stderr).toBe(0);
+    for (const key of [...KEYS, NEW_KEY]) expect(quiet(ran)).not.toContain(key);
+    expect(ran.stdout).toContain("[redacted]");
+  });
+});
+
+describe("kp8 fix round 2: a member removed while the run is on it does not end the run's keys", () => {
+  it("the next helper call hands the run to another member, and every lease the run took is closed at its end", async () => {
+    const { env, dir } = await world(3);
+    const ran = await run(env, dir, job(dir, {
+      [KEYS[0]]: { exit: 0, cmds: [{ args: ["keypool", "remove", "p", "k1"] }], rehelp: 1 },
+      [KEYS[1]]: { exit: 0 },
+    }));
+    expect(ran.code, ran.stderr).toBe(0);
+    expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[1]]);
+    const all = await events(env);
+    expect(all.filter(e => e.type === "LeaseGranted")).toHaveLength(2);
+    expect(all.filter(e => e.type === "LeaseClosed" || e.type === "LeaseLost")).toHaveLength(2);
+    expect(await states(env)).toEqual(["active", "active"]);
   });
 });
 
