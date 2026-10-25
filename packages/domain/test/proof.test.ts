@@ -190,8 +190,23 @@ describe("the proof state (B14, B15)", () => {
   });
 
   it("proofOf: noCode alone is attested only, and the gate accepts it", () => {
-    expect(proofOf(brief({ refs: [], attested: [{ kind: "manual", how: "read the diff" }], noCode: "an analysis, no code changed" }), []))
+    const b = brief({ refs: [], attested: [{ kind: "manual", how: "read the diff" }], noCode: "an analysis, no code changed" });
+    const item = { spec: "manual: read the diff", kind: "manual" as const, repo: null, text: "read the diff", by: "assigner" as const };
+    expect(proofOf(b, [], [], [item]))
       .toEqual({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" });
+  });
+
+  // T-450 case 3: a claim of no code change is the lane's word, so it is accepted only against a proof list the assigner
+  // filed (a lane's own items are its word too); with none, nothing but the lane vouches for it.
+  it("proofOf: noCode is not accepted without a proof list from the assigner (T-450)", () => {
+    const b = brief({ refs: [], attested: [{ kind: "manual", how: "read the memo" }], noCode: "an analysis, no code changed" });
+    const item = (by: "assigner" | "lane") => ({ spec: "manual: read the memo", kind: "manual" as const, repo: null, text: "read the memo", by });
+    const none = proofOf(b, [], [], []);
+    expect(none).toEqual({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: no code change claimed, and the assigner listed no proof to check it against" });
+    expect(proofOf(b, [], [], [item("lane")])).toEqual(none);                                     // the lane's own list does not vouch for itself
+    expect(proofOf(b, [], [], [item("assigner")])).toEqual({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" });
+    // and a no-code brief with no attested item for the assigner's item is still not covered, as before
+    expect(proofOf(brief({ refs: [], noCode: "an analysis" }), [], [], [item("assigner")]).accepts).toBe(false);
   });
 
   it("proofOf: no code change does not stand for a task that has a merge record", () => {
@@ -199,7 +214,8 @@ describe("the proof state (B14, B15)", () => {
     const proofOfMerges = proofOf as (brief: ProofBrief | null, results: readonly RefResult[], merges?: readonly { repo: string; sha: string }[]) => ReturnType<typeof proofOf>;
     expect(proofOfMerges(b, [], [{ repo: "acme/shop", sha: SHA }]))
       .toEqual({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: no code change claimed, but the task has a merge record (acme/shop)" });
-    expect(proofOf(b, [])).toEqual({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" });
+    const item = { spec: "manual: read the diff", kind: "manual" as const, repo: null, text: "read the diff", by: "assigner" as const };
+    expect(proofOf(b, [], [], [item])).toEqual({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" });
   });
 
   it("proofOf: a ref with no result is pending, a stale row for a ref not in the brief is ignored, unfetchable beats pending, failing beats unfetchable", () => {
@@ -349,6 +365,42 @@ describe("judging a reference against what the forge said (B14)", () => {
     expect(judgeCi(star, [], true)).toEqual({ state: "pending", detail: "no checks reported yet" });
     expect(judgeCi(star, [], false)).toEqual({ state: "missing", detail: "no checks found" });
     expect(judgeCi(star, [run({ conclusion: "skipped" }), run({ id: 2, name: "lint", conclusion: "neutral" })], false)).toEqual({ state: "missing", detail: "no check ran" });
+  });
+
+  // T-450 case 2: a ci reference that names some checks is judged on those, and a commit that has another check failing
+  // or still running is not green either (the named list narrows what must exist, never what may be red).
+  it("judgeCi: named checks all green but another check at the commit failed or is running is not green (T-450)", () => {
+    const ci = value(parseProofRef(`acme/shop@${SHA}:ci`)) as Parameters<typeof judgeCi>[0];
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "e2e", conclusion: "failure", url: RUN_URL })], false))
+      .toEqual({ state: "red", detail: `another check "e2e" failed ${RUN_URL}` });
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "e2e", status: "in_progress", conclusion: null })], false))
+      .toEqual({ state: "pending", detail: `another check "e2e" in progress` });
+    // red beats pending among the others; a skipped other is no evidence either way; named-check failures keep their own word
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "a", status: "queued", conclusion: null }), run({ id: 3, name: "b", conclusion: "timed_out" })], false).state).toBe("red");
+    expect(judgeCi(ci, [run({ name: "ci" }), run({ id: 2, name: "e2e", conclusion: "skipped" }), run({ id: 3, name: "x", conclusion: "success" })], false)).toEqual({ state: "green", detail: null });
+    expect(judgeCi(ci, [run({ name: "ci", conclusion: "failure" }), run({ id: 2, name: "e2e", status: "in_progress", conclusion: null })], false).detail).toBe(`"ci" failed`);
+    // a selector by id names its run too: the other checks are the rest
+    const byId = value(parseProofRef(`acme/shop@${SHA}:id=1`)) as Parameters<typeof judgeCi>[0];
+    expect(judgeCi(byId, [run({ id: 1 }), run({ id: 2, name: "e2e", conclusion: "failure" })], false).state).toBe("red");
+  });
+
+  // T-450 case 1: a pull request reference is green only at the commit it names, and that commit's checks must not be
+  // failing or still running. A commit no check has reported on is pending while the brief is young, and after that a
+  // repository with no checks, which the pull request reference does not ask to have any.
+  it("judgePr: green pull request whose commit has a check running or failed is pending or red (T-450)", () => {
+    const ref = value(parseProofRef(`acme/shop#42@${SHA}`)) as Parameters<typeof judgePr>[0];
+    const checks = (runs: CheckRunFacts[], young = false) => ({ runs, young });
+    expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci", status: "in_progress", conclusion: null })])))
+      .toEqual({ state: "pending", detail: `checks: "ci" in progress` });
+    expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci" }), run({ id: 2, name: "lint", conclusion: "failure", url: RUN_URL })])))
+      .toEqual({ state: "red", detail: `checks: "lint" failed ${RUN_URL}` });
+    expect(judgePr(ref, prFacts(), [], checks([run({ name: "ci" })]))).toEqual({ state: "green", detail: null });
+    expect(judgePr(ref, prFacts(), [], checks([], true))).toEqual({ state: "pending", detail: "checks: no checks reported yet" });
+    expect(judgePr(ref, prFacts(), [], checks([], false))).toEqual({ state: "green", detail: null });          // no checks exist for it
+    expect(judgePr(ref, prFacts(), [], checks([run({ conclusion: "skipped" })]))).toEqual({ state: "green", detail: null });
+    // the pull request's own verdicts come first: a moved head is a mismatch whatever the checks say
+    expect(judgePr(ref, prFacts({ headSha: MOVED }), [], checks([run({ conclusion: "failure" })])).state).toBe("mismatch");
+    expect(judgePr(ref, prFacts({ state: "closed", merged: false }), [], checks([])).state).toBe("red");
   });
 
   it("judgeCi: a run address is kept only when it is a github.com one", () => {

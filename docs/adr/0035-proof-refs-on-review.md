@@ -47,7 +47,7 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 - One new table (migration 28), one adapter, one application service, one domain file; the board's rules D1 to D6 do
   not change.
 - The hub makes outbound calls to `api.github.com` built from validated parts only, against a repository allowlist.
-- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged), by design and not that its checks passed: that is a `ci` reference's job, which the assigner's proof list can require.
+- A green check proves the commit passed, not that it holds the work: the reviewer still reads the diff. Likewise a green `pr` reference proves the pull request is at that commit (open or merged) and, since the amendment below, that the commit's checks are neither failing nor running; it does not ask a repository to have checks.
 - Two trade-offs of the caps, kept on purpose. A green row stays when the forge cannot be reached (a rate limit, a timeout,
   the network), for at most an hour, without being refreshed: the Done's refresh may therefore accept a row up to an hour old
   while GitHub is unreachable; the row says `last read hh:mm UTC; the forge could not be reached since`, and an hour later
@@ -69,3 +69,23 @@ cannot be refused, and did not happen at all for a turn that ended DONE with a w
 - The assigner's proof list (what proof the work needs, set when the task is assigned, matched against the brief, with
   `not covered` shown for what has nothing against it) is the next decision, in the same pull request, and is not part of
   this one.
+
+## Amendment, 2026-10-25 (T-450): three Dones that still passed, closed before `on`
+
+Read from the code at 613f3853 by the product lane's review of the warn week. Each is now held in `on` and recorded as
+"would have been refused" in `warn`; the manager's override and the principal's click pass them as before. The mode stays
+`warn` by default; nothing here switches it.
+
+1. **A brief naming only the pull request while the checks run** passed, by design of the first decision. It no longer
+   does: a `pr` reference reads the commit's check runs as well. Failing is red, running is pending, and none yet is
+   pending while the brief is young (YOUNG_MS) and green after (a repository without checks). Reason: a Done over
+   unfinished checks is the case the gate exists for, and the assigner's `ci` item was easy to leave off.
+   Cost: one more forge request per `pr` reference, and a token that cannot read check runs now leaves a `pr`
+   reference unfetchable (as it already did a `ci` one).
+2. **A `ci` reference that named only passing checks** passed while another check at the commit was red. The named
+   list still says what must exist and be green; it no longer hides a failing or running check at the same commit.
+   Skipped and neutral others are ignored. Cost: a known-flaky optional check blocks until overridden with a reason.
+3. **A brief with no code change on a task with no proof list** passed on the lane's word alone. A no-code claim is now
+   accepted only against at least one item the assigner filed; with none it reads `unchecked`. Reason: with nothing
+   listed, nothing can contradict the claim, and a lane cannot be both the claimant and the list. Cost: a research
+   task needs one list item (for example `manual: read the memo`) or a recorded override.

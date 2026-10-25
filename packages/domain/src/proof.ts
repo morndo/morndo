@@ -307,7 +307,11 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
   if (brief.refs.length === 0) {
     if (brief.noCode !== "" && merges.length > 0)
       return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: `proof: no code change claimed, but the task has a merge record (${merges[0]!.repo})` }, list, brief, results);
-    if (brief.noCode !== "") return overlayList({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" }, list, brief, results);
+    if (brief.noCode !== "") {
+      if (!list.some(i => i.by === "assigner"))
+        return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: no code change claimed, and the assigner listed no proof to check it against" }, list, brief, results);
+      return overlayList({ kind: "attested_only", green: 0, total: 0, accepts: true, line: "proof: attested only (no code change)" }, list, brief, results);
+    }
     return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" }, list, brief, results);
   }
   // The merge record's repository, re-applied at every reading (not only when the brief was filed): a merge recorded
@@ -367,8 +371,15 @@ export type Judged = { state: RefState; detail: string | null };
 
 // A pull request reference is green at the commit it names — the head, or the merge commit once it was merged (the head
 // moves on past it). Closed without a merge is the one thing a pull request is red at; a head somewhere else is a
-// mismatch, both shas said, so the person can see which moved.
-export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts, merges?: readonly { repo: string; sha: string }[]): Judged {
+// mismatch, both shas said, so the person can see which moved. When `checks` is given and the pull request itself is
+// green, that commit's check runs are judged like `checks: "*"` on a ci reference, except an empty report after the
+// brief is no longer young, or only skipped runs, reads as green — the reference does not ask a repository to have checks.
+export function judgePr(
+  ref: Extract<ProofRef, { kind: "pr" }>,
+  facts: PrFacts,
+  merges?: readonly { repo: string; sha: string }[],
+  checks?: { runs: readonly CheckRunFacts[]; young: boolean },
+): Judged {
   if (facts.state === "closed" && !facts.merged) return { state: "red", detail: "closed without merge" };
   const taskMerges = (merges ?? []).filter(m => m.repo.toLowerCase() === ref.repo.toLowerCase());
   if (facts.merged && facts.mergeSha !== null && taskMerges.length > 0) {
@@ -384,8 +395,12 @@ export function judgePr(ref: Extract<ProofRef, { kind: "pr" }>, facts: PrFacts, 
   }
   const at = facts.headSha.toLowerCase().startsWith(ref.sha)
     || (facts.merged && facts.mergeSha !== null && facts.mergeSha.toLowerCase().startsWith(ref.sha));
-  return at ? { state: "green", detail: null }
-    : { state: "mismatch", detail: `head is ${facts.headSha.slice(0, 7)}, ref says ${ref.sha.slice(0, 7)}` };
+  if (!at) return { state: "mismatch", detail: `head is ${facts.headSha.slice(0, 7)}, ref says ${ref.sha.slice(0, 7)}` };
+  if (checks === undefined) return { state: "green", detail: null };
+  const onCommit = judgeWildcardChecks(checks.runs, checks.young, "pr");
+  if (onCommit.state === "green") return { state: "green", detail: null };
+  if (onCommit.detail === "no checks reported yet") return { state: "pending", detail: detailLine("checks: no checks reported yet") };
+  return { state: onCommit.state, detail: detailLine(`checks: ${onCommit.detail}`) };
 }
 
 // One check run's own verdict: still running is pending, success is green, each failure has its word, and a run that
@@ -432,29 +447,57 @@ const judgeSelector = (label: string, runs: readonly CheckRunFacts[], young: boo
   return { state: "missing", detail: detailLine(`${label} ${w.verdict.word}`) };        // a check that did not run is not evidence
 };
 
+// `checks: "*"` on a commit: some check must have run and none may fail or still be running. `mode` `ci`: no runs after
+// the brief is no longer young, or only skipped runs, reads as missing; `pr`: the same reads as green.
+const judgeWildcardChecks = (runs: readonly CheckRunFacts[], young: boolean, mode: "ci" | "pr"): Judged => {
+  if (runs.length === 0) {
+    if (young) return { state: "pending", detail: "no checks reported yet" };
+    return mode === "pr" ? { state: "green", detail: null } : { state: "missing", detail: "no checks found" };
+  }
+  const verdicts = runs.map(runVerdict);
+  const first = (state: RunVerdict["state"]) => verdicts.findIndex(v => v.state === state);
+  const at = (state: RunVerdict["state"]) => first(state) === -1 ? null : { i: first(state)!, verdict: verdicts[first(state)!]! };
+  const red = at("red");
+  if (red !== null) return { state: "red", detail: detailLine(withUrl(`"${runs[red.i]!.name}" ${red.verdict.word}`, runs[red.i]!.url)) };
+  const pending = at("pending");
+  if (pending !== null) return { state: "pending", detail: detailLine(`"${runs[pending.i]!.name}" ${pending.verdict.word}`) };
+  if (at("green") !== null) return { state: "green", detail: null };
+  return mode === "pr" ? { state: "green", detail: null } : { state: "missing", detail: "no check ran" };
+};
+
+const runMatchesSelector = (run: CheckRunFacts, check: CheckSelector): boolean =>
+  "name" in check ? run.name === check.name : run.id === check.id;
+
+const judgeOtherChecks = (runs: readonly CheckRunFacts[]): Selected => {
+  let worst: { verdict: RunVerdict; run: CheckRunFacts } | null = null;
+  for (const run of runs) {
+    const verdict = runVerdict(run);
+    if (verdict.state !== "red" && verdict.state !== "pending") continue;
+    if (worst === null || RUN_RANK[verdict.state] < RUN_RANK[worst.verdict.state]) worst = { verdict, run };
+  }
+  if (worst === null) return { state: "green", detail: null };
+  const label = `another check "${worst.run.name}"`;
+  if (worst.verdict.state === "red") return { state: "red", detail: detailLine(withUrl(`${label} ${worst.verdict.word}`, worst.run.url)) };
+  return { state: "pending", detail: detailLine(`${label} ${worst.verdict.word}`) };
+};
+
 // B14: a commit's checks, judged. Named selectors match runs by exact name or by the forge's own number; `checks: "*"`
 // asks only that some check ran and none failed or is still running. `young`: the brief is young, so a check that has
 // not appeared yet is on its way (pending), not missing.
 export function judgeCi(ref: Extract<ProofRef, { kind: "ci" }>, runs: readonly CheckRunFacts[], young: boolean): Judged {
-  if (ref.checks === "*") {
-    if (runs.length === 0) return young ? { state: "pending", detail: "no checks reported yet" } : { state: "missing", detail: "no checks found" };
-    const verdicts = runs.map(runVerdict);
-    const first = (state: RunVerdict["state"]) => verdicts.findIndex(v => v.state === state);
-    const at = (state: RunVerdict["state"]) => first(state) === -1 ? null : { i: first(state)!, verdict: verdicts[first(state)!]! };
-    const red = at("red");
-    if (red !== null) return { state: "red", detail: detailLine(withUrl(`"${runs[red.i]!.name}" ${red.verdict.word}`, runs[red.i]!.url)) };
-    const pending = at("pending");
-    if (pending !== null) return { state: "pending", detail: detailLine(`"${runs[pending.i]!.name}" ${pending.verdict.word}`) };
-    if (at("green") !== null) return { state: "green", detail: null };
-    return { state: "missing", detail: "no check ran" };
-  }
+  if (ref.checks === "*") return judgeWildcardChecks(runs, young, "ci");
+  const selectors = ref.checks;
   let best: Selected | null = null;
-  for (const check of ref.checks) {
+  for (const check of selectors) {
     const label = "name" in check ? `"${check.name}"` : `id ${check.id}`;
-    const judged = judgeSelector(label, runs.filter(r => ("name" in check ? r.name === check.name : r.id === check.id)), young);
+    const judged = judgeSelector(label, runs.filter(r => runMatchesSelector(r, check)), young);
     if (best === null || SELECTOR_RANK[judged.state] < SELECTOR_RANK[best.state]) best = judged;
   }
-  return best!;
+  const matched = runs.filter(r => selectors.some(c => runMatchesSelector(r, c)));
+  const others = runs.filter(r => !matched.includes(r));
+  const other = judgeOtherChecks(others);
+  if (best === null || SELECTOR_RANK[other.state] < SELECTOR_RANK[best.state]) return other;
+  return best;
 }
 
 // What applyAction judges a Done against (B16): the brief as filed, the results the hub read for its references, and

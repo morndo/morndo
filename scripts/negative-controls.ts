@@ -4767,6 +4767,16 @@ export const CONTROLS: Control[] = [
   { id: "t415s7r2-plan-omitted-drops-family", task: "T-415", file: "apps/hub/src/application/usage-service.ts",
     find: "plan: plan ?? planWatch.baseline?.plan ?? null, identity,", replace: "plan, identity,",
     run: ["apps/hub/test/usage-cursor-periods.test.ts"] },
+  // ---- Proof of work gate gaps (board T-450): a pull request's checks, the other checks of a ci reference, a no-code claim.
+  { id: "t450-pr-reads-its-checks", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  if (checks === undefined) return { state: "green", detail: null };`, replace: `  return { state: "green", detail: null };`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "checks:" },
+  { id: "t450-ci-other-checks", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `  if (best === null || SELECTOR_RANK[other.state] < SELECTOR_RANK[best.state]) return other;`, replace: `  if (best === null) return other;`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "another check" },
+  { id: "t450-no-code-needs-the-assigner", task: "T-450", file: "packages/domain/src/proof.ts",
+    find: `      if (!list.some(i => i.by === "assigner"))`, replace: `      if (false)`,
+    run: ["packages/domain/test/proof.test.ts", "apps/hub/test/proof-service.test.ts"], expect: "the assigner listed no proof" },
 ];
 
 // ---- the runner

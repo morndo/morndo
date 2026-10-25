@@ -254,7 +254,9 @@ export class ProofService {
     try {
       if (ref.kind === "pr") {
         const answer = await forge.pullRequest(ref.repo, ref.number);
-        return answer.ok ? judgePr(ref, answer.value, merges) : this.#unread(answer.failure);
+        if (!answer.ok) return this.#unread(answer.failure);
+        const checks = await forge.checkRuns(ref.repo, ref.sha);
+        return checks.ok ? judgePr(ref, answer.value, merges, { runs: checks.value, young }) : this.#unread(checks.failure);
       }
       const answer = await forge.checkRuns(ref.repo, ref.sha);
       return answer.ok ? judgeCi(ref, answer.value, young) : this.#unread(answer.failure);

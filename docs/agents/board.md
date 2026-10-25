@@ -21,6 +21,25 @@ the agents' prompts. The blocks are printed by `morndo-board prompt --role manag
    block in every worker lane's (a `CLAUDE.md`, an agent definition, a system prompt: wherever that engine takes
    standing instructions). Paste it, or generate it: `morndo-board prompt --role worker >> CLAUDE.md`.
 
+4. **Proof of work: which repositories the board checks** (settings of the hub process, read once at start: set them in
+   the hub's environment, then restart it). A brief's `--pr` and `--ci` references are fetched by the hub itself
+   ([ADR-0035](../adr/0035-proof-refs-on-review.md)), and only from repositories the settings list:
+   - `MORNDO_PROOF_REPOS`: `owner/repository` names, comma-separated, for example `acme/shop,acme/api`. **Unset, the
+     default is only `morndo/morndo`**, so on your own install every brief naming your repository is refused when it is
+     filed (`ref_repo`) until you set this. A name must be whole (`owner/repo`); a hub given a bad one does not start.
+     Task data never adds a repository: a merge record or a lane's words cannot widen the list.
+   - `MORNDO_PROOF_GATE`: `off`, `warn` (the default) or `on`. In `warn` a Done is accepted and the Done event records
+     what the board saw, with "would have been refused" where `on` would have held it; `on` refuses it
+     (`proof_not_green`) unless the manager overrides with a reason.
+   - `MORNDO_GITHUB_TOKEN_FILE`: an absolute path to a mode-600 file holding a read-only token, for private
+     repositories. Without it a private repository's references read `not checked`, and the gate holds a Done over them
+     like any reference that is not green.
+
+   The gate holds a Done over: a reference that is not green (a pull request whose commit has a check failing or still
+   running; a `ci` reference whose named checks passed while another check at that commit failed or is running);
+   a proof-list item nothing in the brief answers; and a brief that claims no code change on a task whose assigner
+   listed no proof (the claim is the lane's word, so it needs the assigner's list to be checked against).
+
 What a lane may do is the hub's rule, not the prompt's: a worker token can't assign or mark done whatever the prompt
 says, and the record keeps who changed what. The prompt is there so the agents keep the board true without being
 told each time.
