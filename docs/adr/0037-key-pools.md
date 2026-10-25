@@ -1,8 +1,8 @@
 # ADR-0037: Key pools: several API keys of one provider behind one name, rotated only on exhausted credit
 
-- **Status:** Accepted with the pull request that adds slice 1, 2026-10-25.
+- **Status:** Accepted with the pull request that adds slice 1, 2026-10-25; amended by slice 2 (decisions 12 to 18).
 - **Builds on:** ADR-0018 (Connections, the lease gate, the sealed store, CN1, CN4, CN5, CN8, CN15), ADR-0022 (the store and the Use gate are shared; Secrets stay a separate context), ADR-0029 (the account pool, the sibling for subscriptions).
-- **Rules:** KP1 to KP15 in `docs/domain.md` (KP16 to KP19 arrive with slices 2 and 3).
+- **Rules:** KP1 to KP15 and KP17 to KP19 in `docs/domain.md` (KP16, the claimed probe, arrives with slice 3).
 - **Plan:** `docs/plans/2026-10-24-key-pools.md`, revision 3.1, reviewed twice. This ADR records what slice 1 built and the decisions the plan left to the build.
 
 ## Context
@@ -29,9 +29,17 @@
 10c. **A resume date is capped at a year from now** and is taken only from the structured result (review F5); the alert's error type is cut to 64 characters.
 11. **Revocation reaches the pool through a lifecycle hook** on `ConnectionsService` (`reserved`, `revoked`, `rotated`), and a pick heals a pool whose member was revoked behind its back.
 
-## Not in slice 1
+12. **Slice 2: a pooled `run` holds a Grant, and its helper is `helper --pool <name> --grant <id>`** (plan 3.3). The plain `helper --lease <id>` serves the key of the one Connection its lease was taken on, so a pick made at launch would hold for the whole session. For a pooled run (claude runtime) the grant is opened in the same save as the pick, and each helper call (`handOff`) reads the grant, its lease in the directory and its member's health, and moves the run to the next member when the member is exhausted or its lease's refresh is refused by the gate (budget, expiry, off, terms). The new member is gated again (CN8 runs in full, a member over budget is passed over), the old lease closes with outcome `handoff` and the new one is granted in one directory save (`swapLease`), the grant is saved after it with the pick, and `KeyServed` is written before the key is printed. A failing member or a blocked pool prints nothing and says `pool_blocked`; a helper whose authority has ended says `authority` and takes no lease, so a hand-off is no way round the call cap (KP17). A refusal is a word on stderr and exit 1 (an apiKeyHelper treats every non-zero the same). Every pooled helper call writes one `KeyServed`; `helper --lease` of a single Connection still writes none and is unchanged.
+13. **A crash between the two stores mends itself** (KP19). The directory and the pool are two writes. The order is fixed (swap, then grant with the pick, then the audit line); a crash after the swap leaves a live lease the grant does not name, which the next call adopts; a crash after the grant save leaves a lease with no audit line and nothing printed, which the next call serves. Two calls at once are serialised by the directory's version; the loser adopts. Tests inject the crash at both points and assert one live lease and one `KeyServed` per printed key.
+14. **Attribution after a hand-off is by time, and does not yet probe** (KP18). A refusal reported within one helper cache lifetime (60 s) of a move belongs to the member the run came from, so a stale refusal never marks a healthy new key. The plan adds a claimed probe of the new member for that window; it needs slice 3's probe, so until then a dry new key is found by its own next refusal after the window. A report names its grant, never a member: `keypool report <pool> --grant <id> --outcome …`, by the grant's holder or a child of it, exhausted, failing or limited only. `--grant` with `--member` or `--lease` is refused (`usage`). A lane that holds a lease of a pooled run no longer knows the lease id, so the lane-report path of slice 1 now goes through the grant.
+15. **The grant id is `g` plus its first lease's id.** Lease ids are `l<seq>` of the directory and never reused, so no random source enters the service. A grant is not a capability: who may use it is the process tree (the holder or a child), as for a lease.
+16. **A pool is a routing name** (plan section 6, decision 6 of the plan). The Priority order and the role picks hold the pool's name in place of the members' (`foldPool`), the engine layer gets a provider named after the pool (`morndo-keys run --pool P --`, probe `morndo-keys check --pool P`) and the members' providers are registered off. Leaving, deleting the pool and revoking the last member re-derive through `unfoldPool` and give the members back. A page priority or role save that left a pool out keeps it (`withPools`), so the page cannot drop a pool it does not yet show (its rows are slice 5). A failed engine write after the pool is saved says `saved, engine layer not updated (retry: morndo-keys keypool sync)`; `keypool sync` is the idempotent retry. The re-derivation sits behind a port (`PoolRouting`), called after the pool's own save, so the aggregate holds no engine-layer knowledge.
+17. **`check --pool P` asks whether some member could serve now and moves nothing.** It runs the same gate attempt as `check --connection` on each servable member in ring order and answers the first that passes; it saves no last pick and writes no `MemberPicked`, so a health probe by the engine layer does not turn the rotation. Exit 75 with `pool_empty`, `pool_blocked`, `terms` or the gate's word.
+18. **Grants are swept like leases.** A run closes its grant at its end; `lease`, `run` and `check` also drop the grants whose holder process is gone.
 
-Grants and the pooled helper hand-off (KP17 to KP19, slice 2), Priority and engine-layer re-derivation (slice 2), probes, the claimed recheck and the organization reader (KP16, slice 3), the `StopFailure` hook, `write-env` and sinks (slice 4), the web card (slice 5). Until slice 2 an interactive session that runs dry keeps its key for the whole session.
+## Not in slices 1 and 2
+
+Probes, the claimed recheck and the organization reader (KP16, slice 3), and with them the claimed probe KP18 names, the `StopFailure` hook, `write-env` and sinks (slice 4), the web card (slice 5). Until the `StopFailure` hook (slice 4) an interactive session has no report-back of its own: the hand-off moves it only after a report (the principal's `keypool report`, a lane's, or the run wrapper's for a headless turn).
 
 ## Alternatives
 
@@ -47,7 +55,7 @@ Grants and the pooled helper hand-off (KP17 to KP19, slice 2), Priority and engi
 
 - **Good:** two or more prepaid keys are used one after the other with no hand-switching; a dry key costs one refused request; nothing about a single key changes.
 - **Cost:** one table, one aggregate, one service, one classifier, one CLI command group, and a lifecycle hook on `ConnectionsService`.
-- **Limit:** a key that runs dry in an interactive session is served until the session ends (until slices 2 and 4).
+- **Limit:** a key that runs dry in an interactive session is served until it is reported (slice 4's hook does that by itself); after a report the loss is bounded by the helper's 60 s cache.
 - **Limit:** the hold words (`account_on_hold`, `authentication_failed`) mean a hold only on a 401, a 403 or a structured result with no status; a 400 that echoes them reads as nothing.
 - **Limit:** a record a refusal is read from is the agent CLI's own, but its `result` text for an API error is the CLI's rendering; the classifier matches the credit and spend-limit phrases in it. A different phrasing in a later CLI version reads as nothing (the key is not skipped) until the fixtures follow. A successful run, interactive session or run with another output format is never read.
 - **Limit:** keys of one organization share its rate limits and monthly cap; a pool gains nothing against a 429 or the cap.
