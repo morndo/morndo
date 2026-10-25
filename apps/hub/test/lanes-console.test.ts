@@ -87,6 +87,116 @@ describe("morndo lanes: listing and reading", () => {
   });
 });
 
+// A Claude Code session file: one JSON object a line (made-up messages; the key is made up too, built in two parts).
+const FAKE_KEY = `sk-ant-${"api03-"}${"A".repeat(40)}`;
+const jsonl = (rows: object[]) => new TextEncoder().encode(`${rows.map(r => JSON.stringify(r)).join("\n")}\n`);
+const said = (type: "user" | "assistant", content: unknown, at = "2026-10-26T10:00:00Z") => ({ type, uuid: `u-${Math.random()}`, timestamp: at, message: { role: type, content } });
+const SESSION = jsonl([
+  said("user", "first question"),
+  said("assistant", [{ type: "text", text: "answer one\nwith a second line" }]),
+  said("assistant", [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "echo TOOLINPUT-SHOULD-NOT-SHOW" } }]),
+  said("user", [{ type: "tool_result", tool_use_id: "t1", content: "TOOLOUTPUT-SHOULD-NOT-SHOW" }]),
+  said("assistant", [{ type: "thinking", thinking: "THINKING-SHOULD-NOT-SHOW" }, { type: "text", text: `key was ${FAKE_KEY} in the notes` }]),
+  said("user", "last question"),
+  said("assistant", [{ type: "text", text: "last answer" }]),
+]);
+const LABEL = /^-- transcript text .*alternate screen/;
+
+describe("morndo lanes peek --lines past the screen, on the alternate screen (T-336)", () => {
+  // Claude Code's fullscreen renderer draws on tmux's alternate screen, where tmux keeps no scrollback: the screen is all
+  // capture-pane can give, so peek reads the end of the lane's session transcript instead, as plain text.
+  let b: MemoryBackend;
+  const start = async (o: { refuse?: boolean; transcripts?: Record<string, Uint8Array> } = {}) => {
+    await fleet.close();
+    b = memoryBackend({
+      "%0": { name: "alt", cwd: "/w/alt", screen: "s1\ns2\n❯ ", sessionId: "s-alt", altScreen: true },
+      "%1": { name: "plain", cwd: "/w/plain", screen: "p1\n❯ ", sessionId: "s-plain" },
+      "%2": { name: "altshell", cwd: "/w", screen: "$ ", altScreen: true },
+    }, { transcripts: o.transcripts ?? { "s-alt": SESSION, "s-plain": SESSION } });
+    if (o.refuse) b.refuseTranscripts = true;
+    fleet = await startFakeFleet({ nodes: [localNode("pc", "aaaaaaaa", b)] });
+  };
+
+  it("prints the end of the session's messages, labelled, as N lines of plain text (no tool calls, results or thinking)", async () => {
+    await start();
+    const r = await lanes(["peek", "alt", "--lines", "100"]);
+    expect(r.code, r.err).toBe(0);
+    const [label, ...body] = r.out.trimEnd().split("\n");
+    expect(label).toMatch(LABEL);
+    expect(body).toEqual([
+      "user: first question", "assistant: answer one", "with a second line",
+      expect.stringContaining("key was "), "user: last question", "assistant: last answer",
+    ]);
+    expect(r.out).not.toMatch(/SHOULD-NOT-SHOW/);
+    expect(r.err).toBe("");
+  });
+
+  it("keeps only the last N lines of that text, and redacts key material in it", async () => {
+    await start();
+    const r = await lanes(["peek", "alt", "--lines", "5"]);
+    expect(r.code, r.err).toBe(0);
+    const [label, ...body] = r.out.trimEnd().split("\n");
+    expect(label).toMatch(LABEL);
+    expect(body).toHaveLength(5);
+    expect(body.at(-1)).toBe("assistant: last answer");
+    expect(r.out).not.toContain(FAKE_KEY);
+    expect(r.out).not.toContain("A".repeat(20));
+  });
+
+  it("reads the end of a transcript longer than one chunk, from its end", async () => {
+    const rows = Array.from({ length: 4000 }, (_, i) => said(i % 2 ? "assistant" : "user", i % 2 ? [{ type: "text", text: `reply ${i} ${"x".repeat(100)}` }] : `ask ${i}`));
+    const big = jsonl(rows);
+    expect(big.length).toBeGreaterThan(LIMITS.chunkBytes);
+    await start({ transcripts: { "s-alt": big } });
+    const r = await lanes(["peek", "alt", "--lines", "3"]);
+    expect(r.code, r.err).toBe(0);
+    const [label, ...body] = r.out.trimEnd().split("\n");
+    expect(label).toMatch(LABEL);
+    expect(body).toEqual([expect.stringContaining("reply 3997"), "user: ask 3998", expect.stringContaining("reply 3999")]);
+  });
+
+  it("--json: the text, and where it came from", async () => {
+    await start();
+    const r = await lanes(["peek", "alt", "--lines", "100", "--json"]);
+    expect(r.code, r.err).toBe(0);
+    expect(JSON.parse(r.out)).toMatchObject({ source: "transcript", truncated: false, text: expect.stringContaining("assistant: last answer") });
+  });
+
+  it("prints the screen as before when the lines asked for fit on it, or the pane is not on the alternate screen", async () => {
+    await start();
+    expect((await lanes(["peek", "alt", "--lines", "3"])).out).toBe("s1\ns2\n❯ \n");
+    const plain = await lanes(["peek", "plain", "--lines", "100"]);
+    expect(plain.out).toBe("p1\n❯ \n");
+    expect(plain.err).toBe("");
+  });
+
+  it("from a worker socket (transcript ops refused): the screen, and one line saying why there is no more", async () => {
+    await start({ refuse: true });
+    const r = await lanes(["peek", "alt", "--lines", "100"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toBe("s1\ns2\n❯ \n");
+    expect(r.err.trimEnd().split("\n")).toHaveLength(1);
+    expect(r.err).toMatch(/note: .*scrollback.*transcript.*worker socket/i);
+  });
+
+  it("a lane with no session: the screen, and a note that there is no transcript", async () => {
+    await start();
+    const r = await lanes(["peek", "altshell", "--lines", "100"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toBe("$ \n");
+    expect(r.err.trimEnd().split("\n")).toHaveLength(1);
+    expect(r.err).toMatch(/note: .*no session transcript/i);
+  });
+
+  it("a session whose transcript is gone: the screen, and a note", async () => {
+    await start({ transcripts: {} });
+    const r = await lanes(["peek", "alt", "--lines", "100"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toBe("s1\ns2\n❯ \n");
+    expect(r.err).toMatch(/note: .*transcript/i);
+  });
+});
+
 describe("morndo lanes send", () => {
   it("queues a delivery and says where it stands; 0", async () => {
     const r = await lanes(["send", "manager", "status please"]);

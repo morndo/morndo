@@ -32,7 +32,7 @@ async function lane(name: string, script: string): Promise<string> {
 async function capture(workerId: string, lines: number, attributes?: boolean) {
   const r = await h.call("pane.capture", { workerId, lines, ...(attributes !== undefined ? { attributes } : {}) });
   if (!r.ok) throw new Error(`${r.error.code}: ${r.error.message}`);
-  return r.result as { text: string | null; truncated: boolean };
+  return r.result as { text: string | null; truncated: boolean; scrollbackMissing?: true };
 }
 
 describe("pane.capture (spec §5)", () => {
@@ -79,6 +79,22 @@ describe("pane.capture (spec §5)", () => {
     const one = many.ok ? (many.result as { captures: { text: string | null }[] }).captures[0]?.text ?? "" : "";
     expect(Buffer.byteLength(JSON.stringify(one))).toBeLessThanOrEqual(LIMITS.captureBytesPerPane);
   }, 30_000);
+
+  it("says scrollbackMissing when the pane is on the alternate screen and more lines are asked for than it shows (T-336)", async () => {
+    // tmux keeps no scrollback for the alternate screen (Claude Code's fullscreen renderer draws there), so -S -N gives the
+    // screen only; a pane on its normal screen keeps its history, and a count that fits the screen is not short.
+    const alt = await lane("alt", "printf '\\033[?1049h'; seq 1 120");
+    const normal = await lane("normal", "seq 1 120");
+    expect(await until(async () => (await capture(alt, 5)).text?.includes("120") ?? false)).toBe(true);
+    expect(await until(async () => (await capture(normal, 5)).text?.includes("120") ?? false)).toBe(true);
+    const asked = await capture(alt, 200);
+    expect(asked.scrollbackMissing).toBe(true);
+    expect(asked.text?.split("\n").length).toBeLessThanOrEqual(50);          // the screen, not 200 lines
+    expect((await capture(alt, 20)).scrollbackMissing).toBeUndefined();       // 20 lines are on the 50-row screen
+    const history = await capture(normal, 100);
+    expect(history.scrollbackMissing).toBeUndefined();
+    expect(history.text?.split("\n").length).toBe(100);                      // the history past the screen is there
+  });
 
   it("answers text null for a worker id that is no lane here", async () => {
     expect(await capture("pc.0a1b2c3d.999", 10)).toEqual({ text: null, truncated: false });
