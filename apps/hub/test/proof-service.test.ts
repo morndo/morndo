@@ -201,7 +201,7 @@ describe("verifying (B14, B15)", () => {
     { id: 1, name: "ci", status: "completed", conclusion: "success" },
     { id: 2, name: "lint", status: "completed", conclusion: "failure", url: RUN_URL },
   ];
-  const RED_LINE = `proof: 1 of 2 green · ✗ morndo/morndo@3e9d1a7:ci,lint "lint" failed ${RUN_URL}`;
+  const RED_LINE = `proof: 0 of 2 green · ✗ morndo/morndo#42@3e9d1a7 checks: "lint" failed ${RUN_URL} · ✗ morndo/morndo@3e9d1a7:ci,lint "lint" failed ${RUN_URL}`;
   const asked = (f: FakeForge) => f.requests.map(r => r.path).sort();
   const proofSeen = (line: string, mode: ProofMode, kind: "accepted" | "warn-pass" | "override", overrideReason?: string): string => {
     if (kind === "accepted") return `${line} [mode ${mode}]`;
@@ -241,8 +241,14 @@ describe("verifying (B14, B15)", () => {
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW },
     ]);
     expect(proof.view("T-1")?.state.kind).toBe("verified");
-    expect(fake.requests).toHaveLength(2);
-    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);
+    expect(fake.requests).toHaveLength(5);
+    expect(asked(fake)).toEqual([
+      "/repos/morndo/morndo/branches/main",
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/pulls/42",
+      "/repos/morndo/morndo/rules/branches/main",
+    ]);
     store.close();
   });
 
@@ -259,7 +265,11 @@ describe("verifying (B14, B15)", () => {
     const r = board.follow("T-1", { to: "review", reason: "builder ended its round", rule: "D1" }, "builder", 3);
     expect(r.ok).toBe(true);
     await proof.idle();
-    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);
+    expect(asked(fake)).toEqual([
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/pulls/42",
+    ]);
     expect(store.proofResultsOf("T-1", 3)).toEqual([
       { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 1_000 },
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 1_000 },
@@ -281,7 +291,11 @@ describe("verifying (B14, B15)", () => {
     fake.requests.length = 0;
     expect(board.act("T-1", { action: "move", to: "review", reason: "the wake-up is hours off" }, manager).ok).toBe(true);   // by hand, not by the board
     await proof.idle();
-    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);
+    expect(asked(fake)).toEqual([
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/pulls/42",
+    ]);
     expect(store.proofResultsOf("T-1", 3)).toEqual([
       { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 1_000 },
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 1_000 },
@@ -300,18 +314,18 @@ describe("verifying (B14, B15)", () => {
     await proof.file("T-1", brief, lane);                                           // rev 4
     await proof.idle();
     expect(store.proofResultsOf("T-1", 4)).toEqual([
-      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW },
+      { ref: "morndo/morndo#42@3e9d1a7", state: "pending", detail: `checks: "ci" in progress`, checkedAt: NOW },
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "pending", detail: `"ci" in progress`, checkedAt: NOW },
     ]);
     expect(store.tasksIn("review").map(t => t.key)).toEqual(["T-1"]);
     expect(await proof.tick()).toBe(0);                                             // the interval (2 min) has not passed
-    expect(fake.requests).toHaveLength(2);
+    expect(fake.requests).toHaveLength(5);
     clock = NOW + 120_000;
     fake.runs("morndo/morndo", FULL, greenRuns());                                  // the run finished since
-    expect(await proof.tick()).toBe(1);                                             // one ref due again: only the pending one
-    expect(fake.requests.filter(r => r.path.endsWith("/check-runs"))).toHaveLength(2);
+    expect(await proof.tick()).toBe(2);                                             // both refs still pending on the commit's checks
+    expect(fake.requests.filter(r => r.path.endsWith("/check-runs"))).toHaveLength(4);
     expect(store.proofResultsOf("T-1", 4)).toEqual([
-      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW },
+      { ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 120_000 },
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "green", detail: null, checkedAt: NOW + 120_000 },
     ]);
     expect(proof.view("T-1")?.state.kind).toBe("verified");
@@ -346,8 +360,14 @@ describe("verifying (B14, B15)", () => {
     fake.requests.length = 0;
     clock = NOW + 20 * 60_000;
     fake.pr("morndo/morndo", 43, { head: FULL });
+    fake.runs("morndo/morndo", FULL, greenRuns());
     expect(await proof.tick()).toBe(1);                                             // the rate limit is retried, T-1's 500 is not
-    expect(fake.requests.map(r => r.path)).toEqual(["/repos/morndo/morndo/pulls/43"]);
+    expect(fake.requests.map(r => r.path)).toEqual([
+      "/repos/morndo/morndo/pulls/43",
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/branches/main",
+      "/repos/morndo/morndo/rules/branches/main",
+    ]);
     expect(store.proofResultsOf("T-2", 4)).toEqual([
       { ref: "morndo/morndo#43@3e9d1a7", state: "green", detail: null, checkedAt: NOW + 20 * 60_000 },
     ]);
@@ -375,7 +395,7 @@ describe("verifying (B14, B15)", () => {
     fake.pr("morndo/morndo", 42, { head: FULL });
     fake.runs("morndo/morndo", FULL, greenRuns());
     await proof.verify("T-1");
-    expect(fake.requests).toHaveLength(4);
+    expect(fake.requests).toHaveLength(7);
     expect(proof.view("T-1")?.state.kind).toBe("verified");
     store.close();
   });
@@ -383,6 +403,7 @@ describe("verifying (B14, B15)", () => {
   it("a repository outside the allowlist is never fetched", async () => {
     const { store, board, proof } = withForge({ allowedRepos: ["acme/shop"] });
     fake.pr("acme/shop", 7, { head: FULL });
+    fake.runs("acme/shop", FULL, greenRuns());
     atReview(board);
     await proof.file("T-1", { ...brief, refs: ["acme/shop#7@3e9d1a7"] }, lane);      // the gate's allowlist lets the ref through
     await proof.idle();
@@ -459,7 +480,7 @@ describe("verifying (B14, B15)", () => {
     expect(events).toHaveLength(4);
     expect(store.proofResultsOf("T-1", 4)[1]?.state).toBe("pending");
     clock = NOW + 10 * 60_000 + 1;                                                  // unauthenticated: 10 minutes between pending re-reads
-    expect(await proof.tick()).toBe(1);
+    expect(await proof.tick()).toBe(2);
     expect(store.task("T-1")).toEqual(task);
     expect(store.taskEvents("T-1")).toEqual(events);
     store.close();
@@ -475,7 +496,7 @@ describe("verifying (B14, B15)", () => {
     expect(proof.view("T-1")?.state.line).toBe(RED_LINE);
     const r = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
     expect(r).toEqual({ ok: false, problem: "proof_not_green", detail: RED_LINE });
-    expect(fake.requests).toHaveLength(2);                                          // the rows are fresh: nothing was re-checked
+    expect(fake.requests).toHaveLength(5);                                          // the rows are fresh: nothing was re-checked
     expect(store.task("T-1")?.status).toBe("review");                               // a refused done moves nothing
     expect(store.taskEvents("T-1")).toHaveLength(4);
     store.close();
@@ -513,7 +534,11 @@ describe("verifying (B14, B15)", () => {
     fake.runs("morndo/morndo", FULL, greenRuns());                                  // the forge says green since
     const done = await board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
     expect(done).toMatchObject({ ok: true, task: { status: "done", rev: 5 } });
-    expect(asked(fake)).toEqual(["/repos/morndo/morndo/commits/3e9d1a7/check-runs", "/repos/morndo/morndo/pulls/42"]);   // 31 s old: both refs re-read first
+    expect(asked(fake)).toEqual([
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/commits/3e9d1a7/check-runs",
+      "/repos/morndo/morndo/pulls/42",
+    ]);   // 31 s old: both refs re-read first; required set still cached
     store.close();
   });
 
@@ -565,6 +590,7 @@ describe("verifying (B14, B15)", () => {
     const RECORDED = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
     const OTHER = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     fake.pr("morndo/morndo", 42, { head: OTHER, merged: true, merge: OTHER });
+    fake.runs("morndo/morndo", FULL, greenRuns());
     const { store, board, proof } = withForge();
     atReview(board);
     await proof.file("T-1", brief, lane);
@@ -575,6 +601,190 @@ describe("verifying (B14, B15)", () => {
       detail: `merged as ${OTHER.slice(0, 7)}, the task records ${RECORDED.slice(0, 7)}`,
     });
     store.close();
+  });
+
+  // T-450: three kinds of Done that passed the gate while it was in warn. Each is held in `on` and, in `warn`, accepted
+  // with "would have been refused" in the Done event; the manager's override and the principal's click still pass them.
+  describe("a Done over unfinished, partly checked or unvouched proof is held (T-450)", () => {
+    const doneBy = (board: BoardService) => board.actChecked("T-1", { action: "move", to: "done", reason: "the row ships" }, manager);
+    const lastSeen = (store: Store) => { const c = store.taskEvents("T-1").at(-1)?.change; return c?.kind === "moved" ? c.proofSeen : undefined; };
+
+    it("a brief naming only the pull request while the commit's checks run (case 1)", async () => {
+      for (const mode of ["on", "warn"] as const) {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "in_progress", conclusion: null }]);
+        const { store, board, proof } = withForge({ mode });
+        atReview(board);
+        await proof.file("T-1", { ...brief, refs: ["morndo/morndo#42@3e9d1a7"] }, lane);
+        await proof.idle();
+        const line = `proof: 0 of 1 green · … morndo/morndo#42@3e9d1a7 checks: "ci" in progress`;
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "pending", accepts: false, line });
+        const r = await doneBy(board);
+        if (mode === "on") expect(r, mode).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        else { expect(r.ok, mode).toBe(true); expect(lastSeen(store), mode).toBe(`${line} [mode warn: would have been refused]`); }
+        store.close();
+      }
+    });
+
+    it("a pull request reference turns green when its checks finish, and red when one failed", async () => {
+      fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
+      fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "failure", url: RUN_URL }]);
+      const { store, board, proof } = withForge({ mode: "on" });
+      atReview(board);
+      await proof.file("T-1", { ...brief, refs: ["morndo/morndo#42@3e9d1a7"] }, lane);
+      await proof.idle();
+      expect(proof.view("T-1")?.state.line).toBe(`proof: 0 of 1 green · ✗ morndo/morndo#42@3e9d1a7 checks: "ci" failed ${RUN_URL}`);
+      fake.runs("morndo/morndo", FULL, greenRuns());
+      clock = NOW + 31_000;
+      expect((await doneBy(board)).ok).toBe(true);                                  // the Done's own refresh re-reads a stale row
+      store.close();
+    });
+
+    it("named checks green while another check at the commit failed (case 2)", async () => {
+      for (const mode of ["on", "warn"] as const) {
+        fake.pr("morndo/morndo", 42, { head: FULL });
+        fake.runs("morndo/morndo", FULL, [
+          { id: 1, name: "ci", status: "completed", conclusion: "success" },
+          { id: 2, name: "e2e", status: "completed", conclusion: "failure", url: RUN_URL },
+        ]);
+        const { store, board, proof } = withForge({ mode });
+        atReview(board);
+        await proof.idle();                                                               // the move to review verifies the (absent) brief first
+        expect((await proof.file("T-1", { ...brief, refs: ["morndo/morndo#42@3e9d1a7", "morndo/morndo@3e9d1a7:ci"] }, lane)).ok).toBe(true);
+        await proof.idle();
+        const rows = store.proofResultsOf("T-1", proof.view("T-1")!.rev!);
+        expect(rows.find(r => r.ref.endsWith(":ci"))).toMatchObject({ state: "red", detail: `another check "e2e" failed ${RUN_URL}` });
+        const r = await doneBy(board);
+        if (mode === "on") expect(r, mode).toMatchObject({ ok: false, problem: "proof_not_green" });
+        else { expect(r.ok, mode).toBe(true); expect(lastSeen(store), mode).toContain("[mode warn: would have been refused]"); }
+        store.close();
+      }
+    });
+
+    // The manager's narrowing: only the checks the base branch requires hold a pull request reference.
+    describe("required and optional checks", () => {
+      const prOnly: BriefInput = { ...brief, refs: ["morndo/morndo#42@3e9d1a7"] };
+      const prLine = (tail: string) => `proof: ${tail}`;
+      const fileAndRead = async (mode: ProofMode) => {
+        const made = withForge({ mode });
+        atReview(made.board);
+        await made.proof.file("T-1", prOnly, lane);
+        await made.proof.idle();
+        return made;
+      };
+
+      it("an optional failing check with the required one green passes with a warning on the reference", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure", url: RUN_URL }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const warning = `warning: optional check "e2e" failed ${RUN_URL}`;
+        expect(proof.view("T-1")?.state).toEqual({ kind: "verified", green: 1, total: 1, accepts: true, line: prLine(`1 of 1 green · ⚠ morndo/morndo#42@3e9d1a7 ${warning}`) });
+        expect(store.proofResultsOf("T-1", 4)[0]).toMatchObject({ state: "green", detail: warning });
+        expect((await doneBy(board)).ok).toBe(true);
+        expect(lastSeen(store)).toBe(`${prLine(`1 of 1 green · ⚠ morndo/morndo#42@3e9d1a7 ${warning}`)} [mode on]`);
+        store.close();
+      });
+
+      it("a required check still running holds the Done, an optional one failing next to it changes nothing", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci"] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "in_progress", conclusion: null }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const line = prLine(`0 of 1 green · … morndo/morndo#42@3e9d1a7 checks: "ci" in progress`);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "pending", accepts: false, line });
+        expect(await doneBy(board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        store.close();
+      });
+
+      it("a required set that cannot be read counts every check and the line says so (fail closed)", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: null });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const line = prLine(`0 of 1 green · ✗ morndo/morndo#42@3e9d1a7 checks: "e2e" failed (required checks not readable; every check counted)`);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "failing", accepts: false, line });
+        expect(await doneBy(board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        store.close();
+      });
+
+      // T-450 fix round: no required set means every check counts; a required check never reported holds however long;
+      // a failed read of the required set is read again, so a fail-closed red does not outlive the outage.
+      it("a branch with no required checks counts every check", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: [] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, board, proof } = await fileAndRead("on");
+        const line = prLine(`0 of 1 green · ✗ morndo/morndo#42@3e9d1a7 checks: "e2e" failed (no required checks on the base branch; every check counted)`);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "failing", accepts: false, line });
+        expect(await doneBy(board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        store.close();
+      });
+
+      it("a required check that never reports holds the reference after the brief is no longer young", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: ["ci", "license/cla"] });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }]);
+        const made = withForge({ mode: "on" });
+        atReview(made.board);
+        await made.proof.file("T-1", prOnly, lane);
+        await made.proof.idle();
+        clock = NOW + 20 * 60_000;                                                    // past YOUNG_MS (15 minutes)
+        await made.proof.verify("T-1");
+        const line = prLine(`0 of 1 green · … morndo/morndo#42@3e9d1a7 checks: required "license/cla" not reported yet`);
+        expect(made.proof.view("T-1")?.state).toMatchObject({ kind: "pending", accepts: false, line });
+        expect(await doneBy(made.board)).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        made.store.close();
+      });
+
+      it("a fail-closed result is read again by the timer once the required set can be read", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL, required: null });
+        fake.runs("morndo/morndo", FULL, [{ id: 1, name: "ci", status: "completed", conclusion: "success" }, { id: 2, name: "e2e", status: "completed", conclusion: "failure" }]);
+        const { store, proof } = await fileAndRead("on");
+        expect(proof.view("T-1")?.state.kind).toBe("failing");
+        fake.required("morndo/morndo", "main", { rules: ["ci"] });                    // the forge answers now
+        clock = NOW + 10 * 60_000 + 1;                                                // unauthenticated: ten minutes between re-reads
+        expect(await proof.tick()).toBe(1);
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "verified", accepts: true });
+        expect(proof.view("T-1")?.state.line).toContain(`⚠ morndo/morndo#42@3e9d1a7 warning: optional check "e2e" failed`);
+        store.close();
+      });
+
+      it("the required set of a branch is read once for a while, not once per reference", async () => {
+        fake.pr("morndo/morndo", 42, { head: FULL });
+        fake.runs("morndo/morndo", FULL, greenRuns());
+        const { store, board, proof } = withForge({ mode: "warn" });
+        atReview(board);
+        board.create({ title: "A second task", assignee: "builder" }, manager);
+        board.act("T-2", { action: "move", to: "doing" }, lane);
+        board.act("T-2", { action: "move", to: "review" }, lane);
+        await proof.file("T-1", prOnly, lane);
+        await proof.file("T-2", prOnly, lane);
+        await proof.idle();
+        const asks = () => fake.requests.filter(r => r.path.includes("/rules/branches/") || r.path.endsWith("/branches/main")).length;
+        expect(asks()).toBe(2);                                                       // the branch and the rulesets, once for both tasks
+        clock = NOW + 11 * 60_000;
+        await proof.verify("T-1");
+        expect(asks()).toBe(4);                                                       // ten minutes on, read again
+        store.close();
+      });
+    });
+
+    it("a no-code brief on a task with no proof list from the assigner (case 3)", async () => {
+      const noCode: BriefInput = { summary: "Wrote the memo", leftOut: "nothing", limits: "none known", noCode: "an analysis, no code changed", attested: [{ kind: "manual", how: "read it twice" }] };
+      for (const mode of ["on", "warn"] as const) {
+        const { store, board, proof } = withForge({ mode });
+        atReview(board);
+        await proof.file("T-1", noCode, lane);
+        const line = "proof: no code change claimed, and the assigner listed no proof to check it against";
+        expect(proof.view("T-1")?.state).toMatchObject({ kind: "unchecked", accepts: false, line });
+        const r = await doneBy(board);
+        if (mode === "on") expect(r, mode).toEqual({ ok: false, problem: "proof_not_green", detail: line });
+        else { expect(r.ok, mode).toBe(true); expect(lastSeen(store), mode).toBe(`${line} [mode warn: would have been refused]`); }
+        store.close();
+      }
+      const { store, board, proof } = withForge({ mode: "on" });                     // the same brief against the assigner's list is accepted
+      atReview(board);
+      expect(board.act("T-1", { action: "proof_list", add: ["manual: read the memo"] }, manager).ok).toBe(true);
+      await proof.file("T-1", noCode, lane);
+      expect((await doneBy(board)).ok).toBe(true);
+      store.close();
+    });
   });
 
   describe("the hub's GitHub budget is not a lane's to spend (B14)", () => {
@@ -611,6 +821,7 @@ describe("verifying (B14, B15)", () => {
 
     it("a failure to reach the forge keeps a fresh green, and an old green gives way", async () => {
       fake.pr("morndo/morndo", 42, { head: FULL });
+      fake.runs("morndo/morndo", FULL, greenRuns());
       const { store, board, proof } = withForge();
       atReview(board);
       await proof.file("T-1", one, lane);
@@ -732,7 +943,7 @@ describe("verifying (B14, B15)", () => {
       await proof.file("T-1", { ...brief, ...priv }, lane);
       await proof.idle();
       expect(proof.view("T-1")?.state.kind).toBe("verified");
-      expect(fake.requests).toHaveLength(2);
+      expect(fake.requests).toHaveLength(5);
       expect(fake.requests.every(r => r.headers["authorization"] === `Bearer ${TOKEN}`)).toBe(true);
       expect(await board.actChecked("T-1", { action: "move", to: "done", reason: "shipped" }, manager)).toMatchObject({ ok: true, task: { status: "done" } });
       store.close();
@@ -789,11 +1000,12 @@ describe("a held green is a snapshot too (B13, B16)", () => {
     let asked = 0;
     const forge: ForgeChecks = {
       pullRequest: async () => {
-        if (++asked === 1) return { ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null } };
+        if (++asked === 1) return { ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: "main" } };
         await held;                                                 // the second read is still out when the Done lands
         return { ok: false, failure: { reason: "rate_limited", detail: "rate limit, retry 00:10 UTC" } };
       },
-      checkRuns: async () => ({ ok: true, value: [] }),
+      checkRuns: async () => ({ ok: true, value: [{ id: 1, name: "ci", status: "completed", conclusion: "success", url: null }] }),
+      requiredChecks: async () => ({ ok: true, value: ["ci"] }),
     };
     const proof = new ProofService({ store, board, now: () => NOW + 5_000, forge, mode: "off" });
     atReview(board);
@@ -825,15 +1037,21 @@ describe("a stand-in forge is hub-wide, not only per task (B14)", () => {
 describe("a Done task is a snapshot (B13, B16)", () => {
   const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
   const greenForge = (): ForgeChecks => ({
-    pullRequest: async () => ({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null } }),
+    pullRequest: async () => ({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: "main" } }),
     checkRuns: async () => ({ ok: true, value: [{ id: 1, name: "ci", status: "completed", conclusion: "success", url: null }, { id: 2, name: "lint", status: "completed", conclusion: "success", url: null }] }),
+    requiredChecks: async () => ({ ok: true, value: ["ci", "lint"] }),
   });
 
   it("a merge recorded after the Done changes neither the card's line nor its rows, and asks the forge nothing", async () => {
     const store = new Store(tempDir());
     const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
     const calls: string[] = [];
-    const forge: ForgeChecks = { pullRequest: (...a) => { calls.push("pr"); return greenForge().pullRequest(...a); }, checkRuns: (...a) => { calls.push("ci"); return greenForge().checkRuns(...a); } };
+    const gf = greenForge();
+    const forge: ForgeChecks = {
+      pullRequest: (...a) => { calls.push("pr"); return gf.pullRequest(...a); },
+      checkRuns: (...a) => { calls.push("ci"); return gf.checkRuns(...a); },
+      requiredChecks: (...a) => gf.requiredChecks(...a),
+    };
     const proof = new ProofService({ store, board, now: () => NOW, forge, mode: "on" });
     atReview(board);
     await proof.file("T-1", brief, lane);
@@ -855,9 +1073,11 @@ describe("a Done task is a snapshot (B13, B16)", () => {
     const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
     let release!: () => void;
     const held = new Promise<void>(r => { release = r; });
+    const gf = greenForge();
     const slow: ForgeChecks = {
-      pullRequest: async (...a) => { await held; return greenForge().pullRequest(...a); },
-      checkRuns: async (...a) => { await held; return greenForge().checkRuns(...a); },
+      pullRequest: async (...a) => { await held; return gf.pullRequest(...a); },
+      checkRuns: async (...a) => { await held; return gf.checkRuns(...a); },
+      requiredChecks: async (...a) => gf.requiredChecks(...a),
     };
     const proof = new ProofService({ store, board, now: () => NOW + 5_000, forge: slow, mode: "off" });
     atReview(board);

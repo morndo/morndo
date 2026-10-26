@@ -42,17 +42,26 @@ export const BoardActorSchema = z.discriminatedUnion("kind", [
 export const TaskActorSchema = z.union([
   BoardActorSchema,
   z.object({ kind: z.literal("console") }),
-  z.object({ kind: z.literal("board"), rule: z.enum(["D1", "D2", "D3", "D4"]), lane: text() }),
+  z.object({ kind: z.literal("board"), rule: z.enum(["D1", "D2", "D3", "D4", "D7"]), lane: text() }),
 ]);
+// B18 (ADR-0038): what a blocked task waits on, as the hub stores it; the board's own grammar is the domain's parseWait.
+export const WaitSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("task"), key: taskKey() }),
+  z.object({ kind: z.literal("pr"), repo: text(), n: z.int().check(z.gte(1)) }),
+  z.object({ kind: z.literal("card"), id: text() }),
+  z.object({ kind: z.literal("time"), at: count() }),
+]);
+export const JudgedWaitSchema = z.object({ state: z.enum(["over", "open", "unknown"]), label: text() });
 export const BoardTaskSchema = z.object({
   key: taskKey(), n: z.int().check(z.gte(1)), title: text(), description: text(),
   status: z.enum(STATUSES), assignee: z.nullable(text()), priority: orElse(z.enum(PRIORITIES), "normal"),
   blockedReason: z.nullable(text()), createdAt: count(), updatedAt: count(), stateChangedAt: count(), createdBy: TaskActorSchema,
   rev: z.int().check(z.gte(1)), doneAt: z.nullable(count()), comments: count(),
+  waits: z.exactOptional(z.array(WaitSchema)),
 });
 export const TaskChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("created"), status: z.enum(STATUSES), assignee: z.nullable(text()) }),
-  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()), proofSeen: z.exactOptional(text()) }),
+  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()), proofSeen: z.exactOptional(text()), waits: z.exactOptional(z.array(WaitSchema)) }),
   z.object({ kind: z.literal("assigned"), from: z.nullable(text()), to: z.nullable(text()) }),
   z.object({ kind: z.literal("edited"), title: z.exactOptional(text()), description: z.exactOptional(text()), priority: z.exactOptional(z.enum(PRIORITIES)) }),
   z.object({ kind: z.literal("commented"), text: text() }),
@@ -79,6 +88,9 @@ export const BoardFrameSchema = z.object({
   orphans: z.exactOptional(z.array(text())),
   merged: z.exactOptional(z.array(z.unknown())),
   standIn: z.exactOptional(z.boolean()),     // the hub reads its proof references from a stand-in forge, not GitHub (ADR-0035)
+  // B18: what the wait watch last read of each block's waits, and the blocks of words only that sat too long.
+  waits: z.exactOptional(z.array(z.object({ key: taskKey(), readings: z.array(JudgedWaitSchema) }))),
+  staleBlocks: z.exactOptional(z.array(text())),
 });
 
 // A new task, from the app or an agent. A worker's lands in the backlog whatever it says (B2).
@@ -89,7 +101,7 @@ export const BoardCreateBody = z.object({
 // One change to one task: the same body from the app and from an agent; the hub decides by who sent it.
 const ifRev = z.exactOptional(z.int().check(z.gte(1)));
 export const BoardActionBody = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), notLive: z.exactOptional(str(2000)), proofOverride: z.exactOptional(str(2000)), ifRev }),
+  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), notLive: z.exactOptional(str(2000)), proofOverride: z.exactOptional(str(2000)), waits: z.exactOptional(z.array(str(300)).check(z.maxLength(10))), ifRev }),
   z.object({ action: z.literal("assign"), to: z.nullable(str(200)), ifRev }),
   z.object({ action: z.literal("edit"), title: z.exactOptional(str(1000)), description: z.exactOptional(str(20_000)), priority: z.exactOptional(z.enum(PRIORITIES)), ifRev }),
   z.object({ action: z.literal("comment"), text: str(20_000) }),

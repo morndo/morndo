@@ -69,6 +69,14 @@ jobs:
     needs: signers
     if: needs.signers.outputs.ready == 'true'
     runs-on: ubuntu-24.04
+    # The environment holds RELEASE_APP_ID and RELEASE_APP_PRIVATE_KEY and is limited to the branch main with no
+    # reviewer (this job runs on every push). It must exist with that branch rule and the two secrets BEFORE this
+    # change merges, because a workflow that names a missing environment creates it with no protection rules or secrets
+    # (https://docs.github.com/en/actions/how-tos/deploy/configure-and-manage-deployments/manage-environments, read 2026-10-24).
+    # A secret at the environment level takes precedence over a repository secret of the same name
+    # (https://docs.github.com/en/actions/reference/security/secrets, read 2026-10-24), so the repository copies can
+    # be deleted after the first run reads the environment's.
+    environment: release-please
     timeout-minutes: 15
     permissions:
       contents: write
@@ -87,7 +95,7 @@ jobs:
     steps:
       # A pull request opened with GITHUB_TOKEN starts no workflows, so the required checks never run.
       # https://docs.github.com/en/actions/concepts/security/github_token (read 2026-10-13)
-      # The app token opens the release PR. Secrets: RELEASE_APP_ID, RELEASE_APP_PRIVATE_KEY.
+      # The app token opens the release PR. Secrets of the release-please environment: RELEASE_APP_ID, RELEASE_APP_PRIVATE_KEY.
       - id: app
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:

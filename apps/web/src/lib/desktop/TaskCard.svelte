@@ -12,7 +12,7 @@
   import RunAvatar from "./RunAvatar.svelte";
   import RunDot from "./RunDot.svelte";
   import StatusIcon from "./StatusIcon.svelte";
-  import { ago, type Run, type Task } from "./board.ts";
+  import { ago, waitWords, type Run, type Task } from "./board.ts";
   import { chipOpensJob, jobKey, type ShownJob } from "./jobs.ts";
   import { runLook } from "./run-words.ts";
 
@@ -51,6 +51,7 @@
     <button type="button" class="chip job" data-job={jobKey(job)} onclick={e => { e.stopPropagation(); onOpenJob(jobKey(job)); }} onkeydown={e => { if (chipOpensJob(e.key)) { e.stopPropagation(); e.preventDefault(); onOpenJob(jobKey(job)); } }}>{job.name} · {job.state}</button>
   {/each}
   {#if task.status === "blocked" && task.blockedReason}<p class="why" title={task.blockedReason}>{task.blockedReason}</p>{/if}
+  {#if task.status === "blocked" && task.waits?.length}<p class="waits" data-waits title="The board watches these and moves the task to do when all are over">Waits on {task.waits.map(waitWords).join(", ")}</p>{/if}
   <footer>
     {#if task.priority !== "normal"}
       <span class="chip" class:bad={task.priority === "high"} title="{task.priority === "high" ? "High" : "Low"} priority"><Flag size={11} />{task.priority === "high" ? "High" : "Low"}</span>
@@ -96,6 +97,8 @@
     margin: 0 0 0 22px; font: 400 12px/17px var(--font); color: var(--bad-fg);
     display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2; overflow: hidden;
   }
+  /* B18: what the board watches for this block, in ink: it is the board's to follow, not something asking for him. */
+  .waits { margin: 0 0 0 22px; font: 400 12px/17px var(--font); color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   footer { display: flex; align-items: center; gap: 6px; min-width: 0; flex-wrap: wrap; }
   .chip {
     display: inline-flex; align-items: center; gap: 4px; height: 20px; padding: 0 7px; border-radius: var(--radius-sm);

@@ -29,7 +29,7 @@ describe("the forge adapter", () => {
     const checks = made({ token: TOKEN });
     const pr = await checks.pullRequest("acme/shop", 42);
     const runs = await checks.checkRuns("acme/shop", "3e9d1a7");          // a short sha meets the full one's answer
-    expect(pr).toEqual({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null } });
+    expect(pr).toEqual({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: "main" } });
     expect(runs).toEqual({ ok: true, value: [{ id: 1, name: "ci", status: "completed", conclusion: "success", url: null }] });
     expect(fake.requests.map(r => r.path)).toEqual(["/repos/acme/shop/pulls/42", "/repos/acme/shop/commits/3e9d1a7/check-runs"]);
     expect(fake.requests.map(r => r.query)).toEqual(["", "per_page=100&page=1"]);
@@ -45,7 +45,43 @@ describe("the forge adapter", () => {
 
   it("a pull request answer becomes facts", async () => {
     fake.pr("acme/shop", 42, { state: "closed", merged: true, head: "9c8b7a6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b", merge: FULL });
-    expect(await made().pullRequest("acme/shop", 42)).toEqual({ ok: true, value: { state: "closed", merged: true, headSha: "9c8b7a6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b", mergeSha: FULL } });
+    expect(await made().pullRequest("acme/shop", 42)).toEqual({ ok: true, value: { state: "closed", merged: true, headSha: "9c8b7a6d5e4f3a2b1c0d9e8f7a6b5c4d3e2f1a0b", mergeSha: FULL, baseRef: "main" } });
+  });
+
+  // T-450: the checks a pull request's base branch requires, read from the two documented places (branch protection in
+  // the `protection` of the branch, and the active rulesets) and joined; a place that cannot be read fails the whole ask.
+  describe("the checks a branch requires (T-450)", () => {
+    it("joins branch protection and rulesets, sorted and without repeats, from the two documented paths", async () => {
+      fake.required("acme/shop", "main", { rules: ["ci"], classic: ["lint", "ci"] });
+      expect(await made().requiredChecks("acme/shop", "main")).toEqual({ ok: true, value: ["ci", "lint"] });
+      expect(fake.requests.map(r => r.path).sort()).toEqual(["/repos/acme/shop/branches/main", "/repos/acme/shop/rules/branches/main"]);
+      fake.required("acme/shop", "release/1.0", {});
+      expect(await made().requiredChecks("acme/shop", "release/1.0")).toEqual({ ok: true, value: [] });   // nothing required
+    });
+
+    it("a place that answers an error or no shape fails the ask, so the caller counts every check", async () => {
+      fake.required("acme/shop", "main", { rules: ["ci"] });
+      fake.fail("/repos/acme/shop/rules/branches/main", 404);
+      expect(await made().requiredChecks("acme/shop", "main")).toMatchObject({ ok: false, failure: { reason: "not_found" } });
+      fake.required("acme/shop", "main", { rules: ["ci"] });
+      fake.fail("/repos/acme/shop/branches/main", 403);
+      expect(await made().requiredChecks("acme/shop", "main")).toMatchObject({ ok: false });
+      fake.required("acme/shop", "main", { rules: ["ci"] });
+      fake.fail("/repos/acme/shop/branches/main", 200);                      // 200 with "{}": no protection object, no shape
+      expect(await made().requiredChecks("acme/shop", "main")).toMatchObject({ ok: false, failure: { reason: "unexpected" } });
+    });
+
+    it("a branch name outside the grammar is never requested", async () => {
+      for (const bad of ["", "..", "a/../b", "a b", "x?y=1", "x#y", "/lead", "trail/", "-x", "a\nb", "é", "a".repeat(201)])
+        expect(await made().requiredChecks("acme/shop", bad), JSON.stringify(bad)).toMatchObject({ ok: false, failure: { reason: "unexpected" } });
+      expect(await made().requiredChecks("not a repo", "main")).toMatchObject({ ok: false });
+      expect(fake.requests).toHaveLength(0);
+    });
+
+    it("a pull request answer carries its base branch", async () => {
+      fake.pr("acme/shop", 42, { head: FULL, base: "release/1.0" });
+      expect(await made().pullRequest("acme/shop", 42)).toEqual({ ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: "release/1.0" } });
+    });
   });
 
   it("check runs are read page by page up to the count the forge states", async () => {
