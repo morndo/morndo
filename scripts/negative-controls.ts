@@ -7,7 +7,7 @@
 //   node scripts/negative-controls.ts --check          read-only, in this checkout: every entry's text is there exactly once
 //   node scripts/negative-controls.ts --list           the entries
 // It never changes the checkout it was started from. It makes one temporary worktree of HEAD (git worktree add --detach;
-// uncommitted changes are not in it), runs `npm ci --offline` there once, and for each control:
+// uncommitted changes are not in it), runs `npm ci --offline` there once (online if the cache is cold), and for each control:
 //   1. runs the named test files unchanged: they must pass, or the control would prove nothing (cached per file set);
 //   2. applies the change: `find` must occur exactly once in `file`;
 //   3. runs them again: they must fail, and print `expect` when the entry gives one;
@@ -5303,6 +5303,34 @@ export function verdict(n: Tally, total: number): { line: string; code: 0 | 1 } 
   };
 }
 
+// What a finished process left to read, as text: the last `lines` lines of stdout and stderr together. Either can be a
+// Buffer (no encoding asked) or null (the program never started, or a signal stopped it); `null + null` is 0, and
+// `(0).trim` is how this setup once died with "trim is not a function" instead of saying why npm had failed (T-433). A
+// process that did not start says why, and one that a signal stopped says which.
+export function spawnOutput(r: { stdout?: string | Buffer | null | undefined; stderr?: string | Buffer | null | undefined; error?: Error | undefined; signal?: NodeJS.Signals | null | undefined }, lines = 8): string {
+  const text = [r.stdout, r.stderr].flatMap(part => String(part ?? "").trim().split("\n")).filter(l => l !== "");
+  if (r.error) text.push(r.error.message);
+  if (r.signal) text.push(`stopped by ${r.signal}`);
+  return text.slice(-lines).join("\n");
+}
+
+// `npm ci` in the temporary worktree. Offline first (the cache is filled by the checkout's own `npm ci`); when that fails
+// because the cache lacks a package (npm's ENOTCACHED, "cache mode is 'only-if-cached'"), one online `npm ci` instead,
+// said in one sentence with the command that warms the cache. Any other failure is printed as npm said it, without a retry.
+// npm ci: https://docs.npmjs.com/cli/v11/commands/npm-ci (read 2026-10-24); the ENOTCACHED text is npm 11.19's, seen live.
+type Spawn = (cmd: string, args: readonly string[], opts: { cwd: string; encoding: "utf8" }) => ReturnType<typeof spawnSync>;
+export function installDependencies(tree: string, run: Spawn = spawnSync as Spawn): { ok: true; notes: string[] } | { ok: false; message: string; notes: string[] } {
+  const ci = (...flags: string[]) => run("npm", ["ci", ...flags, "--no-audit", "--no-fund"], { cwd: tree, encoding: "utf8" });
+  const offline = ci("--offline");
+  if (offline.status === 0) return { ok: true, notes: [] };
+  const why = spawnOutput(offline);
+  if (!/ENOTCACHED|only-if-cached/.test(why)) return { ok: false, notes: [], message: `setup: npm ci --offline failed in ${tree}:\n${why}` };
+  const note = `setup: npm's cache is cold, so npm ci runs online in ${tree}; run npm ci once in this checkout to warm the cache.`;
+  const online = ci();
+  if (online.status === 0) return { ok: true, notes: [note] };
+  return { ok: false, notes: [note], message: `setup: npm ci failed in ${tree}, offline and online:\n${spawnOutput(online)}` };
+}
+
 // Five outcomes are counted apart: bit, still passes, broke (the run was broken, or the setup was), timed out, and skipped
 // (a control for another platform).
 async function runAll(controls: readonly Control[], keep: boolean): Promise<number> {
@@ -5319,9 +5347,10 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
   let setupFailed = false;
   try {
     git(ROOT, "worktree", "add", "--detach", tree, head);
-    const ci = spawnSync("npm", ["ci", "--offline", "--no-audit", "--no-fund"], { cwd: tree, encoding: "utf8" });
-    if (ci.status !== 0) {
-      say(`setup: npm ci --offline failed in ${tree} (run npm ci once in this checkout to fill npm's cache):\n${(ci.stdout + ci.stderr).trim().split("\n").slice(-8).join("\n")}`);
+    const ci = installDependencies(tree);
+    for (const note of ci.notes) say(note);
+    if (!ci.ok) {
+      say(ci.message);
       return 2;
     }
     const baseline = new Map<string, Run>();
