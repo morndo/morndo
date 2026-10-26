@@ -5,6 +5,16 @@ import { startInProcessHub, type InProcessHub } from "../../hub/test/inprocess-h
 import { GithubChecks } from "../../hub/src/adapters/github-checks.ts";
 import { startFakeForge, type FakeForge } from "../../hub/test/fake-forge.ts";
 import { HELP, parseArgs, run, valuesOf } from "../src/cli.ts";
+import { PR_EVERY_MS } from "../../hub/src/application/wait-watch.ts";
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+
+const CLI_MAIN = join(import.meta.dirname, "../src/main.ts");
+// The CLI through a real bash, asynchronously: the hub it calls runs in this process, so a blocking spawn would never be answered.
+const viaBash = (line: string, env: Record<string, string>) => new Promise<{ status: number; stdout: string; stderr: string }>(resolve => {
+  execFile("bash", ["-c", line], { env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env }, encoding: "utf8", timeout: 60_000 },
+    (e, stdout, stderr) => resolve({ status: e ? (typeof e.code === "number" ? e.code : 1) : 0, stdout, stderr }));
+});
 import { MANAGER_PROMPT, WORKER_PROMPT } from "../src/prompt.ts";
 
 let hub: InProcessHub;
@@ -146,6 +156,114 @@ describe("a lane's day", () => {
     expect(shown.out).toContain("board (D4, builder) todo → doing");
     expect(shown.out).toContain("board (D1, builder) doing → review: STATUS: DONE npm test: 14 passed");
     expect((await asManager("list")).out).toBe("In review (1)\n  T-1    builder        A\n      proof: no brief");   // a review without a brief says so (B15)
+  });
+});
+
+// B18, D7 (ADR-0038): a block that names what it waits on, the hub's readings of it in list and show, and the board's
+// own move to do once it is over. The forge is the test's; the clock is real (the stale flag gets a hub with its own).
+describe("a block's waits (B18, D7)", () => {
+  let wh: InProcessHub;
+  let wm: string;
+  let wb: string;
+  const prs = new Map<string, "open" | "merged">();
+  let clock = 1_800_000_000_000;
+  const forge = {
+    async pullRequest(repo: string, n: number) {
+      const st = prs.get(`${repo}#${n}`);
+      return st === undefined ? { ok: false as const, failure: { reason: "not_found" as const, detail: "not found" } }
+        : { ok: true as const, value: { state: st === "open" ? "open" as const : "closed" as const, merged: st === "merged", headSha: "b".repeat(40), mergeSha: null, baseRef: "main" } };
+    },
+    async checkRuns() { return { ok: false as const, failure: { reason: "unexpected" as const, detail: "unused" } }; },
+    async requiredChecks() { return { ok: false as const, failure: { reason: "unexpected" as const, detail: "unused" } }; },
+  };
+  beforeEach(async () => {
+    prs.clear();
+    clock = 1_800_000_000_000;
+    wh = await startInProcessHub({ forge, proofRepos: ["morndo/morndo", "acme/widgets"], now: () => clock });
+    wm = wh.agents.issue("manager", "manager").secret;
+    wb = wh.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await wh.close(); });
+  async function say(argv: string[], token: string, laneName: string | null) {
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+  const managerSays = (...argv: string[]) => say(argv, wm, null);
+  const builderSays = (...argv: string[]) => say(argv, wb, "builder");
+
+  it("blocks on a pull request and a task, shows what the hub read, and moves it to do when both are over", async () => {
+    await managerSays("new", "The dependency", "--assign", "builder");     // T-1
+    await managerSays("new", "Ship it", "--assign", "builder");            // T-2
+    prs.set("acme/widgets#7", "open");
+    await builderSays("start", "T-2");
+    const blocked = await builderSays("block", "T-2", "--why", "needs the widget fix and T-1", "--on", "acme/widgets#7", "--on", "T-1");
+    expect(blocked.code, blocked.err).toBe(0);
+    expect(blocked.out).toContain("[waits on acme/widgets#7, T-1]");
+    await wh.waits.tick();
+    let list = await managerSays("list", "--status", "blocked");
+    expect(list.out).toContain("waits on: acme/widgets#7 open · T-1 to do");
+    const shown = await managerSays("show", "T-2");
+    expect(shown.out).toContain("Waits on: acme/widgets#7 open · T-1 to do");
+    prs.set("acme/widgets#7", "merged");
+    await managerSays("start", "T-1");                                      // the manager may; the lane has T-2 blocked
+    await managerSays("move", "T-1", "done", "--why", "checked it");
+    await wh.waits.tick();                                                  // the open reading is younger than PR_EVERY_MS: kept
+    const json = JSON.parse((await managerSays("list", "--status", "blocked", "--json")).out) as { key: string; waitsRead?: unknown[] }[];
+    expect(json[0]).toMatchObject({ key: "T-2", waitsRead: [{ state: "open", label: "acme/widgets#7 open" }, { state: "over", label: "T-1 done" }] });
+    clock += PR_EVERY_MS;
+    await wh.waits.tick();
+    list = await managerSays("list", "--status", "todo");
+    expect(list.out).toContain("T-2");
+    expect((await managerSays("show", "T-2")).out).toMatch(/board \(D7, builder\)\s+blocked → todo: its wait is over: acme\/widgets#7 merged, T-1 done/);
+  });
+  it("words the board's own move, and a wait it can't watch", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    prs.set("morndo/morndo#93", "merged");
+    await builderSays("start", "T-1");
+    expect((await builderSays("block", "T-1", "--why", "after #93", "--on", "#93")).code).toBe(0);
+    await wh.waits.tick();
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toMatch(/board \(D7, builder\)\s+blocked → todo: its wait is over: #93 merged/);
+    const bad = await managerSays("block", "T-1", "--why", "x", "--on", "next week");
+    expect(bad).toMatchObject({ code: 1 });
+    expect(bad.err).toMatch(/the board can't watch that wait: "next week" is none of/);
+    const repo = await managerSays("block", "T-1", "--why", "x", "--on", "other/repo#4");
+    expect(repo.err).toContain("the board reads no pull requests in other/repo");
+    const many = await managerSays("block", "T-1", "--why", "x", "--on", "#1", "--on", "#2", "--on", "#3", "--on", "#4");
+    expect(many.err).toContain("a block names at most 3 waits");
+  });
+  it("refuses an --on without its wait, the way a shell leaves an unquoted #93 (review of #161)", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    for (const argv of [["block", "T-1", "--why", "x", "--on"], ["block", "T-1", "--why", "x", "--on", "--on", "T-2"]]) {
+      const r = await managerSays(...argv);
+      expect(r.code, argv.join(" ")).toBe(2);
+      expect(r.err).toContain("--on needs a wait");
+    }
+    // Through a real shell: bash takes `#93` for a comment and the CLI gets a bare --on.
+    const sh = await viaBash(`node --no-warnings ${CLI_MAIN} block T-1 --why "after the fix" --on #93`, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: wm });
+    expect(sh.status, sh.stderr).toBe(2);
+    expect(sh.stderr).toContain("quote it");
+    expect((await managerSays("show", "T-1")).out).not.toContain("Blocked");
+    const quoted = await viaBash(`node --no-warnings ${CLI_MAIN} block T-1 --why "after the fix" --on '#93' --on morndo/morndo#94`, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: wm });
+    expect(quoted.status, quoted.stderr).toBe(0);
+    expect(quoted.stdout).toContain("[waits on #93, #94]");
+  });
+  it("names the stale flag in list for a block of words only that sat two days", async () => {
+    let now = 1_800_000_000_000;
+    const old = await startInProcessHub({ now: () => now });
+    try {
+      const m = old.agents.issue("manager", "manager").secret;
+      const c = (argv: string[]) => run(argv, { MORNDO_HUB: old.base, MORNDO_AGENT_TOKEN: m }, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} });
+      const out: string[] = [];
+      await c(["new", "Ship it", "--assign", "builder"]);
+      await c(["block", "T-1", "--why", "needs the owner's keys"]);
+      now += 2 * 24 * 3_600_000;
+      out.length = 0;
+      await c(["list", "--status", "blocked"]);
+      expect(out.join("\n")).toContain("[blocked 2 d on words only: check it, or name its waits with --on]");
+    } finally { await old.close(); }
   });
 });
 

@@ -3,7 +3,7 @@
 // given streams, so the tests drive it against an in-process hub and the entry point (main.ts) wires the real ones.
 // Exit codes: 0 done, 1 the hub refused (one line on stderr, in words an agent can act on), 2 usage, 3 the hub can't
 // be reached or didn't answer in a shape this CLI knows.
-import type { MergeRecord, MergedView, Task, TaskEvent, TaskStatus } from "@morndo/domain";
+import type { JudgedWait, MergeRecord, MergedView, Task, TaskEvent, TaskStatus, Wait } from "@morndo/domain";
 import { promptFor } from "./prompt.ts";
 import { lintWhy, proofBlock, whyTokens, type ProofView } from "./proof-text.ts";
 
@@ -24,7 +24,10 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   assign T-12 <lane>|none [--proof "<kind[@owner/repo]: text>"]…   (manager only)
   proof T-12 [--add "<spec>"]… [--drop "<spec>"|<N>]…   the proof list the work must answer (manager sets it; the lane may add)
   start T-12                            in progress (one per lane at a time)
-  block T-12 --why "…"                  blocked, with the reason
+  block T-12 --why "…" [--on <wait>]…  blocked, with the reason; each --on is one thing the board watches for you and,
+                                        once all are over, moves the task back to do: T-11 (done), owner/repo#93 or '#93'
+                                        (merged or closed; quote a bare #), ny-530 (the owner's card closed),
+                                        until:2026-10-28T09:00+01:00
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
   brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json
@@ -77,7 +80,8 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "proof_not_green": return `done is held${detail ? `: ${detail}` : ""}; to accept it anyway: done T-12 --why "…" --proof-override "<what you looked at instead>"`;
     case "bad_sha": return "that isn't a commit hash (7 to 40 hex characters)";
     case "bad_repo": return "that isn't a repo name (owner/name)";
-    case "too_many": return `a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>${detail ? ` (${detail})` : ""}`;
+    case "too_many": return detail?.includes("waits") ? `a block names ${detail}; the rest belongs in --why` : `a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>${detail ? ` (${detail})` : ""}`;
+    case "bad_wait": return `the board can't watch that wait${detail ? `: ${detail}` : ""}`;
     case "no_commit": return "the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout";
     case "no_merge": return "that merge isn't recorded on this task (see show)";
     case "bad_item": return `an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra${detail && !detail.startsWith("an item is") ? `: ${detail}` : ""}`;
@@ -88,6 +92,11 @@ function explain(error: string, other: string | undefined, from: string | undefi
 
 const when = (t: number) => new Date(t).toISOString().slice(0, 16).replace("T", " ");
 // The board's own moves (ADR-0032) name their rule and the lane whose run they followed.
+// B18: a wait as the CLI writes it, the same spelling --on takes.
+const waitText = (w: Wait) => w.kind === "task" ? w.key : w.kind === "card" ? w.id : w.kind === "time" ? `until:${new Date(w.at).toISOString()}`
+  : w.repo.toLowerCase() === "morndo/morndo" ? `#${w.n}` : `${w.repo}#${w.n}`;
+const readingsText = (rs: readonly JudgedWait[]) => rs.map(r => r.label).join(" · ");
+const DAY_MS = 24 * 3_600_000;
 const who = (a: TaskEvent["actor"]) =>
   a.kind === "principal" ? "principal" : a.kind === "console" ? "console" : a.kind === "board" ? `board (${a.rule}, ${a.lane})` : a.name;
 function changeText(e: TaskEvent): string {
@@ -95,7 +104,7 @@ function changeText(e: TaskEvent): string {
   switch (c.kind) {
     case "created": return `filed it in ${c.status}${c.assignee ? `, for ${c.assignee}` : ""}`;
     // The proof the board saw on a done (B16): its own line, with an override or the principal's acceptance inside it.
-    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}${c.notLive !== undefined ? ` (done while not live: ${c.notLive})` : ""}${c.proofSeen !== undefined ? ` (${c.proofSeen})` : ""}`;
+    case "moved": return `${c.from} → ${c.to}${c.reason ? `: ${c.reason}` : ""}${c.waits?.length ? ` [waits on ${c.waits.map(waitText).join(", ")}]` : ""}${c.notLive !== undefined ? ` (done while not live: ${c.notLive})` : ""}${c.proofSeen !== undefined ? ` (${c.proofSeen})` : ""}`;
     case "assigned": return c.to ? `assigned it to ${c.to}` : `took it from ${c.from ?? "nobody"}`;
     case "edited": return `edited ${Object.keys(c).filter(k => k !== "kind").join(", ")}`;
     case "commented": return c.text.includes("\n") ? `commented:\n      ${c.text.replace(/\n/g, "\n      ")}` : `commented: ${c.text}`;
@@ -194,6 +203,9 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       const t = d.task as Task;
       io.out(`${t.key}  ${t.title}`);
       io.out(`  ${STATUS_WORDS[t.status]}${t.blockedReason ? ` (${t.blockedReason})` : ""} · ${t.assignee ? `assigned to ${t.assignee}` : "nobody assigned"} · priority ${t.priority} · rev ${t.rev}`);
+      // B18: what the block waits on, as the hub last read it (or as named, before its first reading).
+      const read = d.waitsRead as JudgedWait[] | undefined;
+      if (t.status === "blocked" && (t.waits ?? []).length > 0) io.out(`  Waits on: ${read ? readingsText(read) : `${(t.waits ?? []).map(waitText).join(" · ")} (not read yet)`}`);
       // B11: the task's merges as the hub sees them, its label saying where they stand.
       const merged = d.merged as MergedView | null | undefined;
       if (merged && merged.merges.length > 0) {
@@ -238,6 +250,9 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const d = await call("GET", "/api/agent/board");
         let tasks = d.tasks as Task[];
         const orphans = new Set((d.orphans as string[] | undefined) ?? []);
+        // B18: each block's readings by key, and the blocks of words only that sat too long.
+        const readsOf = new Map(((d.waits as { key: string; readings: JudgedWait[] }[] | undefined) ?? []).map(w => [w.key, w.readings]));
+        const stale = new Set((d.staleBlocks as string[] | undefined) ?? []);
         const proofLines = d.proof as Record<string, string> | undefined;   // each task in review's one line (ADR-0035)
         const me = lane;
         if (flags.mine === true) {
@@ -250,7 +265,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
           if (!STATUSES.has(status)) throw new Usage(`--status takes one of ${LIST_ORDER.join(", ")}`);
           tasks = tasks.filter(t => t.status === status);
         }
-        if (flags.json === true) { io.out(JSON.stringify(tasks.map(t => ({ ...t, ...(orphans.has(t.key) ? { orphan: true } : {}), ...(proofLines !== undefined && t.key in proofLines ? { proof: proofLines[t.key] } : {}) })))); return 0; }
+        if (flags.json === true) { io.out(JSON.stringify(tasks.map(t => ({ ...t, ...(orphans.has(t.key) ? { orphan: true } : {}), ...(proofLines !== undefined && t.key in proofLines ? { proof: proofLines[t.key] } : {}), ...(readsOf.has(t.key) ? { waitsRead: readsOf.get(t.key) } : {}), ...(stale.has(t.key) ? { staleBlock: true } : {}) })))); return 0; }
         if (!tasks.length) { io.out(flags.mine === true ? `nothing assigned to ${me ?? "you"}` : "the board is empty"); return 0; }
         const lanes = new Set(d.lanes as string[]);
         // B11: each task's merges by key, so a row can say where its merge stands (the hub's label, its own brackets).
@@ -265,7 +280,13 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
             const m = mergedBy.get(t.key);
             const merge = m !== undefined && m.merges.length > 0 ? m : undefined;   // a view with no merge says nothing
             const override = merge?.merges.find(x => x.override)?.override ?? null;
-            io.out(`  ${line(t)}${orphans.has(t.key) ? "  [orphan: its lane is gone; reassign it]" : t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}${merge ? `  [${merge.label}]` : ""}${override ? `  (done not live: ${override})` : ""}`);
+            const staleFor = stale.has(t.key) ? `  [blocked ${Math.floor((((d.at as number | undefined) ?? Date.now()) - t.stateChangedAt) / DAY_MS)} d on words only: check it, or name its waits with --on]` : "";
+            io.out(`  ${line(t)}${orphans.has(t.key) ? "  [orphan: its lane is gone; reassign it]" : t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}${merge ? `  [${merge.label}]` : ""}${override ? `  (done not live: ${override})` : ""}${staleFor}`);
+            // B18: under a block that names waits, what the hub last read of them.
+            if (t.status === "blocked" && (t.waits ?? []).length > 0) {
+              const r = readsOf.get(t.key);
+              io.out(`      waits on: ${r ? readingsText(r) : `${(t.waits ?? []).map(waitText).join(" · ")} (not read yet)`}`);
+            }
             // ADR-0035: the proof line under a task in review, "proof: no brief" included — a review nobody briefed is
             // the thing the manager looks for (B15).
             const proof = proofLines?.[t.key];
@@ -361,8 +382,14 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       case "block": {
         const k = key(rest[0]);
         const why = text("why");
-        if (!why) throw new Usage('usage: morndo-board block T-12 --why "…"');
-        await act(k, { action: "move", to: "blocked", reason: why });
+        if (!why) throw new Usage('usage: morndo-board block T-12 --why "…" [--on <wait>]…');
+        const on = valuesOf(argv, "on");
+        // An --on that came without its wait is refused, never dropped: a shell takes an unquoted `#93` for a comment and
+        // hands over a bare --on, and a block on fewer waits than named would end too early (review of #161).
+        const named = argv.filter(a => a === "--on" || a.startsWith("--on=")).length;
+        if (named !== on.length || on.some(v => v.trim() === ""))
+          throw new Usage("--on needs a wait after it: T-12, '#93' (quote it: a shell takes an unquoted # for a comment), owner/repo#93, ny-530 or until:<time>");
+        await act(k, { action: "move", to: "blocked", reason: why, ...(on.length > 0 ? { waits: on } : {}) });
         return 0;
       }
       case "review": {
