@@ -364,7 +364,8 @@ if gh api "repos/$repo/contents/.github/CODEOWNERS?ref=main" -H "Accept: applica
       if (file ~ re) return 1
       dir = file
       while (dir ~ /\//) {
-        sub(/\/[^/]*$/, "", dir)
+        # The / inside the brackets is escaped: macOS awk ends a regex literal at the first bare /, even in brackets.
+        sub(/\/[^\/]*$/, "", dir)
         if (dir ~ re) return 1
       }
       return 0
