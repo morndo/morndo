@@ -342,6 +342,7 @@ export function helperCommand(launcher: string, lease: string): string {
   return `${launcher} helper --lease ${lease}`;
 }
 
+const HOOK_TIMEOUT_SECONDS = 10;
 const SANDBOX = { enabled: true, failIfUnavailable: true, allowUnsandboxedCommands: false } as const;
 
 export function sandboxReady(sandbox: { enabled?: boolean; failIfUnavailable?: boolean; allowUnsandboxedCommands?: boolean }): boolean {
@@ -360,7 +361,9 @@ function readRule(path: string): string[] {
 // A bare tool name in permissions.deny removes that tool. WebSearch uses the first-party
 // backend, so a third-party base denies it (design 8.3).
 // https://code.claude.com/docs/en/permissions — checked 2026-10-11.
-export function claudeSettings(plan: RunPlan, helper: string | null, denyWebSearch = false): string {
+// A pooled run also names a StopFailure hook: the agent CLI runs it when a turn ends on an API error (https://code.claude.com/docs/en/hooks.md, read
+// 2026-10-26), with the error on stdin; it reports the refusal of the key the run is on (ADR-0037, slice 4). Its output and exit code are ignored.
+export function claudeSettings(plan: RunPlan, helper: string | null, denyWebSearch = false, hook: string | null = null): string {
   const body: Record<string, unknown> = {
     permissions: { deny: [...plan.deny.flatMap(readRule), ...(denyWebSearch ? ["WebSearch"] : [])] },
     sandbox: {
@@ -370,6 +373,7 @@ export function claudeSettings(plan: RunPlan, helper: string | null, denyWebSear
     },
   };
   if (helper !== null) body.apiKeyHelper = helper;
+  if (hook !== null) body.hooks = { StopFailure: [{ hooks: [{ type: "command", command: hook, timeout: HOOK_TIMEOUT_SECONDS }] }] };
   return JSON.stringify(body);
 }
 
@@ -382,8 +386,8 @@ export function claudeIsolation(settings: string): Isolation {
   return sandboxReady(body.sandbox ?? {}) && denies.length > 0 ? "os" : "rules";
 }
 
-export function claudeArgv(bin: string, plan: RunPlan, helper: string, extra: readonly string[], denyWebSearch = false): string[] {
-  return [bin, "-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, helper, denyWebSearch), "--max-budget-usd", plan.reservation.toFixed(2), ...extra];
+export function claudeArgv(bin: string, plan: RunPlan, helper: string, extra: readonly string[], denyWebSearch = false, hook: string | null = null): string[] {
+  return [bin, "-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, helper, denyWebSearch, hook), "--max-budget-usd", plan.reservation.toFixed(2), ...extra];
 }
 
 export class ClaudeRuntime implements Runtime {
@@ -392,12 +396,14 @@ export class ClaudeRuntime implements Runtime {
   readonly #parent: NodeJS.ProcessEnv;
   readonly #baseUrl: string;
   readonly #firstPartyHost: string;
-  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv, baseUrl = "", firstPartyHost = "") {
+  readonly #hook: string | null;
+  constructor(bin: string, helper: string, parent: NodeJS.ProcessEnv, baseUrl = "", firstPartyHost = "", hook: string | null = null) {
     this.#bin = bin;
     this.#helper = helper;
     this.#parent = parent;
     this.#baseUrl = baseUrl;
     this.#firstPartyHost = firstPartyHost;
+    this.#hook = hook;
   }
 
   isolation(): Isolation {
@@ -427,7 +433,7 @@ export class ClaudeRuntime implements Runtime {
     }
     const flags = plan.subscription
       ? ["-p", "--effort", plan.effort, "--output-format", "json", "--settings", claudeSettings(plan, null), ...extra]
-      : claudeArgv(this.#bin, plan, this.#helper, extra, denyWebSearch).slice(1);
+      : claudeArgv(this.#bin, plan, this.#helper, extra, denyWebSearch, this.#hook).slice(1);
     const started = binCommand(this.#bin, flags);
     return runChild(started.command, started.argv, {
       env: childEnv(this.#parent, extraEnv),

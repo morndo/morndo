@@ -5,11 +5,14 @@ import type { Actor, Outcome } from "@morndo/domain";
 import type { ProbeResult, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
 import { fail, gateRuntime, need, type Io, type Parsed } from "./cli.ts";
+import { signalFromHook } from "./adapters/outcome-anthropic.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const HOUR = 3_600_000;
 const DAY = 86_400_000;
+// A hook's payload is read, classified and dropped; more than this is not one.
+const HOOK_STDIN_LIMIT = 65_536;
 
 type Done = { ok: true } | { ok: false; error: { problem: string; exit?: number } };
 
@@ -68,6 +71,7 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
       for (const view of home.keypools.list()) io.stdout(`${JSON.stringify(view)}\n`);
       return 0;
     case "report": {
+      if (parsed.get("from-hook") === "true") return reportFromHook(home, need(pool), parsed, io);
       const outcome = outcomeOf(parsed.get("outcome"), parsed.get("reason"));
       if (outcome === null) return fail(io, "outcome");
       const grant = parsed.get("grant");
@@ -76,16 +80,8 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
         if (parsed.get("member") !== undefined || parsed.get("lease") !== undefined) return fail(io, "usage");
         const caller = selfId();
         if (caller === null) return fail(io, "holder");
-        const name = need(pool);
-        const reported = home.keypools.reportByGrant(name, grant, outcome, home.now(), { kind: "holder", caller });
-        if (reported.ok && reported.value.suspect !== null) {
-          const runtime = home.keypools.state(name)?.runtime;
-          if (runtime !== undefined) {
-            home.runtime.current = gateRuntime(home, runtime);
-            const holder = selfHolder(null);
-            if (holder) await home.keypools.probeMember(name, reported.value.suspect, { why: "suspect", holder });
-          }
-        }
+        const reported = home.keypools.reportByGrant(need(pool), grant, outcome, home.now(), { kind: "holder", caller });
+        if (reported.ok) await probeSuspect(home, need(pool), reported.value.suspect);
         return done(reported, io);
       }
       // With --lease the caller is a lane, and may report only for the member of that open lease, as the process that holds it or one of its
@@ -102,6 +98,49 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
     case "delete": return done(home.keypools.delete(need(pool), ACTOR), io);
     default: return fail(io, "usage");
   }
+}
+
+// A KP18 report that fell back to the hand-off window names the current member to suspect: one claimed probe of it decides.
+async function probeSuspect(home: Opened, pool: string, suspect: string | null): Promise<void> {
+  if (suspect === null) return;
+  const runtime = home.keypools.state(pool)?.runtime;
+  if (runtime === undefined) return;
+  home.runtime.current = gateRuntime(home, runtime);
+  const holder = selfHolder(null);
+  if (holder) await home.keypools.probeMember(pool, suspect, { why: "suspect", holder });
+}
+
+// `keypool report <pool> (--member M | --grant G) --from-hook`: the agent CLI's StopFailure payload on stdin, read, classified and dropped. Only a
+// refusal of the key is applied (exhausted, failing); the line printed is the pool and a word, never the payload. The hook's own exit code is
+// ignored by the CLI, so a payload that is no refusal exits 0 as `ignored`.
+async function reportFromHook(home: Opened, pool: string, parsed: Parsed, io: Io): Promise<number> {
+  const member = parsed.get("member");
+  const grant = parsed.get("grant");
+  if ((member === undefined) === (grant === undefined)) return fail(io, "usage");
+  for (const refused of ["lease", "outcome", "reason"]) if (parsed.get(refused) !== undefined) return fail(io, "usage");
+  const text = io.stdin ?? "";
+  if (Buffer.byteLength(text) > HOOK_STDIN_LIMIT) return fail(io, "too_big");
+  let payload: unknown;
+  try { payload = JSON.parse(text); } catch { return fail(io, "payload"); }
+  const signal = signalFromHook(payload);
+  if (signal === null) {
+    if (home.keypools.state(pool) === null) return fail(io, "missing");
+    io.stdout(`${JSON.stringify({ pool, outcome: "ignored" })}\n`);
+    return 0;
+  }
+  let caller: ReturnType<typeof selfId> = null;
+  if (grant !== undefined) {
+    caller = selfId();
+    if (caller === null) return fail(io, "holder");
+  }
+  const target = grant !== undefined && caller !== null
+    ? { kind: "grant", grant, by: { kind: "holder", caller } } as const
+    : { kind: "member", member: member ?? "" } as const;
+  const reported = home.keypools.reportRefusal(pool, target, signal, home.now());
+  if (!reported.ok) return fail(io, reported.error.problem);
+  await probeSuspect(home, pool, reported.value.suspect);
+  io.stdout(`${JSON.stringify({ pool, outcome: reported.value.outcome })}\n`);
+  return 0;
 }
 
 // One JSON line per probe: the pool, then the service's result, words only. Exit 0 once the command has run.

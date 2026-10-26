@@ -56,6 +56,9 @@ type HandOffCaller = { id: ProcId; ppid: number | null; filter: string | null };
 type Leases = Pick<LeaseService, "swap" | "refresh" | "helper" | "serve" | "lease" | "close">;
 export type LaneProof = { kind: "lane"; lease: string; caller: { pid: number; startedAt: number; bootId: string } };
 export type ReportBy = Actor | LaneProof;
+export type RefusalTarget =
+  | { kind: "member"; member: string }
+  | { kind: "grant"; grant: string; by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId } };
 type CreateInput = {
   name: string;
   vendor: string;
@@ -258,8 +261,43 @@ export class KeyPoolService implements ConnectionLifecycle {
   }
 
   reportSignal(pool: string, member: string, signal: ProviderSignal, observedAt: number, via: "probe" | "report" = "report", why?: ProbeWhy): Result<Outcome, Failure> {
+    const classified = this.#classified(pool, member, signal, false);
+    if (!classified.ok) return classified;
+    const reported = this.report(pool, member, classified.value, observedAt, { kind: "operator" }, via, why);
+    return reported.ok ? ok(classified.value) : reported;
+  }
+
+  // A refusal read from a consumer's own hook (slice 4). Only a mark (exhausted or failing) is applied; a rate limit, an unknown answer or an ok
+  // changes and writes nothing, so a hook that fires on every limited turn cannot fill the event list. By grant, the caller must hold the grant
+  // before anything else happens: a stranger raises no alert and writes nothing.
+  reportRefusal(pool: string, target: RefusalTarget, signal: ProviderSignal, observedAt: number): Result<{ outcome: Outcome["kind"]; suspect: string | null }, Failure> {
+    const loaded = this.#deps.store.load(pool).pool;
+    if (!loaded) return fail("missing");
+    let member: string;
+    if (target.kind === "member") member = target.member;
+    else {
+      const held = loaded.grants.find(row => row.id === target.grant);
+      if (!held) return fail("grant_missing");
+      if (target.by.kind === "holder" && !this.#holds(held.holder, target.by.caller)) return fail("not_holder");
+      member = held.member;
+    }
+    const classified = this.#classified(pool, member, signal, target.kind === "member");
+    if (!classified.ok) return classified;
+    const outcome = classified.value;
+    if (outcome.kind !== "exhausted" && outcome.kind !== "failing") return ok({ outcome: outcome.kind, suspect: null });
+    if (target.kind === "member") {
+      const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" });
+      return reported.ok ? ok({ outcome: outcome.kind, suspect: null }) : reported;
+    }
+    const reported = this.reportByGrant(pool, target.grant, outcome, observedAt, target.by);
+    return reported.ok ? ok({ outcome: outcome.kind, suspect: reported.value.suspect }) : reported;
+  }
+
+  // The pool's dialect classifies the signal; an unmatched 4xx raises the one `unclassified` alert of status and type only.
+  #classified(pool: string, member: string, signal: ProviderSignal, named = true): Result<Outcome, Failure> {
     const loaded = this.#deps.store.load(pool);
     if (!loaded.pool) return fail("missing");
+    if (named && !loaded.pool.members.some(row => row.credential === member)) return fail("missing");
     const dialect = this.#deps.catalog.keyPool(loaded.pool.vendor)?.errorDialect;
     if (!dialect) return fail("no_classifier");
     const classifier = this.#deps.classifiers.for(dialect);
@@ -271,8 +309,7 @@ export class KeyPoolService implements ConnectionLifecycle {
     } else if (signal.status !== null) {
       this.#clearAlert(pool, member, "unclassified");
     }
-    const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" }, via, why);
-    return reported.ok ? ok(outcome) : reported;
+    return ok(outcome);
   }
 
   // Claim, then the member's own gate, then one probe. A refusal before the request sends nothing. The instant of the
