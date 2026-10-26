@@ -144,6 +144,18 @@ describe("--once", () => {
     expect([out.code, out.stdout]).toEqual([0, ""]);
     expect(await states(w)).toEqual(["active", "active", "active"]);
   });
+  it("what it prints passes the exact-value filter: a member named as its own key's value is printed as [redacted]", async () => {
+    const w = await world();
+    const leaky = "sk-ant-synthetic-log-leak-0009";
+    expect((await cli(["add", leaky, "--vendor", "anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], w.env, leaky)).code).toBe(0);
+    expect((await cli(["ack", leaky, "--by", "owner"], w.env)).code).toBe(0);
+    expect((await cli(["keypool", "add", "p", leaky, "--confirm-own-account"], w.env)).code).toBe(0);
+    writeFileSync(w.log, `${CREDIT}\n`);
+    const out = await watch(w, "--member", leaky, "--once");
+    expect(out.code, out.stderr).toBe(0);
+    expect(out.stdout).not.toContain(leaky);
+    expect(lines(out)).toEqual([{ pool: "p", member: "[redacted]", outcome: "exhausted" }]);
+  });
   it("usage and missing: one of --member or --sink, --log needed, a pool and a member that exist, a file that is a sink", async () => {
     const w = await world();
     writeFileSync(w.log, "x\n");

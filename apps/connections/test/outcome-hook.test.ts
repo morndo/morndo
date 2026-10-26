@@ -92,7 +92,7 @@ describe("what a signal keeps", () => {
     expect(signal?.resumeDate ?? null).toBeNull();
   });
   it("the spend-limit date is read from the whole message, not from the cut excerpt", () => {
-    const text = `API Error: 400 You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.`;
+    const text = `API Error: 400 You have reached your specified API usage limits. ${"x".repeat(300)} You will regain access on 2026-11-01 at 00:00 UTC.`;
     expect(signalFromHook(payload("unknown", text))?.resumeDate).toBe("2026-11-01");
   });
 });

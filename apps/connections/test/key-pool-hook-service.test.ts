@@ -143,11 +143,13 @@ describe("reportRefusal by member", () => {
     expect(state(w, "k2")).toBe("exhausted");
     expect(state(w, "k1")).toBe("active");
   });
-  it("a member that is not in the pool says missing and changes nothing", async () => {
+  it("a member that is not in the pool says missing and changes nothing, an unmatched answer for it raises no alert", async () => {
     const w = await world();
     const before = pool(w);
     expect(word(w.pools.reportRefusal("p", { kind: "member", member: "k9" }, signalOf(400), w.mem.clock.now()))).toBe("missing");
+    expect(word(w.pools.reportRefusal("p", { kind: "member", member: "k9" }, signalOf(418, { kind: "teapot_error" }), w.mem.clock.now()))).toBe("missing");
     expect(pool(w)).toEqual(before);
+    expect(w.mem.alerts.raised).toEqual([]);
   });
 });
 

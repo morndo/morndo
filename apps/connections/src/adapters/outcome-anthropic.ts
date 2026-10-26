@@ -68,14 +68,14 @@ const HOOK_HINT_STATUS: Readonly<Record<string, number>> = { authentication_fail
 
 // The JSON a `StopFailure` hook gets on stdin (spike S2, 2026-10-26), read into the signal a provider's answer gives. The `error` code is a hint: a 402
 // and a spend limit arrive as `unknown`, so the text is read for every code that can be a refusal of the key. The status comes only from the CLI's
-// own prefix. Nothing else of the payload is kept: not error_details, the transcript path, the session, nor the message beyond the clipped excerpt.
+// own prefix (anchored at the start). Nothing else of the payload is kept: not error_details, the transcript path, the session, nor the message beyond the clipped excerpt.
 export function signalFromHook(value: unknown): ProviderSignal | null {
   const root = record(value);
   if (!root || root.hook_event_name !== "StopFailure") return null;
   const { error, last_assistant_message: message } = root;
   if (typeof error !== "string" || typeof message !== "string" || message.length > HOOK_TEXT_LIMIT) return null;
   if (NOT_THE_KEY.has(error)) return null;
-  const status = Number(HOOK_STATUS.exec(message.slice(0, 120))?.[1] ?? HOOK_HINT_STATUS[error] ?? NaN);
+  const status = Number(HOOK_STATUS.exec(message)?.[1] ?? HOOK_HINT_STATUS[error] ?? NaN);
   const text = error === "account_on_hold" ? `account_on_hold ${message}` : message;
   return {
     status: Number.isNaN(status) ? null : status,
