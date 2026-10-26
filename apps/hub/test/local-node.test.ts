@@ -20,6 +20,7 @@ function panes(problem: SendProblem | null = null) {
     capture: async id => { captured.push(id); return id === "%9" ? null : `screen of ${id}`; },
     send: async (id, text) => { typed.push({ id, text, at: Date.now() }); await new Promise(r => setTimeout(r, 30)); return problem; },
     sendKeyNames: async () => false,                                  // the hub's local node never presses keys by name
+    captureScreen: async () => null,
     pasteLiteral: async () => {},
   };
   return { tmux, captured, typed };

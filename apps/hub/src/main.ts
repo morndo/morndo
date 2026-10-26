@@ -20,7 +20,7 @@ import { loadOrCreateIdentity, writeIdentityPub } from "./adapters/identity.ts";
 import { fleetForUpdates } from "./adapters/fleet-updates.ts";
 import { principalSigner } from "./adapters/principal-signer.ts";
 import { updaterCli } from "./adapters/updater-cli.ts";
-import { UpdatesService } from "./application/updates-service.ts";
+import { updatesServiceFor } from "./adapters/updates-wiring.ts";
 import { passkeys } from "./adapters/passkeys.ts";
 import { denyConfigFromEnv, denyConfigWithClaudeDir, denyRoots, paneLock } from "@morndo/node-ops";
 import { AGENT_SCOPES, CLIENT_API } from "@morndo/protocol";
@@ -100,7 +100,8 @@ MORNDO_CLAUDE_DIR, MORNDO_MANAGER_WINDOW (default "manager"), MORNDO_LEDGER (the
 MORNDO_PANE_LOCK (the lock file other typists into the manager's pane take), MORNDO_VNC (host:port of the desktop's
 VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's client socket; unset, this
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
-MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet), MORNDO_ENGINES (the engine layer's
+MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet), MORNDO_CONTROL_PLANE_NODE (the fleet
+node name of the control plane's own node agent; the Updates page shows it inside This machine), MORNDO_ENGINES (the engine layer's
 CLI, engine-layer bin/engines: the Engines page), MORNDO_MANAGER_QUEUE (with a fleet, the manager's answers and
 messages go through the fleet's delivery queue; "off" types them directly) and MORNDO_REPO (a local Morndo checkout:
 the board compares merge commits with the nodes' builds in it). MORNDO_TRANSCRIBER (absolute path of a
@@ -320,9 +321,10 @@ switch (cmd) {
     // beside the hub, but without a fleet there is no Rollout to move and no node to command, so the page stays off.
     // The fleet's `rollout` events keep the service's last word on where the Rollout stands, for a view the fleet
     // can't answer (its own subscription, like the runs' and the deliveries').
-    const updatesService = fleet ? new UpdatesService({
+    const updatesService = fleet ? updatesServiceFor(config, {
       fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
       policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
+      warn: line => log.warn(line),
     }) : null;
     const stopRolloutEvents = fleet && updatesService
       ? fleet.client.events(e => { if (e.t === "rollout") updatesService.onRolloutEvent(e.body); })

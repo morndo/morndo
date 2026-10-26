@@ -1313,7 +1313,7 @@ export const CONTROLS: Control[] = [
     find: "join: a.join !== false", replace: "join: true",
     run: ["apps/node-agent/test/pane-capture.test.ts"], expect: "unless asked not to (join: false" },
   { id: "fc6-capture-uncapped", task: "fc6", file: "apps/node-agent/src/ops/pane-ops.ts",
-    find: "return ok<\"pane.capture\">(capCapture(text, LIMITS.captureMaxBytes));", replace: "return ok<\"pane.capture\">({ text, truncated: false });",
+    find: "const capped = capCapture(text, LIMITS.captureMaxBytes);", replace: "const capped = { text, truncated: false };",
     run: ["apps/node-agent/test/pane-capture.test.ts"], expect: "truncated" },
   { id: "fc6-deliver-without-pane-send", task: "fc6", file: "apps/node-agent/src/ops/delivery-ops.ts",
     find: "      if (!d.policy.ops.includes(\"pane.send\")) return fail(\"denied\", \"deliveries are typed through pane.send, which this node's policy does not allow\");\n",
