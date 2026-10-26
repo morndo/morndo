@@ -47,7 +47,9 @@ try {
   fakeForge = await startFakeForge();
   fakeForge.pr("morndo/morndo", 42, { head: FULL });
   fakeForge.pr("morndo/morndo", 43, { head: FULL_GREEN, base: "release", required: ["ci"] });   // its own base branch: it requires only ci
-  fakeForge.runs("morndo/morndo", FULL_GREEN, [{ id: 3, name: "ci", status: "completed", conclusion: "success" }]);
+  // A forge that answers late, as a runner under load does: the test's CLI calls block this process, which serves the forge, so
+  // a Done filed before the check has landed would wait on an answer that cannot come (the hub's 8 s timeout, T-477).
+  fakeForge.runs("morndo/morndo", FULL_GREEN, [{ id: 3, name: "ci", status: "completed", conclusion: "success" }], { delayMs: 400 });
   fakeForge.runs("morndo/morndo", FULL, [
     { id: 1, name: "ci", status: "completed", conclusion: "success" },
     { id: 2, name: "lint", status: "completed", conclusion: "failure", url: RUN },
@@ -160,7 +162,12 @@ try {
       "--limit", "none known",
     ).code === 0, "re-brief failed");
     await panel.locator('[data-proof-need][data-status="told"]').waitFor({ timeout: 10_000 });
-    assert(manager("done", "T-2", "--why", "read the diff").code === 0, "done should pass once data is told");
+    // The panel shows the data as told at once (it comes from the brief); the pull request's new check lands a moment later.
+    // The Done waits for the green line, as the other checks here do: a CLI call made while the hub still waits on the forge
+    // blocks this process, which serves the forge, and the hub gives up after 8 s (T-477).
+    await waitFor(() => manager("show", "T-2").out.includes("1 of 1 green"), 20_000);
+    const done = manager("done", "T-2", "--why", "read the diff");
+    assert(done.code === 0, `done should pass once data is told: ${done.out}`);
   });
 
   await check("a green required check beside a failing optional one is a warning on the reference and does not hold the Done", async () => {
