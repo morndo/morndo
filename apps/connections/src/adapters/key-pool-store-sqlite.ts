@@ -17,7 +17,7 @@ function deleted(body: string): boolean {
 }
 
 // A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
-// (the filter null). A member saved before probes loads with probingUntil null, failedProbes 0 and lastProbe null. Saving still writes
+// (the filter null), and one saved before sinks loads with none. A member saved before probes loads with probingUntil null, failedProbes 0 and lastProbe null. Saving still writes
 // the pool it was given.
 function withHistory(pool: KeyPool): KeyPool {
   const grants = ((pool.grants ?? []) as readonly (Grant & { seen?: Grant["seen"]; lent?: Grant["lent"]; filter?: Grant["filter"] })[]).map(grant => ({
@@ -26,7 +26,7 @@ function withHistory(pool: KeyPool): KeyPool {
   const members = (pool.members ?? []).map(member => ({
     ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0, lastProbe: member.lastProbe ?? null, alerted: member.alerted ?? {},
   }));
-  return { ...pool, grants, members };
+  return { ...pool, grants, members, sinks: pool.sinks ?? [] };
 }
 
 function poolOf(body: string): KeyPool | null {

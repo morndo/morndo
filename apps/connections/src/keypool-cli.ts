@@ -1,7 +1,8 @@
 // `morndo-keys keypool …` (ADR-0037). Exit 0 when done; 1 when refused, with the reason word on stderr. A pick that is refused (the pool
 // is empty or blocked, a gate says no) exits 75, as `lease` and `run` do. `create`, `add`, `move` and `revive` are the principal's
 // (KP10): the command id is "cli", as every other command of this bin.
-import type { Actor, Outcome } from "@morndo/domain";
+import { realpathSync, statSync } from "node:fs";
+import { isSinkPath, type Actor, type Outcome } from "@morndo/domain";
 import type { ProbeResult, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
 import { fail, gateRuntime, need, type Io, type Parsed } from "./cli.ts";
@@ -92,12 +93,44 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
       const by: ReportBy = lease === undefined || caller === null ? ACTOR : { kind: "lane", lease, caller: { pid: caller.pid, startedAt: caller.startedAt, bootId: caller.bootId } };
       return done(home.keypools.report(need(pool), need(parsed.get("member")), outcome, home.now(), by), io);
     }
+    case "sink": return sink(home, parsed, io);
     case "sync": return done(home.keypools.sync(), io);
     case "recheck": return recheck(home, parsed, io);
     case "revive": return done(home.keypools.revive(need(pool), need(member), ACTOR), io);
     case "delete": return done(home.keypools.delete(need(pool), ACTOR), io);
     default: return fail(io, "usage");
   }
+}
+
+// `keypool sink add|remove|list <pool> [path]` (KP20): the files `write-env` writes a pool's key to. A registered path is denied to the lanes' tools
+// (the launcher reads every pool's sinks), so it may not lie in the connections home, where the vault is, and must not be a directory.
+function sink(home: Opened, parsed: Parsed, io: Io): number {
+  const action = parsed.positionals[1];
+  const pool = parsed.positionals[2];
+  const path = parsed.positionals[3];
+  if (pool === undefined || (action !== "add" && action !== "remove" && action !== "list")) return fail(io, "usage");
+  if (action === "list") {
+    const paths = home.keypools.sinksOf(pool);
+    if (paths === null) return fail(io, "missing");
+    for (const row of paths) io.stdout(`${JSON.stringify({ pool, path: row })}\n`);
+    return 0;
+  }
+  if (path === undefined) return fail(io, "usage");
+  if (action === "remove") return done(home.keypools.removeSink(pool, path, ACTOR), io);
+  if (!isSinkPath(path)) return fail(io, "bad_path");
+  if (insideHome(home.dir, path)) return fail(io, "sink_protected");
+  if (isDirectory(path)) return fail(io, "sink_directory");
+  return done(home.keypools.addSink(pool, path, ACTOR), io);
+}
+
+function insideHome(dir: string, path: string): boolean {
+  const roots = new Set([dir]);
+  try { roots.add(realpathSync(dir)); } catch { /* a home that is gone protects nothing */ }
+  return [...roots].some(root => path === root || path.startsWith(`${root}/`));
+}
+
+function isDirectory(path: string): boolean {
+  try { return statSync(path).isDirectory(); } catch { return false; }
 }
 
 // A KP18 report that fell back to the hand-off window names the current member to suspect: one claimed probe of it decides.

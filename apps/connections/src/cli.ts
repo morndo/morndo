@@ -104,6 +104,7 @@ morndo-keys keypool policy <pool> [--mode …] [--recheck …]    keypool list  
 morndo-keys keypool report <pool> --member M --outcome exhausted|failing|limited [--reason R] [--lease <id>]
 morndo-keys keypool report <pool> --outcome exhausted|failing|limited --grant <id>
 morndo-keys keypool report <pool> (--member M | --grant <id>) --from-hook    the agent CLI's StopFailure payload on stdin (a pooled run's settings name this command as the hook): read, classified and dropped, never stored; only a refusal of the key (credit, spend limit, 401/403, hold) changes anything. Prints the pool and one word.
+morndo-keys keypool sink add|remove|list <pool> [<path>]    the files write-env writes the pool's key to; every registered path (and its .member sidecar) is denied to the tools of a run
 morndo-keys keypool sync
 morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role R] [--workspace DIR] [--reserve USD] -- <agent arguments>
 morndo-keys check --pool <name>
@@ -346,7 +347,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   const plan = {
     lease: lease.id, connection: name, ref: connection.kind === "api-key" ? connection.ref : null,
     configDir, model, effort: choice.effort, smallModel: small, workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
-    deny: [home.vaultDir, home.db, home.identity, ...(connection.repo?.deny ?? [])],
+    deny: [home.vaultDir, home.db, home.identity, ...home.keypools.allSinks(), ...(connection.repo?.deny ?? [])],
     reservation: lease.reservation, probe: false, subscription,
   };
   const bin = connection.runtime === "codex" ? home.env.MORNDO_CODEX_BIN ?? "codex" : home.env.MORNDO_CLAUDE_BIN ?? "claude";

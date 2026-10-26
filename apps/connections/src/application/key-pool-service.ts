@@ -4,7 +4,7 @@
 // the audit line, and the next call repairs a crash between those writes. Alerts name a member or the pool and a reason
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
-  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
+  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, addKeySink, removeKeySink, sinkSidecar, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
   joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
   alertOnce, clearAlerted, openGrant, releaseClaim, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant, unreachable,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
@@ -237,6 +237,38 @@ export class KeyPoolService implements ConnectionLifecycle {
       const next = reviveKey(current, member, actor, now);
       return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
     });
+  }
+
+  // The files a pool's key is written to (KP20). A path belongs to one pool; the principal registers and releases it.
+  addSink(pool: string, path: string, actor: Actor): Result<void, Failure> {
+    if (!isPrincipal(actor)) return fail("principal");
+    for (const other of this.#deps.store.names().live) {
+      if (other !== pool && this.#deps.store.load(other).pool?.sinks.includes(path)) return fail("sink_taken");
+    }
+    return this.#change(pool, (current, now) => {
+      const next = addKeySink(current, path, actor, now);
+      return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
+    });
+  }
+
+  removeSink(pool: string, path: string, actor: Actor): Result<void, Failure> {
+    return this.#change(pool, (current, now) => {
+      const next = removeKeySink(current, path, actor, now);
+      return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
+    });
+  }
+
+  sinksOf(pool: string): readonly string[] | null {
+    return this.#deps.store.load(pool).pool?.sinks ?? null;
+  }
+
+  // Every live pool's sinks and the sidecar of each: what the lane deny list names.
+  allSinks(): readonly string[] {
+    const paths: string[] = [];
+    for (const name of this.#deps.store.names().live) {
+      for (const sink of this.#deps.store.load(name).pool?.sinks ?? []) paths.push(sink, sinkSidecar(sink));
+    }
+    return paths;
   }
 
   delete(pool: string, actor: Actor): Result<void, Failure> {

@@ -67,10 +67,13 @@ export type KeyPoolEvent =
   | { type: "PoolRefilled"; at: number }
   | { type: "GrantOpened"; grant: string; member: string; at: number }
   | { type: "GrantMoved"; grant: string; from: string; to: string; why: GrantMoveWhy; at: number }
-  | { type: "GrantClosed"; grant: string; at: number };
+  | { type: "GrantClosed"; grant: string; at: number }
+  | { type: "SinkAdded"; sinks: number; at: number; command: string }
+  | { type: "SinkRemoved"; sinks: number; at: number; command: string };
 export type KeyPool = {
   name: string; runtime: string; vendor: string; policy: RotationPolicy; members: readonly KeyMember[];
   grants: readonly Grant[];
+  sinks: readonly string[];
   lastPick: string | null; terms: TermsAck | null; ownedOrgs: readonly string[]; standing: Standing;
   events: readonly KeyPoolEvent[]; seq: number;
 };
@@ -81,6 +84,20 @@ export type PickRefusal =
 export type CreateKeyPool = { name: string; runtime: string; vendor: string; policy?: RotationPolicy };
 
 const EVENT_LIMIT = 500;
+export const KEY_POOL_SINKS_MAX = 16;
+const SINK_MAX_LENGTH = 4096;
+const SINK_SEGMENT = /^[A-Za-z0-9._@+=,:-]+$/;
+const SIDECAR = ".member";
+
+// A sink is the file `write-env` writes a pool's key to (KP20): absolute, normalised, safe characters only (no space, glob, quote or control
+// character, so it is one literal in a deny rule), and never a sidecar (`<sink>.member`).
+export function isSinkPath(path: string): boolean {
+  if (path.length < 2 || path.length > SINK_MAX_LENGTH || !path.startsWith("/") || path.endsWith(SIDECAR)) return false;
+  return path.slice(1).split("/").every(segment => SINK_SEGMENT.test(segment) && segment !== "." && segment !== "..");
+}
+
+// The file beside a sink that names the member whose key was last written there.
+export const sinkSidecar = (path: string): string => `${path}${SIDECAR}`;
 
 function commandOf(actor: Actor): Result<string, "principal"> {
   return actor.kind === "principal" && actor.command.trim() !== "" ? ok(actor.command) : err("principal");
@@ -160,9 +177,27 @@ export function createKeyPool(
   if (names.connections.includes(input.name) || names.pools.includes(input.name) || names.deleted.includes(input.name)) return err("taken");
   const created: KeyPool = {
     name: input.name, runtime: input.runtime, vendor: input.vendor, policy: policy.value,
-    members: [], grants: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
+    members: [], grants: [], sinks: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
   };
   return ok(settleKeyPool(withEvents(created, [{ type: "KeyPoolCreated", pool: input.name, at: now, command: who.value }]), now));
+}
+
+export function addKeySink(p: KeyPool, path: string, actor: Actor, now: number): Result<KeyPool, "principal" | "bad_path" | "exists" | "too_many"> {
+  const who = commandOf(actor);
+  if (!who.ok) return who;
+  if (!isSinkPath(path)) return err("bad_path");
+  if (p.sinks.includes(path)) return err("exists");
+  if (p.sinks.length >= KEY_POOL_SINKS_MAX) return err("too_many");
+  const sinks = [...p.sinks, path];
+  return ok(withEvents({ ...p, sinks }, [{ type: "SinkAdded", sinks: sinks.length, at: now, command: who.value }]));
+}
+
+export function removeKeySink(p: KeyPool, path: string, actor: Actor, now: number): Result<KeyPool, "principal" | "missing"> {
+  const who = commandOf(actor);
+  if (!who.ok) return who;
+  if (!p.sinks.includes(path)) return err("missing");
+  const sinks = p.sinks.filter(row => row !== path);
+  return ok(withEvents({ ...p, sinks }, [{ type: "SinkRemoved", sinks: sinks.length, at: now, command: who.value }]));
 }
 
 export function acknowledgeKeyPoolTerms(p: KeyPool, revision: string, by: string, actor: Actor, now: number): Result<KeyPool, "principal" | "ack_needed"> {
