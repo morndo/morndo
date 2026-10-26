@@ -108,10 +108,12 @@ describe("pane.capture (spec §5)", () => {
     expect(await until(async () => (await capture(alt, 5)).text?.includes("120") ?? false)).toBe(true);
     const saved = process.env.PATH;
     process.env.PATH = `${bin}:${saved}`;
+    let calls = "";
     try {
       expect((await capture(alt, 200)).scrollbackMissing).toBe(true);
+      calls = readFileSync(log, "utf8");
     } finally { process.env.PATH = saved; rmSync(bin, { recursive: true, force: true }); }
-    const asked = readFileSync(log, "utf8").split("\n").filter(l => l.includes("alternate_on"));
+    const asked = calls.split("\n").filter(l => l.includes("alternate_on"));
     expect(asked).toHaveLength(1);                                    // asked once, and in the very call that captures
     expect(asked[0]).toContain("capture-pane");
   });

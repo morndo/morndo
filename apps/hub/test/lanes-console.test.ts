@@ -129,7 +129,7 @@ describe("morndo lanes peek --lines past the screen, on the alternate screen (T-
     await start();
     const r = await lanes(["peek", "alt", "--lines", "100"]);
     expect(r.code, r.err).toBe(0);
-    const lines = r.out.trimEnd().split("\n");
+    const lines = r.out.replace(/\n$/, "").split("\n");
     expect(lines[0]).toMatch(LABEL);
     expect(lines.slice(1)).toEqual([
       "user: first question", "assistant: answer one", "with a second line",
@@ -145,7 +145,7 @@ describe("morndo lanes peek --lines past the screen, on the alternate screen (T-
     await start();
     const r = await lanes(["peek", "alt", "--lines", "5"]);
     expect(r.code, r.err).toBe(0);
-    const lines = r.out.trimEnd().split("\n");
+    const lines = r.out.replace(/\n$/, "").split("\n");
     expect(lines[0]).toMatch(LABEL);
     expect(lines.slice(1, -4)).toHaveLength(5);              // the screen label and its 3 lines close the output
     expect(lines.slice(-4)).toEqual([SCREEN_LABEL, "s1", "s2", "❯ "]);
@@ -168,7 +168,7 @@ describe("morndo lanes peek --lines past the screen, on the alternate screen (T-
     await start({ transcripts: { "s-alt": big } });
     const r = await lanes(["peek", "alt", "--lines", "4"]);          // more than the screen's 3 rows
     expect(r.code, r.err).toBe(0);
-    const lines = r.out.trimEnd().split("\n");
+    const lines = r.out.replace(/\n$/, "").split("\n");
     expect(lines[0]).toMatch(LABEL);
     expect(lines.slice(1, 5)).toEqual(["user: ask 3996 ü", expect.stringContaining("reply 3997"), "user: ask 3998 ü", expect.stringContaining("reply 3999")]);
     expect(lines.slice(5)).toEqual([SCREEN_LABEL, "s1", "s2", "❯ "]);
