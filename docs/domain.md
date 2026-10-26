@@ -715,6 +715,22 @@ A pool also stands in the routing policy as a name of its own: the Priority and 
 
 Aggregate **KeyPool**, one per name. The clock is the `now` argument. The service (`apps/connections/src/application/key-pool-service.ts`) loads a pool, applies one domain function, saves on the version it read, and retries a lost save up to 8 times, as the account pool's does.
 
+Proposed in [ADR-0024](adr/0024-usage-from-other-vendors.md): sources other than the status line (design: `docs/design/usage-providers/`).
+
+| Term | Means | Is not |
+|---|---|---|
+| Usage source | Where an account's windows come from: the agent CLI's status line, or a vendor path polled on a node, named by the vendor preset's usage entry. | A Connection, a runtime. |
+| Reading | One poll of a usage source: the windows it yields, at a time, for one account. | A Report: it has no session, lane or context. |
+| Amount | A window's used and, when known, limit, in a unit (credits, USD, requests). | The percentage. |
+| Provenance | `reported` (the CLI or the vendor stated it) or `estimated` (Morndo counted it from its own run records). | A confidence score. |
+
+| # | Invariant |
+|---|---|
+| U5 | A Reading is taken only under a node's agent token, for an account registered with that usage source, and names its source. It creates no session. |
+| U6 | A `reported` window replaces an `estimated` one; an `estimated` window never replaces a `reported` one that has not reset. |
+| U7 | No vendor credential is in a Reading, the hub, the fleet, a log, an event or an Alert. A source opens its Secret on its own node, for the one call (CN1, CN5, FL14). |
+| U8 | A window's amount and percentage come from the same Reading. A window read more than twice its source's interval ago is shown "as of" its time, and still dropped at its reset (U2). |
+
 ## Jobs: work that outlives the turn ([ADR-0017](adr/0017-background-jobs-that-report-back.md))
 
 One command an agent starts on one node. It keeps running after that turn and reports its end once. Class names and limits come from that node's policy. Code in `packages/domain/src/jobs.ts`. The domain decides the queue. It does not start a process, read a disk, or talk to a fleet.
