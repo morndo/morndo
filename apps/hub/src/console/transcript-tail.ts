@@ -25,7 +25,11 @@ export function renderTranscript(jsonl: Uint8Array, dropFirstPartialLine: boolea
     let line: unknown;
     try { line = JSON.parse(decoder.decode(piece)); } catch { continue; }
     if (line === null || typeof line !== "object" || Array.isArray(line)) continue;
-    for (const e of parseLine(line as Parameters<typeof parseLine>[0], "assistant", new Set()).entries) {
+    // parseLine skips a sidechain row only on the assistant and attachment sides, so a subagent's user rows are dropped here.
+    if ((line as { isSidechain?: unknown }).isSidechain === true) continue;
+    let entries: ReturnType<typeof parseLine>["entries"];
+    try { entries = parseLine(line as Parameters<typeof parseLine>[0], "assistant", new Set()).entries; } catch { continue; }   // an odd block (null) throws there: the line is skipped like one that does not parse
+    for (const e of entries) {
       // "text" and "event" are the messages ("answer" entries carry no author, and questions, activity and files are not
       // prose). The label is the person's word for the author: "user", "assistant", or the author's own name.
       if ((e.kind !== "text" && e.kind !== "event") || !("author" in e)) continue;

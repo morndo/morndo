@@ -34,6 +34,27 @@ describe("renderTranscript", () => {
     expect(out.join("\n")).not.toContain("�");
   });
 
+  it("skips a line whose reading throws (a null content block) and keeps the rest", () => {
+    // parseLine reads b.type of each block: a null block throws there. One odd line must not end the whole peek.
+    const out = renderTranscript(bytes([
+      row("user", "before"),
+      row("assistant", [null, { type: "text", text: "odd" }]),
+      row("user", [null]),
+      row("assistant", [{ type: "text", text: "after" }]),
+    ]), false);
+    expect(out).toEqual(["user: before", "assistant: after"]);
+  });
+
+  it("skips sidechain rows of either side (a subagent's talk is not the lane's conversation)", () => {
+    const out = renderTranscript(bytes([
+      row("user", "main ask"),
+      row("user", "sub ask X-SIDE", { isSidechain: true }),
+      row("assistant", [{ type: "text", text: "sub answer X-SIDE" }], { isSidechain: true }),
+      row("assistant", [{ type: "text", text: "main answer" }]),
+    ]), false);
+    expect(out).toEqual(["user: main ask", "assistant: main answer"]);
+  });
+
   it("skips a first line that does not parse (a torn start the caller did not drop) and keeps the rest", () => {
     const whole = bytes([row("user", "first"), row("assistant", [{ type: "text", text: "second" }])]);
     const torn = whole.subarray(12);                                    // inside the first row
