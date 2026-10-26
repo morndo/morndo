@@ -177,7 +177,7 @@ jobs:
           fi
           npm run build
           # Node will not strip types under node_modules (nodejs.org/docs/latest-v24.x/api/typescript.html,
-          # "Type stripping in dependencies", v24.21.0, read 2026-10-13). Compile while typescript is installed.
+          # "Type stripping in dependencies", v24.22.1, read 2026-10-26). Compile while typescript is installed.
           node scripts/release/main.ts compile --repo "$GITHUB_WORKSPACE" --out "$RUNNER_TEMP/compiled"
           # --ignore-scripts: no runtime dependency has an install script (ADR-0005), and prune would otherwise run
           # apps/web's prepare (`svelte-kit sync`) after svelte-kit is gone: exit 127 (T-355).
