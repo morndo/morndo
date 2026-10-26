@@ -67,6 +67,8 @@ describe("addSink and removeSink", () => {
     expect(w.pools.addSink("p", PATH, who).ok).toBe(true);
     expect(word(w.pools.removeSink("p", PATH, operator))).toBe("principal");
     expect(w.pools.sinksOf("p")).toEqual([PATH]);
+    // The principal check comes first: an operator learns nothing about what another pool holds.
+    expect(word(w.pools.addSink("q", PATH, operator))).toBe("principal");
   });
   it("a path another pool holds is refused with sink_taken, and the same pool's twice with exists", async () => {
     const w = await world();
