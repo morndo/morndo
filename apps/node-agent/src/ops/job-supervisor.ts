@@ -967,7 +967,11 @@ export class JobSupervisor {
   // next to the log, so the next agent still knows (prune removes the file with the job).
   #markCancel(id: string): void {
     this.#signalledCancels.add(id);
-    try { writeFileSync(join(this.#store.dir, `${id}.cancel`), "", { flag: "wx", mode: 0o600 }); } catch { /* already marked */ }
+    try { writeFileSync(join(this.#store.dir, `${id}.cancel`), "", { flag: "wx", mode: 0o600 }); }
+    catch (e) {
+      // EEXIST: already marked. Anything else leaves the mark in memory only, which an agent restart loses.
+      if (errno(e) !== "EEXIST") this.#log?.error(`marking the cancel of job ${id} failed; an agent restart would lose it`, e);
+    }
   }
 
   #signalled(id: string): boolean {
