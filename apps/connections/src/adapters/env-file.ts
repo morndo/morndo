@@ -2,7 +2,7 @@
 // over the old file, so a reader never sees half a file or a key anyone else can read. Nothing is written for a path in a git work tree, in a directory
 // group or others can write, through a link, or under a protected directory. A name and a value are checked against a closed alphabet so that no quoting
 // or escaping exists. A problem is a word; no path, value or system message is returned.
-import { closeSync, existsSync, fsyncSync, lstatSync, openSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, lstatSync, openSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { CONNECTION_NAME } from "@morndo/domain";
@@ -18,6 +18,10 @@ const inside = (root: string, path: string): boolean => path === root || path.st
 
 function symlinked(path: string): boolean {
   try { return lstatSync(path).isSymbolicLink(); } catch { return false; }
+}
+
+function realOf(path: string): string {
+  try { return realpathSync(path); } catch { return path; }
 }
 
 function inRepository(dir: string): boolean {
@@ -39,6 +43,8 @@ export function envPathProblem(path: string, protectedDirs: readonly string[]): 
     if (!found.isDirectory()) return "no_dir";
     mode = found.mode;
   } catch { return "no_dir"; }
+  // The real place is judged as well as the spelling: a directory that is a link into a protected one is protected.
+  if (protectedDirs.some(root => inside(realOf(root), join(realOf(dir), basename(path))))) return "protected";
   if (inRepository(dir)) return "in_repository";
   if ((mode & GROUP_OTHERS_WRITE) !== 0) return "dir_writable";
   return null;

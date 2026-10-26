@@ -96,6 +96,15 @@ describe("what is refused before anything is written", () => {
     refuses(join(dir, "vault", ".env"), "protected", { protectedDirs: [join(dir, "vault")] });
     refuses(join(dir, "vault"), "protected", { protectedDirs: [join(dir, "vault")] });
   });
+  it("a directory that is a link into a protected directory is protected too (the real place is judged, not the spelling)", () => {
+    const dir = area();
+    mkdirSync(join(dir, "vault"));
+    symlinkSync(join(dir, "vault"), join(dir, "elsewhere"));
+    refuses(join(dir, "elsewhere", ".env"), "protected", { protectedDirs: [join(dir, "vault")] });
+    const home = join(dir, "homelink");
+    symlinkSync(dir, home);
+    refuses(join(home, "vault", ".env"), "protected", { protectedDirs: [join(dir, "vault")] });
+  });
   it("a symlink at the path or at the sidecar", () => {
     const dir = area();
     writeFileSync(join(dir, "real"), "x");

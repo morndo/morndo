@@ -5320,6 +5320,12 @@ export const CONTROLS: Control[] = [
   { id: "t459-served-ppid", task: "T-459", file: "apps/connections/src/application/key-pool-service.ts",
     find: "event.caller.ppid === parent", replace: "event.caller.pid === parent",
     run: ["apps/connections/test/key-pool-hook-service.test.ts"], expect: "last served" },
+  { id: "t459-env-real-place", task: "T-459", file: "apps/connections/src/adapters/env-file.ts",
+    find: "  if (protectedDirs.some(root => inside(realOf(root), join(realOf(dir), basename(path))))) return \"protected\";\n", replace: "",
+    run: ["apps/connections/test/env-file.test.ts"], expect: "real place" },
+  { id: "t459-sink-real-place", task: "T-459", file: "apps/connections/src/keypool-cli.ts",
+    find: " || insideHome(home.dir, join(realOf(dirname(path)), basename(path)))", replace: "",
+    run: ["apps/connections/test/keypool-sink-cli.test.ts"], expect: "real place" },
   // ---- Proof of work gate gaps (board T-450): a pull request's checks, the other checks of a ci reference, a no-code claim.
   { id: "t450-pr-reads-its-checks", task: "T-450", file: "packages/domain/src/proof.ts",
     find: `  if (checks === undefined) return { state: "green", detail: null };`, replace: `  return { state: "green", detail: null };`,

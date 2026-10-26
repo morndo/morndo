@@ -3,6 +3,7 @@
 // (KP10): the command id is "cli", as every other command of this bin.
 import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
+import { basename, dirname, join } from "node:path";
 import { findConnection, isKey, isSinkPath, type Actor, type Outcome } from "@morndo/domain";
 import type { ProbeResult, RefusalTarget, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
@@ -123,7 +124,7 @@ function sink(home: Opened, parsed: Parsed, io: Io): number {
   if (path === undefined) return fail(io, "usage");
   if (action === "remove") return done(home.keypools.removeSink(pool, path, ACTOR), io);
   if (!isSinkPath(path)) return fail(io, "bad_path");
-  if (insideHome(home.dir, path)) return fail(io, "sink_protected");
+  if (insideHome(home.dir, path) || insideHome(home.dir, join(realOf(dirname(path)), basename(path)))) return fail(io, "sink_protected");
   if (isDirectory(path)) return fail(io, "sink_directory");
   return done(home.keypools.addSink(pool, path, ACTOR), io);
 }
@@ -132,6 +133,10 @@ function insideHome(dir: string, path: string): boolean {
   const roots = new Set([dir]);
   try { roots.add(realpathSync(dir)); } catch { /* a home that is gone protects nothing */ }
   return [...roots].some(root => path === root || path.startsWith(`${root}/`));
+}
+
+function realOf(path: string): string {
+  try { return realpathSync(path); } catch { return path; }
 }
 
 function isDirectory(path: string): boolean {

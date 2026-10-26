@@ -2,7 +2,7 @@
 // and the sidecar of each is denied to the agent's tools, beside the vault, the database and the identity, in both lists the settings carry. The runtime is the
 // fixture fake-keyed-runtime.mjs. Every key is synthetic.
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +106,12 @@ describe("keypool sink add | remove | list", () => {
     expect((await cli(["keypool", "sink", "add", "p", join(dir, "vault", "x.env")], env)).stderr.trim()).toBe("sink_protected");
     expect((await cli(["keypool", "sink", "add", "p", join(dir, "connections.db")], env)).stderr.trim()).toBe("sink_protected");
     expect((await cli(["keypool", "sink", "add", "p", elsewhere], env)).stderr.trim()).toBe("sink_directory");
+  });
+  it("refuses a path whose directory is a link into the connections home: the real place is judged", async () => {
+    const { env, dir, elsewhere } = await world();
+    symlinkSync(dir, join(elsewhere, "lnk"));
+    expect((await cli(["keypool", "sink", "add", "p", join(elsewhere, "lnk", "x.env")], env)).stderr.trim()).toBe("sink_protected");
+    expect((await cli(["keypool", "sink", "add", "p", join(elsewhere, "lnk", "vault", "x.env")], env)).stderr.trim()).toBe("sink_protected");
   });
   it("keypool list prints no sink path (the hub forwards it)", async () => {
     const { env, elsewhere } = await world();
