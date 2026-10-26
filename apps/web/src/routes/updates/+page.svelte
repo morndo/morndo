@@ -155,6 +155,7 @@
           <li class="card" data-machine={row.machine}>
             <h2>{row.title}</h2>
             <p class="state">{row.state}</p>
+            {#if row.agent !== null}<p class="note halt">{row.agent}</p>{/if}
             <p class="note">
               Version {row.version ?? "unknown"} ·
               {#if row.channel !== null}Channel {row.channel} · mode {row.mode}{:else}Channel and mode unknown here{/if}

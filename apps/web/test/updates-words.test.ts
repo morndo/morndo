@@ -37,6 +37,42 @@ describe("the Updates page's rows", () => {
     expect(rows[1]).toMatchObject({ version: "0.4.2", channel: null, mode: null });
   });
 
+  it("the control plane's own node agent shows inside This machine: no separate row, no rollback hint; other nodes keep both", () => {
+    const own = { version: "0.4.2", commit: null, status: status(), state: null, node: "e2e-cp" };
+    const rows = updatesRows(view({ controlPlane: own, nodes: [node({ name: "pc" }), node({ name: "e2e-cp" })] }));
+    expect(rows.map(r => r.machine)).toEqual(["control-plane", "pc"]);
+    expect(rows.map(r => r.rollbackNote)).toEqual([null, "run morndo update --rollback on pc"]);
+    // A hub that names no node of its own (no MORNDO_CONTROL_PLANE_NODE) hides nothing: the node keeps its row and hint.
+    const unnamed = updatesRows(view({ controlPlane: { ...own, node: null }, nodes: [node({ name: "e2e-cp" })] }));
+    expect(unnamed.map(r => r.machine)).toEqual(["control-plane", "e2e-cp"]);
+    expect(unnamed[1]!.rollbackNote).toBe("run morndo update --rollback on e2e-cp");
+  });
+
+  it("the live shape: the control plane's own node cp folds into This machine; pc (where the engine lanes run) and srv01 stay", () => {
+    const own = { version: "0.4.2", commit: null, status: status(), state: null, node: "cp" };
+    const rows = updatesRows(view({ controlPlane: own, nodes: [node({ name: "srv01" }), node({ name: "cp" }), node({ name: "pc" })] }));
+    expect(rows.map(r => r.machine)).toEqual(["control-plane", "pc", "srv01"]);
+    expect(rows.map(r => r.rollbackNote)).toEqual([null, "run morndo update --rollback on pc", "run morndo update --rollback on srv01"]);
+  });
+
+  it("folding never hides a problem: the own node's offline, rolled back, failed rollback and above-the-control-plane states show on This machine", () => {
+    const own = { version: "0.4.2", commit: null, status: status(), state: null, node: "cp" };
+    const agent = (n: Partial<UpdatesNode>) => updatesRows(view({ controlPlane: own, nodes: [node({ name: "cp", ...n })] }));
+    expect(agent({})).toHaveLength(1);
+    expect(agent({})[0]!.agent).toBeNull();                                             // healthy: nothing to add
+    expect(agent({ update: { state: "current", version: "0.4.2" } })[0]!.agent).toBeNull();
+    expect(agent({ status: "offline" })[0]!.agent).toBe("its node agent cp is offline");
+    expect(agent({ status: "offline", version: null })[0]!.agent).toBe("its node agent cp is offline");
+    expect(agent({ update: { state: "rolled_back", version: "0.4.2", target: "0.5.0", failedCheck: "node health (fleet connection)" } })[0]!.agent)
+      .toBe("its node agent cp rolled back from 0.5.0: node health (fleet connection) failed");
+    expect(agent({ update: { state: "rolled_back", version: "0.4.2", target: "0.5.0" } })[0]!.agent).toBe("its node agent cp rolled back from 0.5.0");
+    expect(agent({ update: { state: "rollback_failed", version: "0.4.2" } })[0]!.agent).toBe("its node agent cp failed a rollback");
+    expect(agent({ version: "0.5.0" })[0]!.agent).toBe("its node agent cp runs 0.5.0, above this machine's 0.4.2");
+    // The other nodes' rows carry no such sentence, and a node the hub names that the fleet lists not at all adds none.
+    expect(updatesRows(view({ controlPlane: own, nodes: [node({ name: "pc", status: "offline" })] })).map(r => r.agent)).toEqual([null, null]);
+    expect(updatesRows(view({ controlPlane: own, nodes: [] })).map(r => r.agent)).toEqual([null]);
+  });
+
   it("the control plane's sentence, from its own updater's status", () => {
     const sentence = (o: Partial<UpdatesView>) => updatesRows(view(o))[0]!.state;
     expect(sentence({})).toBe("up to date");

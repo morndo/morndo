@@ -2,6 +2,7 @@
   // The Slack-style desktop client (ADR-0006). Frame: 40px top bar, 70px rail, and a panel inset 4px at the right and
   // bottom with a 6px radius, holding the resizable sidebar, the channel, and the right-hand panel with the decisions.
   import { onDestroy, onMount, untrack } from "svelte";
+  import { SvelteMap } from "svelte/reactivity";
   import type { Message, RosterEntry } from "@morndo/domain";
   import { LiveFeed } from "../feed.svelte.ts";
   import { noteActivity } from "../phone/chat/away.ts";
@@ -99,10 +100,11 @@
   let right = $state<{ open: boolean }>(store.get("morndo.right", { open: true }));
   let overlayOpen = $state(false);                       // narrow windows: it opens over the conversation on demand only
   // The outbox (ADR-0008 phase C): Commands written down on this device, sent, retried, resumed after a reload, and
-  // ended by their echo. `previews` are the images' thumbnails for this page's life (blob URLs aren't kept).
+  // ended by their echo. `previews` are the images' thumbnails for this page's life (blob URLs aren't kept). Both maps are
+  // filled once the message is written down, after its entry already shows as sending, so the view must follow them.
   let outgoing = $state<OutboxRecord[]>([]);
-  const previews = new Map<string, string[]>();
-  const sentFiles = new Map<string, SentFile[]>();
+  const previews = new SvelteMap<string, string[]>();
+  const sentFiles = new SvelteMap<string, SentFile[]>();
   let outbox: Outbox | null = null;
   let deviceOutbox: ReturnType<typeof startDeviceOutbox> | null = null;
   let markReady: (o: Outbox) => void = () => {};
