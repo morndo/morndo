@@ -3,11 +3,25 @@
 // while he is attending on any device. Pure.
 import { describe, expect, it } from "vitest";
 import {
-  ATTENDING_INPUT_MS, NOTIFY_DEBOUNCE_MS, NotificationQueue, anyAttending, isAttending, kindCode, payloadOf, raises, reasonCode, suppressedWhileAttending,
+  ATTENDING_INPUT_MS, NOTIFICATION_KINDS, NOTIFY_DEBOUNCE_MS, NotificationQueue, PUSH_TOPICS, anyAttending, isAttending, isPushTopic, kindCode, payloadOf, raises, reasonCode,
+  suppressedWhileAttending,
 } from "../src/index.ts";
 
 const NOW = 1_000_000;
 const counts = { decisions: 2, workers: 1, linked: 0, alerts: 0, usage: 0 };
+
+describe("a Notification's Topic (N6: one a push service takes)", () => {
+  it("is at most 32 URL-safe Base64 characters, of a length that decodes", () => {
+    for (const ok of ["alerts", "usages", "decision", "worker", "linked", "ab", "abc", "abcd", "A-_9", "x".repeat(32)]) expect(isPushTopic(ok), ok).toBe(true);
+    // Apple's push service refused these two with 400 BadWebPushTopic (2026-10-12, 2026-10-25): 5 characters, 1 mod 4.
+    for (const no of ["alert", "usage", "a", "abcde", "x".repeat(33), "x".repeat(29), "", "bad topic", "a.b", "a/b", "a+b", "a=b", "äbc"]) expect(isPushTopic(no), no).toBe(false);
+  });
+  it("every kind has one, and each one passes, so a new kind can't ship a topic Apple refuses", () => {
+    expect(Object.keys(PUSH_TOPICS).sort()).toEqual([...NOTIFICATION_KINDS].sort());
+    for (const k of NOTIFICATION_KINDS) expect(isPushTopic(PUSH_TOPICS[k]), `${k}: ${PUSH_TOPICS[k]}`).toBe(true);
+    expect(new Set(Object.values(PUSH_TOPICS)).size).toBe(NOTIFICATION_KINDS.length);   // a newer one replaces only its own kind
+  });
+});
 
 describe("a push service's reason for a refusal (N1: codes, never text)", () => {
   it("keeps a short code of letters and digits, and nothing else", () => {
