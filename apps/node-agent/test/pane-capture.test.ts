@@ -1,7 +1,9 @@
 // pane.capture (fleet clients spec §5, "Reading"): a pane's last lines, at most 2000, with tmux's attribute escapes when
 // asked, in one answer of at most 256 KiB (LIMITS.captureMaxBytes, one bulk chunk); pane.captureMany keeps its 6 KiB a
 // pane. Real isolated tmux, with panes that print known screens.
-import { writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LIMITS } from "@morndo/protocol";
@@ -94,6 +96,24 @@ describe("pane.capture (spec §5)", () => {
     const history = await capture(normal, 100);
     expect(history.scrollbackMissing).toBeUndefined();
     expect(history.text?.split("\n").length).toBe(100);                      // the history past the screen is there
+  });
+
+  it("reads the screen and whether it is the alternate one in a single tmux call, so the pane cannot change between the two (T-336)", async () => {
+    const bin = mkdtempSync(join(tmpdir(), "morndo-wrap-"));
+    const log = join(bin, "calls.log");
+    const real = execFileSync("which", ["tmux"], { encoding: "utf8" }).trim();
+    writeFileSync(join(bin, "tmux"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "${log}"\nexec ${real} "$@"\n`);
+    chmodSync(join(bin, "tmux"), 0o755);
+    const alt = await lane("alt1", "printf '\\033[?1049h'; seq 1 120");
+    expect(await until(async () => (await capture(alt, 5)).text?.includes("120") ?? false)).toBe(true);
+    const saved = process.env.PATH;
+    process.env.PATH = `${bin}:${saved}`;
+    try {
+      expect((await capture(alt, 200)).scrollbackMissing).toBe(true);
+    } finally { process.env.PATH = saved; rmSync(bin, { recursive: true, force: true }); }
+    const asked = readFileSync(log, "utf8").split("\n").filter(l => l.includes("alternate_on"));
+    expect(asked).toHaveLength(1);                                    // asked once, and in the very call that captures
+    expect(asked[0]).toContain("capture-pane");
   });
 
   it("answers text null for a worker id that is no lane here", async () => {

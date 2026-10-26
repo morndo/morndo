@@ -90,10 +90,14 @@ describe("morndo lanes: listing and reading", () => {
 // A Claude Code session file: one JSON object a line (made-up messages; the key is made up too, built in two parts).
 const FAKE_KEY = `sk-ant-${"api03-"}${"A".repeat(40)}`;
 const jsonl = (rows: object[]) => new TextEncoder().encode(`${rows.map(r => JSON.stringify(r)).join("\n")}\n`);
-const said = (type: "user" | "assistant", content: unknown, at = "2026-10-26T10:00:00Z") => ({ type, uuid: `u-${Math.random()}`, timestamp: at, message: { role: type, content } });
+const said = (type: "user" | "assistant", content: unknown, extra: object = {}) => ({ type, uuid: `u-${Math.random()}`, timestamp: "2026-10-26T10:00:00Z", message: { role: type, content }, ...extra });
 const SESSION = jsonl([
   said("user", "first question"),
   said("assistant", [{ type: "text", text: "answer one\nwith a second line" }]),
+  said("user", "This session is being continued from a previous conversation. SUMMARY-SHOULD-NOT-SHOW", { isCompactSummary: true }),
+  said("user", "<local-command-stdout>LOCALOUT-SHOULD-NOT-SHOW</local-command-stdout>"),
+  said("user", "<bash-stdout>BASHOUT-SHOULD-NOT-SHOW</bash-stdout>"),
+  said("user", "<system-reminder>META-SHOULD-NOT-SHOW</system-reminder>", { isMeta: true }),
   said("assistant", [{ type: "tool_use", id: "t1", name: "Bash", input: { command: "echo TOOLINPUT-SHOULD-NOT-SHOW" } }]),
   said("user", [{ type: "tool_result", tool_use_id: "t1", content: "TOOLOUTPUT-SHOULD-NOT-SHOW" }]),
   said("assistant", [{ type: "thinking", thinking: "THINKING-SHOULD-NOT-SHOW" }, { type: "text", text: `key was ${FAKE_KEY} in the notes` }]),
@@ -101,10 +105,13 @@ const SESSION = jsonl([
   said("assistant", [{ type: "text", text: "last answer" }]),
 ]);
 const LABEL = /^-- transcript text .*alternate screen/;
+const SCREEN_LABEL = "-- screen (what the pane shows now) --";
 
 describe("morndo lanes peek --lines past the screen, on the alternate screen (T-336)", () => {
   // Claude Code's fullscreen renderer draws on tmux's alternate screen, where tmux keeps no scrollback: the screen is all
-  // capture-pane can give, so peek reads the end of the lane's session transcript instead, as plain text.
+  // capture-pane can give. When --lines asks for more than the screen holds, peek adds the end of the lane's session
+  // transcript, as plain text, before the live screen (so a prompt or dialog stays last and visible). Without --lines, or
+  // with a count the screen holds, it prints the screen alone, as it always did.
   let b: MemoryBackend;
   const start = async (o: { refuse?: boolean; transcripts?: Record<string, Uint8Array> } = {}) => {
     await fleet.close();
@@ -116,73 +123,97 @@ describe("morndo lanes peek --lines past the screen, on the alternate screen (T-
     if (o.refuse) b.refuseTranscripts = true;
     fleet = await startFakeFleet({ nodes: [localNode("pc", "aaaaaaaa", b)] });
   };
+  const transcriptOps = (since: number) => fleet.calls.slice(since).filter(c => c.op.startsWith("transcript."));
 
-  it("prints the end of the session's messages, labelled, as N lines of plain text (no tool calls, results or thinking)", async () => {
+  it("prints the end of the session's messages, labelled, then the live screen, labelled and last", async () => {
     await start();
     const r = await lanes(["peek", "alt", "--lines", "100"]);
     expect(r.code, r.err).toBe(0);
-    const [label, ...body] = r.out.trimEnd().split("\n");
-    expect(label).toMatch(LABEL);
-    expect(body).toEqual([
+    const lines = r.out.trimEnd().split("\n");
+    expect(lines[0]).toMatch(LABEL);
+    expect(lines.slice(1)).toEqual([
       "user: first question", "assistant: answer one", "with a second line",
-      expect.stringContaining("key was "), "user: last question", "assistant: last answer",
+      "Morndo: The conversation was compacted.",
+      expect.stringContaining("assistant: key was "), "user: last question", "assistant: last answer",
+      SCREEN_LABEL, "s1", "s2", "❯ ",
     ]);
-    expect(r.out).not.toMatch(/SHOULD-NOT-SHOW/);
+    expect(r.out).not.toMatch(/SHOULD-NOT-SHOW/);          // tool calls and results, thinking, compact summaries, local command output, meta rows
     expect(r.err).toBe("");
   });
 
-  it("reads the transcript through the fleet's transcript.size and transcript.read ops, on the lane's node, as the lanes client", async () => {
-    // Through the client socket it was started with, so that socket's scope decides (a worker socket is refused both, below).
-    await start();
-    const before = fleet.calls.length;
-    const r = await lanes(["peek", "alt", "--lines", "100"]);
-    expect(r.code, r.err).toBe(0);
-    const ops = fleet.calls.slice(before).filter(c => c.op.startsWith("transcript."));
-    expect(ops.map(c => c.op)).toEqual(["transcript.size", "transcript.read"]);
-    expect(ops.every(c => c.node === "pc" && c.args && (c.args as { sessionId?: string }).sessionId === "s-alt")).toBe(true);
-    expect(new Set(fleet.clients)).toEqual(new Set(["lanes"]));
-  });
-
-  it("keeps only the last N lines of that text, and redacts key material in it", async () => {
+  it("keeps only the last N lines of the transcript text, and redacts key material in it", async () => {
     await start();
     const r = await lanes(["peek", "alt", "--lines", "5"]);
     expect(r.code, r.err).toBe(0);
-    const [label, ...body] = r.out.trimEnd().split("\n");
-    expect(label).toMatch(LABEL);
-    expect(body).toHaveLength(5);
-    expect(body.at(-1)).toBe("assistant: last answer");
+    const lines = r.out.trimEnd().split("\n");
+    expect(lines[0]).toMatch(LABEL);
+    expect(lines.slice(1, -4)).toHaveLength(5);              // the screen label and its 3 lines close the output
+    expect(lines.slice(-4)).toEqual([SCREEN_LABEL, "s1", "s2", "❯ "]);
+    expect(lines.at(-5)).toBe("assistant: last answer");
     expect(r.out).not.toContain(FAKE_KEY);
     expect(r.out).not.toContain("A".repeat(20));
   });
 
-  it("reads the end of a transcript longer than one chunk, from its end", async () => {
-    const rows = Array.from({ length: 4000 }, (_, i) => said(i % 2 ? "assistant" : "user", i % 2 ? [{ type: "text", text: `reply ${i} ${"x".repeat(100)}` }] : `ask ${i}`));
+  it("writes the transcript as it is: the hub's home directory is not rewritten in it", async () => {
+    await start({ transcripts: { "s-alt": jsonl([said("user", `see ${home}/notes.txt please`), said("assistant", [{ type: "text", text: "ok" }])]) } });
+    const r = await lanes(["peek", "alt", "--lines", "100"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toContain(`user: see ${home}/notes.txt please`);
+  });
+
+  it("reads the end of a transcript longer than one chunk, from its end, without a broken character", async () => {
+    const rows = Array.from({ length: 4000 }, (_, i) => said(i % 2 ? "assistant" : "user", i % 2 ? [{ type: "text", text: `reply ${i} ${"ü".repeat(60)}` }] : `ask ${i} ü`));
     const big = jsonl(rows);
     expect(big.length).toBeGreaterThan(LIMITS.chunkBytes);
     await start({ transcripts: { "s-alt": big } });
     const r = await lanes(["peek", "alt", "--lines", "4"]);          // more than the screen's 3 rows
     expect(r.code, r.err).toBe(0);
-    const [label, ...body] = r.out.trimEnd().split("\n");
-    expect(label).toMatch(LABEL);
-    expect(body).toEqual(["user: ask 3996", expect.stringContaining("reply 3997"), "user: ask 3998", expect.stringContaining("reply 3999")]);
+    const lines = r.out.trimEnd().split("\n");
+    expect(lines[0]).toMatch(LABEL);
+    expect(lines.slice(1, 5)).toEqual(["user: ask 3996 ü", expect.stringContaining("reply 3997"), "user: ask 3998 ü", expect.stringContaining("reply 3999")]);
+    expect(lines.slice(5)).toEqual([SCREEN_LABEL, "s1", "s2", "❯ "]);
+    expect(r.out).not.toContain("�");
   });
 
-  it("--json: the text, and where it came from", async () => {
+  it("--json: the old fields as they were, and the transcript's text under a new field", async () => {
     await start();
     const r = await lanes(["peek", "alt", "--lines", "100", "--json"]);
     expect(r.code, r.err).toBe(0);
-    expect(JSON.parse(r.out)).toMatchObject({ source: "transcript", truncated: false, text: expect.stringContaining("assistant: last answer") });
+    const j = JSON.parse(r.out) as Record<string, unknown>;
+    expect(j).toMatchObject({ text: "s1\ns2\n❯ ", truncated: false, transcript: expect.stringContaining("assistant: last answer") });
+    expect(j).not.toHaveProperty("source");
+    expect(Object.keys(j).sort()).toEqual(["scrollbackMissing", "text", "transcript", "truncated"]);
+    const plain = JSON.parse((await lanes(["peek", "plain", "--lines", "100", "--json"])).out) as Record<string, unknown>;
+    expect(plain).toEqual({ text: "p1\n❯ ", truncated: false });         // no transcript field when none is added
   });
 
-  it("prints the screen as before when the lines asked for fit on it, or the pane is not on the alternate screen", async () => {
+  it("reads the transcript through the fleet's transcript.size and transcript.read ops, on the lane's node, as the lanes client", async () => {
+    // Through the client socket it was started with, so that socket's scope decides (a worker socket is refused both, in the fleet's tests).
     await start();
+    const before = fleet.calls.length;
+    const r = await lanes(["peek", "alt", "--lines", "100"]);
+    expect(r.code, r.err).toBe(0);
+    const ops = transcriptOps(before);
+    expect(ops.map(c => c.op)).toEqual(["transcript.size", "transcript.read"]);
+    expect(ops.every(c => c.node === "pc" && c.args && (c.args as { sessionId?: string }).sessionId === "s-alt")).toBe(true);
+    expect(new Set(fleet.clients)).toEqual(new Set(["lanes"]));
+  });
+
+  it("a plain peek is unchanged: no --lines (the default 40 is not a request for more), or a count the screen holds, or a pane on its normal screen", async () => {
+    await start();
+    const before = fleet.calls.length;
+    const bare = await lanes(["peek", "alt"]);
+    expect(bare.out).toBe("s1\ns2\n❯ \n");
+    expect(bare.err).toBe("");
     expect((await lanes(["peek", "alt", "--lines", "3"])).out).toBe("s1\ns2\n❯ \n");
     const plain = await lanes(["peek", "plain", "--lines", "100"]);
     expect(plain.out).toBe("p1\n❯ \n");
     expect(plain.err).toBe("");
+    expect((JSON.parse((await lanes(["peek", "alt", "--json"])).out) as Record<string, unknown>).transcript).toBeUndefined();
+    expect(transcriptOps(before)).toEqual([]);                           // nothing was asked of the transcript
   });
 
-  it("from a worker socket (transcript ops refused): the screen, and one line saying why there is no more", async () => {
+  it("from a worker socket (transcript ops refused): the screen alone, and one line saying why there is no more", async () => {
     await start({ refuse: true });
     const r = await lanes(["peek", "alt", "--lines", "100"]);
     expect(r.code, r.err).toBe(0);
