@@ -82,7 +82,7 @@ describe("a write", () => {
     expect(content(w.file)).toBe(`ANTHROPIC_API_KEY=${KEYS[0]}\n`);
     expect(statSync(w.file).mode & 0o777).toBe(0o600);
     expect(memberOf(w.file)).toBe("k1");
-    expect(content(`${w.file}.member`)).toMatch(/^k1\n\d+:\d+\n$/);
+    expect(content(`${w.file}.member`)).toMatch(/^k1\n\d+:\d+\n\d+ k1\n$/);
     expect(statSync(`${w.file}.member`).mode & 0o777).toBe(0o600);
     expect(out.stdout).not.toContain(KEYS[0]);
     expect(out.stdout).not.toContain(w.file);

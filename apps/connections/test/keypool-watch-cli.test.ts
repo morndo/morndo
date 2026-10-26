@@ -1,7 +1,7 @@
 // `keypool watch` through the real bin (ADR-0037, slice 4; plan 3.6): for a server that cannot report a dry key itself, the command reads its log, and on the
 // two exhausted phrases of the classifier PROBES the member it blames: a log holds anyone's words, so a line is a reason to ask the provider, never a verdict
-// (one token, the smallest model, at most one per member per spacing). The matched line is never echoed. The member is the one the sink's stamp names, and only
-// while the pair is consistent and the file is older than the grace: a server that has not restarted still holds the key before. A local stand-in API
+// (one token, the smallest model, at most one per member per spacing). The matched line is never echoed. With --sink the member is the key the SERVER loaded:
+// the server's start time (--server-pid, or a pid file re-read at each phrase) says which write of the sink it read; unknown, or a server that is gone, blames no one. A local stand-in API
 // answers per key; a temporary catalog points the first-party runtime at it. Every key is synthetic.
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer, type Server } from "node:http";
@@ -118,6 +118,13 @@ function follow(w: World, ...more: string[]): { out: () => string; err: () => st
   child.stdin.end();
   return { out: () => stdout, err: () => stderr };
 }
+// A stand-in for the server that reads the sink: a process of its own, whose start time is what watch is told. Killed when the test is over.
+async function server(): Promise<number> {
+  const child = spawn("sleep", ["120"]);
+  children.push(child);
+  await new Promise<void>(resolve => { child.on("spawn", () => { resolve(); }); });
+  return child.pid ?? 0;
+}
 function homeFiles(dir: string): string[] {
   const found: string[] = [];
   const walk = (d: string): void => {
@@ -206,7 +213,7 @@ describe("--once: a phrase in the log is a reason to ask the provider about the 
     expect(out.stdout).not.toContain(leaky);
     expect(lines(out)).toEqual([{ pool: "p", member: "[redacted]", outcome: "exhausted" }]);
   });
-  it("usage and missing: one of --member or --sink, --log needed, a pool and a member that exist, a file that is a sink, a grace that is a number", async () => {
+  it("usage and missing: one of --member or --sink, --log needed, a pool and a member that exist, a file that is a sink, a server pid that is one number or one pid file and only with --sink", async () => {
     const w = await world();
     writeFileSync(w.log, "x\n");
     const word = async (args: string[]) => (await cli(args, w.env)).stderr.trim();
@@ -216,7 +223,9 @@ describe("--once: a phrase in the log is a reason to ask the provider about the 
     expect(await word(["keypool", "watch", "nope", "--log", w.log, "--member", "k1", "--once"])).toBe("missing");
     expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k9", "--once"])).toBe("missing");
     expect(await word(["keypool", "watch", "p", "--log", w.log, "--sink", join(w.sinks, "other.env"), "--once"])).toBe("not_a_sink");
-    expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k1", "--grace", "soon", "--once"])).toBe("usage");
+    expect(await word(["keypool", "watch", "p", "--log", w.log, "--sink", w.file, "--server-pid", "soon", "--once"])).toBe("usage");
+    expect(await word(["keypool", "watch", "p", "--log", w.log, "--sink", w.file, "--server-pid", "5", "--server-pid-file", join(w.sinks, "x.pid"), "--once"])).toBe("usage");
+    expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k1", "--server-pid", "5", "--once"])).toBe("usage");
   });
   it("a log that is not there is an error with --once", async () => {
     const w = await world();
@@ -225,28 +234,72 @@ describe("--once: a phrase in the log is a reason to ask the provider about the 
   });
 });
 
-describe("--sink: the key the server loaded is the key of the file as it was when the server could have read it", () => {
-  it("the member comes from the sink's stamp: the key write-env put there, once the file is older than the grace", async () => {
+describe("--sink: the key the server loaded is the key of the write that was the file when the server started", () => {
+  it("a server that started after the write holds that write's key: the stamped member is probed", async () => {
     const w = await world();
     w.fake.answers[KEYS[0]] = dryKey;
     expect((await writeEnv(w)).code).toBe(0);
+    await sleep(1300);
+    const pid = await server();
     writeFileSync(w.log, `${CREDIT}\n`);
-    await sleep(1200);
-    expect(lines(await watch(w, "--sink", w.file, "--grace", "1", "--once"))).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
+    expect(lines(await watch(w, "--sink", w.file, "--server-pid", String(pid), "--once"))).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
     expect(await states(w)).toEqual(["exhausted", "active", "active"]);
+    expect(w.fake.seen.map(row => row.key)).toEqual([KEYS[0]]);
   });
-  it("inside the grace after a rewrite the server may still hold the key before: a phrase then blames no one (the default grace is ten minutes)", async () => {
+  it("a server that started BEFORE the file was rewritten still holds the old key: the old member is probed, not the new one", async () => {
     const w = await world();
     w.fake.answers[KEYS[0]] = dryKey;
     w.fake.answers[KEYS[1]] = dryKey;
     expect((await writeEnv(w)).code).toBe(0);
-    await cli(["keypool", "report", "p", "--member", "k1", "--outcome", "exhausted"], w.env);
-    expect(JSON.parse((await writeEnv(w, "--if-due")).stdout)).toMatchObject({ written: true, member: "k2" });
+    await sleep(1300);
+    const pid = await server();
+    await sleep(2300);
+    expect(JSON.parse((await writeEnv(w, "--if-due", "--rotate-every", "2s")).stdout)).toMatchObject({ written: true, member: "k2" });
     writeFileSync(w.log, `${CREDIT}\n`);
+    expect(lines(await watch(w, "--sink", w.file, "--server-pid", String(pid), "--once"))).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
+    expect(await states(w)).toEqual(["exhausted", "active", "active"]);
+    expect(w.fake.seen.map(row => row.key)).toEqual([KEYS[0]]);
+  });
+  it("without the server's pid, nothing can be proved: no one is blamed and nothing is sent", async () => {
+    const w = await world();
+    expect((await writeEnv(w)).code).toBe(0);
+    writeFileSync(w.log, `${CREDIT}\n`);
+    await sleep(1300);
     const out = await watch(w, "--sink", w.file, "--once");
     expect([out.code, out.stdout]).toEqual([0, ""]);
     expect(w.fake.seen).toEqual([]);
-    expect(await states(w)).toEqual(["exhausted", "active", "active"]);
+  });
+  it("a pid that is not a process, or a server that started before the first write on record, blames no one", async () => {
+    const w = await world();
+    const early = await server();
+    await sleep(1300);
+    expect((await writeEnv(w)).code).toBe(0);
+    writeFileSync(w.log, `${CREDIT}\n`);
+    for (const pid of [String(early), "2147483646"]) {
+      const out = await watch(w, "--sink", w.file, "--server-pid", pid, "--once");
+      expect([out.code, out.stdout], pid).toEqual([0, ""]);
+    }
+    expect(w.fake.seen).toEqual([]);
+  });
+  it("a pid file is read at each phrase: a server that restarted is followed to its new key", async () => {
+    const w = await world();
+    w.fake.answers[KEYS[0]] = dryKey;
+    w.fake.answers[KEYS[1]] = dryKey;
+    expect((await writeEnv(w)).code).toBe(0);
+    await sleep(1300);
+    const first = await server();
+    const pidFile = join(w.sinks, "server.pid");
+    writeFileSync(pidFile, `${first}\n`);
+    writeFileSync(w.log, "");
+    follow(w, "--sink", w.file, "--server-pid-file", pidFile);
+    await sleep(2500);
+    appendFileSync(w.log, `${CREDIT}\n`);
+    await until(async () => (await states(w))[0] === "exhausted", "k1 to be found dry");
+    expect(JSON.parse((await writeEnv(w, "--if-due")).stdout)).toMatchObject({ written: true, member: "k2" });
+    await sleep(1300);
+    writeFileSync(pidFile, `${await server()}\n`);
+    appendFileSync(w.log, `${CREDIT}\n`);
+    await until(async () => (await states(w))[1] === "exhausted", "k2 to be found dry after the server restarted");
   });
   it("a pair that is not consistent (the file was replaced after write-env wrote the stamp) blames no one", async () => {
     const w = await world();
@@ -254,18 +307,21 @@ describe("--sink: the key the server loaded is the key of the file as it was whe
     expect((await writeEnv(w)).code).toBe(0);
     writeFileSync(`${w.file}.swap`, "ANTHROPIC_API_KEY=somebody-elses\n", { mode: 0o600 });
     renameSync(`${w.file}.swap`, w.file);
+    await sleep(1300);
+    const pid = await server();
     writeFileSync(w.log, `${CREDIT}\n`);
-    const out = await watch(w, "--sink", w.file, "--grace", "0", "--once");
+    const out = await watch(w, "--sink", w.file, "--server-pid", String(pid), "--once");
     expect([out.code, out.stdout]).toEqual([0, ""]);
     expect(w.fake.seen).toEqual([]);
   });
   it("with no sidecar, or a sidecar that is no stamp, nothing is blamed and nothing is sent", async () => {
     const w = await world();
+    const pid = await server();
     writeFileSync(w.log, `${CREDIT}\n`);
-    expect((await watch(w, "--sink", w.file, "--grace", "0", "--once")).stdout).toBe("");
+    expect((await watch(w, "--sink", w.file, "--server-pid", String(pid), "--once")).stdout).toBe("");
     writeFileSync(w.file, "ANTHROPIC_API_KEY=x\n");
     writeFileSync(`${w.file}.member`, "k9\n");
-    const out = await watch(w, "--sink", w.file, "--grace", "0", "--once");
+    const out = await watch(w, "--sink", w.file, "--server-pid", String(pid), "--once");
     expect([out.code, out.stdout]).toEqual([0, ""]);
     expect(w.fake.seen).toEqual([]);
   });
@@ -313,20 +369,5 @@ describe("following the log", () => {
     expect(run.err()).toBe("");
     writeFileSync(w.log, `${CREDIT}\n`);
     await until(async () => (await states(w))[0] === "exhausted", "k1 to be found dry once the log appeared");
-  });
-  it("--sink follows a rotated key: the member is read from the stamp at each match, once the file is past the grace", async () => {
-    const w = await world();
-    w.fake.answers[KEYS[0]] = dryKey;
-    w.fake.answers[KEYS[1]] = dryKey;
-    expect((await writeEnv(w)).code).toBe(0);
-    writeFileSync(w.log, "");
-    follow(w, "--sink", w.file, "--grace", "1");
-    await sleep(2500);
-    appendFileSync(w.log, `${CREDIT}\n`);
-    await until(async () => (await states(w))[0] === "exhausted", "k1 to be found dry");
-    expect(JSON.parse((await writeEnv(w, "--if-due")).stdout)).toMatchObject({ written: true, member: "k2" });
-    await sleep(2500);
-    appendFileSync(w.log, `${CREDIT}\n`);
-    await until(async () => (await states(w))[1] === "exhausted", "k2 to be found dry after the file moved to it");
   });
 });

@@ -122,6 +122,25 @@ describe("keypool sink add | remove | list", () => {
   });
 });
 
+describe("a retired sink leaves the list when its files are gone, and not before", () => {
+  it("removing another sink forgets nothing that still has a file: a retired sink whose only file left is its temp file stays denied", async () => {
+    const { env, dir, elsewhere } = await world();
+    const gone = join(elsewhere, "gone.env");
+    const kept = join(elsewhere, "kept.env");
+    const live = join(elsewhere, "live.env");
+    for (const path of [gone, kept, live]) expect((await cli(["keypool", "sink", "add", "p", path], env)).code).toBe(0);
+    writeFileSync(kept, "ANTHROPIC_API_KEY=left-behind\n");
+    for (const path of [gone, kept]) expect((await cli(["keypool", "sink", "remove", "p", path], env)).code).toBe(0);
+    rmSync(kept);
+    writeFileSync(`${kept}.tmp`, "ANTHROPIC_API_KEY=left-by-a-killed-write\n");
+    expect((await cli(["keypool", "sink", "remove", "p", live], env)).code).toBe(0);
+    expect((await runPool(env, dir)).code).toBe(0);
+    const denied = lastSettings(dir).sandbox.filesystem.denyRead;
+    expect(denied).toContain(`${kept}.tmp`);
+    expect(denied).not.toContain(gone);
+  });
+});
+
 describe("the lane deny list of a run", () => {
   it("characterisation: with no sink the deny lists are the the vault, the database and the identity", async () => {
     const { env, dir } = await world();

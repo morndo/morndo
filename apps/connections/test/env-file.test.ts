@@ -5,7 +5,8 @@ import { renameSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { acquireEnvLock, readEnvStamp, writeEnvFile } from "../src/adapters/env-file.ts";
+import { spawn } from "node:child_process";
+import { acquireEnvLock, memberLoadedAt, readEnvStamp, writeEnvFile } from "../src/adapters/env-file.ts";
 
 const VALUE = "synthetic-value-for-the-env-file-0000";
 const dirs: string[] = [];
@@ -140,7 +141,48 @@ describe("the pair is stamped: the sidecar says which file it is about", () => {
     const path = join(area(), ".env");
     writeEnvFile(input(path, { member: "k7" }));
     const stamp = readEnvStamp(path);
-    expect(stamp).toEqual({ member: "k7", consistent: true, writtenAt: statSync(path).mtimeMs });
+    expect(stamp).toEqual({ member: "k7", consistent: true, writtenAt: statSync(path).mtimeMs, history: [{ at: Math.trunc(statSync(path).mtimeMs), member: "k7" }] });
+  });
+  it("the sidecar keeps a short history of what was written when: the last eight writes, the newest last, so the key a server loaded at its start can be named", async () => {
+    const path = join(area(), ".env");
+    const members: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      members.push(`k${i}`);
+      expect(writeEnvFile(input(path, { member: `k${i}` }))).toEqual({ ok: true });
+      await new Promise(resolve => { setTimeout(resolve, 15); });
+    }
+    const stamp = readEnvStamp(path);
+    expect(stamp?.history.map(row => row.member)).toEqual(members.slice(-8));
+    expect(stamp?.member).toBe("k9");
+    const times = stamp?.history.map(row => row.at) ?? [];
+    expect([...times].sort((a, b) => a - b)).toEqual(times);
+    expect(readFileSync(`${path}.member`, "utf8")).toMatch(/^k9\n\d+:\d+\n(\d+ k\d\n){8}$/);
+  });
+  it("memberLoadedAt: the key a server holds is the one in the file when it started; before the first write, in a history that has gone, or from an inconsistent pair: no one", async () => {
+    const path = join(area(), ".env");
+    writeEnvFile(input(path, { member: "k1" }));
+    await new Promise(resolve => { setTimeout(resolve, 50); });
+    writeEnvFile(input(path, { member: "k2" }));
+    const stamp = readEnvStamp(path);
+    if (!stamp) throw new Error("no stamp");
+    const [first, second] = stamp.history;
+    expect(memberLoadedAt(stamp, (first?.at ?? 0) - 1)).toBeNull();
+    expect(memberLoadedAt(stamp, first?.at ?? 0)).toBe("k1");
+    expect(memberLoadedAt(stamp, (second?.at ?? 0) - 1)).toBe("k1");
+    expect(memberLoadedAt(stamp, second?.at ?? 0)).toBe("k2");
+    expect(memberLoadedAt(stamp, Date.now() + 1000)).toBe("k2");
+    expect(memberLoadedAt({ ...stamp, consistent: false }, Date.now() + 1000)).toBeNull();
+  });
+  it("a sidecar of the earlier two-line form knows only the current write", () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    writeFileSync(path, "ANTHROPIC_API_KEY=x\n", { mode: 0o600 });
+    const found = statSync(path);
+    writeFileSync(`${path}.member`, `k4\n${found.ino}:${Math.trunc(found.mtimeMs)}\n`);
+    const stamp = readEnvStamp(path);
+    expect(stamp).toMatchObject({ member: "k4", consistent: true, history: [{ at: Math.trunc(found.mtimeMs), member: "k4" }] });
+    expect(memberLoadedAt(stamp as NonNullable<typeof stamp>, Math.trunc(found.mtimeMs) - 1)).toBeNull();
+    expect(memberLoadedAt(stamp as NonNullable<typeof stamp>, Math.trunc(found.mtimeMs) + 1)).toBe("k4");
   });
   it("a file replaced after the sidecar (or a sidecar left from an earlier write) is inconsistent: the member it names is not known to be the key in the file", () => {
     const path = join(area(), ".env");
@@ -212,23 +254,63 @@ describe("one writer at a time: <path>.lock", () => {
     expect(second.ok).toBe(true);
     if (second.ok) second.release();
   });
-  it("a lock whose holder is gone is taken over; so is one older than ten minutes", async () => {
+  it("a lock names its owner by pid and start time, and nothing else is left in the directory", async () => {
     const dir = area();
     const path = join(dir, ".env");
-    writeFileSync(`${path}.lock`, "2147483646\n");
-    const gone = await acquireEnvLock(path, { waitMs: 0 });
-    expect(gone.ok).toBe(true);
-    if (gone.ok) gone.release();
-    writeFileSync(`${path}.lock`, `${process.pid}\n`);
-    const old = new Date(Date.now() - 11 * 60_000);
-    utimesSync(`${path}.lock`, old, old);
-    const stale = await acquireEnvLock(path, { waitMs: 0 });
-    expect(stale.ok).toBe(true);
-    if (stale.ok) stale.release();
+    const lock = await acquireEnvLock(path, { waitMs: 0 });
+    expect(lock.ok).toBe(true);
+    expect(readFileSync(`${path}.lock`, "utf8")).toMatch(/^\d+ \d+\n$/);
+    expect(readFileSync(`${path}.lock`, "utf8").split(" ")[0]).toBe(String(process.pid));
+    expect(readdirSync(dir)).toEqual([".env.lock"]);
+    if (lock.ok) lock.release();
+  });
+  it("a lock whose owner is provably gone is taken over: the pid is dead, or the pid is alive but is not the process that took the lock (a reused pid)", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    for (const body of ["2147483646 1\n", `${process.pid} 1\n`]) {
+      writeFileSync(`${path}.lock`, body);
+      const taken = await acquireEnvLock(path, { waitMs: 0 });
+      expect(taken.ok, body).toBe(true);
+      if (taken.ok) taken.release();
+    }
+    expect(readdirSync(dir)).toEqual([]);
+  });
+  it("a lock is not stale because it is old, or empty, or unreadable: only an owner that is provably gone counts", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    const mine = await acquireEnvLock(path, { waitMs: 0 });
+    const body = readFileSync(`${path}.lock`, "utf8");
+    if (mine.ok) mine.release();
+    for (const text of [body, "", "\n", "garbage", "12 ", "-5 7\n", "abc def\n"]) {
+      writeFileSync(`${path}.lock`, text);
+      if (text === body) {
+        const old = new Date(Date.now() - 3 * 3_600_000);
+        utimesSync(`${path}.lock`, old, old);
+      }
+      expect(await acquireEnvLock(path, { waitMs: 100 }), JSON.stringify(text)).toEqual({ ok: false, problem: "busy" });
+      rmSync(`${path}.lock`);
+    }
+  });
+  it("a lock appears with its owner already in it: several processes racing for one lock, exactly one takes it, every time", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    const helper = join(import.meta.dirname, "fixtures/lock-try.mjs");
+    for (let round = 0; round < 6; round++) {
+      const answers = await Promise.all(Array.from({ length: 8 }, () => new Promise<string>(resolve => {
+        const child = spawn(process.execPath, ["--experimental-strip-types", helper, path, "1200"]);
+        let out = "";
+        child.stdout.on("data", chunk => { out += chunk; });
+        child.on("close", () => { resolve(out.trim()); });
+      })));
+      expect(answers.filter(row => row === "ok"), `round ${round}: ${answers.join(",")}`).toHaveLength(1);
+      expect(answers.filter(row => row === "busy")).toHaveLength(7);
+      expect(readdirSync(dir)).toEqual([]);
+    }
   });
   it("a lock held by a live process is not taken over", async () => {
     const path = join(area(), ".env");
-    writeFileSync(`${path}.lock`, `${process.pid}\n`);
+    const mine = await acquireEnvLock(path, { waitMs: 0 });
     expect(await acquireEnvLock(path, { waitMs: 100 })).toEqual({ ok: false, problem: "busy" });
+    if (mine.ok) mine.release();
   });
 });

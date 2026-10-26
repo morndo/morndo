@@ -2,7 +2,7 @@
 // absolute normalised path of safe characters, and is unique within the pool; it is kept in the saved body and in no event. Pure, `now` is the clock.
 import { describe, expect, it } from "vitest";
 import {
-  addKey, addKeySink, createKeyPool, emptyDirectory, findConnection, isSinkPath, joinKeyPool, removeKeySink, sinkFiles, sinkSidecar,
+  addKey, addKeySink, createKeyPool, emptyDirectory, findConnection, forgetRetired, isSinkPath, joinKeyPool, removeKeySink, sinkFiles, sinkSidecar,
   KEY_POOL_SINKS_MAX, KEY_POOL_RETIRED_MAX,
   type Actor, type Connection, type KeyPool,
 } from "../src/index.ts";
@@ -117,17 +117,42 @@ describe("kp20 a sink that is removed still holds a key until its file is gone",
     p = ok(addKeySink(p, PATH, principal, T + 2));
     expect([p.sinks, p.retired, p.sinkSince]).toEqual([[PATH], [], { [PATH]: T + 2 }]);
   });
-  it("a new pool has none retired; a path retired once is kept once; at most KEY_POOL_RETIRED_MAX, the newest kept", () => {
+  it("a new pool has none retired; a path retired once is kept once", () => {
     expect(pool().retired).toEqual([]);
     expect(KEY_POOL_RETIRED_MAX).toBe(64);
+    let p = ok(addKeySink(pool(), PATH, principal, T));
+    p = ok(removeKeySink(p, PATH, principal, T));
+    p = ok(addKeySink(p, PATH, principal, T));
+    p = ok(removeKeySink(p, PATH, principal, T));
+    expect(p.retired).toEqual([PATH]);
+  });
+  it("a retired path is never dropped for room: at KEY_POOL_RETIRED_MAX the next removal is refused with retired_full, the sink stays registered, the list stays whole", () => {
     let p = pool();
-    for (let i = 0; i < KEY_POOL_RETIRED_MAX + 5; i++) {
+    for (let i = 0; i < KEY_POOL_RETIRED_MAX; i++) {
       p = ok(addKeySink(p, `/srv/r${i}/.env`, principal, T));
       p = ok(removeKeySink(p, `/srv/r${i}/.env`, principal, T));
     }
     expect(p.retired).toHaveLength(KEY_POOL_RETIRED_MAX);
-    expect(p.retired.at(-1)).toBe(`/srv/r${KEY_POOL_RETIRED_MAX + 4}/.env`);
-    expect(p.retired).not.toContain("/srv/r0/.env");
+    p = ok(addKeySink(p, "/srv/one-more/.env", principal, T));
+    expect(word(removeKeySink(p, "/srv/one-more/.env", principal, T))).toBe("retired_full");
+    expect(p.sinks).toEqual(["/srv/one-more/.env"]);
+    expect(p.retired).toHaveLength(KEY_POOL_RETIRED_MAX);
+    expect(p.retired).toContain("/srv/r0/.env");
+    // A sink that is already on the list takes no room: it can be retired again.
+    p = ok(addKeySink(p, "/srv/r3/.env", principal, T));
+    expect(ok(removeKeySink(p, "/srv/r3/.env", principal, T)).retired).toHaveLength(KEY_POOL_RETIRED_MAX);
+  });
+  it("forgetRetired takes named paths off the list (the files are gone) and nothing else; it changes no event", () => {
+    let p = pool();
+    for (const path of [PATH, "/srv/b/.env", "/srv/c/.env"]) {
+      p = ok(addKeySink(p, path, principal, T));
+      p = ok(removeKeySink(p, path, principal, T));
+    }
+    const events = p.events.length;
+    const next = forgetRetired(p, [PATH, "/srv/c/.env", "/srv/never/.env"]);
+    expect(next.retired).toEqual(["/srv/b/.env"]);
+    expect(next.events).toHaveLength(events);
+    expect(forgetRetired(p, [])).toBe(p);
   });
   it("retired paths and registration times are in the saved body, and in no event", () => {
     let p = ok(addKeySink(pool(), PATH, principal, T));

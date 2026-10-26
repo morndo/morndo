@@ -137,6 +137,30 @@ describe("sinkPaths, retired sinks and the views", () => {
   });
 });
 
+describe("pruneRetired: a retired sink leaves the list when its files are gone, not for room", () => {
+  it("drops the retired paths the caller says are gone, in every live pool, and keeps the rest; says how many", async () => {
+    const w = await world();
+    for (const [pool, path] of [["p", PATH], ["p", OTHER], ["q", "/srv/third/.env"]] as const) {
+      w.pools.addSink(pool, path, who);
+      w.pools.removeSink(pool, path, who);
+    }
+    expect(w.pools.pruneRetired(path => path !== OTHER)).toBe(2);
+    expect(w.pools.sinkPaths()).toEqual({ live: [], retired: [OTHER] });
+    expect(w.pools.pruneRetired(() => false)).toBe(0);
+  });
+  it("a pool whose retired list is full can retire again once files are gone", async () => {
+    const w = await world();
+    for (let i = 0; i < 64; i++) {
+      expect(w.pools.addSink("p", `/srv/r${i}/.env`, who).ok).toBe(true);
+      expect(w.pools.removeSink("p", `/srv/r${i}/.env`, who).ok).toBe(true);
+    }
+    w.pools.addSink("p", PATH, who);
+    expect(word(w.pools.removeSink("p", PATH, who))).toBe("retired_full");
+    expect(w.pools.pruneRetired(path => path === "/srv/r5/.env")).toBe(1);
+    expect(w.pools.removeSink("p", PATH, who).ok).toBe(true);
+  });
+});
+
 describe("runsPredating: a run that began before a sink was registered has its deny list without it", () => {
   const SEC = 1_000;
   const holder = { node: "n1", pid: 10, startedAt: 1, bootId: "boot", lane: "lane-a" };
@@ -166,5 +190,34 @@ describe("runsPredating: a run that began before a sink was registered has its d
     expect(w.pools.runsPredating("p", PATH)).toBe(false);
     expect(w.pools.runsPredating("p", "/srv/none/.env")).toBe(false);
     expect(w.pools.sinkRegisteredAt("p", "/srv/none/.env")).toBeNull();
+  });
+});
+
+describe("a sink with no registration time (registered before the time was kept)", () => {
+  const holder = { node: "n1", pid: 10, startedAt: 1, bootId: "boot", lane: "lane-a" };
+  const ask = (probe: boolean) => ({ role: "run", entry: "m", holder, workspacePath: "/work/repo", limit: 8, reserve: 1, margin: 0, probe });
+  it("counts as registered after every run began: any live run predates it (the safe default), and a probe lease still does not", async () => {
+    const w = await world();
+    w.pools.addSink("p", PATH, who);
+    const { pool, version } = w.store.load("p");
+    if (!pool) throw new Error("no pool");
+    expect(w.store.save({ ...pool, sinkSince: {} }, version)).toBe(true);
+    expect(w.pools.sinkRegisteredAt("p", PATH)).toBeNull();
+    const leases = new LeaseService(w.mem.deps);
+    expect(w.pools.runsPredating("p", PATH)).toBe(false);
+    expect(leases.lease("k5", ask(true)).ok).toBe(true);
+    expect(w.pools.runsPredating("p", PATH)).toBe(false);
+    w.mem.clock.at += 10_000;
+    const run = leases.lease("k5", ask(false));
+    expect(run.ok).toBe(true);
+    expect(w.pools.runsPredating("p", PATH)).toBe(true);
+    if (run.ok) leases.close("k5", run.value.id, "done", null);
+    expect(w.pools.runsPredating("p", PATH)).toBe(false);
+  });
+  it("a path that is no sink of the pool has no run predating it, with or without a time", async () => {
+    const w = await world();
+    const leases = new LeaseService(w.mem.deps);
+    expect(leases.lease("k5", ask(false)).ok).toBe(true);
+    expect(w.pools.runsPredating("p", "/srv/none/.env")).toBe(false);
   });
 });
