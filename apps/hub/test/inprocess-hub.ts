@@ -164,7 +164,7 @@ export async function startInProcessHub(o: {
     ...(o.proofMode ? { mode: o.proofMode } : {}), ...(o.proofRepos ? { allowedRepos: o.proofRepos } : {}),
   });
   // B18, D7: the wait watch over the same forge, wired as main.ts wires it, without its timer.
-  const waits = new WaitWatch({ board, forge: o.forge ?? null, ledger: null, ...(o.now ? { now: o.now } : {}) });
+  const waits = new WaitWatch({ board, forge: o.forge ?? null, ledger: null, repos: () => o.proofRepos ?? ["morndo/morndo"], ...(o.now ? { now: o.now } : {}) });
   board.attachWaits(waits);
   const agents = new AgentAccess(store, "manager", o.now);
   const usage = new UsageService({ store, ...(o.now ? { now: o.now } : {}), ...(o.profiles ? { profiles: o.profiles } : {}), ...(o.laneNode ? { laneNode: o.laneNode } : {}) });

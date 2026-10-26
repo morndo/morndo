@@ -25,8 +25,9 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   proof T-12 [--add "<spec>"]… [--drop "<spec>"|<N>]…   the proof list the work must answer (manager sets it; the lane may add)
   start T-12                            in progress (one per lane at a time)
   block T-12 --why "…" [--on <wait>]…  blocked, with the reason; each --on is one thing the board watches for you and,
-                                        once all are over, moves the task back to do: T-11 (done), #93 or owner/repo#93
-                                        (merged or closed), ny-530 (the owner's card closed), until:2026-10-28T09:00+01:00
+                                        once all are over, moves the task back to do: T-11 (done), owner/repo#93 or '#93'
+                                        (merged or closed; quote a bare #), ny-530 (the owner's card closed),
+                                        until:2026-10-28T09:00+01:00
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
   brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json
@@ -383,6 +384,11 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const why = text("why");
         if (!why) throw new Usage('usage: morndo-board block T-12 --why "…" [--on <wait>]…');
         const on = valuesOf(argv, "on");
+        // An --on that came without its wait is refused, never dropped: a shell takes an unquoted `#93` for a comment and
+        // hands over a bare --on, and a block on fewer waits than named would end too early (review of #161).
+        const named = argv.filter(a => a === "--on" || a.startsWith("--on=")).length;
+        if (named !== on.length || on.some(v => v.trim() === ""))
+          throw new Usage("--on needs a wait after it: T-12, '#93' (quote it: a shell takes an unquoted # for a comment), owner/repo#93, ny-530 or until:<time>");
         await act(k, { action: "move", to: "blocked", reason: why, ...(on.length > 0 ? { waits: on } : {}) });
         return 0;
       }

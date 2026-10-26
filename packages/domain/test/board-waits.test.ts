@@ -50,6 +50,7 @@ describe("the waits a block may name (B18)", () => {
       "", "T-0", "T-x", "tomorrow", "#0", "#-1", "pr@nobody#3", "other/repo#4",   // a repository the hub doesn't read
       "ny-", "NY-5", "until:2026-01-01T00:00:00Z",                                   // a time already past
       "until:2027-01-15T09:30",                                                         // no offset: whose 09:30?
+      "until:2027-02-31T09:00Z", "until:2027-13-01T09:00Z", "until:2027-01-15T24:30Z", "until:2027-01-15T09:60Z",  // no such day or minute
       `until:${new Date(NOW + 91 * 24 * HOUR).toISOString()}`,                          // further than the board looks ahead
       "T-12 and #93",
     ]) {
@@ -60,6 +61,16 @@ describe("the waits a block may name (B18)", () => {
         expect(r.error.detail, spec).toBeTruthy();
       }
     }
+  });
+});
+
+describe("a card wait on a hub that reads no owner's list (B18)", () => {
+  it("is refused: the board would hold a wait it can never read", () => {
+    const r = parseWait("ny-530", NOW, REPOS, { cards: false });
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.detail).toContain("reads no owner's list");
+    expect(ok(parseWait("ny-530", NOW, REPOS, { cards: true }))).toEqual({ kind: "card", id: "ny-530" });
+    expect(problem(applyAction(task(), { action: "move", to: "blocked", reason: "x", waits: ["ny-530"] }, manager, NOW + 1, [], { ...gate, cards: false }))).toBe("bad_wait");
   });
 });
 
@@ -118,9 +129,11 @@ describe("judging a wait (B18)", () => {
     expect(judgeWait(pr, { kind: "pr", state: "closed" }, NOW)).toEqual({ state: "over", label: "#93 closed" });
     expect(judgeWait(other, { kind: "pr", state: "open" }, NOW)).toEqual({ state: "open", label: "acme/widgets#7 open" });
     expect(judgeWait(pr, null, NOW)).toEqual({ state: "unknown", label: "#93 can't be read now" });
+    expect(judgeWait(other, { kind: "pr", state: "outside" }, NOW)).toEqual({ state: "unknown", label: "acme/widgets#7 is outside the repositories the hub reads" });
     expect(judgeWait({ kind: "card", id: "ny-530" }, { kind: "card", state: "closed" }, NOW)).toEqual({ state: "over", label: "ny-530 closed" });
     expect(judgeWait({ kind: "card", id: "ny-530" }, { kind: "card", state: "open" }, NOW)).toEqual({ state: "open", label: "ny-530 still open" });
-    expect(judgeWait({ kind: "card", id: "ny-530" }, null, NOW)).toEqual({ state: "unknown", label: "ny-530 is not on the owner's list" });
+    expect(judgeWait({ kind: "card", id: "ny-530" }, { kind: "card", state: "absent" }, NOW)).toEqual({ state: "unknown", label: "ny-530 is not on the owner's list" });
+    expect(judgeWait({ kind: "card", id: "ny-530" }, null, NOW)).toEqual({ state: "unknown", label: "the owner's list can't be read now" });
     const at = Date.parse("2026-10-28T08:00:00Z");
     expect(judgeWait({ kind: "time", at }, null, at - 1)).toEqual({ state: "open", label: "until 2026-10-28 08:00 UTC" });
     expect(judgeWait({ kind: "time", at }, null, at)).toEqual({ state: "over", label: "2026-10-28 08:00 UTC reached" });
@@ -157,6 +170,11 @@ describe("the board's move when a task's wait is over (D7)", () => {
     expect(problem(applyAction(t, { action: "move", to: "doing", reason: "x", ifRev: t.rev }, d7, NOW + 2, [t], gate))).toBe("bad_transition");
     expect(problem(applyAction({ ...t, status: "doing" }, { action: "move", to: "todo", reason: "x" }, d7, NOW + 2, [t], gate))).toBe("bad_transition");
     expect(problem(applyAction(t, { action: "move", to: "todo", reason: "x", ifRev: t.rev - 1 }, d7, NOW + 2, [t], gate))).toBe("changed");
+  });
+  it("no rule of the board's restates a block: only a person or the task's lane does", () => {
+    const t = blocked(["#93"]);
+    for (const rule of ["D1", "D2", "D3", "D4", "D7"] as const)
+      expect(problem(applyAction(t, { action: "move", to: "blocked", reason: "restated by the board" }, { kind: "board", rule, lane: "builder" }, NOW + 2, [t], gate)), rule).toBe("bad_transition");
   });
   it("needs no assignee: an unassigned task's wait ends as well", () => {
     const t = ok(block(task(1, null), ["#93"])).task;

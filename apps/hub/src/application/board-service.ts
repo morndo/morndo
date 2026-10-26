@@ -53,6 +53,7 @@ export class BoardService {
   #proof: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null = null;
   #eventListeners = new Set<(e: TaskEvent) => void>();
   #repos: () => readonly string[];
+  #cards: boolean;
   #waits: { readings(key: string): JudgedWait[] | null } | null = null;
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
@@ -61,13 +62,15 @@ export class BoardService {
   // `liveness` (B11): a merge's liveness over the nodes' builds; without one nothing is ever live, so Done waits. `knows`:
   // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
   // `repos` (B18): the repositories whose pull requests the hub reads (MORNDO_PROOF_REPOS); morndo/morndo when absent.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean; repos?: () => readonly string[] }) {
+  // `cards`: whether the hub reads the owner's list (MORNDO_LEDGER); without it a card wait is refused at the block.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean; repos?: () => readonly string[]; cards?: boolean }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
     this.#knows = p.knows ?? null;
     this.#standIn = p.standIn ?? false;
     this.#repos = p.repos ?? (() => [MORNDO_REPO]);
+    this.#cards = p.cards ?? false;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -181,7 +184,7 @@ export class BoardService {
         && this.#store.taskEvents(key).filter(e => e.change.kind === "proof_listed" && e.actor.kind === "worker").length >= PROOF_LIST_CHANGES_MAX)
         return { ok: false as const, error: { problem: "too_many" as const, detail: "proof list changes" } };
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
-        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}), repos: this.#repos() });
+        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}), repos: this.#repos(), cards: this.#cards });
       if (!applied.ok) return applied;
       this.#write(applied.value.task, applied.value.event);
       return applied;

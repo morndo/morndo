@@ -30,7 +30,7 @@ import { AccessService } from "./application/access-service.ts";
 import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
-import { WAIT_PASS_MS, WaitWatch } from "./application/wait-watch.ts";
+import { PR_READS_PER_HOUR, PR_READS_PER_HOUR_ANONYMOUS, WAIT_PASS_MS, WaitWatch } from "./application/wait-watch.ts";
 import { EscalationService, managerOf, type MemoryAsks } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
@@ -340,7 +340,7 @@ switch (cmd) {
       onChange: () => held.board?.runsChanged(),
     });
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null), standIn: config.forgeUrl != null, repos: () => config.proofRepos ?? [MORNDO_REPO] });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null), standIn: config.forgeUrl != null, repos: () => config.proofRepos ?? [MORNDO_REPO], cards: config.ledgerPath != null });
     // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows. Step
     // 3: the rows come from the forge (github-checks.ts holds the credential; nothing else reads it), the mode and the
     // checked repositories from MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS. A pass every minute re-reads what is still
@@ -359,14 +359,17 @@ switch (cmd) {
     proofTimer.unref();
     shutdown.onStop(async () => { clearInterval(proofTimer); await proof.idle(); });
     // B18, D7 (ADR-0038): the hub reads what each block waits on — the board, the forge, the owner's list, the clock —
-    // every WAIT_PASS_MS, and at once after a block that names waits; a task whose waits are all over goes to do.
-    const waits = new WaitWatch({ board, forge, ledger: ownersList });
+    // every WAIT_PASS_MS, and soon after a block that names waits (WaitWatch.follow); a task whose waits are all over goes
+    // to do. Its forge reads have a budget of their own, smaller without a token, so the proof checks keep theirs.
+    const waits = new WaitWatch({
+      board, forge, ledger: ownersList, repos: () => config.proofRepos ?? [MORNDO_REPO],
+      prReadsPerHour: githubToken !== null ? PR_READS_PER_HOUR : PR_READS_PER_HOUR_ANONYMOUS,
+    });
     board.attachWaits(waits);
-    const waitPass = () => { void waits.tick().catch((e: unknown) => log.error("waits: the pass failed", e)); };
-    const waitTimer = setInterval(waitPass, WAIT_PASS_MS);
+    waits.follow(board);
+    const waitTimer = setInterval(() => { void waits.tick().catch((e: unknown) => log.error("waits: the pass failed", e)); }, WAIT_PASS_MS);
     waitTimer.unref();
-    board.onEvent(e => { if (e.change.kind === "moved" && e.change.to === "blocked" && (e.change.waits ?? []).length > 0) waitPass(); });
-    shutdown.onStop(async () => { clearInterval(waitTimer); await waits.idle(); });
+    shutdown.onStop(async () => { clearInterval(waitTimer); waits.stop(); await waits.idle(); });
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });

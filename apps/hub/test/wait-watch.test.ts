@@ -1,4 +1,4 @@
-// What a blocked task waits on, read by the hub itself (B18), and the board's move once it is over (D7, ADR-0040): a
+// What a blocked task waits on, read by the hub itself (B18), and the board's move once it is over (D7, ADR-0038): a
 // real Store in a temp dir, the BoardService over it, and a forge, an owner's list and a clock that the test holds.
 // Synthetic tasks, lanes, pull requests and cards only.
 import { mkdtempSync, rmSync } from "node:fs";
@@ -42,12 +42,13 @@ const card = (id: string, open: boolean): LedgerItem => ({
   recommendation: null, deadline: null, blocking: false, project: null, addedAt: null, open, resolution: open ? null : "answered", closedAt: open ? null : NOW,
 });
 
-const made = (o: { ledger?: () => LedgerRead } = {}) => {
+const made = (o: { ledger?: () => LedgerRead; prReadsPerHour?: number; repos?: () => readonly string[]; gapMs?: number } = {}) => {
   const clock = { now: NOW };
   const store = new Store(tempDir());
-  const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => clock.now, repos: () => ["morndo/morndo", "acme/widgets"] });
+  const repos = o.repos ?? (() => ["morndo/morndo", "acme/widgets"]);
+  const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => clock.now, repos, cards: o.ledger !== undefined });
   const forge = new Forge();
-  const watch = new WaitWatch({ board, forge, ledger: o.ledger ?? null, now: () => clock.now });
+  const watch = new WaitWatch({ board, forge, ledger: o.ledger ?? null, now: () => clock.now, repos, ...(o.prReadsPerHour !== undefined ? { prReadsPerHour: o.prReadsPerHour } : {}), ...(o.gapMs !== undefined ? { gapMs: o.gapMs } : {}) });
   board.attachWaits(watch);
   return { clock, store, board, forge, watch };
 };
@@ -62,7 +63,7 @@ const blocked = (board: BoardService, waits: string[], title = "Ship the totals 
 
 describe("a block's waits, as the store keeps them (B18)", () => {
   it("are read back with the task, in the view, and gone once the task leaves blocked or is blocked on words only", () => {
-    const { store, board } = made();
+    const { store, board } = made({ ledger: () => ({ ok: true, items: [], at: NOW }) });
     blocked(board, ["#93", "ny-530"]);
     expect(store.task("T-1")?.waits).toEqual([{ kind: "pr", repo: "morndo/morndo", n: 93 }, { kind: "card", id: "ny-530" }]);
     expect(board.view().tasks.find(t => t.key === "T-1")?.waits).toHaveLength(2);
@@ -136,6 +137,9 @@ describe("the wait watch (D7)", () => {
     expect(watch.readings("T-1")).toEqual([{ state: "open", label: "ny-530 still open" }]);
     list = { ok: false, error: "ENOENT", at: NOW };
     await watch.tick();
+    expect(watch.readings("T-1")).toEqual([{ state: "unknown", label: "the owner's list can't be read now" }]);
+    list = { ok: true, items: [], at: NOW };
+    await watch.tick();
     expect(watch.readings("T-1")).toEqual([{ state: "unknown", label: "ny-530 is not on the owner's list" }]);
     expect(store.task("T-1")?.status).toBe("blocked");
     list = { ok: true, items: [card("ny-530", false)], at: NOW };
@@ -166,6 +170,76 @@ describe("the wait watch (D7)", () => {
     forge.during = () => { board.act("T-1", { action: "move", to: "blocked", reason: "restated while the hub read", waits: ["#93", "#95"] }, manager); forge.during = null; };
     expect((await watch.tick()).moved).toEqual([]);
     expect(store.task("T-1")).toMatchObject({ status: "blocked", blockedReason: "restated while the hub read" });
+  });
+});
+
+describe("what the wait watch may ask the forge (review of #161)", () => {
+  it("asks again for a pull request it could not read only after PR_EVERY_MS, not on every pass", async () => {
+    const { clock, board, forge, watch } = made();
+    blocked(board, ["acme/widgets#7"], "one");
+    blocked(board, ["acme/widgets#7"], "two");
+    forge.set("acme/widgets", 7, "fail");
+    await watch.tick();
+    await watch.tick();
+    expect(forge.asks).toEqual(["acme/widgets#7"]);
+    clock.now += PR_EVERY_MS;
+    await watch.tick();
+    expect(forge.asks).toEqual(["acme/widgets#7", "acme/widgets#7"]);
+  });
+  it("spends at most prReadsPerHour reads; past it a pull request is unknown and not asked", async () => {
+    const { clock, board, forge, watch } = made({ prReadsPerHour: 2 });
+    for (const n of [1, 2, 3]) { forge.set("morndo/morndo", n, "open"); blocked(board, [`#${n}`], `task ${n}`); }
+    await watch.tick();
+    expect(forge.asks).toHaveLength(2);
+    expect(watch.readings("T-3")).toEqual([{ state: "unknown", label: "#3 can't be read now" }]);
+    clock.now += 3_600_000;
+    await watch.tick();
+    expect(forge.asks).toContain("morndo/morndo#3");
+  });
+  it("reads no repository the hub no longer reads, whatever an older block named (B14)", async () => {
+    let repos: readonly string[] = ["morndo/morndo", "acme/widgets"];
+    const { board, forge, watch } = made({ repos: () => repos });
+    blocked(board, ["acme/widgets#7"]);
+    repos = ["morndo/morndo"];
+    forge.set("acme/widgets", 7, "merged");
+    await watch.tick();
+    expect(forge.asks).toEqual([]);
+    expect(watch.readings("T-1")).toEqual([{ state: "unknown", label: "acme/widgets#7 is outside the repositories the hub reads" }]);
+  });
+  it("judges a task it waits on as it is after the forge answered, not before", async () => {
+    const { board, forge, watch, store } = made();
+    board.create({ title: "the dependency", assignee: "builder" }, manager);           // T-1
+    board.act("T-1", { action: "move", to: "done", reason: "checked" }, manager);
+    board.create({ title: "the dependent", assignee: "builder" }, manager);            // T-2
+    board.act("T-2", { action: "move", to: "blocked", reason: "after T-1 and #93", waits: ["T-1", "#93"] }, manager);
+    forge.set("morndo/morndo", 93, "merged");
+    forge.during = () => { board.act("T-1", { action: "move", to: "doing", reason: "reopened" }, manager); forge.during = null; };
+    await watch.tick();
+    expect(store.task("T-2")?.status).toBe("blocked");
+    expect(watch.readings("T-2")).toEqual([{ state: "open", label: "T-1 in progress" }, { state: "over", label: "#93 merged" }]);
+  });
+  it("a hub that reads no owner's list refuses a card wait at the block", () => {
+    const { board } = made();
+    board.create({ title: "x", assignee: "builder" }, manager);
+    expect(board.act("T-1", { action: "move", to: "blocked", reason: "x", waits: ["ny-530"] }, manager)).toMatchObject({ ok: false, problem: "bad_wait" });
+  });
+});
+
+describe("the pass a block starts (D7)", () => {
+  it("runs soon after a block that names waits, and once per gap however many blocks come", async () => {
+    const { board, forge, watch, store } = made({ gapMs: 40 });
+    watch.follow(board);
+    forge.set("morndo/morndo", 93, "merged");
+    forge.set("morndo/morndo", 94, "merged");
+    blocked(board, ["#93"], "one");
+    blocked(board, ["#94"], "two");
+    await new Promise(r => setTimeout(r, 15));
+    expect(store.task("T-1")?.status).toBe("todo");                 // the first block's pass ran at once
+    expect(store.task("T-2")?.status).toBe("blocked");              // the second waits for the gap
+    await new Promise(r => setTimeout(r, 80));
+    await watch.idle();
+    expect(store.task("T-2")?.status).toBe("todo");
+    watch.stop();
   });
 });
 

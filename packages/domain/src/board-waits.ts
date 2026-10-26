@@ -1,4 +1,4 @@
-// Board context, B18 and D7 (ADR-0040): what a blocked task waits on, in a form the board checks itself, and the board's
+// Board context, B18 and D7 (ADR-0038): what a blocked task waits on, in a form the board checks itself, and the board's
 // own move once all of it is over. A block's reason is the mover's words and nobody re-reads them: on 2026-10-25 five
 // tasks still sat blocked on a tap, a merge or a release that had happened days before (T-331 for 100 h). A wait is one
 // of four things the hub can read without a person: another task on this board (done?), a pull request on a forge the
@@ -33,12 +33,13 @@ const INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2}(?:\.\d{1,3})?)?(?:Z|[+-
 
 // One wait from its spelling: "T-12", "#93" (morndo/morndo), "owner/repo#93" or "pr@owner/repo#93", "ny-530", or
 // "until:<ISO 8601 instant with Z or an offset>". `repos`: the repositories the hub reads (B14's allowlist); a pull
-// request anywhere else is refused here, so the board never holds a wait it cannot check.
-export function parseWait(spec: string, now: number, repos: readonly string[]): Result<Wait, WaitRefusal> {
+// request anywhere else is refused here, so the board never holds a wait it cannot check. `cards`: whether the hub
+// reads the owner's list at all (MORNDO_LEDGER); without it a card wait is refused for the same reason.
+export function parseWait(spec: string, now: number, repos: readonly string[], o: { cards?: boolean } = {}): Result<Wait, WaitRefusal> {
   const s = spec.trim();
   const key = parseTaskKey(s);
   if (key) return ok({ kind: "task", key });
-  if (CARD.test(s)) return ok({ kind: "card", id: s });
+  if (CARD.test(s)) return o.cards === false ? refuse("the hub reads no owner's list (MORNDO_LEDGER), so a card wait could never end") : ok({ kind: "card", id: s });
   const pr = PR.exec(s);
   if (pr) {
     const repo = pr[1] ?? MORNDO_REPO;
@@ -51,12 +52,20 @@ export function parseWait(spec: string, now: number, repos: readonly string[]): 
     const when = s.slice("until:".length);
     if (!INSTANT.test(when)) return refuse("a time is an ISO 8601 instant with Z or an offset, e.g. until:2026-10-28T09:00+01:00");
     const at = Date.parse(when);
-    if (!Number.isFinite(at)) return refuse(`"${when}" is not a time`);
+    if (!Number.isFinite(at) || !realDate(when)) return refuse(`"${when}" is not a time`);
     if (at <= now) return refuse("that time has passed already");
     if (at - now > TIME_AHEAD_MAX_MS) return refuse("a time wait is at most 90 days ahead");
     return ok({ kind: "time", at });
   }
   return refuse(`"${s}" is none of T-12, #93, owner/repo#93, ny-530 or until:<time>`);
+}
+
+// Date.parse rolls an impossible date over (2027-02-31 is read as 3 March), so the parts are checked themselves.
+function realDate(when: string): boolean {
+  const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(when);
+  if (!m) return false;
+  const [y, mo, d, h, mi] = m.slice(1).map(Number) as [number, number, number, number, number];
+  return mo >= 1 && mo <= 12 && d >= 1 && d === new Date(Date.UTC(y, mo - 1, d)).getUTCDate() && h <= 23 && mi <= 59;
 }
 
 // The one spelling of a wait, as the CLI and the record show it.
@@ -70,11 +79,11 @@ export function waitSpec(w: Wait): string {
 }
 
 // A block's waits from their spellings, each once, at most WAITS_MAX, never the task itself.
-export function parseWaits(specs: readonly string[], self: TaskKey, now: number, repos: readonly string[]): Result<Wait[], WaitRefusal | { problem: "too_many"; detail: string }> {
+export function parseWaits(specs: readonly string[], self: TaskKey, now: number, repos: readonly string[], o: { cards?: boolean } = {}): Result<Wait[], WaitRefusal | { problem: "too_many"; detail: string }> {
   const out: Wait[] = [];
   const seen = new Set<string>();
   for (const spec of specs) {
-    const w = parseWait(spec, now, repos);
+    const w = parseWait(spec, now, repos, o);
     if (!w.ok) return w;
     if (w.value.kind === "task" && w.value.key === self) return refuse(`${self} cannot wait on itself`);
     const canon = waitSpec(w.value).toLowerCase();
@@ -87,11 +96,12 @@ export function parseWaits(specs: readonly string[], self: TaskKey, now: number,
 }
 
 // What the hub read for a wait, in the domain's words: a task's status on this board, a pull request's state on its
-// forge, a card's state on the owner's list. A time needs no read. null: nothing could be read.
+// forge, a card's state on the owner's list ("absent": the list was read and does not hold it). A time needs no read.
+// null: nothing could be read.
 export type WaitFact =
   | { kind: "task"; status: TaskStatus }
-  | { kind: "pr"; state: "open" | "merged" | "closed" }
-  | { kind: "card"; state: "open" | "closed" };
+  | { kind: "pr"; state: "open" | "merged" | "closed" | "outside" }       // outside: a repository the hub no longer reads
+  | { kind: "card"; state: "open" | "closed" | "absent" };
 export type WaitState = "over" | "open" | "unknown";
 export type JudgedWait = { state: WaitState; label: string };
 
@@ -110,9 +120,11 @@ export function judgeWait(w: Wait, fact: WaitFact | null, now: number): JudgedWa
       return { state: fact.status === "done" ? "over" : "open", label: `${w.key} ${STATUS_WORDS[fact.status]}` };
     case "pr":
       if (fact === null || fact.kind !== "pr") return { state: "unknown", label: `${prName(w)} can't be read now` };
+      if (fact.state === "outside") return { state: "unknown", label: `${prName(w)} is outside the repositories the hub reads` };
       return { state: fact.state === "open" ? "open" : "over", label: `${prName(w)} ${fact.state}` };
     case "card":
-      if (fact === null || fact.kind !== "card") return { state: "unknown", label: fact === null ? `${w.id} is not on the owner's list` : `${w.id} can't be read now` };
+      if (fact === null || fact.kind !== "card") return { state: "unknown", label: fact === null ? "the owner's list can't be read now" : `${w.id} can't be read now` };
+      if (fact.state === "absent") return { state: "unknown", label: `${w.id} is not on the owner's list` };
       return fact.state === "closed" ? { state: "over", label: `${w.id} closed` } : { state: "open", label: `${w.id} still open` };
   }
 }

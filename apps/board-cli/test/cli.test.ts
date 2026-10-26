@@ -6,6 +6,15 @@ import { GithubChecks } from "../../hub/src/adapters/github-checks.ts";
 import { startFakeForge, type FakeForge } from "../../hub/test/fake-forge.ts";
 import { HELP, parseArgs, run, valuesOf } from "../src/cli.ts";
 import { PR_EVERY_MS } from "../../hub/src/application/wait-watch.ts";
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+
+const CLI_MAIN = join(import.meta.dirname, "../src/main.ts");
+// The CLI through a real bash, asynchronously: the hub it calls runs in this process, so a blocking spawn would never be answered.
+const viaBash = (line: string, env: Record<string, string>) => new Promise<{ status: number; stdout: string; stderr: string }>(resolve => {
+  execFile("bash", ["-c", line], { env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env }, encoding: "utf8", timeout: 60_000 },
+    (e, stdout, stderr) => resolve({ status: e ? (typeof e.code === "number" ? e.code : 1) : 0, stdout, stderr }));
+});
 import { MANAGER_PROMPT, WORKER_PROMPT } from "../src/prompt.ts";
 
 let hub: InProcessHub;
@@ -224,6 +233,22 @@ describe("a block's waits (B18, D7)", () => {
     expect(repo.err).toContain("the board reads no pull requests in other/repo");
     const many = await managerSays("block", "T-1", "--why", "x", "--on", "#1", "--on", "#2", "--on", "#3", "--on", "#4");
     expect(many.err).toContain("a block names at most 3 waits");
+  });
+  it("refuses an --on without its wait, the way a shell leaves an unquoted #93 (review of #161)", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    for (const argv of [["block", "T-1", "--why", "x", "--on"], ["block", "T-1", "--why", "x", "--on", "--on", "T-2"]]) {
+      const r = await managerSays(...argv);
+      expect(r.code, argv.join(" ")).toBe(2);
+      expect(r.err).toContain("--on needs a wait");
+    }
+    // Through a real shell: bash takes `#93` for a comment and the CLI gets a bare --on.
+    const sh = await viaBash(`node --no-warnings ${CLI_MAIN} block T-1 --why "after the fix" --on #93`, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: wm });
+    expect(sh.status, sh.stderr).toBe(2);
+    expect(sh.stderr).toContain("quote it");
+    expect((await managerSays("show", "T-1")).out).not.toContain("Blocked");
+    const quoted = await viaBash(`node --no-warnings ${CLI_MAIN} block T-1 --why "after the fix" --on '#93' --on morndo/morndo#94`, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: wm });
+    expect(quoted.status, quoted.stderr).toBe(0);
+    expect(quoted.stdout).toContain("[waits on #93, #94]");
   });
   it("names the stale flag in list for a block of words only that sat two days", async () => {
     let now = 1_800_000_000_000;

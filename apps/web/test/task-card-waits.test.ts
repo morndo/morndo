@@ -1,4 +1,4 @@
-// A blocked task's card says what the board watches for it (B18, ADR-0040), rendered in headless Chromium: the waits in
+// A blocked task's card says what the board watches for it (B18, ADR-0038), rendered in headless Chromium: the waits in
 // the CLI's own spelling, under the reason, and nothing more for a block of words only.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { startWeb, type Web } from "./harness.ts";

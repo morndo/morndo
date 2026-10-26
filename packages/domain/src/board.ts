@@ -233,7 +233,8 @@ export function mergedView(key: TaskKey, merges: readonly MergeRecord[], livenes
 // is not held for any merge (a board without the fleet knows none). `proof` (B16, ADR-0035): the brief and the results
 // the hub read for its references, in a mode; absent: done is not held for proof either (the hub passes none yet).
 // `repos` (B18): the repositories whose pull requests the hub reads, for a block's waits; absent: morndo/morndo only.
-export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate; repos?: readonly string[] };
+// `cards`: whether the hub reads the owner's list, for a card wait; absent: it does.
+export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate; repos?: readonly string[]; cards?: boolean };
 
 // `board`: the tasks in progress now, for B5 when a task is filed straight into progress.
 export function createTask(input: NewTask, actor: BoardActor | { kind: "console" }, n: number, now: number, board: readonly Task[] = []): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
@@ -281,11 +282,13 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       if (named.length > 0 && action.to !== "blocked") return refuse("bad_wait", undefined, undefined, "waits go with a move to blocked");
       let waits: Wait[] = [];
       if (named.length > 0) {
-        const parsed = parseWaits(named, task.key, now, gate?.repos ?? [MORNDO_REPO]);
+        const parsed = parseWaits(named, task.key, now, gate?.repos ?? [MORNDO_REPO], gate?.cards === false ? { cards: false } : {});
         if (!parsed.ok) return refuse(parsed.error.problem, undefined, undefined, parsed.error.detail);
         waits = parsed.value;
       }
       const restated = action.to === "blocked" && task.status === "blocked";
+      // Only a person or the task's own lane restates a block; no rule of the board's does (D1 to D7 never take that edge).
+      if (restated && actor.kind === "board") return refuse("bad_transition", undefined, task.status);
       if (action.to === task.status && !restated) return refuse("same");
       if (!restated && !mayMove(actor, task.status, action.to)) return refuse("bad_transition", undefined, task.status);
       if (action.to === "doing" && !task.assignee) return refuse("needs_assignee");
