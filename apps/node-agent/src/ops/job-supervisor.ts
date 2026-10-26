@@ -974,7 +974,9 @@ export class JobSupervisor {
     catch { return "unsignalled"; }
     let after = await showUnit(id, this.#toolEnv);
     if (after.kind === "unknown") return "signalled";
-    if (after.kind === "found" && this.#live(after.view)) {
+    // A unit systemd is already stopping (its timeout, a stop from outside) stays deactivating after the SIGTERM
+    // until TimeoutStopSec, so it gets the SIGKILL too.
+    if (after.kind === "found" && this.#unfinished(after.view)) {
       try { await killJobUnit(id, "SIGKILL", this.#toolEnv); }
       catch { return "signalled"; }
       after = await showUnit(id, this.#toolEnv);
