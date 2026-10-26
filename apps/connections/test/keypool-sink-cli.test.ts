@@ -2,7 +2,7 @@
 // and the sidecar of each is denied to the agent's tools, beside the vault, the database and the identity, in both lists the settings carry. The runtime is the
 // fixture fake-keyed-runtime.mjs. Every key is synthetic.
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -130,18 +130,18 @@ describe("the lane deny list of a run", () => {
     expect(settings.sandbox.filesystem.denyRead).toHaveLength(BASE);
     expect(settings.permissions.deny.every(rule => rule.startsWith("Read(//"))).toBe(true);
   });
-  it("a registered sink and its sidecar are in both lists, for a pooled run and for a single-connection run", async () => {
+  it("a registered sink, its sidecar and its temp file are in both lists, for a pooled run and for a single-connection run", async () => {
     const { env, dir, elsewhere } = await world();
     const a = join(elsewhere, "app.env");
     await cli(["keypool", "sink", "add", "p", a], env);
     for (const run of [() => runPool(env, dir), () => runOne(env, dir)]) {
       expect((await run()).code).toBe(0);
       const settings = lastSettings(dir);
-      for (const path of [a, `${a}.member`]) {
+      for (const path of [a, `${a}.member`, `${a}.tmp`]) {
         expect(settings.sandbox.filesystem.denyRead, path).toContain(path);
         expect(settings.permissions.deny, path).toContain(`Read(/${path})`);
       }
-      expect(settings.sandbox.filesystem.denyRead).toHaveLength(BASE + 2);
+      expect(settings.sandbox.filesystem.denyRead).toHaveLength(BASE + 3);
     }
   });
   it("a sink of another pool is denied too: any lane may read any sink", async () => {
@@ -152,7 +152,7 @@ describe("the lane deny list of a run", () => {
     expect(lastSettings(dir).sandbox.filesystem.denyRead).toContain(b);
     expect(lastSettings(dir).permissions.deny).toContain(`Read(/${b})`);
   });
-  it("a removed sink leaves the deny list at the next run", async () => {
+  it("a removed sink whose file is gone leaves the deny list at the next run", async () => {
     const { env, dir, elsewhere } = await world();
     const a = join(elsewhere, "app.env");
     await cli(["keypool", "sink", "add", "p", a], env);
@@ -160,6 +160,33 @@ describe("the lane deny list of a run", () => {
     expect((await runPool(env, dir)).code).toBe(0);
     expect(lastSettings(dir).sandbox.filesystem.denyRead).not.toContain(a);
     expect(lastSettings(dir).sandbox.filesystem.denyRead).toHaveLength(BASE);
+  });
+  it("a removed sink whose file is still there stays denied: it holds a key; the file, the sidecar or the temp file keeps its path in", async () => {
+    const { env, dir, elsewhere } = await world();
+    const a = join(elsewhere, "app.env");
+    await cli(["keypool", "sink", "add", "p", a], env);
+    writeFileSync(a, "ANTHROPIC_API_KEY=left-behind\n");
+    await cli(["keypool", "sink", "remove", "p", a], env);
+    expect((await runPool(env, dir)).code).toBe(0);
+    for (const path of [a, `${a}.member`, `${a}.tmp`]) expect(lastSettings(dir).sandbox.filesystem.denyRead, path).toContain(path);
+    rmSync(a);
+    writeFileSync(`${a}.tmp`, "ANTHROPIC_API_KEY=left-by-a-killed-write\n");
+    expect((await runPool(env, dir)).code).toBe(0);
+    expect(lastSettings(dir).sandbox.filesystem.denyRead).toContain(`${a}.tmp`);
+    rmSync(`${a}.tmp`);
+    expect((await runPool(env, dir)).code).toBe(0);
+    expect(lastSettings(dir).sandbox.filesystem.denyRead).toHaveLength(BASE);
+    expect(existsSync(a)).toBe(false);
+  });
+  it("a deleted pool's sink whose file is still there stays denied too", async () => {
+    const { env, dir, elsewhere } = await world();
+    const a = join(elsewhere, "app.env");
+    await cli(["keypool", "sink", "add", "p", a], env);
+    writeFileSync(a, "ANTHROPIC_API_KEY=left-behind\n");
+    expect((await cli(["keypool", "delete", "p"], env)).code).toBe(0);
+    expect((await runPool(env, dir, "q")).code).toBe(0);
+    expect(lastSettings(dir).sandbox.filesystem.denyRead).toContain(a);
+    expect(lastSettings(dir).permissions.deny).toContain(`Read(/${a})`);
   });
   it("the rule for a file that does not exist yet covers the file and what is under it (readRule)", async () => {
     const { env, dir, elsewhere } = await world();

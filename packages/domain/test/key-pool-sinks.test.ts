@@ -2,8 +2,8 @@
 // absolute normalised path of safe characters, and is unique within the pool; it is kept in the saved body and in no event. Pure, `now` is the clock.
 import { describe, expect, it } from "vitest";
 import {
-  addKey, addKeySink, createKeyPool, emptyDirectory, findConnection, isSinkPath, joinKeyPool, removeKeySink, sinkSidecar,
-  KEY_POOL_SINKS_MAX,
+  addKey, addKeySink, createKeyPool, emptyDirectory, findConnection, isSinkPath, joinKeyPool, removeKeySink, sinkFiles, sinkSidecar,
+  KEY_POOL_SINKS_MAX, KEY_POOL_RETIRED_MAX,
   type Actor, type Connection, type KeyPool,
 } from "../src/index.ts";
 
@@ -43,6 +43,7 @@ describe("kp20 a sink is an absolute, normalised path of safe characters", () =>
     ["a question mark", "/srv/?/.env"], ["brackets", "/srv/[a]/.env"], ["braces", "/srv/{a,b}/.env"], ["parentheses", "/srv/(a)/.env"],
     ["a quote", "/srv/'a'/.env"], ["a backslash", "/srv/a\\b"], ["a tilde", "~/app/.env"], ["a dollar", "/srv/$HOME/.env"],
     ["over 4096 characters", `/${"a".repeat(4096)}`], ["the sidecar of another file", "/srv/app/.env.member"],
+    ["the temp file of another file", "/srv/app/.env.tmp"], ["the lock of another file", "/srv/app/.env.lock"],
   ])("refuses %s", (_name, path) => {
     expect(isSinkPath(path)).toBe(false);
     expect(word(addKeySink(pool(), path, principal, T))).toBe("bad_path");
@@ -50,6 +51,12 @@ describe("kp20 a sink is an absolute, normalised path of safe characters", () =>
   it("the sidecar of a sink is the path with .member, and is itself never a sink", () => {
     expect(sinkSidecar(PATH)).toBe("/srv/app/.env.member");
     expect(isSinkPath(sinkSidecar(PATH))).toBe(false);
+  });
+});
+
+describe("sinkFiles: every file a write can leave a key in", () => {
+  it("the file, its sidecar and its temp file", () => {
+    expect(sinkFiles(PATH)).toEqual([PATH, "/srv/app/.env.member", "/srv/app/.env.tmp"]);
   });
 });
 
@@ -97,6 +104,35 @@ describe("sinks in the pool", () => {
       { type: "SinkAdded", sinks: 1, at: T, command: "c1" },
       { type: "SinkRemoved", sinks: 0, at: T + 1, command: "c1" },
     ]);
+    expect(JSON.stringify(p.events)).not.toContain(PATH);
+  });
+});
+
+describe("kp20 a sink that is removed still holds a key until its file is gone", () => {
+  it("remove moves the path to retired, with its registration time dropped; adding it again takes it out of retired", () => {
+    let p = ok(addKeySink(pool(), PATH, principal, T));
+    expect(p.sinkSince).toEqual({ [PATH]: T });
+    p = ok(removeKeySink(p, PATH, principal, T + 1));
+    expect([p.sinks, p.retired, p.sinkSince]).toEqual([[], [PATH], {}]);
+    p = ok(addKeySink(p, PATH, principal, T + 2));
+    expect([p.sinks, p.retired, p.sinkSince]).toEqual([[PATH], [], { [PATH]: T + 2 }]);
+  });
+  it("a new pool has none retired; a path retired once is kept once; at most KEY_POOL_RETIRED_MAX, the newest kept", () => {
+    expect(pool().retired).toEqual([]);
+    expect(KEY_POOL_RETIRED_MAX).toBe(64);
+    let p = pool();
+    for (let i = 0; i < KEY_POOL_RETIRED_MAX + 5; i++) {
+      p = ok(addKeySink(p, `/srv/r${i}/.env`, principal, T));
+      p = ok(removeKeySink(p, `/srv/r${i}/.env`, principal, T));
+    }
+    expect(p.retired).toHaveLength(KEY_POOL_RETIRED_MAX);
+    expect(p.retired.at(-1)).toBe(`/srv/r${KEY_POOL_RETIRED_MAX + 4}/.env`);
+    expect(p.retired).not.toContain("/srv/r0/.env");
+  });
+  it("retired paths and registration times are in the saved body, and in no event", () => {
+    let p = ok(addKeySink(pool(), PATH, principal, T));
+    p = ok(removeKeySink(p, PATH, principal, T + 1));
+    expect((JSON.parse(JSON.stringify(p)) as KeyPool).retired).toEqual([PATH]);
     expect(JSON.stringify(p.events)).not.toContain(PATH);
   });
 });

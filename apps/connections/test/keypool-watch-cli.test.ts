@@ -1,8 +1,11 @@
-// `keypool watch` through the real bin (ADR-0037, slice 4; plan 3.6): for a server that cannot report a dry key itself, the command reads its log, matches the
-// two exhausted phrases of the classifier and reports the member; it never echoes the line it matched. `--once` reads what the log holds now and exits; without
-// it the command follows the log from its end, from the start of a file that is new, truncated or replaced. Every key is synthetic.
+// `keypool watch` through the real bin (ADR-0037, slice 4; plan 3.6): for a server that cannot report a dry key itself, the command reads its log, and on the
+// two exhausted phrases of the classifier PROBES the member it blames: a log holds anyone's words, so a line is a reason to ask the provider, never a verdict
+// (one token, the smallest model, at most one per member per spacing). The matched line is never echoed. The member is the one the sink's stamp names, and only
+// while the pair is consistent and the file is older than the grace: a server that has not restarted still holds the key before. A local stand-in API
+// answers per key; a temporary catalog points the first-party runtime at it. Every key is synthetic.
 import { spawn, type ChildProcess } from "node:child_process";
-import { appendFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import { appendFileSync, cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -12,16 +15,42 @@ const KEYS: [string, string, string] = ["sk-ant-synthetic-log-key-0001", "sk-ant
 const PLANTED = "planted-secret-in-the-log-line";
 const CREDIT = "Your credit balance is too low to access the Anthropic API. Please go to Plans & Billing to upgrade or purchase credits.";
 const SPEND = "You have reached your specified API usage limits. You will regain access on 2026-11-01 at 00:00 UTC.";
-const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
+const catalogDir = join(import.meta.dirname, "../../../packages/protocol/catalog");
 const main = join(import.meta.dirname, "../src/main.ts");
 const dirs: string[] = [];
 const children: ChildProcess[] = [];
-afterEach(() => {
+const servers: Server[] = [];
+afterEach(async () => {
   for (const child of children.splice(0)) child.kill("SIGKILL");
+  for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.close(() => { resolve(); }); server.closeAllConnections(); });
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
 });
 
 type Out = { code: number; stdout: string; stderr: string };
+type Seen = { method: string; path: string; key: string; body: string };
+type Answer = { status: number; body?: string };
+const refusal = (status: number, type: string, message: string): Answer => ({ status, body: JSON.stringify({ type: "error", error: { type, message }, request_id: "req_synthetic" }) });
+const dryKey = refusal(400, "invalid_request_error", CREDIT);
+const spentKey = refusal(400, "invalid_request_error", SPEND);
+// A stand-in API: it answers by the key it was given (200 unless the test says otherwise) and records every request. Nothing leaves the machine.
+async function api(): Promise<{ url: string; seen: Seen[]; answers: Record<string, Answer> }> {
+  const seen: Seen[] = [];
+  const answers: Record<string, Answer> = {};
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      const key = String(req.headers["x-api-key"] ?? "");
+      seen.push({ method: req.method ?? "", path: req.url ?? "", key, body });
+      const answer = answers[key] ?? { status: 200 };
+      res.writeHead(answer.status, { "content-type": "application/json" });
+      res.end(answer.body ?? JSON.stringify({ id: "msg_synthetic", type: "message", role: "assistant", content: [{ type: "text", text: "." }] }));
+    });
+  });
+  servers.push(server);
+  await new Promise<void>(resolve => { server.listen(0, "127.0.0.1", resolve); });
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, answers };
+}
 function cli(args: string[], env: NodeJS.ProcessEnv, stdin = ""): Promise<Out> {
   return new Promise(resolve => {
     const child = spawn(process.execPath, ["--experimental-strip-types", main, ...args], { env });
@@ -35,15 +64,21 @@ function cli(args: string[], env: NodeJS.ProcessEnv, stdin = ""): Promise<Out> {
     child.stdin.end(stdin);
   });
 }
-type World = { dir: string; env: NodeJS.ProcessEnv; sinks: string; log: string; file: string };
+type World = { dir: string; env: NodeJS.ProcessEnv; sinks: string; log: string; file: string; fake: Awaited<ReturnType<typeof api>> };
 async function world(): Promise<World> {
+  const fake = await api();
   const dir = mkdtempSync(join(tmpdir(), "morndo-watch-"));
   const sinks = mkdtempSync(join(tmpdir(), "morndo-watchfiles-"));
   dirs.push(dir, sinks);
-  mkdirSync(join(dir, "work"));
-  mkdirSync(join(dir, "home"));
+  for (const name of ["work", "home", "cat"]) mkdirSync(join(dir, name));
+  cpSync(catalogDir, join(dir, "cat"), { recursive: true });
+  const vendors = JSON.parse(readFileSync(join(dir, "cat", "vendors.json"), "utf8")) as { id: string; runtimes: { baseUrl: string | null }[] }[];
+  const first = vendors.find(row => row.id === "anthropic");
+  if (!first?.runtimes[0]) throw new Error("no first-party preset");
+  first.runtimes[0].baseUrl = fake.url;
+  writeFileSync(join(dir, "cat", "vendors.json"), JSON.stringify(vendors));
   const env: NodeJS.ProcessEnv = {
-    ...process.env, HOME: join(dir, "home"), MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: catalogPath, PWD: join(dir, "work"),
+    ...process.env, HOME: join(dir, "home"), MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: join(dir, "cat", "vendors.json"), PWD: join(dir, "work"),
   };
   for (let i = 1; i <= 3; i++) {
     const added = await cli(["add", `k${i}`, "--vendor", "anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], env, KEYS[i - 1]);
@@ -54,12 +89,13 @@ async function world(): Promise<World> {
   expect(made.code, made.stderr).toBe(0);
   const file = join(sinks, "app.env");
   expect((await cli(["keypool", "sink", "add", "p", file], env)).code).toBe(0);
-  return { dir, env, sinks, log: join(sinks, "server.log"), file };
+  return { dir, env, sinks, log: join(sinks, "server.log"), file, fake };
 }
 type View = { members: { credential: string; state: string; reason: string | null }[] };
 const view = async (w: World): Promise<View> => JSON.parse((await cli(["keypool", "list"], w.env)).stdout.trim().split("\n")[0] ?? "{}") as View;
 const states = async (w: World): Promise<string[]> => (await view(w)).members.map(m => m.state);
 const watch = (w: World, ...more: string[]) => cli(["keypool", "watch", "p", "--log", w.log, ...more], w.env);
+const writeEnv = (w: World, ...more: string[]) => cli(["keypool", "write-env", "p", "--file", w.file, "--var", "ANTHROPIC_API_KEY", "--isolation", "rules", ...more], w.env);
 const lines = (out: Out): unknown[] => out.stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as unknown);
 const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); });
 async function until(check: () => Promise<boolean>, what: string): Promise<void> {
@@ -96,53 +132,66 @@ function homeFiles(dir: string): string[] {
   return found;
 }
 
-describe("--once", () => {
-  it("a credit line marks the member exhausted and prints one line of words; the matched line is never echoed", async () => {
+describe("--once: a phrase in the log is a reason to ask the provider about the member", () => {
+  it("a credit line is probed; the key is dry, so it is exhausted, and one line of words is printed; the matched line is never echoed", async () => {
     const w = await world();
+    w.fake.answers[KEYS[1]] = dryKey;
     writeFileSync(w.log, `start\n${CREDIT} ${PLANTED} ${KEYS[1]}\nend\n`);
     const out = await watch(w, "--member", "k2", "--once");
     expect([out.code, out.stderr]).toEqual([0, ""]);
     expect(lines(out)).toEqual([{ pool: "p", member: "k2", outcome: "exhausted" }]);
     expect(await states(w)).toEqual(["active", "exhausted", "active"]);
+    expect(w.fake.seen.map(row => [row.method, row.path, row.key])).toEqual([["POST", "/v1/messages", KEYS[1]]]);
     for (const text of [out.stdout, out.stderr, (await cli(["keypool", "list"], w.env)).stdout, (await cli(["log"], w.env)).stdout]) {
       expect(text).not.toContain(PLANTED);
       for (const key of KEYS) expect(text).not.toContain(key);
     }
     for (const path of homeFiles(w.dir)) { const body = readFileSync(path).toString("latin1"); expect(body, path).not.toContain(PLANTED); for (const key of KEYS) expect(body, path).not.toContain(key); }
   });
-  it("a spend-limit line marks it exhausted for the spend limit", async () => {
+  it("a line that only says so does not make a healthy key dry: the probe is answered, the member is healthy and stays active", async () => {
     const w = await world();
+    writeFileSync(w.log, `user said: ${CREDIT}\n`);
+    const out = await watch(w, "--member", "k1", "--once");
+    expect(lines(out)).toEqual([{ pool: "p", member: "k1", outcome: "healthy" }]);
+    expect(await states(w)).toEqual(["active", "active", "active"]);
+    expect(w.fake.seen).toHaveLength(1);
+  });
+  it("a spend-limit line is probed too, and a key at its limit is exhausted for the spend limit", async () => {
+    const w = await world();
+    w.fake.answers[KEYS[0]] = spentKey;
     writeFileSync(w.log, `${SPEND}\n`);
     expect(lines(await watch(w, "--member", "k1", "--once"))).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
     expect((await view(w)).members[0]).toMatchObject({ state: "exhausted", reason: "spend-limit" });
   });
-  it("lines that are not those two phrases change nothing and print nothing: a rate limit, a hold, a refused key, ordinary traffic", async () => {
+  it("lines that are not those two phrases change nothing, print nothing and send nothing: a rate limit, a hold, a refused key, ordinary traffic", async () => {
     const w = await world();
     writeFileSync(w.log, ["GET / 200", "429 rate_limit_error: per-minute rate limit", "403 account_on_hold", "401 authentication_error invalid x-api-key", "authentication_failed"].join("\n") + "\n");
     const out = await watch(w, "--member", "k1", "--once");
     expect([out.code, out.stdout, out.stderr]).toEqual([0, "", ""]);
     expect(await states(w)).toEqual(["active", "active", "active"]);
+    expect(w.fake.seen).toEqual([]);
   });
-  it("three matches in a row report once (a member is reported at most once in ten seconds)", async () => {
+  it("three matches in a row cause one probe and one line (a member is acted on at most once in ten seconds)", async () => {
     const w = await world();
     writeFileSync(w.log, `${CREDIT}\n${CREDIT}\n${SPEND}\n`);
     expect(lines(await watch(w, "--member", "k1", "--once"))).toHaveLength(1);
+    expect(w.fake.seen).toHaveLength(1);
   });
-  it("--sink reads the member from the sidecar at the match", async () => {
-    const w = await world();
-    writeFileSync(`${w.file}.member`, "k3\n");
-    writeFileSync(w.log, `${CREDIT}\n`);
-    expect(lines(await watch(w, "--sink", w.file, "--once"))).toEqual([{ pool: "p", member: "k3", outcome: "exhausted" }]);
-    expect(await states(w)).toEqual(["active", "active", "exhausted"]);
-  });
-  it("--sink with no sidecar, or one naming a member that is not in the pool, reports nothing", async () => {
+  it("another run inside the probe's spacing is skipped: the provider is not asked again, however often the log says it", async () => {
     const w = await world();
     writeFileSync(w.log, `${CREDIT}\n`);
-    expect((await watch(w, "--sink", w.file, "--once")).stdout).toBe("");
-    writeFileSync(`${w.file}.member`, "k9\n");
-    const out = await watch(w, "--sink", w.file, "--once");
+    await watch(w, "--member", "k1", "--once");
+    const again = await watch(w, "--member", "k1", "--once");
+    expect(lines(again)).toEqual([{ pool: "p", member: "k1", outcome: "skipped" }]);
+    expect(w.fake.seen).toHaveLength(1);
+  });
+  it("a member that is already exhausted is not probed", async () => {
+    const w = await world();
+    expect((await cli(["keypool", "report", "p", "--member", "k1", "--outcome", "exhausted"], w.env)).code).toBe(0);
+    writeFileSync(w.log, `${CREDIT}\n`);
+    const out = await watch(w, "--member", "k1", "--once");
     expect([out.code, out.stdout]).toEqual([0, ""]);
-    expect(await states(w)).toEqual(["active", "active", "active"]);
+    expect(w.fake.seen).toEqual([]);
   });
   it("what it prints passes the exact-value filter: a member named as its own key's value is printed as [redacted]", async () => {
     const w = await world();
@@ -150,13 +199,14 @@ describe("--once", () => {
     expect((await cli(["add", leaky, "--vendor", "anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], w.env, leaky)).code).toBe(0);
     expect((await cli(["ack", leaky, "--by", "owner"], w.env)).code).toBe(0);
     expect((await cli(["keypool", "add", "p", leaky, "--confirm-own-account"], w.env)).code).toBe(0);
+    w.fake.answers[leaky] = dryKey;
     writeFileSync(w.log, `${CREDIT}\n`);
     const out = await watch(w, "--member", leaky, "--once");
     expect(out.code, out.stderr).toBe(0);
     expect(out.stdout).not.toContain(leaky);
     expect(lines(out)).toEqual([{ pool: "p", member: "[redacted]", outcome: "exhausted" }]);
   });
-  it("usage and missing: one of --member or --sink, --log needed, a pool and a member that exist, a file that is a sink", async () => {
+  it("usage and missing: one of --member or --sink, --log needed, a pool and a member that exist, a file that is a sink, a grace that is a number", async () => {
     const w = await world();
     writeFileSync(w.log, "x\n");
     const word = async (args: string[]) => (await cli(args, w.env)).stderr.trim();
@@ -166,6 +216,7 @@ describe("--once", () => {
     expect(await word(["keypool", "watch", "nope", "--log", w.log, "--member", "k1", "--once"])).toBe("missing");
     expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k9", "--once"])).toBe("missing");
     expect(await word(["keypool", "watch", "p", "--log", w.log, "--sink", join(w.sinks, "other.env"), "--once"])).toBe("not_a_sink");
+    expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k1", "--grace", "soon", "--once"])).toBe("usage");
   });
   it("a log that is not there is an error with --once", async () => {
     const w = await world();
@@ -174,55 +225,108 @@ describe("--once", () => {
   });
 });
 
-describe("following the log", () => {
-  it("starts at the end: what the log already holds is not reported; a line appended later is", async () => {
+describe("--sink: the key the server loaded is the key of the file as it was when the server could have read it", () => {
+  it("the member comes from the sink's stamp: the key write-env put there, once the file is older than the grace", async () => {
     const w = await world();
+    w.fake.answers[KEYS[0]] = dryKey;
+    expect((await writeEnv(w)).code).toBe(0);
+    writeFileSync(w.log, `${CREDIT}\n`);
+    await sleep(1200);
+    expect(lines(await watch(w, "--sink", w.file, "--grace", "1", "--once"))).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
+    expect(await states(w)).toEqual(["exhausted", "active", "active"]);
+  });
+  it("inside the grace after a rewrite the server may still hold the key before: a phrase then blames no one (the default grace is ten minutes)", async () => {
+    const w = await world();
+    w.fake.answers[KEYS[0]] = dryKey;
+    w.fake.answers[KEYS[1]] = dryKey;
+    expect((await writeEnv(w)).code).toBe(0);
+    await cli(["keypool", "report", "p", "--member", "k1", "--outcome", "exhausted"], w.env);
+    expect(JSON.parse((await writeEnv(w, "--if-due")).stdout)).toMatchObject({ written: true, member: "k2" });
+    writeFileSync(w.log, `${CREDIT}\n`);
+    const out = await watch(w, "--sink", w.file, "--once");
+    expect([out.code, out.stdout]).toEqual([0, ""]);
+    expect(w.fake.seen).toEqual([]);
+    expect(await states(w)).toEqual(["exhausted", "active", "active"]);
+  });
+  it("a pair that is not consistent (the file was replaced after write-env wrote the stamp) blames no one", async () => {
+    const w = await world();
+    w.fake.answers[KEYS[0]] = dryKey;
+    expect((await writeEnv(w)).code).toBe(0);
+    writeFileSync(`${w.file}.swap`, "ANTHROPIC_API_KEY=somebody-elses\n", { mode: 0o600 });
+    renameSync(`${w.file}.swap`, w.file);
+    writeFileSync(w.log, `${CREDIT}\n`);
+    const out = await watch(w, "--sink", w.file, "--grace", "0", "--once");
+    expect([out.code, out.stdout]).toEqual([0, ""]);
+    expect(w.fake.seen).toEqual([]);
+  });
+  it("with no sidecar, or a sidecar that is no stamp, nothing is blamed and nothing is sent", async () => {
+    const w = await world();
+    writeFileSync(w.log, `${CREDIT}\n`);
+    expect((await watch(w, "--sink", w.file, "--grace", "0", "--once")).stdout).toBe("");
+    writeFileSync(w.file, "ANTHROPIC_API_KEY=x\n");
+    writeFileSync(`${w.file}.member`, "k9\n");
+    const out = await watch(w, "--sink", w.file, "--grace", "0", "--once");
+    expect([out.code, out.stdout]).toEqual([0, ""]);
+    expect(w.fake.seen).toEqual([]);
+  });
+});
+
+describe("following the log", () => {
+  it("starts at the end: what the log already holds is not acted on; a line appended later is", async () => {
+    const w = await world();
+    w.fake.answers[KEYS[0]] = dryKey;
     writeFileSync(w.log, `${CREDIT}\n`);
     const run = follow(w, "--member", "k1");
     await sleep(2500);
     expect(await states(w)).toEqual(["active", "active", "active"]);
+    expect(w.fake.seen).toEqual([]);
     appendFileSync(w.log, `${CREDIT} ${PLANTED}\n`);
-    await until(async () => (await states(w))[0] === "exhausted", "k1 to be reported dry");
+    await until(async () => (await states(w))[0] === "exhausted", "k1 to be found dry");
     expect(run.out().trim().split("\n").map(line => JSON.parse(line) as unknown)).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
     expect(run.out() + run.err()).not.toContain(PLANTED);
   });
   it("a log that is truncated is followed from its start", async () => {
     const w = await world();
+    w.fake.answers[KEYS[1]] = dryKey;
     writeFileSync(w.log, `${"ordinary line of the server\n".repeat(20)}`);
     follow(w, "--member", "k2");
     await sleep(2500);
     writeFileSync(w.log, `${CREDIT}\n`);
-    await until(async () => (await states(w))[1] === "exhausted", "k2 to be reported dry after the truncation");
+    await until(async () => (await states(w))[1] === "exhausted", "k2 to be found dry after the truncation");
   });
   it("a log that is replaced (rotated) is followed from the start of the new file", async () => {
     const w = await world();
+    w.fake.answers[KEYS[2]] = dryKey;
     writeFileSync(w.log, `${"ordinary line of the server\n".repeat(5)}`);
     follow(w, "--member", "k3");
     await sleep(2500);
     // The phrase is at the very start of the new file, before where the old file ended: only a reader that starts the new file over finds it.
     writeFileSync(`${w.log}.new`, `${CREDIT}\n${"ordinary line of the server\n".repeat(50)}`);
     renameSync(`${w.log}.new`, w.log);
-    await until(async () => (await states(w))[2] === "exhausted", "k3 to be reported dry after the rotation");
+    await until(async () => (await states(w))[2] === "exhausted", "k3 to be found dry after the rotation");
   });
   it("a log that is not there yet is waited for and read from its start", async () => {
     const w = await world();
+    w.fake.answers[KEYS[0]] = dryKey;
     const run = follow(w, "--member", "k1");
     await sleep(2000);
     expect(run.err()).toBe("");
     writeFileSync(w.log, `${CREDIT}\n`);
-    await until(async () => (await states(w))[0] === "exhausted", "k1 to be reported dry once the log appeared");
+    await until(async () => (await states(w))[0] === "exhausted", "k1 to be found dry once the log appeared");
   });
-  it("--sink follows a rotated key: the member is read from the sidecar at each match", async () => {
+  it("--sink follows a rotated key: the member is read from the stamp at each match, once the file is past the grace", async () => {
     const w = await world();
-    writeFileSync(`${w.file}.member`, "k1\n");
+    w.fake.answers[KEYS[0]] = dryKey;
+    w.fake.answers[KEYS[1]] = dryKey;
+    expect((await writeEnv(w)).code).toBe(0);
     writeFileSync(w.log, "");
-    follow(w, "--sink", w.file);
+    follow(w, "--sink", w.file, "--grace", "1");
     await sleep(2500);
     appendFileSync(w.log, `${CREDIT}\n`);
-    await until(async () => (await states(w))[0] === "exhausted", "k1 to be reported dry");
-    writeFileSync(`${w.file}.member`, "k2\n");
-    await sleep(11_000);
+    await until(async () => (await states(w))[0] === "exhausted", "k1 to be found dry");
+    expect(JSON.parse((await writeEnv(w, "--if-due")).stdout)).toMatchObject({ written: true, member: "k2" });
+    await sleep(2500);
     appendFileSync(w.log, `${CREDIT}\n`);
-    await until(async () => (await states(w))[1] === "exhausted", "k2 to be reported dry after the file moved to it");
+    await until(async () => (await states(w))[1] === "exhausted", "k2 to be found dry after the file moved to it");
   });
 });

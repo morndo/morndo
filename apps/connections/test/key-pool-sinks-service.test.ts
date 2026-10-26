@@ -36,7 +36,7 @@ async function world(): Promise<World> {
     classifiers: { for: d => (d === "dialect-a" ? classifier : null) }, leases: new LeaseService(mem.deps), helper: { limit: 4, ttlMs: 60_000 }, probe: new NoProbe(),
   });
   const connections = new ConnectionsService(mem.deps, pools);
-  for (let i = 1; i <= 4; i++) {
+  for (let i = 1; i <= 5; i++) {
     mem.vault.put(`ref-k${i}`, `0123456789a${i}`);
     expect((await connections.addKey({ name: `k${i}`, vendor: "vendor-a", runtime: "runtime-a", ref: `ref-k${i}`, billing: "metered", budget: { kind: "capped", amount: 10 }, expiry: null }, who)).ok).toBe(true);
     expect(connections.acknowledge(`k${i}`, "ada", who).ok).toBe(true);
@@ -96,23 +96,36 @@ describe("addSink and removeSink", () => {
   });
 });
 
-describe("allSinks and the views", () => {
-  it("allSinks lists every live pool's sinks, with the sidecar of each, for the lane deny list", async () => {
+describe("sinkPaths, retired sinks and the views", () => {
+  it("sinkPaths lists every live pool's sinks, and the retired ones apart, for the lane deny list", async () => {
     const w = await world();
     w.pools.addSink("p", PATH, who);
     w.pools.addSink("q", OTHER, who);
-    expect([...w.pools.allSinks()].sort()).toEqual([OTHER, `${OTHER}.member`, PATH, `${PATH}.member`].sort());
+    expect(w.pools.sinkPaths()).toEqual({ live: [PATH, OTHER], retired: [] });
   });
-  it("a deleted pool's sinks are released (its name stays taken)", async () => {
+  it("a removed sink is retired, not forgotten: it may still hold a key", async () => {
     const w = await world();
     w.pools.addSink("p", PATH, who);
-    expect(w.pools.delete("p", who).ok).toBe(true);
-    expect(w.pools.allSinks()).toEqual([]);
+    expect(w.pools.removeSink("p", PATH, who).ok).toBe(true);
+    expect(w.pools.sinkPaths()).toEqual({ live: [], retired: [PATH] });
     expect(w.pools.addSink("q", PATH, who).ok).toBe(true);
+    expect(w.pools.sinkPaths()).toEqual({ live: [PATH], retired: [] });
+  });
+  it("a deleted pool's sinks (and its retired ones) stay in the list as retired; its name stays taken", async () => {
+    const w = await world();
+    w.pools.addSink("p", PATH, who);
+    w.pools.addSink("p", OTHER, who);
+    w.pools.removeSink("p", OTHER, who);
+    expect(w.pools.delete("p", who).ok).toBe(true);
+    expect([...w.pools.sinkPaths().retired].sort()).toEqual([OTHER, PATH].sort());
+    expect(w.pools.sinkPaths().live).toEqual([]);
+    expect(w.pools.addSink("q", PATH, who).ok).toBe(true);
+    expect(w.pools.sinkPaths()).toEqual({ live: [PATH], retired: [OTHER] });
   });
   it("list and state name no sink path", async () => {
     const w = await world();
     w.pools.addSink("p", PATH, who);
+    w.pools.removeSink("p", PATH, who);
     expect(JSON.stringify(w.pools.list())).not.toContain("/srv/");
     expect(JSON.stringify(w.pools.state("p"))).not.toContain("/srv/");
   });
@@ -121,5 +134,37 @@ describe("allSinks and the views", () => {
     w.pools.addSink("p", PATH, who);
     expect(JSON.stringify(body(w, "p").events)).not.toContain("/srv/");
     expect(body(w, "p").events.at(-1)).toMatchObject({ type: "SinkAdded", sinks: 1 });
+  });
+});
+
+describe("runsPredating: a run that began before a sink was registered has its deny list without it", () => {
+  const SEC = 1_000;
+  const holder = { node: "n1", pid: 10, startedAt: 1, bootId: "boot", lane: "lane-a" };
+  const ask = (probe: boolean) => ({ role: "run", entry: "m", holder, workspacePath: "/work/repo", limit: 8, reserve: 1, margin: 0, probe });
+  it("a live run lease that started before the registration predates it; one started after, a closed one and a probe lease do not", async () => {
+    const w = await world();
+    const leases = new LeaseService(w.mem.deps);
+    const early = leases.lease("k5", ask(false));
+    expect(early.ok).toBe(true);
+    w.mem.clock.at += 10 * SEC;
+    expect(w.pools.addSink("p", PATH, who).ok).toBe(true);
+    expect(w.pools.sinkRegisteredAt("p", PATH)).toBe(w.mem.clock.now());
+    expect(w.pools.runsPredating("p", PATH)).toBe(true);
+    if (early.ok) leases.close("k5", early.value.id, "done", null);
+    expect(w.pools.runsPredating("p", PATH)).toBe(false);
+    w.mem.clock.at += 10 * SEC;
+    const late = leases.lease("k5", ask(false));
+    expect(late.ok).toBe(true);
+    expect(w.pools.runsPredating("p", PATH)).toBe(false);
+  });
+  it("a probe lease taken before the registration does not count, and an unknown sink has no run predating it", async () => {
+    const w = await world();
+    const leases = new LeaseService(w.mem.deps);
+    expect(leases.lease("k5", ask(true)).ok).toBe(true);
+    w.mem.clock.at += 10 * SEC;
+    w.pools.addSink("p", PATH, who);
+    expect(w.pools.runsPredating("p", PATH)).toBe(false);
+    expect(w.pools.runsPredating("p", "/srv/none/.env")).toBe(false);
+    expect(w.pools.sinkRegisteredAt("p", "/srv/none/.env")).toBeNull();
   });
 });

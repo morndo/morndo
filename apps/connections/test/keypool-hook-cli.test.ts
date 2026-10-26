@@ -3,7 +3,8 @@
 // fake-keyed-runtime.mjs, which runs the hook command from the settings with a saved payload (the real CLI's own, test/fixtures/stopfailure) as
 // the agent CLI does. The run's own result is a success in these cases, so only the hook can have marked a member. Every key is synthetic.
 import { spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { createServer, type Server } from "node:http";
+import { cpSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -11,11 +12,38 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 vi.setConfig({ testTimeout: 60_000 });
 const KEYS: [string, string, string] = ["sk-ant-synthetic-hook-key-0001", "sk-ant-synthetic-hook-key-0002", "sk-ant-synthetic-hook-key-0003"];
 const PLANTED = "planted-secret-in-the-hook-payload";
-const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
+const catalogDir = join(import.meta.dirname, "../../../packages/protocol/catalog");
 const fixture = join(import.meta.dirname, "fixtures/fake-keyed-runtime.mjs");
 const main = join(import.meta.dirname, "../src/main.ts");
 const dirs: string[] = [];
-afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
+const servers: Server[] = [];
+afterEach(async () => {
+  for (const server of servers.splice(0)) await new Promise<void>(resolve => { server.close(() => { resolve(); }); server.closeAllConnections(); });
+  for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+});
+
+// A stand-in API: it answers by the key it was given (200 unless the test says otherwise) and records every request. Nothing leaves the machine.
+type Seen = { method: string; path: string; key: string; body: string };
+type ApiAnswer = { status: number; body?: string };
+async function api(): Promise<{ url: string; seen: Seen[]; answers: Record<string, ApiAnswer> }> {
+  const seen: Seen[] = [];
+  const answers: Record<string, ApiAnswer> = {};
+  const server = createServer((req, res) => {
+    let body = "";
+    req.on("data", chunk => { body += chunk; });
+    req.on("end", () => {
+      const key = String(req.headers["x-api-key"] ?? "");
+      seen.push({ method: req.method ?? "", path: req.url ?? "", key, body });
+      const answer = answers[key] ?? { status: 200 };
+      res.writeHead(answer.status, { "content-type": "application/json" });
+      res.end(answer.body ?? JSON.stringify({ id: "msg_synthetic", type: "message", role: "assistant", content: [{ type: "text", text: "." }] }));
+    });
+  });
+  servers.push(server);
+  await new Promise<void>(resolve => { server.listen(0, "127.0.0.1", resolve); });
+  return { url: `http://127.0.0.1:${(server.address() as { port: number }).port}`, seen, answers };
+}
+const refusal = (status: number, type: string, message: string): ApiAnswer => ({ status, body: JSON.stringify({ type: "error", error: { type, message }, request_id: "req_synthetic" }) });
 
 type Out = { code: number; stdout: string; stderr: string };
 const saved = (name: string): Record<string, unknown> =>
@@ -34,13 +62,19 @@ function cli(args: string[], env: NodeJS.ProcessEnv, stdin = ""): Promise<Out> {
     child.stdin.end(stdin);
   });
 }
-async function world(n = 3, pool = true): Promise<{ dir: string; env: NodeJS.ProcessEnv }> {
+async function world(n = 3, pool = true): Promise<{ dir: string; env: NodeJS.ProcessEnv; fake: Awaited<ReturnType<typeof api>> }> {
+  const fake = await api();
   const dir = mkdtempSync(join(tmpdir(), "morndo-hook-"));
   dirs.push(dir);
-  mkdirSync(join(dir, "work"));
-  mkdirSync(join(dir, "home"));
+  for (const name of ["work", "home", "cat"]) mkdirSync(join(dir, name));
+  cpSync(catalogDir, join(dir, "cat"), { recursive: true });
+  const vendors = JSON.parse(readFileSync(join(dir, "cat", "vendors.json"), "utf8")) as { id: string; runtimes: { baseUrl: string | null }[] }[];
+  const first = vendors.find(row => row.id === "anthropic");
+  if (!first?.runtimes[0]) throw new Error("no first-party preset");
+  first.runtimes[0].baseUrl = fake.url;
+  writeFileSync(join(dir, "cat", "vendors.json"), JSON.stringify(vendors));
   const env: NodeJS.ProcessEnv = {
-    ...process.env, HOME: join(dir, "home"), MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: catalogPath, MORNDO_CLAUDE_BIN: fixture,
+    ...process.env, HOME: join(dir, "home"), MORNDO_CONNECTIONS_HOME: dir, MORNDO_VAULT: "file", MORNDO_CATALOG: join(dir, "cat", "vendors.json"), MORNDO_CLAUDE_BIN: fixture,
     PWD: join(dir, "work"),
   };
   for (let i = 1; i <= n; i++) {
@@ -52,7 +86,7 @@ async function world(n = 3, pool = true): Promise<{ dir: string; env: NodeJS.Pro
     const made = await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", "owner", "--confirm-own-account", ...Array.from({ length: n }, (_, i) => `k${i + 1}`)], env);
     expect(made.code, made.stderr).toBe(0);
   }
-  return { dir, env };
+  return { dir, env, fake };
 }
 type Member = { credential: string; state: string };
 const states = async (env: NodeJS.ProcessEnv): Promise<string[]> =>
@@ -118,10 +152,10 @@ describe("a hook under a pooled run, by its grant", () => {
     expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[1]]);
     expect(await states(env)).toEqual(["exhausted", "active", "active"]);
   });
-  it("a spend-limit refusal exhausts it too, a 401 marks it failing and blocks the pool, and a rate limit or an overload changes nothing", async () => {
+  it("a spend-limit refusal exhausts it too, a 401 is probed first (the key answers, so it is healthy), and a rate limit or an overload changes nothing", async () => {
     for (const [name, outcome, after] of [
       ["spend-limit-400", "exhausted", ["exhausted", "active"]],
-      ["invalid-key-401", "failing", ["failing", "active"]],
+      ["invalid-key-401", "healthy", ["active", "active"]],
       ["rate-limit-429", "limited", ["active", "active"]],
       ["overloaded-529", "ignored", ["active", "active"]],
     ] as const) {
@@ -131,6 +165,66 @@ describe("a hook under a pooled run, by its grant", () => {
       expect(hookRuns(dir).map(h => [h.code, JSON.parse(h.stdout) as unknown]), name).toEqual([[0, { pool: "p", outcome }]]);
       expect(await states(env), name).toEqual(after);
     }
+  });
+});
+
+describe("a refused key is probed before it counts: a 401 or 403 from the hook is one request's word, not the key's", () => {
+  it("a 401 payload names the member, a real one-token Messages request decides: a key that answers is healthy and stays active", async () => {
+    const { env, fake } = await world(2);
+    const out = await cli(["keypool", "report", "p", "--member", "k1", "--from-hook"], env, JSON.stringify(saved("invalid-key-401")));
+    expect([out.code, out.stderr]).toEqual([0, ""]);
+    expect(JSON.parse(out.stdout)).toEqual({ pool: "p", outcome: "healthy" });
+    expect(await states(env)).toEqual(["active", "active"]);
+    expect(fake.seen).toHaveLength(1);
+    expect([fake.seen[0]?.method, fake.seen[0]?.path, fake.seen[0]?.key]).toEqual(["POST", "/v1/messages", KEYS[0]]);
+    expect((JSON.parse(fake.seen[0]?.body ?? "{}") as { max_tokens: number }).max_tokens).toBe(1);
+  });
+  it("a per-resource 403 does not kill a healthy key (the 403 payload, the probe's smallest model answers)", async () => {
+    const { env } = await world(2);
+    const out = await cli(["keypool", "report", "p", "--member", "k2", "--from-hook"], env, JSON.stringify(saved("forbidden-403")));
+    expect(JSON.parse(out.stdout)).toEqual({ pool: "p", outcome: "healthy" });
+    expect(await states(env)).toEqual(["active", "active"]);
+  });
+  it("a key the provider refuses to the probe too is failing, and blocks the pool (a hold likewise)", async () => {
+    for (const name of ["invalid-key-401", "account-on-hold-403"]) {
+      const { env, fake } = await world(2);
+      fake.answers[KEYS[0]] = name === "invalid-key-401" ? refusal(401, "authentication_error", "invalid x-api-key") : refusal(403, "permission_error", "account_on_hold");
+      const out = await cli(["keypool", "report", "p", "--member", "k1", "--from-hook"], env, JSON.stringify(saved(name)));
+      expect(JSON.parse(out.stdout), name).toEqual({ pool: "p", outcome: "failing" });
+      expect(await states(env), name).toEqual(["failing", "active"]);
+    }
+  });
+  it("a second refusal inside the probe's spacing is not probed again: skipped, one request in all", async () => {
+    const { env, fake } = await world(2);
+    await cli(["keypool", "report", "p", "--member", "k1", "--from-hook"], env, JSON.stringify(saved("invalid-key-401")));
+    const again = await cli(["keypool", "report", "p", "--member", "k1", "--from-hook"], env, JSON.stringify(saved("invalid-key-401")));
+    expect([again.code, JSON.parse(again.stdout)]).toEqual([0, { pool: "p", outcome: "skipped" }]);
+    expect(fake.seen).toHaveLength(1);
+  });
+  it("a credit refusal is not probed: the provider's own words about the key are enough, and a rate limit sends nothing", async () => {
+    const { env, fake } = await world(2);
+    await cli(["keypool", "report", "p", "--member", "k1", "--from-hook"], env, JSON.stringify(saved("credit-refusal-400")));
+    await cli(["keypool", "report", "p", "--member", "k2", "--from-hook"], env, JSON.stringify(saved("rate-limit-429")));
+    expect(fake.seen).toEqual([]);
+    expect(await states(env)).toEqual(["exhausted", "active"]);
+  });
+  it("by the session that was served: the served key is the one probed", async () => {
+    const { env, fake } = await world(3);
+    fake.answers[KEYS[1]] = refusal(401, "authentication_error", "invalid x-api-key");
+    const out = await session(env, 2, saved("invalid-key-401"));
+    expect(out.code, out.stderr).toBe(0);
+    expect(JSON.parse(out.stdout)).toEqual({ pool: "p", outcome: "failing" });
+    expect(fake.seen.map(row => row.key)).toEqual([KEYS[1]]);
+    expect(await states(env)).toEqual(["active", "failing", "active"]);
+  });
+  it("nothing in the probe's path holds the payload's words or the key: stdout, stderr, files", async () => {
+    const { env, dir } = await world(2);
+    const out = await cli(["keypool", "report", "p", "--member", "k1", "--from-hook"], env, JSON.stringify({ ...saved("invalid-key-401"), last_assistant_message: `Invalid API key ${PLANTED}`, error_details: PLANTED }));
+    for (const text of [out.stdout, out.stderr, (await cli(["log"], env)).stdout, (await cli(["keypool", "list"], env)).stdout]) {
+      expect(text).not.toContain(PLANTED);
+      for (const key of KEYS) expect(text).not.toContain(key);
+    }
+    for (const path of homeFiles(dir)) expect(readFileSync(path).toString("latin1"), path).not.toContain(PLANTED);
   });
 });
 

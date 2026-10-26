@@ -1,11 +1,11 @@
 // The file a server's key is written to (ADR-0037, slice 4; plan 3.6): `NAME=value` through a temp file in the same directory, 0600 from the moment it is
 // created, then renamed over the old one, so a reader never sees half a file or a key anyone else can read. A path in a repository, in a directory
 // others can write, through a link, or under a protected directory is refused before anything is written. The sidecar names the member the key is of.
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { renameSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { writeEnvFile } from "../src/adapters/env-file.ts";
+import { acquireEnvLock, readEnvStamp, writeEnvFile } from "../src/adapters/env-file.ts";
 
 const VALUE = "synthetic-value-for-the-env-file-0000";
 const dirs: string[] = [];
@@ -25,7 +25,7 @@ describe("a written file", () => {
     expect(writeEnvFile(input(path))).toEqual({ ok: true });
     expect(readFileSync(path, "utf8")).toBe(`ANTHROPIC_API_KEY=${VALUE}\n`);
     expect(mode(path)).toBe(0o600);
-    expect(readFileSync(`${path}.member`, "utf8")).toBe("k1\n");
+    expect(readFileSync(`${path}.member`, "utf8")).toMatch(/^k1\n\d+:\d+\n$/);
     expect(mode(`${path}.member`)).toBe(0o600);
   });
   it("replaces an existing file's content and makes its mode 0600", () => {
@@ -132,5 +132,103 @@ describe("what is refused before anything is written", () => {
   });
   it("a path that is not absolute", () => {
     refuses(".env", "bad_path");
+  });
+});
+
+describe("the pair is stamped: the sidecar says which file it is about", () => {
+  it("readEnvStamp gives the member, when the file was written, and that the pair is consistent", () => {
+    const path = join(area(), ".env");
+    writeEnvFile(input(path, { member: "k7" }));
+    const stamp = readEnvStamp(path);
+    expect(stamp).toEqual({ member: "k7", consistent: true, writtenAt: statSync(path).mtimeMs });
+  });
+  it("a file replaced after the sidecar (or a sidecar left from an earlier write) is inconsistent: the member it names is not known to be the key in the file", () => {
+    const path = join(area(), ".env");
+    writeEnvFile(input(path, { member: "k1" }));
+    writeFileSync(`${path}.new`, "ANTHROPIC_API_KEY=other\n", { mode: 0o600 });
+    renameSync(`${path}.new`, path);
+    expect(readEnvStamp(path)).toMatchObject({ member: "k1", consistent: false });
+    const again = join(area(), ".env");
+    writeEnvFile(input(again, { member: "k1" }));
+    const at = new Date(Date.now() - 5000);
+    utimesSync(again, at, at);
+    expect(readEnvStamp(again)).toMatchObject({ consistent: false });
+  });
+  it("no sidecar, no file, or a sidecar that is not a stamp: null", () => {
+    const dir = area();
+    expect(readEnvStamp(join(dir, ".env"))).toBeNull();
+    writeFileSync(join(dir, ".env"), "A=1\n");
+    expect(readEnvStamp(join(dir, ".env"))).toBeNull();
+    writeFileSync(join(dir, ".env.member"), "k1\n");
+    expect(readEnvStamp(join(dir, ".env"))).toBeNull();
+    writeFileSync(join(dir, ".env.member"), "k1\nnot-a-stamp\n");
+    expect(readEnvStamp(join(dir, ".env"))).toBeNull();
+  });
+});
+
+describe("the temp file has a fixed name, so a write that was killed leaves one the deny list knows", () => {
+  it("a write goes through <path>.tmp: a stale one from a killed write is replaced, and none is left", () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    writeFileSync(`${path}.tmp`, "ANTHROPIC_API_KEY=left-by-a-killed-write\n", { mode: 0o600 });
+    expect(writeEnvFile(input(path))).toEqual({ ok: true });
+    expect(readdirSync(dir).sort()).toEqual([".env", ".env.member"]);
+    expect(readFileSync(path, "utf8")).toBe(`ANTHROPIC_API_KEY=${VALUE}\n`);
+  });
+  it("a temp path that is a link is refused and its target left alone", () => {
+    const dir = area();
+    writeFileSync(join(dir, "real"), "x");
+    symlinkSync(join(dir, "real"), join(dir, ".env.tmp"));
+    expect(writeEnvFile(input(join(dir, ".env")))).toEqual({ ok: false, problem: "symlink" });
+    expect(readFileSync(join(dir, "real"), "utf8")).toBe("x");
+  });
+  it("a failed write removes the temp file too (the path is a directory)", () => {
+    const dir = area();
+    mkdirSync(join(dir, ".env"));
+    expect(writeEnvFile(input(join(dir, ".env")))).toEqual({ ok: false, problem: "write_failed" });
+    expect(readdirSync(dir)).toEqual([".env"]);
+  });
+});
+
+describe("one writer at a time: <path>.lock", () => {
+  it("a lock is taken, held against another taker, and released", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    const first = await acquireEnvLock(path, { waitMs: 0 });
+    expect(first.ok).toBe(true);
+    expect(readdirSync(dir)).toEqual([".env.lock"]);
+    expect(await acquireEnvLock(path, { waitMs: 150 })).toEqual({ ok: false, problem: "busy" });
+    if (first.ok) first.release();
+    expect(readdirSync(dir)).toEqual([]);
+    const second = await acquireEnvLock(path, { waitMs: 0 });
+    expect(second.ok).toBe(true);
+    if (second.ok) second.release();
+  });
+  it("a taker waits for the holder to let go", async () => {
+    const path = join(area(), ".env");
+    const first = await acquireEnvLock(path, { waitMs: 0 });
+    setTimeout(() => { if (first.ok) first.release(); }, 200);
+    const second = await acquireEnvLock(path, { waitMs: 3000 });
+    expect(second.ok).toBe(true);
+    if (second.ok) second.release();
+  });
+  it("a lock whose holder is gone is taken over; so is one older than ten minutes", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    writeFileSync(`${path}.lock`, "2147483646\n");
+    const gone = await acquireEnvLock(path, { waitMs: 0 });
+    expect(gone.ok).toBe(true);
+    if (gone.ok) gone.release();
+    writeFileSync(`${path}.lock`, `${process.pid}\n`);
+    const old = new Date(Date.now() - 11 * 60_000);
+    utimesSync(`${path}.lock`, old, old);
+    const stale = await acquireEnvLock(path, { waitMs: 0 });
+    expect(stale.ok).toBe(true);
+    if (stale.ok) stale.release();
+  });
+  it("a lock held by a live process is not taken over", async () => {
+    const path = join(area(), ".env");
+    writeFileSync(`${path}.lock`, `${process.pid}\n`);
+    expect(await acquireEnvLock(path, { waitMs: 100 })).toEqual({ ok: false, problem: "busy" });
   });
 });

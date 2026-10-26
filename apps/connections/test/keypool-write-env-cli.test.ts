@@ -1,8 +1,8 @@
 // `keypool write-env` through the real bin (ADR-0037, slice 4; plan 3.6): one gated lease per write, the picked member's key written to a registered sink
-// as NAME=value (0600, by rename), a sidecar naming the member, words only on stdout and stderr. `--if-due` rewrites only when the served member can no longer
+// as NAME=value (0600, by rename), a sidecar naming the member and stamping the file it is about, one writer at a time (<sink>.lock), words only on stdout and stderr. `--if-due` rewrites only when the served member can no longer
 // serve (or the file is gone, or `--rotate-every` has passed). Every key is synthetic; the planted values must reach nothing but the file.
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -52,6 +52,8 @@ async function world(mode: "round-robin" | "drain" = "round-robin", register = t
 // The writer is a timer or a pre-start, no agent: its isolation is its own claim, as for `lease` (the vendor's floor is rules).
 const write = (w: World, ...more: string[]) => cli(["keypool", "write-env", "p", "--file", w.file, "--var", "ANTHROPIC_API_KEY", "--isolation", "rules", ...more], w.env);
 const content = (path: string): string => readFileSync(path, "utf8");
+// The sidecar: the member's name, then the stamp of the file it is about (inode and mtime).
+const memberOf = (file: string): string => content(`${file}.member`).split("\n")[0] ?? "";
 const dry = async (w: World, member: string) => { expect((await cli(["keypool", "report", "p", "--member", member, "--outcome", "exhausted"], w.env)).code).toBe(0); };
 type Event = { type: string; name?: string; outcome?: string };
 const events = async (w: World, name: string): Promise<Event[]> => (await cli(["log", name], w.env)).stdout.trim().split("\n").filter(Boolean).map(line => JSON.parse(line) as Event);
@@ -69,7 +71,7 @@ function homeFiles(dir: string): string[] {
   walk(dir);
   return found;
 }
-const ago = (path: string, ms: number): void => { const at = new Date(Date.now() - ms); utimesSync(path, at, at); };
+const sleep = (ms: number) => new Promise<void>(resolve => { setTimeout(resolve, ms); });
 
 describe("a write", () => {
   it("writes the first member's key as NAME=value, 0600, with the sidecar, and prints words only", async () => {
@@ -79,7 +81,8 @@ describe("a write", () => {
     expect(line(out)).toEqual({ pool: "p", written: true, member: "k1" });
     expect(content(w.file)).toBe(`ANTHROPIC_API_KEY=${KEYS[0]}\n`);
     expect(statSync(w.file).mode & 0o777).toBe(0o600);
-    expect(content(`${w.file}.member`)).toBe("k1\n");
+    expect(memberOf(w.file)).toBe("k1");
+    expect(content(`${w.file}.member`)).toMatch(/^k1\n\d+:\d+\n$/);
     expect(statSync(`${w.file}.member`).mode & 0o777).toBe(0o600);
     expect(out.stdout).not.toContain(KEYS[0]);
     expect(out.stdout).not.toContain(w.file);
@@ -168,15 +171,17 @@ describe("--if-due", () => {
     const out = await write(w, "--if-due");
     expect(line(out)).toEqual({ pool: "p", written: true, member: "k2" });
     expect(content(w.file)).toBe(`ANTHROPIC_API_KEY=${KEYS[1]}\n`);
-    expect(content(`${w.file}.member`)).toBe("k2\n");
+    expect(memberOf(w.file)).toBe("k2");
   });
-  it("rewrites when the file or the sidecar is missing, or the sidecar is older than the file (a write that was cut short)", async () => {
+  it("rewrites when the file or the sidecar is missing, or the file is not the one the stamp is about (replaced after the stamp, or a write cut short)", async () => {
     const w = await world();
     expect(line(await write(w, "--if-due"))).toMatchObject({ written: true });
     rmSync(`${w.file}.member`);
     expect(line(await write(w, "--if-due"))).toMatchObject({ written: true });
-    ago(`${w.file}.member`, 60_000);
+    writeFileSync(`${w.file}.swap`, "ANTHROPIC_API_KEY=somebody-elses\n", { mode: 0o600 });
+    renameSync(`${w.file}.swap`, w.file);
     expect(line(await write(w, "--if-due"))).toMatchObject({ written: true });
+    expect(line(await write(w, "--if-due"))).toMatchObject({ written: false, why: "not_due" });
     rmSync(w.file);
     expect(line(await write(w, "--if-due"))).toMatchObject({ written: true });
   });
@@ -186,18 +191,79 @@ describe("--if-due", () => {
     expect((await cli(["keypool", "remove", "p", "k1"], w.env)).code).toBe(0);
     expect(line(await write(w, "--if-due"))).toMatchObject({ written: true, member: "k2" });
   });
-  it("--rotate-every rewrites after that long and not before, in round-robin only", async () => {
+  it("--rotate-every rewrites after that long and not before (seconds, minutes, hours or days), in round-robin only", async () => {
     const w = await world();
     await write(w);
-    const young = await write(w, "--if-due", "--rotate-every", "12h");
+    const young = await write(w, "--if-due", "--rotate-every", "2s");
     expect(line(young)).toEqual({ pool: "p", written: false, why: "not_due" });
-    ago(w.file, 13 * 3_600_000);
-    ago(`${w.file}.member`, 13 * 3_600_000);
-    expect(line(await write(w, "--if-due", "--rotate-every", "12h"))).toMatchObject({ written: true, member: "k2" });
+    await sleep(2300);
+    expect(line(await write(w, "--if-due", "--rotate-every", "2s"))).toMatchObject({ written: true, member: "k2" });
     const drain = await world("drain");
     await write(drain);
     const out = await write(drain, "--if-due", "--rotate-every", "12h");
     expect([out.code, out.stderr.trim()]).toEqual([1, "usage"]);
+    expect((await write(w, "--if-due", "--rotate-every", "soon")).stderr.trim()).toBe("usage");
+  });
+});
+
+describe("one writer at a time, and a pair that agrees", () => {
+  it("two writes at once both finish, one after the other: the file holds the key of the member its sidecar names, and the stamp matches", async () => {
+    const w = await world();
+    const [a, b] = await Promise.all([write(w), write(w)]);
+    expect([a.code, b.code], `${a.stderr}${b.stderr}`).toEqual([0, 0]);
+    const members = [a, b].map(out => (line(out) as { member: string }).member);
+    expect(new Set(members).size).toBe(2);
+    const member = memberOf(w.file);
+    expect(content(w.file)).toBe(`ANTHROPIC_API_KEY=${KEYS[Number(member.slice(1)) - 1]}\n`);
+    expect(content(`${w.file}.member`).split("\n")[1]).toBe(`${statSync(w.file).ino}:${Math.trunc(statSync(w.file).mtimeMs)}`);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
+  });
+  it("a lock held by a live process makes a write wait and then say busy; nothing is written and no lease is taken", async () => {
+    const w = await world();
+    writeFileSync(`${w.file}.lock`, `${process.pid}\n`);
+    const started = Date.now();
+    const out = await write(w);
+    expect([out.code, out.stdout, out.stderr.trim()]).toEqual([1, "", "busy"]);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(4000);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env.lock"]);
+    for (const name of ["k1", "k2", "k3"]) expect((await events(w, name)).filter(e => e.type === "LeaseGranted")).toEqual([]);
+  });
+  it("a lock whose holder is gone is taken over, and the lock is gone after the write", async () => {
+    const w = await world();
+    writeFileSync(`${w.file}.lock`, "2147483646\n");
+    const out = await write(w);
+    expect([out.code, out.stderr]).toEqual([0, ""]);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
+  });
+  it("a temp file left by a killed write is replaced, not kept", async () => {
+    const w = await world();
+    writeFileSync(`${w.file}.tmp`, `ANTHROPIC_API_KEY=${KEYS[2]}\n`, { mode: 0o600 });
+    expect((await write(w)).code).toBe(0);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
+  });
+  it("a run that began before the sink was registered has the file open to its tools: write-env refuses while it lives, and writes once it is gone", async () => {
+    const w = await world("round-robin", false);
+    const added = await cli(["add", "k5", "--vendor", "anthropic", "--runtime", "claude", "--billing", "metered", "--budget", "10"], w.env, "sk-ant-synthetic-env-key-0005");
+    expect(added.code, added.stderr).toBe(0);
+    expect((await cli(["ack", "k5", "--by", "owner"], w.env)).code).toBe(0);
+    const marks = mkdtempSync(join(tmpdir(), "morndo-envrun-"));
+    dirs.push(marks);
+    const slow = join(import.meta.dirname, "fixtures/slow-runtime.mjs");
+    const running = spawn(process.execPath, ["--experimental-strip-types", main, "run", "--connection", "k5", "--workspace", join(w.dir, "work"), "--reserve", "1", "--", "--dir", marks], { env: { ...w.env, MORNDO_CLAUDE_BIN: slow } });
+    try {
+      for (let i = 0; i < 100 && !readdirSync(marks).includes("pid"); i++) await sleep(100);
+      expect(readdirSync(marks)).toContain("pid");
+      await sleep(1100);
+      expect((await cli(["keypool", "sink", "add", "p", w.file], w.env)).code).toBe(0);
+      const refused = await write(w);
+      expect([refused.code, refused.stdout, refused.stderr.trim()]).toEqual([1, "", "older_runs"]);
+      expect(readdirSync(w.sinks)).toEqual([]);
+    } finally {
+      running.kill("SIGKILL");
+      try { process.kill(Number(readFileSync(join(marks, "pid"), "utf8")), "SIGKILL"); } catch { /* gone */ }
+    }
+    const written = await write(w);
+    expect([written.code, written.stderr]).toEqual([0, ""]);
   });
 });
 
@@ -212,7 +278,7 @@ describe("the value goes to the file and nowhere else", () => {
     for (const text of shown) for (const key of KEYS) expect(text).not.toContain(key);
     for (const path of homeFiles(w.dir)) for (const key of KEYS) expect(readFileSync(path).toString("latin1"), path).not.toContain(key);
     expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
-    expect(content(`${w.file}.member`)).toMatch(/^k\d\n$/);
+    expect(memberOf(w.file)).toMatch(/^k\d$/);
   });
   it("a write that fails after the lease (the path is a directory by now) closes the lease failed and leaves no temp file", async () => {
     const w = await world();

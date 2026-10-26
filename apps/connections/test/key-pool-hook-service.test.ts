@@ -1,5 +1,5 @@
 // A refusal read from a consumer's own hook (ADR-0037, slice 4): `reportRefusal` classifies a signal with the pool's dialect and applies it only when
-// it is a mark (exhausted or failing). A rate limit or an unknown answer changes nothing and writes nothing; an unmatched 4xx raises the one
+// it is a credit refusal (exhausted). A refused key (failing) is not marked on the hook's word: the member is named to be probed. A rate limit or an unknown answer changes nothing and writes nothing; an unmatched 4xx raises the one
 // `unclassified` alert of status and type only. By grant, the caller must hold the grant before anything is applied (no alert, no write for a stranger).
 // In-memory ports, a manual clock. Keys are synthetic; the planted secrets must reach nothing.
 import { describe, expect, it } from "vitest";
@@ -101,12 +101,14 @@ describe("reportRefusal by grant", () => {
     expect(again.ok).toBe(true);
     expect(pool(w).events.filter(e => e.type === "KeyExhausted")).toHaveLength(1);
   });
-  it("a refused key marks the member failing and blocks the pool", async () => {
+  it("a refused key (401) is not marked on the hook's word: the member is named to be probed, and nothing changes", async () => {
     const w = await world();
     const run = await start(w);
-    expect(w.pools.reportRefusal("p", { kind: "grant", grant: run.grant, by: byHolder(caller.id) }, signalOf(401), w.mem.clock.now())).toEqual({ ok: true, value: { outcome: "failing", suspect: null } });
-    expect(state(w, run.member)).toBe("failing");
-    expect(pool(w).standing).toBe("blocked");
+    const before = JSON.stringify(pool(w));
+    expect(w.pools.reportRefusal("p", { kind: "grant", grant: run.grant, by: byHolder(caller.id) }, signalOf(401), w.mem.clock.now())).toEqual({ ok: true, value: { outcome: "failing", suspect: run.member } });
+    expect(state(w, run.member)).toBe("active");
+    expect(pool(w).standing).toBe("ok");
+    expect(JSON.stringify(pool(w))).toBe(before);
   });
   it("a caller that does not hold the grant is refused before anything is applied: no mark, no event, no alert", async () => {
     const w = await world();
@@ -137,6 +139,12 @@ describe("reportRefusal by grant", () => {
 });
 
 describe("reportRefusal by member", () => {
+  it("a refused key (401) or a per-resource refusal named by member is not marked either: it is named to be probed", async () => {
+    const w = await world();
+    const before = JSON.stringify(pool(w));
+    expect(w.pools.reportRefusal("p", { kind: "member", member: "k2" }, signalOf(401), w.mem.clock.now())).toEqual({ ok: true, value: { outcome: "failing", suspect: "k2" } });
+    expect(JSON.stringify(pool(w))).toBe(before);
+  });
   it("marks that member, and says exhausted", async () => {
     const w = await world();
     expect(w.pools.reportRefusal("p", { kind: "member", member: "k2" }, signalOf(400), w.mem.clock.now())).toEqual({ ok: true, value: { outcome: "exhausted", suspect: null } });
@@ -156,10 +164,10 @@ describe("reportRefusal by member", () => {
 describe("reportRefusal by the session that was served", () => {
   // `lease --pool` is one lease per call and exec'd by the agent CLI, so its parent is the CLI; a hook the CLI runs has that CLI as an ancestor.
   const HOUR_MS = 3_600_000;
-  const serve = (w: World, member: string, ppid: number): void => {
+  const serve = (w: World, member: string, ppid: number, parentStartedAt: number | null = 1): void => {
     const leased = w.leases.lease(member, { ...runRequest, reserve: 0, probe: true });
     if (!leased.ok) throw new Error(`no lease: ${JSON.stringify(leased)}`);
-    const served = w.leases.serve(member, leased.value.id, { pid: 7000 + ppid, ppid, lane: null, workspace: "/work/repo", isolation: "rules", proof: "claimed" });
+    const served = w.leases.serve(member, leased.value.id, { pid: 7000 + ppid, ppid, parentStartedAt, lane: null, workspace: "/work/repo", isolation: "rules", proof: "claimed" });
     expect(served.ok).toBe(true);
     w.leases.close(member, leased.value.id, "done", null);
   };
@@ -212,6 +220,18 @@ describe("reportRefusal by the session that was served", () => {
     serve(far, "k1", 400);
     far.mem.processes.tree.set(900, [900, 899, 500, 450, 440, 430, 420, 400, 1]);
     expect(word(far.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), far.mem.clock.now()))).toBe("unserved");
+  });
+  it("a parent pid that was reused is not the session: the start time of the parent must match, and an event without one is not matched", async () => {
+    const w = await world();
+    serve(w, "k1", 500, 2);
+    serve(w, "k2", 500, null);
+    inSession(w, 500);
+    const before = JSON.stringify(pool(w));
+    expect(word(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), w.mem.clock.now()))).toBe("unserved");
+    expect(JSON.stringify(pool(w))).toBe(before);
+    serve(w, "k3", 500, 1);
+    expect(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), w.mem.clock.now()).ok).toBe(true);
+    expect([state(w, "k1"), state(w, "k2"), state(w, "k3")]).toEqual(["active", "active", "exhausted"]);
   });
   it("a caller with no parent known is unserved", async () => {
     const w = await world();
