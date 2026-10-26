@@ -53,7 +53,8 @@ try {
 
   await check("the desktop attaches an HTML page, script and all; the lane gets it byte for byte and the app runs none of it", async () => {
     tmux("send-keys", "-t", panes.builder ?? "", "clear", "Enter");
-    const html = `<!doctype html><meta charset="utf-8"><title>Q3</title><p>Grüße</p><script>window.__ran = 1</script>\n`;
+    // Two markers: a <script> runs if the page is loaded as a page, an onerror also if its markup is put into the app's DOM.
+    const html = `<!doctype html><meta charset="utf-8"><title>Q3</title><p>Grüße</p><script>window.__ran = 1</script><img src=x onerror="window.__ran = 2">\n`;
     const input = page.locator('.box input[type="file"]');
     await input.setInputFiles({ name: "huge.html", mimeType: "text/html", buffer: Buffer.alloc(10 * 1024 * 1024 + 1, 0x61) });
     await page.getByText("huge.html is over 10 MB.").waitFor();

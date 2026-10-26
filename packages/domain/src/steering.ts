@@ -86,28 +86,37 @@ export function safeUploadName(name: string): string | null {
 }
 
 // S1: the domain carries no platform, so UTF-8 is read here, byte by byte. An overlong form, a surrogate half, a code
-// point past U+10FFFF or a sequence cut short is not text, and neither is a NUL byte: all of it comes back null.
-export function utf8Text(b: Uint8Array): string | null {
-  let out = "";
+// point past U+10FFFF or a sequence cut short is not text, and neither is a NUL byte. `take` gets each code point; the
+// walk answers whether every byte held.
+function walkUtf8(b: Uint8Array, take?: (cp: number) => void): boolean {
   let i = 0;
   while (i < b.length) {
     const lead = b[i++] ?? 0;
-    if (lead === 0) return null;
-    if (lead < 0x80) { out += String.fromCharCode(lead); continue; }
+    if (lead === 0) return false;
+    if (lead < 0x80) { take?.(lead); continue; }
     const extra = lead < 0xe0 ? 1 : lead < 0xf0 ? 2 : 3;
-    if (lead < 0xc2 || lead > 0xf4) return null;
+    if (lead < 0xc2 || lead > 0xf4) return false;
     let cp = lead & (extra === 1 ? 0x1f : extra === 2 ? 0x0f : 0x07);
     for (let k = 0; k < extra; k++) {
       const c = b[i++];
-      if (c === undefined || (c & 0xc0) !== 0x80) return null;
+      if (c === undefined || (c & 0xc0) !== 0x80) return false;
       cp = (cp << 6) | (c & 0x3f);
     }
     const least = extra === 1 ? 0x80 : extra === 2 ? 0x800 : 0x10000;
-    if (cp < least || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return null;
-    out += String.fromCodePoint(cp);
+    if (cp < least || cp > 0x10ffff || (cp >= 0xd800 && cp <= 0xdfff)) return false;
+    take?.(cp);
   }
-  return out;
+  return true;
 }
+
+// The text of a note, or null when its bytes aren't UTF-8 by the rules above.
+export function utf8Text(b: Uint8Array): string | null {
+  let out = "";
+  return walkUtf8(b, cp => { out += String.fromCodePoint(cp); }) ? out : null;
+}
+
+// The same judgement without the text: a 10 MB page is checked without building a 10 MB string.
+export const isUtf8Text = (b: Uint8Array): boolean => walkUtf8(b);
 
 // Bytes that aren't UTF-8: a NUL means a binary, anything else a text in another encoding.
 const unreadable = (b: Uint8Array): "not_allowed" | "not_utf8" => (b.includes(0) ? "not_allowed" : "not_utf8");
@@ -121,7 +130,7 @@ function textProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {
 
 // A page is markup by right; it has only to be UTF-8.
 function htmlProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {
-  return utf8Text(b) === null ? unreadable(b) : null;
+  return isUtf8Text(b) ? null : unreadable(b);
 }
 
 export function uploadByteLimit(kind: UploadKind): number {

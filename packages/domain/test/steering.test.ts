@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_ACCEPT, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, screenNamedUpload, sniffImage, uploadByteLimit, utf8Text, type Upload } from "../src/index.ts";
+import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_ACCEPT, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, isUtf8Text, screenNamedUpload, sniffImage, uploadByteLimit, utf8Text, type Upload } from "../src/index.ts";
 
 const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(16).fill(0)]);
 const T0 = Date.UTC(2026, 9, 1, 12);
@@ -145,6 +145,16 @@ describe("S1: UTF-8 is read from the bytes themselves, with no platform decoder"
   it("refuses a NUL byte", () => {
     expect(utf8Text(new Uint8Array([0]))).toBeNull();
     expect(utf8Text(new Uint8Array([0x61, 0x00, 0x62]))).toBeNull();
+  });
+  it("judges a page's bytes by the same rules without building its text, so a 10 MB page costs no string", () => {
+    const good = [new Uint8Array(0), text("plain"), text("café 日本語 a 😀"), new Uint8Array([0xef, 0xbb, 0xbf, 0x3c])];
+    const bad = [
+      [0xc0, 0xaf], [0xe0, 0x80, 0xaf], [0xf0, 0x80, 0x80, 0xaf], [0xed, 0xa0, 0x80], [0xed, 0xbf, 0xbf], [0xf4, 0x90, 0x80, 0x80],
+      [0xe2, 0x82], [0xf0, 0x9f, 0x98], [0x61, 0x80], [0xfe, 0xff], [0], [0x61, 0x00, 0x62],
+    ].map(b => new Uint8Array(b));
+    for (const b of good) expect([isUtf8Text(b), utf8Text(b) !== null]).toEqual([true, true]);
+    for (const b of bad) expect([isUtf8Text(b), utf8Text(b)]).toEqual([false, null]);
+    expect(isUtf8Text(new Uint8Array(MAX_UPLOAD_BYTES).fill(0x61))).toBe(true);
   });
   it("still notices HTML behind a BOM", () => {
     expect(acceptNamedUpload(new Uint8Array([0xef, 0xbb, 0xbf, ...text("<html><script>")]), "notes.md")).toEqual({ ok: false, error: "not_allowed" });

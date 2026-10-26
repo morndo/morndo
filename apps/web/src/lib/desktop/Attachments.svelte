@@ -15,6 +15,7 @@
   import X from "@lucide/svelte/icons/x";
   import type { Attachment } from "@morndo/domain";
   import { renderMarkdown } from "../markdown.ts";
+  import { readStart } from "./preview.ts";
 
   let { attachments }: { attachments: Attachment[] } = $props();
 
@@ -27,22 +28,23 @@
   const ICON = { image: FileImage, video: FilePlay, audio: FileMusic, pdf: FileText, text: FileCode, file: FileIcon } as const;
 
   let viewing = $state<Attachment | null>(null);
-  let previews = $state<Record<string, { text: string; cut: boolean } | "error">>({});
+  let previews = $state<Record<string, { text: string; cut: boolean } | "loading" | "error">>({});
   let open = $state<Record<string, boolean>>({});
   const PREVIEW_BYTES = 200_000;
   const isMarkdown = (a: Attachment) => /\.(md|markdown)$/i.test(a.name);
 
-  // Text files: fetched once (the hub serves them as text/plain), shown folded until opened.
-  $effect(() => {
-    for (const a of attachments) {
-      if (a.kind !== "text" || !a.id || previews[a.id]) continue;
-      const id = a.id;
-      fetch(url(a), { credentials: "same-origin" })
-        .then(r => (r.ok ? r.text() : Promise.reject(new Error(String(r.status)))))
-        .then(t => { previews[id] = { text: t.slice(0, PREVIEW_BYTES), cut: t.length > PREVIEW_BYTES }; })
-        .catch(() => { previews[id] = "error"; });
-    }
-  });
+  // Text files: folded until opened, then their first 200 KB are fetched once (the hub serves them as text/plain). A page
+  // the owner attached can be 10 MB, so nothing is fetched for a preview nobody opens.
+  function togglePreview(a: Attachment) {
+    const id = a.id ?? "";
+    open[id] = !open[id];
+    if (!open[id] || (previews[id] && previews[id] !== "error")) return;       // a failed one is tried again
+    previews[id] = "loading";
+    fetch(url(a), { credentials: "same-origin" })
+      .then(r => (r.ok && r.body ? readStart(r.body, PREVIEW_BYTES) : Promise.reject(new Error(String(r.status)))))
+      .then(p => { previews[id] = p; })
+      .catch(() => { previews[id] = "error"; });
+  }
 </script>
 
 <svelte:window onkeydown={e => { if (viewing && e.key === "Escape") { e.preventDefault(); viewing = null; } }} />
@@ -76,7 +78,7 @@
           <span class="meta"><strong>{a.name}</strong><small>{label(a)}</small></span>
           <span class="acts">
             {#if a.kind === "text"}
-              <button class="ab" onclick={() => (open[a.id ?? ""] = !open[a.id ?? ""])} aria-expanded={!!open[a.id ?? ""]}>{open[a.id ?? ""] ? "Hide" : "Preview"}</button>
+              <button class="ab" onclick={() => togglePreview(a)} aria-expanded={!!open[a.id ?? ""]}>{open[a.id ?? ""] ? "Hide" : "Preview"}</button>
             {/if}
             {#if a.kind === "pdf"}<a class="ab" href={url(a)} target="_blank" rel="noopener" title="Open in a new tab"><ExternalLink size={14} />Open</a>{/if}
             <a class="ab icon" href={url(a, true)} download={a.name} aria-label="Download {a.name}" title="Download"><Download size={15} /></a>
@@ -86,10 +88,10 @@
           {@const p = previews[a.id]}
           <div class="preview">
             {#if p === "error"}<p class="muted">The preview couldn't be loaded.</p>
-            {:else if !p}<p class="muted">Loading…</p>
+            {:else if !p || p === "loading"}<p class="muted">Loading…</p>
             {:else if isMarkdown(a)}<div class="md">{@html renderMarkdown(p.text)}</div>
             {:else}<pre>{p.text}</pre>{/if}
-            {#if p && p !== "error" && p.cut}<p class="muted">Only the first 200 KB are shown; download it for the rest.</p>{/if}
+            {#if typeof p === "object" && p.cut}<p class="muted">Only the first 200 KB are shown; download it for the rest.</p>{/if}
           </div>
         {/if}
       {/if}
