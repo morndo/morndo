@@ -26,7 +26,7 @@ describe("a written file", () => {
     expect(writeEnvFile(input(path))).toEqual({ ok: true });
     expect(readFileSync(path, "utf8")).toBe(`ANTHROPIC_API_KEY=${VALUE}\n`);
     expect(mode(path)).toBe(0o600);
-    expect(readFileSync(`${path}.member`, "utf8")).toMatch(/^k1\n\d+:\d+\n$/);
+    expect(readFileSync(`${path}.member`, "utf8")).toMatch(/^k1\n\d+:\d+\n\d+ k1\n$/);
     expect(mode(`${path}.member`)).toBe(0o600);
   });
   it("replaces an existing file's content and makes its mode 0600", () => {

@@ -1,17 +1,17 @@
 // `morndo-keys keypool …` (ADR-0037). Exit 0 when done; 1 when refused, with the reason word on stderr. A pick that is refused (the pool
 // is empty or blocked, a gate says no) exits 75, as `lease` and `run` do. `create`, `add`, `move` and `revive` are the principal's
 // (KP10): the command id is "cli", as every other command of this bin.
-import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { basename, dirname, join } from "node:path";
 import { findConnection, isKey, isSinkPath, sinkFiles, type Actor, type Outcome } from "@morndo/domain";
 import type { ProbeResult, RefusalTarget, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
 import { fail, gateRuntime, need, pooledProbe, prepareLease, serveLeased, type Io, type Parsed } from "./cli.ts";
-import { acquireEnvLock, ENV_NAME, envPathProblem, readEnvStamp, writeEnvFile } from "./adapters/env-file.ts";
+import { acquireEnvLock, ENV_NAME, envPathProblem, memberLoadedAt, readEnvStamp, writeEnvFile } from "./adapters/env-file.ts";
 import { lineScanner, redactingWriter, type Verdict } from "./adapters/log-watch.ts";
 import { signalFromHook } from "./adapters/outcome-anthropic.ts";
-import { selfHolder, selfId } from "./adapters/processes.ts";
+import { processStartMs, selfHolder, selfId } from "./adapters/processes.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const HOUR = 3_600_000;
@@ -122,6 +122,8 @@ function sink(home: Opened, parsed: Parsed, io: Io): number {
     return 0;
   }
   if (path === undefined) return fail(io, "usage");
+  // A retired sink whose files are all gone protects nothing: forgotten before the list is added to, so a full list is not a reason to refuse.
+  home.keypools.pruneRetired(retired => !sinkFiles(retired).some(existsSync));
   if (action === "remove") return done(home.keypools.removeSink(pool, path, ACTOR), io);
   if (!isSinkPath(path)) return fail(io, "bad_path");
   if (insideHome(home.dir, path) || insideHome(home.dir, join(realOf(dirname(path)), basename(path)))) return fail(io, "sink_protected");
@@ -220,10 +222,9 @@ function due(members: readonly { credential: string; state: string }[], file: st
 
 const WATCH_POLL_MS = 250;
 const WATCH_ONCE_MS = 10_000;
-const WATCH_GRACE_S = 600;
 const READ_CHUNK = 65_536;
 
-// `keypool watch <pool> --log <file> (--member M | --sink <sink>) [--grace <seconds>] [--once]` (plan 3.6). A phrase in the log is a reason to ask the
+// `keypool watch <pool> --log <file> (--member M | --sink <sink> (--server-pid N | --server-pid-file F)) [--once]` (plan 3.6). A phrase in the log is a reason to ask the
 // provider about the member, never a verdict: the member it blames is probed with one real token request, at most once in ten seconds each. The matched
 // line is never printed or kept: what is printed is the pool, the member and a word, through the exact-value filter of the pool's keys.
 async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promise<number> {
@@ -231,9 +232,12 @@ async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promis
   const named = parsed.get("member");
   const sinkPath = parsed.get("sink");
   const once = parsed.get("once") === "true";
-  const graceText = parsed.get("grace");
-  const grace = graceText === undefined ? WATCH_GRACE_S : /^\d+$/.test(graceText) ? Number(graceText) : null;
-  if (log === undefined || (named === undefined) === (sinkPath === undefined) || grace === null) return fail(io, "usage");
+  // The key a --sink phrase blames is the one the SERVER loaded: the server's pid (or a file that holds it, read at each phrase) gives its start time.
+  const pidText = parsed.get("server-pid");
+  const pidFile = parsed.get("server-pid-file");
+  const pidGiven = (pidText !== undefined ? 1 : 0) + (pidFile !== undefined ? 1 : 0);
+  if (pidGiven > 1 || (pidGiven > 0 && sinkPath === undefined) || (pidText !== undefined && !/^[1-9]\d*$/.test(pidText))) return fail(io, "usage");
+  if (log === undefined || (named === undefined) === (sinkPath === undefined)) return fail(io, "usage");
   const state = home.keypools.state(pool);
   if (state === null) return fail(io, "missing");
   if (named !== undefined && !state.members.some(row => row.credential === named)) return fail(io, "missing");
@@ -247,13 +251,21 @@ async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promis
   }
   const print = redactingWriter(text => { io.stdout(text); }, secrets);
   const reportedAt = new Map<string, number>();
-  // The member a phrase blames: the one named, or the one the sink's stamp names — but only from a consistent pair older than the grace, for a
-  // server that has not restarted since the file was rewritten may still hold the key before. Re-read at each verdict.
+  // The member a phrase blames: the one named, or for a sink the member of the write that was the file when the server started. Whatever cannot be
+  // proved (no server pid, a pid that is no process, a pair that does not agree, a server older than the first write on record) blames no one.
+  const serverPid = (): number | null => {
+    if (pidText !== undefined) return Number(pidText);
+    try {
+      const first = readFileSync(pidFile ?? "", "utf8").split("\n")[0]?.trim() ?? "";
+      return /^[1-9]\d*$/.test(first) ? Number(first) : null;
+    } catch { return null; }
+  };
   const memberNow = (): string | null => {
     if (named !== undefined) return named;
     const stamp = readEnvStamp(sinkPath ?? "");
-    if (stamp === null || !stamp.consistent || Date.now() - stamp.writtenAt < grace * 1000) return null;
-    return stamp.member;
+    const pid = serverPid();
+    const started = pid === null ? null : processStartMs(pid);
+    return stamp === null || started === null ? null : memberLoadedAt(stamp, started);
   };
   const act = async (verdicts: readonly Verdict[]): Promise<void> => {
     for (const verdict of verdicts) {

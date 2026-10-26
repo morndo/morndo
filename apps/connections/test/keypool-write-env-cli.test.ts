@@ -218,7 +218,7 @@ describe("one writer at a time, and a pair that agrees", () => {
     expect(content(`${w.file}.member`).split("\n")[1]).toBe(`${statSync(w.file).ino}:${Math.trunc(statSync(w.file).mtimeMs)}`);
     expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
   });
-  it("a lock held by a live process makes a write wait and then say busy; nothing is written and no lease is taken", async () => {
+  it("a lock whose owner cannot be shown to be gone (a live process, or a lock with no readable owner) makes a write wait and then say busy; nothing is written and no lease is taken", async () => {
     const w = await world();
     writeFileSync(`${w.file}.lock`, `${process.pid}\n`);
     const started = Date.now();
@@ -230,7 +230,7 @@ describe("one writer at a time, and a pair that agrees", () => {
   });
   it("a lock whose holder is gone is taken over, and the lock is gone after the write", async () => {
     const w = await world();
-    writeFileSync(`${w.file}.lock`, "2147483646\n");
+    writeFileSync(`${w.file}.lock`, "2147483646 1\n");
     const out = await write(w);
     expect([out.code, out.stderr]).toEqual([0, ""]);
     expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);

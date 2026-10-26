@@ -74,7 +74,7 @@ export type KeyPool = {
   name: string; runtime: string; vendor: string; policy: RotationPolicy; members: readonly KeyMember[];
   grants: readonly Grant[];
   sinks: readonly string[];
-  // Sinks that were removed but may still hold a key in their file, newest last, at most KEY_POOL_RETIRED_MAX, with when
+  // Sinks that were removed but may still hold a key in their file, newest last, at most KEY_POOL_RETIRED_MAX (never dropped for room), with when
   // each live sink was registered (T-459): a run that began before that time was denied the file.
   retired: readonly string[];
   sinkSince: Readonly<Record<string, number>>;
@@ -207,15 +207,23 @@ export function addKeySink(p: KeyPool, path: string, actor: Actor, now: number):
   return ok(withEvents({ ...p, sinks, retired, sinkSince }, [{ type: "SinkAdded", sinks: sinks.length, at: now, command: who.value }]));
 }
 
-export function removeKeySink(p: KeyPool, path: string, actor: Actor, now: number): Result<KeyPool, "principal" | "missing"> {
+export function removeKeySink(p: KeyPool, path: string, actor: Actor, now: number): Result<KeyPool, "principal" | "missing" | "retired_full"> {
   const who = commandOf(actor);
   if (!who.ok) return who;
   if (!p.sinks.includes(path)) return err("missing");
+  // A retired sink may still hold a key and stays on the list until its files are gone (`forgetRetired`), never to make room: past the cap a removal is refused.
+  if (!p.retired.includes(path) && p.retired.length >= KEY_POOL_RETIRED_MAX) return err("retired_full");
   const sinks = p.sinks.filter(row => row !== path);
-  const retired = [...p.retired.filter(row => row !== path), path].slice(-KEY_POOL_RETIRED_MAX);
+  const retired = [...p.retired.filter(row => row !== path), path];
   const sinkSince = { ...p.sinkSince };
   delete sinkSince[path];
   return ok(withEvents({ ...p, sinks, retired, sinkSince }, [{ type: "SinkRemoved", sinks: sinks.length, at: now, command: who.value }]));
+}
+
+// The retired sinks whose files are gone protect nothing: forgotten, without an event. The same pool when nothing is forgotten.
+export function forgetRetired(p: KeyPool, paths: readonly string[]): KeyPool {
+  const retired = p.retired.filter(row => !paths.includes(row));
+  return retired.length === p.retired.length ? p : { ...p, retired };
 }
 
 export function acknowledgeKeyPoolTerms(p: KeyPool, revision: string, by: string, actor: Actor, now: number): Result<KeyPool, "principal" | "ack_needed"> {

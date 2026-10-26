@@ -4,7 +4,7 @@
 // the audit line, and the next call repairs a crash between those writes. Alerts name a member or the pool and a reason
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
-  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, addKeySink, removeKeySink, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
+  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, addKeySink, forgetRetired, removeKeySink, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
   joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
   alertOnce, clearAlerted, openGrant, releaseClaim, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant, unreachable,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
@@ -289,8 +289,10 @@ export class KeyPoolService implements ConnectionLifecycle {
   // Whether a live run lease of a key connection began before the sink was registered: that run's deny list was built
   // without the file, so it is not protected for it. A probe lease is never a run.
   runsPredating(pool: string, path: string): boolean {
-    const since = this.sinkRegisteredAt(pool, path);
-    if (since === null) return false;
+    const loaded = this.#deps.store.load(pool).pool;
+    if (!loaded?.sinks.includes(path)) return false;
+    // A sink registered before the time was kept counts as registered after every run began: the safe default, any live run predates it.
+    const since = loaded.sinkSince[path] ?? Number.POSITIVE_INFINITY;
     for (const connection of this.#deps.connections.load().directory.connections) {
       if (!isKey(connection)) continue;
       for (const row of connection.leases) {
@@ -298,6 +300,19 @@ export class KeyPoolService implements ConnectionLifecycle {
       }
     }
     return false;
+  }
+
+  // A retired sink leaves the list when its files are gone (the caller says which), never for room. How many were forgotten.
+  pruneRetired(gone: (path: string) => boolean): number {
+    let dropped = 0;
+    for (const name of this.#deps.store.names().live) {
+      const result = this.#change(name, pool => {
+        const next = forgetRetired(pool, pool.retired.filter(gone));
+        return { pool: next, result: ok(pool.retired.length - next.retired.length) };
+      });
+      if (result.ok) dropped += result.value;
+    }
+    return dropped;
   }
 
   delete(pool: string, actor: Actor): Result<void, Failure> {
