@@ -78,7 +78,7 @@ describe("what raises a Notification (N2)", () => {
     await tick(1000);
     expect(sent.at(-1)?.payload).toEqual({ kind: 0, decisions: 1, workers: 1, linked: 0, alerts: 0, usage: 0 });   // the muted worker isn't counted
   });
-  it("every kind's Topic is one a push service takes: at most 32 URL-safe Base64 characters, a length that decodes (Apple refused the 5-character \"alert\" with 400 BadWebPushTopic, 2026-10-12)", async () => {
+  it("every kind's Topic is one a push service takes: at most 32 URL-safe Base64 characters, a length that decodes (Apple refused the 5-character \"alert\" and \"usage\" with 400 BadWebPushTopic, 2026-10-12 and 2026-10-25)", async () => {
     const topicsOf: string[] = [];
     const all = new NotificationService({ store, alerts: () => 1, send: async (_s, _p, o) => { topicsOf.push(o.topic); return { status: 201 }; } });
     all.board([]);
@@ -87,10 +87,11 @@ describe("what raises a Notification (N2)", () => {
     all.worker("%1", true, null);
     all.linked();
     all.alert(true);
+    all.usage();
     await vi.advanceTimersByTimeAsync(5000); await all.settled();
     all.stop();
     const topics = [...new Set(topicsOf)].sort();
-    expect(topics).toHaveLength(4);
+    expect(topics).toHaveLength(5);                                     // decision, worker, linked, alert, usage
     for (const t of topics) {
       expect(t, t).toMatch(/^[A-Za-z0-9_-]{1,32}$/);                  // RFC 8030 section 5.4
       expect(t.length % 4, `${t}: a Base64 length`).not.toBe(1);       // 4n+1 never decodes; Apple checks it
@@ -305,7 +306,7 @@ describe("a usage notice the hub wrote (S4, plan 4.4)", () => {
     expect(sent).toEqual([]);
     await tick(1);
     expect(sent.map(s => s.payload)).toEqual([{ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }, { kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }]);
-    expect(sent[0]?.options).toEqual({ ttlSeconds: 6 * 3600, topic: "usage", urgency: "normal" });
+    expect(sent[0]?.options).toEqual({ ttlSeconds: 6 * 3600, topic: "usages", urgency: "normal" });
     expect(audit).toEqual([{ type: "NotificationSent", kind: "usage", counts: { decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }, devices: 2, at: Date.now() }]);
     expect(Object.values(sent[0]?.payload as object).every(v => typeof v === "number")).toBe(true);   // numbers only, never a word of the notice
     svc.usage();                                                       // counted from zero again

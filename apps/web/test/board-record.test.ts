@@ -9,7 +9,7 @@ import { ProofViewSchema, parseBody } from "@morndo/protocol";
 const ev = (actor: TaskActor, change: TaskChange): TaskEvent => ({ key: "T-1" as TaskEvent["key"], rev: 2, at: 1, actor, change });
 const moved = (from: TaskStatus, to: TaskStatus, reason: string | null = null): TaskChange => ({ kind: "moved", from, to, reason });
 const line = (e: TaskEvent) => { const l = eventLine(e); return `${l.who} ${l.text}`; };
-const board = (rule: "D1" | "D2" | "D3" | "D4"): TaskActor => ({ kind: "board", rule, lane: "builder" });
+const board = (rule: "D1" | "D2" | "D3" | "D4" | "D7"): TaskActor => ({ kind: "board", rule, lane: "builder" });
 
 describe("the record's words", () => {
   it("a lane's own move reads as it always did", () => {
@@ -29,6 +29,11 @@ describe("the record's words", () => {
     expect(line(ev(board("D2"), moved("doing", "blocked", "needs_decision")))).toBe("board moved it to Blocked when builder said it is blocked or needs a decision");
     expect(line(ev(board("D3"), moved("doing", "todo", GONE_REASON)))).toBe("board moved it to To do when builder stopped");
     expect(line(ev(board("D4"), moved("blocked", "doing")))).toBe("board moved it to In progress when builder started on it");
+  });
+  it("the board's move when a block's wait is over says what ended (D7, B18), and a block names its waits", () => {
+    expect(line(ev(board("D7"), moved("blocked", "todo", "its wait is over: #93 merged, ny-530 closed")))).toBe("board moved it to To do when what it waited on was over: #93 merged, ny-530 closed");
+    expect(line(ev({ kind: "manager", name: "manager", token: "t" }, { kind: "moved", from: "doing", to: "blocked", reason: "needs the merge", waits: [{ kind: "pr", repo: "morndo/morndo", n: 93 }, { kind: "task", key: "T-7" as TaskEvent["key"] }] })))
+      .toBe("manager moved it from In progress to Blocked: needs the merge (waits on #93, T-7)");
   });
   it("the console and the board get the system's avatar, a lane an agent's, the manager its own, you yours", () => {
     expect([avatarOf({ kind: "console" }), avatarOf(board("D1")), avatarOf({ kind: "worker", name: "b", token: "t" }), avatarOf({ kind: "manager", name: "manager", token: "t" }), avatarOf({ kind: "principal", endpointId: "e" as never, sessionId: "s" as never })])

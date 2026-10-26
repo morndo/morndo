@@ -3,7 +3,7 @@
 // wins), and then, unless he is attending on any device, sends the counts, numbers only, to every Push subscription.
 // A push service answering 404 or 410 drops that subscription (N4). It grants and starts nothing (N5): it reads the
 // board and the roster and writes only push_subscriptions and the audit's Notification rows.
-import { NotificationQueue, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
+import { NotificationQueue, PUSH_TOPICS, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
 import { UNUSABLE_KEY, isP256Point, isPushService, type PushOptions, type PushResult, type PushSender, type PushSubscription } from "../adapters/webpush.ts";
 import { log } from "../adapters/log.ts";
 
@@ -16,15 +16,15 @@ export type PushStore = {
 export type Timers = { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(id: unknown): void };
 
 // How long a push service keeps it for an offline device, and how urgently it delivers (RFC 8030 sections 5.2, 5.3).
-// The topic is the kind's name: a newer one of the same kind replaces one still waiting there (section 5.4). At most 32
-// URL-safe Base64 characters, of a length that decodes as Base64: Apple's push service refused "alert" (5 characters)
-// with 400 BadWebPushTopic (2026-10-12), so the alerts' topic is "alerts".
+// The Topic is the kind's own (N6, PUSH_TOPICS): a newer one of the same kind replaces one still waiting there (section
+// 5.4). The domain holds the rule a Topic must meet, because Apple refused "alert" (2026-10-12) and "usage"
+// (2026-10-25) with 400 BadWebPushTopic, each only after it shipped.
 const OPTIONS: Record<NotificationKind, PushOptions> = {
-  decision: { ttlSeconds: 12 * 3600, topic: "decision", urgency: "high" },
-  worker: { ttlSeconds: 3600, topic: "worker", urgency: "normal" },
-  linked: { ttlSeconds: 3600, topic: "linked", urgency: "high" },
-  alert: { ttlSeconds: 6 * 3600, topic: "alerts", urgency: "high" },
-  usage: { ttlSeconds: 6 * 3600, topic: "usage", urgency: "normal" },
+  decision: { ttlSeconds: 12 * 3600, topic: PUSH_TOPICS.decision, urgency: "high" },
+  worker: { ttlSeconds: 3600, topic: PUSH_TOPICS.worker, urgency: "normal" },
+  linked: { ttlSeconds: 3600, topic: PUSH_TOPICS.linked, urgency: "high" },
+  alert: { ttlSeconds: 6 * 3600, topic: PUSH_TOPICS.alert, urgency: "high" },
+  usage: { ttlSeconds: 6 * 3600, topic: PUSH_TOPICS.usage, urgency: "normal" },
 };
 const delivered = (status: number) => status >= 200 && status < 300;
 

@@ -1,6 +1,6 @@
 // How the board is shown (ADR-0015): the columns in work order, the words for each status and refusal, and what the
 // app may do from where. The rules live in the domain and the hub; this presents their results and asks the hub.
-import { workingOn, type AuthorKind, type BoardRule, type MergedView, type Run, type Task, type TaskActor, type TaskEvent, type TaskPriority, type TaskStatus } from "@morndo/domain";
+import { workingOn, type AuthorKind, type BoardRule, type MergedView, type Run, type Task, type TaskActor, type TaskEvent, type TaskPriority, type TaskStatus, type Wait } from "@morndo/domain";
 import { BoardTaskSchema, MergedViewSchema, ProofViewSchema, RunViewSchema, parseBody, type ProofView } from "@morndo/protocol";
 export type { ProofView };
 import { saidOf } from "./run-words.ts";
@@ -133,16 +133,22 @@ export const whoOf = (a: TaskActor): string =>
 // Its avatar: the principal's own tile, the manager's, a lane's; the console and the board are no agent, so the system's.
 export const avatarOf = (a: TaskActor): AuthorKind =>
   a.kind === "principal" ? "principal" : a.kind === "manager" ? "peer" : a.kind === "worker" ? "agent" : "system";
-// A board move in words (B10): what the lane's Run did that made it, by the rule (D1 to D4).
+// A board move in words (B10): what the lane's Run did that made it, by the rule (D1 to D4); D7, what the task waited on
+// was over (B18), the waits it read in its reason.
 const BOARD_WHY: Record<BoardRule, (lane: string) => string> = {
   D1: l => `when ${l} said DONE`,
   D2: l => `when ${l} said it is blocked or needs a decision`,
   D3: l => `when ${l} stopped`,
   D4: l => `when ${l} started on it`,
+  D7: () => "when what it waited on was over",
 };
+// B18: a wait in the CLI's own spelling, so the app and morndo-board say the same thing.
+export const waitWords = (w: Wait) => w.kind === "task" ? w.key : w.kind === "card" ? w.id : w.kind === "time" ? `until ${new Date(w.at).toLocaleString()}`
+  : w.repo.toLowerCase() === "morndo/morndo" ? `#${w.n}` : `${w.repo}#${w.n}`;
 // The reason D1 and D2 carry is the lane's status line (derivedMove, or the outcome's name when it had none): the record
 // keeps what the lane said after the status word, never the word again.
 const boardSaid = (rule: BoardRule, reason: string | null) => {
+  if (rule === "D7") return (reason ?? "").replace(/^its wait is over: /, "");
   if ((rule !== "D1" && rule !== "D2") || !reason || reason === "blocked" || reason === "needs_decision") return "";
   return saidOf(reason).rest;
 };
@@ -158,7 +164,8 @@ export function eventLine(e: TaskEvent): { who: string; text: string; comment: s
         return { who: w, text: `moved it to ${STATUS_WORDS[c.to]} ${BOARD_WHY[e.actor.rule](e.actor.lane)}${said ? `: ${said}` : ""}`, comment: null };
       }
       const proofComment = c.proofSeen ? `Proof when accepted: ${c.proofSeen}` : null;
-      return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}`, comment: proofComment };
+      const waits = c.waits?.length ? ` (waits on ${c.waits.map(waitWords).join(", ")})` : "";
+      return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}${waits}`, comment: proofComment };
     }
     case "assigned": return { who: w, text: c.to ? `assigned it to ${c.to}` : "unassigned it", comment: null };
     case "edited": return { who: w, text: `edited the ${Object.keys(c).filter(k => k !== "kind").join(", ")}`, comment: null };

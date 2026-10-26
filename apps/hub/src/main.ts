@@ -30,12 +30,14 @@ import { AccessService } from "./application/access-service.ts";
 import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
+import { PR_READS_PER_HOUR, PR_READS_PER_HOUR_ANONYMOUS, WAIT_PASS_MS, WaitWatch } from "./application/wait-watch.ts";
 import { EscalationService, managerOf, type MemoryAsks } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { ManagerQueue } from "./application/manager-queue.ts";
 import { fleetDeliveries } from "./adapters/fleet-deliveries.ts";
 import { fileStore } from "./adapters/files.ts";
+import { parseConsoleArgs } from "./console/args.ts";
 import { processIo, runLanes } from "./console/lanes.ts";
 import { noteMissingFfmpeg, uploadInbox } from "./adapters/uploads.ts";
 import { desktopTarget, legacyPorts } from "./adapters/local-ports.ts";
@@ -80,7 +82,7 @@ const HELP = `morndo: your agents, on your phone.
   morndo serve            run the hub on 127.0.0.1:$MORNDO_PORT (default 8790)
   morndo pair             show a one-time QR (10 minutes) to pair a phone or laptop
   morndo devices          list paired devices
-  morndo revoke <id>      revoke a device; its sessions end at once
+  morndo revoke <id>      revoke a device; its sessions end at once (morndo revoke --help)
   morndo audit [count]    the latest device and session events (morndo audit --help)
   morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
                           events (morndo lanes --help)
@@ -118,6 +120,11 @@ const crash = exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
 if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
+// `serve`, `pair`, `devices`, `revoke` and `agent-token` answer `--help` here too, before settings and the database
+// are read: `revoke --help` is usage, not a device named "--help" (console/args.ts).
+const consoleArgs = parseConsoleArgs(process.argv.slice(2));
+if (consoleArgs.kind === "help") { process.stdout.write(`${consoleArgs.usage}\n`); await exitAfterOutput(0); }
+if (consoleArgs.kind === "refused") { process.stderr.write(`morndo ${consoleArgs.command}: ${consoleArgs.why} ${consoleArgs.synopsis}\n`); await exitAfterOutput(2); }
 // `morndo update`, `morndo doctor` and `morndo install` (design §4.8, §10.3) run here too, before the hub's
 // settings and database are read: they need neither, and a machine with no hub still updates and installs. The
 // hub runs the updater's program, as it runs the engines CLI, and leaves with its exit code.
@@ -251,6 +258,8 @@ switch (cmd) {
     // Memory is opened below, after Decisions: its pending Notes reach the board through this holder once it exists
     // (ADR-0031 round 2); a hub without Memory never files an Ask.
     const memoryHolder: { service: MemoryService | null } = { service: null };
+    // The manager's needs-you list: the decision cards read it, and so do a block's card waits (B18).
+    const ownersList = config.ledgerPath ? ledgerReader(config.ledgerPath) : null;
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -258,7 +267,7 @@ switch (cmd) {
         openQuestions: id => observation.openQuestions(id),
         screen: id => observation.screen(id),
       },
-      ledger: config.ledgerPath ? ledgerReader(config.ledgerPath) : null,
+      ledger: ownersList,
       store, managerName: config.managerWindow, send: (pane, text, key) => typist.send(pane, text, key), policy: () => access.policy(),
       workerGraceMs: config.workerAskGraceMs,
       // An answer in doubt is settled as a send is, with its node (op.status; final review C1).
@@ -337,7 +346,7 @@ switch (cmd) {
       onChange: () => held.board?.runsChanged(),
     });
     const following: { projector: BoardProjector | null } = { projector: null };
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null), standIn: config.forgeUrl != null });
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null), standIn: config.forgeUrl != null, repos: () => config.proofRepos ?? [MORNDO_REPO], cards: config.ledgerPath != null });
     // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows. Step
     // 3: the rows come from the forge (github-checks.ts holds the credential; nothing else reads it), the mode and the
     // checked repositories from MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS. A pass every minute re-reads what is still
@@ -346,16 +355,27 @@ switch (cmd) {
     const githubToken = readTokenFile(config.githubTokenFile ?? null, m => log.warn(m));
     const standIn = standInNotice(config);
     if (standIn !== null) log.warn(standIn);
+    // One forge for the proof and the waits: one credential, one rate-limit wall (github-checks.ts).
+    const forge = new GithubChecks({ token: githubToken, ...(config.forgeUrl ? { baseUrl: config.forgeUrl } : {}) });
     const proof = new ProofService({
-      store, board, forge: new GithubChecks({
-        token: githubToken,
-        ...(config.forgeUrl ? { baseUrl: config.forgeUrl } : {}),
-      }), mode: config.proofGate ?? "warn",
+      store, board, forge, mode: config.proofGate ?? "warn",
       allowedRepos: config.proofRepos ?? [MORNDO_REPO], authenticated: githubToken !== null, standIn: standIn !== null,
     });
     const proofTimer = setInterval(() => { void proof.tick().catch((e: unknown) => log.error("proof: the timer pass failed", e)); }, 60_000);
     proofTimer.unref();
     shutdown.onStop(async () => { clearInterval(proofTimer); await proof.idle(); });
+    // B18, D7 (ADR-0038): the hub reads what each block waits on — the board, the forge, the owner's list, the clock —
+    // every WAIT_PASS_MS, and soon after a block that names waits (WaitWatch.follow); a task whose waits are all over goes
+    // to do. Its forge reads have a budget of their own, smaller without a token, so the proof checks keep theirs.
+    const waits = new WaitWatch({
+      board, forge, ledger: ownersList, repos: () => config.proofRepos ?? [MORNDO_REPO],
+      prReadsPerHour: githubToken !== null ? PR_READS_PER_HOUR : PR_READS_PER_HOUR_ANONYMOUS,
+    });
+    board.attachWaits(waits);
+    waits.follow(board);
+    const waitTimer = setInterval(() => { void waits.tick().catch((e: unknown) => log.error("waits: the pass failed", e)); }, WAIT_PASS_MS);
+    waitTimer.unref();
+    shutdown.onStop(async () => { clearInterval(waitTimer); waits.stop(); await waits.idle(); });
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });

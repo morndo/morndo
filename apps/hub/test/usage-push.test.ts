@@ -75,7 +75,7 @@ describe("usage notices raise a push (S4)", () => {
     expect(post("Max 20x", 22)).toEqual({ ok: true });
     await settle(2000);
     expect(sent.map(s => s.payload)).toEqual([{ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 1 }]);
-    expect(sent[0]?.options).toEqual({ ttlSeconds: 6 * 3600, topic: "usage", urgency: "normal" });
+    expect(sent[0]?.options).toEqual({ ttlSeconds: 6 * 3600, topic: "usages", urgency: "normal" });
     expect(audit).toEqual([{ type: "NotificationSent", kind: "usage", counts: { decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 1 }, devices: 1, at: now }]);
     expect(JSON.stringify(sent[0]?.payload)).not.toContain("plan changed");            // the notice's words never leave the hub
   });

@@ -21,6 +21,27 @@ the agents' prompts. The blocks are printed by `morndo-board prompt --role manag
    block in every worker lane's (a `CLAUDE.md`, an agent definition, a system prompt: wherever that engine takes
    standing instructions). Paste it, or generate it: `morndo-board prompt --role worker >> CLAUDE.md`.
 
+4. **Proof of work: which repositories the board checks** (settings of the hub process, read once at start: set them in
+   the hub's environment, then restart it). A brief's `--pr` and `--ci` references are fetched by the hub itself
+   ([ADR-0035](../adr/0035-proof-refs-on-review.md)), and only from repositories the settings list:
+   - `MORNDO_PROOF_REPOS`: `owner/repository` names, comma-separated, for example `acme/shop,acme/api`. **Unset, the
+     default is only `morndo/morndo`**, so on your own install every brief naming your repository is refused when it is
+     filed (`ref_repo`) until you set this. A name must be whole (`owner/repo`); a hub given a bad one does not start.
+     Task data never adds a repository: a merge record or a lane's words cannot widen the list.
+   - `MORNDO_PROOF_GATE`: `off`, `warn` (the default) or `on`. In `warn` a Done is accepted and the Done event records
+     what the board saw, with "would have been refused" where `on` would have held it; `on` refuses it
+     (`proof_not_green`) unless the manager overrides with a reason.
+   - `MORNDO_GITHUB_TOKEN_FILE`: an absolute path to a mode-600 file holding a read-only token, for private
+     repositories. Without it a private repository's references read `not checked`, and the gate holds a Done over them
+     like any reference that is not green.
+
+   The gate holds a Done over: a reference that is not green (a pull request whose commit has a check failing or still
+   running that its base branch requires, branch protection or ruleset, while an optional one shows as a ⚠ warning on the
+   reference and holds nothing; a required check that never reports holds it, and every check counts when the hub cannot read
+   the required set or the branch requires none; a `ci` reference whose named checks passed while another check at that commit failed or is running);
+   a proof-list item nothing in the brief answers; and a brief that claims no code change on a task whose assigner
+   listed no proof (the claim is the lane's word, so it needs the assigner's list to be checked against).
+
 What a lane may do is the hub's rule, not the prompt's: a worker token can't assign or mark done whatever the prompt
 says, and the record keeps who changed what. The prompt is there so the agents keep the board true without being
 told each time.
@@ -58,6 +79,12 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - A wrong sha: `morndo-board unmerged T-12 <sha>`, then record the right one.
 - Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read `morndo-board list --status blocked` and act, or ask the principal.
+- When a block waits on something the board can see, name it, so nobody has to remember to look:
+  `morndo-board block T-12 --why "…" --on T-11 --on morndo/morndo#93 --on ny-530 --on until:2026-10-28T09:00+01:00` (a task
+  done, a pull request merged or closed, the principal's card closed, a time reached; a bare #93 needs quotes in a shell:
+  '#93'). The board reads them itself and moves
+  the task back to to do when all are over (`board (D7)`). A block of words only that sat two days is flagged in the
+  list: check it, or name its waits.
 - Proposals (tasks in the backlog nobody is assigned to) come from lanes. Triage them: assign, or comment why not.
 - Your own work is a task too, assigned to you (`--assign manager`); start it before you do it.
 - Talk through comments on the task (`morndo-board comment T-12 "…"`), short, one fact per line, so the record
@@ -84,6 +111,8 @@ your turns. The principal reads the board instead of asking you.
   `STATUS: NEEDS DECISION T-12 checkpoint: <what>`, which the board moves to blocked with that line as the reason; the
   manager decides whether you go on.
 - Work on one task at a time; the board refuses a second in progress. When a block clears: `morndo-board resume T-12`.
+  If you block on something the board can see, name it: `morndo-board block T-12 --why "…" --on morndo/morndo#93` (also a task,
+  a card ny-530 or until:<time>); the board moves the task back to to do when it is over.
 - Work only on tasks assigned to you. If you find work that isn't on the board, file it as a proposal:
   `morndo-board new "<what>" --desc "<why>"`. It lands in the backlog for the manager; don't start it yourself.
 - Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;
