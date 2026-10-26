@@ -103,7 +103,8 @@ export function paneOps(d: PaneDeps): Pick<OpTable, "pane.captureMany" | "pane.c
       // tmux keeps no scrollback on the alternate screen (capture-pane -S: "negative numbers are lines in the history",
       // and there is none there), so more lines than the pane shows cannot come from tmux: said, never guessed at.
       const rows = await d.tmux.altScreenRows(lane.pane);
-      return ok<"pane.capture">({ ...capCapture(text, LIMITS.captureMaxBytes), ...(rows !== null && a.lines > rows ? { scrollbackMissing: true } : {}) });
+      const capped = capCapture(text, LIMITS.captureMaxBytes);
+      return ok<"pane.capture">(rows !== null && a.lines > rows ? { ...capped, scrollbackMissing: true } : capped);
     }),
 
     "pane.frame": read(async a => {
