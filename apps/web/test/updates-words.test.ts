@@ -37,6 +37,17 @@ describe("the Updates page's rows", () => {
     expect(rows[1]).toMatchObject({ version: "0.4.2", channel: null, mode: null });
   });
 
+  it("the control plane's own node agent shows inside This machine: no separate row, no rollback hint; other nodes keep both", () => {
+    const own = { version: "0.4.2", commit: null, status: status(), state: null, node: "e2e-cp" };
+    const rows = updatesRows(view({ controlPlane: own, nodes: [node({ name: "pc" }), node({ name: "e2e-cp" })] }));
+    expect(rows.map(r => r.machine)).toEqual(["control-plane", "pc"]);
+    expect(rows.map(r => r.rollbackNote)).toEqual([null, "run morndo update --rollback on pc"]);
+    // A hub that names no node of its own (no MORNDO_ENGINE_NODE) hides nothing: the node keeps its row and hint.
+    const unnamed = updatesRows(view({ controlPlane: { ...own, node: null }, nodes: [node({ name: "e2e-cp" })] }));
+    expect(unnamed.map(r => r.machine)).toEqual(["control-plane", "e2e-cp"]);
+    expect(unnamed[1]!.rollbackNote).toBe("run morndo update --rollback on e2e-cp");
+  });
+
   it("the control plane's sentence, from its own updater's status", () => {
     const sentence = (o: Partial<UpdatesView>) => updatesRows(view(o))[0]!.state;
     expect(sentence({})).toBe("up to date");

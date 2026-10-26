@@ -84,8 +84,9 @@ const who = (verifiedAt: number, now: number): Authenticated => ({
   endpoint: { id: "e-1" as never, name: "phone", credential: { id: "c-1", publicKey: new Uint8Array([1]), counter: 1, transports: [] }, pairedAt: now - 3_600_000, pairedWith: "t-1" as never, lastSeenAt: now, revokedAt: null },
 });
 
-const service = (fleet: FleetForUpdates, cli: ReturnType<typeof cliWith>["cli"], now: () => number, events: UpdateCommanded[]) =>
+const service = (fleet: FleetForUpdates, cli: ReturnType<typeof cliWith>["cli"], now: () => number, events: UpdateCommanded[], ownNode: string | null = null) =>
   new UpdatesService({
+    ownNode,
     fleet, cli, sign: principalSigner(identity), policy: () => ({ stay: "12h", stepUp: "1h" }) as AccessPolicy, now,
     store: { record(es: UpdateCommanded[]) { events.push(...es); } } as never as Store,
     build: () => ({ version: "0.4.2", commit: null }),
@@ -197,10 +198,16 @@ describe("the updates service (no HTTP)", () => {
     const { fleet, rollout, nodes } = fleetWith();
     const svc = service(fleet, cliWith("0.5.0").cli, () => now, []);
     expect(await svc.view()).toEqual({
-      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }), state: null },
+      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }), state: null, node: null },
       rollout, aboveControlPlane: [],
       nodes: [{ name: "pc", status: "online", version: "0.4.2", proto: [1], update: nodes[0]!.update }],
     });
+  });
+
+  it("view: names the fleet node this machine is (MORNDO_ENGINE_NODE) so the page can fold it into This machine", async () => {
+    const { fleet } = fleetWith();
+    const view = await service(fleet, cliWith(null).cli, () => 1_800_000_000_000, [], "e2e-cp").view();
+    expect(view.controlPlane.node).toBe("e2e-cp");
   });
 });
 
