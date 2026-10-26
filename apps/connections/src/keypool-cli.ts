@@ -1,7 +1,7 @@
 // `morndo-keys keypool …` (ADR-0037). Exit 0 when done; 1 when refused, with the reason word on stderr. A pick that is refused (the pool
 // is empty or blocked, a gate says no) exits 75, as `lease` and `run` do. `create`, `add`, `move` and `revive` are the principal's
 // (KP10): the command id is "cli", as every other command of this bin.
-import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
+import { closeSync, existsSync, openSync, readSync, realpathSync, statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { basename, dirname, join } from "node:path";
 import { findConnection, isKey, isSinkPath, sinkFiles, type Actor, type Outcome } from "@morndo/domain";
@@ -220,21 +220,20 @@ function due(members: readonly { credential: string; state: string }[], file: st
 
 const WATCH_POLL_MS = 250;
 const WATCH_ONCE_MS = 10_000;
+const WATCH_GRACE_S = 600;
 const READ_CHUNK = 65_536;
-// What a verdict is told to the pool as: a canned phrase, never a part of the log line.
-const WATCH_SIGNAL: Readonly<Record<Exclude<Verdict, "none">, string>> = {
-  "exhausted-credit": "credit balance is too low",
-  "exhausted-spend": "you have reached your specified API usage limits",
-};
 
-// `keypool watch <pool> --log <file> (--member M | --sink <sink>) [--once]` (plan 3.6). The matched line is never printed or kept: a verdict is a word,
-// the report names the member, a member is reported at most once in ten seconds, and what is printed passes the exact-value filter of the pool's keys.
+// `keypool watch <pool> --log <file> (--member M | --sink <sink>) [--grace <seconds>] [--once]` (plan 3.6). A phrase in the log is a reason to ask the
+// provider about the member, never a verdict: the member it blames is probed with one real token request, at most once in ten seconds each. The matched
+// line is never printed or kept: what is printed is the pool, the member and a word, through the exact-value filter of the pool's keys.
 async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promise<number> {
   const log = parsed.get("log");
   const named = parsed.get("member");
   const sinkPath = parsed.get("sink");
   const once = parsed.get("once") === "true";
-  if (log === undefined || (named === undefined) === (sinkPath === undefined)) return fail(io, "usage");
+  const graceText = parsed.get("grace");
+  const grace = graceText === undefined ? WATCH_GRACE_S : /^\d+$/.test(graceText) ? Number(graceText) : null;
+  if (log === undefined || (named === undefined) === (sinkPath === undefined) || grace === null) return fail(io, "usage");
   const state = home.keypools.state(pool);
   if (state === null) return fail(io, "missing");
   if (named !== undefined && !state.members.some(row => row.credential === named)) return fail(io, "missing");
@@ -248,22 +247,26 @@ async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promis
   }
   const print = redactingWriter(text => { io.stdout(text); }, secrets);
   const reportedAt = new Map<string, number>();
+  // The member a phrase blames: the one named, or the one the sink's stamp names — but only from a consistent pair older than the grace, for a
+  // server that has not restarted since the file was rewritten may still hold the key before. Re-read at each verdict.
   const memberNow = (): string | null => {
     if (named !== undefined) return named;
-    try { return readFileSync(`${sinkPath ?? ""}.member`, "utf8").trim() || null; } catch { return null; }
+    const stamp = readEnvStamp(sinkPath ?? "");
+    if (stamp === null || !stamp.consistent || Date.now() - stamp.writtenAt < grace * 1000) return null;
+    return stamp.member;
   };
-  const act = (verdicts: readonly Verdict[]): void => {
+  const act = async (verdicts: readonly Verdict[]): Promise<void> => {
     for (const verdict of verdicts) {
       if (verdict === "none") continue;
       const member = memberNow();
       if (member === null) continue;
+      // A phrase asks only about a member that can serve right now: one already dry or refused is left alone.
+      if (home.keypools.state(pool)?.members.find(row => row.credential === member)?.state !== "active") continue;
       const last = reportedAt.get(member);
       if (last !== undefined && Date.now() - last < WATCH_ONCE_MS) continue;
-      const signal = { status: null, kind: null, text: WATCH_SIGNAL[verdict], retryAfterSeconds: null, code: null, resumeDate: null };
-      const reported = home.keypools.reportRefusal(pool, { kind: "member", member }, signal, home.now());
-      if (!reported.ok || reported.value.outcome !== "exhausted") continue;
       reportedAt.set(member, Date.now());
-      print(`${JSON.stringify({ pool, member, outcome: "exhausted" })}\n`);
+      const probed = await probeSuspect(home, pool, member);
+      print(`${JSON.stringify({ pool, member, outcome: probed?.outcome ?? "skipped" })}\n`);
     }
   };
   // Where the log is read from: its end when it is there at the start; the start of a file that appears later, is truncated or is replaced.
@@ -290,7 +293,7 @@ async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promis
           const got = readSync(fd, buffer, 0, Math.min(READ_CHUNK, size - offset), offset);
           if (got <= 0) break;
           offset += got;
-          act(scanner.push(decoder.write(buffer.subarray(0, got))));
+          await act(scanner.push(decoder.write(buffer.subarray(0, got))));
         }
       } finally { closeSync(fd); }
     } else if (first) {
@@ -304,14 +307,16 @@ async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promis
   }
 }
 
-// A KP18 report that fell back to the hand-off window names the current member to suspect: one claimed probe of it decides.
-async function probeSuspect(home: Opened, pool: string, suspect: string | null): Promise<void> {
-  if (suspect === null) return;
+// A KP18 report that fell back to the hand-off window names the current member to suspect, and a key a hook refuses is named, not marked: one
+// claimed probe of it decides. Null when there is nothing to ask: no suspect, no runtime, no holder.
+async function probeSuspect(home: Opened, pool: string, suspect: string | null): Promise<ProbeResult | null> {
+  if (suspect === null) return null;
   const runtime = home.keypools.state(pool)?.runtime;
-  if (runtime === undefined) return;
+  if (runtime === undefined) return null;
   home.runtime.current = gateRuntime(home, runtime);
   const holder = selfHolder(null);
-  if (holder) await home.keypools.probeMember(pool, suspect, { why: "suspect", holder });
+  if (!holder) return null;
+  return home.keypools.probeMember(pool, suspect, { why: "suspect", holder });
 }
 
 // `keypool report <pool> (--member M | --grant G | --served) --from-hook`: the agent CLI's StopFailure payload on stdin, read, classified and dropped. Only a
@@ -341,8 +346,15 @@ async function reportFromHook(home: Opened, pool: string, parsed: Parsed, io: Io
       : { kind: "member", member: member ?? "" };
   const reported = home.keypools.reportRefusal(pool, target, signal, home.now());
   if (!reported.ok) return fail(io, reported.error.problem);
-  await probeSuspect(home, pool, reported.value.suspect);
-  io.stdout(`${JSON.stringify({ pool, outcome: reported.value.outcome })}\n`);
+  // A refused key is named to be probed, never marked on a hook's word: one probe decides, and its word is printed. A credit refusal the hand-off
+  // window moved onto another member is asked as well, but the provider's own words are enough: it stays exhausted.
+  const { outcome, suspect } = reported.value;
+  let word: string = outcome;
+  if (outcome === "failing" || (outcome === "exhausted" && suspect !== null)) {
+    const probed = await probeSuspect(home, pool, suspect);
+    if (outcome === "failing") word = probed?.outcome ?? "skipped";
+  }
+  io.stdout(`${JSON.stringify({ pool, outcome: word })}\n`);
   return 0;
 }
 
