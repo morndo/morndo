@@ -1,11 +1,12 @@
 // `morndo-keys keypool …` (ADR-0037). Exit 0 when done; 1 when refused, with the reason word on stderr. A pick that is refused (the pool
 // is empty or blocked, a gate says no) exits 75, as `lease` and `run` do. `create`, `add`, `move` and `revive` are the principal's
 // (KP10): the command id is "cli", as every other command of this bin.
-import { realpathSync, statSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { isSinkPath, type Actor, type Outcome } from "@morndo/domain";
 import type { ProbeResult, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
-import { fail, gateRuntime, need, type Io, type Parsed } from "./cli.ts";
+import { fail, gateRuntime, need, pooledProbe, prepareLease, serveLeased, type Io, type Parsed } from "./cli.ts";
+import { ENV_NAME, envPathProblem, writeEnvFile } from "./adapters/env-file.ts";
 import { signalFromHook } from "./adapters/outcome-anthropic.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 
@@ -94,6 +95,7 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
       return done(home.keypools.report(need(pool), need(parsed.get("member")), outcome, home.now(), by), io);
     }
     case "sink": return sink(home, parsed, io);
+    case "write-env": return writeEnv(home, need(pool), parsed, io);
     case "sync": return done(home.keypools.sync(), io);
     case "recheck": return recheck(home, parsed, io);
     case "revive": return done(home.keypools.revive(need(pool), need(member), ACTOR), io);
@@ -131,6 +133,51 @@ function insideHome(dir: string, path: string): boolean {
 
 function isDirectory(path: string): boolean {
   try { return statSync(path).isDirectory(); } catch { return false; }
+}
+
+// `keypool write-env <pool> --file <sink> --var NAME [--if-due [--rotate-every D]]` (plan 3.6): the picked member's key goes to a registered sink under one
+// gated lease, KeyServed written before the file, the lease closed after. The place is checked before any lease is taken. Words only on stdout and stderr.
+async function writeEnv(home: Opened, pool: string, parsed: Parsed, io: Io): Promise<number> {
+  const file = parsed.get("file");
+  const name = parsed.get("var");
+  const ifDue = parsed.get("if-due") === "true";
+  const rotate = parsed.get("rotate-every");
+  if (file === undefined || name === undefined || (rotate !== undefined && !ifDue)) return fail(io, "usage");
+  const state = home.keypools.state(pool);
+  if (state === null) return fail(io, "missing");
+  if (!ENV_NAME.test(name)) return fail(io, "bad_name");
+  let rotateMs: number | undefined;
+  try { rotateMs = durationOf(rotate); } catch { return fail(io, "usage"); }
+  if (rotateMs !== undefined && state.mode === "drain") return fail(io, "usage");
+  if (!(home.keypools.sinksOf(pool) ?? []).includes(file)) return fail(io, "not_a_sink");
+  const protectedDirs = [home.dir];
+  const problem = envPathProblem(file, protectedDirs);
+  if (problem !== null) return fail(io, problem);
+  if (ifDue && !due(state.members, file, rotateMs)) {
+    io.stdout(`${JSON.stringify({ pool, written: false, why: "not_due" })}\n`);
+    return 0;
+  }
+  const picked = await home.keypools.pick(pool, member => prepareLease(home, parsed, member), pooledProbe(home, pool, parsed.get("lane") ?? null));
+  if (!picked.ok) return fail(io, picked.error.problem, picked.error.exit);
+  const { member, value } = picked.value;
+  const code = await serveLeased(home, io, value, secret => {
+    const written = writeEnvFile({ path: file, name, value: secret, member, protectedDirs });
+    return written.ok ? null : written.problem;
+  });
+  if (code === 0) io.stdout(`${JSON.stringify({ pool, written: true, member })}\n`);
+  return code;
+}
+
+// Is a rewrite due: the file or its sidecar is missing, the sidecar is older than the file (a write cut short), the member it names can no
+// longer serve or has left the pool, or `rotate` has passed since the file was written.
+function due(members: readonly { credential: string; state: string }[], file: string, rotate: number | undefined): boolean {
+  const sidecar = `${file}.member`;
+  if (!existsSync(file) || !existsSync(sidecar)) return true;
+  const written = statSync(file).mtimeMs;
+  if (statSync(sidecar).mtimeMs < written) return true;
+  const named = readFileSync(sidecar, "utf8").trim();
+  if (members.find(row => row.credential === named)?.state !== "active") return true;
+  return rotate !== undefined && Date.now() - written >= rotate;
 }
 
 // A KP18 report that fell back to the hand-off window names the current member to suspect: one claimed probe of it decides.

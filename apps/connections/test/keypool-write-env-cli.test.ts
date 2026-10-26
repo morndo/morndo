@@ -49,7 +49,8 @@ async function world(mode: "round-robin" | "drain" = "round-robin", register = t
   if (register) expect((await cli(["keypool", "sink", "add", "p", file], env)).code).toBe(0);
   return { dir, env, file, sinks };
 }
-const write = (w: World, ...more: string[]) => cli(["keypool", "write-env", "p", "--file", w.file, "--var", "ANTHROPIC_API_KEY", ...more], w.env);
+// The writer is a timer or a pre-start, no agent: its isolation is its own claim, as for `lease` (the vendor's floor is rules).
+const write = (w: World, ...more: string[]) => cli(["keypool", "write-env", "p", "--file", w.file, "--var", "ANTHROPIC_API_KEY", "--isolation", "rules", ...more], w.env);
 const content = (path: string): string => readFileSync(path, "utf8");
 const dry = async (w: World, member: string) => { expect((await cli(["keypool", "report", "p", "--member", member, "--outcome", "exhausted"], w.env)).code).toBe(0); };
 type Event = { type: string; name?: string; outcome?: string };
@@ -136,14 +137,14 @@ describe("what is refused before a lease is taken", () => {
     mkdirSync(join(repo, ".git"), { recursive: true });
     const inRepo = join(repo, ".env");
     expect((await cli(["keypool", "sink", "add", "p", inRepo], w.env)).code).toBe(0);
-    const a = await cli(["keypool", "write-env", "p", "--file", inRepo, "--var", "ANTHROPIC_API_KEY"], w.env);
+    const a = await cli(["keypool", "write-env", "p", "--file", inRepo, "--var", "ANTHROPIC_API_KEY", "--isolation", "rules"], w.env);
     expect([a.code, a.stderr.trim()]).toEqual([1, "in_repository"]);
     const open = join(w.sinks, "open");
     mkdirSync(open);
     chmodSync(open, 0o777);
     const loose = join(open, ".env");
     expect((await cli(["keypool", "sink", "add", "p", loose], w.env)).code).toBe(0);
-    const b = await cli(["keypool", "write-env", "p", "--file", loose, "--var", "ANTHROPIC_API_KEY"], w.env);
+    const b = await cli(["keypool", "write-env", "p", "--file", loose, "--var", "ANTHROPIC_API_KEY", "--isolation", "rules"], w.env);
     expect([b.code, b.stderr.trim()]).toEqual([1, "dir_writable"]);
     expect(readdirSync(repo)).toEqual([".git"]);
     expect(readdirSync(open)).toEqual([]);
