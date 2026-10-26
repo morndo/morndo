@@ -194,7 +194,7 @@ describe("--if-due", () => {
   it("--rotate-every rewrites after that long and not before (seconds, minutes, hours or days), in round-robin only", async () => {
     const w = await world();
     await write(w);
-    const young = await write(w, "--if-due", "--rotate-every", "2s");
+    const young = await write(w, "--if-due", "--rotate-every", "1d");
     expect(line(young)).toEqual({ pool: "p", written: false, why: "not_due" });
     await sleep(2300);
     expect(line(await write(w, "--if-due", "--rotate-every", "2s"))).toMatchObject({ written: true, member: "k2" });
