@@ -10,6 +10,12 @@ describe("MORNDO_CONTROL_PLANE_NODE", () => {
     expect(loadConfig({ MORNDO_CONTROL_PLANE_NODE: "" }).controlPlaneNode).toBeNull();
   });
 
+  it("is trimmed and lower-cased: the fleet's node names are exactly [a-z0-9-]{1,32}, compared as written, so a stray space or capital could never match one", () => {
+    expect(loadConfig({ MORNDO_CONTROL_PLANE_NODE: " cp " }).controlPlaneNode).toBe("cp");
+    expect(loadConfig({ MORNDO_CONTROL_PLANE_NODE: "CP\n" }).controlPlaneNode).toBe("cp");
+    expect(loadConfig({ MORNDO_CONTROL_PLANE_NODE: "   " }).controlPlaneNode).toBeNull();
+  });
+
   it("is the node's name, apart from the engine node: the live shape has the engine lanes on pc and the control plane's own node cp", () => {
     const c = loadConfig({ MORNDO_ENGINE_NODE: "pc", MORNDO_CONTROL_PLANE_NODE: "cp" });
     expect(c.engineNode).toBe("pc");
