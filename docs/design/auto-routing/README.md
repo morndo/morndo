@@ -671,7 +671,7 @@ New and extended ports, in `apps/connections/src/application/ports.ts`.
 | `RouteStore` | `decideAndSave(facts, answer, finalize)`: one write transaction that re-reads committed spend, runs the pure `decide` and `finalize`, and saves the route (section 6.4). Also `get(id)`, `byTask(key)`, `append(route, fact)`, `appendShadow(route, answer)`, `facts(before)`. | SQLite, in the connections database. |
 | `StandingStore` | `levels(group)`, `apply(change)`. | SQLite, in the same database. |
 | `DecisionPort` (new) | Section 8.3. | `rules`, `openai-decisions`, later `local-model`. |
-| `Catalog` (extended) | Presets as today, plus a per-model family map in the `VendorPreset` schema (`families`: ordered model patterns to a family, router models to `unknown`), a per-model `class`, and a decisions preset (section 8.3). A model no pattern matches keeps the preset's `family`, and class `unknown`. | `catalog-file`. |
+| `Catalog` (extended) | Presets as today, plus a per-model family map (`families`: ordered model patterns to a family, router models to `unknown`) and a per-model `class`, both in their own file `packages/protocol/catalog/auto-routing.json` beside `vendors.json` (as `key-pools.json`, ADR-0037 decision 10b: an older build's strict preset schema refuses an unknown field), and a decisions preset (section 8.3). A model no pattern matches keeps the preset's `family`, and class `unknown`. | `catalog-file`. |
 | `Clock`, `AlertSink` | As today. | As today. |
 
 ### 8.3 The decision port and its adapters

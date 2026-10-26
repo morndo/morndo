@@ -1,0 +1,16 @@
+[
+  {"vendor": "anthropic", "families": [], "class": [{"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}]},
+  {"vendor": "openai", "families": [], "class": []},
+  {"vendor": "deepseek", "families": [], "class": []},
+  {"vendor": "moonshot", "families": [], "class": []},
+  {"vendor": "zai", "families": [], "class": [{"pattern": "glm-5.3-flash", "class": "fast"}, {"pattern": "glm-5.3", "class": "flagship"}]},
+  {"vendor": "openrouter", "families": [{"pattern": "openrouter/auto", "family": "unknown"}, {"pattern": "anthropic/*", "family": "anthropic"}, {"pattern": "openai/*", "family": "openai"}], "class": [{"pattern": "openrouter/auto", "class": "unknown"}, {"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}]},
+  {"vendor": "custom-anthropic", "families": [], "class": []},
+  {"vendor": "custom-openai", "families": [], "class": []},
+  {"vendor": "claude", "families": [], "class": [{"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}]},
+  {"vendor": "codex", "families": [], "class": []},
+  {"vendor": "cursor", "families": [{"pattern": "claude-*", "family": "anthropic"}, {"pattern": "gpt-*", "family": "openai"}, {"pattern": "auto", "family": "unknown"}], "class": [{"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}, {"pattern": "auto", "class": "unknown"}]},
+  {"vendor": "studio", "families": [], "class": []},
+  {"vendor": "cursor-cloud", "families": [{"pattern": "claude-*", "family": "anthropic"}, {"pattern": "gpt-*", "family": "openai"}, {"pattern": "auto", "family": "unknown"}], "class": [{"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}, {"pattern": "auto", "class": "unknown"}]},
+  {"vendor": "agy", "families": [], "class": []}
+]

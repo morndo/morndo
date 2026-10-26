@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -20,10 +20,25 @@ describe("catalog file", () => {
   });
 
   it("classes the glm models as the design's table states", () => {
-    const zai = new FileCatalog(catalog).presets().find(preset => preset.id === "zai");
-    expect(zai?.class).toBeDefined();
-    if (!zai?.class) return;
-    expect(modelClassOf("glm-5.3", zai.class)).toBe("flagship");
-    expect(modelClassOf("glm-5.3-flash", zai.class)).toBe("fast");
+    const rules = new FileCatalog(catalog).autoRouting("zai");
+    expect(rules?.class).toBeDefined();
+    if (!rules) return;
+    expect(modelClassOf("glm-5.3", rules.class)).toBe("flagship");
+    expect(modelClassOf("glm-5.3-flash", rules.class)).toBe("fast");
+  });
+
+  it("has auto-routing rules for every preset and none for a name it does not know", () => {
+    const file = new FileCatalog(catalog);
+    for (const preset of file.presets()) expect(file.autoRouting(preset.id), preset.id).not.toBeNull();
+    expect(file.autoRouting("nobody")).toBeNull();
+  });
+
+  it("reads a catalog without the sibling file as one with no Auto rules", () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-catalog-"));
+    dirs.push(dir);
+    writeFileSync(join(dir, "vendors.json"), readFileSync(catalog, "utf8"));
+    const file = new FileCatalog(join(dir, "vendors.json"));
+    expect(file.presets().length).toBeGreaterThan(0);
+    expect(file.autoRouting("zai")).toBeNull();
   });
 });

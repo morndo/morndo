@@ -140,11 +140,6 @@ export const VendorPreset = z.strictObject({
   runtimes: z.array(runtime).check(z.minLength(1)),
   models,
   family: text(64),
-  families: z.optional(z.array(z.strictObject({ pattern: text(80), family: text(64) }))),
-  class: z.optional(z.array(z.strictObject({
-    pattern: text(80),
-    class: z.enum(["flagship", "everyday", "fast", "unknown"]),
-  }))),
   keyShapes: z.array(text(40)),
   spend: z.array(z.enum(["balance", "token-price", "manual", "provider"])),
   prices: z.array(z.strictObject({
@@ -170,6 +165,24 @@ export const KeyPoolEntry = z.strictObject({
   termsLine: text(1500),
 });
 export const KeyPoolCatalog = z.array(KeyPoolEntry).check(z.refine(
+  (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
+));
+
+// What Auto needs from the catalog is its own file, as the key pools' is: a build that came before it, whose strict vendor
+// schema refuses a field it does not know, still reads vendors.json. Without the file, Auto has no families and no classes.
+export type AutoRoutingRules = {
+  families: readonly { pattern: string; family: string }[];
+  class: readonly { pattern: string; class: "flagship" | "everyday" | "fast" | "unknown" }[];
+};
+export const AutoRoutingEntry = z.strictObject({
+  vendor: name(),
+  families: z.array(z.strictObject({ pattern: text(80), family: text(64) })),
+  class: z.array(z.strictObject({
+    pattern: text(80),
+    class: z.enum(["flagship", "everyday", "fast", "unknown"]),
+  })),
+});
+export const AutoRoutingCatalog = z.array(AutoRoutingEntry).check(z.refine(
   (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
 ));
 
@@ -291,6 +304,7 @@ export type LeaseView = z.output<typeof LeaseView>;
 export type PolicyView = z.output<typeof PolicyView>;
 export type VendorPreset = z.output<typeof VendorPreset>;
 export type KeyPoolEntry = z.output<typeof KeyPoolEntry>;
+export type AutoRoutingEntry = z.output<typeof AutoRoutingEntry>;
 export type ConnectionsPage = z.output<typeof ConnectionsPage>;
 export type AutoPickView = z.output<typeof AutoPickView>;
 export type RouteAnswer = z.output<typeof RouteAnswer>;
@@ -306,5 +320,10 @@ export function parseVendorCatalog(value: unknown): VendorPreset[] | null {
 
 export function parseKeyPoolCatalog(value: unknown): KeyPoolEntry[] | null {
   const parsed = z.safeParse(KeyPoolCatalog, value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseAutoRoutingCatalog(value: unknown): AutoRoutingEntry[] | null {
+  const parsed = z.safeParse(AutoRoutingCatalog, value);
   return parsed.success ? parsed.data : null;
 }

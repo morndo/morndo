@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   AutoPickView, CONNECTION_WORDS, ConnectionRow, ConnectionsPage, ConnectionView, LeaseView, NarrowCommand, PolicyView, PriorityCommand,
-  RevokeCommand, RoleCommand, RouteAnswer, VendorCatalog, VendorPreset, commandNeedsStepUp,
+  RevokeCommand, RoleCommand, RouteAnswer, VendorCatalog, VendorPreset, commandNeedsStepUp, parseAutoRoutingCatalog,
 } from "../src/index.ts";
 
 const BANNED = /secret|value|plaintext|apiKey|token/i;
@@ -150,6 +150,8 @@ describe("vendor catalog", () => {
 
   it("every preset has terms, and engine-layer custody is the only one without an isolation floor", () => {
     const catalog = VendorCatalog.parse(raw);
+    const autoRules = parseAutoRoutingCatalog(JSON.parse(readFileSync(join(import.meta.dirname, "../catalog/auto-routing.json"), "utf8")));
+    if (!autoRules) throw new Error("auto-routing.json is not an Auto routing catalog");
     expect(catalog.map(p => p.id)).toEqual([
       "anthropic", "openai", "deepseek", "moonshot", "zai", "openrouter", "custom-anthropic", "custom-openai",
       "claude", "codex", "cursor", "studio", "cursor-cloud", "agy",
@@ -193,8 +195,6 @@ describe("vendor catalog", () => {
       if (preset.terms.revision === "unknown") expect(preset.terms.sources, preset.id).toEqual([]);
       else expect(preset.terms.sources[0], preset.id).toMatch(/^https:\/\//);
       expect(preset.isolation === null, preset.id).toBe(preset.custody === "engine-layer");
-      if (!preset.families || !preset.class) throw new Error(preset.id);
-      expect(preset.families.some(row => row.pattern === "*"), preset.id).toBe(false);
     }
     const cursorFamilies = [
       { pattern: "claude-*", family: "anthropic" },
@@ -207,16 +207,20 @@ describe("vendor catalog", () => {
       { pattern: "*sonnet*", class: "everyday" },
       { pattern: "*haiku*", class: "fast" },
     ];
-    expect(cursor?.families).toEqual(cursorFamilies);
-    expect(cloud?.families).toEqual(cursorFamilies);
-    expect(cursor?.class).toEqual([...modelClass, { pattern: "auto", class: "unknown" }]);
-    expect(cloud?.class).toEqual(cursor?.class);
-    expect(catalog.find(p => p.id === "openrouter")?.families).toEqual([
+    const rules = (vendor: string) => autoRules.find(row => row.vendor === vendor);
+    expect(rules("cursor")?.families).toEqual(cursorFamilies);
+    expect(rules("cursor-cloud")?.families).toEqual(cursorFamilies);
+    expect(rules("cursor")?.class).toEqual([...modelClass, { pattern: "auto", class: "unknown" }]);
+    expect(rules("cursor-cloud")?.class).toEqual(rules("cursor")?.class);
+    expect(rules("openrouter")?.families).toEqual([
       { pattern: "openrouter/auto", family: "unknown" },
       { pattern: "anthropic/*", family: "anthropic" },
       { pattern: "openai/*", family: "openai" },
     ]);
-    expect(catalog.find(p => p.id === "anthropic")?.class).toEqual(modelClass);
-    expect(catalog.find(p => p.id === "claude")?.class).toEqual(modelClass);
+    expect(rules("anthropic")?.class).toEqual(modelClass);
+    expect(rules("claude")?.class).toEqual(modelClass);
+    // The catalog file names every preset once, and no family row is a bare "*".
+    expect(autoRules.map(row => row.vendor)).toEqual(catalog.map(preset => preset.id));
+    for (const row of autoRules) expect(row.families.some(item => item.pattern === "*"), row.vendor).toBe(false);
   });
 });
