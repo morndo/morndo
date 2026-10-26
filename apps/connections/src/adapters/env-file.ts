@@ -33,7 +33,6 @@ function inRepository(dir: string): boolean {
 // The word for what is wrong with the place, or null: checked before a lease is taken, and again by the write.
 export function envPathProblem(path: string, protectedDirs: readonly string[]): string | null {
   if (!isAbsolute(path) || path.endsWith("/")) return "bad_path";
-  if (protectedDirs.some(root => inside(root, path))) return "protected";
   if (symlinked(path) || symlinked(`${path}.member`)) return "symlink";
   const dir = dirname(path);
   let mode: number;
@@ -42,7 +41,7 @@ export function envPathProblem(path: string, protectedDirs: readonly string[]): 
     if (!found.isDirectory()) return "no_dir";
     mode = found.mode;
   } catch { return "no_dir"; }
-  // The real place is judged as well as the spelling: a directory that is a link into a protected one is protected.
+  // The real place is judged, not the spelling: a directory that is a link into a protected one is protected.
   if (protectedDirs.some(root => inside(realOf(root), join(realOf(dir), basename(path))))) return "protected";
   if (inRepository(dir)) return "in_repository";
   if ((mode & GROUP_OTHERS_WRITE) !== 0) return "dir_writable";
