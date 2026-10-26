@@ -286,6 +286,12 @@ export class JobSupervisor {
     });
   }
 
+  // How many jobs this supervisor still holds cap or cancel state for. A job that has ended holds none, so the count is
+  // bounded by the open jobs (the tests read it to show nothing outlives a job).
+  trackedJobs(): number {
+    return new Set([...this.#capSights.keys(), ...this.#signalledCancels]).size;
+  }
+
   close(): void {
     this.#closed = true;
     this.#server?.close();
