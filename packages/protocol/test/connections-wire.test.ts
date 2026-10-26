@@ -3,8 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  CONNECTION_WORDS, ConnectionRow, ConnectionsPage, ConnectionView, LeaseView, NarrowCommand, PolicyView, PriorityCommand,
-  RevokeCommand, RoleCommand, VendorCatalog, VendorPreset, commandNeedsStepUp,
+  AutoPickView, CONNECTION_WORDS, ConnectionRow, ConnectionsPage, ConnectionView, LeaseView, NarrowCommand, PolicyView, PriorityCommand,
+  RevokeCommand, RoleCommand, RouteAnswer, VendorCatalog, VendorPreset, commandNeedsStepUp, parseAutoRoutingCatalog,
 } from "../src/index.ts";
 
 const BANNED = /secret|value|plaintext|apiKey|token/i;
@@ -17,7 +17,7 @@ const CONNECTION_KEYS = [
   "billing", "budget", "configDir", "custody", "expiry", "fingerprint", "isolation", "kind", "name", "ref", "repo", "runtime", "status", "termsRevision", "vendor",
 ];
 const LEASE_KEYS = ["authority", "connection", "entry", "id", "isolation", "probe", "reservation", "role", "runtime", "start", "workspace"];
-const POLICY_KEYS = ["mode", "order", "roles"];
+const POLICY_KEYS = ["auto", "mode", "order", "roles"];
 
 describe("connection wire", () => {
   it("schema keys match the allowlist, and a banned name fails even if listed", () => {
@@ -54,9 +54,29 @@ describe("connection wire", () => {
     expect(Object.keys(CONNECTION_WORDS.sections)).toEqual(["connections", "priority", "roles"]);
     expect(CONNECTION_WORDS.modes["keys-only"]).toBe("API keys only");
   });
+
+  it("names the Auto switch, and a policy carries the switch on the priority and on each role", () => {
+    expect(CONNECTION_WORDS.auto.label).toBe("Auto: Morndo picks per task, among each Role's chain, and says why");
+    expect(CONNECTION_WORDS.auto.fallbackOrder).toBe("Fallback order");
+    expect(CONNECTION_WORDS.auto.on).toBe("On");
+    expect(CONNECTION_WORDS.auto.off).toBe("Off");
+    expect(CONNECTION_WORDS.auto.hand).toBe("Hand: Auto doesn't route this Role. Its chain runs as you set it.");
+    expect(CONNECTION_WORDS.auto.drifted).toBe("Changed outside Morndo: Auto waits until you re-apply or keep it as hand.");
+    const policy = {
+      auto: true, mode: "keys-only" as const, order: ["key-a"],
+      roles: [{
+        role: "implement", override: "follow" as const, mode: null, order: ["key-a"],
+        picks: ["key-a:m"], riskPicks: null, drifted: false, auto: true,
+      }],
+    };
+    expect(PolicyView.safeParse(policy).success).toBe(true);
+    const { auto, ...without } = policy;
+    expect(auto).toBe(true);
+    expect(PolicyView.safeParse(without).success).toBe(false);
+  });
 });
 
-const PAGE_KEYS = ["alerts", "catalog", "connections", "mode", "order", "roles", "version"];
+const PAGE_KEYS = ["alerts", "auto", "catalog", "connections", "mode", "order", "roles", "version"];
 const ROW_KEYS = ["availability", "budgetLevel", "budgetPercent", "expiry", "kind", "name", "runtime", "spendSource", "usageFiveHour", "usageSevenDay", "vendor"];
 const COMMANDS = [PriorityCommand, RoleCommand, RevokeCommand, NarrowCommand, ConnectionsPage, ConnectionRow];
 
@@ -94,6 +114,26 @@ describe("the settings page allowlist", () => {
     expect(commandNeedsStepUp("role")).toBe(true);
     expect(commandNeedsStepUp("revoke")).toBe(true);
     expect(commandNeedsStepUp("narrow")).toBe(false);
+    expect(PriorityCommand.safeParse({ ...priority, auto: true }).success).toBe(true);
+    expect(ConnectionsPage.safeParse({
+      ...page,
+      auto: { on: true, taskCeiling: 3, saveLine: 0.5, dailyCaps: { "key-a": 10 }, reserves: { implement: 5 } },
+    }).success).toBe(true);
+  });
+
+  it("a pick view and a route answer refuse a title and a long code", () => {
+    const pick = {
+      route: "rt-118", tier: "routine" as const, pick: "key-a:m@high",
+      chain: ["key-a:m@high", "sub-a:m@high"], stage: "rules" as const, rulesPick: "key-a:m@high",
+      reasons: [{ code: "cheapest", stage: "rules" as const }], excluded: [], ranked: ["key-a:m@high"],
+    };
+    expect(AutoPickView.safeParse(pick).success).toBe(true);
+    expect(AutoPickView.safeParse({ ...pick, title: "docs: explain the retry flag" }).success).toBe(false);
+    expect(AutoPickView.safeParse({ ...pick, reasons: [{ code: "x".repeat(65), stage: "rules" }] }).success).toBe(false);
+    expect(AutoPickView.safeParse({ ...pick, reasons: [{ code: "docs: explain the retry flag", stage: "rules" }] }).success).toBe(false);
+    expect(RouteAnswer.safeParse({ route: "rt-118", auto: true, chain: ["key-a:m@high"] }).success).toBe(true);
+    expect(RouteAnswer.safeParse({ route: "rt-118", auto: false, reason: "hand", chain: ["key-a:m@high"] }).success).toBe(true);
+    expect(RouteAnswer.safeParse({ route: "rt-118", auto: true, chain: ["key-a:m@high"], title: "MARKER" }).success).toBe(false);
   });
 });
 
@@ -110,6 +150,8 @@ describe("vendor catalog", () => {
 
   it("every preset has terms, and engine-layer custody is the only one without an isolation floor", () => {
     const catalog = VendorCatalog.parse(raw);
+    const autoRules = parseAutoRoutingCatalog(JSON.parse(readFileSync(join(import.meta.dirname, "../catalog/auto-routing.json"), "utf8")));
+    if (!autoRules) throw new Error("auto-routing.json is not an Auto routing catalog");
     expect(catalog.map(p => p.id)).toEqual([
       "anthropic", "openai", "deepseek", "moonshot", "zai", "openrouter", "custom-anthropic", "custom-openai",
       "claude", "codex", "cursor", "studio", "cursor-cloud", "agy",
@@ -154,5 +196,57 @@ describe("vendor catalog", () => {
       else expect(preset.terms.sources[0], preset.id).toMatch(/^https:\/\//);
       expect(preset.isolation === null, preset.id).toBe(preset.custody === "engine-layer");
     }
+    const modelClass = [
+      { pattern: "*opus*", class: "flagship" },
+      { pattern: "*fable*", class: "flagship" },
+      { pattern: "*sonnet*", class: "everyday" },
+      { pattern: "*haiku*", class: "fast" },
+    ];
+    const rules = (vendor: string) => autoRules.find(row => row.vendor === vendor);
+    // Cursor runs only its own pool models (owner rule 2026-10-24), so it has no third-party family or class rows.
+    const ownPool = ["grok-*", "composer-*"];
+    expect(rules("cursor")?.families).toEqual([]);
+    expect(rules("cursor-cloud")?.families).toEqual([]);
+    expect(rules("cursor")?.class).toEqual([]);
+    expect(rules("cursor-cloud")?.class).toEqual([]);
+    expect(rules("cursor")?.ownModels).toEqual(ownPool);
+    expect(rules("cursor-cloud")?.ownModels).toEqual(ownPool);
+    expect(rules("openrouter")?.families).toEqual([
+      { pattern: "openrouter/auto", family: "unknown" },
+      { pattern: "anthropic/*", family: "anthropic" },
+      { pattern: "openai/*", family: "openai" },
+    ]);
+    expect(rules("anthropic")?.class).toEqual(modelClass);
+    expect(rules("claude")?.class).toEqual(modelClass);
+    // The catalog file names every preset once, and no family row is a bare "*".
+    expect(autoRules.map(row => row.vendor)).toEqual(catalog.map(preset => preset.id));
+    for (const row of autoRules) expect(row.families.some(item => item.pattern === "*"), row.vendor).toBe(false);
+  });
+});
+
+describe("auto-routing catalog", () => {
+  const entry = {
+    vendor: "vendor-a",
+    families: [{ pattern: "m-*", family: "fam-a" }],
+    class: [{ pattern: "m-1", class: "flagship" as const }],
+  };
+
+  it("returns entries for the shipped file, and ownModels is optional", () => {
+    const shipped = parseAutoRoutingCatalog(JSON.parse(readFileSync(join(import.meta.dirname, "../catalog/auto-routing.json"), "utf8")));
+    expect(shipped).not.toBeNull();
+    expect(shipped?.length).toBeGreaterThan(0);
+    expect(parseAutoRoutingCatalog([entry])).not.toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: ["grok-*", "composer-*"] }])).not.toBeNull();
+  });
+
+  it("returns null for a shape the schema refuses", () => {
+    expect(parseAutoRoutingCatalog([{ ...entry, extra: true }])).toBeNull();
+    expect(parseAutoRoutingCatalog([entry, { ...entry }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, class: [{ pattern: "m-1", class: "premium" }] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, class: [{ pattern: "m-1", class: "flagship", extra: 1 }] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, families: [{ pattern: "a".repeat(81), family: "fam-a" }] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: "grok-*" }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: [1] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: [""] }])).toBeNull();
   });
 });
