@@ -44,8 +44,9 @@ export class WaitWatch {
   #gapMs: number;
   #tokens: number;
   #filledAt: number;
-  #readings = new Map<string, JudgedWait[]>();
+  #readings = new Map<string, { rev: number; judged: JudgedWait[] }>();
   #prs = new Map<string, { at: number; fact: WaitFact | null }>();
+  #firstSeen = new Map<string, number>();                 // when a pull request was first waited on: the order of the unread
   #running: Promise<{ judged: number; moved: string[] }> | null = null;
   #again = false;
   #lastSoon = Number.NEGATIVE_INFINITY;
@@ -64,8 +65,12 @@ export class WaitWatch {
     this.#tokens = this.#perHour; this.#filledAt = this.#now();
   }
 
-  // What the last pass read of a blocked task's waits, in the order the block named them; null before any pass.
-  readings(key: string): JudgedWait[] | null { return this.#readings.get(key) ?? null; }
+  // What the last pass read of a blocked task's waits, in the order the block named them; null before any pass, and for a
+  // block restated since (`rev`: the task's revision now), whose readings were of other waits.
+  readings(key: string, rev?: number): JudgedWait[] | null {
+    const r = this.#readings.get(key);
+    return r && (rev === undefined || r.rev === rev) ? r.judged : null;
+  }
 
   // A pass soon after every block that names waits: at once, or at the end of the gap since the last such pass.
   follow(board: { onEvent(fn: (e: TaskEvent) => void): () => void }): void {
@@ -106,12 +111,16 @@ export class WaitWatch {
   async #pass(): Promise<{ judged: number; moved: string[] }> {
     const blocked = this.#board.blockedTasks().filter(t => (t.waits ?? []).length > 0);
     for (const key of [...this.#readings.keys()]) if (!blocked.some(t => t.key === key)) this.#readings.delete(key);
-    // 1. The pull requests, the only reads that wait on another machine: each once, the longest unread first, so a budget
-    //    smaller than the list starves none of them.
+    // 1. The pull requests, the only reads that wait on another machine: each once, the longest unread first and, among the
+    //    never read, the one waited on longest first, so a budget smaller than the list starves none of them (a lane that
+    //    keeps naming new ones queues behind the older).
     const prs = new Map<string, Extract<Wait, { kind: "pr" }>>();
     for (const t of blocked) for (const w of t.waits ?? []) if (w.kind === "pr") prs.set(prId(w), w);
     for (const id of [...this.#prs.keys()]) if (!prs.has(id)) this.#prs.delete(id);   // kept only while something waits on it
-    const order = [...prs.entries()].sort(([a], [b]) => (this.#prs.get(a)?.at ?? Number.NEGATIVE_INFINITY) - (this.#prs.get(b)?.at ?? Number.NEGATIVE_INFINITY));
+    for (const id of [...this.#firstSeen.keys()]) if (!prs.has(id)) this.#firstSeen.delete(id);
+    for (const id of prs.keys()) if (!this.#firstSeen.has(id)) this.#firstSeen.set(id, this.#now());
+    const lastRead = (id: string) => this.#prs.get(id)?.at ?? Number.NEGATIVE_INFINITY;
+    const order = [...prs.entries()].sort(([a], [b]) => (lastRead(a) - lastRead(b)) || ((this.#firstSeen.get(a) ?? 0) - (this.#firstSeen.get(b) ?? 0)));
     const prFacts = new Map<string, WaitFact | null>();
     for (const [id, w] of order) prFacts.set(id, await this.#pr(w));
     // 2. The rest, now, so what the board and the owner's list say is what they say at the judgement.
@@ -123,7 +132,7 @@ export class WaitWatch {
       const now = this.#now();
       const readings = (t.waits ?? []).map(w => judgeWait(w, this.#fact(w, cards, prFacts), now));
       judged += readings.length;
-      this.#readings.set(t.key, readings);
+      this.#readings.set(t.key, { rev: t.rev, judged: readings });
       const move = waitMove(t, readings);
       if (move === null) continue;
       const r = this.#board.act(t.key, { action: "move", to: move.to, reason: move.reason, ifRev: t.rev }, { kind: "board", rule: move.rule, lane: t.assignee ?? "-" });

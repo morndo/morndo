@@ -54,7 +54,7 @@ export class BoardService {
   #eventListeners = new Set<(e: TaskEvent) => void>();
   #repos: () => readonly string[];
   #cards: boolean;
-  #waits: { readings(key: string): JudgedWait[] | null } | null = null;
+  #waits: { readings(key: string, rev?: number): JudgedWait[] | null } | null = null;
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
@@ -85,7 +85,7 @@ export class BoardService {
   // Done attempt waits for first. null: none attached, Done is not held for proof.
   attachProof(p: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null): void { this.#proof = p; }
   // The wait watch's readings (B18, wait-watch.ts), shown in the view. null: none attached, the view says nothing of them.
-  attachWaits(w: { readings(key: string): JudgedWait[] | null } | null): void { this.#waits = w; }
+  attachWaits(w: { readings(key: string, rev?: number): JudgedWait[] | null } | null): void { this.#waits = w; }
   #said(e: TaskEvent) { for (const l of this.#eventListeners) l(e); }
   // Every push carries the runs as they are then, so one due for the runs alone is dropped.
   #tell() {
@@ -111,7 +111,7 @@ export class BoardService {
     const now = this.#now();
     const tasks = boardOrder(this.#store.shownTasks(now - DONE_SHOWN_MS), now);
     const waits = this.#waits === null ? [] : tasks.flatMap(t => {
-      const readings = t.status === "blocked" && (t.waits ?? []).length > 0 ? this.#waits?.readings(t.key) ?? null : null;
+      const readings = t.status === "blocked" && (t.waits ?? []).length > 0 ? this.#waits?.readings(t.key, t.rev) ?? null : null;
       return readings === null ? [] : [{ key: t.key, readings }];
     });
     const staleBlocks = tasks.filter(t => isStaleBlock(t, now)).map(t => t.key);
@@ -125,7 +125,7 @@ export class BoardService {
     const task = this.#store.task(key);
     if (!task) return null;
     const merges = this.#store.mergesOf(key);
-    const read = task.status === "blocked" && (task.waits ?? []).length > 0 ? this.#waits?.readings(key) ?? null : null;
+    const read = task.status === "blocked" && (task.waits ?? []).length > 0 ? this.#waits?.readings(key, task.rev) ?? null : null;
     return { task, events: this.#store.taskEvents(key), merged: merges.length > 0 ? mergedView(task.key, merges, this.#liveness) : null, ...(read ? { waitsRead: read } : {}) };
   }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }

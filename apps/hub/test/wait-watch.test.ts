@@ -196,6 +196,28 @@ describe("what the wait watch may ask the forge (review of #161)", () => {
     await watch.tick();
     expect(forge.asks).toContain("morndo/morndo#3");
   });
+  it("a lane that keeps naming new pull requests does not starve another task's older one", async () => {
+    const { clock, board, forge, watch } = made({ prReadsPerHour: 1 });
+    board.create({ title: "the busy one", assignee: "builder" }, manager);          // T-1
+    blocked(board, ["#500"], "the patient one");                                      // T-2, waits since now
+    forge.set("morndo/morndo", 500, "open");
+    for (let i = 1; i <= 4; i++) {
+      board.act("T-1", { action: "move", to: "blocked", reason: `try ${i}`, waits: [`#${600 + i}`] }, manager);
+      clock.now += 3_600_000 / 1 + 1;                                                 // one read's worth of budget per round
+      await watch.tick();
+    }
+    expect(forge.asks.slice(0, 2)).toContain("morndo/morndo#500");
+  });
+  it("shows no readings of a block's earlier waits once it is restated", async () => {
+    const { board, forge, watch } = made();
+    blocked(board, ["#93"]);
+    forge.set("morndo/morndo", 93, "open");
+    await watch.tick();
+    expect(board.view().waits).toEqual([{ key: "T-1", readings: [{ state: "open", label: "#93 open" }] }]);
+    board.act("T-1", { action: "move", to: "blocked", reason: "now after #94", waits: ["#94"] }, manager);
+    expect(board.view().waits ?? []).toEqual([]);
+    expect(board.task("T-1")?.waitsRead).toBeUndefined();
+  });
   it("reads no repository the hub no longer reads, whatever an older block named (B14)", async () => {
     let repos: readonly string[] = ["morndo/morndo", "acme/widgets"];
     const { board, forge, watch } = made({ repos: () => repos });
