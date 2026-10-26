@@ -2,7 +2,7 @@
 // as NAME=value (0600, by rename), a sidecar naming the member, words only on stdout and stderr. `--if-due` rewrites only when the served member can no longer
 // serve (or the file is gone, or `--rotate-every` has passed). Every key is synthetic; the planted values must reach nothing but the file.
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
