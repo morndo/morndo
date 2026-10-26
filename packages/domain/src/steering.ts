@@ -7,11 +7,12 @@ import { err, ok, unreachable, type EndpointId, type Result } from "./shared.ts"
 
 export type ImageMime = "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 export type TextMime = "text/plain" | "text/markdown" | "application/json" | "text/csv" | "application/yaml";
-export type UploadMime = ImageMime | TextMime | "application/pdf" | "audio/ogg" | "audio/webm" | "audio/mp4" | "audio/mpeg" | "audio/wav";
-export type UploadKind = "image" | "text" | "pdf" | "audio";
+export type HtmlMime = "text/html";
+export type UploadMime = ImageMime | TextMime | HtmlMime | "application/pdf" | "audio/ogg" | "audio/webm" | "audio/mp4" | "audio/mpeg" | "audio/wav";
+export type UploadKind = "image" | "text" | "html" | "pdf" | "audio";
 export type Upload = { id: string; endpointId: EndpointId; path: string; mime: UploadMime; size: number; at: number };
 
-export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;     // images and PDF: a photo or a document
+export const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;     // images, PDF and HTML pages: a photo or a document
 export const TEXT_MAX_BYTES = 1 * 1024 * 1024;        // notes, config, and logs a lane reads from disk
 export const MAX_UPLOADS_PER_COMMAND = 6;
 export const UPLOAD_TTL_MS = 24 * 3_600_000;           // attachable for a day after it was uploaded
@@ -27,8 +28,11 @@ const TEXT_BY_EXT: Record<string, TextMime> = {
   ".md": "text/markdown", ".txt": "text/plain", ".log": "text/plain", ".json": "application/json", ".csv": "text/csv",
   ".yaml": "application/yaml", ".yml": "application/yaml",
 };
+// S1: an HTML page is a document the worker reads, not a note: its bytes are markup by right, and it may carry its
+// styles and pictures inline, so it has a document's 10 MB. The hub never serves it as a page (files.ts).
+const HTML_EXTENSIONS: ReadonlySet<string> = new Set([".html", ".htm"]);
 // What the file picker may offer. The server still decides; this is the same list.
-export const UPLOAD_ACCEPT = [...Object.keys(IMAGE_BY_EXT), ".pdf", ...Object.keys(TEXT_BY_EXT)].join(",");
+export const UPLOAD_ACCEPT = [...Object.keys(IMAGE_BY_EXT), ".pdf", ...HTML_EXTENSIONS, ...Object.keys(TEXT_BY_EXT)].join(",");
 
 // S1: an image is known by its own bytes, never by the type the browser claims. SVG (which can carry script) is not one.
 export function sniffImage(b: Uint8Array): ImageMime | null {
@@ -53,10 +57,11 @@ export type AcceptedUpload =
   | { kind: "image"; mime: ImageMime; name: string }
   | { kind: "pdf"; mime: "application/pdf"; name: string }
   | { kind: "text"; mime: TextMime; name: string }
+  | { kind: "html"; mime: HtmlMime; name: string }
   | { kind: "audio"; container: AudioContainer; name: string };
 // Without the Capability argument an audio name is always refused, so that call can never be answered with one.
 export type NamedUpload = Exclude<AcceptedUpload, { kind: "audio" }>;
-export type NamedKind = "image" | "text" | "pdf";
+export type NamedKind = "image" | "text" | "html" | "pdf";
 
 const starts = (b: Uint8Array, ...bytes: number[]) => b.length >= bytes.length && bytes.every((x, i) => b[i] === x);
 
@@ -104,16 +109,26 @@ export function utf8Text(b: Uint8Array): string | null {
   return out;
 }
 
+// Bytes that aren't UTF-8: a NUL means a binary, anything else a text in another encoding.
+const unreadable = (b: Uint8Array): "not_allowed" | "not_utf8" => (b.includes(0) ? "not_allowed" : "not_utf8");
+
+// A note may not open as markup, so a page or an SVG can't pass as one.
 function textProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {
   const text = utf8Text(b);
-  if (text === null) return b.includes(0) ? "not_allowed" : "not_utf8";
+  if (text === null) return unreadable(b);
   return /^(<\?xml|<!doctype\s+html|<html|<svg)\b/i.test(text.replace(/^\uFEFF/, "").trimStart()) ? "not_allowed" : null;
+}
+
+// A page is markup by right; it has only to be UTF-8.
+function htmlProblem(b: Uint8Array): "not_allowed" | "not_utf8" | null {
+  return utf8Text(b) === null ? unreadable(b) : null;
 }
 
 export function uploadByteLimit(kind: UploadKind): number {
   switch (kind) {
     case "image":
     case "pdf":
+    case "html":
     case "audio": return MAX_UPLOAD_BYTES;
     case "text": return TEXT_MAX_BYTES;
     default: return unreachable(kind);
@@ -125,6 +140,7 @@ function kindOf(name: string): UploadKind | null {
   if (IMAGE_BY_EXT[ext]) return "image";
   if (AUDIO_BY_EXT[ext]) return "audio";
   if (ext === ".pdf") return "pdf";
+  if (HTML_EXTENSIONS.has(ext)) return "html";
   if (TEXT_BY_EXT[ext]) return "text";
   return null;
 }
@@ -151,8 +167,9 @@ export function screenNamedUpload(
   return ok({ kind, name: safe });
 }
 
-// S1: the extension picks the kind. An image is then whatever image its bytes are. HTML, SVG, executables and archives
-// are not on the list. Text is UTF-8 under 1 MiB; a PDF starts with %PDF- and, like an image, is at most 10 MiB.
+// S1: the extension picks the kind. An image is then whatever image its bytes are. SVG, executables and archives are
+// not on the list. Text is UTF-8 under 1 MiB; an HTML page is UTF-8 too, at most 10 MiB; a PDF starts with %PDF- and,
+// like an image, is at most 10 MiB.
 export function acceptNamedUpload(bytes: Uint8Array, name: string): Result<NamedUpload, UploadRefusal>;
 export function acceptNamedUpload(
   bytes: Uint8Array,
@@ -177,6 +194,10 @@ export function acceptNamedUpload(
     return mime ? ok({ kind, mime, name: safe }) : err("not_allowed");
   }
   if (kind === "pdf") return starts(bytes, 0x25, 0x50, 0x44, 0x46, 0x2d) ? ok({ kind, mime: "application/pdf", name: safe }) : err("not_allowed");
+  if (kind === "html") {
+    const problem = htmlProblem(bytes);
+    return problem ? err(problem) : ok({ kind, mime: "text/html", name: safe });
+  }
   const problem = textProblem(bytes);
   return problem || !text ? err(problem ?? "not_allowed") : ok({ kind: "text", mime: text, name: safe });
 }
