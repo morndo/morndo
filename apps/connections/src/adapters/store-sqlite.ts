@@ -3,7 +3,7 @@ import Database from "better-sqlite3";
 import { chmodSync, existsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { assertLocalDisk, openPrivateDb } from "@morndo/service-kit";
-import type { Directory, Policy } from "@morndo/domain";
+import { adoptPolicy, type Directory, type Policy } from "@morndo/domain";
 import type { ConnectionStore } from "../application/ports.ts";
 import { FileRefused, assertPrivate, ensurePrivateDir, refuseBareHome, writePrivate } from "./file-mode.ts";
 import { DatabaseFromFuture, MIGRATIONS, migrate } from "./store-migrations.ts";
@@ -98,7 +98,9 @@ export class SqliteStore implements ConnectionStore {
       const directory = this.#readDirectory.get() as { body: string } | undefined;
       const policy = this.#readPolicy.get() as { body: string } | undefined;
       if (!version || !directory || !policy) throw new Error("store is empty");
-      return { directory: JSON.parse(directory.body) as Directory, policy: JSON.parse(policy.body) as Policy, version: version.version };
+      const parsed = adoptPolicy(JSON.parse(policy.body));
+      if (!parsed) throw new Error("policy is not valid");
+      return { directory: JSON.parse(directory.body) as Directory, policy: parsed, version: version.version };
     })();
   }
 

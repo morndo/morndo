@@ -52,6 +52,14 @@ export const CONNECTION_WORDS = {
   signInNotes: { codex: "Turn on device code sign-in in ChatGPT's security settings first. On a machine with a browser, codex login works too." },
   addLine: "morndo-keys add",
   runtimes: { claude: "Claude Code", codex: "Codex", cursor: "Cursor agent" },
+  auto: {
+    label: "Auto: Morndo picks per task, among each Role's chain, and says why",
+    fallbackOrder: "Fallback order",
+    on: "On",
+    off: "Off",
+    hand: "Hand: Auto doesn't route this Role. Its chain runs as you set it.",
+    drifted: "Changed outside Morndo: Auto waits until you re-apply or keep it as hand.",
+  },
 } as const;
 
 const repo = z.strictObject({ allow: z.array(text(200)), deny: z.array(text(200)) });
@@ -93,6 +101,7 @@ export const LeaseView = z.strictObject({
 });
 
 export const PolicyView = z.strictObject({
+  auto: z.boolean(),
   mode: z.enum(["subscriptions-first", "keys-first", "subscriptions-only", "keys-only", "custom"]),
   order: z.array(name()),
   roles: z.array(z.strictObject({
@@ -103,6 +112,7 @@ export const PolicyView = z.strictObject({
     picks: z.array(text(200)),
     riskPicks: z.nullable(z.array(text(200))),
     drifted: z.boolean(),
+    auto: z.boolean(),
   })),
 });
 
@@ -158,6 +168,27 @@ export const KeyPoolCatalog = z.array(KeyPoolEntry).check(z.refine(
   (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
 ));
 
+// What Auto needs from the catalog is its own file, as the key pools' is: a build that came before it, whose strict vendor
+// schema refuses a field it does not know, still reads vendors.json. Without the file, Auto has no families and no classes.
+export type AutoRoutingRules = {
+  families: readonly { pattern: string; family: string }[];
+  class: readonly { pattern: string; class: "flagship" | "everyday" | "fast" | "unknown" }[];
+  ownModels?: readonly string[];
+};
+export const AutoRoutingEntry = z.strictObject({
+  vendor: name(),
+  families: z.array(z.strictObject({ pattern: text(80), family: text(64) })),
+  class: z.array(z.strictObject({
+    pattern: text(80),
+    class: z.enum(["flagship", "everyday", "fast", "unknown"]),
+  })),
+  // Ordered globs; when present, the vendor's connection may run only models matching one of them.
+  ownModels: z.optional(z.array(text(80))),
+});
+export const AutoRoutingCatalog = z.array(AutoRoutingEntry).check(z.refine(
+  (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
+));
+
 // The probe model is its own file, so a build from before it, whose strict schemas refuse a field they do not know, never reads it (ADR-0037 decision 10b).
 export type KeyPoolProbe = { model: string };
 export const KeyPoolProbeEntry = z.strictObject({
@@ -195,6 +226,7 @@ export const RoleRow = z.strictObject({
   chain: z.array(text(200)),
   drifted: z.boolean(),
   first: z.nullable(text(200)),
+  auto: z.optional(z.boolean()),
 });
 export const AlertRow = z.strictObject({
   kind: z.literal("connection"),
@@ -210,6 +242,13 @@ export const CatalogChoice = z.strictObject({
   termsSources: z.array(z.url()),
   isolation: z.nullable(z.enum(["none", "rules", "os"])),
 });
+const autoSettings = z.strictObject({
+  on: z.boolean(),
+  taskCeiling: z.number(),
+  saveLine: z.number(),
+  dailyCaps: z.record(name(), z.number()),
+  reserves: z.record(name(), z.number()),
+});
 export const ConnectionsPage = z.strictObject({
   version: z.int(),
   connections: z.array(ConnectionRow),
@@ -218,9 +257,38 @@ export const ConnectionsPage = z.strictObject({
   roles: z.array(RoleRow),
   alerts: z.array(AlertRow),
   catalog: z.array(CatalogChoice),
+  auto: z.optional(autoSettings),
 });
 
-export const PriorityCommand = z.strictObject({ version: z.int(), mode, order: z.array(name()) });
+const reasonCode = z.string().check(z.regex(/^[a-z0-9-]{1,64}$/));
+const reason = z.strictObject({
+  code: reasonCode,
+  stage: z.enum(["rules", "declined"]),
+  n: z.optional(z.number()),
+  name: z.optional(reasonCode),
+});
+export const AutoPickView = z.strictObject({
+  route: text(32),
+  tier: z.enum(["routine", "standard", "hard"]),
+  pick: z.nullable(text(200)),
+  chain: z.array(text(200)),
+  stage: z.enum(["rules", "decider"]),
+  rulesPick: z.nullable(text(200)),
+  reasons: z.array(reason),
+  excluded: z.array(z.strictObject({ entry: text(200), reason })),
+  ranked: z.array(text(200)),
+});
+export const RouteAnswer = z.discriminatedUnion("auto", [
+  z.strictObject({ route: text(32), auto: z.literal(true), chain: z.array(text(200)) }),
+  z.strictObject({
+    route: text(32),
+    auto: z.literal(false),
+    reason: z.enum(["off", "role-off", "hand", "drifted", "none-eligible"]),
+    chain: z.array(text(200)),
+  }),
+]);
+
+export const PriorityCommand = z.strictObject({ version: z.int(), mode, order: z.array(name()), auto: z.optional(z.boolean()) });
 export const RoleCommand = z.strictObject({
   version: z.int(),
   role: text(64),
@@ -243,14 +311,19 @@ export const COMMAND_KINDS = ["priority", "role", "revoke", "narrow"] as const;
 export type CommandKind = (typeof COMMAND_KINDS)[number];
 // Widening (priority, a role save, revoke) needs a fresh passkey. Narrowing does not.
 export const commandNeedsStepUp = (kind: CommandKind): boolean => kind !== "narrow";
+// The command word of the hub, which checks a fresh passkey before it calls.
+export const HUB_COMMAND = "hub";
 
 export type ConnectionView = z.output<typeof ConnectionView>;
 export type LeaseView = z.output<typeof LeaseView>;
 export type PolicyView = z.output<typeof PolicyView>;
 export type VendorPreset = z.output<typeof VendorPreset>;
 export type KeyPoolEntry = z.output<typeof KeyPoolEntry>;
+export type AutoRoutingEntry = z.output<typeof AutoRoutingEntry>;
 export type KeyPoolProbeEntry = z.output<typeof KeyPoolProbeEntry>;
 export type ConnectionsPage = z.output<typeof ConnectionsPage>;
+export type AutoPickView = z.output<typeof AutoPickView>;
+export type RouteAnswer = z.output<typeof RouteAnswer>;
 export type PriorityCommand = z.output<typeof PriorityCommand>;
 export type RoleCommand = z.output<typeof RoleCommand>;
 export type RevokeCommand = z.output<typeof RevokeCommand>;
@@ -263,6 +336,11 @@ export function parseVendorCatalog(value: unknown): VendorPreset[] | null {
 
 export function parseKeyPoolCatalog(value: unknown): KeyPoolEntry[] | null {
   const parsed = z.safeParse(KeyPoolCatalog, value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseAutoRoutingCatalog(value: unknown): AutoRoutingEntry[] | null {
+  const parsed = z.safeParse(AutoRoutingCatalog, value);
   return parsed.success ? parsed.data : null;
 }
 

@@ -13,7 +13,7 @@ const e = (text: string): Engine => {
   return parsed;
 };
 const role = (name: string, picks: string[], over: Partial<RoleRoute> = {}): RoleRoute => ({
-  role: name, override: "follow", priority: null, picks: picks.map(e), riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null, ...over,
+  role: name, override: "follow", priority: null, picks: picks.map(e), riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null, auto: false, ...over,
 });
 const policy = (order: string[], roles: RoleRoute[] = []): Policy => ({ ...emptyPolicy(), priority: { mode: "keys-first", order }, roles });
 const listed: Listed[] = ["k1", "k2", "k3", "p", "sub"].map(name => ({ name, kind: name === "sub" ? "subscription" as const : "api-key" as const, models: ["m"], efforts: null }));

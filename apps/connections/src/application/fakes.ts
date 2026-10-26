@@ -1,6 +1,6 @@
 // In-memory ports. Tests move the clock and the runtime by hand. No ambient I/O.
 import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type Isolation, type KeyPool, type Policy } from "@morndo/domain";
-import type { KeyPoolProbe, KeyPoolTerms, VendorPreset } from "@morndo/protocol";
+import type { AutoRoutingRules, KeyPoolProbe, KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 import { chainHolders } from "./providers.ts";
 import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type KeyPoolStore, type ModelLister, type ModelRow, type ProbeAnswer, type ProcId, type Processes, type ProviderEntry, type ProviderProbe, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
 import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, WorkspaceRoots } from "./ports.ts";
@@ -57,9 +57,11 @@ export class MemoryCatalog implements Catalog {
   rows: readonly VendorPreset[] = [];
   keyPools: Readonly<Record<string, KeyPoolTerms>> = {};
   keyPoolProbes: Readonly<Record<string, KeyPoolProbe>> = {};
+  autoRules: Readonly<Record<string, AutoRoutingRules>> = {};
   presets(): readonly VendorPreset[] { return this.rows; }
   keyPool(vendor: string): KeyPoolTerms | null { return this.keyPools[vendor] ?? null; }
   keyPoolProbe(vendor: string): KeyPoolProbe | null { return this.keyPoolProbes[vendor] ?? null; }
+  autoRouting(vendor: string): AutoRoutingRules | null { return this.autoRules[vendor] ?? null; }
 }
 
 export class MemoryStore implements ConnectionStore {

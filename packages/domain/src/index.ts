@@ -14,6 +14,7 @@ export * from "./catchup.ts";
 export * from "./engines.ts";
 export * from "./connections.ts";
 export * from "./routing.ts";
+export * from "./auto-routing.ts";
 export * from "./board.ts";
 export * from "./board-waits.ts";
 export * from "./proof.ts";

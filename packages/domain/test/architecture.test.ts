@@ -21,6 +21,13 @@ describe("domain architecture", () => {
     expect(offending(`const m = await import("ws");`)).toEqual(["ws"]);
     expect(offending(`export * from "./access.ts";`)).toEqual([]);
   });
+  it("auto-routing.ts does not call Math.random", () => {
+    const code = readFileSync(join(SRC, "auto-routing.ts"), "utf8");
+    expect(code).not.toMatch(/\bMath\.random\b/);
+  });
+  it("the check catches a planted Math.random (negative control)", () => {
+    expect(/\bMath\.random\b/.test("const n = Math.random();")).toBe(true);
+  });
   it("uses no ambient I/O globals either", () => {
     const code = readdirSync(SRC).map(f => readFileSync(join(SRC, f), "utf8")).join("\n");
     expect(code).not.toMatch(/\b(fetch|process|require|Date\.now|setTimeout|setInterval|crypto)\b/);

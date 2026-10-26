@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import {
   acknowledge, addKey, addSubscription, closeLease, emptyDirectory, emptyPolicy, ensureRole, lease, loseLease,
   noteDrift, noteHelper, parseEngine, placeNew, project, recordSpend, refresh, revoke, revokeName, reviseTerms, rotate, setBudget,
-  setExpiry, setIsolation, setOverride, setPicks, setPriority, setRepo, turnOff, turnOn, type Directory, type Lease, type Policy,
+  setExpiry, setGlobalAuto, setIsolation, setOverride, setPicks, setPriority, setRepo, setTaskCeiling, turnOff, turnOn, type Directory, type Lease, type Policy,
 } from "../src/index.ts";
 
 const BANNED = /secret|value|plaintext|apiKey|token/i;
@@ -23,8 +23,8 @@ const CONNECTION = ["name", "vendor", "runtime", "status", "terms", "repo", "iso
 const SUBSCRIPTION = [...CONNECTION, "configDir", "leases"];
 const KEY = [...CONNECTION, "ref", "fingerprint", "billing", "budget", "expiry", "spend", "leases", "warned"];
 const LEASE = ["id", "connection", "holder", "role", "entry", "runtime", "workspace", "isolation", "start", "reservation", "probe", "calls", "windowStart", "authority"];
-const POLICY = ["priority", "roles", "events"];
-const ROLE = ["role", "override", "priority", "picks", "riskPicks", "written", "writtenRisk", "seenChain", "seenRisk"];
+const POLICY = ["autoSettings", "events", "priority", "roles"];
+const ROLE = ["auto", "override", "picks", "priority", "riskPicks", "role", "seenChain", "seenRisk", "written", "writtenRisk"];
 const EVENT: Record<string, readonly string[]> = {
   ConnectionAdded: ["type", "name", "at", "command"],
   ConnectionRotated: ["type", "name", "at", "command", "fingerprint"],
@@ -53,6 +53,8 @@ const EVENT: Record<string, readonly string[]> = {
   ChainProjected: ["type", "role", "at", "chain"],
   ChainDrifted: ["type", "role", "at"],
   ChainKept: ["type", "role", "at"],
+  AutoSwitched: ["type", "scope", "role", "on", "at", "command"],
+  AutoSettingsChanged: ["type", "setting", "name", "from", "to", "at", "command"],
 };
 
 const T = 1_700_000_000_000;
@@ -117,6 +119,8 @@ function history(): { dir: Directory; policy: Policy; lease: Lease } {
   policy = must(project(policy, "implement", [{ name: "key-a", kind: "api-key" }], T));
   policy = noteDrift(policy, "implement", T);
   policy = revokeName(policy, "key-a", [{ name: "key-a", kind: "api-key" }], T).policy;
+  policy = must(setGlobalAuto(policy, true, "step-up", "c1", T));
+  policy = must(setTaskCeiling(policy, 2, "session", "c1", T));
   return { dir, policy, lease: leaseRow };
 }
 
