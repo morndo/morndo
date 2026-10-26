@@ -204,7 +204,7 @@ describe("the updates service (no HTTP)", () => {
     });
   });
 
-  it("view: names the fleet node this machine is (MORNDO_ENGINE_NODE) so the page can fold it into This machine", async () => {
+  it("view: names the control plane's own fleet node (MORNDO_CONTROL_PLANE_NODE) so the page can fold it into This machine", async () => {
     const { fleet } = fleetWith();
     const view = await service(fleet, cliWith(null).cli, () => 1_800_000_000_000, [], "e2e-cp").view();
     expect(view.controlPlane.node).toBe("e2e-cp");

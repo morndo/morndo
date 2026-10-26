@@ -42,10 +42,17 @@ describe("the Updates page's rows", () => {
     const rows = updatesRows(view({ controlPlane: own, nodes: [node({ name: "pc" }), node({ name: "e2e-cp" })] }));
     expect(rows.map(r => r.machine)).toEqual(["control-plane", "pc"]);
     expect(rows.map(r => r.rollbackNote)).toEqual([null, "run morndo update --rollback on pc"]);
-    // A hub that names no node of its own (no MORNDO_ENGINE_NODE) hides nothing: the node keeps its row and hint.
+    // A hub that names no node of its own (no MORNDO_CONTROL_PLANE_NODE) hides nothing: the node keeps its row and hint.
     const unnamed = updatesRows(view({ controlPlane: { ...own, node: null }, nodes: [node({ name: "e2e-cp" })] }));
     expect(unnamed.map(r => r.machine)).toEqual(["control-plane", "e2e-cp"]);
     expect(unnamed[1]!.rollbackNote).toBe("run morndo update --rollback on e2e-cp");
+  });
+
+  it("the live shape: the control plane's own node cp folds into This machine; pc (where the engine lanes run) and srv01 stay", () => {
+    const own = { version: "0.4.2", commit: null, status: status(), state: null, node: "cp" };
+    const rows = updatesRows(view({ controlPlane: own, nodes: [node({ name: "srv01" }), node({ name: "cp" }), node({ name: "pc" })] }));
+    expect(rows.map(r => r.machine)).toEqual(["control-plane", "pc", "srv01"]);
+    expect(rows.map(r => r.rollbackNote)).toEqual([null, "run morndo update --rollback on pc", "run morndo update --rollback on srv01"]);
   });
 
   it("the control plane's sentence, from its own updater's status", () => {
