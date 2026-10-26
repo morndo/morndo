@@ -4,7 +4,7 @@
 import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import { findConnection, isKey, isSinkPath, type Actor, type Outcome } from "@morndo/domain";
-import type { ProbeResult, ReportBy } from "./application/key-pool-service.ts";
+import type { ProbeResult, RefusalTarget, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
 import { fail, gateRuntime, need, pooledProbe, prepareLease, serveLeased, type Io, type Parsed } from "./cli.ts";
 import { ENV_NAME, envPathProblem, writeEnvFile } from "./adapters/env-file.ts";
@@ -279,13 +279,14 @@ async function probeSuspect(home: Opened, pool: string, suspect: string | null):
   if (holder) await home.keypools.probeMember(pool, suspect, { why: "suspect", holder });
 }
 
-// `keypool report <pool> (--member M | --grant G) --from-hook`: the agent CLI's StopFailure payload on stdin, read, classified and dropped. Only a
+// `keypool report <pool> (--member M | --grant G | --served) --from-hook`: the agent CLI's StopFailure payload on stdin, read, classified and dropped. Only a
 // refusal of the key is applied (exhausted, failing); the line printed is the pool and a word, never the payload. The hook's own exit code is
 // ignored by the CLI, so a payload that is no refusal exits 0 as `ignored`.
 async function reportFromHook(home: Opened, pool: string, parsed: Parsed, io: Io): Promise<number> {
   const member = parsed.get("member");
   const grant = parsed.get("grant");
-  if ((member === undefined) === (grant === undefined)) return fail(io, "usage");
+  const served = parsed.get("served") === "true";
+  if ([member !== undefined, grant !== undefined, served].filter(Boolean).length !== 1) return fail(io, "usage");
   for (const refused of ["lease", "outcome", "reason"]) if (parsed.get(refused) !== undefined) return fail(io, "usage");
   const text = io.stdin ?? "";
   if (Buffer.byteLength(text) > HOOK_STDIN_LIMIT) return fail(io, "too_big");
@@ -297,14 +298,12 @@ async function reportFromHook(home: Opened, pool: string, parsed: Parsed, io: Io
     io.stdout(`${JSON.stringify({ pool, outcome: "ignored" })}\n`);
     return 0;
   }
-  let caller: ReturnType<typeof selfId> = null;
-  if (grant !== undefined) {
-    caller = selfId();
-    if (caller === null) return fail(io, "holder");
-  }
-  const target = grant !== undefined && caller !== null
-    ? { kind: "grant", grant, by: { kind: "holder", caller } } as const
-    : { kind: "member", member: member ?? "" } as const;
+  // By grant and by session the caller is this process: the grant's holder or one of its children, the session the key was served to.
+  const caller = grant !== undefined || served ? selfId() : null;
+  if ((grant !== undefined || served) && caller === null) return fail(io, "holder");
+  const target: RefusalTarget = grant !== undefined && caller !== null ? { kind: "grant", grant, by: { kind: "holder", caller } }
+    : served && caller !== null ? { kind: "served", caller }
+      : { kind: "member", member: member ?? "" };
   const reported = home.keypools.reportRefusal(pool, target, signal, home.now());
   if (!reported.ok) return fail(io, reported.error.problem);
   await probeSuspect(home, pool, reported.value.suspect);

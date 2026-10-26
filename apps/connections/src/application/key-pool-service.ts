@@ -58,6 +58,7 @@ export type LaneProof = { kind: "lane"; lease: string; caller: { pid: number; st
 export type ReportBy = Actor | LaneProof;
 export type RefusalTarget =
   | { kind: "member"; member: string }
+  | { kind: "served"; caller: ProcId }
   | { kind: "grant"; grant: string; by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId } };
 type CreateInput = {
   name: string;
@@ -79,6 +80,9 @@ const ATTEMPTS = 8;
 // The call cap a probe lease uses, the same figure the command line uses for one.
 const PROBE_LEASES = 8;
 const DAY_MS = 86_400_000;
+// How far back, and how many levels up, a session's last key is looked for.
+const SERVED_WINDOW_MS = 3_600_000;
+const SERVED_LEVELS = 5;
 const fail = (problem: string): Result<never, Failure> => err({ problem });
 // A refresh refused for one of these swaps. Anything else (a missing lease, a lost save) is returned as it is.
 const REFRESH_SWAP = new Set(["budget", "expired", "off", "terms"]);
@@ -307,7 +311,11 @@ export class KeyPoolService implements ConnectionLifecycle {
     if (!loaded) return fail("missing");
     let member: string;
     if (target.kind === "member") member = target.member;
-    else {
+    else if (target.kind === "served") {
+      const found = this.#served(loaded, target.caller);
+      if (found === null) return fail("unserved");
+      member = found;
+    } else {
       const held = loaded.grants.find(row => row.id === target.grant);
       if (!held) return fail("grant_missing");
       if (target.by.kind === "holder" && !this.#holds(held.holder, target.by.caller)) return fail("not_holder");
@@ -317,12 +325,31 @@ export class KeyPoolService implements ConnectionLifecycle {
     if (!classified.ok) return classified;
     const outcome = classified.value;
     if (outcome.kind !== "exhausted" && outcome.kind !== "failing") return ok({ outcome: outcome.kind, suspect: null });
-    if (target.kind === "member") {
+    if (target.kind !== "grant") {
       const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" });
       return reported.ok ? ok({ outcome: outcome.kind, suspect: null }) : reported;
     }
     const reported = this.reportByGrant(pool, target.grant, outcome, observedAt, target.by);
     return reported.ok ? ok({ outcome: outcome.kind, suspect: reported.value.suspect }) : reported;
+  }
+
+  // The member a session was last served: looking from the caller's nearest ancestor outwards (a few levels: a hook runs under a shell under the agent
+  // CLI), the first one that is the parent of a KeyServed of a member of the pool within the hour (the helper's cache is minutes) gives the newest such
+  // member. A hand-written apiKeyHelper is exec'd by the agent CLI, so the parent of its lease is the CLI; the nearest ancestor wins, so a key leased by hand
+  // from a shell further out is not taken for the CLI's.
+  #served(pool: KeyPool, caller: ProcId): string | null {
+    const ancestors = this.#deps.processes.ancestors(caller.pid).slice(1, 1 + SERVED_LEVELS).map(row => row.pid);
+    const members = new Set(pool.members.map(row => row.credential));
+    const since = this.#deps.clock.now() - SERVED_WINDOW_MS;
+    const events = this.#deps.connections.load().directory.events;
+    for (const parent of ancestors) {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const event = events[i];
+        if (event === undefined || event.at < since) break;
+        if (event.type === "KeyServed" && members.has(event.name) && event.caller.ppid === parent) return event.name;
+      }
+    }
+    return null;
   }
 
   // The pool's dialect classifies the signal; an unmatched 4xx raises the one `unclassified` alert of status and type only.

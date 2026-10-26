@@ -92,29 +92,13 @@ function homeFiles(dir: string): string[] {
 }
 
 describe("the launcher's settings", () => {
-  it("a pooled run carries a StopFailure command hook that names the pool and the grant, and no other new key", async () => {
+  it("a pooled run's settings carry no hook: a headless run ends before a hook can finish (spike S2b), and the run wrapper reads its result", async () => {
     const { env, dir } = await world(2);
     const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0 } }));
     expect(ran.code, ran.stderr).toBe(0);
-    const settings = settingsOf(calls(dir)[0] as Call);
-    expect(Object.keys(settings).sort()).toEqual(["apiKeyHelper", "hooks", "permissions", "sandbox"]);
-    const hooks = settings.hooks as { StopFailure: { hooks: { type: string; command: string; timeout: number }[] }[] };
-    expect(Object.keys(hooks)).toEqual(["StopFailure"]);
-    expect(hooks.StopFailure).toHaveLength(1);
-    expect(hooks.StopFailure[0]?.hooks).toHaveLength(1);
-    const entry = hooks.StopFailure[0]?.hooks[0];
-    expect(entry?.type).toBe("command");
-    expect(entry?.command).toMatch(/ keypool report p --from-hook --grant g\S+$/);
-    expect(entry?.timeout).toBeGreaterThan(0);
-    expect(entry?.timeout).toBeLessThanOrEqual(30);
+    expect(Object.keys(settingsOf(calls(dir)[0] as Call)).sort()).toEqual(["apiKeyHelper", "permissions", "sandbox"]);
   });
-  it("the hook command line holds no key", async () => {
-    const { env, dir } = await world(2);
-    await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0 } }));
-    const line = JSON.stringify(settingsOf(calls(dir)[0] as Call).hooks);
-    for (const key of KEYS) expect(line).not.toContain(key);
-  });
-  it("characterisation: a single-connection run carries no hook", async () => {
+  it("characterisation: a single-connection run carries none either", async () => {
     const { env, dir } = await world(2, false);
     const ran = await cli(["run", "--connection", "k1", "--workspace", join(dir, "work"), "--reserve", "1", "--", "-p", "--job", job(dir, { [KEYS[0]]: { exit: 0 } })], env);
     expect(ran.code, ran.stderr).toBe(0);
@@ -122,7 +106,7 @@ describe("the launcher's settings", () => {
   });
 });
 
-describe("the hook marks the member the run is on", () => {
+describe("a hook under a pooled run, by its grant", () => {
   it("a credit refusal reported by the hook, while the run's own result is a success, exhausts the first member and the next helper call hands the run to the second", async () => {
     const { env, dir } = await world(3);
     const ran = await run(env, dir, job(dir, {
@@ -192,6 +176,75 @@ describe("keypool report --from-hook, by hand", () => {
     expect((await cli(["keypool", "report", "nope", "--member", "k1", "--from-hook"], env, payload)).stderr.trim()).toBe("missing");
     expect((await cli(["keypool", "report", "p", "--member", "k9", "--from-hook"], env, payload)).stderr.trim()).toBe("missing");
     expect((await cli(["keypool", "report", "p", "--grant", "gnope", "--from-hook"], env, payload)).stderr.trim()).toBe("grant_missing");
+  });
+});
+
+// An interactive session, in the small: a shell (the agent CLI's place) that takes a key through `lease --pool` as a hand-written apiKeyHelper does, then
+// runs the hook command as its own child with the payload on stdin. The helper's parent and the hook's ancestor are the same shell.
+function session(env: NodeJS.ProcessEnv, leases: number, payload: unknown, hookArgs = ["--served"]): Promise<Out> {
+  const node = JSON.stringify(process.execPath);
+  const mainPath = JSON.stringify(main);
+  const lease = `${node} --experimental-strip-types ${mainPath} lease --pool p --isolation rules >/dev/null`;
+  const hook = `${node} --experimental-strip-types ${mainPath} keypool report p ${hookArgs.join(" ")} --from-hook`;
+  const script = `${Array.from({ length: leases }, () => lease).join("; ")}${leases > 0 ? "; " : ""}${hook}`;
+  return new Promise(resolve => {
+    const child = spawn("sh", ["-c", script], { env });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", chunk => { stdout += chunk; });
+    child.stderr.on("data", chunk => { stderr += chunk; });
+    child.on("close", code => resolve({ code: code ?? 1, stdout, stderr }));
+    child.stdin.end(JSON.stringify(payload));
+  });
+}
+
+describe("keypool report --served --from-hook: the member the session was last served", () => {
+  it("a session served k1 is told k1's key is dry: k1 is exhausted, and the next session is served k2", async () => {
+    const { env } = await world(3);
+    const out = await session(env, 1, saved("credit-refusal-400"));
+    expect([out.code, out.stderr]).toEqual([0, ""]);
+    expect(JSON.parse(out.stdout)).toEqual({ pool: "p", outcome: "exhausted" });
+    expect(await states(env)).toEqual(["exhausted", "active", "active"]);
+    const next = await cli(["lease", "--pool", "p", "--isolation", "rules"], env);
+    expect(next.stdout.trim()).toBe(KEYS[1]);
+  });
+  it("with the rotation moved on, it is the key last served that is blamed, not the first: three keys taken, the third is dry", async () => {
+    const { env } = await world(3);
+    const out = await session(env, 3, saved("credit-refusal-400"));
+    expect(out.code, out.stderr).toBe(0);
+    expect(await states(env)).toEqual(["active", "active", "exhausted"]);
+  });
+  it("a rate limit changes nothing", async () => {
+    const { env } = await world(3);
+    const out = await session(env, 1, saved("rate-limit-429"));
+    expect(JSON.parse(out.stdout)).toEqual({ pool: "p", outcome: "limited" });
+    expect(await states(env)).toEqual(["active", "active", "active"]);
+  });
+  it("a hook outside any session that was served says unserved, exits 1 and changes nothing", async () => {
+    const { env } = await world(3);
+    // A key leased in another shell that is gone, and a hook in a session that was never served one.
+    await new Promise<void>(resolve => { spawn("sh", ["-c", `${JSON.stringify(process.execPath)} --experimental-strip-types ${JSON.stringify(main)} lease --pool p --isolation rules >/dev/null`], { env }).on("close", () => { resolve(); }); });
+    const out = await session(env, 0, saved("credit-refusal-400"));
+    expect([out.code, out.stdout, out.stderr.trim()]).toEqual([1, "", "unserved"]);
+    expect(await states(env)).toEqual(["active", "active", "active"]);
+  });
+  it("is one of three targets: --served with --member or --grant is usage", async () => {
+    const { env } = await world(2);
+    const payload = JSON.stringify(saved("credit-refusal-400"));
+    expect((await cli(["keypool", "report", "p", "--served", "--member", "k1", "--from-hook"], env, payload)).stderr.trim()).toBe("usage");
+    expect((await cli(["keypool", "report", "p", "--served", "--grant", "g1", "--from-hook"], env, payload)).stderr.trim()).toBe("usage");
+  });
+  it("a planted secret in the payload leaves nothing, and the member's key is in none of the output", async () => {
+    const { env, dir } = await world(2);
+    const out = await session(env, 1, { ...saved("credit-refusal-400"), last_assistant_message: `Credit balance is too low ${PLANTED}`, error_details: PLANTED });
+    expect(out.code, out.stderr).toBe(0);
+    for (const text of [out.stdout, out.stderr, (await cli(["keypool", "list"], env)).stdout, (await cli(["log"], env)).stdout]) {
+      expect(text).not.toContain(PLANTED);
+      for (const key of KEYS) expect(text).not.toContain(key);
+    }
+    for (const path of homeFiles(dir)) expect(readFileSync(path).toString("latin1"), path).not.toContain(PLANTED);
   });
 });
 

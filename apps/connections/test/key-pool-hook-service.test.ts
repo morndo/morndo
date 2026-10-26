@@ -153,6 +153,81 @@ describe("reportRefusal by member", () => {
   });
 });
 
+describe("reportRefusal by the session that was served", () => {
+  // `lease --pool` is one lease per call and exec'd by the agent CLI, so its parent is the CLI; a hook the CLI runs has that CLI as an ancestor.
+  const HOUR_MS = 3_600_000;
+  const serve = (w: World, member: string, ppid: number): void => {
+    const leased = w.leases.lease(member, { ...runRequest, reserve: 0, probe: true });
+    if (!leased.ok) throw new Error(`no lease: ${JSON.stringify(leased)}`);
+    const served = w.leases.serve(member, leased.value.id, { pid: 7000 + ppid, ppid, lane: null, workspace: "/work/repo", isolation: "rules", proof: "claimed" });
+    expect(served.ok).toBe(true);
+    w.leases.close(member, leased.value.id, "done", null);
+  };
+  const hook = { pid: 900, startedAt: 1, bootId: "boot" };
+  const inSession = (w: World, ppid: number): void => { w.mem.processes.tree.set(900, [900, 899, ppid, 1]); };
+  it("marks the member this session was last served, and no other", async () => {
+    const w = await world();
+    serve(w, "k1", 500);
+    serve(w, "k2", 600);
+    inSession(w, 500);
+    expect(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), w.mem.clock.now())).toEqual({ ok: true, value: { outcome: "exhausted", suspect: null } });
+    expect([state(w, "k1"), state(w, "k2"), state(w, "k3")]).toEqual(["exhausted", "active", "active"]);
+  });
+  it("the latest key served to the session wins: a session that was moved on is blamed for the key it holds now", async () => {
+    const w = await world();
+    serve(w, "k1", 500);
+    w.mem.clock.at += 10_000;
+    serve(w, "k3", 500);
+    inSession(w, 500);
+    expect(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), w.mem.clock.now()).ok).toBe(true);
+    expect([state(w, "k1"), state(w, "k3")]).toEqual(["active", "exhausted"]);
+  });
+  it("a process that is not under a session that was served says unserved and changes nothing: no mark, no alert", async () => {
+    const w = await world();
+    serve(w, "k1", 500);
+    inSession(w, 501);
+    const before = JSON.stringify(pool(w));
+    expect(word(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), w.mem.clock.now()))).toBe("unserved");
+    expect(word(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(418, { kind: "teapot_error" }), w.mem.clock.now()))).toBe("unserved");
+    expect(JSON.stringify(pool(w))).toBe(before);
+    expect(w.mem.alerts.raised).toEqual([]);
+  });
+  it("a key served more than an hour ago is not the session's: a hook is no way to blame an old key", async () => {
+    const w = await world();
+    serve(w, "k1", 500);
+    w.mem.clock.at += HOUR_MS + 1_000;
+    inSession(w, 500);
+    expect(word(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), w.mem.clock.now()))).toBe("unserved");
+    expect(state(w, "k1")).toBe("active");
+  });
+  it("the nearest ancestor wins: a key leased by hand from a shell further out is not taken for the agent CLI's", async () => {
+    const w = await world();
+    serve(w, "k1", 400);
+    w.mem.clock.at += 1_000;
+    serve(w, "k2", 500);
+    w.mem.processes.tree.set(900, [900, 899, 500, 450, 400, 1]);
+    expect(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), w.mem.clock.now()).ok).toBe(true);
+    expect([state(w, "k1"), state(w, "k2")]).toEqual(["active", "exhausted"]);
+    const far = await world();
+    serve(far, "k1", 400);
+    far.mem.processes.tree.set(900, [900, 899, 500, 450, 440, 430, 420, 400, 1]);
+    expect(word(far.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(400), far.mem.clock.now()))).toBe("unserved");
+  });
+  it("a caller with no parent known is unserved", async () => {
+    const w = await world();
+    serve(w, "k1", 500);
+    expect(word(w.pools.reportRefusal("p", { kind: "served", caller: { pid: 12345, startedAt: 1, bootId: "boot" } }, signalOf(400), w.mem.clock.now()))).toBe("unserved");
+  });
+  it("a rate limit for a served session changes nothing", async () => {
+    const w = await world();
+    serve(w, "k1", 500);
+    inSession(w, 500);
+    const before = JSON.stringify(pool(w));
+    expect(w.pools.reportRefusal("p", { kind: "served", caller: hook }, signalOf(429), w.mem.clock.now())).toEqual({ ok: true, value: { outcome: "limited", suspect: null } });
+    expect(JSON.stringify(pool(w))).toBe(before);
+  });
+});
+
 describe("what is not a mark changes nothing", () => {
   it("a rate limit says limited and leaves the pool byte for byte as it was (no KeyLimited event)", async () => {
     const w = await world();

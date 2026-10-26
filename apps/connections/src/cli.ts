@@ -103,7 +103,7 @@ morndo-keys keypool recheck [<pool>] [--member M]    probes the exhausted keys t
 morndo-keys keypool policy <pool> [--mode …] [--recheck …]    keypool list    keypool delete <pool>
 morndo-keys keypool report <pool> --member M --outcome exhausted|failing|limited [--reason R] [--lease <id>]
 morndo-keys keypool report <pool> --outcome exhausted|failing|limited --grant <id>
-morndo-keys keypool report <pool> (--member M | --grant <id>) --from-hook    the agent CLI's StopFailure payload on stdin (a pooled run's settings name this command as the hook): read, classified and dropped, never stored; only a refusal of the key (credit, spend limit, 401/403, hold) changes anything. Prints the pool and one word.
+morndo-keys keypool report <pool> (--served | --member M | --grant <id>) --from-hook    the agent CLI's StopFailure payload on stdin, for a hook in your own settings: read, classified and dropped, never stored; only a refusal of the key (credit, spend limit, 401/403, hold) changes anything. --served names the member this session was last served by lease --pool (the key the hook's own CLI holds); --member names one yourself. Prints the pool and one word. (A pooled run's settings carry no hook: a headless run ends before a hook can finish.)
 morndo-keys keypool sink add|remove|list <pool> [<path>]    the files write-env writes the pool's key to; every registered path (and its .member sidecar) is denied to the tools of a run
 morndo-keys keypool write-env <pool> --file <sink> --var NAME --isolation rules [--if-due [--rotate-every 12h]]    writes the next member's key to a registered sink as NAME=value (0600, by rename) and its name to <sink>.member, under one gated lease; --if-due only when that member can no longer serve, a file is missing or --rotate-every has passed (round-robin only). The writer's isolation is its own claim, as for lease. It prints the pool and a word, never the key or the path. Refused for a path in a repository or in a directory group or others can write.
 morndo-keys keypool watch <pool> --log <file> (--member M | --sink <sink>) [--once]    for a server that cannot report a dry key itself: reads its log and, on the credit-balance or the usage-limit phrase, reports the member (--sink: the one named in <sink>.member at that moment). It never prints the line it matched, only the pool, the member and a word; a member is reported at most once in ten seconds. Without --once it follows the log from its end, from the start of a file that is new, truncated or replaced; --once reads what the log holds now and exits.
@@ -343,7 +343,6 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   });
   // A single-connection run stays on its lease. A pooled run's line is filled in once its filter channel is listening.
   let helperLine = [keys.command, ...keys.args, "helper", "--lease", lease.id].join(" ");
-  let hookLine: string | null = null;
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
   const plan = {
@@ -420,8 +419,6 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       }
       channel = served;
       helperLine = [keys.command, ...keys.args, "helper", "--filter", served.path, "--pool", grant.pool, "--grant", grant.id].join(" ");
-      // The agent CLI runs this when a turn ends on an API error; it reports a refusal of the key the grant is on.
-      hookLine = [keys.command, ...keys.args, "keypool", "report", grant.pool, "--from-hook", "--grant", grant.id].join(" ");
     }
     home.close();
     released = true;
@@ -469,7 +466,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
       }).execute(plan, parsed.rest, hooks)
       : connection.runtime === "cursor"
         ? await new CursorRuntime(saved.MORNDO_CURSOR_BIN ?? "agent", saved).execute(plan, parsed.rest, hooks)
-        : await new ClaudeRuntime(bin, helperLine, saved, baseUrl, party, hookLine).execute(plan, parsed.rest, hooks);
+        : await new ClaudeRuntime(bin, helperLine, saved, baseUrl, party).execute(plan, parsed.rest, hooks);
     status = child.status;
     stdout = child.stdout;
     output = child.stdout;
@@ -1158,7 +1155,7 @@ function parse(argv: readonly string[]): Parsed {
   const values = new Map<string, string[]>();
   for (let i = 1; i < ours.length; i++) {
     const token = ours[i] ?? "";
-    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed" || token === "--confirm-own-account" || token === "--from-hook" || token === "--if-due" || token === "--once") {
+    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed" || token === "--confirm-own-account" || token === "--from-hook" || token === "--if-due" || token === "--once" || token === "--served") {
       values.set(token.slice(2), ["true"]);
       continue;
     }
