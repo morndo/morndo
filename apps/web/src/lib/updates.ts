@@ -3,7 +3,7 @@
 // control plane first ("This machine", named control-plane as the hub's updates service does), then the nodes by
 // name. Pure words: no Svelte, no fetch. A node's Channel and mode are its own machine's word (`morndo update` on
 // it); the view does not carry them, so the row says null and the page says so, never a guess. The control plane's
-// own node (MORNDO_ENGINE_NODE) is folded into This machine: it has no row of its own.
+// own node (the hub's MORNDO_CONTROL_PLANE_NODE) is folded into This machine: it has no row of its own.
 import { compareVersions, parseVersion } from "@morndo/domain";
 import type { NodeUpdateHealth, RolloutWire, UpdateStateFile, UpdatesNode, UpdatesView, UpdaterStatus } from "@morndo/protocol";
 

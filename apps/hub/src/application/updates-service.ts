@@ -41,8 +41,8 @@ export class UpdatesService {
   #policy: () => AccessPolicy;
   #now: () => number;
   #build: () => { version: string; commit: string | null };
-  // The fleet node this machine is (MORNDO_ENGINE_NODE), so the Updates page can fold it into This machine; null
-  // when the hub does not know it.
+  // The fleet node this machine is (MORNDO_CONTROL_PLANE_NODE), so the Updates page can fold it into This machine;
+  // null when the hub is not told it.
   #ownNode: string | null;
   // The Rollout as the fleet's last `rollout` event said (§7), for the view when the fleet can't be asked now.
   #rollout: RolloutWire | null = null;
