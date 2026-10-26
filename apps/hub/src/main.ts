@@ -323,6 +323,7 @@ switch (cmd) {
     const updatesService = fleet ? new UpdatesService({
       fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
       policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
+      ownNode: config.engineNode ?? null,
     }) : null;
     const stopRolloutEvents = fleet && updatesService
       ? fleet.client.events(e => { if (e.t === "rollout") updatesService.onRolloutEvent(e.body); })

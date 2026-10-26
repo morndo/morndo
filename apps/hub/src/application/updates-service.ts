@@ -41,15 +41,19 @@ export class UpdatesService {
   #policy: () => AccessPolicy;
   #now: () => number;
   #build: () => { version: string; commit: string | null };
+  // The fleet node this machine is (MORNDO_ENGINE_NODE), so the Updates page can fold it into This machine; null
+  // when the hub does not know it.
+  #ownNode: string | null;
   // The Rollout as the fleet's last `rollout` event said (§7), for the view when the fleet can't be asked now.
   #rollout: RolloutWire | null = null;
 
   constructor(p: {
     fleet: FleetForUpdates; cli: UpdaterCli; sign: (ask: PrincipalAsk, now: number) => string;
     store: Store; policy: () => AccessPolicy; now?: () => number; build: () => { version: string; commit: string | null };
+    ownNode?: string | null;
   }) {
     this.#fleet = p.fleet; this.#cli = p.cli; this.#sign = p.sign; this.#store = p.store;
-    this.#policy = p.policy; this.#now = p.now ?? Date.now; this.#build = p.build;
+    this.#policy = p.policy; this.#now = p.now ?? Date.now; this.#build = p.build; this.#ownNode = p.ownNode ?? null;
   }
 
   // What the screen shows (§8.1): the fleet's Rollout and nodes, the control plane's own updater status, and the
@@ -59,7 +63,7 @@ export class UpdatesService {
     const [status, state, r, n] = await Promise.all([this.#cli.status(), this.#cli.state(), this.#fleet.rollout(), this.#fleet.nodes()]);
     const build = this.#build();
     return {
-      controlPlane: { version: build.version, commit: build.commit, status, state },
+      controlPlane: { version: build.version, commit: build.commit, status, state, node: this.#ownNode },
       rollout: r.ok ? r.rollout : this.#rollout,
       aboveControlPlane: r.ok ? r.aboveControlPlane : [],
       nodes: n.ok ? n.nodes.map(node) : [],

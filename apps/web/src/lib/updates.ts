@@ -2,7 +2,8 @@
 // control plane's own updater status, the fleet's Rollout and nodes — the rows the page shows, one per machine, the
 // control plane first ("This machine", named control-plane as the hub's updates service does), then the nodes by
 // name. Pure words: no Svelte, no fetch. A node's Channel and mode are its own machine's word (`morndo update` on
-// it); the view does not carry them, so the row says null and the page says so, never a guess.
+// it); the view does not carry them, so the row says null and the page says so, never a guess. The control plane's
+// own node (MORNDO_ENGINE_NODE) is folded into This machine: it has no row of its own.
 import { compareVersions, parseVersion } from "@morndo/domain";
 import type { NodeUpdateHealth, RolloutWire, UpdateStateFile, UpdatesNode, UpdatesView, UpdaterStatus } from "@morndo/protocol";
 
@@ -155,7 +156,9 @@ const nodeRow = (n: UpdatesNode, rollout: RolloutWire | null, controlPlane: stri
 };
 
 export function updatesRows(v: UpdatesView): UpdatesRow[] {
-  return [controlPlaneRow(v), ...[...v.nodes].sort((a, b) => a.name.localeCompare(b.name)).map(n => nodeRow(n, v.rollout, v.controlPlane.version))];
+  // The control plane's own node has no row of its own: that machine is This machine, already shown first.
+  const nodes = v.nodes.filter(n => n.name !== v.controlPlane.node);
+  return [controlPlaneRow(v), ...[...nodes].sort((a, b) => a.name.localeCompare(b.name)).map(n => nodeRow(n, v.rollout, v.controlPlane.version))];
 }
 
 // The Rollout as one line (§8.2): its Version, committed or soaking with the minutes left, or halted by whom and why
