@@ -5204,7 +5204,7 @@ export const CONTROLS: Control[] = [
     find: "paths.push(sink, sinkSidecar(sink));", replace: "paths.push(sink);",
     run: ["apps/connections/test/key-pool-sinks-service.test.ts"], expect: "sidecar" },
   { id: "t459-sink-cli-protected", task: "T-459", file: "apps/connections/src/keypool-cli.ts",
-    find: "  if (insideHome(home.dir, path)) return fail(io, \"sink_protected\");\n", replace: "",
+    find: "  if (insideHome(home.dir, path) || insideHome(home.dir, join(realOf(dirname(path)), basename(path)))) return fail(io, \"sink_protected\");\n", replace: "",
     run: ["apps/connections/test/keypool-sink-cli.test.ts"], expect: "sink_protected" },
   { id: "t459-sink-cli-directory", task: "T-459", file: "apps/connections/src/keypool-cli.ts",
     find: "  if (isDirectory(path)) return fail(io, \"sink_directory\");\n", replace: "",
