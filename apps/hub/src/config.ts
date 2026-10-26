@@ -39,7 +39,8 @@ export type Config = {
   engineNode?: string | null;
   // MORNDO_CONTROL_PLANE_NODE: the fleet node name of the node agent that runs beside the hub on the control plane's own
   // machine (not MORNDO_ENGINE_NODE, which names where the engine lanes run, and may be another machine). The Updates
-  // page folds that node into This machine. Unset or empty: no node is folded in.
+  // page folds that node into This machine. Trimmed and lower-cased (the fleet's node names are [a-z0-9-]{1,32}, compared
+  // as written). Unset or empty: no node is folded in.
   controlPlaneNode?: string | null;
   // MORNDO_REPO (B11): a local Morndo checkout the board reads merge ancestry from (`git merge-base --is-ancestor`),
   // kept current by the operator; the board never fetches. Unset or null: no checkout, every answer unknown, so a
@@ -152,7 +153,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     managerQueue: fleetSocket(env) !== null && !/^(off|0)$/i.test(env.MORNDO_MANAGER_QUEUE ?? ""),
     engineSessions: engineSessions(env),
     engineNode: env.MORNDO_ENGINE_NODE || null,
-    controlPlaneNode: env.MORNDO_CONTROL_PLANE_NODE || null,
+    controlPlaneNode: env.MORNDO_CONTROL_PLANE_NODE?.trim().toLowerCase() || null,
     morndoRepo: env.MORNDO_REPO || null,
     // Not the hub's own address: the JWT travels in clear to the browser vendors' push services, and the origin would
     // name the private host (review L2). Set MORNDO_PUSH_CONTACT to give them a contact of your own; `serve` refuses

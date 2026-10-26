@@ -20,7 +20,7 @@ import { loadOrCreateIdentity, writeIdentityPub } from "./adapters/identity.ts";
 import { fleetForUpdates } from "./adapters/fleet-updates.ts";
 import { principalSigner } from "./adapters/principal-signer.ts";
 import { updaterCli } from "./adapters/updater-cli.ts";
-import { UpdatesService } from "./application/updates-service.ts";
+import { updatesServiceFor } from "./adapters/updates-wiring.ts";
 import { passkeys } from "./adapters/passkeys.ts";
 import { denyConfigFromEnv, denyConfigWithClaudeDir, denyRoots, paneLock } from "@morndo/node-ops";
 import { AGENT_SCOPES, CLIENT_API } from "@morndo/protocol";
@@ -321,10 +321,10 @@ switch (cmd) {
     // beside the hub, but without a fleet there is no Rollout to move and no node to command, so the page stays off.
     // The fleet's `rollout` events keep the service's last word on where the Rollout stands, for a view the fleet
     // can't answer (its own subscription, like the runs' and the deliveries').
-    const updatesService = fleet ? new UpdatesService({
+    const updatesService = fleet ? updatesServiceFor(config, {
       fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
       policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
-      ownNode: config.controlPlaneNode ?? null,
+      warn: line => log.warn(line),
     }) : null;
     const stopRolloutEvents = fleet && updatesService
       ? fleet.client.events(e => { if (e.t === "rollout") updatesService.onRolloutEvent(e.body); })

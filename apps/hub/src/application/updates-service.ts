@@ -44,16 +44,19 @@ export class UpdatesService {
   // The fleet node this machine is (MORNDO_CONTROL_PLANE_NODE), so the Updates page can fold it into This machine;
   // null when the hub is not told it.
   #ownNode: string | null;
+  #warn: (line: string) => void;
+  #ownNodeWarned = false;
   // The Rollout as the fleet's last `rollout` event said (§7), for the view when the fleet can't be asked now.
   #rollout: RolloutWire | null = null;
 
   constructor(p: {
     fleet: FleetForUpdates; cli: UpdaterCli; sign: (ask: PrincipalAsk, now: number) => string;
     store: Store; policy: () => AccessPolicy; now?: () => number; build: () => { version: string; commit: string | null };
-    ownNode?: string | null;
+    ownNode?: string | null; warn?: (line: string) => void;
   }) {
     this.#fleet = p.fleet; this.#cli = p.cli; this.#sign = p.sign; this.#store = p.store;
     this.#policy = p.policy; this.#now = p.now ?? Date.now; this.#build = p.build; this.#ownNode = p.ownNode ?? null;
+    this.#warn = p.warn ?? (() => {});
   }
 
   // What the screen shows (§8.1): the fleet's Rollout and nodes, the control plane's own updater status, and the
@@ -62,12 +65,23 @@ export class UpdatesService {
   async view(): Promise<UpdatesView> {
     const [status, state, r, n] = await Promise.all([this.#cli.status(), this.#cli.state(), this.#fleet.rollout(), this.#fleet.nodes()]);
     const build = this.#build();
+    if (n.ok) this.#checkOwnNode(n.nodes);
     return {
       controlPlane: { version: build.version, commit: build.commit, status, state, node: this.#ownNode },
       rollout: r.ok ? r.rollout : this.#rollout,
       aboveControlPlane: r.ok ? r.aboveControlPlane : [],
       nodes: n.ok ? n.nodes.map(node) : [],
     };
+  }
+
+  // The setting names a node the fleet does not list: said once in the log, until the name is seen again. An empty list
+  // proves nothing (the fleet may just not be answerable), and a fleet that cannot be asked is no word either.
+  #checkOwnNode(nodes: FleetNode[]): void {
+    if (this.#ownNode === null || nodes.length === 0) return;
+    if (nodes.some(n => n.name === this.#ownNode)) { this.#ownNodeWarned = false; return; }
+    if (this.#ownNodeWarned) return;
+    this.#ownNodeWarned = true;
+    this.#warn(`MORNDO_CONTROL_PLANE_NODE names "${this.#ownNode}", which is no node the fleet lists (${nodes.map(n => n.name).join(", ")}): the Updates page folds nothing into This machine`);
   }
 
   async apply(a: Authenticated, machine: string, version: string): Promise<UpdatesCommandOutcome> {
