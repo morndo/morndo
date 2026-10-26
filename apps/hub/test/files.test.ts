@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { denyRoots } from "@morndo/node-ops";
+import { describeFile } from "../src/adapters/file-kinds.ts";
 import { fileStore, servingHeaders, storedIds } from "../src/adapters/files.ts";
 
 let root: string, home: string, data: string, work: string;
@@ -113,5 +114,15 @@ describe("serving", () => {
     expect(servingHeaders(meta("pdf", "application/pdf"), false)["Content-Security-Policy"]).toBe("default-src 'none'; img-src data:; style-src 'unsafe-inline'");
     expect(servingHeaders(meta("file", "application/octet-stream"), false)["Content-Disposition"]).toMatch(/^attachment/);
     expect(servingHeaders(meta("image", "image/png"), true)["Content-Disposition"]).toMatch(/^attachment/);
+  });
+  it("an HTML page the owner attached comes back as text in a sandbox, never as a page (S1)", () => {
+    for (const path of ["/inbox/pasted-20261026-120000-abc123-report.html", "/inbox/old.HTM"]) {
+      const page = describeFile(path);
+      expect(page).toMatchObject({ mime: "text/plain; charset=utf-8", kind: "text" });
+      const h = servingHeaders({ id: "x", size: 3, ...page }, false);
+      expect(h["Content-Type"]).toBe("text/plain; charset=utf-8");
+      expect(h["Content-Security-Policy"]).toMatch(/^default-src 'none';.*sandbox$/);
+      expect(h["X-Content-Type-Options"]).toBe("nosniff");
+    }
   });
 });

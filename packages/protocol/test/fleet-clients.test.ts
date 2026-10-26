@@ -37,6 +37,15 @@ describe("limits for fleet clients", () => {
   });
 });
 
+describe("pane.capture's scrollbackMissing (T-336)", () => {
+  const result = (r: unknown) => z.safeParse(OP_RESULTS["pane.capture"], r);
+  it("is kept when true, may be left out (an older node), and is never false", () => {
+    expect(result({ text: "x", truncated: false, scrollbackMissing: true })).toMatchObject({ success: true, data: { scrollbackMissing: true } });
+    expect(result({ text: "x", truncated: false }).success).toBe(true);
+    expect(result({ text: "x", truncated: false, scrollbackMissing: false }).success).toBe(false);
+  });
+});
+
 describe("error codes for deliveries", () => {
   it("id_conflict, no_session and already_typed: none of them ran, and each reads as itself", () => {
     for (const code of ["id_conflict", "no_session", "already_typed"] as const) {

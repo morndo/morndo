@@ -419,7 +419,7 @@ describe("the inbox", () => {
     const inbox = uploadInbox({ dir });
     expect(await inbox.save(Buffer.from("<svg><script>alert(1)</script></svg>"), endpointId("ep1"))).toEqual({ ok: false, error: "not_an_image" });
   });
-  it("saves a markdown file under a safe name and refuses an executable, HTML, bad UTF-8, and a text file over 1 MB", async () => {
+  it("saves a markdown file under a safe name and refuses an executable, an SVG, bad UTF-8, and a text file over 1 MB", async () => {
     const inbox = uploadInbox({ dir });
     const md = await inbox.save(Buffer.from("# Notes\n"), endpointId("ep1"), "My Notes.md");
     if (!md.ok) throw new Error(md.error);
@@ -427,13 +427,23 @@ describe("the inbox", () => {
     expect(md.value.mime).toBe("text/markdown");
     expect(readFileSync(md.value.path).toString("utf8")).toBe("# Notes\n");
     expect(await inbox.save(Buffer.from("MZ"), endpointId("ep1"), "run.exe")).toEqual({ ok: false, error: "not_allowed" });
-    expect(await inbox.save(Buffer.from("<!doctype html>"), endpointId("ep1"), "page.html")).toEqual({ ok: false, error: "not_allowed" });
+    expect(await inbox.save(Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>"), endpointId("ep1"), "pic.svg")).toEqual({ ok: false, error: "not_allowed" });
     expect(await inbox.save(Buffer.from([0xff, 0xfe, 0x61]), endpointId("ep1"), "notes.md")).toEqual({ ok: false, error: "not_utf8" });
     expect(await inbox.save(Buffer.alloc(1024 * 1024 + 1), endpointId("ep1"), "big.md")).toEqual({ ok: false, error: "too_big" });
     const pdf = await inbox.save(Buffer.from("%PDF-1.7\n"), endpointId("ep1"), "spec.pdf");
     if (!pdf.ok) throw new Error(pdf.error);
     expect(pdf.value.mime).toBe("application/pdf");
     expect(readFileSync(pdf.value.path).subarray(0, 5).toString("utf8")).toBe("%PDF-");
+  });
+  it("saves an HTML page byte for byte, for a worker to open by its path", async () => {
+    const inbox = uploadInbox({ dir });
+    const page = Buffer.from("<!doctype html><meta charset=utf-8><p>Grüße</p><script>run()</script>");
+    const r = await inbox.save(page, endpointId("ep1"), "report.html");
+    if (!r.ok) throw new Error(r.error);
+    expect(r.value.mime).toBe("text/html");
+    expect(r.value.path).toMatch(/-report\.html$/);
+    expect(readFileSync(r.value.path).equals(page)).toBe(true);
+    expect(inbox.get(r.value.id)).toMatchObject({ endpointId: "ep1", mime: "text/html", size: page.length });
   });
   it("removes files after a week", async () => {
     let t = Date.now();

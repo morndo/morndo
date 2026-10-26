@@ -252,6 +252,26 @@ describe("worker socket: what a forwarded caller is refused", () => {
   });
 });
 
+describe("worker socket: transcripts of any lane", () => {
+  // `morndo lanes peek --lines N` on a pane without scrollback asks for the end of the lane's transcript with
+  // transcript.size and transcript.read on the lane's node, over whatever socket it was given. The worker socket closes
+  // both for every node, protected lane or not (it lists neither: any op not listed is closed); the owner's socket sends them.
+  it("worker socket: transcript.size and transcript.read are refused on a start node and a lane that is not protected; the owner socket sends them", async () => {
+    const w = await world();
+    const session = "11111111-1111-4111-8111-111111111111";
+    for (const node of ["pc", "edge", "ctl"]) {
+      refused(await w.worker.post("/v1/op", op({ node }, "transcript.size", { sessionId: session })));
+      refused(await w.worker.post("/v1/op", op({ node }, "transcript.read", { sessionId: session, offset: 0, max: 100 })));
+    }
+    expect(sent(w.pc, "transcript.size", "transcript.read")).toHaveLength(0);
+    expect(sent(w.srv, "transcript.size", "transcript.read")).toHaveLength(0);
+    expect(sent(w.ctl, "transcript.size", "transcript.read")).toHaveLength(0);
+    expect((await w.owner.post("/v1/op", op({ node: "pc" }, "transcript.size", { sessionId: session })))?.body).toMatchObject({ ok: true });
+    expect((await w.owner.post("/v1/op", op({ node: "pc" }, "transcript.read", { sessionId: session, offset: 0, max: 100 })))?.body).toMatchObject({ ok: true });
+    expect(sent(w.pc, "transcript.size", "transcript.read")).toHaveLength(2);
+  });
+});
+
 describe("worker socket: what a forwarded caller still does", () => {
   it("worker socket: reads, peeks of lanes that are not protected and the events stream work", async () => {
     const w = await world();

@@ -24,6 +24,12 @@ export type Tmux = {
   // last `o.lines` lines (1 to LIMITS.captureMaxLines), with tmux's attribute escapes when `o.attributes`, and wrapped
   // lines joined unless `o.join` is false. null: no such pane, or a count out of range.
   capture(id: string, o?: { lines: number; attributes?: boolean; join?: boolean }): Promise<string | null>;
+  // pane.capture's screen and, read in the same one tmux invocation, whether the pane is on tmux's alternate screen
+  // (Claude Code's fullscreen renderer draws there), where capture-pane -S has no history to reach ("negative numbers are
+  // lines in the history", and the alternate screen keeps none): then `altRows` is the pane's height, all the lines there
+  // are, and the caller says scrollbackMissing when it asked for more. `altRows` null: not on the alternate screen, or a
+  // format line that read oddly. null: no such pane, a count out of range, or a tmux that failed.
+  captureScreen(id: string, o: { lines: number; attributes?: boolean; join?: boolean }): Promise<{ text: string; altRows: number | null } | null>;
   // `engineLane`: the pane runs a lane of the engine layer (engine-sessions.ts), whose input line is the last line on screen
   // (engineLaneBoxOnScreen) and which has no menus. Only a caller that knows that from the lane's own registry says so: a
   // shell prompt can be drawn the same way.
@@ -38,6 +44,9 @@ export type Tmux = {
 
 const KEYS = new Set<string>(KEY_NAMES);
 const PANE_ID = /^%\d+$/;
+// display-message -p's format for captureScreen: the alternate-screen flag and the pane's height. A constant, so no
+// format is ever built from outside data (tmux-cli.ts's rule for -F and display-message -p).
+const ALT_FORMAT = "#{alternate_on} #{pane_height}";
 
 // Text into a pane as one tmux command list, so no other tmux client's keys land between its parts: load it into a private
 // buffer from stdin (load-buffer: "If path is '-', the contents are read from stdin"), paste it (-p: "paste bracket control
@@ -230,6 +239,35 @@ export function tmuxAdapter(opts: { socket: string | null; session: string | nul
     } catch { return null; }
   };
 
+  // The capture's text as the `o` branch shapes it: each line trimmed of its end, the pane's empty bottom lines (blank
+  // once their escapes are left out) dropped, then the last N lines are what was asked for.
+  const shaped = (out: string, o: { lines: number }): string => {
+    const lines = out.split("\n").map(l => l.trimEnd());
+    while (lines.length && !lines.at(-1)?.replace(SGR, "").trim()) lines.pop();
+    return lines.slice(-o.lines).join("\n");
+  };
+
+  // The screen and the alternate-screen state in one tmux command list (as terminal.ts's frame reads its capture and its
+  // facts), so the pane cannot change between the two. -S: "negative numbers are lines in the history", so -S -N is N
+  // lines of history and the visible pane; -J "joins any wrapped lines" (as kira reads screen text; left out when `join`
+  // is false); -e "includes escape sequences for text and background attributes". The format's one last line is split off
+  // the output before the text is shaped: "#{alternate_on}" is 1 once the pane's application switched to the alternate
+  // screen, and "#{pane_height}" follows it — the height is all the lines there are there.
+  const captureScreen = async (id: string, o: { lines: number; attributes?: boolean; join?: boolean }): Promise<{ text: string; altRows: number | null } | null> => {
+    if (!PANE_ID.test(id)) return null;
+    if (!Number.isInteger(o.lines) || o.lines < 1 || o.lines > LIMITS.captureMaxLines) return null;
+    try {
+      const out = await tmux(["capture-pane", "-p", ...(o.join === false ? [] : ["-J"]), ...(o.attributes ? ["-e"] : []), "-t", id, "-S", `-${o.lines}`, ";", "display-message", "-p", "-t", id, ALT_FORMAT]);
+      const whole = out.endsWith("\n") ? out.slice(0, -1) : out;       // the format's line is the last one
+      const at = whole.lastIndexOf("\n") + 1;
+      const [alt = "", rows = "", ...rest] = whole.slice(at).split(" ");
+      const altRows = alt === "1" && rest.length === 0 && /^\d+$/.test(rows) ? Number(rows) : null;
+      return { text: shaped(whole.slice(0, at), o), altRows };
+    } catch {
+      return null;                                        // the pane went away between list and capture
+    }
+  };
+
   return {
     async listWorkers() {
       const fmt = ["#{pane_id}", "#{session_name}", "#{window_index}", "#{window_name}", "#{pane_current_path}"].join(SEP);
@@ -268,23 +306,18 @@ export function tmuxAdapter(opts: { socket: string | null; session: string | nul
     async capture(id, o) {
       if (!/^%\d+$/.test(id)) return null;
       if (o && (!Number.isInteger(o.lines) || o.lines < 1 || o.lines > LIMITS.captureMaxLines)) return null;
-      try {
-        if (!o) {
+      if (!o) {
+        try {
           const out = await tmux(["capture-pane", "-p", "-J", "-t", id, "-S", `-${history}`]);
           return out.split("\n").map(l => l.trimEnd()).join("\n").replace(/\n+$/, "");
+        } catch {
+          return null;                                    // the pane went away between list and capture
         }
-        // -S: "negative numbers are lines in the history", so -S -N is N lines of history and the visible pane; -J "joins
-        // any wrapped lines" (as kira reads screen text; left out when `join` is false); -e "includes escape sequences for
-        // text and background attributes". The pane's empty bottom lines go first (blank once their escapes are left out),
-        // then the last N lines are what was asked for.
-        const out = await tmux(["capture-pane", "-p", ...(o.join === false ? [] : ["-J"]), ...(o.attributes ? ["-e"] : []), "-t", id, "-S", `-${o.lines}`]);
-        const lines = out.split("\n").map(l => l.trimEnd());
-        while (lines.length && !lines.at(-1)?.replace(SGR, "").trim()) lines.pop();
-        return lines.slice(-o.lines).join("\n");
-      } catch {
-        return null;                                      // the pane went away between list and capture
       }
+      const screen = await captureScreen(id, o);
+      return screen === null ? null : screen.text;
     },
+    captureScreen,
     async sendKeyNames(paneId, names) {
       // send-keys: "Each argument key is the name of the key (such as 'C-a' or 'NPage') to send"; one argument per name,
       // never -l ("disables key name lookup"). The allow-list is checked again here, right before tmux sees the names.
