@@ -682,7 +682,7 @@ Several API-key Connections of one provider and runtime behind one name, served 
 | Hand-off | The pooled helper moving a run to the next member when the one it is on cannot serve: the old lease closed and the new one granted in one directory save, the window carried over. | A pick (a hand-off is not a rotation); a rotation on a refusal. |
 | Sink | A file a pool's key is written to by `write-env`, registered by the principal: an absolute normalised path of safe characters, one pool's, denied to the lanes' tools with its `.member` sidecar. | A Secrets store; the vault. |
 | Sidecar | `<sink>.member`: the name of the member whose key was last written to the sink, so a report-back (or `watch`) knows whom to blame. | The key. |
-| Failure hook | The agent CLI's `StopFailure` hook: on an API error it runs a command with the error on stdin; a pooled run's settings name `keypool report … --from-hook`. Its payload is read, classified and dropped. | A source of truth about the key beyond the refusal it carries. |
+| Failure hook | The agent CLI's `StopFailure` hook: on an API error it runs a command with the error on stdin; an interactive session's own settings name `keypool report <pool> --served --from-hook` (the member this session was last served). Its payload is read, classified and dropped. | A source of truth about the key beyond the refusal it carries. |
 | Previous member | The member a grant came from, with when it moved: a refusal reported within the helper's cache lifetime of the move belongs to it. | The current member. |
 
 | # | Invariant |
