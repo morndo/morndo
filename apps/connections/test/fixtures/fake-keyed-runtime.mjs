@@ -83,12 +83,26 @@ function reports(answer) {
   catch (error) { appendFileSync(`${job.record}.report`, `${JSON.stringify({ code: error.status ?? 1, stderr: String(error.stderr ?? "") })}\n`); }
 }
 
+// `hook`: what the agent CLI does when a turn ends on an API error: run each StopFailure hook command the settings name, through a shell, with `hook`
+// as the JSON on stdin (a string is sent as it is). Each result is recorded in `<record>.hook`, never shown.
+function hooks(answer) {
+  if (answer.hook === undefined) return;
+  const stdin = typeof answer.hook === "string" ? answer.hook : JSON.stringify(answer.hook);
+  for (const group of settings.hooks?.StopFailure ?? []) {
+    for (const entry of group.hooks ?? []) {
+      const out = spawnSync("sh", ["-c", entry.command], { encoding: "utf8", timeout: 20_000, input: stdin });
+      appendFileSync(`${job.record}.hook`, `${JSON.stringify({ code: out.status ?? 1, stdout: String(out.stdout ?? ""), stderr: String(out.stderr ?? "") })}\n`);
+    }
+  }
+}
+
 let result = helper();
 record(result, false);
 const first = job.keys?.[result.key] ?? { exit: 0 };
 commands(first);
 await bypasses(first);
 reports(first);
+hooks(first);
 // `killParent`: the run is killed before it can close its lease or its grant (what a SIGKILL of the launcher leaves behind).
 if (first.killParent) process.kill(process.ppid, "SIGKILL");
 let answer = first;
@@ -97,7 +111,7 @@ for (let i = 0; i < (first.rehelp ?? 0); i++) {
   record(result, true);
   answer = job.keys?.[result.key] ?? { exit: 0 };
 }
-if (answer !== first) reports(answer);
+if (answer !== first) { reports(answer); hooks(answer); }
 // `cmdsAfter`: commands run after the last helper call, before the child prints (a member removed or rotated once it was handed to).
 commands(answer, answer.cmdsAfter);
 if (answer.json) process.stdout.write(`${JSON.stringify(answer.json)}\n`);
