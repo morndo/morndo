@@ -38,6 +38,13 @@ const PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><scr
       nodes: [{ name: "pc", status: "online", version: "0.4.2", proto: [1], update: { state: "rolled_back", version: "0.4.2", target: "0.5.0", failedCheck: "node health (fleet connection)" } }],
     };
   }
+  if (q === "own") {
+    w.__view = {
+      controlPlane: { version: "0.4.2", commit: null, status: status(), state: null, node: "pc" },
+      rollout, aboveControlPlane: [],
+      nodes: [{ name: "pc", status: "online", version: "0.4.2", proto: [1], update: { state: "rolled_back", version: "0.4.2", target: "0.5.0", failedCheck: "node health (fleet connection)" } }],
+    };
+  }
   const off = q === "off";
   const json = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { "content-type": "application/json" } });
   w.fetch = async (input, init) => {
@@ -95,6 +102,15 @@ describe("the Updates page", () => {
       expect(await page.locator("[data-rollout]").textContent()).toContain("committed");
       expect(await page.locator("[data-updates] .sum").textContent()).toContain("Channel and mode are set with");
       expect(await page.locator("[data-updates] .sum").textContent()).toContain("morndo update");
+    } finally { await page.close(); }
+  });
+
+  it("the control plane's own node has no row of its own, and its problem shows on This machine", async () => {
+    const page = await open("own");
+    try {
+      expect(await page.locator("[data-machine]").evaluateAll(els => els.map(e => e.getAttribute("data-machine")))).toEqual(["control-plane"]);
+      expect(await page.locator("[data-machine=control-plane]").textContent())
+        .toContain("its node agent pc rolled back from 0.5.0: node health (fleet connection) failed");
     } finally { await page.close(); }
   });
 
