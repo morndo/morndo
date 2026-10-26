@@ -86,7 +86,7 @@ const who = (verifiedAt: number, now: number): Authenticated => ({
 
 const service = (fleet: FleetForUpdates, cli: ReturnType<typeof cliWith>["cli"], now: () => number, events: UpdateCommanded[], ownNode: string | null = null, warn?: (line: string) => void) =>
   new UpdatesService({
-    ownNode, warn,
+    ownNode, ...(warn === undefined ? {} : { warn }),
     fleet, cli, sign: principalSigner(identity), policy: () => ({ stay: "12h", stepUp: "1h" }) as AccessPolicy, now,
     store: { record(es: UpdateCommanded[]) { events.push(...es); } } as never as Store,
     build: () => ({ version: "0.4.2", commit: null }),
