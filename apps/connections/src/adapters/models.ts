@@ -46,6 +46,13 @@ export function launchChoice(picks: Readonly<Record<string, string>>, role: stri
   return { model, effort: effort && effort !== "" ? effort : "high" };
 }
 
+// What a run may copy from its own output into an engine mark: a model id, and never a string that holds a key it knows.
+export function markableModel(seen: string, keys: readonly string[]): string | null {
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:/@[\]=,-]{0,99}$/.test(seen)) return null;
+  for (const key of keys) if (key !== "" && seen.includes(key)) return null;
+  return seen;
+}
+
 export function sameModel(alias: string, reported: string, patterns: Readonly<Record<string, string>> = {}): boolean {
   if (reported === alias) return true;
   const pattern = patterns[alias];

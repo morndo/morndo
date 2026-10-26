@@ -1,0 +1,8 @@
+[
+  {
+    "vendor": "anthropic",
+    "errorDialect": "anthropic",
+    "termsRevision": "2026-10-25",
+    "termsLine": "A key pool rotates between your own API keys. The Commercial Terms govern API keys and the Console, and credits may only be used by the holder of the account they belong to (Supplemental Credits Terms); the Usage Policy forbids evading a ban or payment through another account. So a pool holds only keys of Console accounts you hold, rotates only when a key's credit is used up or a spend limit you set is reached, and stops, alerting you, when a key or its account is refused. By acknowledging you confirm that every key you add is of an account you hold. (Terms read 2026-10-24: Consumer Terms of 8 Oct 2025, Commercial Terms of 17 Jun 2025, Supplemental Credits Terms of 4 Mar 2024; the wording is the owner's to revise.)"
+  }
+]
