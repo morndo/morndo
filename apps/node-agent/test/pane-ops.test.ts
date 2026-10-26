@@ -3,7 +3,7 @@
 // test hooks that act on panes (noExpect, clockOffsetMs).
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { chmodSync, mkdtempSync, writeFileSync as writeFile } from "node:fs";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync as writeFile } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -16,6 +16,7 @@ let home: { home: string; cleanup: () => void };
 let t: TestTmux;
 let h: Harness;
 let lane = { workerId: "", stamp: "" };
+const wrappers: string[] = [];
 const dirOf = (name: string) => { const d = join(home.home, name); mkdirSync(d, { recursive: true }); return d; };
 const claude = (dir: string) => `${process.execPath} ${FIXTURE} ${dir}`;
 const submitted = (dir: string) => (existsSync(join(dir, "submitted.jsonl")) ? readFileSync(join(dir, "submitted.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
@@ -36,7 +37,7 @@ beforeEach(async () => {
   h = opsHarness({ home: home.home, socket: t.socket });
   lane = await startLane(dirOf("a"));
 });
-afterEach(async () => { h.close(); await t.kill(); home.cleanup(); });
+afterEach(async () => { for (const w of wrappers.splice(0)) rmSync(w, { recursive: true, force: true }); h.close(); await t.kill(); home.cleanup(); });
 
 const send = (text: string, key: string, expect: Record<string, unknown> = {}, workerId = lane.workerId, harness = h, timeoutMs?: number) =>
   harness.call("pane.send", { workerId, text, expect: { server: lane.stamp, window: "lane-a", ...expect } }, { key, ...(timeoutMs !== undefined ? { timeoutMs } : {}) });
@@ -253,6 +254,7 @@ describe("the pane lock (spec §3.1 \"Pane lock\")", () => {
 describe("pane.send with a tmux that stalls at the paste", () => {
   it("cuts the paste at 5 s, answers internal (it may have acted), and the next send is not blocked behind it", async () => {
     const bin = mkdtempSync(join(tmpdir(), "morndo-wrap-"));
+    wrappers.push(bin);
     const flag = join(bin, "hang");
     const real = execFileSync("which", ["tmux"], { encoding: "utf8" }).trim();
     writeFile(join(bin, "tmux"), `#!/bin/sh\ncase " $* " in *" load-buffer "*) if [ -e "${flag}" ]; then rm -f "${flag}"; sleep 8; fi ;; esac\nexec ${real} "$@"\n`);
@@ -271,6 +273,7 @@ describe("pane.send with a tmux that stalls at the paste", () => {
   }, 30_000);
   it("a styled capture that outlasts the deadline answers timeout, executed no, and types nothing", async () => {
     const bin = mkdtempSync(join(tmpdir(), "morndo-wrap-"));
+    wrappers.push(bin);
     const flag = join(bin, "slow");
     const real = execFileSync("which", ["tmux"], { encoding: "utf8" }).trim();
     writeFile(join(bin, "tmux"), `#!/bin/sh\ncase " $* " in *" capture-pane "*" -e "*) if [ -e "${flag}" ]; then rm -f "${flag}"; sleep 2; fi ;; esac\nexec ${real} "$@"\n`);
@@ -289,6 +292,7 @@ describe("pane.send with a tmux that stalls at the paste", () => {
   // decision 7): only an abort before the paste is "not executed".
   it("a paste killed after the deadline stays in doubt: executed maybe, the key kept, and a retry with the key types nothing", async () => {
     const bin = mkdtempSync(join(tmpdir(), "morndo-wrap-"));
+    wrappers.push(bin);
     const flag = join(bin, "typed-then-hang");
     const real = execFileSync("which", ["tmux"], { encoding: "utf8" }).trim();
     writeFile(join(bin, "tmux"), `#!/bin/sh\ncase " $* " in *" load-buffer "*) if [ -e "${flag}" ]; then rm -f "${flag}"; ${real} "$@"; sleep 8; exit 0; fi ;; esac\nexec ${real} "$@"\n`);

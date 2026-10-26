@@ -5,11 +5,12 @@
 import Database from "better-sqlite3";
 import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { LIMITS, NodeStatusHealth } from "@morndo/protocol";
-import { Flight } from "@morndo/service-kit";
+import { CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE, LIMITS, NodeStatusHealth } from "@morndo/protocol";
+import { Flight, holdFile, productBuild } from "@morndo/service-kit";
 import { loadConfig, type AgentConfig } from "../src/config.ts";
 import { agentPaths } from "../src/paths.ts";
 import { openAgentDb } from "../src/db/open.ts";
@@ -59,6 +60,34 @@ describe("over the connection", () => {
     stuck();
   });
 
+  it("its hello says it takes long messages and the Rollout frame beside the policy's ops; CAP_UPDATE only with an updater installed", async () => {
+    const bare = await runAgent(config);
+    stops.push(() => bare.agent.stop());
+    const hello = await fleet.waitFor(m => m.t === "hello");
+    expect((hello as Msg & { caps: string[] }).caps).toEqual([...config.policy.ops, CAP_LONG_TEXT, CAP_ROLLOUT]);
+
+    // The updater installed — launcher and apply unit both present (updates §7) — with the policy allowing
+    // update.apply: the hello says CAP_UPDATE too, and the fleet may send the op.
+    mkdirSync(join(home.home, ".local", "bin"), { recursive: true });
+    writeFileSync(join(home.home, ".local/bin/morndo-update"), "#!/bin/sh\n");
+    mkdirSync(join(home.home, ".config/systemd/user"), { recursive: true });
+    writeFileSync(join(home.home, ".config/systemd/user/morndo-update-apply@.service"), "[Unit]\nDescription=apply\n");
+    await bare.agent.stop();
+    const before = fleet.received.length;
+    const withUpdater = await runAgent(loadConfig(home.home));
+    stops.push(() => withUpdater.agent.stop());
+    const second = await fleet.waitFor(m => m.t === "hello", 5000, before);
+    expect((second as Msg & { caps: string[] }).caps).toEqual([...config.policy.ops, CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE]);
+  });
+
+  it("its hello carries the build it runs: the version and the commit (the fleet's /v1/nodes shows it)", async () => {
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    const hello = (await fleet.waitFor(m => m.t === "hello")) as Msg & { agent: { version: string; commit?: string } };
+    const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: join(import.meta.dirname, "..", "..", ".."), encoding: "utf8" }).trim();
+    expect(hello.agent).toEqual({ version: productBuild().version, commit: head });
+  });
+
   it("sends the full inventory and health after welcome, then inventory again when tmux changes", async () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "api", "sleep 600");
     const { agent } = await runAgent(config);
@@ -67,8 +96,9 @@ describe("over the connection", () => {
     expect(inv).toMatchObject({ v: 1, invVersion: 1, panes: [{ window: "api", workerId: expect.stringMatching(/^pc\.[0-9a-f]{8}\.\d+$/) }] });
     const health = await fleet.waitFor(m => m.t === "ev.health");
     const h = (health as Msg & { health: Record<string, unknown> }).health;
-    expect(Object.keys(h).sort()).toEqual(["diskFreeHome", "drops", "load1", "memAvailable", "memTotal", "psiFull10", "psiSome10", "spoolDepth", "tmuxOk", "wallClock"]);
+    expect(Object.keys(h).sort()).toEqual(["diskFreeHome", "drops", "load1", "memAvailable", "memTotal", "psiFull10", "psiSome10", "spoolDepth", "tmuxOk", "tzOffsetMin", "wallClock"]);
     expect(Math.abs((h.wallClock as number) - Date.now())).toBeLessThan(5000);
+    expect(h.tzOffsetMin).toBe(-new Date().getTimezoneOffset() || 0);              // ADR-0032: east positive, in every health
     t.tmux("new-window", "-d", "-t", "=main:", "-n", "web", "sleep 600");
     const next = await fleet.waitFor(m => m.t === "ev.inventory" && m.invVersion === 2);
     expect((next.panes as { window: string }[]).map(p => p.window).sort()).toEqual(["api", "web"]);
@@ -472,6 +502,106 @@ describe("test hooks over the connection (test-hooks.ts)", () => {
   });
 });
 
+// §6.3's node blocker, made visible: the agent's status.json lists its in-flight work as it changes, and a stop begun
+// mid-paste (what SIGTERM calls) finishes the paste, types it exactly once and refuses new work as `updating`. The
+// wrapper stands in for `tmux` on PATH, as pane-ops.test.ts's does: it holds every paste (load-buffer) ~300 ms and
+// counts it, so a stop can begin while one runs.
+describe("in-flight work, in status.json and across a stop (§6.3)", () => {
+  const wrappers: string[] = [];
+  afterEach(() => { for (const w of wrappers.splice(0)) rmSync(w, { recursive: true, force: true }); });
+
+  // A lane "api" running the stand-in for Claude Code's input box, and what was submitted in it.
+  async function claudeLane() {
+    const dir = join(home.home, "lane");
+    mkdirSync(dir);
+    t.tmux("new-session", "-d", "-s", "main", "-n", "api", "-x", "100", "-y", "20", `${process.execPath} ${FIXTURE} ${dir}`);
+    expect(await until(() => t.tmux("capture-pane", "-p", "-t", "=main:0").includes("❯"))).toBe(true);
+    const file = join(dir, "submitted.jsonl");
+    return () => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+  }
+  // The fake tmux: each paste sleeps ~300 ms before the real binary runs, and is counted.
+  function slowTmux() {
+    const bin = mkdtempSync(join(tmpdir(), "morndo-wrap-"));
+    wrappers.push(bin);
+    const pastes = join(bin, "pastes");
+    const real = execFileSync("which", ["tmux"], { encoding: "utf8" }).trim();
+    writeFileSync(join(bin, "tmux"), `#!/bin/sh\ncase " $* " in *" load-buffer "*) echo x >> "${pastes}"; sleep 0.3 ;; esac\nexec ${real} "$@"\n`);
+    chmodSync(join(bin, "tmux"), 0o755);
+    return { bin, pasteCount: () => (existsSync(pastes) ? readFileSync(pastes, "utf8").trim().split("\n").filter(Boolean).length : 0) };
+  }
+  const inFlightOf = () => {
+    try {
+      const body = JSON.parse(readFileSync(agentPaths(home.home).statusFile, "utf8")) as { inFlight?: { kind: string; id: string }[] };
+      return body.inFlight ?? [];
+    } catch { return []; }
+  };
+  const sendPaste = (id: string, key: string, workerId: string, text: string) =>
+    fleet.send({ t: "req", id, op: "pane.send", args: { workerId, text, expect: { server: workerId.split(".")[1], window: "api" } }, timeoutMs: 10_000, key });
+
+  it("status.json says the node has seen the hold within a re-read interval, not at the next health tick", async () => {
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    const heldOf = (): boolean | undefined => {
+      try { return (JSON.parse(readFileSync(agentPaths(home.home).statusFile, "utf8")) as { held?: boolean }).held; }
+      catch { return undefined; }
+    };
+    expect(await until(() => heldOf() === false, 2000, 5)).toBe(true);
+    const path = holdFile(home.home, { HOME: home.home, NODE_ENV: "test" });
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify({ services: ["node"], reason: "drain", version: "0.2.0", since: new Date().toISOString() }));
+    try {
+      expect(await until(() => heldOf() === true, 3000, 5), "acknowledged within about a second").toBe(true);
+    } finally { rmSync(path, { force: true }); }
+  });
+
+  it("status.json lists the paste while it is typed, and nothing after", async () => {
+    const submitted = await claudeLane();
+    const { agent } = await runAgent(config);
+    stops.push(() => agent.stop());
+    const workerId = ((await fleet.waitFor(m => m.t === "ev.inventory")).panes as { workerId: string }[])[0]?.workerId ?? "";
+    const text = `a paste the status outlasts\n${"mid-paste line\n".repeat(6)}`;
+    const slow = slowTmux();
+    const saved = process.env.PATH;
+    process.env.PATH = `${slow.bin}:${saved}`;
+    try {
+      sendPaste("paste", "hub:listed-1", workerId, text);
+      expect(await until(() => inFlightOf().some(i => i.kind === "pane.send" && i.id === "hub:listed-1"), 2000, 5)).toBe(true);
+      expect(await fleet.waitFor(m => m.t === "res" && m.id === "paste", 10_000)).toMatchObject({ ok: true, result: { problem: null } });
+    } finally { process.env.PATH = saved; }
+    expect(inFlightOf()).toEqual([]);                 // the end is saved too, before the answer even travels
+    expect(submitted()).toEqual([text]);
+  });
+
+  it("a SIGTERM mid-paste finishes it", async () => {
+    const submitted = await claudeLane();
+    const { agent } = await runAgent(config);
+    let stopping: Promise<void> | null = null;
+    stops.push(() => { stopping ??= agent.stop(); return stopping; });
+    const workerId = ((await fleet.waitFor(m => m.t === "ev.inventory")).panes as { workerId: string }[])[0]?.workerId ?? "";
+    const text = `typed while the agent stops\n${"and finished once\n".repeat(6)}`;
+    const slow = slowTmux();
+    const saved = process.env.PATH;
+    process.env.PATH = `${slow.bin}:${saved}`;
+    try {
+      sendPaste("paste", "hub:sigterm-1", workerId, text);
+      expect(await until(() => inFlightOf().some(i => i.kind === "pane.send"), 2000, 5)).toBe(true);
+      stopping = agent.stop();                        // what SIGTERM calls, begun while the paste is in flight
+      fleet.send({ t: "req", id: "during", op: "lane.start", args: { name: "late", cwd: join(home.home, "w") }, timeoutMs: 5000, key: "hub:during" });
+      expect(await fleet.waitFor(m => m.t === "res" && m.id === "during", 2000)).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
+      let resolved = false;
+      void stopping.then(() => { resolved = true; });
+      expect(inFlightOf().some(i => i.id === "hub:sigterm-1"), "the paste is still in flight").toBe(true);
+      expect(resolved, "the stop waits for it").toBe(false);
+      await stopping;
+      expect(submitted()).toEqual([text]);            // typed exactly once
+      expect(slow.pasteCount()).toBe(1);              // the fake tmux saw the text once
+    } finally { process.env.PATH = saved; }
+    const db = new Database(config.dbPath, { readonly: true });
+    try { expect((db.prepare("SELECT state FROM done_keys WHERE key = 'hub:sigterm-1'").get() as { state: string }).state).toBe("done"); }
+    finally { db.close(); }
+  });
+});
+
 describe("`morndo-node run`: files it can't use stop it with one sentence, exit 78 (final review M3)", () => {
   // `run` on this joined HOME: exit 78, the sentence, no stack frame, and the fleet never dialed.
   const refusedWith = (sentence: RegExp) => {
@@ -525,6 +655,25 @@ describe("`morndo-node run` and test hooks", () => {
       expect(await fleet.waitFor(m => m.t === "hello", 10_000)).toMatchObject({ streamId: fixed });
       expect(stderr.match(/test hooks are on/g)).toHaveLength(1);
       expect(stderr).toMatch(/test hooks are on \(fixedStreamId, spoolFail\)/);
+    } finally {
+      child.kill("SIGTERM");
+    }
+    expect(await exited).toBe(0);
+  });
+
+  it("`run` removes MORNDO_AGENT_TOKEN from its environment first, before it hosts tmux or starts the agent, and says so once", async () => {
+    const child = spawn(process.execPath, [MAIN, "run"], {
+      env: { ...process.env, HOME: home.home, NODE_ENV: "test", MORNDO_AGENT_TOKEN: "mgr_secret-token" },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    const exited = new Promise<number | null>(resolve => child.once("exit", code => resolve(code)));
+    let stderr = "";
+    child.stderr.on("data", (d: Buffer) => { stderr += d.toString("utf8"); });
+    try {
+      await fleet.waitFor(m => m.t === "hello", 10_000);
+      expect(stderr.match(/MORNDO_AGENT_TOKEN was set in the node's environment/g)).toHaveLength(1);
+      expect(stderr).toMatch(/removed from it at start, before tmux and the lanes/);
+      expect(stderr).not.toContain("mgr_secret-token");
     } finally {
       child.kill("SIGTERM");
     }

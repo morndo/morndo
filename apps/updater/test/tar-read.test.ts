@@ -1,0 +1,263 @@
+// The tar reader's contract (design §6.1 step 4, §10.4 "a crafted archive"): it reads exactly what
+// scripts/release/archive.ts packTree writes and refuses everything else — paths that leave the tree, links that
+// point out (straight or through another link of the archive), anything written through a link, device nodes and
+// GNU extensions, a bad checksum, a truncated body,
+// unbounded expansion. Every refusal also checks that nothing landed outside dest: the reader's one write rule.
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { gzipSync } from "node:zlib";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { packTree, type TreeFile } from "../../../scripts/release/archive.ts";
+import { extractTar, foldKey, TarRefused, type TarEntry } from "../src/adapters/tar-read.ts";
+import { foldKey as packFoldKey } from "../../../scripts/release/archive.ts";
+import { evilGz, paxBody, rawTar } from "./helpers/tar-fixtures.ts";
+
+let root = "";
+
+beforeAll(() => { root = mkdtempSync(join(tmpdir(), "morndo-upd-")); });
+afterAll(() => { rmSync(root, { recursive: true, force: true }); });
+
+const dir = (name: string) => join(root, name);
+
+// One refusal case: TarRefused with a reason, and dest's parent holding exactly what it held before — an escape
+// (`../x`, `a/../../b`) would create a sibling of dest, so the listing is the check.
+const refuse = async (gz: Buffer, name: string, reason: RegExp, o: { maxBytes?: number } = {}): Promise<void> => {
+  const archive = dir(`${name}.tar.gz`);
+  const dest = dir(`${name}-dest`);
+  writeFileSync(archive, gz);
+  mkdirSync(dest);
+  const before = readdirSync(root).sort();
+  let thrown: unknown;
+  try { await extractTar(archive, dest, { maxBytes: o.maxBytes ?? 10 * 1024 * 1024 }); }
+  catch (error) { thrown = error; }
+  expect(thrown, name).toBeInstanceOf(TarRefused);
+  expect((thrown as TarRefused).reason, name).toMatch(reason);
+  expect(readdirSync(root).sort(), name).toEqual(before);
+};
+
+const MODE = (path: string) => (statSync(path).mode & 0o777).toString(8);
+
+// One 152-character name with no "/" in it: no ustar prefix/name split can hold it, so packTree writes it as a
+// pax `path` record — the one extension the reader accepts.
+const LONG = `${"leaf".repeat(37)}.txt`;
+
+const GOOD: TreeFile[] = [
+  { path: "README.md", mode: "0444", bytes: Buffer.from("morndo 0.2.0\n") },
+  { path: "app/lib/main.js", mode: "0444", bytes: Buffer.from("console.log('hi')\n") },
+  { path: "app/run.sh", mode: "0555", bytes: Buffer.from("#!/bin/sh\necho 0.2.0\n") },
+  { path: "bin/morndo", mode: "0555", link: "../app/run.sh" },
+  { path: "units", mode: "0555", directory: true },
+  { path: "units/hub.service", mode: "0444", bytes: Buffer.from("[Unit]\n") },
+  { path: LONG, mode: "0444", bytes: Buffer.from("a long name\n") },
+];
+
+describe("extractTar", () => {
+  it("extracts a packTree archive exactly: entries in archive order, contents, link targets, its own modes", async () => {
+    const archive = dir("good.tar.gz");
+    writeFileSync(archive, packTree(GOOD, 0));
+    const dest = dir("good-dest");
+    mkdirSync(dest);
+    const entries = await extractTar(archive, dest, { maxBytes: 10 * 1024 * 1024 });
+    const byPath = new Map(entries.map((e: TarEntry) => [e.path, e]));
+    // every file of the tree, plus packTree's explicit directories and the implicit parents of nested paths
+    expect([...byPath.keys()].sort()).toEqual([...GOOD.map(f => f.path), "app", "app/lib", "bin"].sort());
+    expect(byPath.get("units")!.type).toBe("dir");
+    expect(byPath.get("app/lib/main.js")!.type).toBe("file");
+    expect(byPath.get("bin/morndo")).toEqual({ path: "bin/morndo", type: "symlink", link: "../app/run.sh" });
+    expect(byPath.get(LONG)!.type).toBe("file");
+    // the disk agrees: contents, link targets, and the reader's own modes (the signed list sets the final ones)
+    expect(readFileSync(join(dest, "README.md"), "utf8")).toBe("morndo 0.2.0\n");
+    expect(readFileSync(join(dest, LONG), "utf8")).toBe("a long name\n");
+    expect(readlinkSync(join(dest, "bin/morndo"))).toBe("../app/run.sh");
+    expect(statSync(join(dest, "units")).isDirectory()).toBe(true);
+    expect(MODE(join(dest, "README.md"))).toBe("600");
+    expect(MODE(join(dest, "app"))).toBe("700");
+  });
+
+  it("refuses a '..' escape (../escape)", () => refuse(evilGz([{ name: "../escape", body: Buffer.from("out") }]), "escape", /escape/));
+  it("refuses an absolute path (/abs)", () => refuse(evilGz([{ name: "/abs", body: Buffer.from("out") }]), "abs", /\/abs/));
+  it("refuses a climb back out (a/../../b)", () => refuse(evilGz([{ name: "a/../../b", body: Buffer.from("out") }]), "climb", /a\/\.\.\/\.\.\/b/));
+  it("refuses a link that leaves the tree (l -> ../../out)", () => refuse(evilGz([{ name: "l", type: "2", link: "../../out" }]), "link-out", /l|\.\.\/\.\.\/out/));
+  it("refuses an absolute link target (l -> /etc)", () => refuse(evilGz([{ name: "l", type: "2", link: "/etc" }]), "link-abs", /\/etc/));
+  // "x/l1/.." passes the lexical rule on its own, but x/l1 is itself a link: walking dest/l2 — the kernel, e.g.
+  // chdir(2) through it — lands on the parent of dest, so the reader resolves each target through the archive's
+  // own links before any of them can be walked.
+  it("refuses a link that climbs out through another link (x/l1 -> .., l2 -> x/l1/..)", () =>
+    refuse(evilGz([
+      { name: "x", type: "5" },
+      { name: "x/l1", type: "2", link: ".." },
+      { name: "l2", type: "2", link: "x/l1/.." },
+    ]), "link-through-link", /l2/));
+  it("accepts a link chain that stays inside (x/l1 -> .., l3 -> x/l1/x)", async () => {
+    const archive = dir("chain.tar.gz");
+    writeFileSync(archive, evilGz([
+      { name: "x", type: "5" },
+      { name: "x/l1", type: "2", link: ".." },
+      { name: "l3", type: "2", link: "x/l1/x" },
+    ]));
+    const dest = dir("chain-dest");
+    mkdirSync(dest);
+    const entries = await extractTar(archive, dest, { maxBytes: 10 * 1024 * 1024 });
+    expect(entries.filter(e => e.type === "symlink").map(e => e.path).sort()).toEqual(["l3", "x/l1"]);
+    // the kernel agrees the chain stays inside: walking l3 lands on x, not on anything past dest
+    expect(realpathSync(join(dest, "l3"))).toBe(realpathSync(join(dest, "x")));
+  });
+  // The review of 2026-10-21, confirmed on macOS: a file system may treat two spellings as one name (APFS folds
+  // case and NFC/NFD), so a walk that looks links up by exact spelling never substitutes P/UP for p/up and
+  // realpath(dest/esc) was the folder above dest. Every name is keyed by its folded form on every platform.
+  it("refuses a link that climbs out through a differently cased link (p/up -> .., esc -> P/UP/..)", () =>
+    refuse(evilGz([
+      { name: "p", type: "5" },
+      { name: "p/up", type: "2", link: ".." },
+      { name: "esc", type: "2", link: "P/UP/.." },
+    ]), "link-case-fold", /esc/));
+  it("refuses a link that climbs out through a link spelled in another Unicode form", () => {
+    const composed = "café";        // é as one character
+    const decomposed = "café";    // the same name as e + combining acute
+    return refuse(evilGz([
+      { name: composed, type: "5" },
+      { name: `${composed}/up`, type: "2", link: ".." },
+      { name: "esc", type: "2", link: `${decomposed}/up/..` },
+    ]), "link-nfd-fold", /esc/);
+  });
+  it("accepts a parent link followed inside (p/up -> .., ok -> p/up/p)", async () => {
+    const archive = dir("parent-link.tar.gz");
+    writeFileSync(archive, evilGz([
+      { name: "p", type: "5" },
+      { name: "p/up", type: "2", link: ".." },
+      { name: "ok", type: "2", link: "p/up/p" },
+    ]));
+    const dest = dir("parent-link-dest");
+    mkdirSync(dest);
+    await extractTar(archive, dest, { maxBytes: 10 * 1024 * 1024 });
+    // the kernel agrees the walk stays inside: ok lands on p, not on anything past dest
+    expect(realpathSync(join(dest, "ok"))).toBe(realpathSync(join(dest, "p")));
+  });
+  it("refuses a link loop (a -> b, b -> a, c -> a/z)", () =>
+    refuse(evilGz([
+      { name: "a", type: "2", link: "b" },
+      { name: "b", type: "2", link: "a" },
+      { name: "c", type: "2", link: "a/z" },
+    ]), "link-loop", /loop/));
+  it("refuses a file written through a symlink (l -> d, then l/x)", () =>
+    refuse(evilGz([{ name: "l", type: "2", link: "d" }, { name: "l/x", body: Buffer.from("pwn") }]), "through-link", /l/));
+
+  it("refuses a hard link, naming its typeflag", () => refuse(evilGz([{ name: "b", type: "1", link: "a" }]), "hardlink", /'1'/));
+  it("refuses a character device, naming its typeflag", () => refuse(evilGz([{ name: "dev", type: "3" }]), "chardev", /'3'/));
+  it("refuses a block device, naming its typeflag", () => refuse(evilGz([{ name: "dev", type: "4" }]), "blockdev", /'4'/));
+  it("refuses a FIFO, naming its typeflag", () => refuse(evilGz([{ name: "pipe", type: "6" }]), "fifo", /'6'/));
+  it("refuses a GNU long name (typeflag L)", () => refuse(evilGz([{ name: "@LongLink", type: "L", body: Buffer.from("nnnnnnnnnnnnnnnnnnnn") }]), "gnu-l", /'L'/));
+
+  it("refuses a pax key other than path and linkpath", () =>
+    refuse(evilGz([{ name: "PaxHeaders/1", type: "x", body: paxBody([["comment", "trust me"]]) }, { name: "a", body: Buffer.from("x") }]), "pax-key", /comment/));
+
+  it("refuses a path seen twice", () =>
+    refuse(evilGz([{ name: "a", body: Buffer.from("1") }, { name: "a", body: Buffer.from("2") }]), "duplicate", /duplicate.*a|a.*duplicate/));
+
+  // An I/O error is no verdict on the archive (review of 2026-10-21, second round): it comes back as itself, to be
+  // tried again later, never dressed as a refusal of the data. A corrupt gzip stream still is one.
+  it("an I/O error while writing comes back as itself, not as a refusal", async () => {
+    const dest = dir("read-only-dest");
+    mkdirSync(dest);
+    chmodSync(dest, 0o500);
+    const archive = dir("io.tar.gz");
+    writeFileSync(archive, evilGz([{ name: "a", body: Buffer.from("1") }]));
+    try {
+      const failure = await extractTar(archive, dest, { maxBytes: 1 << 20 }).then(() => null, (error: unknown) => error);
+      expect(failure).not.toBeInstanceOf(TarRefused);
+      expect((failure as NodeJS.ErrnoException).code).toBe("EACCES");
+    } finally { chmodSync(dest, 0o700); }
+  });
+  it("a missing archive is an I/O error too; a corrupt gzip stream is still refused", async () => {
+    const dest = dir("io-missing");
+    mkdirSync(dest);
+    const missing = await extractTar(dir("no-such.tar.gz"), dest, { maxBytes: 1 << 20 }).then(() => null, (error: unknown) => error);
+    expect(missing).not.toBeInstanceOf(TarRefused);
+    expect((missing as NodeJS.ErrnoException).code).toBe("ENOENT");
+    const corrupt = dir("corrupt.tar.gz");
+    writeFileSync(corrupt, Buffer.concat([gzipSync(Buffer.alloc(1024)).subarray(0, 10), Buffer.from("not deflate data at all")]));
+    await expect(extractTar(corrupt, dir("io-corrupt-dest"), { maxBytes: 1 << 20 })).rejects.toBeInstanceOf(TarRefused);
+  });
+
+  // Two spellings one file system would treat as one name are refused on every platform: written as two entries
+  // they are two files here and one file there, so the tree the signed list describes would not be the tree on disk.
+  it("refuses two names that differ only by case", () =>
+    refuse(evilGz([
+      { name: "README", body: Buffer.from("one") },
+      { name: "readme", body: Buffer.from("two") },
+    ]), "case-collision", /collide/));
+  it("refuses two names that differ only by Unicode form", () =>
+    refuse(evilGz([
+      { name: "café", body: Buffer.from("one") },
+      { name: "café", body: Buffer.from("two") },
+    ]), "nfd-collision", /collide/));
+  // Full case folding, not only lower case (review of 2026-10-21): ß/ss, ﬁ/fi and ς/σ are one name to a folding file
+  // system and to Unicode's case folding, so they fold to one key here too. Folding more refuses an odd archive at
+  // worst; folding less lets two spellings of one file through.
+  for (const [a, b, label] of [["stra\u00dfe", "strasse", "sharp-s"], ["\ufb01le", "file", "fi-ligature"], ["\u03bb\u03bf\u03b3\u03bf\u03c2", "\u03bb\u03bf\u03b3\u03bf\u03c3", "final-sigma"],
+    ["gro\u1e9e", "gross", "capital-sharp-s"], ["\u212aey", "key", "kelvin-sign"], ["\u0130d", "i\u0307d", "dotted-capital-i"]] as const) {
+    it(`refuses two names that fold to one under full case folding (${label})`, () =>
+      refuse(evilGz([
+        { name: a, body: Buffer.from("one") },
+        { name: b, body: Buffer.from("two") },
+      ]), `fold-${label}`, /collide/));
+  }
+  // NFKC on its own (review of 2026-10-21, second round): a superscript two and a full-width letter are the same
+  // name as their plain forms once compatibility forms are folded, with no case involved.
+  it("refuses two names that fold to one only by compatibility form (NFKC)", () =>
+    refuse(evilGz([
+      { name: "v\u00b2", body: Buffer.from("one") },
+      { name: "v2", body: Buffer.from("two") },
+    ]), "nfkc-collision", /collide/));
+
+  // The fold is a fixed point: folding a key again changes nothing, for every code point sampled and for short
+  // mixed strings, and the reader and the packer fold alike (the same rule written twice must not drift).
+  it("folds to a fixed point, the same way in the reader and the packer", () => {
+    const samples: string[] = [];
+    for (let c = 0; c < 0x30000; c += 1) {
+      if (c >= 0xd800 && c <= 0xdfff) continue;
+      if (c < 0x3000 || c % 17 === 0) samples.push(String.fromCodePoint(c));
+    }
+    let seed = 7;
+    const next = () => { seed = (seed * 1103515245 + 12345) % 2147483648; return seed; };
+    for (let n = 0; n < 3000; n += 1) {
+      let word = "";
+      for (let k = 0; k < 1 + (next() % 4); k += 1) word += samples[next() % samples.length];
+      samples.push(word);
+    }
+    const unstable = samples.filter(x => foldKey(foldKey(x)) !== foldKey(x));
+    expect(unstable.map(x => Array.from(x, ch => ch.codePointAt(0)!.toString(16)).join(" "))).toEqual([]);
+    expect(samples.filter(x => foldKey(x) !== packFoldKey(x))).toEqual([]);
+  });
+
+  it("accepts two names whose folded forms differ", async () => {
+    const archive = dir("folded-ok.tar.gz");
+    writeFileSync(archive, evilGz([
+      { name: "README", body: Buffer.from("upper") },
+      { name: "readme.txt", body: Buffer.from("lower") },
+    ]));
+    const dest = dir("folded-ok-dest");
+    mkdirSync(dest);
+    await extractTar(archive, dest, { maxBytes: 10 * 1024 * 1024 });
+    expect(readFileSync(join(dest, "README"), "utf8")).toBe("upper");
+    expect(readFileSync(join(dest, "readme.txt"), "utf8")).toBe("lower");
+  });
+
+  it("refuses a bad header checksum", () =>
+    refuse(evilGz([{ name: "a", body: Buffer.from("x"), badChecksum: true }]), "checksum", /checksum/));
+
+  it("refuses a truncated archive (the stream ends inside a body)", () => {
+    // the gzip is whole, so gunzip ends cleanly; the tar inside stops mid-body (512-byte header, then 600 of 1000)
+    const cut = rawTar([{ name: "a", body: Buffer.alloc(1000, 0x61) }]).subarray(0, 512 + 600);
+    return refuse(gzipSync(cut), "truncated", /truncat/);
+  });
+
+  it("refuses a body past maxBytes", async () => {
+    const archive = dir("toolarge.tar.gz");
+    writeFileSync(archive, packTree(GOOD, 0));
+    const dest = dir("toolarge-dest");
+    mkdirSync(dest);
+    await expect(extractTar(archive, dest, { maxBytes: 512 })).rejects.toMatchObject({ reason: /too large/ });
+  });
+});

@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The node agent's agent (design §5): the same rules as the hub's. Nothing here can kill a tmux server the
+     agent started: launchd stops the job, not a control group, and the updater's tmux guard is the systemd
+     side's alone (RL13). -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.morndo.node</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/morndo-node</string>
+    <string>run</string>
+  </array>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>

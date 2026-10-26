@@ -5,7 +5,7 @@
 // the connection is closed (1008), so an agent message a real fleet would refuse fails the test that sent it.
 import { createPublicKey, generateKeyPairSync, randomBytes, sign, verify, type KeyObject } from "node:crypto";
 import { WebSocketServer, type WebSocket } from "ws";
-import { AgentFrames, LIMITS, decodeValue, fleetSigPayload, formatJoinString, nodeSigPayload } from "@morndo/protocol";
+import { AgentFrames, LIMITS, decodeValue, fleetSigPayload, formatJoinString, nodeSigPayload, type RolloutWire } from "@morndo/protocol";
 import { wsText } from "../src/ws-text.ts";
 import { whenTrue } from "../../fleet/test/helpers/when-true.ts";
 
@@ -13,7 +13,14 @@ export type Script = {
   join: "welcome" | number;                                   // the answer to `join`: welcome, or close with this code
   hello: "challenge" | number;                                // the answer to `hello`
   tamperSig: boolean;                                         // sign something other than the payload
-  welcome: { connEpoch: number; ackSeq: number; streamKnown: boolean } | number;   // after a good proof, or a close code
+  // After a good proof, or a close code. `controlPlane`, `rollout` and `offer` (updates §7) ride the welcome as
+  // the fleet's own would; absent, they stay absent — a fleet from before the updates design says neither.
+  welcome: {
+    connEpoch: number; ackSeq: number; streamKnown: boolean;
+    controlPlane?: { version: string; commit: string | null };
+    rollout?: RolloutWire | null;
+    offer?: { version: string; attempt: string } | null;
+  } | number;
   // As a real fleet keeps them: the highest seq accepted per stream. When set, a welcome's ackSeq and streamKnown are
   // those of the hello's streamId (unknown: 0 and false) instead of `welcome`'s.
   streams: Record<string, number> | null;

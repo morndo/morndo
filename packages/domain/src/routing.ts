@@ -595,3 +595,149 @@ export function stillNamed(policy: Policy, name: string): boolean {
     r.picks.some(p => p.provider === name) || (r.riskPicks ?? []).some(p => p.provider === name)
     || (r.written ?? []).some(t => t.startsWith(`${name}:`)) || (r.writtenRisk ?? []).some(t => t.startsWith(`${name}:`)));
 }
+
+function sameNames(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && a.every((name, i) => name === b[i]);
+}
+
+// The pool stands where the first of {pool, ...members} stood; the other names in that group drop out.
+function foldNames(order: readonly string[], pool: string, members: readonly string[], append: boolean): readonly string[] {
+  const group = new Set<string>([pool, ...members]);
+  let first = -1;
+  for (let i = 0; i < order.length; i++) {
+    const name = order[i];
+    if (name !== undefined && group.has(name)) { first = i; break; }
+  }
+  if (first < 0) return append ? [...order, pool] : order;
+  const next: string[] = [];
+  let changed = false;
+  for (let i = 0; i < order.length; i++) {
+    const name = order[i];
+    if (name === undefined) continue;
+    if (i === first) {
+      next.push(pool);
+      if (name !== pool) changed = true;
+    } else if (group.has(name)) changed = true;
+    else next.push(name);
+  }
+  return changed ? next : order;
+}
+
+function foldPicks(picks: readonly Engine[], pool: string, members: readonly string[]): readonly Engine[] {
+  const member = new Set(members);
+  const seen = new Set<string>();
+  const next: Engine[] = [];
+  let changed = false;
+  for (const pick of picks) {
+    const mapped = member.has(pick.provider) ? { ...pick, provider: pool } : pick;
+    const text = engineText(mapped);
+    if (seen.has(text)) { changed = true; continue; }
+    seen.add(text);
+    if (mapped !== pick) changed = true;
+    next.push(mapped);
+  }
+  return changed ? next : picks;
+}
+
+function unfoldNames(order: readonly string[], pool: string, leaving: readonly string[], remaining: readonly string[]): readonly string[] {
+  if (!order.includes(pool)) return order;
+  const present = new Set(order);
+  const insert = leaving.filter(name => !present.has(name));
+  if (remaining.length > 0 && insert.length === 0) return order;
+  const next: string[] = [];
+  for (const name of order) {
+    if (name !== pool) { next.push(name); continue; }
+    if (remaining.length > 0) next.push(pool);
+    next.push(...insert);
+  }
+  return sameNames(next, order) ? order : next;
+}
+
+function unfoldPicks(
+  picks: readonly Engine[], pool: string, leaving: readonly string[], remaining: readonly string[], listed: readonly Listed[],
+): readonly Engine[] {
+  if (!picks.some(pick => pick.provider === pool)) return picks;
+  const seen = new Set<string>();
+  const next: Engine[] = [];
+  for (const pick of picks) {
+    const copies = pick.provider === pool
+      ? leaving.flatMap(member => {
+        const copy: Engine = { provider: member, model: pick.model, effort: pick.effort };
+        return fits(copy, listed) ? [copy] : [];
+      })
+      : [];
+    const rows = pick.provider === pool && remaining.length === 0 ? copies : [pick, ...copies];
+    for (const row of rows) {
+      const text = engineText(row);
+      if (seen.has(text)) continue;
+      seen.add(text);
+      next.push(row);
+    }
+  }
+  if (next.length === picks.length && next.every((row, i) => row === picks[i])) return picks;
+  return next;
+}
+
+function retitle(policy: Policy, order: readonly string[], roles: readonly RoleRoute[], at: number): Policy {
+  const orderChanged = order !== policy.priority.order || roles.some((row, i) => row.priority !== policy.roles[i]?.priority);
+  const pickRoles = roles.flatMap((row, i) => {
+    const before = policy.roles[i];
+    return before && (row.picks !== before.picks || row.riskPicks !== before.riskPicks) ? [row.role] : [];
+  });
+  if (!orderChanged && roles.every((row, i) => row === policy.roles[i])) return policy;
+  const events: RouteEvent[] = [...policy.events];
+  if (orderChanged) events.push({ type: "PriorityChanged", at, command: null });
+  for (const role of pickRoles) events.push({ type: "PicksChanged", role, at, command: null });
+  return {
+    ...policy,
+    priority: order === policy.priority.order ? policy.priority : { ...policy.priority, order },
+    roles: roles.every((row, i) => row === policy.roles[i]) ? policy.roles : roles,
+    events,
+  };
+}
+
+export function foldPool(policy: Policy, pool: string, members: readonly string[], at: number): Policy {
+  const order = foldNames(policy.priority.order, pool, members, true);
+  const roles = policy.roles.map(row => {
+    const picks = foldPicks(row.picks, pool, members);
+    const riskPicks = row.riskPicks === null ? null : foldPicks(row.riskPicks, pool, members);
+    const own = row.priority ? foldNames(row.priority.order, pool, members, false) : null;
+    const priority = row.priority && own && own !== row.priority.order ? { ...row.priority, order: own } : row.priority;
+    if (picks === row.picks && riskPicks === row.riskPicks && priority === row.priority) return row;
+    return { ...row, picks, riskPicks, priority };
+  });
+  return retitle(policy, order, roles, at);
+}
+
+export function unfoldPool(
+  policy: Policy, pool: string, leaving: readonly string[], remaining: readonly string[], listed: readonly Listed[], at: number,
+): Policy {
+  const order = unfoldNames(policy.priority.order, pool, leaving, remaining);
+  const roles = policy.roles.map(row => {
+    const picks = unfoldPicks(row.picks, pool, leaving, remaining, listed);
+    const riskPicks = row.riskPicks === null ? null : unfoldPicks(row.riskPicks, pool, leaving, remaining, listed);
+    const own = row.priority ? unfoldNames(row.priority.order, pool, leaving, remaining) : null;
+    const priority = row.priority && own && own !== row.priority.order ? { ...row.priority, order: own } : row.priority;
+    if (picks === row.picks && riskPicks === row.riskPicks && priority === row.priority) return row;
+    return { ...row, picks, riskPicks, priority };
+  });
+  return retitle(policy, order, roles, at);
+}
+
+// A saved order that left a pool out gets it back before the first later name that save still has, or at the end.
+export function withPools(order: readonly string[], current: readonly string[], pools: readonly string[]): string[] {
+  const result = [...order];
+  for (const pool of pools) {
+    if (result.includes(pool) || !current.includes(pool)) continue;
+    const at = current.indexOf(pool);
+    let insertAt = result.length;
+    for (let i = at + 1; i < current.length; i++) {
+      const follower = current[i];
+      if (follower === undefined) continue;
+      const pos = result.indexOf(follower);
+      if (pos >= 0) { insertAt = pos; break; }
+    }
+    result.splice(insertAt, 0, pool);
+  }
+  return result;
+}

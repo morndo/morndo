@@ -5,19 +5,21 @@
 // ever sees. Untrusted bytes go through these and nothing else: an unknown field, a local time or a wrong type is a
 // refusal, never a guess. The signatures beside the documents are the updater's to verify before any of this is read.
 import type {
-  ArtifactRef, CHANNELS, Channel, ChannelFeed, FeedEntry, HealthReport, KeySet, Manifest, PLATFORMS, ProtocolRange,
-  SafePointReport, SchemaInfo,
+  ArtifactRef, CHANNELS, Channel, ChannelFeed, FeedEntry, HealthReport, InstallMethod, KeySet,
+  Manifest, PLATFORMS, ProtocolRange, SafePointReport, SchemaInfo, UPDATE_MODES, UpdateMode,
 } from "@morndo/domain";
 import * as z from "./z.ts";
 
 // The domain's own words, re-declared so the package stays free of runtime imports it doesn't need (board.ts's pattern).
 const CHANNEL_WORDS = ["stable", "latest"] as const satisfies typeof CHANNELS;
 const PLATFORM_WORDS = ["linux-x64", "linux-arm64", "darwin-arm64"] as const satisfies typeof PLATFORMS;
+const MODE_WORDS = ["apply", "stage", "off"] as const satisfies typeof UPDATE_MODES;
+const METHOD_WORDS = ["updater", "checkout", "package"] as const satisfies readonly InstallMethod[];
 
 // A Version is SemVer 2.0.0, spelled exactly as the spec's official regex (https://semver.org/#is-there-a-suggested-
 // regular-expression-regex-to-check-a-semver-string, read 2026-10-11). The domain parses it again its own way; here it
 // only has to be a well-formed Version, or nothing.
-const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
+export const SEMVER = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/;
 const version = () => z.string().check(z.regex(SEMVER));
 const sha256 = () => z.string().check(z.regex(/^[0-9a-f]{64}$/));
 const commit = () => z.string().check(z.regex(/^[0-9a-f]{40}$/));
@@ -59,7 +61,10 @@ export const ChannelFeedSchema = z.strictObject({
 
 // ---- manifest.json (the release key's document, one per Release)
 
-const SchemaInfoSchema = z.strictObject({ version: z.int().check(z.gte(1)), floor: z.int().check(z.gte(1)) });
+// Floor 0 is a database whose migrations are all additive: service-kit's runner starts the floor at 0
+// and only a breaking migration raises it (migrate.ts). The hub, the node and the connections store
+// are there today, so a Manifest has to be able to say so.
+const SchemaInfoSchema = z.strictObject({ version: z.int().check(z.gte(1)), floor: z.int().check(z.gte(0)) });
 const SchemasSchema = z.strictObject({           // one entry per database, all four of them
   hub: SchemaInfoSchema, fleet: SchemaInfoSchema, node: SchemaInfoSchema, connections: SchemaInfoSchema,
 });
@@ -68,9 +73,14 @@ export const ProtocolRangeSchema = z.strictObject({
   agent: z.tuple([boundedInt, boundedInt]),
   clientApi: z.tuple([boundedInt, boundedInt]),
 });
+// One rule for what a Manifest may call an Artifact (§9.6), shared with the updater's download directory: a
+// plain file name — it starts with a letter or digit and admits no separator, so no name can leave the directory
+// it lands in — and '+' is a plain character, because a Version's build metadata is part of the name the pipeline
+// signs. Two rules would drift apart; one of them refusing what the other signed is a crash, not a refusal.
+export const ARTIFACT_NAME = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,200}$/;
 export const ArtifactRefSchema = z.strictObject({
   platform: z.enum(PLATFORM_WORDS),
-  name: z.string().check(z.regex(/^[A-Za-z0-9][A-Za-z0-9._+-]{0,200}$/)),
+  name: z.string().check(z.regex(ARTIFACT_NAME)),
   size: z.int().check(z.gte(1)),
   sha256: sha256(),
   filesSha256: sha256(),
@@ -123,6 +133,63 @@ export const HealthReportSchema = z.strictObject({
   checks: z.record(z.string(), z.boolean()),
 });
 
+// ---- the updater's own file and answer (§8.1, §8.3): the settings file and `morndo update --status --json`
+
+// A UTC instant as printed, kept as the text it is: the status is an answer, not a signed document, so its times are
+// never re-encoded. The same shape as the documents' (a Z, no offset) is all the reader is promised.
+const instantText = () => z.string().check(z.iso.datetime());
+// Local hours for automatic applies (§8.3), two clocks of an HH:MM shape.
+const WINDOW = /^([01]\d|2[0-3]):[0-5]\d-([01]\d|2[0-3]):[0-5]\d$/;
+
+// ~/.config/morndo-update/config.json: every field optional, nothing guessed — what isn't there is the default
+// (§8.3's table), which the domain holds, not the file.
+export const UpdateConfigSchema = z.strictObject({
+  channel: z.exactOptional(z.enum(CHANNEL_WORDS)),
+  mode: z.exactOptional(z.enum(MODE_WORDS)),
+  window: z.exactOptional(z.string().check(z.regex(WINDOW))),
+  pin: z.exactOptional(version()),
+  soakMinutes: z.exactOptional(z.int().check(z.gte(0), z.lte(10080))),
+});
+
+// One row of the status's checks: the newest ten, their outcome a word of at most 64 characters.
+export const CheckRowSchema = z.strictObject({
+  at: instantText(),
+  channel: z.enum(CHANNEL_WORDS),
+  outcome: z.string().check(z.minLength(1), z.maxLength(64)),
+  detail: z.string().check(z.maxLength(500)),
+  version: z.nullable(version()),
+});
+
+// One row of the status's updates (§8.1): an attempt, its target and state, and when it began and ended — the
+// state a word of the domain's own state machine, kept as text here so a state a reader does not know still reads.
+export const UpdateRowSchema = z.strictObject({
+  id: z.string().check(z.minLength(1), z.maxLength(100)),
+  target: version(),
+  state: z.string().check(z.minLength(1), z.maxLength(64)),
+  startedAt: instantText(),
+  finishedAt: z.nullable(instantText()),
+});
+
+// What `morndo update --status --json` prints (§8.1): the machine as the hub and the web app read it. The links'
+// names (current, previous, good, staged) are Versions or null; the Feed and the Key set are what was last verified.
+export const UpdateStatusSchema = z.strictObject({
+  installMethod: z.enum(METHOD_WORDS),
+  channel: z.enum(CHANNEL_WORDS),
+  mode: z.enum(MODE_WORDS),
+  pin: z.nullable(version()),
+  window: z.nullable(z.string()),
+  current: z.nullable(version()),
+  previous: z.nullable(version()),
+  good: z.nullable(version()),
+  staged: z.nullable(version()),
+  feed: z.nullable(z.strictObject({ channel: z.enum(CHANNEL_WORDS), seq: z.int().check(z.gte(1)), expiresAt: instantText() })),
+  keySet: z.nullable(z.strictObject({ version: z.int().check(z.gte(1)), expiresAt: instantText() })),
+  lastCheck: z.nullable(CheckRowSchema),
+  checks: z.array(CheckRowSchema).check(z.maxLength(10)),
+  // The last ten updates, newest first (§8.1): what was applied, what rolled back, what never finished.
+  updates: z.exactOptional(z.array(UpdateRowSchema).check(z.maxLength(10))),
+});
+
 // The decoded shapes are the domain's own (checked at compile time).
 type Same<A, B> = [A] extends [B] ? ([B] extends [A] ? true : false) : false;
 const check = <T extends true>(t: T) => t;
@@ -135,5 +202,9 @@ check<Same<z.output<typeof ArtifactRefSchema>, ArtifactRef>>(true);
 check<Same<z.output<typeof ManifestSchema>, Manifest>>(true);
 check<Same<z.output<typeof SafePointReportSchema>, SafePointReport>>(true);
 check<Same<z.output<typeof HealthReportSchema>, HealthReport>>(true);
+// The status's words are the domain's own (the channel a literal union, the method and mode its unions).
+check<Same<z.output<typeof UpdateStatusSchema>["channel"], Channel>>(true);
+check<Same<z.output<typeof UpdateStatusSchema>["installMethod"], InstallMethod>>(true);
+check<Same<z.output<typeof UpdateConfigSchema>["mode"], UpdateMode | undefined>>(true);
 // The channel word is the domain's Channel (a literal union, not a widened string).
 check<Same<z.output<typeof ChannelFeedSchema>["channel"], Channel>>(true);

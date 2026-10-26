@@ -12,19 +12,21 @@
   import PenLine from "@lucide/svelte/icons/pen-line";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
   import ExternalLink from "@lucide/svelte/icons/external-link";
+  import { cardOf } from "@morndo/domain";
   import { renderMarkdown } from "../markdown.ts";
-  import { REFUSALS, ago, deliveryLine, type DecisionItem } from "../desktop/decisions.ts";
+  import { REFUSALS, ago, deliveryLine, standingLine, type DecisionItem } from "../desktop/decisions.ts";
+  import { DELIVERED, MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
   import { byLabel } from "./horizon.ts";
   import { actions, brief, due } from "./brief.ts";
   import type { Body } from "../catchup/run.ts";
   import { MAY_HAVE_GONE, againLabel } from "../catchup/answer.ts";
 
-  let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext }: {
+  let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext, onOpenBrief }: {
     item: DecisionItem | null; primed: boolean; index: number; of: number; now: number;
     answering: { label: string; sending: boolean; commitAt: number } | null;
     refusal: { code: string; text: string } | null; note: string | null;
     onPick: (body: Body, label: string) => Promise<boolean>; onUndo: () => void; onVerifyAgain: () => void; onTryAgain: () => void;
-    onScreen: (workerId: string) => void; onNext: () => void;
+    onScreen: (workerId: string) => void; onNext: () => void; onOpenBrief?: () => void;
   } = $props();
 
   let words = $state("");
@@ -35,29 +37,31 @@
   const askerName = $derived(item ? (item.asker.kind === "manager" ? "Manager" : item.asker.name) : "");
   const dueText = $derived(item?.deadline == null ? null : item.deadline <= now ? due(item.deadline, now) : `due ${byLabel(item.deadline, now).replace(/^by (the )?/, "")}`);
   const b = $derived(item ? brief(item, now) : null);
+  const compact = $derived(item?.brief ? cardOf(item) : null);
   const acts = $derived(item ? actions(item, "card") : []);
   // What the card draws, once, for the loop, the "or" and which button is primary. A task (an Ask that became one while
   // its card was on top) gets Done; its Later is catch-up's own Later under the card (code review #11).
   const drawn = $derived(acts.filter(a => a.kind !== "later" && a.kind !== "decide"));
   // The meta line under the title, without what the kicker already says (decision, due).
-  const meta = $derived((b?.meta ?? []).filter(m => m !== "Decision" && !m.startsWith("due ") && !m.startsWith("overdue ")));
+  const meta = $derived((b?.meta ?? []).filter(m => m !== "Decision" && !m.startsWith("due ") && !m.startsWith("overdue ") && !/^≈\d+ min$/.test(m)));
   // With options, the recommended one is marked on its button; the reason for it waits behind More, so the options and
   // his own words fit on the card (and the kicker already says when it is due).
   const marked = $derived(acts.some(a => a.kind === "option" && a.recommended));
-  const hasMore = $derived(!!b && (!!b.more.text || !!b.more.link || !!item?.context || (marked && !!b.more.recommendation)));
+  const hasMore = $derived(!compact && !!b && (!!b.more.text || !!b.more.link || !!item?.context || (marked && !!b.more.recommendation)));
   const sentenceCase = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
   const left = $derived(answering ? Math.max(0, Math.ceil((answering.commitAt - now) / 1000)) : 0);
-  // ADR-0010: an answer for the manager waits in its inbox until it reached the manager.
+  // An answer for the manager in the fleet's queue (fleet-clients §9.1, E13): where it stands until it is in the conversation.
   function answeredHere(d: DecisionItem): string {
     const dl = deliveryLine(d);
-    if (dl?.state === "queued") return `Answered. Queued, it will be delivered${dl.why ? `: ${dl.why}` : ""}.`;
-    if (dl?.state === "delivered") return "Answered. Delivered to the manager.";
+    if (dl?.state === "queued") return `Answered. ${QUEUED}${dl.why ? `: ${dl.why}` : ""}.`;
+    if (dl?.state === "delivered") return `Answered. ${DELIVERED} to the manager.`;
+    if (dl?.state === "uncertain") return `Answered. ${MAY_HAVE_BEEN}: look at the manager's screen to be sure.`;
     return "Answered.";
   }
   // What closed it, in words, when it isn't open any more.
   // Not on the board: gone, if the board is current; otherwise nothing can be said yet (review of PR #7, finding 8).
   const closed = $derived(!item ? (primed ? "This decision isn't on the hub's list anymore." : null)
-    : item.status === "answered" ? (item.decision?.via === "elsewhere" ? `Answered on another device: ${item.decision.choice.kind === "option" ? `“${item.decision.choice.label}”` : "in words"}.` : answeredHere(item))
+    : item.status === "answered" ? (item.decision?.via === "elsewhere" ? standingLine(item, "") : answeredHere(item))
     : item.status === "settled" ? `Settled${item.resolution ? `: ${item.resolution}` : "."}`
     : item.status === "expired" ? "Expired: nobody answered within a day." : null);
   // The words stay until the answer has started (offline, a cancelled passkey check, or a refusal keep them; Undo
@@ -75,9 +79,11 @@
 </header>
 
 <div class="card-body">
-  <p class="kicker">Decision {index} of {of}{dueText ? ` · ${dueText}` : ""}</p>
-  <h2 class="q">{b?.title ?? "A decision"}</h2>
-  {#if b?.sentence}<p class="sum">{b.sentence}</p>{/if}
+  <p class="kicker">{compact ? compact.topic : `Decision ${index} of ${of}`}{dueText ? ` · ${dueText}` : ""}{#if compact?.minutes != null} · ≈{compact.minutes} min{/if}</p>
+  <h2 class="q">{compact?.headline ?? b?.title ?? "A decision"}</h2>
+  {#if compact?.spend}<p class="spend">Includes spend</p>{/if}
+  {#if !compact && b?.sentence}<p class="sum">{b.sentence}</p>{/if}
+  {#if compact?.spend && compact.recommended}<p class="sum"><b>Recommended:</b> {compact.recommended}</p>{/if}
   {#if item?.context && item.contextKind === "screen"}
     {#if meta.length}<p class="meta">{sentenceCase(meta.join(" · "))}</p>{/if}
     <pre class="screen">{item.context}</pre>
@@ -113,7 +119,7 @@
     <p class="note" role="status">Waiting for the hub to say where this decision stands…</p>
   {:else if closed}
     {#if refusal && !MAY_HAVE_GONE.has(refusal.code)}<p class="err" role="alert">{refusal.text}</p>{/if}
-    <div class="state" role="status"><p>{closed}</p>{#if item?.decision?.via !== "here"}<p class="note">Nothing was answered from here.</p>{/if}</div>
+    <div class="state" role="status"><p>{closed}</p>{#if item && item.decision?.via === "elsewhere"}<p class="note">Nothing was answered from here.</p>{/if}</div>
     <button class="pbtn primary block" onclick={onNext}>Next card</button>
   {:else if item}
     {#if refusal}
@@ -129,6 +135,16 @@
       {/if}
       {#if item.asker.workerId}<button class="pbtn block" onclick={() => item.asker.workerId && onScreen(item.asker.workerId)}><SquareTerminal size={18} />Answer on its screen</button>{/if}
       <p class="note">{askerName} waits at a prompt on its own screen; Morndo never presses keys in it.</p>
+    {:else if compact}
+      <div class="opts">
+        {#each compact.quickAnswers as a, i (a.key)}
+          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void onPick({ key: a.key }, a.label)}>
+            <span>{a.label}</span>{#if i === 0}<small>Recommended</small>{/if}
+          </button>
+        {/each}
+        <button class="pbtn read" class:primary={compact.quickAnswers.length === 0} data-open-brief={item?.id} aria-haspopup="dialog" onclick={() => onOpenBrief?.()}>Read the brief</button>
+      </div>
+      {#if item.answerable}<p class="note">{REFUSALS[item.answerable] ?? item.answerable}</p>{/if}
     {:else if writing}
       <label class="sr" for="words">Your answer for {askerName}</label>
       <textarea id="words" bind:value={words} rows="3" placeholder="Your answer for {askerName}…"></textarea>
@@ -196,7 +212,8 @@
   .opt small.def { order: 0; text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 13px; line-height: 17px; }
   .or { display: flex; align-items: center; gap: 10px; margin: 0; color: var(--muted); font: 400 13px/1 var(--body); }
   .or::before, .or::after { content: ""; flex: 1; height: 1px; background: var(--line); }
-  .words { min-height: 52px; gap: 8px; font-size: 16px; }
+  .words, .read { min-height: 48px; gap: 8px; font-size: 16px; width: 100%; }
+  .spend { margin: 6px 0 0; font: 700 12px/16px var(--body); }
   .state { margin-top: 14px; padding: 12px 14px; border-radius: 14px; background: var(--fill); }
   .state p { margin: 0; color: var(--fg); }
   .state .note { color: var(--fg); }

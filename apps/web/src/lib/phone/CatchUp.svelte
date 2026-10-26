@@ -10,6 +10,7 @@
   import type { CatchUpConversationWire } from "@morndo/protocol";
   import type { LiveFeed } from "../feed.svelte.ts";
   import { MAY_HAVE_GONE, type CatchUpSession } from "../catchup/session.svelte.ts";
+  import { OFFLINE_DECISION, PASSKEY_UNFINISHED, STILL_OFFLINE } from "../desktop/decisions.ts";
   import { counts, segments, type Body, type Mark } from "../catchup/run.ts";
   import { hold, swipe, type Swiped } from "../catchup/swipe.ts";
   import type { NewCommand } from "../outbox/outbox.ts";
@@ -24,10 +25,11 @@
   import type { QuickAnswers } from "./quick.svelte.ts";
   import { tookLabel } from "./words.ts";
 
-  let { feed, session, quick, outgoing, verifiedFresh, verify, onBack, onDay, onQueue, onRetry, onDiscard, onEchoes, onScreen }: {
+  let { feed, session, quick, outgoing, verifiedFresh, verify, onBack, onDay, onQueue, onRetry, onDiscard, onCancel = () => {}, onEchoes, onScreen, onOpenBrief }: {
     feed: LiveFeed; session: CatchUpSession; quick: QuickAnswers; outgoing: OutboxRecord[]; verifiedFresh: boolean; verify: () => Promise<boolean>;
     onBack: () => void; onDay: () => void; onQueue: (c: NewCommand) => Promise<void>; onRetry: (id: string) => void; onDiscard: (id: string) => void;
-    onEchoes: (worker: string, echoes: Echo[]) => void; onScreen: (workerId: string) => void;
+    onEchoes: (worker: string, echoes: Echo[]) => void; onScreen: (workerId: string) => void; onOpenBrief: (id: string) => void;
+    onCancel?: (id: string) => void;                    // a message the manager's queue still holds (ruling 83)
   } = $props();
 
   const run = $derived(session.run);
@@ -109,18 +111,16 @@
     session.markAllRead(marks);
   }
   function aside() { if (top) session.setAside(top.key); }
-  let lastPick: { key: string; id: string; body: Body; label: string; seen: string } | null = null;
   // Whether the answer started (its 5 seconds run): the card keeps words that didn't go (review of PR #7, 13).
   async function pick(body: Body, label: string): Promise<boolean> {
     if (top?.kind !== "decision") return false;
     const card = top;
     note = null;
-    if (!online || navigator.onLine === false) { note = "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here."; return false; }
+    if (!online || navigator.onLine === false) { note = OFFLINE_DECISION; return false; }
     // AC7: the passkey first, inside the tap (Safari asks for Face ID only from a user gesture), then the 5 seconds.
-    if (!verifiedFresh && !(await verify())) { note = "Not answered: the passkey check didn't finish."; return false; }
+    if (!verifiedFresh && !(await verify())) { note = PASSKEY_UNFINISHED; return false; }
     // The version of the ask on screen now goes with it (review of PR #7, finding 5).
     const seen = feed.decisions.find(d => d.id === card.id)?.version ?? "";
-    lastPick = { key: card.key, id: card.id, body, label, seen };
     session.answer(card.key, card.id, body, label, seen);
     return session.run?.answering?.key === card.key;
   }
@@ -128,8 +128,8 @@
   async function tryAgain() {
     const r = session.refusal;
     if (!r?.retry) return;
-    if (!online || navigator.onLine === false) { note = "Still offline. It goes when you try again online."; return; }
-    if (!verifiedFresh && !(await verify())) { note = "Not answered: the passkey check didn't finish."; return; }
+    if (!online || navigator.onLine === false) { note = STILL_OFFLINE; return; }
+    if (!verifiedFresh && !(await verify())) { note = PASSKEY_UNFINISHED; return; }
     await session.retry(r.key, r.retry.id, r.retry.body, r.retry.label, r.retry.seen, r.retry.requestId);
   }
   // An unknown outcome that did reach the hub: the board shows it answered here, and it counts as his answer.
@@ -137,9 +137,10 @@
     if (top?.kind === "decision" && session.refusal?.key === top.key && MAY_HAVE_GONE.has(session.refusal.code) && item?.status === "answered" && item.decision?.via === "here") session.confirmAnswered(top.key);
   });
   async function verifyAgain() {
-    const p = lastPick;
-    if (!p || !(await verify())) return;
-    await session.retry(p.key, p.id, p.body, p.label, p.seen);
+    const key = top?.key ?? null;
+    const said = await session.retryStepUp(feed, verify);
+    if ((top?.key ?? null) !== key) return;
+    note = said;
   }
   // Queued in the outbox, or false with a note (the text stays in the box).
   async function reply(text: string, seen: string): Promise<boolean> {
@@ -209,11 +210,11 @@
           {#if top.kind === "decision"}
             <DecisionCard {item} primed={feed.primed} index={decisionIndex} of={c?.decisionsInRun ?? 0} {now} {answering} {refusal} {note}
               onPick={(b, l) => pick(b, l)} onUndo={() => session.undo()} onVerifyAgain={() => void verifyAgain()} onTryAgain={() => void tryAgain()}
-              onScreen={id => onScreen(id)} onNext={() => session.moveOn(top.key)} />
+              onScreen={id => onScreen(id)} onNext={() => session.moveOn(top.key)} onOpenBrief={() => item && onOpenBrief(item.id)} />
           {:else}
             <UpdateCard worker={feed.workers.find(w => w.id === top.worker) ?? null} name={top.conversation} {view} mark={view?.mark ?? feed.reads[top.conversation] ?? null}
               {now} outgoing={outgoing.filter(o => o.worker === top.worker)} loading={online} {note}
-              onReply={reply} onOpen={id => openChat(top.worker, top.conversation, id)} {onRetry} {onDiscard}
+              onReply={reply} onOpen={id => openChat(top.worker, top.conversation, id)} {onRetry} {onDiscard} {onCancel}
               onVerify={id => void verify().then(ok => { if (ok) onRetry(id); })} />
           {/if}
         </article>

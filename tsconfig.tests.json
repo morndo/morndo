@@ -14,9 +14,12 @@
     "apps/node-agent/test",
     "apps/fleet/test",
     "apps/board-cli/test",
+    "apps/memory-cli/test",
     "apps/connections/test",
     "apps/updater/test",
     "test",
+    "e2e/update-vm",
+    "e2e/update.e2e.ts",
     "scripts",
     "knowledge",
     "vitest.config.ts"

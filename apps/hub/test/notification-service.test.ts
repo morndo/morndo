@@ -51,9 +51,9 @@ describe("what raises a Notification (N2)", () => {
     expect(sent).toEqual([]);
     await tick(1);
     expect(sent.map(s => s.endpoint)).toEqual(["https://fcm.googleapis.com/fcm/send/phone", "https://fcm.googleapis.com/fcm/send/laptop"]);
-    expect(sent[0]?.payload).toEqual({ kind: 0, decisions: 1, workers: 0, linked: 0 });
+    expect(sent[0]?.payload).toEqual({ kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 });
     expect(sent[0]?.options).toEqual({ ttlSeconds: 12 * 3600, topic: "decision", urgency: "high" });
-    expect(audit).toEqual([{ type: "NotificationSent", kind: "decision", counts: { decisions: 1, workers: 0, linked: 0 }, devices: 2, at: Date.now() }]);
+    expect(audit).toEqual([{ type: "NotificationSent", kind: "decision", counts: { decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 }, devices: 2, at: Date.now() }]);
   });
   it("the board at start raises nothing: those were waiting before", async () => {
     const fresh = new NotificationService({ store, send: async () => ({ status: 201 }) });
@@ -66,7 +66,7 @@ describe("what raises a Notification (N2)", () => {
     svc.worker("%1", false, null, true);
     svc.worker("%1", true, null);
     await tick(1000);
-    expect(sent.at(-1)?.payload).toEqual({ kind: 1, decisions: 0, workers: 1, linked: 0 });
+    expect(sent.at(-1)?.payload).toEqual({ kind: 1, decisions: 0, workers: 1, linked: 0, alerts: 0, usage: 0 });
     expect(sent.at(-1)?.options).toEqual({ ttlSeconds: 3600, topic: "worker", urgency: "normal" });
     const before = sent.length;
     svc.worker("%1", true, null);                                    // still needing
@@ -76,12 +76,31 @@ describe("what raises a Notification (N2)", () => {
     expect(sent.length).toBe(before);
     svc.board([decision("ny-9")]);
     await tick(1000);
-    expect(sent.at(-1)?.payload).toEqual({ kind: 0, decisions: 1, workers: 1, linked: 0 });   // the muted worker isn't counted
+    expect(sent.at(-1)?.payload).toEqual({ kind: 0, decisions: 1, workers: 1, linked: 0, alerts: 0, usage: 0 });   // the muted worker isn't counted
+  });
+  it("every kind's Topic is one a push service takes: at most 32 URL-safe Base64 characters, a length that decodes (Apple refused the 5-character \"alert\" and \"usage\" with 400 BadWebPushTopic, 2026-10-12 and 2026-10-25)", async () => {
+    const topicsOf: string[] = [];
+    const all = new NotificationService({ store, alerts: () => 1, send: async (_s, _p, o) => { topicsOf.push(o.topic); return { status: 201 }; } });
+    all.board([]);
+    all.board([decision("t-1")]);
+    all.worker("%1", false, null, true);
+    all.worker("%1", true, null);
+    all.linked();
+    all.alert(true);
+    all.usage();
+    await vi.advanceTimersByTimeAsync(5000); await all.settled();
+    all.stop();
+    const topics = [...new Set(topicsOf)].sort();
+    expect(topics).toHaveLength(5);                                     // decision, worker, linked, alert, usage
+    for (const t of topics) {
+      expect(t, t).toMatch(/^[A-Za-z0-9_-]{1,32}$/);                  // RFC 8030 section 5.4
+      expect(t.length % 4, `${t}: a Base64 length`).not.toBe(1);       // 4n+1 never decodes; Apple checks it
+    }
   });
   it("a device linked (AC13)", async () => {
     svc.linked();
     await tick(1000);
-    expect(sent[0]?.payload).toEqual({ kind: 2, decisions: 0, workers: 0, linked: 1 });
+    expect(sent[0]?.payload).toEqual({ kind: 2, decisions: 0, workers: 0, linked: 1, alerts: 0, usage: 0 });
     expect(sent[0]?.options).toEqual({ ttlSeconds: 3600, topic: "linked", urgency: "high" });
     svc.linked();
     await tick(1000);
@@ -97,7 +116,7 @@ describe("the latest wins after a second (N3)", () => {
     await tick(999);
     expect(sent).toEqual([]);
     await tick(1);
-    expect(sent.map(s => s.payload)).toEqual([{ kind: 0, decisions: 2, workers: 0, linked: 0 }, { kind: 0, decisions: 2, workers: 0, linked: 0 }]);
+    expect(sent.map(s => s.payload)).toEqual([{ kind: 0, decisions: 2, workers: 0, linked: 0, alerts: 0, usage: 0 }, { kind: 0, decisions: 2, workers: 0, linked: 0, alerts: 0, usage: 0 }]);
   });
   it("answered within the second: nothing to say, nothing sent", async () => {
     svc.board([decision("ny-1")]);
@@ -185,7 +204,7 @@ describe("the payload (N1, amendment 4)", () => {
     expect(new Set(sent.map(s => (s.payload as { kind: number }).kind))).toEqual(new Set([0, 1, 2]));
     expect(parseBody(PushPayload, { kind: 1, decisions: 0, workers: 1, linked: 0, worker: "builder" })).toBeNull();
     expect(parseBody(PushPayload, { kind: "worker", decisions: 0, workers: 1, linked: 0 })).toBeNull();
-    expect(parseBody(PushPayload, { kind: 3, decisions: 0, workers: 1, linked: 0 })).toBeNull();
+    expect(parseBody(PushPayload, { kind: 5, decisions: 0, workers: 1, linked: 0, alerts: 0, usage: 0 })).toBeNull();
   });
   it("records nothing but Notification rows: no Delivery, nothing an Escalation counts (N5)", async () => {
     answer = () => 500;
@@ -258,7 +277,7 @@ describe("one push per ask (review M1)", () => {
     svc.worker("%3", true, "q:toolu_1");                              // the question it waits on…
     svc.board([decision("q-toolu_1")]);                              // …is the Ask the board shows
     await tick(1000);
-    expect(sent.map(s => s.payload)).toEqual([{ kind: 0, decisions: 1, workers: 0, linked: 0 }, { kind: 0, decisions: 1, workers: 0, linked: 0 }]);
+    expect(sent.map(s => s.payload)).toEqual([{ kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 }, { kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 }]);
   });
   it("a muted worker's question still goes, as a Decision: an Ask breaks mute, as a mention does", async () => {
     muted.add("%3");
@@ -276,6 +295,39 @@ describe("a device linked goes even while he is attending (review M2)", () => {
     svc.linked();
     await tick(1000);
     expect(sent.map(s => (s.payload as { kind: number }).kind)).toEqual([2, 2]);
+  });
+});
+
+describe("a usage notice the hub wrote (S4, plan 4.4)", () => {
+  it("counts one more per notice, debounced, and the count resets once it went; the payload is the count, no text", async () => {
+    svc.usage();
+    svc.usage();                                                       // a second before the second is over: one push, both counted
+    await tick(999);
+    expect(sent).toEqual([]);
+    await tick(1);
+    expect(sent.map(s => s.payload)).toEqual([{ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }, { kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }]);
+    expect(sent[0]?.options).toEqual({ ttlSeconds: 6 * 3600, topic: "usages", urgency: "normal" });
+    expect(audit).toEqual([{ type: "NotificationSent", kind: "usage", counts: { decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 }, devices: 2, at: Date.now() }]);
+    expect(Object.values(sent[0]?.payload as object).every(v => typeof v === "number")).toBe(true);   // numbers only, never a word of the notice
+    svc.usage();                                                       // counted from zero again
+    await tick(1000);
+    expect(sent.at(-1)?.payload).toEqual({ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 1 });
+  });
+  it("not while he is attending; the count waits for the next one", async () => {
+    svc.attending("conn-1", true);
+    svc.usage();
+    await tick(2000);
+    expect(sent).toEqual([]);
+    expect(audit).toEqual([]);
+    expect(svc.counts().usage).toBe(1);                                // still counted: it goes with the next one
+  });
+  it("the payload passes the protocol's strict numbers-only schema", async () => {
+    svc.usage();
+    await tick(1000);
+    for (const s of sent) {
+      expect(parseBody(PushPayload, s.payload)).toEqual(s.payload);
+      expect(parseBody(PushPayload, { ...(s.payload as object), text: "seat-a: plan changed" })).toBeNull();
+    }
   });
 });
 

@@ -152,7 +152,7 @@ beforeEach(async () => {
   const config: Config = {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo",
     requireProxyIdentity: false, principalLogin: null, tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: join(dir, "web"), officeName: null,
-    pollMs: 1000, quietAfterMs: 1000, managerWindow: "manager", ledgerPath: null, paneLock: null, managerInbox: null, vnc: null,
+    pollMs: 1000, quietAfterMs: 1000, managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null,
     filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
   };
   access = new AccessService(store, fakePasskeys(), () => now);
@@ -167,7 +167,7 @@ beforeEach(async () => {
     desktop: () => ({ host: "127.0.0.1", port: vnc.port, password: null }),
   });
   http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000),
+    config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, () => now, () => access.policy()), escalations, remote,
   });
   await http.ready;

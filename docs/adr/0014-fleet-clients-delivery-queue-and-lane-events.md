@@ -3,7 +3,7 @@
 - **Status:** Proposed, 2026-10-08. Design: [`docs/design/fleet-clients/README.md`](../design/fleet-clients/README.md) (sub-project 2 of the fleet).
 - **Number:** 0010, 0011 and 0013 belong to open pull requests (manager inbox, phone chat app, engines settings).
 - **Builds on:** ADR-0012 (the fleet), ADR-0008 (send states, idempotency), ADR-0006 (decisions).
-- **Supersedes, once its §9.1 is live:** ADR-0010 (the manager's answers through kira's inbox on disk; PR #10). Its domain rules stay: an answer counts as given once queued, and is recorded once it reached the manager.
+- **Supersedes, once its §9.1 is live:** ADR-0010 (the manager's answers through kira's inbox on disk; rebuilt on main by #29, which §9.1's work removes; the owner, 2026-10-09). Its domain rules stay: an answer counts as given once queued, and is recorded once it reached the manager.
 
 ## Context
 

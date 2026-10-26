@@ -23,21 +23,28 @@
   import type { OutboxRecord } from "../outbox/state.ts";
   import Rail, { type View } from "./Rail.svelte";
   import Sidebar from "./Sidebar.svelte";
+  import { sentTo } from "../manager.ts";
+  import { SEEN_MARK, unseen } from "../alerts.ts";
   import TopNav from "./TopNav.svelte";
+  import { clearSeat, forgetSource } from "../usage-api.ts";
   import DecisionCard, { type AnswerBody, type AnswerProblem } from "./DecisionCard.svelte";
   import { UNKNOWN, hubRefusal } from "../catchup/answer.ts";
   import DecisionsPanel from "./DecisionsPanel.svelte";
   import RightPanel from "./RightPanel.svelte";
   import { REFUSALS, waitingCount, type DecisionItem } from "./decisions.ts";
+  import { explainCodeProblem, type CodeOutcome } from "./memory-code.ts";
+  import { clampRight, layoutIsNarrow, widthAfterWindowChange } from "./panel-width.ts";
+  import type { AskOutcome } from "./answer-session.ts";
   import { api, ApiError, explain } from "../api.ts";
+  import { askForBrief as sharedAsk } from "../ask-brief.ts";
   import { decodeJobs, type ShownJob } from "./jobs.ts";
   import { stepUp, withStepUp } from "../stepup.ts";
   import LinkedNotice from "../LinkedNotice.svelte";
   import FleetNotice from "../FleetNotice.svelte";
   import "./desk-tokens.css";
 
-  let { device, office, verifiedAt: initialVerifiedAt, policy: initialPolicy, desktop = false, engines = false, onSignedOut }: {
-    device: string; office: string; verifiedAt: number | null; policy: Policy; desktop?: boolean; engines?: boolean; onSignedOut: () => void;
+  let { device, office, verifiedAt: initialVerifiedAt, policy: initialPolicy, desktop = false, engines = false, updates = false, onSignedOut }: {
+    device: string; office: string; verifiedAt: number | null; policy: Policy; desktop?: boolean; engines?: boolean; updates?: boolean; onSignedOut: () => void;
   } = $props();
   let policy = $state<Policy>({ stay: "7d", stepUp: "1h" });
   $effect.pre(() => { policy = initialPolicy; });
@@ -81,6 +88,12 @@
     if (w) open(w.id);
   }
   let sidebarWidth = $state(store.get("morndo.sidebar", 300));
+  // The stored width is the one the owner chose. A narrow window only changes what is drawn.
+  let rightWidth = $state(clampRight(store.get("morndo.right.width", 440)));
+  function setRightWidth(n: number, persist = false) {
+    rightWidth = clampRight(n);
+    if (persist) store.set("morndo.right.width", rightWidth);
+  }
   // The right-hand panel with the decisions: open by default beside every conversation. Closing it is remembered on this
   // device.
   let right = $state<{ open: boolean }>(store.get("morndo.right", { open: true }));
@@ -106,10 +119,12 @@
   let screenRequest = $state<{ worker: string; n: number } | null>(null);
   let focus = $state<{ id: string; n: number } | null>(null);
 
-  const manager = $derived(feed.workers.find(w => w.name === "manager") ?? null);
-  const current = $derived(feed.workers.find(w => w.id === selected) ?? null);
+  // The roster lists the manager even while it has no window (a restart): not running, and a message to it can wait.
+  const manager = $derived(feed.roster.find(w => w.name === "manager") ?? null);
+  const current = $derived(feed.roster.find(w => w.id === selected) ?? null);
   const nameOf = (w: RosterEntry) => (w.name === "manager" ? "Manager" : w.name);
-  const needsYouCount = $derived(feed.workers.filter(w => w.needsYou).length);
+  // Activity's count: who waits for him, and the fleet's alerts he hasn't seen (they are on Activity too).
+  const needsYouCount = $derived(feed.workers.filter(w => w.needsYou).length + unseen(feed.alerts, feed.reads[SEEN_MARK]));
   const decisionsWaiting = $derived(waitingCount(feed.decisions));
   const decisionByMessage = $derived(new Map(feed.decisions.filter(d => d.messageId).map(d => [d.messageId as string, d])));
   const stepUpMs = $derived(STEP_UP_MS[policy.stepUp]);
@@ -118,8 +133,8 @@
   // Like Slack, the right-hand panel sits beside the conversation while the conversation keeps a readable width (560px);
   // in a narrower window it stays shut until asked for, and then lies over the conversation.
   let windowWidth = $state(typeof innerWidth === "number" ? innerWidth : 1920);
-  const RIGHT_WIDTH = 440;
-  const narrow = $derived(windowWidth - 70 - 4 - sidebarWidth - RIGHT_WIDTH < 560);
+  const drawnRight = $derived(widthAfterWindowChange(rightWidth, windowWidth, sidebarWidth).drawn);
+  const narrow = $derived(layoutIsNarrow(windowWidth, sidebarWidth));
   const rightShown = $derived(narrow ? overlayOpen : right.open);
   const decisionsShown = $derived(rightShown);
   function saveRight(next: { open: boolean }) { right = next; store.set("morndo.right", next); }
@@ -132,9 +147,9 @@
   // The hub's own word is its code ("uncertain": the asker's machine may have typed it); no word of the hub's own (the
   // connection failed, a proxy's page) is "unknown", which may have gone too; anything else (a cancelled passkey
   // prompt) sent nothing.
-  async function answer(id: string, body: AnswerBody, requestId: string): Promise<AnswerProblem | null> {
+  async function answer(id: string, body: AnswerBody, requestId: string, seen?: string): Promise<AnswerProblem | null> {
     try {
-      await withStepUp(() => api.post(`/api/escalations/${encodeURIComponent(id)}/answer`, { ...body, requestId }), at => (verifiedAt = at));
+      await withStepUp(() => api.post(`/api/escalations/${encodeURIComponent(id)}/answer`, { ...body, requestId, ...(seen ? { seen } : {}) }), at => (verifiedAt = at));
       return null;
     } catch (e) {
       if (e instanceof ApiError) return e.code === `http_${e.status}` ? { code: "unknown", text: UNKNOWN } : { code: hubRefusal(e), text: REFUSALS[hubRefusal(e)] ?? explain(e) };
@@ -143,6 +158,24 @@
     }
   }
   function openScreen(workerId: string) { open(workerId); overlayOpen = false; screenRequest = { worker: workerId, n: (screenRequest?.n ?? 0) + 1 }; }
+  // The console's one-time approval code for a pending Memory note (ADR-0031 round 3): a Command under step-up like the
+  // approval itself, so a stale passkey check is redone first (AC7). The code crosses this once, into the card's reveal,
+  // and is never kept here.
+  async function memoryCode(noteId: string): Promise<CodeOutcome> {
+    try {
+      const r = await withStepUp(() => api.post<{ code: string; expiresAt: number }>(`/api/memory/notes/${encodeURIComponent(noteId)}/approval-code`), at => (verifiedAt = at));
+      return { ok: true, code: r.code, expiresAt: r.expiresAt };
+    } catch (e) {
+      return { ok: false, text: explainCodeProblem(e) };
+    }
+  }
+  async function askForBrief(d: DecisionItem): Promise<AskOutcome> {
+    return sharedAsk(d, feed.workers, c => onQueue({ target: c.worker, targetName: c.workerName, text: c.text, uploads: [], images: [], files: [], seen: c.seen }), async () => {
+      if (verifiedFresh || navigator.onLine === false) return null;
+      try { verifiedAt = await stepUp(); } catch (e) { return explain(e); }
+      return null;
+    });
+  }
   function openChat(d: DecisionItem) {
     if (!d.asker.workerId || !d.messageId) return;
     open(d.asker.workerId);
@@ -180,9 +213,9 @@
 
   // Pick a channel: the last one, else the manager, else the first agent.
   $effect(() => {
-    if (selected && feed.workers.some(w => w.id === selected)) return;
+    if (selected && feed.roster.some(w => w.id === selected)) return;
     const last = store.get<string | null>("morndo.channel", null);
-    const pick = feed.workers.find(w => w.name === last) ?? manager ?? feed.workers[0];
+    const pick = feed.roster.find(w => w.name === last) ?? manager ?? feed.roster[0];
     if (pick) selected = pick.id;
   });
   $effect(() => { if (view === "home") feed.watch(selected); });
@@ -220,11 +253,14 @@
   $effect(() => {
     const worker = feed.historyFor;
     const messages = feed.messages;
-    const sent = outgoing.some(r => r.worker === worker && r.state === "sent");
-    if (outbox && worker && sent) void outbox.echoes(worker, echoesOf(messages));
+    const name = feed.roster.find(w => w.id === worker)?.name ?? "";
+    const sent = worker !== null && outgoing.some(r => sentTo(r, { id: worker, name }) && r.state === "sent");
+    if (outbox && worker && sent) void outbox.echoes(worker, echoesOf(messages), name);
   });
   // Waiting sends try at once when the feed is live again (S7).
   $effect(() => { if (feed.status === "live") outbox?.connected(); });
+  // Messages to the manager in the fleet's queue move on as the hub says (fleet-clients §9.1).
+  $effect(() => { const items = feed.deliveries; if (items.length) void outboxReady.then(o => o.deliveries(items)); });
 
   function open(id: string) { view = "home"; selected = id; }
   // Resolves once the message is written down on this device; throws if it couldn't be, so the composer keeps the draft
@@ -245,6 +281,8 @@
   }
   async function onRetry(id: string) { await outbox?.retry(id); }
   async function onDiscard(id: string) { forget(id); await outbox?.discard(id); }
+  // Cancel: the hub withdraws a message the manager's queue still holds (ruling 83); its entry then says Not delivered.
+  async function onCancel(id: string) { await outbox?.cancel(id); }
   // "Not sent: verify": the passkey check, then the same request id again (AC7 is judged when it arrives).
   async function onVerify(id: string) {
     try { verifiedAt = await stepUp(); } catch { return; }
@@ -278,12 +316,14 @@
     }
   }
 
-  // Where a notification's click opens the app (phase F): ?view=decisions or ?view=activity, then a clean address. The
-  // service worker navigates an open window there too, which loads the page again.
+  // Where a notification's click opens the app (phase F): ?view=decisions, ?view=activity or ?view=dashboard (Home's
+  // own name, where a usage push goes), then a clean address. The service worker navigates an open window there too,
+  // which loads the page again.
   function openFromAddress() {
     const v = new URLSearchParams(location.search).get("view");
     if (v === "decisions") showRight();
-    else if (v === "activity") view = "activity";
+    else if (v === "activity" || v === "alerts") view = "activity";            // the fleet's alerts are on Activity
+    else if (v === "dashboard") view = "dashboard";
     if (v) history.replaceState(history.state, "", location.pathname);
   }
 
@@ -318,7 +358,7 @@
 </script>
 
 {#snippet inlineCard(d: DecisionItem)}
-  <DecisionCard item={d} variant="inline" {now} {verifiedFresh} onAnswer={answer} onOpenScreen={openScreen} />
+  <DecisionCard item={d} variant="inline" {now} {verifiedFresh} onAnswer={answer} onOpenScreen={openScreen} onMemoryCode={memoryCode} />
 {/snippet}
 
 <div class="desk desk-tokens">
@@ -331,7 +371,9 @@
       onSignedOut={() => { preferences = null; onSignedOut(); }} onClose={() => (preferences = null)} />
   {/if}
   {#if details && detailsWorker}
+    <!-- The account with a fresh session on this lane, for its label (ADR-0034); none when no account reports here. -->
     <DetailsModal worker={detailsWorker} displayName={nameOf(detailsWorker)} session={feed.details[detailsWorker.id]}
+      account={feed.usage.find(a => a.sessions.some(s => s.lane === detailsWorker.name)) ?? null}
       prefs={prefsOf(detailsWorker.name)} tab={details.tab} onPrefs={p => detailsWorker && setPrefs(detailsWorker.name, p)}
       onScreen={() => { if (detailsWorker) openScreen(detailsWorker.id); }}
       onClose={() => (details = null)} />
@@ -344,24 +386,27 @@
       decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
       onView={v => (view = v)} onManager={() => manager && open(manager.id)} onPreferences={t => (preferences = t)} />
     <div class="workspace">
-      <div class="panel" class:over={narrow && rightShown} style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${RIGHT_WIDTH}px` : ''}">
-        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines}
+      <div class="panel" class:over={narrow && rightShown} style:--right-w="{drawnRight}px" style:grid-template-columns="{sidebarWidth}px minmax(0, 1fr){rightShown && !narrow ? ` ${drawnRight}px` : ''}">
+        <Sidebar {office} workers={feed.workers} {manager} {selected} {view} {unread} {needsYouCount} {engines} {updates} runs={feed.boardRuns}
           decisions={decisionsWaiting} decisionsOpen={decisionsShown} onDecisions={showRight}
           {prefsOf} onMenu={(id, x, y) => (menu = { x, y, id })}
           onSelect={open} onActivity={() => (view = "activity")} onCompose={() => { if (manager) { open(manager.id); setTimeout(() => composerEl?.focus(), 50); } }} />
         <div class="resizer" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" style:left="{sidebarWidth - 2}px" onpointerdown={startResize}></div>
         <main class="main">
           {#if view === "activity"}
-            <ActivityView workers={feed.workers} onOpen={open} {nameOf} />
+            <ActivityView workers={feed.workers} onOpen={open} {nameOf}
+              alerts={feed.alerts} seenAt={feed.reads[SEEN_MARK] ?? 0} onSeen={at => feed.markRead(SEEN_MARK, at)} />
           {:else if view === "dashboard"}
-            <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane} />
+            <HomeView accounts={feed.usage} at={feed.usageAt} live={feed.usageAt !== null} {now} onOpenLane={openLane}
+              notices={feed.usageNotices} onForget={(account, source, node) => forgetSource(account, source, node)}
+              onClearSeat={account => clearSeat(account)} />
           {:else if view === "board"}
-            <BoardView tasks={feed.board} lanes={feed.boardLanes} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
+            <BoardView tasks={feed.board} lanes={feed.boardLanes} runs={feed.boardRuns} merged={feed.boardMerged} standIn={feed.boardStandIn} live={feed.boardAt !== null} {now} open={openTask} jobs={feed.jobs} counts={feed.jobCounts} more={feed.jobsMore} openJob={openJobId} onOpen={k => (openTask = k)} onOpenJob={id => (openJobId = id)} onLoadJobs={loadHiddenJobs}
               onAct={boardAct} onCreate={boardCreate} onOpenLane={openLane} />
           {:else if current}
             <ChannelView worker={current} displayName={nameOf(current)} {feed} {verifiedAt} panel={rightShown}
-              outgoing={outgoing.filter(r => r.worker === current?.id).map((r): Outgoing => ({ ...r, images: previews.get(r.id) ?? [], files: sentFiles.get(r.id) ?? [] }))}
-              {onQueue} {onRetry} {onDiscard} {onVerify} {onEdit} {editRequest} {onEdited}
+              outgoing={outgoing.filter(r => current !== null && sentTo(r, current)).map((r): Outgoing => ({ ...r, images: previews.get(r.id) ?? [], files: sentFiles.get(r.id) ?? [] }))}
+              {onQueue} {onRetry} {onDiscard} {onCancel} {onVerify} {onEdit} {editRequest} {onEdited}
               prefs={prefsOf(current.name)} onDetails={() => current && openDetails(current.id)}
               dividerMark={opened?.worker === current.id ? opened.mark : undefined} onAtBottom={(value, worker) => (atBottom = { worker, value })}
               {stepUpMs} onSecurity={() => (preferences = "security")}
@@ -374,9 +419,9 @@
           {/if}
         </main>
         {#if rightShown}
-          <RightPanel waiting={decisionsWaiting} onClose={closeRight}>
+          <RightPanel waiting={decisionsWaiting} width={drawnRight} chosen={rightWidth} onWidth={(n) => setRightWidth(n)} onCommit={(n) => setRightWidth(n, true)} onClose={closeRight}>
             <DecisionsPanel items={feed.decisions} ledger={feed.ledger} {now} {verifiedFresh} onAnswer={answer}
-              onOpenScreen={openScreen} onOpenChat={openChat} />
+              onOpenScreen={openScreen} onOpenChat={openChat} onAskBrief={askForBrief} onMemoryCode={memoryCode} />
           </RightPanel>
         {/if}
       </div>
@@ -404,7 +449,7 @@
   .main { display: flex; min-width: 0; min-height: 0; border-left: 1px solid var(--border-soft); }
   .empty { margin: auto; color: var(--muted); }
   .panel.over > :global(.side-panel) {
-    position: absolute; top: 0; right: 0; bottom: 0; width: min(440px, calc(100% - 16px)); z-index: 6;
+    position: absolute; top: 0; right: 0; bottom: 0; width: min(var(--right-w), calc(100% - 16px)); z-index: 6;
     box-shadow: -10px 0 28px rgba(0, 0, 0, 0.16);
   }
 </style>

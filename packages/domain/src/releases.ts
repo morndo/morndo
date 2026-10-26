@@ -4,7 +4,7 @@
 // language, RL1–RL14, the Update state machine, the recovery table and the fleet's rollout and skew rules. It is
 // pure: no signature is verified here (the Verifier port reports facts: "these bytes verify under this key, under
 // that namespace"), no service is stopped, no store is opened, and no clock is read — every function takes `now`.
-import { err, ok, type Result } from "./shared.ts";
+import { err, ok, type Result, type EndpointId } from "./shared.ts";
 
 // ---- Version (SemVer 2.0.0; https://semver.org/#spec-item/11, read 2026-10-11)
 
@@ -195,7 +195,9 @@ export function admit(p: {
   if (machine.badVersions.some(bad => equalVersions(bad, target))) return err("bad_here");
   // The feed's word and the holds — a pin (RL14), a withdrawal, a halt (RL12) — guard moving TO a Version. They
   // never guard moving away from one: the principal's `--rollback` (§8.1) is the escape from exactly a halted,
-  // pinned or withdrawn Version, back to the one already on disk, and RL12 halts automatic applies only.
+  // pinned or withdrawn Version, back to the one already on disk. A named `--to` is refused for a halted
+  // Version, because RL12's halt is lifted by the principal resuming the Rollout on the control plane, not by
+  // one machine naming the Version; `--rollback` (moving away) is never held by it.
   if (ask.kind !== "rollback") {
     if (machine.settings.pin !== null && !equalVersions(target, machine.settings.pin)) return err("pinned");
     if (p.offered !== null && p.offered.feed.withdrawn.some(w => { const q = parseVersion(w); return q !== null && equalVersions(q, target); }))
@@ -379,11 +381,13 @@ export function judgeProbation(p: { upMs: number; restarts: number }): Result<tr
 // ---- Skew (RL11) and the Rollout (RL12)
 
 export type NodeView = { name: string; version: Version | null; agentProtocol: number | null; joined: boolean; revoked: boolean };
-export type SkewRefusal = { reason: "node_ahead" } | { reason: "protocol_dropped"; nodes: string[] };
+export type SkewRefusal = { reason: "node_ahead" } | { reason: "protocol_dropped"; nodes: string[]; unknown?: string[] };
 
 // May this machine apply this Version, given the control plane and the nodes? A node never applies above its
 // control plane. The control plane defers a Release that drops an agent protocol a joined, non-revoked node still
 // depends on — the Manifest's protocol range decides, so no knowledge of what changed is needed — and names them.
+// A joined node whose protocol is unknown (it never said one) counts as cut too, and is named in `unknown`: the
+// control plane cannot know it would still be understood. Revoking the node lets a Release past it.
 export function skew(p: {
   machine: "node" | "control_plane"; controlPlane: Version; nodes: NodeView[];
   target: Version; targetProtocol: { agent: [number, number]; clientApi: [number, number] };
@@ -391,9 +395,10 @@ export function skew(p: {
   if (p.machine === "node" && compareVersions(p.target, p.controlPlane) > 0) return err({ reason: "node_ahead" });
   if (p.machine === "control_plane") {
     const [min, max] = p.targetProtocol.agent;
-    const cut = p.nodes.filter(n => n.joined && !n.revoked && n.agentProtocol !== null
-      && (n.agentProtocol < min || n.agentProtocol > max)).map(n => n.name);
-    if (cut.length > 0) return err({ reason: "protocol_dropped", nodes: cut });
+    const counted = p.nodes.filter(n => n.joined && !n.revoked);
+    const cut = counted.filter(n => n.agentProtocol === null || n.agentProtocol < min || n.agentProtocol > max).map(n => n.name);
+    const unknown = counted.filter(n => n.agentProtocol === null).map(n => n.name);
+    if (cut.length > 0) return err({ reason: "protocol_dropped", nodes: cut, ...(unknown.length > 0 ? { unknown } : {}) });
   }
   return ok(true);
 }
@@ -631,3 +636,18 @@ export type ReleaseEvent =
   | { type: "RolloutHalted"; version: string; by: string; at: number }
   | { type: "RolloutResumed"; version: string; at: number }
   | { type: "SkewBlocked"; detail: string; at: number };
+
+// ---- The hub's own audit of the owner's update commands (updates §8.1, PR 6c)
+
+// What the hub records when the owner commands an update through it, after the step-up let it: which command, the
+// endpoint that asked at the moment it ran, and exactly what was asked — which machine ("control-plane" for this
+// machine through its updater CLI, a node's name for update.apply, "fleet" for a resume) and which Version (null
+// for a rollback, which names none). The domain's word for it; the hub's store keeps the rows.
+export type UpdateCommanded = {
+  type: "UpdateCommanded";
+  command: "update.apply" | "update.rollback" | "rollout.resume";
+  endpointId: EndpointId;
+  machine: string;
+  version: string | null;
+  at: number;
+};

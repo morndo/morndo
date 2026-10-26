@@ -28,14 +28,20 @@
     {
       "files": [
         "packages/node-ops/src/tmux.ts",
+        "packages/node-ops/src/menu.ts",
         "packages/domain/src/board.ts",
+        "packages/domain/src/brief.ts",
+        "packages/domain/src/card.ts",
+        "packages/domain/src/proof.ts",
+        "packages/protocol/test/card.test.ts",
         "packages/protocol/src/releases.ts",
         "packages/node-ops/test/tmux*.ts",
         "apps/hub/src/adapters/manager-protocol.ts",
         "apps/hub/test/steering.test.ts",
         "apps/hub/test/tmux-*.ts",
         "test/fixtures/*.ts",
-        "apps/node-agent/test/fake-claude.fixture.ts"
+        "apps/node-agent/test/fake-claude.fixture.ts",
+        "apps/node-agent/test/fake-engine-lane.fixture.ts"
       ],
       "rules": {
         "no-control-regex": "off"
@@ -45,6 +51,7 @@
       "files": [
         "apps/hub/src/**",
         "packages/node-ops/src/**",
+        "packages/fleet-client/src/**",
         "apps/node-agent/src/**",
         "apps/fleet/src/**"
       ],

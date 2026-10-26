@@ -5,15 +5,42 @@
 #   sh commit-traces message FILE
 #   sh commit-traces range <git rev-list args>
 #   sh commit-traces mails <git rev-list args>
-# A dependabot[bot] author, committer, or trailer is allowed. Any other
-# [bot] identity is not. Install the commit-msg hook with
-# scripts/install-git-hooks.sh.
+# A dependabot[bot] author, committer, or trailer is allowed. So is the release
+# App's own release commit, and only that: an author name and address are git
+# metadata any pusher can write, so the identity alone admits nothing. A commit is
+# admitted only when ALL hold: its author is exactly RELEASE_BOT_NAME with
+# RELEASE_BOT_MAIL; its committer is GitHub's web-flow; its whole id is a line of
+# the file named by COMMIT_TRACES_VERIFIED (the ids GitHub's own API reported as
+# verified, by web-flow, as a commit of a pull request the App itself opened on a
+# release-please branch: release-commits-verified; CI builds the file, a local
+# pre-push has none, so it admits no bot); it has exactly one parent; and it changes,
+# as modifications only, nothing but release files: in a package.json or
+# package-lock.json only the root version (every other part of the JSON equal, so
+# no dependency moves), in .release-please-manifest.json only the root "." entry,
+# in CHANGELOG.md only added lines. Any other [bot]
+# identity, a name or an address alone, or a lookalike is not admitted. Install the
+# commit-msg hook with scripts/install-git-hooks.sh.
+# COMMIT_TRACES_LEGACY: full commit ids, separated by spaces, whose author and
+# committer addresses are not checked. For a commit already in the published
+# history whose address cannot be rewritten; only its address is spared, by an
+# exact match of the whole id. Nothing sets it but a proof (pre-push-proof.sh
+# pins the one commit this repository has); never set it in CI or a hook.
+# mails and range read the whole range with one git log into a temp file and
+# judge it with one awk pass per concern, not a set of forks per commit. The
+# per-commit rules stay in check_commit, run only for the candidates that the
+# awk pass finds.
 set -eu
 
 names='claude|anthropic|cursor|codex|copilot|gpt|gemini|glm'
+# The release App (Release Please commits the release PR as this identity). It is the id of the App's bot user and its
+# slug, the address GitHub gives every App. The identity is one of several conditions (release_commit below), never enough.
+RELEASE_BOT_NAME='morndo-release[bot]'
+RELEASE_BOT_MAIL='345868531+morndo-release[bot]@users.noreply.github.com'
 robot=$(printf '\360\237\244\226')
+fs=$(printf '\037')
 err=$(mktemp)
-trap 'rm -f "$err"' EXIT
+out=$(mktemp)
+trap 'rm -f "$err" "$out"' EXIT
 
 fail() {
   echo "commit-traces: $*" >&2
@@ -61,6 +88,7 @@ github_committer() {
 
 check_mails() {
   sha=$1
+  case " ${COMMIT_TRACES_LEGACY:-} " in *" $sha "*) return 0 ;; esac
   ae=$(git log -1 --format='%ae' "$sha")
   ce=$(git log -1 --format='%ce' "$sha")
   noreply_mail "$ae" || fail "$sha author email is not @users.noreply.github.com"
@@ -69,36 +97,166 @@ check_mails() {
   fi
 }
 
+# 0 when a JSON file differs between two commits only in the value jq-path $4 (a version, string-shaped), which must
+# read as a version after, with everything else equal. $1 and $2: the parent and the commit; $3: the file; $4: the jq
+# path of the one value that may change; $5: the jq expression that deletes it (the rest must be equal). jq failing
+# (not JSON, no jq) is a no.
+only_json_value() {
+  oj_a=$(git show "$1:$3" 2>/dev/null | jq -S "$5" 2>/dev/null) || return 1
+  oj_b=$(git show "$2:$3" 2>/dev/null | jq -S "$5" 2>/dev/null) || return 1
+  [ -n "$oj_a" ] && [ "$oj_a" = "$oj_b" ] || return 1
+  git show "$2:$3" | jq -e "$4 | type == \"string\" and test(\"^[0-9A-Za-z.+-]+\$\")" >/dev/null 2>&1
+}
+
+# 0 when the commit changes nothing but release files, as plain modifications: one parent, no deleted, added, renamed or
+# mode-changed file, only the root version of a package.json or package-lock.json, only the root entry of the release
+# manifest, and only added lines in CHANGELOG.md. Fail closed on anything else.
+release_files_only() {
+  rf_sha=$1
+  [ "$(git rev-list --parents -n 1 "$rf_sha" | wc -w)" -eq 2 ] || return 1
+  rf_parent="$rf_sha^1"
+  rf_files=$(git diff --no-renames --name-only --diff-filter=M "$rf_parent" "$rf_sha")
+  [ -n "$rf_files" ] || return 1
+  [ "$rf_files" = "$(git diff --no-renames --name-only "$rf_parent" "$rf_sha")" ] || return 1
+  [ -z "$(git diff --no-renames --summary "$rf_parent" "$rf_sha")" ] || return 1
+  for rf_file in $rf_files; do
+    case "$rf_file" in
+      package.json|*/package.json)
+        only_json_value "$rf_parent" "$rf_sha" "$rf_file" '.version' 'del(.version)' || return 1 ;;
+      package-lock.json|*/package-lock.json)
+        # the root package's two version lines, and nothing else: not a dependency's, not a name, not a path
+        only_json_value "$rf_parent" "$rf_sha" "$rf_file" '.version' 'del(.version, .packages[""].version)' || return 1
+        git show "$rf_sha:$rf_file" | jq -e '.packages[""].version == .version' >/dev/null 2>&1 || return 1 ;;
+      .release-please-manifest.json)
+        only_json_value "$rf_parent" "$rf_sha" "$rf_file" '.["."]' 'del(.["."])' || return 1 ;;
+      CHANGELOG.md)
+        [ "$(git diff --no-renames --numstat "$rf_parent" "$rf_sha" -- "$rf_file" | cut -f2)" = 0 ] || return 1 ;;
+      *) return 1 ;;
+    esac
+  done
+  return 0
+}
+
+# 0 when the commit is the release App's own release commit (see the header): identity, GitHub as committer, listed as
+# verified, release files only. $1: the commit; $2 to $5: author name and address, committer name and address.
+release_commit() {
+  [ "$2" = "$RELEASE_BOT_NAME" ] && [ "$3" = "$RELEASE_BOT_MAIL" ] || return 1
+  [ "$4" = GitHub ] && [ "$5" = noreply@github.com ] || return 1
+  [ -n "${COMMIT_TRACES_VERIFIED:-}" ] && [ -f "$COMMIT_TRACES_VERIFIED" ] || return 1
+  grep -F -x -q "$1" "$COMMIT_TRACES_VERIFIED" || return 1
+  release_files_only "$1"
+}
+
 check_commit() {
   sha=$1
   msg=$(git log -1 --format='%B' "$sha")
   if bad_message "$msg"; then
     fail "$sha message attributes the change to an assistant"
   fi
-  ident=$(git log -1 --format='%an%n%ae%n%cn%n%ce' "$sha")
+  # The release App's own release commit (release_commit) leaves its author identity out of the identity text; the
+  # committer, GitHub, is judged as always, and the message is judged above, so an assistant beside it still fails.
+  an=$(git log -1 --format='%an' "$sha")
+  ae=$(git log -1 --format='%ae' "$sha")
+  cn=$(git log -1 --format='%cn' "$sha")
+  ce=$(git log -1 --format='%ce' "$sha")
+  if release_commit "$sha" "$an" "$ae" "$cn" "$ce"; then an=''; ae=''; fi
+  ident=$(printf '%s\n%s\n%s\n%s' "$an" "$ae" "$cn" "$ce")
   if bad_ident "$ident"; then
     fail "$sha author or committer names an assistant or a bot other than dependabot[bot]"
   fi
   check_mails "$sha"
 }
 
-walk() {
-  action=$1
+# The whole range in one git log, into the out file. A failing git log (a
+# missing sha, a bad range) must not look like a clean check.
+log_all() {
+  fmt=$1
   shift
-  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
-  # A failing rev-list (a missing sha, a bad range) must not look like a clean check.
   status=0
-  list=$(git rev-list "$@" 2>"$err") || status=$?
+  git -c log.showSignature=false log --no-color --format="$fmt" "$@" >"$out" 2>"$err" || status=$?
   if [ "$status" -ne 0 ]; then
     cat "$err" >&2
     fail "revision range"
   fi
-  while IFS= read -r sha; do
-    [ -n "$sha" ] || continue
-    "$action" "$sha"
-  done <<EOF
-$list
-EOF
+}
+
+# One pass of both noreply rules and the legacy pin, in git's order, over a log
+# of exactly id, author address and committer address, one line each, split at
+# the unit separator. A name or an address that holds the separator shifts the
+# fields, so a record that is not exactly three fields refuses (fail closed).
+# The addresses are always read from this log, never from the one that also
+# holds names and messages, where a crafted name could shift them.
+scan_mails() {
+  LC_ALL=C awk -v legacy=" ${COMMIT_TRACES_LEGACY:-} " -v fs="$fs" '
+    BEGIN { FS = fs }
+    {
+      sub(/^[[:space:]]+/, "", $0)
+      if ($0 == "") next
+      if (NF != 3) {
+        printf "commit-traces: %s record does not read as id, author and committer address\n", substr($0, 1, 40) > "/dev/stderr"
+        exit 1
+      }
+      if (index(legacy, " " $1 " ")) next
+      if (tolower($2) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/) {
+        printf "commit-traces: %s author email is not @users.noreply.github.com\n", $1 > "/dev/stderr"
+        exit 1
+      }
+      if (tolower($3) !~ /^[^@[:space:]]+@users[.]noreply[.]github[.]com$/ &&
+          tolower($3) != "noreply@github.com") {
+        printf "commit-traces: %s committer email is not a noreply address\n", $1 > "/dev/stderr"
+        exit 1
+      }
+    }' "$1"
+}
+
+# The ids bad_message or bad_ident can refuse: everything they match (a name,
+# a vendor domain, generated with or by, their urls, trailers, [bot], the
+# emoji) holds one of these markers, so a record holding none is clean by
+# both. A record that does not start with a commit id (a message holding the
+# record separator) refuses: fail closed, never skip.
+candidates() {
+  LC_ALL=C awk '
+    BEGIN {
+      FS = "\037"; RS = "\036"
+      split("claude anthropic cursor codex copilot gpt gemini glm generated openai [bot] co-authored-by signed-off-by \360\237\244\226", mark, " ")
+    }
+    {
+      sub(/^[[:space:]]+/, "", $0)
+      if ($0 == "") next
+      id = substr($0, 1, 40)
+      if (length($0) < 40 || id ~ /[^0-9a-f]/) {
+        printf "commit-traces: %s record is not a commit\n", id > "/dev/stderr"
+        exit 1
+      }
+      text = tolower($0)
+      for (m in mark) {
+        if (index(text, mark[m])) {
+          print id
+          break
+        }
+      }
+    }
+' "$1"
+}
+
+# The mails mode: both noreply rules over the whole range in one pass.
+mails() {
+  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
+  log_all '%H%x1f%ae%x1f%ce' "$@"
+  scan_mails "$out"
+}
+
+# The range mode: one pass finds the candidates, check_commit judges each
+# one, then the mails mode's own log and pass cover the whole range.
+range() {
+  [ "$#" -ge 1 ] || fail "usage: commit-traces $mode <rev-list>"
+  log_all '%H%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%B%x1e' "$@"
+  list=$(candidates "$out")
+  for sha in $list; do
+    check_commit "$sha"
+  done
+  log_all '%H%x1f%ae%x1f%ce' "$@"
+  scan_mails "$out"
 }
 
 [ "$#" -ge 1 ] || fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"
@@ -114,10 +272,10 @@ case "$mode" in
     check_message "$(awk '/^# -+ >8 -+/ { exit } /^#/ { next } { print }' "$1")"
     ;;
   range)
-    walk check_commit "$@"
+    range "$@"
     ;;
   mails)
-    walk check_mails "$@"
+    mails "$@"
     ;;
   *)
     fail "usage: commit-traces message FILE | commit-traces range <rev-list> | commit-traces mails <rev-list>"

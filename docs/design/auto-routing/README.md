@@ -2,6 +2,8 @@
 
 **Phase: design only.** This document and [ADR-0020](../../adr/0020-auto-routing.md). No product code yet.
 
+An addendum at the end (2026-10-21) records what changed on `main` since: ADRs 0027–0030, the launch path of section 8.5, the pool's window ranking, and U4.
+
 **The request (2026-10-11):** for execution, switch between a Cursor subscription and GLM through a Z.ai key. Morndo decides which one runs when, so the settings need an Auto mode.
 
 **The owner's answer to decision 1 (2026-10-11):** "A combination. Maybe a lightweight model to decide... research the web when to use what model and if we could use something like decision api to make it more easy. In general maybe how we can use decision api."
@@ -1123,3 +1125,28 @@ None of these is in this ADR's scope. Each would get its own ADR before any code
 4. **New models earn harder work.** Default unchanged: a model new to a Role (GLM now) starts on routine tasks. It moves up a level after 4 of its last 5 are accepted first try, and down after 3 of 5 are sent back. New: the decider can't skip this; it only chooses among models already trusted for the task's level. The alternative is to trust it for every task from the start.
 5. **New: may Morndo send task profiles to an outside decider?** Default: off for every workspace; you turn it on per workspace, starting with your own projects, not ones that hold other people's material. When on, only profile fields leave the machine: kind, size, risk, round, priority, languages, and each option's model, cost, trust level and record. Never titles, descriptions, code, paths, or repo and key names. The vendor's standard endpoint; EU processing if your vendor account is approved for it. Off means the rules decide, at no cost.
 6. **New: the decider's budget.** Default: $0.25 a day for all decision-API uses together, a few thousand decisions at the price checked on 2026-10-11 (estimate). Over it, the rules decide until the next day, and you get one Alert. The alternative is $1 a day.
+
+## Addendum, 2026-10-21: what changed on `main` since this design (2026-10-11)
+
+ADR-0020 stays **Proposed**. This addendum records facts only, read on `main` at `fdbd7ff`; it changes none of the design's rules and decides nothing for the owner. No auto-routing code is on `main` (no `MORNDO_ROUTE`, route store or router service); the design's build plan (section 15) has not started.
+
+**ADRs accepted since**
+- [ADR-0027](../../adr/0027-reliable-lanes.md), decision 3: `lane.start` takes a `role` or an `engine`, and a node's `policy.engines.defaultRole` is the role of a start that names neither. It fails closed; nothing falls back to the node's own launcher.
+- [ADR-0028](../../adr/0028-codex-as-an-engine.md): Codex is an engine with its own sign-in. An unattended lane turn runs with full access, and usage is read through the CLI's app server (`morndo-keys usage`), as 5-hour and 7-day windows.
+- [ADR-0029](../../adr/0029-account-pool.md): an account pool per runtime (`PL1`–`PL14` in `docs/domain.md`). A session is pinned to one account by default; rotation is on only when the principal turns it on.
+- [ADR-0030](../../adr/0030-engine-lane-sessions.md): engine lanes are found where the engine layer records them, so briefs reach them like any lane. This changes how a started lane is reached, not how it is chosen.
+
+**Section 8.5 is stale on the launch path.** It says that until the engine layer's `router` setting lands, whoever starts a run calls `route` and passes `--engine`, `--model`, `--effort` and `--role` on, and that the fleet's `lane.start` "learns to start engine lanes" later. On `main` that is done (`apps/node-agent/src/ops/lane-engine.ts`, `laneLaunch`):
+- A start by role runs `<engines cli> resolve <role> --json` and takes its pick; a start by engine runs that entry. The pick is turned into the provider's launch command from `policy.engines.launch`, with `{model}`, `{effort}`, `{account}` and `{lane}` filled in.
+- A role nothing can fill, a provider without a launch command, no engine layer or the layer switched off refuses the start. The answer names the engine that ran and what the resolver passed over, and a non-empty list raises `engine_fallback`.
+- The path calls only `enabled` and `resolve`. It has no router hook, no route id and no `MORNDO_ROUTE`. Ask 1 (a `router` setting) and ask 2 (`--route` to `bin`) are not referenced by the lane start path or by the code that reads the engine layer (the fleet's own `Router` routes operations to nodes, which is a different thing). Where `route` would sit on this path is open.
+
+**Overlap with the pool's window ranking.** Both read the Usage windows, for different choices:
+- Auto (R18 step 6, section 6.2) excludes a subscription whose window is at 90% or more and ranks the rest by the weekly share against the Save line. The choice is an entry (`provider:model@effort`) among a Role's Connections, per run.
+- The pool (`PL3`–`PL6`) ranks the seats of one runtime by window, reset and load, to place a session's next turn on an account. Its placement ranking (`PL4`) applies in rotate mode; pinned mode, the default, keeps a session on its account (`PL6`).
+- A pool member is a subscription Connection with a sign-in home of its own (`PL1`). Neither document says which window figure Auto's `UsageReader` reads for a runtime that has several members, or how an Auto pick and a pool placement are ordered. ADR-0029 decision 7 says the engine layer needs no change: the provider's binary is a wrapper around `morndo-keys pool exec`.
+- ADR-0029 (Context 2) states that chains and priorities are "not a rotation".
+
+**U4 and PL12.** U4 on `main` (`docs/domain.md`) reads "Usage grants and decides nothing: no Mandate, Decision, Verdict or engine choice follows from it". This design's R18 would amend it so windows and spend act in exclusions, fences and ranking (with CN15 and ADR-0018 decision 9), and the build plan's step 1 would make that edit. That step has not been made. `PL12`, written after this design, says the pool's usage read "still decides nothing, so U4 stands". While ADR-0020 is Proposed, **U4 stands** as written; the two texts do not conflict until the amendment is accepted, and then `PL12`'s last sentence would be read against it.
+
+**Also on `main`.** [ADR-0026](../../adr/0026-capability-knowledge.md) and `docs/domain.md` already name this design's Scorecard cell and model class (K9: Knowledge never admits, excludes, fences or ranks a Candidate), so ADR-0020's wording on the class has readers.

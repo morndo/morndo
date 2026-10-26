@@ -199,7 +199,7 @@ Messages are JSON over WebSocket, validated with zod/mini on both sides. Every m
 | `pane.captureMany` | `workerIds` (≤ 64) | `{ workerId, text \| null }[]` | no |
 | `pane.frame` | `workerId` | `Frame` | no |
 | `pane.keys` | `workerId, data` (≤ 4096), `expect` | `true`/`false` | no; keystrokes are never retried |
-| `pane.send` | `workerId, text` (≤ 8000), `expect` | `{ problem: SendProblem \| null, typedAt }` | yes |
+| `pane.send` | `workerId, text` (≤ 100,000, ADR-0033), `expect` | `{ problem: SendProblem \| null, typedAt }` | yes |
 | `op.status` | `key` | `unknown` \| `started` \| `done` + outcome | n/a |
 | `transcript.size` / `transcript.read` / `transcript.locate` | `sessionId`; `offset, max` (≤ 256 KiB); `needle` (≤ 200 chars) | size; `{ bytes, eof }`; offset or `null` | no |
 | `file.stat` / `file.get` | `path` or `ref`; `offset, max` (≤ 256 KiB) | `{ size, mtime }`; `{ bytes, eof }`; today's confinement rules, up to 25 MiB | no |
@@ -207,6 +207,7 @@ Messages are JSON over WebSocket, validated with zod/mini on both sides. Every m
 | `lane.start` | `name, cwd, account?, resume?` (typed fields, no free flags: `account` matches `^[a-z0-9][a-z0-9-]{0,31}$` and `resume` is a UUID, so neither can pass as a flag) | `{ workerId }` | yes |
 | `lane.stop` | `name` | `true` | yes |
 | `worktree.list` / `worktree.add` | `repo`; `repo, name, base` (branch names: `/` allowed; checked by the schema, then by `git check-ref-format --branch` on the node) | worktrees; path (under policy `repoRoots`) | add: yes |
+| `memory.sync` (ADR-0031, docs/design/memory) | `version, part, parts, files` (names `morndo-mem-…`, no path) | `committed, written, removed, skillDirs, conflicts`; the skills in the policy's `memory.skillDirs` | yes |
 
 The agent decodes every op's arguments with the same schemas the fleet checked, then applies what only the node can judge (its policy's roots, git's branch rules). A key on an op that takes none, or a keyed op without one, is `bad_args` at both ends. A file is read for someone else only after `confine` and then opened with `O_NOFOLLOW`, so a link swapped in between is refused. The deny list covers credentials and the state of Morndo's own services and kira (`~/.local/share/morndo*`, `~/.local/state/morndo*`, `~/.config/morndo*`, `~/.local/share/kira`, `~/.config/kira`, every `.credentials.json`).
 

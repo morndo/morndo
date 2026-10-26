@@ -7,32 +7,43 @@ import { createReadStream, existsSync, readFileSync, statSync } from "node:fs";
 import { extname, join, normalize, sep } from "node:path";
 import { hostname } from "node:os";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type FeedEvent } from "@morndo/domain";
-import { Flight, HoldWatch, productVersion } from "@morndo/service-kit";
+import { CONVERSATION_CAP, LONGEST_SESSION_MS, STAY_CHOICES, STEP_UP_CHOICES, formatFingerprint, type BoardActor, type FeedEvent, type Transcription } from "@morndo/domain";
+import { Flight, HoldWatch, productStamp } from "@morndo/service-kit";
 import { catchUp } from "../application/catchup.ts";
 import { chats, digest } from "../application/chats.ts";
 import type { PresenceService } from "../application/presence-service.ts";
 import type { Config } from "../config.ts";
 import type { HubIdentity } from "./identity.ts";
+import type { Store } from "./store.ts";
 import type { AccessService, Authenticated } from "../application/access-service.ts";
 import type { ObservationService, OlderResult } from "../application/observation-service.ts";
-import type { SteeringService } from "../application/steering-service.ts";
+import type { SendResult, SteeringService } from "../application/steering-service.ts";
 import type { EscalationService } from "../application/escalation-service.ts";
 import type { RemoteService, Viewer } from "../application/remote-service.ts";
 import type { ReadingService } from "../application/reading-service.ts";
 import type { NotificationService } from "../application/notification-service.ts";
+import { queuedCommand, type ManagerQueue } from "../application/manager-queue.ts";
 import type { EnginesService } from "../application/engines-service.ts";
 import type { ConnectionsPageService } from "../application/connections-page.ts";
 import type { BoardService } from "../application/board-service.ts";
+import type { ProofService } from "../application/proof-service.ts";
 import type { AgentAccess } from "../application/agent-access.ts";
 import type { JobsService } from "../application/jobs-service.ts";
+import type { AlertsService } from "../application/alerts-service.ts";
 import type { UsageService } from "../application/usage-service.ts";
+import type { TranscriptionService } from "../application/transcription-service.ts";
+import type { BriefService } from "../application/brief-service.ts";
+import type { MemoryService } from "../application/memory-service.ts";
+import type { UpdatesCommandOutcome, UpdatesService } from "../application/updates-service.ts";
+import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
 import { servingHeaders, type Files } from "./files.ts";
 import type { Inbox } from "./uploads.ts";
 import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
-  AnswerBody, BoardActionBody, BoardCreateBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, UsageReportBody, IdentityProveBody, LinkDecisionBody, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PushSubscriptionBody, SendBody, UPLOAD_NAME_HEADER,
+  AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
+  LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
+  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLeaseBody, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -42,6 +53,12 @@ import { RateLimiter, takeAll, type BucketConfig, type Taken } from "./rate-limi
 
 const COOKIE = "__Host-morndo";
 const MAX_BODY = 64 * 1024;
+// A Note's own limits are characters (MEMORY_LIMITS): 20,000 of them can be 120 KB as JSON that escapes every character
+// (\uXXXX), so a Note's body gets room for that, and no more.
+const MEMORY_MAX_BODY = 160 * 1024;
+// A send's text is at most PROTO_LIMITS.maxMessageText characters, each one escaped \uXXXX in JSON (the same reasoning
+// as MEMORY_MAX_BODY), plus the body's other fields.
+const SEND_MAX_BODY = PROTO_LIMITS.maxMessageText * 6 + 16 * 1024;
 // The terminal view's frames: asked every 80 ms; while they are unavailable, at most every 2 s (streamTerminal).
 const FRAME_POLL_MS = 80;
 const FRAME_BACKOFF_MAX_MS = 2000;
@@ -58,7 +75,7 @@ class HttpError extends Error {
 }
 
 // Rate limits (ADR-0008, A6): token buckets, refused with 429 and Retry-After in whole seconds, rounded up.
-export type Limits = Record<"passkeyPerCaller" | "passkeyGlobal" | "commands" | "uploads" | "feedFrames" | "linkRequests" | "linkPolls" | "engineReads" | "agentCalls" | "agentRefusals", BucketConfig>;
+export type Limits = Record<"passkeyPerCaller" | "passkeyGlobal" | "commands" | "uploads" | "feedFrames" | "linkRequests" | "linkPolls" | "engineReads" | "agentCalls" | "agentRefusals" | "transcriptions", BucketConfig>;
 export const LIMITS: Limits = {
   passkeyPerCaller: { capacity: 10, refillPerSecond: 1 / 6 },      // pairing and login: 10 at once, then 10 a minute per caller
   passkeyGlobal: { capacity: 60, refillPerSecond: 1 },             // and a looser ceiling for everyone together
@@ -76,6 +93,10 @@ export const LIMITS: Limits = {
   // lanes), and refused ones per caller address, so a guessed token is slow to try.
   agentCalls: { capacity: 120, refillPerSecond: 2 },
   agentRefusals: { capacity: 20, refillPerSecond: 1 / 6 },
+  // ADR-0021: an ask costs a probe and a queue slot behind runs that hold half the cores: 30 at once, then 30 a
+  // minute per Endpoint, as commands are. Spent whatever the plugin answers, so a looping client spends its own
+  // bucket and not the machine's queue alone (the queue cap is the second door).
+  transcriptions: { capacity: 30, refillPerSecond: 0.5 },
 };
 const limited = (t: Taken) => {
   if (!t.ok) throw new HttpError(429, "rate_limited", { "Retry-After": String(t.retryAfterSeconds) });
@@ -112,19 +133,19 @@ async function readRaw(req: IncomingMessage, max: number): Promise<Buffer> {
 }
 
 // A JSON body decoded with its protocol schema (ADR-0008, A2): 400 "bad_request" before any service sees it.
-async function readBody<S extends Schema>(req: IncomingMessage, schema: S): Promise<Output<S>> {
-  const v = parseBody(schema, await readJson(req));
+async function readBody<S extends Schema>(req: IncomingMessage, schema: S, max = MAX_BODY): Promise<Output<S>> {
+  const v = parseBody(schema, await readJson(req, max));
   if (v === null) throw new HttpError(400, "bad_request");
   return v;
 }
 
-async function readJson(req: IncomingMessage): Promise<Record<string, unknown>> {
+async function readJson(req: IncomingMessage, max = MAX_BODY): Promise<Record<string, unknown>> {
   if (!(req.headers["content-type"] ?? "").startsWith("application/json")) throw new HttpError(415, "send JSON");
   const chunks: Buffer[] = [];
   let size = 0;
   for await (const chunk of req) {
     size += (chunk as Buffer).length;
-    if (size > MAX_BODY) throw new HttpError(413, "body too large");
+    if (size > max) throw new HttpError(413, "body too large");
     chunks.push(chunk as Buffer);
   }
   try {
@@ -165,6 +186,13 @@ export function workerIdFromSegment(segment: string): string | null {
   return id !== null && isWorkerOrLegacyId(id) ? id : null;
 }
 
+function transcriptionView(row: Transcription) {
+  return {
+    id: row.id, recording: row.recording, language: row.language, state: row.state,
+    position: row.position, reason: row.reason, outcome: row.outcome, problem: row.problem, text: row.text,
+  };
+}
+
 // 127.0.0.1, ::1, and IPv4-mapped ::ffff:127.0.0.1. A missing address is not this machine.
 export function isLoopbackAddress(address: string | undefined): boolean {
   if (!address) return false;
@@ -184,16 +212,22 @@ export function healthDetail(opts: { remoteAddress: string | undefined; proxyLog
 
 export function startHttp(p: {
   config: Config; identity: HubIdentity; access: AccessService; observation: ObservationService; steering: SteeringService; escalations: EscalationService;
-  remote: RemoteService; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
+  remote: RemoteService; store: Store; files?: Files | null; inbox?: Inbox | null; limits?: Limits; now?: () => number; heartbeatMs?: number;
   reading?: ReadingService | null;
   updates?: { schema?: number; holdPath?: string; now?: () => number };
   presence?: PresenceService | null;                                        // ADR-0011: his last activity per device
   push?: { publicKey: Buffer; notifications: NotificationService } | null;   // web push (phase F); null: off
   engines?: EnginesService | null;                                          // ADR-0013: the Engines page; null: not connected
+  updatesService?: UpdatesService | null;                                   // updates §8.1 (PR 6c): every machine's Version; null: no fleet and no CLI
   connections?: ConnectionsPageService | null;                              // ADR-0018: LLM connections; null: no home set
-  board?: { service: BoardService; agents: AgentAccess } | null;            // ADR-0015: the board; null: off
+  board?: { service: BoardService; agents: AgentAccess; proof?: ProofService } | null;   // ADR-0015: the board (proof: ADR-0035, B13; absent: briefs are not seeded); null: off
   usage?: UsageService | null;                                              // ADR-0016: the accounts' usage; null: off
+  queue?: ManagerQueue | null;                                              // the manager's delivery queue (fleet-clients §9.1); null without a fleet
   jobs?: JobsService | null;                                                // the fleet's job mirror; null: off
+  alerts?: AlertsService | null;                                            // the fleet's alerts in the app; null: no fleet
+  transcription?: TranscriptionService | null;                              // ADR-0021; null: the plugin is not wired
+  briefs?: BriefService | null;                                             // ADR-0023: decision briefs; null: off
+  memory?: { service: MemoryService; agents: AgentAccess } | null;          // ADR-0031: Memory's agent door, board or not; null: off
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
   const files = p.files ?? null;
@@ -206,6 +240,7 @@ export function startHttp(p: {
     linkRequests: new RateLimiter(limits.linkRequests, clock), linkPolls: new RateLimiter(limits.linkPolls, clock),
     engineReads: new RateLimiter(limits.engineReads, clock),
     agentCalls: new RateLimiter(limits.agentCalls, clock), agentRefusals: new RateLimiter(limits.agentRefusals, clock),
+    transcriptions: new RateLimiter(limits.transcriptions, clock),
   };
   // Who is asking, for the per-caller buckets: the proxy's identity header (the person on the private network), else the
   // remote address. Never a header a caller could pick freely when the proxy doesn't set one: only the proxy's own.
@@ -213,6 +248,7 @@ export function startHttp(p: {
     const login = req.headers["tailscale-user-login"];
     return typeof login === "string" && login ? `login:${login}` : `addr:${req.socket.remoteAddress ?? "?"}`;
   };
+  const microphone = () => p.transcription?.allowsMicrophone() ? "microphone=(self)" : "microphone=()";
   const flight = new Flight();
   const watch = new HoldWatch({
     path: p.updates?.holdPath ?? join(config.dataDir, "hold.json"),
@@ -233,11 +269,11 @@ export function startHttp(p: {
     return true;
   };
 
-  const secureHeaders = {
+  const secureHeaders = () => ({
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
-    "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=()",
-  };
+    "Permissions-Policy": `camera=(), ${microphone()}, geolocation=(), payment=()`,
+  });
 
   const proxyOk = (req: IncomingMessage) => {
     if (!config.requireProxyIdentity) return true;
@@ -259,17 +295,26 @@ export function startHttp(p: {
       authenticated: auth(req) !== null,
     });
     if (detail === "ready") return json(res, 200, { ready: true });
-    return json(res, 200, { version: productVersion(), schema: schemaVersion, ready: true, inFlight: flight.list() });
+    return json(res, 200, { ...productStamp(), schema: schemaVersion, ready: true, held: watch.held, inFlight: flight.list() });
   }
 
-  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2).
+  // Every JSON body, including GET /api/escalations and an answer, is redacted here (ADR-0018 §6.2). Each names the
+  // database's store (RL10, §11.5), so a device can stamp each Command with the hub store it saw before its first
+  // attempt and a restored hub — another store — answers it uncertain instead of typing it twice.
   const json = (res: ServerResponse, status: number, body: unknown, extra: Record<string, string> = {}, path = "") => {
-    res.writeHead(status, { ...secureHeaders, "Content-Type": "application/json", "Cache-Control": "no-store", ...extra });
+    res.writeHead(status, { ...secureHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store", "Morndo-Store": p.store.storeId, ...extra });
     res.end(JSON.stringify(redactResponse(path, body)));
   };
   const setCookie = (secret: string) =>
     `${COOKIE}=${secret}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${Math.floor(LONGEST_SESSION_MS / 1000)}`;   // the hub enforces the policy's real limits
   const clearCookie = `${COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0`;
+  // A send's answer, to a worker or to the manager by its role: a repeat of one already typed or queued is 200 with where
+  // it stands; a refusal is 403 (a fresh passkey first), 404 (no such window) or 409.
+  const sent = (res: ServerResponse, r: SendResult) => {
+    if (r.ok) return json(res, 200, r);
+    if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.delivery ? { delivery: r.delivery } : {}) });
+    return json(res, r.problem === "step_up" ? 403 : r.problem === "no_pane" ? 404 : 409, { error: r.problem });
+  };
 
   const deviceView = (a: Authenticated | null) => (e: ReturnType<AccessService["devices"]>[number]) => ({
     id: e.id, name: e.name, pairedAt: e.pairedAt, lastSeenAt: e.lastSeenAt, revokedAt: e.revokedAt, current: a?.endpoint.id === e.id,
@@ -279,28 +324,123 @@ export function startHttp(p: {
   // console is the whole identity (agent-access.ts), and a worker token says which lane it acts as (X-Morndo-Lane).
   // A refusal spends the caller's refusal bucket; a call spends the token's.
   const boardProblemStatus = (problem: string) =>
-    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" ? 409 : 400;
+    problem === "unknown" ? 404 : problem === "step_up" ? 403 : problem === "not_allowed" || problem === "not_yours" ? 403 : problem === "changed" || problem === "one_doing" || problem === "same" || problem === "not_live" || problem === "proof_not_green" || problem === "too_many" || problem === "no_commit" ? 409 : 400;
   const boardAnswer = (res: ServerResponse, r: ReturnType<BoardService["act"]>) =>
-    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}) });
-  async function agentApi(req: IncomingMessage, res: ServerResponse, path: string) {
-    const method = req.method ?? "GET";
-    if (!p.board) return json(res, 404, { error: "board_off" });
+    r.ok ? json(res, 200, { task: r.task, event: r.event }) : json(res, boardProblemStatus(r.problem), { error: r.problem, ...(r.other ? { other: r.other } : {}), ...(r.from ? { from: r.from } : {}), ...(r.detail ? { detail: r.detail } : {}) });
+
+  // An updates command's answer (updates §8.1): 403 a step-up too old, 409 the refusal with the fleet's own words
+  // (its code when the fleet refused), 503 what couldn't be asked. The routes stay thin (round 2, R4): every look
+  // and every gate is the service's, so a refused command never costs a round trip first. A rollback that needs
+  // §11.4's word answers 409 with what it would drop (review round 1), so the screen can ask for the word.
+  const updatesAnswer = (res: ServerResponse, r: UpdatesCommandOutcome) => {
+    if (r.ok) return json(res, 200, { ok: true });
+    const status = r.problem === "step_up" ? 403 : r.problem === "unavailable" ? 503 : 409;
+    const error = r.problem === "refused" ? r.code : r.problem;
+    if (r.problem === "step_up") return json(res, status, { error });
+    return json(res, status, r.problem === "needs_word" ? { error, message: r.message, restores: r.restores } : { error, message: r.message });
+  };
+
+  // ADR-0023: file, restate, list and close a decision brief. Same door as the board (a bearer token, no cookie).
+  const briefStatus = (problem: string) =>
+    problem === "unknown" ? 404 : problem === "not_allowed" ? 403 : problem === "ref_taken" || problem === "too_many_open" ? 409 : 400;
+  async function readBriefBody(req: IncomingMessage): Promise<{ kind: "markdown"; text: string } | { kind: "json"; value: unknown }> {
+    const type = req.headers["content-type"] ?? "";
+    if (type.startsWith("text/markdown")) return { kind: "markdown", text: (await readRaw(req, MAX_BODY)).toString("utf8") };
+    if (type.startsWith("application/json")) return { kind: "json", value: await readJson(req) };
+    throw new HttpError(415, "send markdown or JSON");
+  }
+  function briefAnswer(res: ServerResponse, r: { ok: false; problem: string } | { ok: "filed"; id: string; version: number; warnings: unknown[] } | { ok: "dry"; warnings: unknown[] } | { ok: "refused"; problems: unknown[] } | { ok: true }) {
+    if (r.ok === "filed") return json(res, 201, { id: r.id, version: r.version, warnings: r.warnings });
+    if (r.ok === "dry") return json(res, 200, { dry: true, warnings: r.warnings });
+    if (r.ok === "refused") return json(res, 422, { error: "brief_refused", problems: r.problems, warnings: [] });
+    if (r.ok === true) return json(res, 200, r);
+    return json(res, briefStatus(r.problem), { error: r.problem });
+  }
+  async function agentDecisions(req: IncomingMessage, res: ServerResponse, path: string, method: string, actor: Parameters<BriefService["file"]>[1]) {
+    const briefs = p.briefs;
+    if (!briefs) return json(res, 404, { error: "briefs_off" });
+    const q = new URL(req.url ?? "/", "http://hub").searchParams;
+    if (path === "/api/agent/decisions/template" && method === "GET") {
+      res.writeHead(200, { ...secureHeaders(), "Content-Type": "text/markdown; charset=utf-8", "Cache-Control": "no-store" });
+      res.end(BRIEF_TEMPLATE);
+      return;
+    }
+    if (path === "/api/agent/decisions" && method === "GET") {
+      const listed = briefs.list(actor, { open: q.get("open") === "1", drafts: q.get("drafts") === "1" });
+      return listed.ok ? json(res, 200, { requests: listed.requests }) : json(res, briefStatus(listed.problem), { error: listed.problem });
+    }
+    if (path === "/api/agent/decisions" && method === "POST") return briefAnswer(res, briefs.file(await readBriefBody(req), actor, q.get("dry") === "1"));
+    const one = /^\/api\/agent\/decisions\/([A-Za-z0-9_-]{1,32})(?:\/(withdraw|settle|forward|decline))?$/.exec(path);
+    if (!one) throw new HttpError(404, "no such route");
+    const id = one[1] ?? "";
+    const action = one[2];
+    if (!action && method === "GET") {
+      const shown = briefs.show(actor, id);
+      return shown.ok ? json(res, 200, { request: shown.request }) : json(res, briefStatus(shown.problem), { error: shown.problem });
+    }
+    if (!action && method === "PUT") return briefAnswer(res, briefs.restate(id, await readBriefBody(req), actor, q.get("dry") === "1"));
+    if (method !== "POST" || !action) throw new HttpError(404, "no such route");
+    if (action === "forward") return briefAnswer(res, briefs.forward(actor, id));
+    const body = await readJson(req);
+    if (action === "decline") return briefAnswer(res, briefs.decline(actor, id, typeof body.why === "string" ? body.why : ""));
+    if (action === "withdraw") return briefAnswer(res, briefs.withdraw(actor, id, typeof body.why === "string" ? body.why : ""));
+    return briefAnswer(res, briefs.settle(actor, id, typeof body.note === "string" ? body.note : null));
+  }
+
+  // Who an agent call is from (agent-access.ts), or null once the refusal is answered. Each call spends the token's
+  // bucket; a refusal the caller's.
+  function agentCaller(req: IncomingMessage, res: ServerResponse, agents: AgentAccess) {
     const auth = req.headers.authorization;
     const bearer = typeof auth === "string" && /^Bearer\s+/i.test(auth) ? auth.replace(/^Bearer\s+/i, "").trim() : null;
     const laneHeader = req.headers["x-morndo-lane"];
     // A caller that has spent its refusals is turned away before any token is looked up (guessing costs nothing).
     limited(buckets.agentRefusals.peek(callerOf(req)));
-    const who = p.board.agents.authenticate(bearer, typeof laneHeader === "string" ? laneHeader : null);
+    const who = agents.authenticate(bearer, typeof laneHeader === "string" ? laneHeader : null);
     if (!who.ok) {
       // A token that isn't one spends the caller's refusals; a real token without its lane is that token's own
       // misconfiguration, charged to the token, so the answer stays "which lane?" rather than "too many calls".
       if (who.token) limited(buckets.agentCalls.take(who.token.id));
       else limited(buckets.agentRefusals.take(callerOf(req)));
-      return json(res, who.refused === "lane_needed" || who.refused === "bad_name" ? 400 : 401, { error: who.refused });
+      json(res, who.refused === "lane_needed" || who.refused === "bad_name" ? 400 : 401, { error: who.refused });
+      return null;
     }
     limited(buckets.agentCalls.take(who.token.id));
+    return who;
+  }
+
+  // ADR-0031: Memory's side of the agent door (docs/design/memory/README.md, "Agent door"), on the board's tokens and
+  // buckets, whether the board is on or off. Provenance is the token and the lane it names (M3), never the body.
+  const memoryStatus = (problem: string) =>
+    problem === "not_found" ? 404 : problem === "not_principal" || problem === "not_yours" ? 403
+      : problem === "invalidated" || problem.startsWith("already_") || problem === "mismatch" ? 409 : 400;
+  const memoryAnswer = (res: ServerResponse, r: ReturnType<MemoryService["note"]>, status = 200) =>
+    r.ok ? json(res, status, { note: r.note }) : json(res, memoryStatus(r.problem), { error: r.problem });
+  async function agentMemory(req: IncomingMessage, res: ServerResponse, path: string, method: string, service: MemoryService, actor: BoardActor) {
+    if (path === "/api/agent/memory/search" && method === "GET") {
+      const q = new URL(req.url ?? "/", "http://hub").searchParams;
+      const found = service.search({ q: q.get("q"), scope: q.get("scope"), kind: q.get("kind"), limit: q.get("limit") });
+      return found.ok ? json(res, 200, { notes: found.notes }) : json(res, 400, { error: found.problem });
+    }
+    if (path === "/api/agent/memory/notes" && method === "POST") return memoryAnswer(res, service.remember(actor, await readBody(req, MemoryRememberBody, MEMORY_MAX_BODY)), 201);
+    const one = /^\/api\/agent\/memory\/notes\/(N-\d{1,9})(\/invalidate)?$/.exec(path);
+    if (one && !one[2] && method === "GET") return memoryAnswer(res, service.note(actor, one[1] ?? ""));
+    if (one && one[2] && method === "POST") return memoryAnswer(res, service.invalidate(actor, one[1] ?? "", (await readBody(req, MemoryInvalidateBody)).reason));
+    throw new HttpError(404, "no such route");
+  }
+
+  async function agentApi(req: IncomingMessage, res: ServerResponse, path: string) {
+    const method = req.method ?? "GET";
+    if (path.startsWith("/api/agent/memory/")) {
+      if (!p.memory) return json(res, 404, { error: "memory_off" });
+      const who = agentCaller(req, res, p.memory.agents);
+      return who ? agentMemory(req, res, path, method, p.memory.service, who.actor) : undefined;
+    }
+    if (!p.board) return json(res, 404, { error: "board_off" });
+    const who = agentCaller(req, res, p.board.agents);
+    if (!who) return;
     const { service } = p.board;
-    if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role } });
+    if (path === "/api/agent/whoami" && method === "GET") return json(res, 200, { actor: who.actor, token: { id: who.token.id, name: who.token.name, role: who.token.role, scopes: who.token.scopes } });
+    if (path.startsWith("/api/agent/decisions")) return agentDecisions(req, res, path, method, who.actor);
     // A job grant (ADR-0017 §6). The body names the lane, the class and a directory hash. It has no command.
     if (path === "/api/agent/jobs/grant" && method === "POST") {
       const body = await readJson(req);
@@ -316,14 +456,91 @@ export function startHttp(p: {
       const r = p.usage.report(await readBody(req, UsageReportBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
       return r.ok ? json(res, 200, { account: r.account }) : json(res, 400, { error: r.problem });
     }
-    if (path === "/api/agent/board" && method === "GET") return json(res, 200, service.view());
+    // A usage reading a source posts (U14): the windows it can see now, or the one reason it cannot. The status line
+    // has its own route above; a reading that names it is refused.
+    if (path === "/api/agent/usage/readings" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      // A plain worker token is counted once per reading it posts that is accepted (warn, the default) or refused for
+      // want of the scope (enforce, which stores nothing). A body the hub cannot read is not counted.
+      const unbound = who.token.role !== "manager" && !who.token.scopes.includes("usage-pool");
+      if (unbound && (p.config.usageReadingsGate ?? "warn") === "enforce") {
+        p.board.agents.noteUnbound(who.token.id);
+        return json(res, 403, { error: "scope_required", message: "usage readings need a manager token or a worker token with the usage-pool scope (morndo agent-token new <name> --role worker --scope usage-pool)" });
+      }
+      const accountHeader = req.headers["x-morndo-account"];
+      const r = p.usage.reading(await readBody(req, UsageReadingsBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
+      if (unbound && r.ok) p.board.agents.noteUnbound(who.token.id);
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    // A node's ask for a lease before a rationed read (S5, plan 4.4, U16): granted with an opaque id and its expiry,
+    // fresh with the capture time the caller may use instead of spawning, or denied with one reason and a wait. The
+    // answer leaks nothing else — not which node holds a live lease, not why a reading is fresh. The route is a
+    // manager's or the pool's (fix round 2026-10-24, finding 1, the limit route's rule): a worker token without the
+    // usage-pool scope is refused, and the lease granted is bound to the asking token's id.
+    if (path === "/api/agent/usage/lease" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (who.token.role !== "manager" && !who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "not_allowed" });
+      const body = await readBody(req, UsageLeaseBody);
+      const g = p.usage.leases.grant(body.account, body.source, body.node ?? null, who.token.id);
+      if (g.status === "granted") return json(res, 200, { status: "granted", lease_id: g.id, expires_at: Math.floor(g.expiresAt / 1000) });
+      if (g.status === "fresh") return json(res, 200, { status: "fresh", captured_at: Math.floor(g.capturedAt / 1000) });
+      return json(res, 200, { status: "denied", reason: g.reason, retry_after_s: Math.ceil(g.retryAfterMs / 1000) });
+    }
+    // A seat's limit hit as any source reports it (U9). The reply says only that it was taken: the agent door leaks
+    // nothing of the seat or any state. The route is a manager's or the pool's (PR #127, finding 2): a manager-role
+    // token, or one holding the usage-pool scope. A worker token without the scope stays refused — a lane's own
+    // failures reach the hub through the fleet tap, which needs no token.
+    if (path === "/api/agent/usage/limit" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (who.token.role !== "manager" && !who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "not_allowed" });
+      const body = await readBody(req, UsageLimitBody);
+      const accountHeader = req.headers["x-morndo-account"];
+      const account = body.account ?? (typeof accountHeader === "string" ? accountHeader : null);
+      const r = p.usage.noteLimit({
+        account,
+        kind: body.kind,
+        backAt: typeof body.back_at === "number" ? body.back_at * 1000 : null,
+        by: body.by,
+        at: typeof body.at === "number" ? body.at * 1000 : null,
+        fix: body.fix, hint: body.hint,
+      });
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    // The pool's own word on a seat (U15): a token with the usage-pool scope only — a role is not the scope, so the
+    // manager's token is refused without it too. The reply says only that it was taken.
+    if (path === "/api/agent/usage/pool" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      if (!who.token.scopes.includes("usage-pool")) return json(res, 403, { error: "scope_required" });
+      const body = await readBody(req, UsagePoolBody);
+      const r = p.usage.poolSeat({
+        account: body.account, action: body.action,
+        ...(body.state === undefined ? {} : { state: body.state }),
+        why: body.why ?? null,
+        backAt: typeof body.back_at === "number" ? body.back_at * 1000 : null,
+        at: typeof body.at === "number" ? body.at * 1000 : null,
+        by: body.by,
+      });
+      return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    if (path === "/api/agent/board" && method === "GET") {
+      // ADR-0035 step 4: the agents' board read carries each task in review's proof line beside the board itself; the
+      // principal's own routes answer without it.
+      const v = service.view();
+      return json(res, 200, { ...v, ...(p.board.proof ? { proof: p.board.proof.lines(v.tasks) } : {}) });
+    }
     if (path === "/api/agent/board/tasks" && method === "POST") return boardAnswer(res, service.create(await readBody(req, BoardCreateBody), who.actor));
     const task = /^\/api\/agent\/board\/tasks\/(T-\d{1,9})$/.exec(path);
     if (task && method === "GET") {
       const t = service.task(task[1] ?? "");
-      return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
+      return t ? json(res, 200, { ...t, ...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {}) }) : json(res, 404, { error: "unknown" });
     }
-    if (task && method === "POST") return boardAnswer(res, service.act(task[1] ?? "", await readBody(req, BoardActionBody), who.actor));
+    if (task && method === "POST") {
+      const body = await readBody(req, BoardActionBody);
+      // B13 (ADR-0035): a brief is filed through the proof service, which seeds its references as rows to check; every
+      // other action is the board's own. Without the service wired, a brief is the board's alone.
+      if (body.action === "brief" && p.board.proof) return boardAnswer(res, await p.board.proof.file(task[1] ?? "", body.brief, who.actor));
+      return boardAnswer(res, await service.actChecked(task[1] ?? "", body, who.actor));
+    }
     throw new HttpError(404, "no such route");
   }
 
@@ -395,6 +612,7 @@ export function startHttp(p: {
     const a = auth(req);
     if (!a) return json(res, 401, { error: "signed_out" }, { "Set-Cookie": clearCookie });
     if (path === "/api/me" && method === "GET") {
+      await p.transcription?.refresh();
       return json(res, 200, {
         endpoint: { id: a.endpoint.id, name: a.endpoint.name, pairedAt: a.endpoint.pairedAt },
         session: { startedAt: a.session.startedAt, verifiedAt: a.session.verifiedAt },
@@ -404,6 +622,10 @@ export function startHttp(p: {
         // The links follow the probe, not merely whether MORNDO_ENGINES is set: a missing or too-old CLI hides them.
         engines: p.engines ? (await p.engines.ready().then(why => why === null, () => false)) : false,
         connections: p.connections != null,
+        transcription: p.transcription ? p.transcription.me() : false,
+        // The Updates screen (updates §8.2): this hub has it when it runs with a fleet. Said here so no page probes
+        // /api/updates for a 404 (CI's web e2e: every page logged it as a console error, review of #114).
+        updates: p.updatesService != null,
       });
     }
     if (path === "/api/logout" && method === "POST") {
@@ -471,12 +693,26 @@ export function startHttp(p: {
     if (send && sendTo === null) throw new HttpError(404, "no such route");
     if (sendTo !== null && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
-      const body = await readBody(req, SendBody);
-      const r = await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.retry === true, body.again === true);
+      const body = await readBody(req, SendBody, SEND_MAX_BODY);
+      return sent(res, await steering.send(a, sendTo, body.text, body.requestId, body.uploads ?? [], body.seen, body.name, body.createdAt, body.again === true, body.hubStore));
+    }
+    // The manager by its role: its window, or, while it has none, the fleet's queue for its sticky lane (steering).
+    if (path === "/api/manager/send" && method === "POST") {
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, SendBody, SEND_MAX_BODY);
+      return sent(res, await steering.sendToManager(a, body.text, body.requestId, body.uploads ?? [], body.createdAt, body.again === true, body.hubStore));
+    }
+    // The principal's cancel of one of his messages to the manager still waiting in the fleet's queue (ruling 83; spec
+    // §9.1): 200 with where it stands now (given up, cancelled), 409 only when it is too late (already typed), 404 for
+    // no such message of his. A refusal that is not too late (the node offline, a timeout, busy) is 503: the app keeps
+    // Cancel, and a later try can still withdraw it.
+    if (path === "/api/manager/cancel" && method === "POST") {
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, CancelBody);
+      const r = await steering.cancel(a, body.requestId);
       if (r.ok) return json(res, 200, r);
-      if (r.problem === "unavailable") return json(res, 503, { error: r.problem });
-      if (r.problem === "duplicate") return json(res, 200, { error: "duplicate", ok: true, at: r.at, ...(r.queued ? { queued: true } : {}), ...(r.inbox !== undefined ? { inbox: r.inbox, reason: r.reason ?? null } : {}) });
-      return json(res, r.problem === "step_up" ? 403 : r.problem === "no_pane" ? 404 : 409, { error: r.problem });
+      const status = r.problem === "unknown" ? 404 : r.problem === "already_typed" ? 409 : 503;
+      return json(res, status, { error: r.problem });
     }
     // A file an agent sent or the principal attached: the hub's copy, by id only (files.ts), never as a page of this origin.
     const file = /^\/api\/files\/([0-9a-f]{32})$/.exec(path);
@@ -484,7 +720,7 @@ export function startHttp(p: {
       const f = files?.get(file[1] ?? "");
       if (!f) return json(res, 404, { error: "no_such_file" });
       const download = new URL(req.url ?? "/", "http://hub").searchParams.get("download") === "1";
-      res.writeHead(200, { ...secureHeaders, ...servingHeaders(f.meta, download) });
+      res.writeHead(200, { ...secureHeaders(), ...servingHeaders(f.meta, download) });
       if (method === "HEAD") return res.end();
       createReadStream(f.file).on("error", () => res.destroy()).pipe(res);
       return;
@@ -493,11 +729,53 @@ export function startHttp(p: {
     if (path === "/api/uploads" && method === "POST") {
       if (!inbox) throw new HttpError(404, "no such route");
       limited(buckets.uploads.take(a.endpoint.id));
-      const r = inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req));
-      if (!r.ok) return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
+      await p.transcription?.refresh();
+      const r = await inbox.save(await readRaw(req, MAX_UPLOAD_BYTES), a.endpoint.id, uploadName(req), p.transcription?.capability());
+      if (!r.ok) {
+        if (r.error === "too_many") return json(res, 503, { error: r.error }, { "Retry-After": "60" });
+        return json(res, r.error === "too_big" ? 413 : 415, { error: r.error });
+      }
       return json(res, 200, { id: r.value.id, name: r.value.path.split("/").pop(), size: r.value.size, mime: r.value.mime });
     }
-    if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.board());
+    const tx = /^\/api\/transcriptions(?:\/([A-Za-z0-9][A-Za-z0-9:_-]{0,199})(\/cancel)?)?$/.exec(path);
+    if (tx && (method === "GET" || method === "POST")) {
+      if (!p.transcription) return json(res, 404, { error: "transcription_off" });
+      await p.transcription.refresh();
+      const id = tx[1];
+      if (!id && method === "POST") {
+        limited(buckets.transcriptions.take(a.endpoint.id));
+        if (!p.transcription.allowsMicrophone()) return json(res, 404, { error: "transcription_off" });
+        const body = await readBody(req, TranscriptionCreateBody);
+        // The endpoint is part of the ask: an upload another device made is not this caller's recording (S2).
+        const created = await p.transcription.request({ ...body, caller: { endpointId: a.endpoint.id } });
+        if (!created.ok) {
+          if (created.error === "unreadable") return json(res, 404, { error: created.error });
+          // The live-row cap is the whole machine's queue, not this caller's bucket (that one is already 429).
+          // 503 is a temporary overload. Retry-After matches the queue's minute sweep, so a client waits
+          // instead of treating the body as a malformed request.
+          if (created.error === "too_many") return json(res, 503, { error: created.error }, { "Retry-After": "60" });
+          return json(res, 400, { error: created.error });
+        }
+        return json(res, 200, transcriptionView(created.value));
+      }
+      // A row that exists still answers with the plugin gone: its text stays readable (design §6). An unknown id with
+      // no ready plugin is the feature being off, not a missing row.
+      const off = () => !p.transcription?.capability().present;
+      if (id && !tx[2] && method === "GET") {
+        const row = p.transcription.get(id, { endpointId: a.endpoint.id });
+        return row ? json(res, 200, transcriptionView(row)) : off()
+          ? json(res, 404, { error: "transcription_off" })
+          : json(res, 404, { error: "unknown" });
+      }
+      if (id && tx[2] === "/cancel" && method === "POST") {
+        await readBody(req, TranscriptionCancelBody);
+        const cancelled = p.transcription.cancel(id, { endpointId: a.endpoint.id });
+        return cancelled.ok ? json(res, 200, transcriptionView(cancelled.value)) : off()
+          ? json(res, 404, { error: "transcription_off" })
+          : json(res, 404, { error: "unknown" });
+      }
+    }
+    if (path === "/api/escalations" && method === "GET") return json(res, 200, escalations.seenBy(a.endpoint.id));
     const answer = /^\/api\/escalations\/([A-Za-z0-9_-]{1,80})\/answer$/.exec(path);
     if (answer && method === "POST") {
       limited(buckets.commands.take(a.endpoint.id));
@@ -542,14 +820,76 @@ export function startHttp(p: {
       const status = result.problem === "step_up" ? 403 : result.problem === "conflict" ? 409 : 400;
       return json(res, status, { error: result.problem });
     }
+    // Updates §8.1 (PR 6c): the owner's one screen over every machine's Version. Reading is a look; each command is
+    // a Command (AC7), the fleet's refusal 409 with the fleet's own words, what can't be asked 503.
+    if (path === "/api/updates" && method === "GET") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.engineReads.take(a.endpoint.id));
+      return json(res, 200, await p.updatesService.view());
+    }
+    if (path === "/api/updates/apply" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      // Thin on purpose (round 2, R4): the service gates the command before any look — the unknown-machine check
+      // rides behind it, on the fleet's own node list alone — so a stale step-up answers without a round trip.
+      const body = await readBody(req, UpdatesApplyBody);
+      return updatesAnswer(res, await p.updatesService.apply(a, body.machine, body.version));
+    }
+    if (path === "/api/updates/rollback" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UpdatesRollbackBody);
+      return updatesAnswer(res, await p.updatesService.rollback(a, body.machine, body.word));
+    }
+    if (path === "/api/updates/resume" && method === "POST") {
+      if (!p.updatesService) return json(res, 404, { error: "updates_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      return updatesAnswer(res, await p.updatesService.resume(a, (await readBody(req, UpdatesResumeBody)).version));
+    }
     // ADR-0016: the accounts' usage, a look.
     if (path === "/api/usage" && method === "GET") return p.usage ? json(res, 200, p.usage.view()) : json(res, 404, { error: "usage_off" });
+    // The principal's own forget of a usage source (AT-23): the account, and the source to drop; without a source,
+    // the whole account. A Command like the others: limited, and the principal's session only.
+    if (path === "/api/usage/forget" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UsageForgetBody);
+      return json(res, 200, { forgotten: p.usage.forget(body.account, body.source, body.node) });
+    }
+    // The principal looked at usage (S5, AT-45): marks every account somebody now wants read — the same demand a
+    // feed hello raises. A Command like the forget above, limited the same; the reads themselves stay leased.
+    if (path === "/api/usage/look" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      p.usage.look();
+      return json(res, 200, { ok: true });
+    }
+    // The principal's own clear of a seat (U17): the pool's word or the hub's derived one, or both. A Command like
+    // the others: limited, and the principal's session only — an agent token never reaches here.
+    if (path === "/api/usage/seat/clear" && method === "POST") {
+      if (!p.usage) return json(res, 404, { error: "usage_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const body = await readBody(req, UsageSeatClearBody);
+      return json(res, 200, { cleared: p.usage.clearSeat(body.account, body.owner) });
+    }
     // The fleet's job mirror: the list and the counts beside each node. A look.
     if (path === "/api/jobs" && method === "GET") {
       if (!p.jobs) return json(res, 404, { error: "jobs_off" });
       const q = new URL(req.url ?? "/", "http://hub").searchParams;
       if (q.get("hidden") === "1" || q.has("before")) return json(res, 200, p.jobs.page(q.get("before")));
       return json(res, 200, p.jobs.view());
+    }
+    // ADR-0031 (M8): the console's one-time approval code, minted in the app for one Note that waits. A Command under
+    // step-up, like the approval itself; the code is said once here and never logged or stored but its hash — the
+    // console spends it (`morndo memory approve <id>`, the code read from stdin). No body to read. Not an agent route: only a session
+    // reaches it (the agents' door has no such path).
+    const approvalCode = /^\/api\/memory\/notes\/(N-\d{1,9})\/approval-code$/.exec(path);
+    if (approvalCode && method === "POST") {
+      if (!p.memory) return json(res, 404, { error: "memory_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const r = p.memory.service.issueApprovalCode(a, approvalCode[1] ?? "");
+      if (r.ok) return json(res, 200, { code: r.code, expiresAt: r.expiresAt });
+      return json(res, r.problem === "step_up" ? 403 : r.problem === "not_found" ? 404 : 409, { error: r.problem });
     }
     // ADR-0015: the board. Reading is a look; a change is a Command (AC7).
     if (path.startsWith("/api/board")) {
@@ -559,13 +899,17 @@ export function startHttp(p: {
       const task = /^\/api\/board\/tasks\/(T-\d{1,9})$/.exec(path);
       if (task && method === "GET") {
         const t = service.task(task[1] ?? "");
-        return t ? json(res, 200, t) : json(res, 404, { error: "unknown" });
+        return t ? json(res, 200, { ...t, ...(p.board.proof ? { proof: p.board.proof.view(task[1] ?? "") } : {}) }) : json(res, 404, { error: "unknown" });
       }
       if ((path === "/api/board/tasks" || task) && method === "POST") {
         limited(buckets.commands.take(a.endpoint.id));
         const actor = service.principal(a);
         if ("problem" in actor) return json(res, 403, { error: actor.problem });
-        if (task) return boardAnswer(res, service.act(task[1] ?? "", await readBody(req, BoardActionBody), actor));
+        if (task) {
+          const body = await readBody(req, BoardActionBody);
+          if (body.action === "brief" && p.board.proof) return boardAnswer(res, await p.board.proof.file(task[1] ?? "", body.brief, actor));
+          return boardAnswer(res, await service.actChecked(task[1] ?? "", body, actor));
+        }
         return boardAnswer(res, service.create(await readBody(req, BoardCreateBody), actor));
       }
       throw new HttpError(404, "no such route");
@@ -581,7 +925,7 @@ export function startHttp(p: {
   }
 
   let cachedIndex: { html: string; csp: string; file: string; mtimeMs: number } | null = null;
-  function staticFile(req: IncomingMessage, res: ServerResponse, path: string) {
+  async function staticFile(req: IncomingMessage, res: ServerResponse, path: string) {
     const root = normalize(config.webDir);
     // Each segment decoded on its own (decodeSegment); a path with one that doesn't decode is no file, and the app shell
     // answers it, as any path the app doesn't know.
@@ -592,7 +936,7 @@ export function startHttp(p: {
     if (isFile && extname(candidate) !== ".html") {
       const immutable = path.startsWith("/_app/immutable/");
       res.writeHead(200, {
-        ...secureHeaders, "Content-Type": TYPES[extname(candidate)] ?? "application/octet-stream",
+        ...secureHeaders(), "Content-Type": TYPES[extname(candidate)] ?? "application/octet-stream",
         "Cache-Control": immutable ? "public, max-age=31536000, immutable" : "no-cache",
         ...(path === "/service-worker.js" ? { "Service-Worker-Allowed": "/" } : {}),
       });
@@ -600,6 +944,10 @@ export function startHttp(p: {
     }
     // Every page is the app shell (SPA fallback); its CSP allows exactly its own inline bootstrap. Read again after a
     // rebuild, so the shell never points at assets the build replaced.
+    // The document's Permissions-Policy is what gates the microphone. It is served from the last probe, and a
+    // refresh runs behind the response so a slow probe never holds the page. The next document sees what it found.
+    // A probe that throws is logged here: a dropped rejection is an unhandledRejection, and that exits the hub.
+    void p.transcription?.refresh()?.catch(e => log.warn("transcription: probe failed", e));
     const file = ["200.html", "index.html"].map(f => join(root, f)).find(f => existsSync(f));
     if (!file) throw new HttpError(503, "web app not built: run `npm run build`");
     const mtimeMs = statSync(file).mtimeMs;
@@ -607,7 +955,7 @@ export function startHttp(p: {
       const html = readFileSync(file, "utf8");
       cachedIndex = { html, csp: cspFor(html), file, mtimeMs };
     }
-    res.writeHead(200, { ...secureHeaders, "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache", "Content-Security-Policy": cachedIndex.csp });
+    res.writeHead(200, { ...secureHeaders(), "Content-Type": TYPES[".html"] ?? "text/html", "Cache-Control": "no-cache", "Content-Security-Policy": cachedIndex.csp });
     res.end(req.method === "HEAD" ? undefined : cachedIndex.html);
   }
 
@@ -628,7 +976,7 @@ export function startHttp(p: {
         finally { end?.(); }
       }
       if (req.method !== "GET" && req.method !== "HEAD") throw new HttpError(405, "method not allowed");
-      staticFile(req, res, path);
+      await staticFile(req, res, path);
     } catch (e) {
       const status = e instanceof HttpError ? e.status : 500;
       if (status === 500) log.error(`${req.method ?? "?"} request failed`, e);            // no URL: it may be what failed to parse
@@ -673,10 +1021,18 @@ export function startHttp(p: {
         fleet: status => send({ t: "fleet", available: status === "ok" }),
         watching: () => conn.watching,
       });
-      const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...board }));
+      // Each connection hears where every Decision stands for its own endpoint: "here" only for the device whose
+      // request accepted it (seenBy), never the hub-level record.
+      const unsubscribeBoard = escalations.subscribe(board => send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id, board) }));
       const unsubscribeTasks = p.board?.service.subscribe(b => send({ t: "board", ...b })) ?? (() => false);
       const unsubscribeUsage = p.usage?.subscribe(v => send({ t: "usage", ...v })) ?? (() => false);
+      // Where this device's messages to the manager stand in the fleet's queue (fleet-clients §9.1): each change, by
+      // request id; never another device's.
+      const unsubscribeQueue = p.queue?.subscribe(c => {
+        if (c.row.kind === "command" && c.row.endpointId === conn.auth.endpoint.id) send({ t: "deliveries", items: [queuedCommand(c.row, c.view)] });
+      }) ?? (() => false);
       const unsubscribeJobs = p.jobs?.subscribe(v => send({ t: "jobs", ...v })) ?? (() => false);
+      const unsubscribeAlerts = p.alerts?.subscribe(items => send({ t: "alerts", items })) ?? (() => false);
       // Older pages, one at a time per connection (fleet core §3.1): each waits for the one before it.
       let olderDone: Promise<void> = Promise.resolve();
       // Read marks and mute (phase D): every change, from any device, to every feed.
@@ -685,7 +1041,7 @@ export function startHttp(p: {
       // without a listener that emit would end the hub. Logged without the payload.
       ws.on("error", e => log.warn(`feed socket: ${e.message}`));
       ws.on("pong", () => { conn.alive = true; });
-      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
+      ws.on("close", () => { conns.delete(conn); unsubscribe(); unsubscribeBoard(); unsubscribeTasks(); unsubscribeUsage(); unsubscribeJobs(); unsubscribeAlerts(); unsubscribeQueue(); unsubscribeReading(); p.push?.notifications.left(conn.id); p.presence?.left(conn.id); });
       // Every frame is decoded (ADR-0008, A2): malformed closes with 1003, a type this hub doesn't know is ignored.
       ws.on("message", raw => {
         if (!buckets.feedFrames.take(conn.id).ok) return ws.close(1008, "too many messages");
@@ -712,9 +1068,13 @@ export function startHttp(p: {
             if (r.kind === "events") send({ t: "events", events: r.events, caughtUp: true });
             else send({ t: "snapshot", ...observation.snapshot() });
             send({ t: "fleet", available: observation.fleet() === "ok" });   // a resumed feed may have missed a change
-            send({ t: "decisions", ...escalations.board() });
+            send({ t: "decisions", ...escalations.seenBy(conn.auth.endpoint.id) });
             if (p.board) send({ t: "board", ...p.board.service.view() });   // ADR-0015: whole, after every hello
             if (p.usage) send({ t: "usage", ...p.usage.view() });           // ADR-0016: every account, after every hello
+            p.usage?.look();                                                // S5 (AT-45): somebody is looking — mark the demand
+            if (p.queue) send({ t: "deliveries", items: p.queue.commandsOf(conn.auth.endpoint.id) });   // all of the last day
+            send({ t: "manager", queue: steering.managerQueue });           // whether a message waits for it while it has no window
+            if (p.alerts) send({ t: "alerts", ...p.alerts.view() });        // the fleet's latest alerts, after every hello
             if (p.jobs) send({ t: "jobs", ...p.jobs.view() });               // the fleet mirror, after every hello
             if (p.reading) send(p.reading.state());           // all marks and mutes: they may have moved while away
             if (p.reading) send({ t: "caught_up", at: p.reading.caughtUpAt() });   // ADR-0009, C7

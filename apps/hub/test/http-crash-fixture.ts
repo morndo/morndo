@@ -114,7 +114,7 @@ async function child(dir: string, variant: Variant) {
   const config: Config = {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo",
     requireProxyIdentity: true, principalLogin: LOGIN, tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 1000,
-    managerWindow: "manager", ledgerPath: null, paneLock: null, managerInbox: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
   };
   let n = 0;
   const fakePasskeys: Passkeys = {
@@ -162,7 +162,7 @@ async function child(dir: string, variant: Variant) {
   };
   const remote = new RemoteService({ store, terminal, panes: () => ["%1"], desktop: () => null });
   const http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000),
+    config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, Date.now, undefined, null, () => "none"), escalations, remote,
   });
   await http.ready;

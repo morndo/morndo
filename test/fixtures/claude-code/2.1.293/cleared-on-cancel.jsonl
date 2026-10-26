@@ -1,0 +1,2 @@
+{"type":"queue-operation","operation":"enqueue","timestamp":"2026-10-08T12:04:00.000Z","sessionId":"5e1f0c2a-7b3d-4e8f-9a6b-0c1d2e3f4a5b","content":"[fixture] dropped by an interrupt"}
+{"type":"queue-operation","operation":"remove","timestamp":"2026-10-08T12:04:03.000Z","sessionId":"5e1f0c2a-7b3d-4e8f-9a6b-0c1d2e3f4a5b","content":"[fixture] dropped by an interrupt","reason":"cleared_on_cancel"}

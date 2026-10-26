@@ -44,21 +44,28 @@ export function readHold(opts: { path: string; service: ServiceName; now: number
 
 export type InFlight = { kind: string; id: string };
 
-// Work a restart would interrupt. begin() returns the function that ends that one item.
+// Work a restart would interrupt. begin() returns the function that ends that one item. onChange, when given, runs
+// after an item begins and after each ends, with the list already moved: a service can write its status file the
+// moment its in-flight work changes, not only on its health tick. It must not throw — it runs inside the op.
 export class Flight {
   #items = new Map<number, InFlight>();
   #n = 0;
   #waiters: (() => void)[] = [];
+  #onChange: (() => void) | undefined;
+
+  constructor(o: { onChange?: () => void } = {}) { this.#onChange = o.onChange; }
 
   begin(item: InFlight): () => void {
     const token = ++this.#n;
     this.#items.set(token, item);
+    this.#onChange?.();
     let ended = false;
     return () => {
       if (ended) return;
       ended = true;
       this.#items.delete(token);
       if (this.#items.size === 0) for (const wake of this.#waiters.splice(0)) wake();
+      this.#onChange?.();
     };
   }
 
@@ -96,11 +103,18 @@ export class HoldWatch {
   #staleNoted = false;
   #timer: ReturnType<typeof setInterval> | null = null;
 
-  constructor(opts: { path: string; service: ServiceName; now?: () => number; onStale?: (message: string) => void }) {
+  #onChange: (held: boolean) => void;
+
+  // onChange: told when this service starts or stops seeing the hold, so it can say so in its health at once — the
+  // updater waits for that acknowledgement before it judges the drain (updates design §6.2 step 3).
+  constructor(opts: {
+    path: string; service: ServiceName; now?: () => number; onStale?: (message: string) => void; onChange?: (held: boolean) => void;
+  }) {
     this.#path = opts.path;
     this.#service = opts.service;
     this.#now = opts.now ?? Date.now;
     this.#onStale = opts.onStale ?? (() => {});
+    this.#onChange = opts.onChange ?? (() => {});
   }
 
   start(): void {
@@ -124,7 +138,11 @@ export class HoldWatch {
     } else {
       this.#staleNoted = false;
     }
-    this.#held = view.kind === "held";
+    const held = view.kind === "held";
+    if (held !== this.#held) {
+      this.#held = held;
+      this.#onChange(held);
+    }
     return view;
   }
 

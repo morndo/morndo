@@ -5,7 +5,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 const FIXTURE = join(import.meta.dirname, "crash-handlers.fixture.ts");
-const run = (how: string) => spawnSync(process.execPath, ["--no-warnings", FIXTURE, how], { encoding: "utf8", timeout: 20_000 });
+const run = (how: string, extra = "") => spawnSync(process.execPath, ["--no-warnings", FIXTURE, how, extra], { encoding: "utf8", timeout: 20_000 });
 
 describe("the hub's process-level crash handlers", () => {
   it("log an unhandled rejection through the logger, with its cause, then exit 1", () => {
@@ -22,5 +22,21 @@ describe("the hub's process-level crash handlers", () => {
     expect(r.stdout).not.toMatch(/still running/);
     expect(r.stderr).toMatch(/\[hub\] error: uncaught exception/);
     expect(r.stderr).toMatch(/TypeError: thrown in ~\/somewhere\/x\.ts/);
+  });
+  it("run the hub's close first when one is set (a start that fails), then exit 1", () => {
+    const r = run("rejection", "cleanup");
+    expect(r.status).toBe(1);
+    expect(r.stdout).toContain("cleaned");
+    expect(r.stderr).toMatch(/unhandled promise rejection/);
+  });
+  it("do not wait for a close that never ends: exit 1 after its bound", () => {
+    const r = run("exception", "hang");
+    expect(r.status).toBe(1);
+    expect(r.stderr).toMatch(/uncaught exception/);
+  });
+  it("run no close once the hub serves (beforeExit(null)): a crash then exits 1 at once", () => {
+    const r = run("rejection", "done");
+    expect(r.status).toBe(1);
+    expect(r.stdout).not.toContain("cleaned");
   });
 });

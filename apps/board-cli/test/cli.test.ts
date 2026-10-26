@@ -2,7 +2,19 @@
 // the board as the prompt blocks describe it, the words a refusal comes back in, and the exit codes.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "../../hub/test/inprocess-hub.ts";
-import { HELP, parseArgs, run } from "../src/cli.ts";
+import { GithubChecks } from "../../hub/src/adapters/github-checks.ts";
+import { startFakeForge, type FakeForge } from "../../hub/test/fake-forge.ts";
+import { HELP, parseArgs, run, valuesOf } from "../src/cli.ts";
+import { PR_EVERY_MS } from "../../hub/src/application/wait-watch.ts";
+import { execFile } from "node:child_process";
+import { join } from "node:path";
+
+const CLI_MAIN = join(import.meta.dirname, "../src/main.ts");
+// The CLI through a real bash, asynchronously: the hub it calls runs in this process, so a blocking spawn would never be answered.
+const viaBash = (line: string, env: Record<string, string>) => new Promise<{ status: number; stdout: string; stderr: string }>(resolve => {
+  execFile("bash", ["-c", line], { env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME ?? "", ...env }, encoding: "utf8", timeout: 60_000 },
+    (e, stdout, stderr) => resolve({ status: e ? (typeof e.code === "number" ? e.code : 1) : 0, stdout, stderr }));
+});
 import { MANAGER_PROMPT, WORKER_PROMPT } from "../src/prompt.ts";
 
 let hub: InProcessHub;
@@ -44,7 +56,10 @@ describe("the manager's day", () => {
     expect(list.out).toBe("To do (2)\n  T-1    builder        Build the login page  (high)\n  T-2    reviewer       Found later");
     expect((await asBuilder("start", "T-1")).code).toBe(0);
     expect((await asBuilder("review", "T-1", "--note", "npm test: 14 passed")).code).toBe(0);
-    const done = await asManager("done", "T-1");
+    const unchecked = await asManager("done", "T-1");
+    expect(unchecked.code).toBe(1);
+    expect(unchecked.err).toContain("what you checked");
+    const done = await asManager("done", "T-1", "--why", "ran npm test at the lane's commit: 14 passed");
     expect(done.code).toBe(0);
     expect(done.out).toContain("Done this week");
     expect(done.out).toContain("  manager review → done");
@@ -63,6 +78,28 @@ describe("the manager's day", () => {
     const json = await asManager("list", "--json");
     expect(JSON.parse(json.out)).toMatchObject([{ key: "T-1", status: "blocked" }]);
     expect((await asManager("list", "--status", "sideways")).code).toBe(2);
+  });
+  it("list marks an orphan task, in text and in --json", async () => {
+    // B2: a to do task whose lane the fleet no longer lists. A hub of its own, whose board flags "ghost" as gone.
+    const orphanHub = await startInProcessHub({ orphans: ts => ts.filter(t => t.assignee === "ghost").map(t => t.key) });
+    try {
+      const here = orphanHub.agents.issue("manager", "manager").secret;
+      const out: string[] = [], err: string[] = [];
+      const call = async (argv: string[]) => {
+        const mark = out.length;
+        const code = await run(argv, { MORNDO_HUB: orphanHub.base, MORNDO_AGENT_TOKEN: here }, { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+        return { code, out: out.slice(mark).join("\n") };
+      };
+      await call(["new", "A", "--assign", "builder"]);
+      await call(["new", "B", "--assign", "ghost"]);
+      const list = await call(["list"]);
+      expect(list.out.split("\n").find(l => l.includes("T-1"))).toBe("  T-1    builder        A");
+      expect(list.out.split("\n").find(l => l.includes("T-2"))).toBe("  T-2    ghost          B  [orphan: its lane is gone; reassign it]");
+      expect(list.out).not.toContain("[lane not running]");
+      const json = JSON.parse((await call(["list", "--json"])).out) as { key: string; orphan?: boolean }[];
+      expect(json.find(t => t.key === "T-2")?.orphan).toBe(true);
+      expect("orphan" in (json.find(t => t.key === "T-1") ?? {})).toBe(false);
+    } finally { await orphanHub.close(); }
   });
 });
 
@@ -107,6 +144,267 @@ describe("a lane's day", () => {
     expect(await asBuilder("show", "T-9")).toMatchObject({ code: 1, err: "refused: no such task" });
     expect((await asBuilder("show", "nope")).code).toBe(2);
   });
+  it("the record names the console's change and the board's own moves, with the rule and the lane (ADR-0032)", async () => {
+    await asManager("new", "A");
+    expect(hub.board.act("T-1", { action: "assign", to: "builder" }, { kind: "console" }).ok).toBe(true);    // lanes start --task
+    const rev = hub.board.task("T-1")?.task.rev ?? 0;
+    expect(hub.board.follow("T-1", { to: "doing", reason: null, rule: "D4" }, "builder", rev).ok).toBe(true);
+    const done = hub.board.follow("T-1", { to: "review", reason: "STATUS: DONE npm test: 14 passed", rule: "D1" }, "builder", rev + 1);
+    expect(done.ok).toBe(true);
+    const shown = await asManager("show", "T-1");
+    expect(shown.out).toContain("console      assigned it to builder");
+    expect(shown.out).toContain("board (D4, builder) todo → doing");
+    expect(shown.out).toContain("board (D1, builder) doing → review: STATUS: DONE npm test: 14 passed");
+    expect((await asManager("list")).out).toBe("In review (1)\n  T-1    builder        A\n      proof: no brief");   // a review without a brief says so (B15)
+  });
+});
+
+// B18, D7 (ADR-0038): a block that names what it waits on, the hub's readings of it in list and show, and the board's
+// own move to do once it is over. The forge is the test's; the clock is real (the stale flag gets a hub with its own).
+describe("a block's waits (B18, D7)", () => {
+  let wh: InProcessHub;
+  let wm: string;
+  let wb: string;
+  const prs = new Map<string, "open" | "merged">();
+  let clock = 1_800_000_000_000;
+  const forge = {
+    async pullRequest(repo: string, n: number) {
+      const st = prs.get(`${repo}#${n}`);
+      return st === undefined ? { ok: false as const, failure: { reason: "not_found" as const, detail: "not found" } }
+        : { ok: true as const, value: { state: st === "open" ? "open" as const : "closed" as const, merged: st === "merged", headSha: "b".repeat(40), mergeSha: null, baseRef: "main" } };
+    },
+    async checkRuns() { return { ok: false as const, failure: { reason: "unexpected" as const, detail: "unused" } }; },
+    async requiredChecks() { return { ok: false as const, failure: { reason: "unexpected" as const, detail: "unused" } }; },
+  };
+  beforeEach(async () => {
+    prs.clear();
+    clock = 1_800_000_000_000;
+    wh = await startInProcessHub({ forge, proofRepos: ["morndo/morndo", "acme/widgets"], now: () => clock });
+    wm = wh.agents.issue("manager", "manager").secret;
+    wb = wh.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await wh.close(); });
+  async function say(argv: string[], token: string, laneName: string | null) {
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+  const managerSays = (...argv: string[]) => say(argv, wm, null);
+  const builderSays = (...argv: string[]) => say(argv, wb, "builder");
+
+  it("blocks on a pull request and a task, shows what the hub read, and moves it to do when both are over", async () => {
+    await managerSays("new", "The dependency", "--assign", "builder");     // T-1
+    await managerSays("new", "Ship it", "--assign", "builder");            // T-2
+    prs.set("acme/widgets#7", "open");
+    await builderSays("start", "T-2");
+    const blocked = await builderSays("block", "T-2", "--why", "needs the widget fix and T-1", "--on", "acme/widgets#7", "--on", "T-1");
+    expect(blocked.code, blocked.err).toBe(0);
+    expect(blocked.out).toContain("[waits on acme/widgets#7, T-1]");
+    await wh.waits.tick();
+    let list = await managerSays("list", "--status", "blocked");
+    expect(list.out).toContain("waits on: acme/widgets#7 open · T-1 to do");
+    const shown = await managerSays("show", "T-2");
+    expect(shown.out).toContain("Waits on: acme/widgets#7 open · T-1 to do");
+    prs.set("acme/widgets#7", "merged");
+    await managerSays("start", "T-1");                                      // the manager may; the lane has T-2 blocked
+    await managerSays("move", "T-1", "done", "--why", "checked it");
+    await wh.waits.tick();                                                  // the open reading is younger than PR_EVERY_MS: kept
+    const json = JSON.parse((await managerSays("list", "--status", "blocked", "--json")).out) as { key: string; waitsRead?: unknown[] }[];
+    expect(json[0]).toMatchObject({ key: "T-2", waitsRead: [{ state: "open", label: "acme/widgets#7 open" }, { state: "over", label: "T-1 done" }] });
+    clock += PR_EVERY_MS;
+    await wh.waits.tick();
+    list = await managerSays("list", "--status", "todo");
+    expect(list.out).toContain("T-2");
+    expect((await managerSays("show", "T-2")).out).toMatch(/board \(D7, builder\)\s+blocked → todo: its wait is over: acme\/widgets#7 merged, T-1 done/);
+  });
+  it("words the board's own move, and a wait it can't watch", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    prs.set("morndo/morndo#93", "merged");
+    await builderSays("start", "T-1");
+    expect((await builderSays("block", "T-1", "--why", "after #93", "--on", "#93")).code).toBe(0);
+    await wh.waits.tick();
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toMatch(/board \(D7, builder\)\s+blocked → todo: its wait is over: #93 merged/);
+    const bad = await managerSays("block", "T-1", "--why", "x", "--on", "next week");
+    expect(bad).toMatchObject({ code: 1 });
+    expect(bad.err).toMatch(/the board can't watch that wait: "next week" is none of/);
+    const repo = await managerSays("block", "T-1", "--why", "x", "--on", "other/repo#4");
+    expect(repo.err).toContain("the board reads no pull requests in other/repo");
+    const many = await managerSays("block", "T-1", "--why", "x", "--on", "#1", "--on", "#2", "--on", "#3", "--on", "#4");
+    expect(many.err).toContain("a block names at most 3 waits");
+  });
+  it("refuses an --on without its wait, the way a shell leaves an unquoted #93 (review of #161)", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    for (const argv of [["block", "T-1", "--why", "x", "--on"], ["block", "T-1", "--why", "x", "--on", "--on", "T-2"]]) {
+      const r = await managerSays(...argv);
+      expect(r.code, argv.join(" ")).toBe(2);
+      expect(r.err).toContain("--on needs a wait");
+    }
+    // Through a real shell: bash takes `#93` for a comment and the CLI gets a bare --on.
+    const sh = await viaBash(`node --no-warnings ${CLI_MAIN} block T-1 --why "after the fix" --on #93`, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: wm });
+    expect(sh.status, sh.stderr).toBe(2);
+    expect(sh.stderr).toContain("quote it");
+    expect((await managerSays("show", "T-1")).out).not.toContain("Blocked");
+    const quoted = await viaBash(`node --no-warnings ${CLI_MAIN} block T-1 --why "after the fix" --on '#93' --on morndo/morndo#94`, { MORNDO_HUB: wh.base, MORNDO_AGENT_TOKEN: wm });
+    expect(quoted.status, quoted.stderr).toBe(0);
+    expect(quoted.stdout).toContain("[waits on #93, #94]");
+  });
+  it("names the stale flag in list for a block of words only that sat two days", async () => {
+    let now = 1_800_000_000_000;
+    const old = await startInProcessHub({ now: () => now });
+    try {
+      const m = old.agents.issue("manager", "manager").secret;
+      const c = (argv: string[]) => run(argv, { MORNDO_HUB: old.base, MORNDO_AGENT_TOKEN: m }, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} });
+      const out: string[] = [];
+      await c(["new", "Ship it", "--assign", "builder"]);
+      await c(["block", "T-1", "--why", "needs the owner's keys"]);
+      now += 2 * 24 * 3_600_000;
+      out.length = 0;
+      await c(["list", "--status", "blocked"]);
+      expect(out.join("\n")).toContain("[blocked 2 d on words only: check it, or name its waits with --on]");
+    } finally { await old.close(); }
+  });
+});
+
+// B11: a task's PR merged is a record on the task, and Done waits for it to be live on every node. This hub answers
+// liveness as two nodes' builds would: pc's build doesn't carry the merge (on abc1234), srv01 names none. All names
+// synthetic, as everywhere here.
+describe("a task's merge and the done gate (B11)", () => {
+  let gate: InProcessHub;
+  let gateManager: string;
+  let gateBuilder: string;
+  beforeEach(async () => {
+    gate = await startInProcessHub({ liveness: () => ({ live: false, blockers: [{ node: "pc", on: "abc1234" }, { node: "srv01", on: null }] }) });
+    gateManager = gate.agents.issue("manager", "manager").secret;
+    gateBuilder = gate.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await gate.close(); });
+
+  async function gateCli(argv: string[], token: string, laneName: string | null) {
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: gate.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+  const managerSays = (...argv: string[]) => gateCli(argv, gateManager, null);
+  const builderSays = (...argv: string[]) => gateCli(argv, gateBuilder, "builder");
+
+  // One task through to review, its PR merged as abc1234: what the done gate judges.
+  async function taskMerged() {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    await builderSays("start", "T-1");
+    await builderSays("review", "T-1");
+    await managerSays("merged", "T-1", "abc1234");
+  }
+
+  // One call against a fetch that notes what was sent and answers as told: for the body the CLI builds.
+  async function stubCli(answer: Record<string, unknown>, argv: string[]) {
+    const sent: { path: string; body: unknown }[] = [];
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: "https://hub.example.test", MORNDO_AGENT_TOKEN: "mat_stub" }, {
+      fetch: async (url, init) => {
+        sent.push({ path: new URL(url).pathname, body: init?.body === undefined ? undefined : JSON.parse(init.body as string) });
+        return new Response(JSON.stringify(answer), { status: 200, headers: { "content-type": "application/json" } });
+      },
+      lane: async () => null, out: l => out.push(l), err: l => err.push(l),
+    });
+    return { code, out: out.join("\n"), err: err.join("\n"), sent };
+  }
+  // A task and the event of its merge, as the hub answers a change: enough for the CLI to print.
+  const shipIt = { key: "T-1", n: 1, title: "Ship it", description: "", status: "review", assignee: "builder", priority: "normal", blockedReason: null, createdAt: 0, updatedAt: 0, stateChangedAt: 0, createdBy: { kind: "manager", name: "manager", token: "mat_x" }, rev: 4, doneAt: null, comments: 0 };
+  const mergedIn = { key: "T-1", rev: 4, at: 0, actor: { kind: "manager", name: "manager", token: "mat_x" }, change: { kind: "merged", repo: "morndo/morndo", sha: "abc1234" } };
+  const actor = { kind: "manager", name: "manager", token: "mat_x" } as const;
+
+  it("merged records the commit, default repo morndo/morndo", async () => {
+    const mine = await stubCli({ task: shipIt, event: mergedIn }, ["merged", "T-1", "abc1234"]);
+    expect(mine.code).toBe(0);
+    expect(mine.out).toContain("recorded its merge: morndo/morndo abc1234");
+    expect(mine.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "merged", sha: "abc1234" } }]);
+    const other = await stubCli({ task: shipIt, event: mergedIn }, ["merged", "T-1", "abc1234", "--repo", "acme/other"]);
+    expect(other.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "merged", sha: "abc1234", repo: "acme/other" } }]);
+    await managerSays("new", "Ship it", "--assign", "builder");
+    expect(await managerSays("merged", "T-1")).toMatchObject({ code: 2, err: "usage: morndo-board merged T-12 <sha> [--repo owner/name]" });
+    expect(await managerSays("merged", "T-1", "abc1234", "--repo")).toMatchObject({ code: 2, err: "usage: morndo-board merged T-12 <sha> [--repo owner/name]" });
+  });
+  it("unmerged clears a record, and its usage needs a sha", async () => {
+    const cleared = await stubCli({ task: shipIt, event: { ...mergedIn, change: { kind: "unmerged", repo: "morndo/morndo", sha: "abc1234" } } }, ["unmerged", "T-1", "abc1234"]);
+    expect(cleared.code).toBe(0);
+    expect(cleared.out).toContain("cleared its merge record: morndo/morndo abc1234");
+    expect(cleared.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "unmerged", sha: "abc1234" } }]);
+    await taskMerged();
+    const again = await managerSays("unmerged", "T-1", "abc1234");
+    expect(again.code).toBe(0);
+    expect(again.out).toContain("cleared its merge record: morndo/morndo abc1234");
+    expect((await managerSays("show", "T-1")).out).not.toContain("Merged:");
+    expect((await managerSays("list")).out).not.toContain("merged, not live");
+    expect(await managerSays("unmerged", "T-1")).toMatchObject({ code: 2, err: "usage: morndo-board unmerged T-12 <sha> [--repo owner/name]" });
+    expect(await managerSays("unmerged", "T-1", "abc1234", "--repo")).toMatchObject({ code: 2, err: "usage: morndo-board unmerged T-12 <sha> [--repo owner/name]" });
+  });
+  it("done is refused while the merge is not live", async () => {
+    await taskMerged();
+    const refused = await managerSays("done", "T-1", "--why", "ran the checks at the merge");
+    expect(refused).toMatchObject({ code: 1, err: 'refused: its merge is not live: merged, not live: pc on abc1234, srv01 unknown; if you accept it anyway: done T-12 --why "…" --not-live "<reason>"' });
+  });
+  it("done --not-live sends the reason", async () => {
+    const event = { key: "T-1", rev: 5, at: 0, actor, change: { kind: "moved", from: "review", to: "done", reason: "ran the checks", notLive: "srv01 is retiring this week" } };
+    const cli = await stubCli({ task: { ...shipIt, status: "done" }, event }, ["done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week"]);
+    expect(cli.code).toBe(0);
+    expect(cli.sent).toEqual([{ path: "/api/agent/board/tasks/T-1", body: { action: "move", to: "done", reason: "ran the checks", notLive: "srv01 is retiring this week" } }]);
+    await taskMerged();
+    expect(await managerSays("done", "T-1", "--why", "checked", "--not-live")).toMatchObject({ code: 2, err: "--not-live takes the reason it is accepted before it is live" });
+  });
+  it("show prints the merge and its label", async () => {
+    await taskMerged();
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("Merged: morndo/morndo abc1234 (by manager, ");
+    expect(shown.out).toContain("merged, not live: pc on abc1234, srv01 unknown");
+  });
+  it("show prints the override", async () => {
+    await taskMerged();
+    await managerSays("done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week");
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("Accepted as done while not live: srv01 is retiring this week");
+    expect(shown.out).toContain("review → done: ran the checks (done while not live: srv01 is retiring this week)");
+  });
+  it("list marks a task that merged but is not live", async () => {
+    await taskMerged();
+    expect((await managerSays("list")).out).toContain("Ship it  [merged, not live: pc on abc1234, srv01 unknown]");
+    await managerSays("done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week");
+    expect((await managerSays("list")).out).toContain("  (done not live: srv01 is retiring this week)");
+  });
+  it("list leaves tasks without a merge as they were", async () => {
+    await managerSays("new", "A", "--assign", "builder");
+    await builderSays("start", "T-1");
+    await builderSays("review", "T-1");
+    expect((await managerSays("list")).out).toBe("In review (1)\n  T-1    builder        A\n      proof: no brief");
+    expect(JSON.parse((await managerSays("list", "--json")).out)).toMatchObject([{ key: "T-1", status: "review" }]);
+  });
+  it("bad_sha and bad_repo are explained", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    expect(await managerSays("merged", "T-1", "nope")).toMatchObject({ code: 1, err: "refused: that isn't a commit hash (7 to 40 hex characters)" });
+    expect(await managerSays("merged", "T-1", "abc1234", "--repo", "acme")).toMatchObject({ code: 1, err: "refused: that isn't a repo name (owner/name)" });
+  });
+  it("too_many and no_commit are explained", async () => {
+    await managerSays("new", "Ship it", "--assign", "builder");
+    for (let i = 0; i < 5; i++) expect((await managerSays("merged", "T-1", String(i).repeat(40))).code).toBe(0);
+    expect(await managerSays("merged", "T-1", "a".repeat(40))).toMatchObject({ code: 1, err: "refused: a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>" });
+    const err: string[] = [];
+    const code = await run(["merged", "T-1", "abc1234"], { MORNDO_HUB: "https://hub.example.test", MORNDO_AGENT_TOKEN: "mat_stub" }, {
+      fetch: async () => new Response(JSON.stringify({ error: "no_commit" }), { status: 409, headers: { "content-type": "application/json" } }),
+      lane: async () => null, out: () => {}, err: l => err.push(l),
+    });
+    expect(code).toBe(1);
+    expect(err.join("\n")).toBe("refused: the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout");
+  });
+  it("merged then done: refused while not live, done once the reason is given", async () => {
+    await taskMerged();
+    expect((await managerSays("done", "T-1", "--why", "ran the checks")).code).toBe(1);
+    const done = await managerSays("done", "T-1", "--why", "ran the checks", "--not-live", "srv01 is retiring this week");
+    expect(done.code).toBe(0);
+    expect(done.out).toContain("Done this week");
+    expect(gate.board.task("T-1")).toMatchObject({ merged: { merges: [{ repo: "morndo/morndo", sha: "abc1234", override: "srv01 is retiring this week" }] } });
+  });
 });
 
 describe("the prompt and the plumbing", () => {
@@ -124,5 +422,363 @@ describe("the prompt and the plumbing", () => {
     expect(await cli(["list"], "mat_wrong")).toMatchObject({ code: 1, err: "refused: the hub doesn't know this token (MORNDO_AGENT_TOKEN)" });
     const gone = await run(["list"], { MORNDO_HUB: "http://127.0.0.1:1", MORNDO_AGENT_TOKEN: "mat_x" }, { fetch, lane: async () => null, out: () => {}, err: () => {} });
     expect(gone).toBe(3);
+  });
+});
+
+describe("the brief and the proof (B13 to B16)", () => {
+  // A hub with the proof gate on and a local forge to check references against: what the CLI's lanes see, driven the
+  // way the prompts tell them to work. Everything the forge answers was registered here; nothing leaves this process.
+  const PR = "morndo/morndo#42@3e9d1a7";
+  const CI = "morndo/morndo@3e9d1a7:ci,lint";
+  const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  let proofHub: InProcessHub;
+  let fakeForge: FakeForge;
+  let proofManager: string;
+  let proofBuilder: string;
+  let files: Map<string, string>;     // what --json reads, standing in for the disk
+  beforeEach(async () => {
+    fakeForge = await startFakeForge();
+    proofHub = await startInProcessHub({ forge: new GithubChecks({ baseUrl: fakeForge.base }), proofMode: "on" });
+    proofManager = proofHub.agents.issue("manager", "manager").secret;
+    proofBuilder = proofHub.agents.issue("lanes", "worker").secret;
+    files = new Map();
+  });
+  afterEach(async () => { await proofHub.proof.idle(); await proofHub.close(); await fakeForge.close(); });
+
+  async function proofCli(argv: string[], token: string, laneName: string | null) {
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: proofHub.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l),
+        readFile: p => { const c = files.get(p); return c === undefined ? Promise.reject(new Error("no such file")) : Promise.resolve(c); } });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+  const managerSays = (...argv: string[]) => proofCli(argv, proofManager, null);
+  const builderSays = (...argv: string[]) => proofCli(argv, proofBuilder, "builder");
+
+  // One task of this lane's in review: the state a brief is filed from (revs: created 1, doing 2, review 3).
+  const atReview = async (key: string, title: string) => {
+    await managerSays("new", title, "--assign", "builder");
+    await builderSays("start", key);
+    await builderSays("review", key);
+  };
+  // The forge answering green: the pull request of the brief's references, open at the head the refs point at, both
+  // of its checks a success.
+  const greenForge = () => {
+    fakeForge.pr("morndo/morndo", 42, { head: FULL });
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+  };
+  const briefCmd = (key: string, ...extra: string[]) => ["brief", key, "--summary", "Totals row rounds to cents", "--left-out", "nothing", "--limit", "locale formats not covered", ...extra];
+  // One task in review with a green brief: what a checked `done` follows.
+  const greenBriefed = async (key: string, title: string) => {
+    greenForge();
+    await atReview(key, title);
+    await builderSays(...briefCmd(key, "--pr", PR, "--ci", CI));
+    await proofHub.proof.idle();
+  };
+
+  it("brief T-12 --pr … --ci … files one action and prints the ref states", async () => {
+    greenForge();
+    await atReview("T-1", "Ship the totals row");
+    const filed = await builderSays(...briefCmd("T-1", "--pr", PR, "--ci", CI));
+    expect(filed.code).toBe(0);
+    expect(filed.out).toContain("T-1 brief filed (rev 4)");
+    await proofHub.proof.idle();                       // the checks the filing set off land
+    for (const shown of [await builderSays("show", "T-1"), await builderSays("brief", "T-1", "--show")]) {
+      expect(shown.out).toContain(`✓ ${PR}`);
+      expect(shown.out).toContain("proof: 2 of 2 green");
+    }
+    expect((proofHub.board.task("T-1")?.events ?? []).filter(e => e.change.kind === "briefed")).toHaveLength(1);
+  });
+
+  it("a ref missing its repository exits 1 with the grammar", async () => {
+    await atReview("T-1", "Ship the totals row");
+    const refused = await builderSays(...briefCmd("T-1", "--pr", "#42@3e9d1a7"));
+    expect(refused).toMatchObject({ code: 1, err: `refused: a reference must be whole: #42@3e9d1a7: a reference is owner/repo#PR@sha or owner/repo@sha:check,check` });
+  });
+
+  it("brief repeats --pr and --ci and takes --test, --manual, --ui, --data, --infra and --no-code", async () => {
+    greenForge();
+    await atReview("T-1", "Ship the totals row");
+    // valuesOf itself: every --name value and every --name=value, in the order the command line gave them
+    expect(valuesOf(["brief", "T-1", "--pr", "a/b#1@1111111", "--pr=c/d#2@2222222", "--pr", "e/f#3@3333333"], "pr"))
+      .toEqual(["a/b#1@1111111", "c/d#2@2222222", "e/f#3@3333333"]);
+    const filed = await builderSays(...briefCmd("T-1",
+      "--pr", PR, "--pr", "morndo/morndo#43@3e9d1a7",
+      "--ci", CI, "--ci", "morndo/morndo@3e9d1a7:*",
+      "--test", "npm test: 48 passed, 0 failed", "--manual", "read the diff", "--ui", "the totals row renders",
+      "--data", "a sample of 30 rows", "--infra", "restarted the hub",
+      "--decision", "round at display, not at sum",
+    ));
+    expect(filed.code).toBe(0);
+    expect(proofHub.proof.view("T-1")?.brief).toEqual({
+      summary: "Totals row rounds to cents",
+      decisions: "round at display, not at sum",
+      leftOut: "nothing",
+      limits: "locale formats not covered",
+      refs: [PR, "morndo/morndo#43@3e9d1a7", CI, "morndo/morndo@3e9d1a7:*"],
+      attested: [
+        { kind: "tests", how: "npm test: 48 passed, 0 failed" },
+        { kind: "manual", how: "read the diff" },
+        { kind: "ui", how: "the totals row renders" },
+        { kind: "data", how: "a sample of 30 rows" },
+        { kind: "infra", how: "restarted the hub" },
+      ],
+      noCode: "",
+    });
+    // --no-code stands in for the references: a brief of its own
+    const memo = await builderSays("brief", "T-1", "--summary", "A look at the numbers", "--left-out", "nothing", "--limit", "none known", "--no-code", "an analysis, no code changed");
+    expect(memo.code).toBe(0);
+    expect(proofHub.proof.view("T-1")?.brief).toMatchObject({ refs: [], noCode: "an analysis, no code changed" });
+  });
+
+  it("brief --json reads the wire shape from a file", async () => {
+    await atReview("T-1", "Ship the totals row");
+    const wire = {
+      summary: "Totals row rounds to cents", decisions: "round at display, not at sum", leftOut: "nothing", limits: "locale formats not covered",
+      refs: [PR], attested: [{ kind: "tests", how: "npm test: 48 passed, 0 failed" }],
+    };
+    files.set("brief.json", JSON.stringify(wire));
+    const filed = await builderSays("brief", "T-1", "--json", "brief.json");
+    expect(filed.code).toBe(0);
+    expect(filed.out).toContain("T-1 brief filed (rev 4)");
+    expect(proofHub.proof.view("T-1")?.brief).toEqual({ ...wire, noCode: "" });
+    // a file that is not there or not JSON is a usage error, never a hub call
+    files.set("broken.json", "{not json");
+    expect(await builderSays("brief", "T-1", "--json", "broken.json")).toMatchObject({ code: 2 });
+    const missing = await builderSays("brief", "T-1", "--json", "missing.json");
+    expect(missing).toMatchObject({ code: 2 });
+    expect(missing.err).toContain("usage:");
+  });
+
+  it("brief without its required flags is a usage error naming the flag", async () => {
+    await atReview("T-1", "Ship the totals row");
+    expect(HELP).toContain('brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json');
+    expect(HELP).toContain("brief T-12 --show [--json] [--from-last]   the brief the hub holds and how each reference checked out");
+    expect(HELP).toContain('done T-12 --why "…" [--not-live "…"] [--proof-override "<reason>"]');
+    const noSummary = await builderSays("brief", "T-1", "--left-out", "nothing", "--limit", "none known");
+    expect(noSummary).toMatchObject({ code: 2 });
+    expect(noSummary.err).toContain("--summary");
+    const noLeftOut = await builderSays("brief", "T-1", "--summary", "Totals row rounds to cents", "--limit", "none known");
+    expect(noLeftOut).toMatchObject({ code: 2 });
+    expect(noLeftOut.err).toContain("--left-out");
+    const noLimit = await builderSays("brief", "T-1", "--summary", "Totals row rounds to cents", "--left-out", "nothing");
+    expect(noLimit).toMatchObject({ code: 2 });
+    expect(noLimit.err).toContain("--limit");
+  });
+
+  it("brief --show prints the brief and --show --json prints it as JSON; --from-last prints a stale brief after the task went back to doing", async () => {
+    greenForge();
+    await atReview("T-1", "Ship the totals row");
+    await builderSays(...briefCmd("T-1", "--pr", PR, "--ci", CI));
+    await proofHub.proof.idle();
+    const shown = await builderSays("brief", "T-1", "--show");
+    expect(shown.code).toBe(0);
+    expect(shown.out).toContain("  Proof: proof: 2 of 2 green");
+    expect(shown.out).toContain("    Brief (rev 4): Totals row rounds to cents");
+    expect(shown.out).toContain(`    ✓ ${PR} green`);
+    const asJson = await builderSays("brief", "T-1", "--show", "--json");
+    expect(JSON.parse(asJson.out)).toMatchObject({ rev: 4, state: { kind: "verified", green: 2, total: 2, accepts: true, line: "proof: 2 of 2 green" } });
+    // the task goes back to doing: the brief no longer counts, but the next round starts from it
+    await managerSays("move", "T-1", "doing");
+    expect((await builderSays("brief", "T-1", "--show")).out).toContain("proof: no brief");
+    const fromLast = await builderSays("brief", "T-1", "--show", "--from-last");
+    expect(JSON.parse(fromLast.out)).toEqual({
+      summary: "Totals row rounds to cents", decisions: "", leftOut: "nothing", limits: "locale formats not covered",
+      refs: [PR, CI], attested: [], noCode: "",
+    });
+    await managerSays("new", "Another one");
+    expect((await builderSays("brief", "T-2", "--show")).out).toContain("no brief filed");
+  });
+
+  it("--why naming an unverified sha prints the warning and still sends", async () => {
+    await greenBriefed("T-1", "Ship the totals row");
+    const warned = await managerSays("done", "T-1", "--why", "ran the checks at 9f8e7d6: 48 passed");
+    expect(warned.code).toBe(0);
+    expect(warned.err).toBe(`warning: --why names 9f8e7d6, which the board did not verify; verified: ${PR}, ${CI}`);
+    expect(proofHub.board.task("T-1")?.task.status).toBe("done");
+    // the same done naming the sha the board did verify prints nothing
+    await greenBriefed("T-2", "Ship the other row");
+    const quiet = await managerSays("done", "T-2", "--why", "ran the checks at 3e9d1a7: 48 passed");
+    expect(quiet).toMatchObject({ code: 0, err: "" });
+  });
+
+  it("--why with a #n that no verified pull request has warns, and a verified #n does not", async () => {
+    await greenBriefed("T-1", "Ship the totals row");
+    const warned = await managerSays("done", "T-1", "--why", "PR #43 looked green");
+    expect(warned.code).toBe(0);
+    expect(warned.err).toBe(`warning: --why names #43, which the board did not verify; verified: ${PR}, ${CI}`);
+    await greenBriefed("T-2", "Ship the other row");
+    const quiet = await managerSays("done", "T-2", "--why", "PR #42 is green");
+    expect(quiet).toMatchObject({ code: 0, err: "" });
+  });
+
+  it("done --proof-override sends the reason and the event records it", async () => {
+    fakeForge.pr("morndo/morndo", 42, { head: FULL });
+    fakeForge.runs("morndo/morndo", FULL, [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "failure" },
+    ]);
+    await atReview("T-1", "Ship the totals row");
+    await builderSays(...briefCmd("T-1", "--pr", PR, "--ci", CI));
+    await proofHub.proof.idle();
+    const refused = await managerSays("done", "T-1", "--why", "read the diff");
+    expect(refused).toMatchObject({ code: 1, err: `refused: done is held: proof: 0 of 2 green · ✗ ${PR} checks: "lint" failed · ✗ ${CI} "lint" failed; to accept it anyway: done T-12 --why "…" --proof-override "<what you looked at instead>"` });
+    expect(proofHub.board.task("T-1")?.task.status).toBe("review");
+    const accepted = await managerSays("done", "T-1", "--why", "read the diff", "--proof-override", "read the diff at the merge; the lint failure is the known flake");
+    expect(accepted.code).toBe(0);
+    expect(proofHub.board.task("T-1")?.task.status).toBe("done");
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("(proof: 0 of 2 green · ✗ morndo/morndo#42@3e9d1a7 checks: \"lint\" failed · ✗ morndo/morndo@3e9d1a7:ci,lint \"lint\" failed; override: read the diff at the merge; the lint failure is the known flake [mode on])");
+  });
+
+  it("list prints the proof line under a task in review; show prints the Proof block with attested items marked as the lane's word", async () => {
+    greenForge();
+    await atReview("T-1", "Ship the totals row");
+    await builderSays(...briefCmd("T-1", "--pr", PR, "--ci", CI, "--test", "npm test: 48 passed, 0 failed", "--ui", "the totals row renders"));
+    await proofHub.proof.idle();
+    const listed = await managerSays("list");
+    expect(listed.out).toContain("In review (1)");
+    expect(listed.out.split("\n").find(l => l.includes("proof: 2 of 2 green"))).toBe("      proof: 2 of 2 green");
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("  Proof: proof: 2 of 2 green");
+    expect(shown.out).toContain(`    ✓ ${PR} green`);
+    expect(shown.out).toContain(`    ✓ ${CI} green`);
+    expect(shown.out).toContain("    Attested (tests): npm test: 48 passed, 0 failed  (the lane's word, not checked)");
+    expect(shown.out).toContain("    Attested (ui): the totals row renders  (the lane's word, not checked)");
+    expect(JSON.parse((await managerSays("show", "T-1", "--json")).out).proof).toMatchObject({ rev: 4, state: { kind: "verified", green: 2, total: 2 } });
+  });
+
+  it("list says so when the hub reads a stand-in forge", async () => {
+    const standIn = await startInProcessHub({ standIn: true });
+    try {
+      const m = standIn.agents.issue("manager", "manager").secret;
+      const out: string[] = [];
+      await run(["new", "A task"], { MORNDO_HUB: standIn.base, MORNDO_AGENT_TOKEN: m }, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} });
+      out.length = 0;
+      await run(["list"], { MORNDO_HUB: standIn.base, MORNDO_AGENT_TOKEN: m }, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} });
+      expect(out[0]).toBe("(proof references are read from a stand-in forge, not GitHub)");
+    } finally { await standIn.close(); }
+    expect((await managerSays("list")).out).not.toContain("stand-in");
+  });
+
+  it("a bare --proof-override is a usage error", async () => {
+    await atReview("T-1", "Ship the totals row");
+    const bare = await managerSays("done", "T-1", "--why", "checked", "--proof-override");
+    expect(bare).toMatchObject({ code: 2 });
+    expect(bare.err).toContain("--proof-override takes the reason");
+  });
+});
+
+describe("the proof list (B17)", () => {
+  const PR = "morndo/morndo#42@3e9d1a7";
+  const PR_SPEC = "pr@morndo/morndo: the pull request";
+  const DATA_SPEC = "data: a sample of 30 rows";
+  const LANE_SPEC = "ui: the totals row";
+  const ITEM_GRAMMAR = "an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra";
+  let proofHub: InProcessHub;
+  let fakeForge: FakeForge;
+  let proofManager: string;
+  let proofBuilder: string;
+
+  beforeEach(async () => {
+    fakeForge = await startFakeForge();
+    fakeForge.pr("morndo/morndo", 42, { head: "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01" });
+    fakeForge.runs("morndo/morndo", "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01", [
+      { id: 1, name: "ci", status: "completed", conclusion: "success" },
+      { id: 2, name: "lint", status: "completed", conclusion: "success" },
+    ]);
+    proofHub = await startInProcessHub({ forge: new GithubChecks({ baseUrl: fakeForge.base }), proofMode: "on" });
+    proofManager = proofHub.agents.issue("manager", "manager").secret;
+    proofBuilder = proofHub.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await proofHub.proof.idle(); await proofHub.close(); await fakeForge.close(); });
+
+  const proofCli = (argv: string[], token: string, laneName: string | null) => {
+    const out: string[] = [], err: string[] = [];
+    const codePromise = run(argv, { MORNDO_HUB: proofHub.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => laneName, out: l => out.push(l), err: l => err.push(l) });
+    return codePromise.then(code => ({ code, out: out.join("\n"), err: err.join("\n") }));
+  };
+  const managerSays = (...argv: string[]) => proofCli(argv, proofManager, null);
+  const builderSays = (...argv: string[]) => proofCli(argv, proofBuilder, "builder");
+  const atReview = async (key = "T-1") => {
+    await managerSays("new", "Ship the totals row", "--assign", "builder");
+    await builderSays("start", key);
+    await builderSays("review", key);
+  };
+  const briefGreen = async (key: string, extra: string[] = []) => {
+    await builderSays("brief", key, "--summary", "Totals row rounds to cents", "--left-out", "nothing", "--limit", "none known", "--pr", PR, ...extra);
+    await proofHub.proof.idle();
+  };
+
+  it("new --proof files the list with the task and proof prints it", async () => {
+    const made = await managerSays("new", "Ship the totals row", "--assign", "builder", "--proof", PR_SPEC, "--proof", DATA_SPEC);
+    expect(made.code).toBe(0);
+    const shown = await managerSays("proof", "T-1");
+    expect(shown.out).toContain("Proof list (set by the manager):");
+    expect(shown.out).toContain(`[not covered] ${PR_SPEC}`);
+    expect(shown.out).toContain(`[not covered] ${DATA_SPEC}`);
+  });
+
+  it("assign --proof", async () => {
+    await managerSays("new", "Found later");
+    const assigned = await managerSays("assign", "T-1", "builder", "--proof", DATA_SPEC);
+    expect(assigned.code).toBe(0);
+    expect((await managerSays("proof", "T-1")).out).toContain(`[not covered] ${DATA_SPEC}`);
+  });
+
+  it("proof --add and --drop N", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC, "--add", DATA_SPEC);
+    await builderSays("proof", "T-1", "--add", LANE_SPEC);
+    const before = await managerSays("proof", "T-1");
+    expect(before.out).toContain(`[not covered] ${LANE_SPEC}  (added by the lane)`);
+    const updated = await builderSays("proof", "T-1", "--drop", "3");
+    expect(updated.code).toBe(0);
+    expect(updated.out).toContain("T-1 proof list updated");
+    expect(updated.out).not.toContain(LANE_SPEC);
+  });
+
+  it("a lane adds an item and cannot drop the manager's (exit 1)", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC);
+    expect((await builderSays("proof", "T-1", "--add", LANE_SPEC)).code).toBe(0);
+    const refused = await builderSays("proof", "T-1", "--drop", PR_SPEC);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("only the manager");
+  });
+
+  it("a bad item exits 1 with the grammar", async () => {
+    await atReview();
+    const bad = await managerSays("proof", "T-1", "--add", "not a spec");
+    expect(bad.code).toBe(1);
+    expect(bad.err).toContain(ITEM_GRAMMAR);
+    expect(bad.err.split(ITEM_GRAMMAR).length - 1).toBe(1);        // said once, not repeated as its own detail
+  });
+
+  it("show prints the list and list names the item not covered", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC, "--add", DATA_SPEC);
+    await briefGreen("T-1");
+    const listed = await managerSays("list");
+    expect(listed.out).toContain(`not covered: ${DATA_SPEC}`);
+    const shown = await managerSays("show", "T-1");
+    expect(shown.out).toContain("Proof list (set by the manager):");
+    expect(shown.out).toContain(`[covered] ${PR_SPEC}`);
+    expect(shown.out).toContain(`[not covered] ${DATA_SPEC}`);
+  });
+
+  it("done is held for an item not covered and goes through once the lane answers it", async () => {
+    await atReview();
+    await managerSays("proof", "T-1", "--add", PR_SPEC, "--add", DATA_SPEC);
+    await briefGreen("T-1");
+    const held = await managerSays("done", "T-1", "--why", "read the diff");
+    expect(held.code).toBe(1);
+    expect(held.err).toContain(`not covered: ${DATA_SPEC}`);
+    await briefGreen("T-1", ["--data", "30 rows read by hand"]);
+    expect((await managerSays("done", "T-1", "--why", "read the diff")).code).toBe(0);
   });
 });

@@ -1,9 +1,11 @@
 // How the board is shown (ADR-0015): the columns in work order, the words for each status and refusal, and what the
 // app may do from where. The rules live in the domain and the hub; this presents their results and asks the hub.
-import { workingOn, type Task, type TaskEvent, type TaskPriority, type TaskStatus } from "@morndo/domain";
-import { BoardTaskSchema, parseBody } from "@morndo/protocol";
+import { workingOn, type AuthorKind, type BoardRule, type MergedView, type Run, type Task, type TaskActor, type TaskEvent, type TaskPriority, type TaskStatus, type Wait } from "@morndo/domain";
+import { BoardTaskSchema, MergedViewSchema, ProofViewSchema, RunViewSchema, parseBody, type ProofView } from "@morndo/protocol";
+export type { ProofView };
+import { saidOf } from "./run-words.ts";
 
-export type { Task, TaskEvent, TaskPriority, TaskStatus };
+export type { MergedView, Run, Task, TaskEvent, TaskPriority, TaskStatus };
 export { workingOn };                                   // the domain's B5 lookup, one definition
 
 export const COLUMNS: { status: TaskStatus; label: string; hint: string }[] = [
@@ -36,6 +38,58 @@ export function decodeTasks(raw: unknown[]): { tasks: Task[]; dropped: number } 
   return { tasks, dropped };
 }
 
+// The Runs of a `board` frame (ADR-0032, BoardFrameSchema.runs), keyed by lane: each decoded on its own with RunViewSchema,
+// and one this build can't read dropped, as a task is. `runs` is null when the frame has none (a hub from before), so the
+// board shows no rings and no run counts rather than "0 working now". Two Runs of one lane name (a window of that name on
+// two nodes): the one whose lane is there (not gone, not on a node that is offline) wins, else the one whose phase began
+// later, so a stopped window elsewhere never hides the one at work.
+export function decodeRuns(raw: readonly unknown[] | undefined): { runs: ReadonlyMap<string, Run> | null; dropped: number } {
+  if (raw === undefined) return { runs: null, dropped: 0 };
+  const runs = new Map<string, Run>();
+  let dropped = 0;
+  const there = (r: Run) => r.phase !== "gone" && r.phase !== "unknown";
+  for (const x of raw) {
+    const r = parseBody(RunViewSchema, x);
+    if (!r) { dropped++; continue; }
+    const had = runs.get(r.lane);
+    if (!had || (there(r) !== there(had) ? there(r) : r.since > had.since)) runs.set(r.lane, r);
+  }
+  return { runs, dropped };
+}
+
+// Where each task's merges stand (B11, BoardFrameSchema.merged), keyed by task: each decoded on its own, one this
+// build can't read dropped, as a Run is. `null` when the frame has none (a hub from before B11), so a task shows no
+// merge line rather than a wrong one.
+export function decodeMerged(raw: readonly unknown[] | undefined): { merged: ReadonlyMap<string, MergedView> | null; dropped: number } {
+  if (raw === undefined) return { merged: null, dropped: 0 };
+  const merged = new Map<string, MergedView>();
+  let dropped = 0;
+  for (const x of raw) {
+    const m = parseBody(MergedViewSchema, x);
+    if (m) merged.set(m.key, m);
+    else dropped++;
+  }
+  return { merged, dropped };
+}
+
+// The hub's proof view for one task (ADR-0035 step 5): absent or unreadable on an older hub → no Proof section.
+export function decodeProof(raw: unknown): ProofView | null {
+  return raw === undefined || raw === null ? null : parseBody(ProofViewSchema, raw);
+}
+
+// The Accept-as-done button while a task is in review (B11 merge gate, B16 proof gate): merge override wins over proof.
+export function acceptLabel(proof: ProofView | null, merged: MergedView | null): { label: string; title: string | undefined } {
+  if (merged?.live === false)
+    return { label: "Accept anyway", title: "Its merge is not live on every node; this is recorded as accepted by you" };
+  // The gate's mode decides what the button promises: on holds the Done (so this is an override, recorded), warn only
+  // records it, off says nothing.
+  if (proof !== null && !proof.state.accepts && proof.mode === "on")
+    return { label: "Accept anyway", title: "Its proof is not green; this is recorded as accepted by you" };
+  if (proof !== null && !proof.state.accepts && proof.mode === "warn")
+    return { label: "Accept as done", title: "Its proof is not green; the gate is in warn mode, so this is recorded" };
+  return { label: "Accept as done", title: undefined };
+}
+
 export const byStatus = (tasks: readonly Task[]) => {
   const m = new Map<TaskStatus, Task[]>(COLUMNS.map(c => [c.status, []]));
   for (const t of tasks) m.get(t.status)?.push(t);
@@ -58,19 +112,73 @@ export const REFUSALS: Record<string, string> = {
   unknown: "The hub doesn't know this task any more.",
   step_up: "Verify with your passkey first.",
   board_off: "The hub has no board.",
+  // B11: the merge gate's refusals.
+  not_live: "Its merge is not live on every node yet.",
+  bad_sha: "That isn't a commit hash.",
+  bad_repo: "That isn't a repo name (owner/name).",
+  no_merge: "That merge isn't recorded on this task.",
+  too_many: "A task holds at most 5 merge records.",
+  no_commit: "The hub's checkout doesn't have that commit yet.",
+  // B14 to B16 (ADR-0035): the proof gate's refusals.
+  proof_not_green: "Its proof isn't green yet; accepting it anyway is recorded.",
+  bad_ref: "That isn't a whole reference: owner/repo#PR@sha.",
+  ref_unrelated: "A ci reference must hang off a pull request of the same brief.",
+  ref_repo: "The board doesn't check that repository.",
 };
 
-const who = (e: TaskEvent) => (e.actor.kind === "principal" ? "You" : e.actor.name);
+// Who made a change, in the record's words: you, a lane or the manager by its name, the control plane's console
+// (`lanes start --task`, ADR-0032), or the board itself following a Run (B10).
+export const whoOf = (a: TaskActor): string =>
+  a.kind === "principal" ? "You" : a.kind === "console" ? "console" : a.kind === "board" ? "board" : a.name;
+// Its avatar: the principal's own tile, the manager's, a lane's; the console and the board are no agent, so the system's.
+export const avatarOf = (a: TaskActor): AuthorKind =>
+  a.kind === "principal" ? "principal" : a.kind === "manager" ? "peer" : a.kind === "worker" ? "agent" : "system";
+// A board move in words (B10): what the lane's Run did that made it, by the rule (D1 to D4); D7, what the task waited on
+// was over (B18), the waits it read in its reason.
+const BOARD_WHY: Record<BoardRule, (lane: string) => string> = {
+  D1: l => `when ${l} said DONE`,
+  D2: l => `when ${l} said it is blocked or needs a decision`,
+  D3: l => `when ${l} stopped`,
+  D4: l => `when ${l} started on it`,
+  D7: () => "when what it waited on was over",
+};
+// B18: a wait in the CLI's own spelling, so the app and morndo-board say the same thing.
+export const waitWords = (w: Wait) => w.kind === "task" ? w.key : w.kind === "card" ? w.id : w.kind === "time" ? `until ${new Date(w.at).toLocaleString()}`
+  : w.repo.toLowerCase() === "morndo/morndo" ? `#${w.n}` : `${w.repo}#${w.n}`;
+// The reason D1 and D2 carry is the lane's status line (derivedMove, or the outcome's name when it had none): the record
+// keeps what the lane said after the status word, never the word again.
+const boardSaid = (rule: BoardRule, reason: string | null) => {
+  if (rule === "D7") return (reason ?? "").replace(/^its wait is over: /, "");
+  if ((rule !== "D1" && rule !== "D2") || !reason || reason === "blocked" || reason === "needs_decision") return "";
+  return saidOf(reason).rest;
+};
 // One line per event, for the task's history.
 export function eventLine(e: TaskEvent): { who: string; text: string; comment: string | null } {
   const c = e.change;
-  const w = who(e);
+  const w = whoOf(e.actor);
   switch (c.kind) {
     case "created": return { who: w, text: `filed it${c.assignee ? ` for ${c.assignee}` : ""} in ${STATUS_WORDS[c.status]}`, comment: null };
-    case "moved": return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}`, comment: null };
+    case "moved": {
+      if (e.actor.kind === "board") {
+        const said = boardSaid(e.actor.rule, c.reason);
+        return { who: w, text: `moved it to ${STATUS_WORDS[c.to]} ${BOARD_WHY[e.actor.rule](e.actor.lane)}${said ? `: ${said}` : ""}`, comment: null };
+      }
+      const proofComment = c.proofSeen ? `Proof when accepted: ${c.proofSeen}` : null;
+      const waits = c.waits?.length ? ` (waits on ${c.waits.map(waitWords).join(", ")})` : "";
+      return { who: w, text: `moved it from ${STATUS_WORDS[c.from]} to ${STATUS_WORDS[c.to]}${c.reason ? `: ${c.reason}` : ""}${waits}`, comment: proofComment };
+    }
     case "assigned": return { who: w, text: c.to ? `assigned it to ${c.to}` : "unassigned it", comment: null };
     case "edited": return { who: w, text: `edited the ${Object.keys(c).filter(k => k !== "kind").join(", ")}`, comment: null };
     case "commented": return { who: w, text: "commented", comment: c.text };
+    case "briefed": return { who: w, text: "filed a brief", comment: null };   // B13; the later round words this
+    case "merged": return { who: w, text: `recorded its merge in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };   // B11; the later round words this
+    case "unmerged": return { who: w, text: `cleared its merge record in ${c.repo} (${c.sha.slice(0, 7)})`, comment: null };
+    case "proof_listed": {
+      const lines = [...c.add.map(s => `+ ${s}`), ...c.drop.map(s => `- ${s}`)];
+      return { who: w, text: "set the proof list", comment: lines.length > 0 ? lines.join("\n") : null };
+    }
+    // A kind this build does not know (a newer hub's record): one plain line, never a throw that takes the whole panel down.
+    default: return { who: w, text: "made a change this version cannot show", comment: null };
   }
 }
 export const ago = (t: number, now: number) => {

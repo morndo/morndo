@@ -6,15 +6,22 @@ import type { EngineSettings, Runtime } from "./application/ports.ts";
 import { bindCommands, type BoundCommands } from "./application/commands.ts";
 import { ConnectionsService } from "./application/connections-service.ts";
 import { LeaseService } from "./application/lease-service.ts";
+import { KeyPoolService } from "./application/key-pool-service.ts";
+import { PoolRoutingSync } from "./application/key-pool-routing.ts";
+import { PoolService } from "./application/pool-service.ts";
 import { RoutingService } from "./application/routing-service.ts";
 import { FileAlerts } from "./adapters/alerts-file.ts";
+import { builtinClassifiers } from "./adapters/classifiers.ts";
 import { FileCatalog } from "./adapters/catalog-file.ts";
 import { CliEngines } from "./adapters/engines-bin.ts";
 import { FileEngines } from "./adapters/engines-file.ts";
 import { FileModels } from "./adapters/models.ts";
 import { ProcProcesses } from "./adapters/processes.ts";
 import { GitRepos } from "./adapters/repos.ts";
+import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { RunSpend } from "./adapters/spend.ts";
+import { SqliteKeyPoolStore } from "./adapters/key-pool-store-sqlite.ts";
+import { SqlitePoolStore } from "./adapters/pool-store-sqlite.ts";
 import { SqliteStore } from "./adapters/store-sqlite.ts";
 import { AgeVault } from "./adapters/vault-age.ts";
 import { readUsage } from "./adapters/usage-file.ts";
@@ -53,6 +60,8 @@ export type Opened = {
   routing: RoutingService;
   commands: BoundCommands;
   leases: LeaseService;
+  pool: PoolService;
+  keypools: KeyPoolService;
   catalog: FileCatalog;
   engines: EngineSettings;
   models: FileModels;
@@ -76,6 +85,8 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
   const identity = join(dir, "identity");
   const catalog = new FileCatalog(catalogPath(env));
   const store = new SqliteStore(db);
+  const poolStore = new SqlitePoolStore(db);
+  const keyPoolStore = new SqliteKeyPoolStore(db);
   // The Connections commands hold no Secrets records, so they use the node keys there are and never make one.
   const keys = new NodeKeys(dir, ONLY_EXISTING_KEYS);
   const vault = env.MORNDO_VAULT === "file" ? new FileVault(vaultDir, keys) : new AgeVault(vaultDir, identity, keys);
@@ -88,14 +99,26 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
     clock, vault, runtime, models, spend: new RunSpend(), catalog, store,
     repos: new GitRepos(), alerts: new FileAlerts(join(dir, "alerts.log")), processes, engines,
   };
+  const leases = new LeaseService(deps);
+  const keypools = new KeyPoolService({
+    clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, processes, classifiers: builtinClassifiers,
+    leases, helper: { limit: HELPER_LIMIT, ttlMs: HELPER_TTL_MS },
+  });
+  const pools = () => keypools.routingPools();
+  const routing = new RoutingService(deps, pools);
+  keypools.attachRouting(new PoolRoutingSync({
+    routing, engines, catalog, models, store, clock, pools,
+  }));
   return {
     dir, db, vaultDir, identity, store, vault, catalog, engines, models, processes, runtime, env,
-    connections: new ConnectionsService(deps),
-    routing: new RoutingService(deps),
-    commands: bindCommands(deps, () => readUsage(join(dir, "usage.json"))),
-    leases: new LeaseService(deps),
+    connections: new ConnectionsService(deps, keypools),
+    routing,
+    commands: bindCommands(deps, () => readUsage(join(dir, "usage.json")), pools, keypools),
+    leases,
+    pool: new PoolService({ clock, store: poolStore, connections: store, catalog, processes }),
+    keypools,
     now: () => clock.now(),
-    close: () => store.close(),
+    close: () => { store.close(); poolStore.close(); keyPoolStore.close(); },
     seal: async (ref, text) => { await vault.seal(ref, new SecretMaterial(new TextEncoder().encode(text))); },
     open: async ref => new TextDecoder().decode((await vault.open(ref)).bytes()),
   };

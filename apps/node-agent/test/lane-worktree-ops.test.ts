@@ -4,11 +4,16 @@ import { execFileSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import type { Launch } from "../src/config.ts";
 import { branchNameOk } from "../src/ops/worktree-ops.ts";
 import { isolatedTmux, tempHome, until, wait, type TestTmux } from "./helpers.ts";
 import { opsHarness, type Harness } from "./ops-harness.ts";
 
 const SID = "3f0c1d2e-1111-4222-8333-444455556666";
+// The stand-in `claude` as the pane's own program (spec §5, launch.via "direct"), and no wait for a trust dialog that a
+// stand-in never shows (lane-ops.ts).
+const DIRECT: Launch = { command: ["claude"], via: "direct" };
+const QUICK = { trustMs: 0 };
 let home: { home: string; cleanup: () => void };
 let t: TestTmux;
 let h: Harness;
@@ -34,7 +39,7 @@ beforeEach(() => {
   process.env.PATH = `${bin}:${savedPath ?? ""}`;
   process.env.MORNDO_TEST_ARGV = argvDir;
   t = isolatedTmux();
-  h = opsHarness({ home: home.home, socket: t.socket, policy: { repoRoots: [join(home.home, "code")] } });
+  h = opsHarness({ home: home.home, socket: t.socket, policy: { repoRoots: [join(home.home, "code")], launch: DIRECT }, laneWaits: QUICK });
 });
 afterEach(async () => {
   h.close();
@@ -49,15 +54,21 @@ const argv = (name: string) => (existsSync(join(argvDir, `${name}.argv`)) ? read
 describe("lane.start", () => {
   it("starts claude-as with the typed account and resume id in a new window, and the answer's invVersion lists it", async () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "base", "sleep 600");
-    const name = "fix: a/b ü.2 #S";                                // "#S" would become the session name unescaped
-    const r = await h.call("lane.start", { name, cwd: work, account: "acct", resume: SID }, { key: "hub:ls1" });
-    if (!r.ok) throw new Error(r.error.message);
-    const workerId = (r.result as { workerId: string }).workerId;
-    expect(workerId).toMatch(/^pc\.[0-9a-f]{8}\.\d+$/);
-    expect(h.inventory.last().invVersion).toBe(r.invVersion);
-    expect(h.inventory.last().panes.find(p => p.workerId === workerId)).toMatchObject({ window: name, cwd: work });
-    expect(await until(() => argv("claude-as") !== null)).toBe(true);
-    expect(argv("claude-as")).toEqual(["claude-as", "acct", "--resume", SID]);
+    // The owner's launcher (spec §5): claude-as, with the op's account in place of {account}.
+    const owner = opsHarness({ home: home.home, socket: t.socket, policy: { launch: { command: ["claude-as", "{account}"], via: "direct" } }, laneWaits: QUICK });
+    try {
+      const name = "fix: a/b ü.2 #S";                              // "#S" would become the session name unescaped
+      const r = await owner.call("lane.start", { name, cwd: work, account: "acct", resume: SID }, { key: "hub:ls1" });
+      if (!r.ok) throw new Error(r.error.message);
+      const workerId = (r.result as { workerId: string }).workerId;
+      expect(workerId).toMatch(/^pc\.[0-9a-f]{8}\.\d+$/);
+      expect(owner.inventory.last().invVersion).toBe(r.invVersion);
+      expect(owner.inventory.last().panes.find(p => p.workerId === workerId)).toMatchObject({ window: name, cwd: work });
+      expect(await until(() => argv("claude-as") !== null)).toBe(true);
+      expect(argv("claude-as")).toEqual(["claude-as", "acct", "--resume", SID]);
+    } finally {
+      owner.close();
+    }
   });
   it("starts plain claude without an account, and claude --resume with only a resume id", async () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "base", "sleep 600");
@@ -93,7 +104,7 @@ describe("lane.start", () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "base", "sleep 600");
     const linked = `${home.home}-link`;
     symlinkSync(home.home, linked);
-    const viaLink = opsHarness({ home: linked, socket: t.socket });
+    const viaLink = opsHarness({ home: linked, socket: t.socket, policy: { launch: DIRECT }, laneWaits: QUICK });
     try {
       mkdirSync(join(home.home, ".ssh"), { recursive: true });
       mkdirSync(join(home.home, ".config", "morndo-fleet"), { recursive: true });
@@ -137,12 +148,12 @@ describe("lane.start", () => {
 });
 
 describe("lane.stop", () => {
-  it("closes the lane's window; a name it doesn't have is no_pane", async () => {
+  it("closes the lane's window with mode kill; a name it doesn't have is no_pane", async () => {
     t.tmux("new-session", "-d", "-s", "main", "-n", "base", "sleep 600");
     t.tmux("new-window", "-d", "-t", "=main:", "-n", "done lane", "sleep 600");
-    expect(await h.call("lane.stop", { name: "done lane" }, { key: "hub:st1" })).toMatchObject({ ok: true, result: { ok: true } });
+    expect(await h.call("lane.stop", { name: "done lane", mode: "kill" }, { key: "hub:st1" })).toMatchObject({ ok: true, result: { ok: true } });
     expect(t.tmux("list-windows", "-t", "=main", "-F", "#{window_name}").trim()).toBe("base");
-    expect(await h.call("lane.stop", { name: "done lane" }, { key: "hub:st2" })).toMatchObject({ ok: false, error: { code: "no_pane", executed: "no" } });
+    expect(await h.call("lane.stop", { name: "done lane", mode: "kill" }, { key: "hub:st2" })).toMatchObject({ ok: false, error: { code: "no_pane", executed: "no" } });
   });
 });
 

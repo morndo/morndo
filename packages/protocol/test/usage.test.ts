@@ -76,3 +76,19 @@ describe("usage report shape", () => {
     expect(named?.onDemand).toBe("off");
   });
 });
+
+describe("an account's profile on the wire (ADR-0034)", () => {
+  const base = { account: "a3", reportedAt: 1, fiveHour: null, sevenDay: null, spend: null, sessions: [] };
+
+  it("an account carries its profile; one from before profiles decodes with profile null", () => {
+    expect(parseBody(AccountUsageSchema, { ...base, profile: { email: "ada@example.test", org: "team", plan: "Max 5x" } })?.profile)
+      .toEqual({ email: "ada@example.test", org: "team", plan: "Max 5x" });
+    expect(parseBody(AccountUsageSchema, { ...base, fiveHour: { usedPercentage: 23.5, resetsAt: 2 } })?.profile).toBeNull();
+  });
+
+  it("a profile with an org that is not one of the two words is dropped, and the account is kept", () => {
+    const a = parseBody(AccountUsageSchema, { ...base, profile: { email: "ada@example.test", org: "family", plan: "Max 5x" } });
+    expect(a?.account).toBe("a3");
+    expect(a?.profile).toBeNull();
+  });
+});

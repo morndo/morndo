@@ -6,8 +6,9 @@ import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync,
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, type Page } from "playwright";
+import type { Page } from "playwright";
 import { themes } from "@morndo/brand";
+import { launch } from "./harness.ts";
 import { buildOffice } from "./office.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -38,13 +39,15 @@ const port = await freePort();
 const office = buildOffice({ home: HOME, socket: SOCKET, vncPort: await freePort() });
 const { panes, ledger, writeLedger, line: L, claudeDir: CLAUDE, env: officeEnv } = office;
 
-const env = { ...process.env, ...officeEnv(port) };
+// MORNDO_WORKER_ASK_GRACE_MS=0: this file checks the reviewer's question as a decision; N2's 10-minute grace would
+// hold a freshly asked one (as harness.ts does for every startOffice office).
+const env = { ...process.env, ...officeEnv(port), MORNDO_WORKER_ASK_GRACE_MS: "0" };
 const hubMain = join(ROOT, "apps/hub/src/main.ts");
 let hub: ChildProcess | null = spawn(process.execPath, [hubMain, "serve"], { env, stdio: ["ignore", "pipe", "inherit"] });
 await new Promise<void>((res, rej) => { hub?.stdout?.on("data", d => { if (String(d).includes("morndo hub on")) res(); }); hub?.once("exit", c => rej(new Error(`hub exited ${c}`))); });
 const pairUrl = execFileSync(process.execPath, [hubMain, "pair"], { env, encoding: "utf8" }).split("\n").find(l => l.includes("/pair#t="))?.trim() ?? "";
 
-const browser = await chromium.launch();
+const browser = await launch();
 try {
   for (const scheme of ["light", "dark"] as const) {
     const context = await browser.newContext({ viewport: { width: 1920, height: 908 }, colorScheme: scheme });
@@ -415,11 +418,16 @@ try {
       const card = panel.locator('[data-decision="ny-7"]');
       await card.getByText("Ship the demo release tonight?").waitFor();
       await card.getByText("Blocking").waitFor();
-      await card.getByText("hold until tomorrow").waitFor();
-      await card.getByText(/CI is green, the reviewer approved/).waitFor();
+      await card.getByText("Filed without a brief").waitFor();
       const buttons = await card.locator(".actions .btn").allInnerTexts();
       assert(JSON.stringify(buttons.map(b => b.trim())) === JSON.stringify(["Ship it", "Hold for a day", "Ask the reviewer first"]), `buttons ${JSON.stringify(buttons)}`);
-      assert(await card.locator(".btn.primary").innerText() === "Ship it", "the recommended (first) option isn't the primary button");
+      assert((await card.locator(".btn.primary").innerText()).trim() === "Ship it", "the recommended (first) option isn't the primary button");
+      await card.getByRole("button", { name: "Details ›" }).click();
+      const brief = page.getByRole("dialog");
+      await brief.getByText("hold until tomorrow").waitFor();
+      await brief.getByText(/CI is green, the reviewer approved/).waitFor();
+      await page.keyboard.press("Escape");
+      await brief.waitFor({ state: "hidden" });
       const order = await panel.locator(".group").first().locator("[data-decision]").evaluateAll(els => els.map(e => e.getAttribute("data-decision")));
       assert(order[0] === "ny-7", `blocking item not first: ${JSON.stringify(order)}`);
       await panel.getByRole("button", { name: /^On your plate/ }).waitFor();

@@ -15,6 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
+import { WORKER_ASK_GRACE_MS } from "@morndo/domain";
 import { ServerFeedFrames, decode } from "@morndo/protocol";
 import type { Config } from "../src/config.ts";
 import { Store } from "../src/adapters/store.ts";
@@ -37,6 +38,7 @@ const MENU = "Allow this edit?\n❯ 1. Yes\n  2. No\n\nEsc to cancel";
 type FleetHub = {
   observation: ObservationService;
   escalations: EscalationService;
+  clock: { at: number };
   cookie(): Promise<string>;
   get(path: string): Promise<Response>;
   post(path: string, body: unknown, cookie: string): Promise<Response>;
@@ -54,7 +56,7 @@ async function startFleetHub(rig: FleetRig): Promise<FleetHub> {
   const config: Config = {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo", requireProxyIdentity: false, principalLogin: null,
     tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 60_000,
-    managerWindow: "manager", ledgerPath: null, paneLock: null, managerInbox: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
     fleetSocket: rig.fleet.socketPath,
   };
   let n = 0;
@@ -67,19 +69,22 @@ async function startFleetHub(rig: FleetRig): Promise<FleetHub> {
   const access = new AccessService(store, passkeys);
   const observation = observationFor(rig.ports, { quietAfterMs: 60_000 });
   const steering = steeringFor(rig.ports, { store, policy: () => access.policy(), waitingOn: id => observation.waitingOn(id), nameOf: id => observation.nameOf(id) });
+  // A worker's menu waits WORKER_ASK_GRACE_MS first (N2), so the hub's decisions clock is this mutable holder: a test
+  // that boards a menu advances it past the grace between two polls. The skew stays inside the policy's 1 h step-up.
+  const clock = { at: Date.now() };
   const escalations = escalationsFor(rig.ports, {
-    store,
+    store, now: () => clock.at,
     watch: {
       workers: () => observation.snapshot().workers.map(w => ({ id: w.id as string, name: w.name, conflict: observation.conflicted(w.id) })),
       history: id => observation.history(id), openQuestions: id => observation.openQuestions(id), screen: id => observation.screen(id),
     },
   });
   const remote = new RemoteService({ store, terminal: rig.ports.terminal, panes: () => observation.snapshot().workers.map(w => w.id as string), desktop: () => null });
-  const http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, observation, steering, escalations, remote });
+  const http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, store, observation, steering, escalations, remote });
   await http.ready;
   const base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
   return {
-    observation, escalations,
+    observation, escalations, clock,
     async cookie() {
       const opts = await access.pairOptions(access.issueConsoleToken().secret, "phone");
       if (!("flowId" in opts)) throw new Error(opts.refused);
@@ -214,6 +219,8 @@ describe("the hub in fleet mode with two nodes (spec §9)", () => {
     pcPane.screen = MENU;
     boxPane.screen = MENU;
     await hub.observation.poll();
+    hub.escalations.poll();                              // first sight; a worker's menu waits WORKER_ASK_GRACE_MS (N2)
+    hub.clock.at += WORKER_ASK_GRACE_MS;
     hub.escalations.poll();
     expect(hub.escalations.board().items.map(i => i.id).sort()).toEqual(["menu-box_bbbbbbbb_1", "menu-pc_aaaaaaaa_1"]);
     const r = await hub.post("/api/escalations/menu-pc_aaaaaaaa_1/answer", { key: "1", requestId: randomUUID() }, cookie);

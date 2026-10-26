@@ -2,10 +2,14 @@
 // pushed to every feed when what is shown changed, read back by the principal, and there again after a restart of
 // the service over the same store. Real server on a random port, fake passkeys, synthetic data only.
 import type { WebSocket } from "ws";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "./inprocess-hub.ts";
 import { frameText } from "./http-crash-fixture.ts";
 import { UsageService } from "../src/application/usage-service.ts";
+import { poolProfiles } from "../src/adapters/pool-accounts.ts";
 
 let hub: InProcessHub;
 let now: number;
@@ -72,11 +76,19 @@ describe("reports under an agent token (U1)", () => {
     expect(a).toMatchObject({ fiveHour: { usedPercentage: 23.5 }, sevenDay: { usedPercentage: 41.2 } });
     expect((a.sessions as Body[]).map(s => s.sessionId)).toEqual(["s2", "s1"]);
   });
+  it("a window with an epoch value in its percentage is unknown, not the old number shown as fresh (U14)", async () => {
+    await post(statusLine({ session: "s1", five: 60, week: 40 }), "max-1");
+    now += 10 * 60_000;
+    const a = (await json(await post(statusLine({ session: "s1", five: 1_700_000_000, week: 41 }), "max-1"))).account as Body;
+    expect(a.fiveHour).toBeNull();
+    expect(a.sevenDay).toMatchObject({ usedPercentage: 41 });
+    expect(a.reportedAt).toBe(now);
+  });
   it("a report that names its windows keeps those bars and does not invent a 5-hour window", async () => {
     const resets = Math.floor((now + 27 * 24 * HOUR) / 1000);
     const body = {
       session_id: "cursor-plan", model: { display_name: "Cursor Ultra" },
-      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "included usage, monthly" } },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
       limits: [
         { label: "Cursor models", used_percentage: 88, resets_at: resets, resets_on: "2026-11-07" },
         { label: "Other models", used_percentage: 45, resets_at: resets, resets_on: "2026-11-07" },
@@ -97,7 +109,7 @@ describe("reports under an agent token (U1)", () => {
     const limits = [{ label: "", used_percentage: 1 }, ...Array.from({ length: 8 }, (_, i) => ({ label: `W${i}`, used_percentage: 10 + i, resets_at: resets }))];
     const posted = await post({
       session_id: "cursor-plan",
-      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets, period: "monthly" } },
+      rate_limits: { spend_limit: { used_percentage: 85, resets_at: resets } },
       limits, on_demand: "off",
     }, "cursor");
     expect(posted.status).toBe(200);
@@ -192,5 +204,67 @@ describe("the principal's side and the feed", () => {
     await post(statusLine({ session: "s1", spend: true }), "max-1");
     const again = new UsageService({ store: hub.store, now: () => now });
     expect(again.view().accounts.map(a => ({ account: a.account, five: a.fiveHour?.usedPercentage, spend: a.spend?.usedUsd, sessions: a.sessions.length }))).toEqual([{ account: "max-1", five: 23.5, spend: 314.12, sessions: 1 }]);
+  });
+});
+
+describe("account labels from the pool's file (U5)", () => {
+  let poolDir = "";
+  const writePool = (lines: unknown[]) => writeFileSync(join(poolDir, "usage.jsonl"), `${lines.map(l => JSON.stringify(l)).join("\n")}\n`);
+  const a3 = (tier: string) => ({ name: "a3", email: "ada@example.test", org: "claude_team", tier, plan: "max", orgId: "org-0001" });
+  let pool: ReturnType<typeof poolProfiles>;
+  const restart = async () => {
+    await hub.close();
+    pool = poolProfiles(join(poolDir, "usage.jsonl"));
+    await pool.refresh();
+    hub = await startInProcessHub({ now: () => now, profiles: pool.current });
+    workerToken = hub.agents.issue("lanes", "worker").secret;
+  };
+  const accountsOf = async (cookie: string) => (await json(await fetch(`${hub.base}/api/usage`, { headers: { cookie: `__Host-morndo=${cookie}` } }))).accounts as Body[];
+
+  beforeEach(() => {
+    poolDir = mkdtempSync(join(tmpdir(), "morndo-pool-"));
+    writePool([a3("default_claude_max_5x")]);
+  });
+  afterEach(() => { rmSync(poolDir, { recursive: true, force: true }); });
+
+  it("the principal's GET shows a reporting account's profile and only its; the agent door's reply carries none", async () => {
+    await restart();
+    await post(statusLine(), "a3");
+    await post(statusLine(), "b9");
+    const cookie = await hub.cookie();
+    const accounts = await accountsOf(cookie);
+    expect(accounts.find(a => a.account === "a3")?.profile).toEqual({ email: "ada@example.test", org: "team", plan: "Max 5x" });
+    expect(accounts.find(a => a.account === "b9")?.profile).toBeNull();        // reports, but is not in the file
+    const reply = await json(await post(statusLine({ session: "s2" }), "a3"));
+    expect((reply.account as Body).profile).toBeNull();                        // U5: never in the agent door's reply
+    expect(JSON.stringify(reply)).not.toContain("example.test");
+  });
+
+  it("a changed file reaches a connected feed without a report; an unchanged look tells nobody", async () => {
+    await restart();
+    const cookie = await hub.cookie();
+    const ws = await hub.socket("/api/feed", cookie);
+    const f = frames(ws);
+    ws.send(JSON.stringify({ t: "hello" }));
+    await f.next("usage");
+    let mark = f.seen.length;
+    expect((await post(statusLine(), "a3")).status).toBe(200);
+    expect((((await f.next("usage", mark)).accounts as Body[])[0] as Body).profile).toEqual({ email: "ada@example.test", org: "team", plan: "Max 5x" });
+    mark = f.seen.length;
+    writePool([a3("default_claude_max_20x")]);                                 // the file changed, with every lane quiet
+    await pool.refresh();
+    hub.usage.refreshProfiles();
+    expect((((await f.next("usage", mark)).accounts as Body[])[0] as Body).profile).toMatchObject({ plan: "Max 20x" });
+    mark = f.seen.length;
+    hub.usage.refreshProfiles();                                               // nothing changed since
+    await new Promise(r => setTimeout(r, 300));
+    expect(f.seen.slice(mark).filter(m => m.t === "usage")).toEqual([]);
+    ws.close();
+  });
+
+  it("with no profiles source, every profile is null", async () => {
+    await post(statusLine(), "a3");                                            // the beforeEach hub, no pool file wired
+    const cookie = await hub.cookie();
+    expect((await accountsOf(cookie)).find(a => a.account === "a3")?.profile).toBeNull();
   });
 });

@@ -1,33 +1,46 @@
 // This device's outbox (ADR-0008 phase C), as the desktop and the phone both start it: the IndexedDB store, one sender
 // across tabs through a Web Lock, the other tabs told of every change, and the one POST that sends a Command. Moved here
 // from Desktop.svelte unchanged (ADR-0009), so a reply from a catch-up card goes through the same outbox (S4–S8).
-import { api, ApiError } from "../api.ts";
-import { Outbox, type PostOutcome } from "./outbox.ts";
-import type { OutboxRecord } from "./state.ts";
+import { api, ApiError, seenHubStore } from "../api.ts";
+import { Outbox, type CancelOutcome, type PostOutcome } from "./outbox.ts";
+import { commandDelivery, type OutboxRecord } from "./state.ts";
 import { openStore } from "./store.ts";
-
-const SPOOL = new Set(["queued", "held", "typing", "sent", "stuck", "accepted", "delivered", "lost", "expired", "cancelled", "gone"]);
-function spoolWord(inbox: unknown, reason: unknown): { inbox: NonNullable<OutboxRecord["inbox"]>; reason: string | null } | Record<string, never> {
-  if (typeof inbox !== "string" || !SPOOL.has(inbox)) return {};
-  return { inbox: inbox as NonNullable<OutboxRecord["inbox"]>, reason: typeof reason === "string" ? reason : null };
-}
+import { ABSENT_MANAGER } from "../manager.ts";
 
 // One POST of a queued Command: what it came to, for the outbox. A hub answer of its own is final; no answer of the
 // hub's own (a network error, a proxy's page) is "unanswered" and retried with the same request id (S5).
 export async function post(r: OutboxRecord, signal: AbortSignal): Promise<PostOutcome> {
   try {
-    const res = await api.post<{ at?: unknown; queued?: unknown; inbox?: unknown; reason?: unknown }>(`/api/workers/${encodeURIComponent(r.worker)}/send`, { text: r.text, requestId: r.id, uploads: r.uploads, seen: r.seen, name: r.workerName, createdAt: r.createdAt, ...(r.revive ? { retry: true } : {}), ...(r.again ? { again: true } : {}) }, signal);
-    // ok, or 200 "duplicate": typed before. `at` is the hub's time of the typing (review M2). queued: the manager's inbox
-    // has it and types it once its pane is free (ADR-0010). inbox: where the spool says that command stands.
-    const queued = res.queued === true ? { queued: true as const } : {};
-    const inbox = spoolWord(res.inbox, res.reason);
-    return typeof res.at === "number" ? { kind: "typed", at: res.at, ...queued, ...inbox } : { kind: "typed", ...queued, ...inbox };
+    // Written to the manager while it had no window: to its role, which the hub sends to whichever window it has now, or
+    // queues for it (POST /api/manager/send).
+    const url = r.worker === ABSENT_MANAGER ? "/api/manager/send" : `/api/workers/${encodeURIComponent(r.worker)}/send`;
+    const res = await api.post<{ at?: unknown; delivery?: unknown }>(url, { text: r.text, requestId: r.id, uploads: r.uploads, seen: r.seen, name: r.workerName, createdAt: r.createdAt, ...(r.again ? { again: true } : {}), ...(r.hubStore ? { hubStore: r.hubStore } : {}) }, signal);
+    // ok, or 200 "duplicate": typed before. `at` is the hub's time of the typing (review M2). `delivery`: the manager's
+    // queue has it (fleet-clients §9.1), and where it stands there. `createdAt`: a message to the manager waits up to 24
+    // hours from when it was written (ruling 83). `again`: the phone's Send again (ADR-0011), never a status read.
+    const delivery = commandDelivery(res.delivery);
+    return { kind: "typed", ...(typeof res.at === "number" ? { at: res.at } : {}), ...(delivery ? { delivery } : {}) };
   } catch (e) {
     if (!(e instanceof ApiError) || e.code === `http_${e.status}`) return { kind: "unanswered" };
     if (e.code === "uncertain") return { kind: "uncertain" };
     if (e.status === 429) return { kind: "wait", ms: e.retryAfterMs ?? 1000 };
-    if (e.status === 503) return { kind: "unanswered" };                 // the inbox isn't taking a Send again right now; try again
+    if (e.status === 503) return { kind: "unanswered" };                 // the hub holds new work while it updates; try again
     return { kind: "refused", code: e.code, status: e.status };
+  }
+}
+
+// The Cancel of a message the manager's queue still holds (ruling 83): what the hub said. A 409 is too late (typed
+// meanwhile). A 404 (`unknown`: the hub, or the fleet, has no such delivery) says nothing was typed: the record stays as
+// it stood, and the hub's `deliveries` frames go on saying where it stands (review #6).
+export async function cancelDelivery(r: OutboxRecord): Promise<CancelOutcome> {
+  try {
+    const res = await api.post<{ delivery?: unknown }>("/api/manager/cancel", { requestId: r.id });
+    const delivery = commandDelivery(res.delivery);
+    return delivery ? { kind: "cancelled", delivery } : { kind: "unanswered" };
+  } catch (e) {
+    if (e instanceof ApiError && e.status === 409 && e.code !== `http_${e.status}`) return { kind: "too_late", delivery: commandDelivery(e.data.delivery) };
+    if (e instanceof ApiError && e.status === 404 && e.code !== `http_${e.status}`) return { kind: "unknown" };
+    return { kind: "unanswered" };
   }
 }
 
@@ -44,15 +57,18 @@ export function startDeviceOutbox(o: { connected: () => boolean; onChange: (reco
   const channel = typeof BroadcastChannel === "function" ? new BroadcastChannel("morndo-outbox") : null;
   const locks = (navigator as Navigator & { locks?: LockManager }).locks;
   const ready = openStore().then(async store => {
-    let quiet = false;
     const box = new Outbox({
-      store, post, active: !locks,
+      store, post, cancel: cancelDelivery, active: !locks,
       timers: { now: () => Date.now(), setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) },
       connected: o.connected,
-      onChange: records => { o.onChange(records); if (!quiet && !stopped) channel?.postMessage("changed"); },   // closed once stopped
+      // RL10 (§11.5): each Command goes out stamped with the hub store this device saw before its first attempt.
+      hubStore: seenHubStore,
+      // Its own changes only: a refresh shows what another tab already told of, and a change made while one runs is still
+      // this tab's own, so the others hear of it (the two-tab QA: a message written in each tab at once).
+      onChange: (records, fromRefresh) => { o.onChange(records); if (!fromRefresh && !stopped) channel?.postMessage("changed"); },   // closed once stopped
     });
     outbox = box;
-    if (channel) channel.onmessage = () => { quiet = true; void box.refresh().finally(() => { quiet = false; }); };
+    if (channel) channel.onmessage = () => { void box.refresh(); };
     await box.start();
     if (stopped) box.stop();
     else {

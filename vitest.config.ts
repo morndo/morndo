@@ -80,7 +80,7 @@ export default defineConfig({
       {
         test: {
           name: "units",
-          include: ["packages/*/test/**/*.test.ts", "apps/hub/test/**/*.test.ts", "apps/node-agent/test/**/*.test.ts", "apps/fleet/test/**/*.test.ts", "apps/board-cli/test/**/*.test.ts", "apps/connections/test/**/*.test.ts", "apps/web/test/**/*.test.ts", "apps/updater/test/**/*.test.ts", "scripts/**/*.test.ts", "knowledge/**/*.test.ts"],
+          include: ["packages/*/test/**/*.test.ts", "apps/hub/test/**/*.test.ts", "apps/node-agent/test/**/*.test.ts", "apps/fleet/test/**/*.test.ts", "apps/board-cli/test/**/*.test.ts", "apps/memory-cli/test/**/*.test.ts", "apps/connections/test/**/*.test.ts", "apps/web/test/**/*.test.ts", "apps/updater/test/**/*.test.ts", "scripts/**/*.test.ts", "e2e/update-vm/*.test.ts", "knowledge/**/*.test.ts", "plugins/*/test/**/*.test.ts"],
           exclude: browserTests,
           // Many start a real hub, SQLite, tmux or TigerVNC: alone at load 7 the slowest took 3.6 to 4.0 s against Vitest's
           // 5 s default, so any load tipped them over (five such timeouts at load 18 to 23, each passing alone). 20 s
@@ -88,7 +88,7 @@ export default defineConfig({
           testTimeout: 20_000,
           hookTimeout: 20_000,
           env: scratch("units"),
-          globalSetup: ["test/run-scratch.ts"],
+          globalSetup: ["test/clean-tree.ts"],     // the scratch directory (run-scratch.ts), and a check that the tests leave no files in the repository
           setupFiles: ["test/units-without-chromium.ts"],
           sequence: { groupOrder: 0 },
         },
@@ -96,7 +96,7 @@ export default defineConfig({
       // Their hooks start Vite and a browser, or close them: 60 s, not Vitest's 10 (review M2: two timed out at load 17).
       // A test that loads its page itself compiles the app cold: 4 files at once beside 16 busy CPU loops, those took
       // 3.8 s (median), 7.4 s (p90), up to 11.9 s (142 tests, 2026-10-12); a third went past Vitest's 5 s. 20 s, as units.
-      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, testTimeout: 20_000, hookTimeout: 60_000, env: scratch("chromium"), globalSetup: ["test/run-scratch.ts"], sequence: { groupOrder: 1 } } },
+      { test: { name: "chromium", include: browserTests, maxWorkers: browserWorkers, testTimeout: 20_000, hookTimeout: 60_000, env: scratch("chromium"), globalSetup: ["test/clean-tree.ts"], sequence: { groupOrder: 1 } } },
       { test: { name: "fleet", include: ["test/fleet/**/*.test.ts"], maxWorkers: fleetWorkers, testTimeout: 120_000, hookTimeout: 60_000, env: scratch("fleet"), globalSetup: ["test/run-scratch.ts"], sequence: { groupOrder: 2 } } },
     ],
   },

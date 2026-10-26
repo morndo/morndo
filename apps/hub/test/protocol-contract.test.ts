@@ -6,11 +6,12 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { Conversation } from "@morndo/domain";
+import { Conversation, DEFAULT_POLICY, WORKER_ASK_GRACE_MS } from "@morndo/domain";
 import { localTranscriptBytes } from "@morndo/node-ops";
 import { ServerFeedFrames, decode } from "@morndo/protocol";
 import { followTranscript } from "../src/adapters/claude-sessions.ts";
 import { Store } from "../src/adapters/store.ts";
+import { BoardService } from "../src/application/board-service.ts";
 import { ObservationService } from "../src/application/observation-service.ts";
 import { EscalationService } from "../src/application/escalation-service.ts";
 
@@ -54,7 +55,7 @@ describe("the hub's own frames decode in the app", () => {
         watch: {
           workers: () => [{ id: "%0", name: "manager" }, { id: "%1", name: "reviewer" }],
           history: () => [],
-          openQuestions: id => (id === "%1" ? [{ id: "a2", at: now - 1000, author: { kind: "agent", name: "reviewer" }, kind: "question", text: "Keep it?", questionId: "q1",
+          openQuestions: id => (id === "%1" ? [{ id: "a2", at: now - WORKER_ASK_GRACE_MS - 1000, author: { kind: "agent", name: "reviewer" }, kind: "question", text: "Keep it?", questionId: "q1",
             questions: [{ question: "Keep it?", header: "Keep", multiSelect: false, options: [{ label: "Yes", description: null }] }] }] : []),
           screen: () => "$ ",
         },
@@ -69,6 +70,25 @@ describe("the hub's own frames decode in the app", () => {
       expect(board.items.length).toBeGreaterThanOrEqual(2);
       const d = wire({ t: "decisions", ...board });
       expect(d.kind === "ok" && d.frame.t === "decisions" ? d.frame.items.length : -1).toBe(board.items.length);
+    } finally { store.close(); }
+  });
+  it("the board frame, with the to do tasks whose lane the fleet no longer lists (B2, orphans)", () => {
+    const store = new Store(join(dir, "data"));
+    try {
+      const board = new BoardService({
+        store, now: () => 1, policy: () => DEFAULT_POLICY,
+        orphans: ts => ts.filter(t => t.assignee === "ghost").map(t => t.key),
+      });
+      const manager = { kind: "manager", name: "manager", token: "t" } as const;
+      board.create({ title: "A", assignee: "builder" }, manager);
+      board.create({ title: "B", assignee: "ghost" }, manager);
+      const d = wire({ t: "board", ...board.view() });
+      expect(d.kind).toBe("ok");
+      expect(d.kind === "ok" && d.frame.t === "board" ? d.frame.orphans : undefined).toEqual(["T-2"]);
+      // A hub from before the field, with no orphans at all, still parses.
+      const old = wire({ t: "board", tasks: [], lanes: [], at: 1 });
+      expect(old.kind).toBe("ok");
+      expect(old.kind === "ok" && old.frame.t === "board" ? "orphans" in old.frame : null).toBe(false);
     } finally { store.close(); }
   });
 });

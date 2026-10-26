@@ -5,7 +5,7 @@ import { ApiError, explain } from "./api.ts";
 
 export { UPLOAD_ACCEPT };
 
-const REFUSALS: readonly UploadRefusal[] = ["too_big", "not_allowed", "not_utf8", "bad_name", "not_an_image"];
+const REFUSALS: readonly UploadRefusal[] = ["too_big", "not_allowed", "not_utf8", "bad_name", "not_an_image", "too_many"];
 const isRefusal = (code: string): code is UploadRefusal => (REFUSALS as readonly string[]).includes(code);
 
 export function refusalMessage(name: string, error: UploadRefusal): string {
@@ -18,6 +18,7 @@ export function refusalMessage(name: string, error: UploadRefusal): string {
   if (error === "not_utf8") return `${shown} isn't valid UTF-8 text.`;
   if (error === "bad_name") return `${shown} has a file name that can't be kept.`;
   if (error === "not_an_image") return `${shown} isn't a PNG, JPEG, GIF or WebP image.`;
+  if (error === "too_many") return `${shown} is waiting on too many other recordings. Try again in a minute.`;
   return `${shown} can't be attached. Use an image, a PDF, or a text file (.md, .txt, .json, .csv, .yaml, .yml, .log).`;
 }
 

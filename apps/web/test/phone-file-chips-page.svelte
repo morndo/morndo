@@ -51,7 +51,7 @@
 <div class="phone">
   <Conversation {feed} {worker} {outgoing} {pendingFiles} {now} verifiedFresh={true} verify={async () => true}
     onBack={() => {}} onDecide={() => {}} onQueue={async () => {}} onRetry={() => {}} onDiscard={() => {}}
-    onAgain={() => {}} onCheck={() => {}} onEchoes={() => {}} />
+    onAgain={() => {}} onCancel={() => {}} onEchoes={() => {}} />
 </div>
 
 <style>

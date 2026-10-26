@@ -1,10 +1,10 @@
 // morndo job (ADR-0017, design §2, §12 step 5). A reused id with a different command is id_conflict:
 // exit 1, one line on stderr, and nothing new is started.
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { callNode, runJob, type NodeRequest, type NodeResult } from "../src/job-cli.ts";
 
 const TOKEN = "mat_secret-token";
@@ -156,8 +156,12 @@ describe("exit codes", () => {
 });
 
 describe("the socket", () => {
+  const dirs: string[] = [];
+  afterEach(() => { for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true }); });
+
   it("rejects when the node closes without a line, and when it never answers", async () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-job-sock-"));
+    dirs.push(dir);
     const closedPath = join(dir, "closed.sock");
     const quiet = createServer(socket => socket.end());
     await new Promise<void>((resolve, reject) => {
@@ -181,6 +185,7 @@ describe("the socket", () => {
 
   it("rejects when the node answers with a line that is not JSON", async () => {
     const dir = mkdtempSync(join(tmpdir(), "morndo-job-sock-"));
+    dirs.push(dir);
     const path = join(dir, "bad.sock");
     const server = createServer(socket => { socket.on("data", () => socket.end("not-json\n")); });
     await new Promise<void>((resolve, reject) => {

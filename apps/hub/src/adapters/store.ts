@@ -1,38 +1,109 @@
 // SQLite adapter for the Access context (ADR-0005). The domain never sees SQL; this maps rows to domain values.
 import Database from "better-sqlite3";
-import { mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { randomUUID } from "node:crypto";
+import { mkdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { assertLocalDisk } from "@morndo/service-kit";
+import { log } from "./log.ts";
 import { migrate } from "./migrations.ts";
+import type { DeliveryState } from "@morndo/protocol";
 import {
-  endpointId, pairingTokenId, sessionId,
-  type AccessEvent, type AccountUsage, type BoardChanged, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
-  type Session, type Task, type TaskEvent, type Upload,
+  endpointId, pairingTokenId, sessionId, REF_STATES, START_RECORD_HOLD_MS, RECORD_CONFLICT_MS,
+  type AccessEvent, type AccountUsage, type BoardChanged, type DecisionBrief, type EnginesChanged, type EscalationAnswered, type Endpoint, type LinkRequest, type LinkState, type NotificationEvent, type PairingToken,
+  type RefResult, type Session, type Task, type TaskEvent, type TaskStatus, type Transcription, type UpdateCommanded, type Upload, type MergeRecord,
+  type SourceHealth, type UsageNotice, type SeatRecord, type WindowReading, type LaneRecord,
 } from "@morndo/domain";
 
 // What the audit log holds: Access events, and the principal's Decisions (the words of a Decision never, only their
-// length and a hash), and his changes to the engines (ADR-0013).
-export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged;
+// length and a hash), and his changes to the engines (ADR-0013). A brief's audit names the id, version, asker and
+// token, never the text (ADR-0023, as BoardChanged).
+export type BriefAudit = {
+  type: "BriefFiled" | "BriefRestated" | "BriefWithdrawn" | "BriefSettled" | "BriefForwarded" | "BriefDeclined";
+  id: string; version: number; asker: { kind: "manager" | "worker"; name: string }; token: string; at: number;
+};
+export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged | BriefAudit | UpdateCommanded;
+
+export type BriefState = "draft" | "open" | "withdrawn" | "settled" | "expired" | "declined";
+// One version of a filed brief. A restate is the next row; the earlier JSON stays.
+export type BriefRecord = {
+  id: string; version: number; ref: string | null;
+  askerKind: "manager" | "worker"; askerName: string; tokenId: string;
+  filedByKind: "manager" | "worker"; filedByName: string;
+  brief: DecisionBrief; state: BriefState; filedAt: number;
+  resolution: string | null; draftedBy: string | null; closedAt: number | null;
+};
 
 // An agent token (ADR-0015, B1): the credential the manager's lane or a worker's changes the board with. Only its hash
-// is kept; `role` says whether it acts as the manager or as the worker lane it names on each call.
-export type AgentToken = { id: string; name: string; role: "manager" | "worker"; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null };
+// is kept; `role` says whether it acts as the manager or as the worker lane it names on each call, and `scopes` (U15)
+// the closed list's words of what it may do beyond its role — none for every token minted before the list.
+// `unboundCount` is how many usage readings a plain worker token posted; `lastUnboundAt` is when the last one was.
+export type AgentToken = { id: string; name: string; role: "manager" | "worker"; scopes: readonly string[]; secretHash: string; createdAt: number; lastUsedAt: number | null; revokedAt: number | null; unboundCount: number; lastUnboundAt: number | null };
+
+// Usage S2 (plan 4.2 to 4.5): what one row of usage_sources holds — the source's health, its last reading and the one
+// before it (the sameAsPrevious rule's memory), and the cleaned hint of its last failure. `previous` keeps only what
+// that rule needs of each window.
+export type UsageSourceBody = {
+  health: SourceHealth;
+  reading: { capturedAt: number; plan: string | null; windows: WindowReading[] } | null;
+  previous: { capturedAt?: number | null; windows: { id: string; usedPercent: number | null; resetsAt: number | null }[] } | null;
+  hint: string | null;
+  // The newest stamp this source gave, each capped at the hub's clock WHEN IT WAS RECEIVED (R3 on PR #125): what a later
+  // reading's stamp is ordered against. A stamp from a clock that runs ahead is stored as the receipt time, so it never
+  // outranks an honest reading that arrives after it. A row stored without it falls back to its other stamps.
+  orderedAt?: number;
+};
+export type UsageSourceRow = { account: string; source: string; node: string; body: UsageSourceBody };
+export type UsageWatchKind = "plan" | "threshold" | "cycle";
+export type UsageWatchRow = { account: string; kind: UsageWatchKind; key: string; body: unknown };
 
 type Row = Record<string, unknown>;
 
 // A sends row, its state first (as Store.send returned it before `workerId` and `key` were added, so a failed assertion on
-// one still prints its state).
+// one still prints its state). `request`: "<endpoint>:<request id>" for an escalation answer, naming the endpoint whose
+// request it was; `requestSession`: the session under it (who sent it, A1; null on rows from before it was kept);
+// `label`: the option's label as the ask showed it when the answer was written (null for words, and on older rows).
 export type SendRow = {
   state: "started" | "done"; at: number; outcome: string | null; typedAt: number | null; store: string | null; storeSeq: number | null; workerId: string | null; key: string;
+  request: string | null; requestSession: string | null; label: string | null;
 };
 type SendRowSql = {
   key: string; state: "started" | "done"; at: number; outcome: string | null; typed_at: number | null; node_store: string | null; node_store_seq: number | null; worker_id: string | null;
+  request: string | null; request_session: string | null; label: string | null;
 };
 const sendRow = (r: SendRowSql): SendRow =>
-  ({ state: r.state, at: r.at, outcome: r.outcome, typedAt: r.typed_at, store: r.node_store, storeSeq: r.node_store_seq, workerId: r.worker_id, key: r.key });
-const SEND_COLUMNS = "key, state, at, outcome, typed_at, node_store, node_store_seq, worker_id";
+  ({ state: r.state, at: r.at, outcome: r.outcome, typedAt: r.typed_at, store: r.node_store, storeSeq: r.node_store_seq, workerId: r.worker_id, key: r.key, request: r.request, requestSession: r.request_session, label: r.label });
+const SEND_COLUMNS = "key, state, at, outcome, typed_at, node_store, node_store_seq, worker_id, request, request_session, label";
+// The first key past every key that starts with `prefix`, an ask's prefix (escalation-service.ts askPrefix), which ends
+// in ":": the same with that ":" made ";", the next character. SQLite compares TEXT bytewise by default (BINARY), so
+// the keys from `prefix` up to this one are exactly those that start with it
+// (https://www.sqlite.org/datatype3.html#collation). Any other prefix is refused: the next code point after its last
+// character may not exist, or not survive as UTF-8 (round 4.4 of the PR #55 review).
+const keysPast = (prefix: string) => {
+  if (!prefix.endsWith(":")) throw new Error(`an answer key prefix ends in ":", not ${JSON.stringify(prefix.slice(-1))}`);
+  return `${prefix.slice(0, -1)};`;
+};
 
 export const READ_MARKS_KEPT = 500;
+
+// One delivery of an answer or a message to the manager through the fleet's queue (fleet-clients §9.1; migration 18).
+// `state` "sending": the fleet was asked and hasn't answered yet (or never did); otherwise the delivery's own state as the
+// hub last heard it. An answer's `choice` is JSON (escalation-service.ts StoredChoice: its option, or its words' length
+// and digest, never the words); `ask` the ask it answered (its message, or its time); `queuedAt` the hub's time, which
+// is the queued Decision's own. A message's are null. Never the text.
+export type ManagerDeliveryState = "sending" | DeliveryState;
+export type ManagerDeliveryRow = {
+  deliveryId: string; kind: "answer" | "command"; escalationId: string | null; ask: string | null; choice: string | null;
+  endpointId: string; sessionId: string; requestId: string; queuedAt: number; state: ManagerDeliveryState; updatedAt: number;
+};
+type ManagerDeliverySql = {
+  delivery_id: string; kind: "answer" | "command"; escalation_id: string | null; ask: string | null; choice: string | null;
+  endpoint_id: string; session_id: string; request_id: string; queued_at: number; state: ManagerDeliveryState; updated_at: number;
+};
+const managerDeliveryRow = (r: ManagerDeliverySql): ManagerDeliveryRow => ({
+  deliveryId: r.delivery_id, kind: r.kind, escalationId: r.escalation_id, ask: r.ask, choice: r.choice, endpointId: r.endpoint_id,
+  sessionId: r.session_id, requestId: r.request_id, queuedAt: r.queued_at, state: r.state, updatedAt: r.updated_at,
+});
+const OPEN_STATES = "('sending', 'queued', 'typed', 'held')";
 
 const linkFrom = (r: Row): LinkRequest => ({
   id: r.id as string, secretHash: r.secret_hash as string, tokenSecretHash: r.token_secret_hash as string, code: r.code as string,
@@ -42,13 +113,29 @@ const linkFrom = (r: Row): LinkRequest => ({
   decidedBy: r.decided_by === null ? null : endpointId(r.decided_by as string),
 });
 
+// The database file's identity, (device, inode), as the node's own open keeps it (final review I2; node-agent
+// src/db/open.ts). BigInt stats: an inode can pass 2^53. The device number is kept for the record only; the inode alone
+// is compared, because WSL2's distro disk, btrfs subvolumes and external volumes can come back under another one (attach
+// order), and comparing it would renew the store for nothing, with sends in doubt stuck uncertain.
+function fileIdentity(path: string): string {
+  const st = statSync(path, { bigint: true });
+  return `${st.dev}:${st.ino}`;
+}
+// The inode of a recorded identity ("<device>:<inode>"): the part compared.
+const inodeOf = (identity: string): string => identity.slice(identity.lastIndexOf(":") + 1);
+
 export class Store {
   readonly db: Database.Database;
+  // This database file's store (RL10, §11.5), as the row beside it holds it: renewed whenever the file's inode isn't
+  // the one recorded with it, so a copy renamed over the file (a restore §11.4) answers as a new store and Commands the
+  // old one typed stay uncertain on the devices that saw it. Every API answer names it (Morndo-Store).
+  readonly storeId: string;
 
   constructor(dataDir: string) {
     assertLocalDisk(dataDir);                            // before anything is created: a missing dir is judged by its parent
     mkdirSync(dataDir, { recursive: true, mode: 0o700 });
-    this.db = new Database(join(dataDir, "morndo.db"));
+    const path = join(dataDir, "morndo.db");
+    this.db = new Database(path);
     this.db.pragma("journal_mode = WAL");
     // NORMAL, said out loud: what the hub has always run with, since better-sqlite3 builds SQLite with
     // SQLITE_DEFAULT_WAL_SYNCHRONOUS=1 (its compile_options; checked 2026-10-08, 13.0.3), which a WAL database takes on
@@ -56,11 +143,64 @@ export class Store {
     // never corrupt (https://www.sqlite.org/pragma.html#pragma_synchronous); fleet core §16.4.
     this.db.pragma("synchronous = NORMAL");
     this.db.pragma("foreign_keys = ON");
-    try { migrate(this.db); }                            // numbered migrations (migrations.ts); refuses a newer database
+    try {
+      migrate(this.db);                                  // numbered migrations (migrations.ts); refuses a newer database
+      this.mendStateChangedAt();
+      this.storeId = this.storeOfThisFile(path);
+    }
     catch (e) { this.db.close(); throw e; }
   }
 
+  // The store this file answers for: the row's, or, when the file's inode isn't the one recorded with it, a new one
+  // stored with this identity in one transaction — before anything is sent. A database without a row yet (new, or made
+  // by a hub from before migration 25) gets this file's identity, as the original; a file whose device number alone
+  // changed keeps its store and gets the new identity recorded.
+  private storeOfThisFile(path: string): string {
+    const identity = fileIdentity(path);
+    return this.db.transaction(() => {
+      const row = this.db.prepare("SELECT store, identity FROM hub_store WHERE id = 1").get() as { store: string; identity: string } | undefined;
+      if (row && inodeOf(row.identity) === inodeOf(identity)) {
+        if (row.identity !== identity) this.db.prepare("UPDATE hub_store SET identity = ? WHERE id = 1").run(identity);
+        return row.store;
+      }
+      const store = randomUUID();
+      this.db.prepare("INSERT INTO hub_store (id, store, identity) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET store = excluded.store, identity = excluded.identity").run(store, identity);
+      if (row) log.warn(`${basename(path)} is not the file this database was made in (copied or restored?): a new store; Commands sent before stay uncertain`);
+      return store;
+    }).immediate();
+  }
+
+  // A hub from before migration 23 opens a database at 23 as it is and saves a task without naming state_changed_at, so
+  // after a rollback and an upgrade again a task can stand at a later updated_at with an older state_changed_at than
+  // its last change of state (D6 would let a Run undo that move). The events say when status, assignee or description
+  // last changed (a comment, a title or a priority edit is none), and both hubs write them: a task whose updated_at is
+  // past its state_changed_at takes that time. A task with no such event keeps what it has.
+  private mendStateChangedAt() {
+    this.db.exec(`UPDATE board_tasks SET state_changed_at = COALESCE((
+        SELECT MAX(e.at) FROM board_events e WHERE e.key = board_tasks.key AND (
+          json_extract(e.change, '$.kind') IN ('created', 'moved', 'assigned')
+          OR (json_extract(e.change, '$.kind') = 'edited' AND json_extract(e.change, '$.description') IS NOT NULL))
+      ), state_changed_at)
+      WHERE state_changed_at IS NULL OR updated_at > state_changed_at`);
+  }
+
   transaction<T>(fn: () => T): T { return this.db.transaction(fn)(); }
+
+  // The usage writes that must stand or fall together (fix round on PR #125, finding 4c): a watch and the notice that
+  // goes with it commit as one, over better-sqlite3's transaction as `transaction` above (nested calls become savepoints).
+  atomically<T>(fn: () => T): T { return this.db.transaction(fn)(); }
+
+  // One usage source row by its key (finding 5a): what a report or a reading reads, instead of scanning every row.
+  usageSource(account: string, source: string, node: string): UsageSourceRow | null {
+    const r = this.db.prepare("SELECT account, source, node, body FROM usage_sources WHERE account = ? AND source = ? AND node = ?").get(account, source, node) as Row | undefined;
+    return r ? { account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody } : null;
+  }
+
+  // Notice retention (finding 5c): notices older than `olderThanMs` go, and all but the newest `keep`; how many went.
+  pruneUsageNotices(keep: number, olderThanMs: number, now: number): number {
+    const stale = this.db.prepare("DELETE FROM usage_notices WHERE at < ?").run(now - olderThanMs).changes;
+    return stale + this.db.prepare("DELETE FROM usage_notices WHERE id NOT IN (SELECT id FROM usage_notices ORDER BY at DESC, rowid DESC LIMIT ?)").run(keep).changes;
+  }
 
   setting<T>(key: string): T | null {
     const r = this.db.prepare("SELECT value FROM settings WHERE key = ?").get(key) as { value: string } | undefined;
@@ -89,17 +229,6 @@ export class Store {
     this.db.prepare("INSERT INTO decisions (escalation_id, at, body) VALUES (?, ?, ?) ON CONFLICT(escalation_id) DO UPDATE SET at = excluded.at, body = excluded.body")
       .run(id, Date.now(), JSON.stringify(decision));
   }
-  // ADR-0010: the answers handed to the manager's inbox and not settled yet, one row per inbox message (its key), so two
-  // answers to one ask (asked again in between) are each recorded when they arrive (code review B7).
-  savePending(key: string, escalationId: string, body: unknown) {
-    this.db.prepare("INSERT INTO pending_answers (key, escalation_id, body, at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET body = excluded.body")
-      .run(key, escalationId, JSON.stringify(body), Date.now());
-  }
-  pendingAnswers(): { key: string; escalationId: string; body: unknown }[] {
-    return (this.db.prepare("SELECT key, escalation_id, body FROM pending_answers ORDER BY at").all() as Row[])
-      .map(r => ({ key: r.key as string, escalationId: r.escalation_id as string, body: JSON.parse(r.body as string) as unknown }));
-  }
-  dropPending(key: string) { this.db.prepare("DELETE FROM pending_answers WHERE key = ?").run(key); }
   // Only while the stored Decision is still this one (the time it was taken): a newer answer's row is left alone (B3).
   replaceDecisionIf(id: string, at: number, decision: unknown) {
     this.db.prepare("UPDATE decisions SET body = ? WHERE escalation_id = ? AND json_extract(body, '$.at') = ?").run(JSON.stringify(decision), id, at);
@@ -107,9 +236,75 @@ export class Store {
   dropDecisionIf(id: string, at: number) {
     this.db.prepare("DELETE FROM decisions WHERE escalation_id = ? AND json_extract(body, '$.at') = ?").run(id, at);
   }
-  decisions(sinceMs = 7 * 24 * 3_600_000): { id: string; decision: unknown }[] {
-    return (this.db.prepare("SELECT escalation_id, body FROM decisions WHERE at >= ?").all(Date.now() - sinceMs) as Row[])
+  // The Decisions a hub start restores (E8): every one whatever its age, since an ask can stay open far longer than a
+  // week (the manager's list keeps an answered item open while it works on it; issue #20). The domain applies one only
+  // to its own ask, sighted again and not asked again since (Escalations.restore). A menu on a screen (`menu-…`,
+  // menuEscalationId) keeps the 7-day window: its id names a pane, and a legacy pane id comes back on a later pane, whose
+  // new menu an old answer must not answer (fleet core §4: old `menu-N` rows drop out of view). SQLite's substr, not
+  // LIKE, whose `_` would match any character.
+  decisions(menuWindowMs = 7 * 24 * 3_600_000): { id: string; decision: unknown }[] {
+    return (this.db.prepare("SELECT escalation_id, body FROM decisions WHERE substr(escalation_id, 1, 5) <> 'menu-' OR at >= ?").all(Date.now() - menuWindowMs) as Row[])
       .map(r => ({ id: r.escalation_id as string, decision: JSON.parse(r.body as string) as unknown }));
+  }
+
+  // The manager's deliveries (fleet-clients §9.1, migration 18), written before the fleet is asked, so a hub that stops
+  // then still follows what it may have queued. NORMAL like every hub table (plan.md, Databases): a row a power loss
+  // takes back is a delivery the hub stops following, which the node still delivers once. A second write of an id
+  // changes nothing: the row of its first attempt stands.
+  saveManagerDelivery(r: ManagerDeliveryRow) {
+    // ON CONFLICT, not OR IGNORE: that would also swallow a CHECK on a kind or a state this table doesn't know.
+    this.db.prepare(`INSERT INTO manager_deliveries (delivery_id, kind, escalation_id, ask, choice, endpoint_id, session_id, request_id, queued_at, state, updated_at)
+      VALUES (@deliveryId, @kind, @escalationId, @ask, @choice, @endpointId, @sessionId, @requestId, @queuedAt, @state, @updatedAt)
+      ON CONFLICT(delivery_id) DO NOTHING`).run(r);
+  }
+  managerDelivery(id: string): ManagerDeliveryRow | null {
+    const r = this.db.prepare("SELECT * FROM manager_deliveries WHERE delivery_id = ?").get(id) as ManagerDeliverySql | undefined;
+    return r ? managerDeliveryRow(r) : null;
+  }
+  // The latest delivery a request made (an answer, or a message).
+  managerDeliveryOfRequest(endpointId: string, requestId: string): ManagerDeliveryRow | null {
+    const r = this.db.prepare("SELECT * FROM manager_deliveries WHERE endpoint_id = ? AND request_id = ? ORDER BY queued_at DESC, length(delivery_id) DESC, delivery_id DESC LIMIT 1")
+      .get(endpointId, requestId) as ManagerDeliverySql | undefined;
+    return r ? managerDeliveryRow(r) : null;
+  }
+  // The delivery of the answer whose Decision was taken at `queuedAt`.
+  answerDelivery(escalationId: string, queuedAt: number): ManagerDeliveryRow | null {
+    // The latest attempt: of ids that share a key, the longer suffix is the higher number ("~10" after "~9"; review #12).
+    const r = this.db.prepare("SELECT * FROM manager_deliveries WHERE kind = 'answer' AND escalation_id = ? AND queued_at = ? ORDER BY length(delivery_id) DESC, delivery_id DESC LIMIT 1")
+      .get(escalationId, queuedAt) as ManagerDeliverySql | undefined;
+    return r ? managerDeliveryRow(r) : null;
+  }
+  // Every delivery under one key: the key itself, then "<key>~2", "<key>~3" … (manager-queue.ts idFor), oldest first.
+  // SQLite's substr counts characters, so the prefix is counted in code points.
+  managerDeliveryAttempts(base: string): ManagerDeliveryRow[] {
+    const again = `${base}~`;
+    return (this.db.prepare("SELECT * FROM manager_deliveries WHERE delivery_id = ? OR substr(delivery_id, 1, ?) = ? ORDER BY queued_at, delivery_id")
+      // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
+      .all(base, [...again].length, again) as ManagerDeliverySql[]).map(managerDeliveryRow);
+  }
+  // Every delivery whose id starts with `prefix` (the answers to one ask: "hub:answer:<id>:<ask>:"), oldest first.
+  managerDeliveriesWithPrefix(prefix: string): ManagerDeliveryRow[] {
+    return (this.db.prepare("SELECT * FROM manager_deliveries WHERE substr(delivery_id, 1, ?) = ? ORDER BY queued_at, delivery_id")
+      // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
+      .all([...prefix].length, prefix) as ManagerDeliverySql[]).map(managerDeliveryRow);
+  }
+  // The deliveries not final yet: still to be followed.
+  openManagerDeliveries(): ManagerDeliveryRow[] {
+    return (this.db.prepare(`SELECT * FROM manager_deliveries WHERE state IN ${OPEN_STATES} ORDER BY queued_at, delivery_id`).all() as ManagerDeliverySql[])
+      .map(managerDeliveryRow);
+  }
+  // One device's messages to the manager changed since `since`, oldest first.
+  commandDeliveriesOf(endpointId: string, since: number): ManagerDeliveryRow[] {
+    return (this.db.prepare("SELECT * FROM manager_deliveries WHERE kind = 'command' AND endpoint_id = ? AND updated_at >= ? ORDER BY queued_at, delivery_id")
+      .all(endpointId, since) as ManagerDeliverySql[]).map(managerDeliveryRow);
+  }
+  setManagerDeliveryState(id: string, state: ManagerDeliveryState, at: number) {
+    this.db.prepare("UPDATE manager_deliveries SET state = ?, updated_at = ? WHERE delivery_id = ?").run(state, at, id);
+  }
+  dropManagerDelivery(id: string) { this.db.prepare("DELETE FROM manager_deliveries WHERE delivery_id = ?").run(id); }
+  // Rows last changed before `before` (the node keeps a final delivery 7 days, spec §4.3; the hub keeps its row as long).
+  pruneManagerDeliveries(before: number): number {
+    return this.db.prepare("DELETE FROM manager_deliveries WHERE updated_at < ?").run(before).changes;
   }
 
   // Retention (ADR-0008, A8; the policy is in application/retention.ts): pairing tokens expired or redeemed before
@@ -124,35 +319,40 @@ export class Store {
   }
 
   // S5: a request id's record, written "started" before typing and "done" after; kept 24 hours. `typedAt`: the node's
-  // own time of the typing (fleet core §3.1), null for a row from before it was kept. `outcome`: "typed", "queued"
-  // (handed to the manager's inbox, ADR-0010), or "requeued" (queued once more after the inbox gave the first up,
-  // ADR-0011); null while started. `workerId`: the worker an answer went to (null for a
-  // send, whose repeat names its worker itself).
+  // own time of the typing (fleet core §3.1), null for a row from before it was kept. `workerId`: the worker an answer
+  // went to (null for a send, whose repeat names its worker itself).
   send(key: string): SendRow | null {
     const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE key = ?`).get(key) as SendRowSql | undefined;
     return r ? sendRow(r) : null;
   }
   // An escalation answer, written "started" before it is typed, as a send is (fleet core §3.1; final review C1 and its
   // follow-up): under its answer key, with the worker it goes to and the request that sends it ("<endpoint>:<request
-  // id>"); its store and store sequence once its node answers (setSendStore). A repeat by either finds it and asks that
+  // id>") and the session under it, so a row settled later is recorded with its own sender's provenance (A1), and the
+  // option's label as the ask showed it, so an answer found typed for an earlier version keeps that version's label
+  // (E9); its store and store sequence once its node answers (setSendStore). A repeat by either finds it and asks that
   // node (SteeringService's settle) instead of typing it again, after a hub that stopped while typing it too. False if a
   // row for the key is there already.
-  startAnswer(key: string, at: number, o: { workerId: string | null; request: string }): boolean {
-    return this.db.prepare("INSERT OR IGNORE INTO sends (key, state, at, worker_id, request) VALUES (?, 'started', ?, ?, ?)")
-      .run(key, at, o.workerId, o.request).changes === 1;
+  startAnswer(key: string, at: number, o: { workerId: string | null; request: string; session?: string | null; label?: string | null }): boolean {
+    return this.db.prepare("INSERT OR IGNORE INTO sends (key, state, at, worker_id, request, request_session, label) VALUES (?, 'started', ?, ?, ?, ?, ?)")
+      .run(key, at, o.workerId, o.request, o.session ?? null, o.label ?? null).changes === 1;
   }
-  // The answer a request sent, if any (its row, under its answer key).
+  // The answer a request sent, if any (its row, under its answer key). A request can hold rows for two versions of an
+  // ask (asked again in between, its first never started): the one it wrote last, by insertion, never by the hub's
+  // clock, which may step back between the two (rounds 3.6 and 4.9 of the PR #55 review). A new row's rowid is one past
+  // the largest in the table (https://www.sqlite.org/autoinc.html, read 2026-10-13), so it is above every row still
+  // there; the hub runs no VACUUM, the one command that may renumber them (https://www.sqlite.org/lang_vacuum.html).
   sendOfRequest(request: string): SendRow | null {
-    const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE request = ?`).get(request) as SendRowSql | undefined;
+    const r = this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE request = ? ORDER BY rowid DESC LIMIT 1`).get(request) as SendRowSql | undefined;
     return r ? sendRow(r) : null;
   }
   // Every answer to one ask kept here (24 hours), whatever its choice: the rows whose answer key starts with `prefix`
-  // (escalation-service.ts askPrefix), oldest first. SQLite's substr counts characters, so the prefix is counted in
-  // code points, not UTF-16 units.
+  // (escalation-service.ts askPrefix), in the order they were written, by insertion as sendOfRequest's, never by the
+  // hub's clock (round 5.4): what an answer settles before it is typed (E8), the first written first. A range of the
+  // primary key, never a scan of every send (round 3.7 of the PR #55 review): the keys from the prefix up to the prefix
+  // with its last character one higher (keysPast).
   answersOfAsk(prefix: string): SendRow[] {
-    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE substr(key, 1, ?) = ? ORDER BY at, key`)
-      // oxlint-disable-next-line typescript/no-misused-spread -- code points on purpose: SQLite's substr counts them (above)
-      .all([...prefix].length, prefix) as SendRowSql[]).map(sendRow);
+    return (this.db.prepare(`SELECT ${SEND_COLUMNS} FROM sends WHERE key >= ? AND key < ? ORDER BY rowid`)
+      .all(prefix, keysPast(prefix)) as SendRowSql[]).map(sendRow);
   }
   // The store of the node a send went to (fleet core §3.1), kept with its row: only that store can say it never started.
   // With it, the store sequence its answer gave (null when unknown): a lower one from that store later means its
@@ -164,21 +364,6 @@ export class Store {
     return this.db.prepare("INSERT OR IGNORE INTO sends (key, state, at) VALUES (?, 'started', ?)").run(key, at).changes === 1;
   }
   finishSend(key: string, typedAt: number) { this.db.prepare("UPDATE sends SET state = 'done', outcome = 'typed', typed_at = ? WHERE key = ?").run(typedAt, key); }
-  // Handed to the manager's inbox (ADR-0010): done, with no typedAt, because the deliverer types it.
-  finishQueued(key: string) { this.db.prepare("UPDATE sends SET state = 'done', outcome = 'queued' WHERE key = ?").run(key); }
-  // Queued once more after the inbox gave the first up (ADR-0011): the row remembers it, so a further repeat adds nothing.
-  finishRequeued(key: string) { this.db.prepare("UPDATE sends SET state = 'done', outcome = 'requeued' WHERE key = ?").run(key); }
-  // Commands handed to the inbox (outcome queued, no answer request). Answers carry a request and are not these.
-  queuedCommands(): string[] {
-    return (this.db.prepare("SELECT key FROM sends WHERE state = 'done' AND outcome = 'queued' AND request IS NULL").all() as { key: string }[])
-      .map(r => r.key);
-  }
-  // A crash between startAnswer and finishQueued, for a manager that is not running (no worker). The message is
-  // already in the inbox. Left started, every repeat is refused as uncertain (round 3.8).
-  recoverQueuedAnswers(): number {
-    return this.db.prepare(`UPDATE sends SET state = 'done', outcome = 'queued'
-      WHERE state = 'started' AND worker_id IS NULL AND substr(key, 1, 7) = 'answer:'`).run().changes;
-  }
   dropSend(key: string) { this.db.prepare("DELETE FROM sends WHERE key = ?").run(key); }
   pruneSends(now: number, keepMs = 24 * 3_600_000): number {
     return this.db.prepare("DELETE FROM sends WHERE at < ?").run(now - keepMs).changes;
@@ -201,6 +386,27 @@ export class Store {
     return r ? { id: r.id as string, endpointId: endpointId(r.endpoint_id as string), path: r.path as string, mime: r.mime as Upload["mime"], size: r.size as number, at: r.at as number } : undefined;
   }
   pruneUploads(before: number): number { return this.db.prepare("DELETE FROM uploads WHERE at < ?").run(before).changes; }
+
+  // One transcription per endpoint, recording and language (ADR-0021). The body is the domain row. A row this hub
+  // did not write is skipped rather than guessed at. The endpoint is part of the key, so two devices keep their own rows.
+  transcriptions(): Transcription[] {
+    const rows = this.db.prepare("SELECT body FROM transcriptions").all() as { body: string }[];
+    const out: Transcription[] = [];
+    for (const row of rows) {
+      try {
+        const parsed = JSON.parse(row.body) as Transcription;
+        if (parsed && typeof parsed.id === "string" && parsed.recording) out.push(parsed);
+      } catch { /* a row from somewhere else */ }
+    }
+    return out;
+  }
+  saveTranscription(row: Transcription) {
+    const endpointId = "endpointId" in row && typeof row.endpointId === "string" ? row.endpointId : "";
+    this.db.prepare(`INSERT INTO transcriptions (id, recording_kind, recording_id, language, endpoint_id, accepted_at, body)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id, recording_kind, recording_id, language, endpoint_id) DO UPDATE SET accepted_at = excluded.accepted_at, body = excluded.body`)
+      .run(row.id, row.recording.kind, row.recording.id, row.language, endpointId, row.acceptedAt, JSON.stringify(row));
+  }
 
   // Reading (ADR-0008 phase D): one read mark per conversation (the forward-only rule is the domain's, O7), and mute.
   readMarks(): Record<string, number> {
@@ -350,19 +556,37 @@ export class Store {
   }
   // The tasks the board shows: every open one, and Done since `doneAfter` (a week, DONE_SHOWN_MS).
   shownTasks(doneAfter: number): Task[] {
-    return (this.db.prepare("SELECT * FROM board_tasks WHERE status != 'done' OR done_at > ? ORDER BY n").all(doneAfter) as Row[]).map(taskFrom);
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE status != 'done' OR done_at > ? ORDER BY n").all(doneAfter) as Row[]).map(r => this.#withWaits(taskFrom(r)));
   }
   // The tasks in progress now (B5), by the (status, assignee) index.
   tasksInProgress(): Task[] {
     return (this.db.prepare("SELECT * FROM board_tasks WHERE status = 'doing' ORDER BY n").all() as Row[]).map(taskFrom);
   }
+  // Every task in one status (the proof timer asks for review), ordered by the board's own number.
+  tasksIn(status: TaskStatus): Task[] {
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE status = ? ORDER BY n").all(status) as Row[]).map(r => this.#withWaits(taskFrom(r)));
+  }
   taskInProgressOf(lane: string): Task | null {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE status = 'doing' AND assignee = ? ORDER BY n LIMIT 1").get(lane) as Row | undefined;
     return r ? taskFrom(r) : null;
   }
+  // A lane's open tasks (every status but done): what the board's own moves read for that lane (ADR-0032, D1 to D4).
+  openTasksOf(lane: string): Task[] {
+    return (this.db.prepare("SELECT * FROM board_tasks WHERE assignee = ? AND status <> 'done' ORDER BY n").all(lane) as Row[]).map(r => this.#withWaits(taskFrom(r)));
+  }
   task(key: string): Task | null {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE key = ?").get(key) as Row | undefined;
-    return r ? taskFrom(r) : null;
+    return r ? this.#withWaits(taskFrom(r)) : null;
+  }
+  // B18 (ADR-0038): a blocked task's waits are the ones its latest move named, read from that event. The record is the
+  // one place they live, so no column can keep waits an older hub's later block knew nothing of (an older hub's block
+  // writes a move without waits, and that move is then the latest).
+  #withWaits(t: Task): Task {
+    if (t.status !== "blocked") return t;
+    const r = this.db.prepare("SELECT change FROM board_events WHERE key = ? AND json_extract(change, '$.kind') = 'moved' ORDER BY rev DESC LIMIT 1").get(t.key) as Row | undefined;
+    if (!r) return t;
+    const change = JSON.parse(r.change as string) as { to?: string; waits?: unknown };
+    return change.to === "blocked" && Array.isArray(change.waits) && change.waits.length > 0 ? { ...t, waits: change.waits as NonNullable<Task["waits"]> } : t;
   }
   // The next task number, and taking it: the counter only grows, and is written in the same transaction as the task,
   // only once the task is accepted (a refused filing burns no number).
@@ -372,11 +596,11 @@ export class Store {
     this.saveSetting("board_counter", n);
   }
   saveTask(t: Task) {
-    this.db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, blocked_reason, created_at, updated_at, created_by, rev, done_at, comments)
-      VALUES (@key, @n, @title, @description, @status, @assignee, @priority, @blockedReason, @createdAt, @updatedAt, @createdBy, @rev, @doneAt, @comments)
+    this.db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, blocked_reason, created_at, updated_at, state_changed_at, created_by, rev, done_at, comments)
+      VALUES (@key, @n, @title, @description, @status, @assignee, @priority, @blockedReason, @createdAt, @updatedAt, @stateChangedAt, @createdBy, @rev, @doneAt, @comments)
       ON CONFLICT(key) DO UPDATE SET title = excluded.title, description = excluded.description, status = excluded.status, assignee = excluded.assignee,
-        priority = excluded.priority, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at, rev = excluded.rev, done_at = excluded.done_at, comments = excluded.comments`)
-      .run({ ...t, createdBy: JSON.stringify(t.createdBy) });
+        priority = excluded.priority, blocked_reason = excluded.blocked_reason, updated_at = excluded.updated_at, state_changed_at = excluded.state_changed_at, rev = excluded.rev, done_at = excluded.done_at, comments = excluded.comments`)
+      .run({ ...withoutWaits(t), createdBy: JSON.stringify(t.createdBy) });
   }
   saveTaskEvent(e: TaskEvent) {
     this.db.prepare("INSERT INTO board_events (key, rev, at, actor, change) VALUES (?, ?, ?, ?, ?)").run(e.key, e.rev, e.at, JSON.stringify(e.actor), JSON.stringify(e.change));
@@ -386,10 +610,66 @@ export class Store {
       .map(r => ({ key: r.key as Task["key"], rev: r.rev as number, at: r.at as number, actor: JSON.parse(r.actor as string) as TaskEvent["actor"], change: JSON.parse(r.change as string) as TaskEvent["change"] }));
   }
 
-  // Agent tokens (ADR-0015, B1).
+  // The board's merge records (B11): one row per recorded merge of a task's PR. The same record again (a replayed
+  // action) changes nothing; the row as it was first written stands.
+  saveMerge(key: string, m: MergeRecord) {
+    this.db.prepare("INSERT OR IGNORE INTO board_merges (key, repo, sha, at, by, override) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(key, m.repo, m.sha, m.at, m.by, m.override);
+  }
+  mergesOf(key: string): MergeRecord[] {
+    return (this.db.prepare("SELECT repo, sha, at, by, override FROM board_merges WHERE key = ? ORDER BY at, sha").all(key) as Row[]).map(mergeFrom);
+  }
+  allMerges(): Map<string, MergeRecord[]> {
+    const all = new Map<string, MergeRecord[]>();
+    for (const r of this.db.prepare("SELECT key, repo, sha, at, by, override FROM board_merges ORDER BY key, at, sha").all() as Row[]) {
+      const list = all.get(r.key as string) ?? [];
+      list.push(mergeFrom(r));
+      all.set(r.key as string, list);
+    }
+    return all;
+  }
+  // Done accepted while a merge was not live (B11): the reason lands on that task's morndo/morndo merges that carry no
+  // override yet. Other repositories' rows are never touched: their merges never held done.
+  overrideMerges(key: string, reason: string) {
+    this.db.prepare("UPDATE board_merges SET override = ? WHERE key = ? AND lower(repo) = 'morndo/morndo' AND override IS NULL").run(reason, key);
+  }
+  // A wrong record cleared (B11): the one row this (task, repo, sha) names, and no other; the repo matches without
+  // regard to case, as the domain matches it.
+  deleteMerge(key: string, repo: string, sha: string) {
+    this.db.prepare("DELETE FROM board_merges WHERE key = ? AND lower(repo) = lower(?) AND sha = ?").run(key, repo, sha);
+  }
+
+  // The board's proof results (B14, ADR-0035): one row per reference of a brief, `brief_rev` the rev of the `briefed`
+  // event it belongs to, so rows of two rounds of work are kept apart. Results are rows, not events, so nothing here
+  // ever touches board_tasks or board_events; all three are plain statements, and the caller decides about transactions.
+
+  // One pending row per reference of a brief just filed. INSERT OR IGNORE: a row that exists (a replayed filing after a
+  // crash between the event and this) stands, its state as it was checked.
+  seedProofs(key: string, briefRev: number, refs: readonly string[], at: number) {
+    const ins = this.db.prepare("INSERT OR IGNORE INTO board_proofs (key, brief_rev, ref, state, detail, checked_at) VALUES (?, ?, ?, 'pending', NULL, ?)");
+    for (const ref of refs) ins.run(key, briefRev, ref, at);
+  }
+  // A reference's state as the hub read it: the row of (key, brief_rev, ref), replaced whole.
+  saveProofResult(key: string, briefRev: number, r: RefResult) {
+    this.db.prepare(`INSERT INTO board_proofs (key, brief_rev, ref, state, detail, checked_at) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT(key, brief_rev, ref) DO UPDATE SET state = excluded.state, detail = excluded.detail, checked_at = excluded.checked_at`)
+      .run(key, briefRev, r.ref, r.state, r.detail, r.checkedAt);
+  }
+  // The results of one brief, ordered by ref. A row whose state is not one this build knows (a newer hub wrote it) is
+  // never guessed at: it reads as unfetchable, with the reason kept.
+  proofResultsOf(key: string, briefRev: number): RefResult[] {
+    return (this.db.prepare("SELECT ref, state, detail, checked_at FROM board_proofs WHERE key = ? AND brief_rev = ? ORDER BY ref").all(key, briefRev) as Row[])
+      .map(r => (REF_STATES as readonly string[]).includes(r.state as string)
+        ? { ref: r.ref as string, state: r.state as RefResult["state"], detail: (r.detail as string | null) ?? null, checkedAt: r.checked_at as number }
+        : { ref: r.ref as string, state: "unfetchable", detail: "unknown state", checkedAt: r.checked_at as number });
+  }
+
+  // Agent tokens (ADR-0015, B1). `scopes` (U15): the closed list's names, comma-separated in the row, empty: none.
+  // The unbound counters are written for a new row and left alone on conflict: a revoke saves the token again.
   saveAgentToken(t: AgentToken) {
-    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, created_at, last_used_at, revoked_at) VALUES (@id, @name, @role, @secretHash, @createdAt, @lastUsedAt, @revokedAt)
-      ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at`).run(t);
+    this.db.prepare(`INSERT INTO agent_tokens (id, name, role, secret_hash, scopes, created_at, last_used_at, revoked_at, unbound_count, last_unbound_at) VALUES (@id, @name, @role, @secretHash, @scopes, @createdAt, @lastUsedAt, @revokedAt, @unboundCount, @lastUnboundAt)
+      ON CONFLICT(id) DO UPDATE SET last_used_at = excluded.last_used_at, revoked_at = excluded.revoked_at, scopes = excluded.scopes`)
+      .run({ ...t, scopes: [...t.scopes].join(",") });
   }
   agentTokenBySecretHash(hash: string): AgentToken | null {
     const r = this.db.prepare("SELECT * FROM agent_tokens WHERE secret_hash = ?").get(hash) as Row | undefined;
@@ -406,6 +686,10 @@ export class Store {
   touchAgentToken(id: string, at: number) {
     this.db.prepare("UPDATE agent_tokens SET last_used_at = ? WHERE id = ? AND (last_used_at IS NULL OR last_used_at < ?)").run(at, id, at - 60_000);
   }
+  // One usage reading posted with a plain worker token.
+  noteUnboundReading(id: string, at: number) {
+    this.db.prepare("UPDATE agent_tokens SET unbound_count = unbound_count + 1, last_unbound_at = ? WHERE id = ?").run(at, id);
+  }
 
   // Usage (ADR-0016): the latest state of each account, whole, so the dashboard is as it was after a restart.
   usageAccounts(): AccountUsage[] {
@@ -414,6 +698,147 @@ export class Store {
   saveUsageAccount(a: AccountUsage) {
     this.db.prepare("INSERT INTO usage_accounts (account, body, reported_at) VALUES (?, ?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body, reported_at = excluded.reported_at")
       .run(a.account, JSON.stringify(a), a.reportedAt);
+  }
+  deleteUsageAccount(account: string) {
+    this.db.prepare("DELETE FROM usage_accounts WHERE account = ?").run(account);
+  }
+
+  // Usage S2 (plan 4.2 to 4.5): one row per account, source and node — its health, its last reading and the one
+  // before it, for the sameAsPrevious rule. `node` is "" when a source has none.
+  usageSources(): UsageSourceRow[] {
+    return (this.db.prepare("SELECT account, source, node, body FROM usage_sources ORDER BY account, source, node").all() as Row[])
+      .map(r => ({ account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody }));
+  }
+  saveUsageSource(account: string, source: string, node: string, body: UsageSourceBody) {
+    this.db.prepare("INSERT INTO usage_sources (account, source, node, body) VALUES (?, ?, ?, ?) ON CONFLICT(account, source, node) DO UPDATE SET body = excluded.body")
+      .run(account, source, node, JSON.stringify(body));
+  }
+  deleteUsageSources(account: string, source?: string, node?: string | null) {
+    if (source === undefined) this.db.prepare("DELETE FROM usage_sources WHERE account = ?").run(account);
+    else if (node === undefined || node === null) this.db.prepare("DELETE FROM usage_sources WHERE account = ? AND source = ?").run(account, source);
+    else this.db.prepare("DELETE FROM usage_sources WHERE account = ? AND source = ? AND node = ?").run(account, source, node);
+  }
+
+  // One account's source rows, without scanning every row and filtering (PR #125 fix round 2, finding 3c).
+  usageSourcesOf(account: string): UsageSourceRow[] {
+    return (this.db.prepare("SELECT account, source, node, body FROM usage_sources WHERE account = ? ORDER BY source, node").all(account) as Row[])
+      .map(r => ({ account: r.account as string, source: r.source as string, node: r.node as string, body: JSON.parse(r.body as string) as UsageSourceBody }));
+  }
+
+  // The notices the hub itself wrote (plan 4.4), newest first, at most `limit`. The signature is the once-only key:
+  // a notice with the same signature is never told again.
+  usageNotices(limit: number): UsageNotice[] {
+    return (this.db.prepare("SELECT text FROM usage_notices ORDER BY at DESC, rowid DESC LIMIT ?").all(limit) as Row[])
+      .map(r => JSON.parse(r.text as string) as UsageNotice);
+  }
+  saveUsageNotice(n: UsageNotice, signature: string) {
+    const r = this.db.prepare("INSERT OR IGNORE INTO usage_notices (id, account, kind, signature, at, text) VALUES (?, ?, ?, ?, ?, ?)")
+      .run(n.id, n.account, n.kind, signature, n.at, JSON.stringify(n));
+    return r.changes === 1;             // false: a repeat the signature already covered (S4, who hears of a notice)
+  }
+  lastUsageNoticeSignature(account: string, kind: string): string | null {
+    const r = this.db.prepare("SELECT signature FROM usage_notices WHERE account = ? AND kind = ? ORDER BY at DESC, rowid DESC LIMIT 1").get(account, kind) as Row | undefined;
+    return r ? (r.signature as string) : null;
+  }
+
+  // The watches (plan 4.1 and 4.2): a plan watch per source (kind "plan", key the source name; PR #125 fix round 2,
+  // finding 1b — a row of the old shape, key "", is never read again), a threshold watch per window (kind
+  // "threshold", key the canonical window id) and a cycle book per window (kind "cycle", key the window id).
+  usageWatches(account?: string): UsageWatchRow[] {
+    const rows = account === undefined
+      ? this.db.prepare("SELECT account, kind, key, body FROM usage_watch ORDER BY account, kind, key").all() as Row[]
+      : this.db.prepare("SELECT account, kind, key, body FROM usage_watch WHERE account = ? ORDER BY kind, key").all(account) as Row[];
+    return rows.map(r => ({ account: r.account as string, kind: r.kind as UsageWatchKind, key: r.key as string, body: JSON.parse(r.body as string) as unknown }));
+  }
+  saveUsageWatch(account: string, kind: UsageWatchKind, key: string, body: unknown) {
+    this.db.prepare("INSERT INTO usage_watch (account, kind, key, body) VALUES (?, ?, ?, ?) ON CONFLICT(account, kind, key) DO UPDATE SET body = excluded.body")
+      .run(account, kind, key, JSON.stringify(body));
+  }
+  deleteUsageWatches(account: string) {
+    this.db.prepare("DELETE FROM usage_watch WHERE account = ?").run(account);
+  }
+
+  // The seat record (plan 4.5): one per account, whatever reported the limit.
+  usageSeats(): { account: string; record: SeatRecord }[] {
+    return (this.db.prepare("SELECT account, body FROM usage_seats ORDER BY account").all() as Row[])
+      .map(r => ({ account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord }));
+  }
+  // The one seat row of one account, or null when it has none (PR #125 fix round 2, finding 3c).
+  usageSeat(account: string): { account: string; record: SeatRecord } | null {
+    const r = this.db.prepare("SELECT account, body FROM usage_seats WHERE account = ?").get(account) as Row | undefined;
+    return r ? { account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord } : null;
+  }
+  saveUsageSeat(account: string, record: SeatRecord) {
+    this.db.prepare("INSERT INTO usage_seats (account, body) VALUES (?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body")
+      .run(account, JSON.stringify(record));
+  }
+  deleteUsageSeat(account: string) {
+    this.db.prepare("DELETE FROM usage_seats WHERE account = ?").run(account);
+  }
+
+  // The pool-owned seat records (S3, U15): one per account, beside the derived ones in usage_seats.
+  usagePoolSeats(): { account: string; record: SeatRecord }[] {
+    return (this.db.prepare("SELECT account, body FROM usage_pool_seats ORDER BY account").all() as Row[])
+      .map(r => ({ account: r.account as string, record: JSON.parse(r.body as string) as SeatRecord }));
+  }
+  saveUsagePoolSeat(account: string, record: SeatRecord) {
+    this.db.prepare("INSERT INTO usage_pool_seats (account, body) VALUES (?, ?) ON CONFLICT(account) DO UPDATE SET body = excluded.body")
+      .run(account, JSON.stringify(record));
+  }
+  deleteUsagePoolSeat(account: string) {
+    this.db.prepare("DELETE FROM usage_pool_seats WHERE account = ?").run(account);
+  }
+
+  // Which lane of which node is signed in as which account (plan 4.5 item 4): a lane's reports and starts write it,
+  // its failures resolve from it. `source` says how the record was written (PR #127, finding 4b): "start" by a
+  // lane_account tap, "report" by a status-line report; every row from before the column is a report. `token` and
+  // `conflictUntil` (fix round 2, finding 1) say which agent token wrote or last confirmed it, and until when a
+  // disagreement between two tokens makes it ambiguous; null on every row from before those columns.
+  laneAccount(node: string, lane: string): LaneRecord | null {
+    const r = this.db.prepare("SELECT node, lane, account, at, source, token, conflict_until FROM lane_accounts WHERE node = ? AND lane = ?").get(node, lane) as Row | undefined;
+    return r ? { node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report", token: (r.token as string | null) ?? null, conflictUntil: (r.conflict_until as number | null) ?? null } : null;
+  }
+  laneAccounts(): LaneRecord[] {
+    return (this.db.prepare("SELECT node, lane, account, at, source, token, conflict_until FROM lane_accounts ORDER BY node, lane").all() as Row[])
+      .map(r => ({ node: r.node as string, lane: r.lane as string, account: r.account as string, at: r.at as number, source: r.source as "start" | "report", token: (r.token as string | null) ?? null, conflictUntil: (r.conflict_until as number | null) ?? null }));
+  }
+  // A start record always replaces and clears any conflict, with no token bound (a hub-issued start is the principal's
+  // own act). A report follows the token-bound rule (fix round 2, finding 1): a record belongs to the token that wrote
+  // or last confirmed it — the same token replaces its own word, another token's same account only refreshes the stamp,
+  // and another token's different account replaces nothing: while the record is fresher than RECORD_CONFLICT_MS it
+  // turns the lane ambiguous for an hour instead, and past that it gives way. A start record younger than
+  // START_RECORD_HOLD_MS stands against another token's report (PR #127, finding 4b): a first report of its own
+  // account binds the token to it, its own bound token may move it, and any other word is ignored or ambiguous.
+  saveLaneAccount(node: string, lane: string, account: string, at: number, source: "start" | "report", token: string | null = null, conflictUntil: number | null = null) {
+    const write = () =>
+      this.db.prepare(`INSERT INTO lane_accounts (node, lane, account, at, source, token, conflict_until) VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(node, lane) DO UPDATE SET account = excluded.account, at = excluded.at, source = excluded.source, token = excluded.token, conflict_until = excluded.conflict_until`)
+        .run(node, lane, account, at, source, token, conflictUntil);
+    if (source === "start") { write(); return; }
+    const held = this.laneAccount(node, lane);
+    const conflict = () => this.db.prepare("UPDATE lane_accounts SET conflict_until = ? WHERE node = ? AND lane = ?").run(at + RECORD_CONFLICT_MS, node, lane);
+    if (held === null) { write(); return; }
+    if (held.source === "start" && at - held.at < START_RECORD_HOLD_MS) {
+      if (held.token == null) {
+        if (account === held.account) this.db.prepare("UPDATE lane_accounts SET token = ? WHERE node = ? AND lane = ?").run(token, node, lane);   // binds the token, nothing else moves
+        return;                                                                                                                                    // a different account: ignored, the hold stands
+      }
+      if (held.token === token) { write(); return; }               // its own reporter moved: the record follows, hold and conflict gone
+      if (account !== held.account) conflict();                    // another token's different account: ambiguous, never replaced
+      return;
+    }
+    if (held.token == null || held.token === token) { write(); return; }
+    if (account === held.account) {
+      this.db.prepare("UPDATE lane_accounts SET at = ? WHERE node = ? AND lane = ?").run(at, node, lane);   // the same word from another token: only the stamp
+      return;
+    }
+    if (at - held.at < RECORD_CONFLICT_MS) { conflict(); return; }
+    write();
+  }
+  // Fix round 2 on PR #127 (finding 4): forgetting a whole account takes its lane records with it, so a later failure
+  // of one of its lanes resolves nothing until a start or a report names the account again.
+  deleteLaneAccountsOf(account: string) {
+    this.db.prepare("DELETE FROM lane_accounts WHERE account = ?").run(account);
   }
 
   // One comment per job id. `open` is a claim this process still has to finish. A settled row is not taken again.
@@ -435,16 +860,86 @@ export class Store {
     this.db.prepare("UPDATE job_notices SET acked = 1 WHERE id = ?").run(id);
   }
 
+  // Decision briefs (ADR-0023). The counter only grows, and is taken in the same transaction as the insert, only once
+  // the brief is accepted (a refusal burns no number, as the board's counter, B7). A ref id (ny-…) takes none.
+  peekBriefNumber(): number { return (this.setting<number>("brief_counter") ?? 0) + 1; }
+  takeBriefNumber(n: number) {
+    if (n !== this.peekBriefNumber()) throw new Error(`brief number ${n} is not the next one`);
+    this.saveSetting("brief_counter", n);
+  }
+  insertBrief(r: BriefRecord) {
+    this.db.prepare(`INSERT INTO decision_briefs (
+      id, version, ref, asker_kind, asker_name, token_id, filed_by_kind, filed_by_name, brief, state, filed_at, resolution, drafted_by, closed_at)
+      VALUES (@id, @version, @ref, @askerKind, @askerName, @tokenId, @filedByKind, @filedByName, @brief, @state, @filedAt, @resolution, @draftedBy, @closedAt)`)
+      .run({ ...r, brief: JSON.stringify(r.brief) });
+  }
+  setBriefState(id: string, version: number, state: BriefState, resolution: string | null, closedAt: number | null) {
+    this.db.prepare("UPDATE decision_briefs SET state = ?, resolution = ?, closed_at = ? WHERE id = ? AND version = ?").run(state, resolution, closedAt, id, version);
+  }
+  // Forwarding a draft: the manager becomes the asker, and the card can say who drafted it.
+  forwardBrief(id: string, version: number, askerName: string, tokenId: string, draftedBy: string) {
+    this.db.prepare("UPDATE decision_briefs SET state = 'open', asker_kind = 'manager', asker_name = ?, token_id = ?, drafted_by = ?, closed_at = NULL, resolution = NULL WHERE id = ? AND version = ?")
+      .run(askerName, tokenId, draftedBy, id, version);
+  }
+  // Forwarding a draft that names a list item: the open brief's id becomes that ref, so it joins the list item.
+  // A withdrawn or declined row already at that id does not block; the open brief is the next version.
+  claimForward(oldId: string, version: number, ref: string, askerName: string, tokenId: string, draftedBy: string): { id: string; version: number } {
+    const clash = this.brief(ref);
+    if (clash && clash.id !== oldId) {
+      const old = this.brief(oldId);
+      if (!old) return { id: oldId, version };
+      const next = clash.version + 1;
+      this.insertBrief({
+        ...old, id: ref, version: next, ref, state: "open", askerKind: "manager", askerName, tokenId,
+        draftedBy, resolution: null, closedAt: null,
+      });
+      this.setBriefState(oldId, old.version, "withdrawn", null, old.filedAt);
+      return { id: ref, version: next };
+    }
+    this.db.prepare(`UPDATE decision_briefs SET id = ?, ref = ?, state = 'open', asker_kind = 'manager', asker_name = ?, token_id = ?, drafted_by = ?, closed_at = NULL, resolution = NULL WHERE id = ? AND version = ?`)
+      .run(ref, ref, askerName, tokenId, draftedBy, oldId, version);
+    return { id: ref, version };
+  }
+  brief(id: string): BriefRecord | null {
+    const r = this.db.prepare("SELECT * FROM decision_briefs WHERE id = ? ORDER BY version DESC LIMIT 1").get(id) as Row | undefined;
+    return r ? briefFrom(r) : null;
+  }
+  currentBriefs(): BriefRecord[] {
+    return (this.db.prepare(`SELECT * FROM decision_briefs AS b
+      WHERE version = (SELECT MAX(version) FROM decision_briefs WHERE id = b.id) ORDER BY filed_at`).all() as Row[]).map(briefFrom);
+  }
+  openBriefCount(kind: "manager" | "worker", name: string): number {
+    const r = this.db.prepare(`SELECT COUNT(*) AS n FROM decision_briefs AS b
+      WHERE state = 'open' AND asker_kind = ? AND asker_name = ?
+      AND version = (SELECT MAX(version) FROM decision_briefs WHERE id = b.id)`).get(kind, name) as { n: number };
+    return r.n;
+  }
+
   close() { this.db.close(); }
 }
 
+// A task's waits are not a column (they live in its latest move, #withWaits), so they are never bound as one.
+const withoutWaits = ({ waits: _waits, ...row }: Task) => row;
 const taskFrom = (r: Row): Task => ({
   key: r.key as Task["key"], n: r.n as number, title: r.title as string, description: r.description as string, status: r.status as Task["status"],
   assignee: (r.assignee as string | null) ?? null, priority: r.priority as Task["priority"], blockedReason: (r.blocked_reason as string | null) ?? null,
-  createdAt: r.created_at as number, updatedAt: r.updated_at as number, createdBy: JSON.parse(r.created_by as string) as Task["createdBy"],
+  createdAt: r.created_at as number, updatedAt: r.updated_at as number, stateChangedAt: (r.state_changed_at as number | null) ?? (r.updated_at as number), createdBy: JSON.parse(r.created_by as string) as Task["createdBy"],
   rev: r.rev as number, doneAt: (r.done_at as number | null) ?? null, comments: r.comments as number,
 });
 const agentTokenFrom = (r: Row): AgentToken => ({
   id: r.id as string, name: r.name as string, role: r.role as AgentToken["role"], secretHash: r.secret_hash as string,
+  scopes: ((r.scopes as string | null) ?? "").split(",").filter(s => s !== ""),
   createdAt: r.created_at as number, lastUsedAt: (r.last_used_at as number | null) ?? null, revokedAt: (r.revoked_at as number | null) ?? null,
+  unboundCount: (r.unbound_count as number | null) ?? 0, lastUnboundAt: (r.last_unbound_at as number | null) ?? null,
+});
+const mergeFrom = (r: Row): MergeRecord => ({
+  repo: r.repo as string, sha: r.sha as string, at: r.at as number, by: r.by as string, override: (r.override as string | null) ?? null,
+});
+const briefFrom = (r: Row): BriefRecord => ({
+  id: r.id as string, version: r.version as number, ref: (r.ref as string | null) ?? null,
+  askerKind: r.asker_kind as BriefRecord["askerKind"], askerName: r.asker_name as string, tokenId: r.token_id as string,
+  filedByKind: r.filed_by_kind as BriefRecord["filedByKind"], filedByName: r.filed_by_name as string,
+  brief: JSON.parse(r.brief as string) as DecisionBrief, state: r.state as BriefState, filedAt: r.filed_at as number,
+  resolution: (r.resolution as string | null) ?? null, draftedBy: (r.drafted_by as string | null) ?? null,
+  closedAt: (r.closed_at as number | null) ?? null,
 });

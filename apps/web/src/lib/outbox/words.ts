@@ -2,7 +2,9 @@
 // code. One wording for the desktop's conversation and the phone's update card (review of PR #7, finding 12): the
 // phone had its own short list and showed the hub's raw codes for the rest.
 import { unreachable } from "@morndo/domain";
-import { UNSEEN_AFTER_MS, type OutboxRecord } from "./state.ts";
+import { LIMITS } from "@morndo/protocol";
+import { MAX_TEXT, UNSEEN_AFTER_MS, type OutboxRecord } from "./state.ts";
+import { DELIVERED, GIVEN_UP, MAY_HAVE_BEEN, NOT_DELIVERED, QUEUED, queuedLine } from "../queue-words.ts";
 
 // After the worker's name: "builder is showing a menu. …". The desktop says where to look as "the Terminal tab".
 const PROBLEMS: Record<string, string> = {
@@ -12,7 +14,7 @@ const PROBLEMS: Record<string, string> = {
   not_submitted: "didn't take the message. Check its Terminal tab.",
   no_pane: "is no longer running.",
   busy: "is being typed into by something else right now. Try again in a few seconds.",
-  too_long: "can't take a message this long (8000 characters at most).",
+  too_long: `can't take a message this long (${MAX_TEXT.toLocaleString("en-US")} characters at most).`,
   not_yours: "can't take that file: it was uploaded from another device.",
   unknown_upload: "can't take that file anymore. Attach it again.",
   expired: "can't take that file anymore: it's over a day old. Attach it again.",
@@ -41,8 +43,10 @@ const REASONS: Record<string, string> = {
   // may settle it, but it stays here when nobody can say: the machine's store is unknown, changed or behind, and always
   // on the legacy hub, which has no machine to ask (the residual round: the words promised it would be typed).
   uncertain: "May have been sent. Check again asks whether it was typed; if that can't be known, it stays here, so look at the worker's screen before sending it again.",
-  not_delivered: "Not sent: that command is no longer in the inbox, so it cannot be sent again.",
 };
+
+const TOO_OLD_FOR_LONG = `is on a machine whose Morndo agent or fleet is too old for a message this long (${LIMITS.maxSendText.toLocaleString("en-US")} characters at most there), so nothing was typed. Update Morndo on that machine, or send a shorter message.`;
+const TEXT_TOO_BIG = "can't take a message this big: its text is too large to send, so nothing was typed. Shorten it.";
 
 // A message waits behind an earlier one of the same conversation that is Not sent or Uncertain (review M3).
 export const heldBehind = (o: OutboxRecord, all: readonly OutboxRecord[]) =>
@@ -53,8 +57,27 @@ export function sendReason(o: OutboxRecord, name: string, screen = "the Terminal
   if (o.error === null) return "";
   const problem = PROBLEMS[o.error];
   if (REASONS[o.error]) return REASONS[o.error] ?? "";
+  // A message over the old bound that an older agent (the fleet answers unknown_op for it) or an older fleet (bad_args:
+  // it checks 8,000) won't take: the fix is an update, not a rename or a smaller file.
+  if (o.text.length > LIMITS.maxSendText && (o.error === "unknown_op" || o.error === "bad_args")) return `${name} ${TOO_OLD_FOR_LONG}`;
+  // The text alone (no file) can be over the agent's message cap, say with a great many control characters.
+  if (o.error === "too_large" && o.uploads.length === 0) return `${name} ${TEXT_TOO_BIG}`;
   if (!problem) return `Not sent: the hub answered "${o.error}".`;
   return `${name} ${screen === "the Terminal tab" ? problem : problem.replace(/(the|its) Terminal tab/g, screen)}`;
+}
+
+const DELIVERY_LABELS: Record<NonNullable<OutboxRecord["delivery"]>["state"], string> = {
+  queued: QUEUED, delivered: DELIVERED, uncertain: MAY_HAVE_BEEN, given_up: NOT_DELIVERED,
+};
+// A message in the manager's queue, one line more: why it waits, why it never went, or what "may have" means. Empty for
+// one delivered, or typed directly.
+export function deliveryNote(o: OutboxRecord): string {
+  const d = o.state === "sent" ? o.delivery : undefined;
+  if (!d) return "";
+  if (d.state === "queued") return queuedLine(d.waiting);
+  if (d.state === "uncertain") return "It was typed, but never seen in the manager's conversation. Look at its screen before sending it again.";
+  if (d.state === "given_up") return `Nothing reached the manager${d.why && GIVEN_UP[d.why] ? `: ${GIVEN_UP[d.why]}` : ""}. Write it again if it's still needed.`;
+  return "";
 }
 
 // Where it stands, in words (S8).
@@ -63,27 +86,10 @@ export function sendLabel(o: OutboxRecord, all: readonly OutboxRecord[], now: nu
     case "queued": return heldBehind(o, all) ? "Waiting for the message above" : o.attempts === 0 ? "Queued" : "Waiting to send…";
     case "sending": return "Sending…";
     case "sent":
-      // Queued in the manager's inbox. "Not sent" only when the spool expired it, still untyped. A command it has
-      // accepted, sent, stuck or left unconfirmed has no deadline and keeps its own words. One typed directly
-      // keeps the "not seen yet" warning.
-      if (o.queued) return queuedPlace(o);
+      if (o.delivery) return DELIVERY_LABELS[o.delivery.state];               // the manager's queue has it (fleet-clients §9.1)
       return o.sentAt !== null && now - o.sentAt > UNSEEN_AFTER_MS ? "Sent, not seen in the conversation yet" : "Sent";
     case "failed": return "Not sent";
     case "uncertain": return "May have been sent";
     default: return unreachable(o.state);
   }
-}
-
-function queuedPlace(o: OutboxRecord): string {
-  if (o.inbox === "expired") return "Not sent";
-  if (o.inbox === "accepted") return "Accepted, waiting to be delivered";
-  if (o.inbox === "stuck") return "Stuck, still waiting to be delivered";
-  if (o.inbox === "sent" && o.inboxReason === "unconfirmed") return "Sent, not confirmed in the conversation yet";
-  if (o.inbox === "sent") return "Sent, not seen in the conversation yet";
-  if (o.inbox === "typing") return "Being typed";
-  if (o.inbox === "held") return "Held, it will be delivered";
-  if (o.inbox === "lost") return "Lost from the queue";
-  if (o.inbox === "cancelled") return "Cancelled";
-  if (o.inbox === "gone") return "Not in the inbox";
-  return "Queued, it will be delivered";
 }

@@ -9,6 +9,7 @@ import {
 } from "@morndo/domain";
 import type { Store } from "../adapters/store.ts";
 import type { Passkeys } from "../adapters/passkeys.ts";
+import type { RevocationJournal } from "@morndo/service-kit";
 import { log } from "../adapters/log.ts";
 
 const FLOW_TTL_MS = 5 * 60_000;
@@ -39,14 +40,16 @@ export class AccessService {
   #store: Store;
   #passkeys: Passkeys;
   #now: () => number;
+  #journal: RevocationJournal | null;
   #flows = new Map<string, Flow>();
   #onRevoked: (endpointId: string) => void = () => {};
   #onLinked = new Set<(e: Linked) => void>();
 
-  constructor(store: Store, pk: Passkeys, now: () => number = Date.now) {
+  constructor(store: Store, pk: Passkeys, now: () => number = Date.now, journal?: RevocationJournal) {
     this.#store = store;
     this.#passkeys = pk;
     this.#now = now;
+    this.#journal = journal ?? null;
   }
 
   onRevoked(fn: (endpointId: string) => void) { this.#onRevoked = fn; }
@@ -401,6 +404,11 @@ export class AccessService {
   }
 
   revoke(id: string): boolean {
+    // RL10 (updates design §11.5): the journal line goes down, fsynced, before the transaction. A crash between the
+    // two leaves a revocation the next start applies; the other order could leave one only morndo.db knows, which a
+    // database restored from an older copy would forget.
+    const current = this.#store.endpoint(id);
+    if (current !== null && isActive(current)) this.#journal?.append({ kind: "endpoint", id, at: this.#now() });
     const done = this.#store.transaction(() => {
       const endpoint = this.#store.endpoint(id);
       if (!endpoint) return false;

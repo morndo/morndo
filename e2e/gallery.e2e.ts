@@ -3,8 +3,7 @@
 // That the gallery is absent from a production build is the build's own check (apps/web/scripts/check-build.ts).
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { chromium } from "playwright";
-import { assert, checks, freePort, outDir } from "./harness.ts";
+import { assert, checks, freePort, launch, outDir } from "./harness.ts";
 
 const OUT = outDir("gallery");
 const WEB = join(import.meta.dirname, "../apps/web");
@@ -25,9 +24,9 @@ for (const end = Date.now() + 60_000; ; await new Promise(r => setTimeout(r, 250
 }
 
 const { check, watch, finish } = checks(OUT);
-const browser = await chromium.launch();
+const browser = await launch();
 let code = 1;
-const SENDS = ["Queued", "Waiting to send…", "Sending…", "Sent", "Sent, not seen in the conversation yet", "Not sent", "May have been sent", "Waiting for the message above"];
+const SENDS = ["Queued", "Waiting to send…", "Sending…", "Sent", "Sent, not seen in the conversation yet", "Not sent", "May have been sent", "Waiting for the message above", "Queued, it will be delivered"];
 const PILLS = ["Connecting", "Live", "Reconnecting", "Offline", "Signed out"];
 try {
   const backgrounds: string[] = [];
@@ -71,7 +70,7 @@ try {
       const starred = side.getByRole("button", { name: /^Starred/ });
       assert(await starred.count() === 1 && await row("release").count() === 1, `no Starred section with release: ${await starred.count()} headers, ${await row("release").count()} rows`);
       // Each decision card in its state (review L2).
-      assert(await page.locator('[data-shot="decisions"] figure').count() === 12, "not 12 decision cards");
+      assert(await page.locator('[data-shot="decisions"] figure').count() === 14, "not 14 decision cards");
       const card = (caption: string) => page.locator('[data-shot="decisions"] figure').filter({ has: page.locator("figcaption", { hasText: caption }) }).locator("article.dc");
       for (const [caption, u] of [["Blocking", "blocking"], ["Overdue", "overdue"], ["Due soon", "soon"], ["Normal, asked again", "normal"], ["Answered here", "answered"], ["Settled", "done"]] as const) {
         assert((await card(caption).getAttribute("class"))?.split(" ").includes(`u-${u}`), `"${caption}" isn't u-${u}`);
@@ -81,6 +80,11 @@ try {
       await card("Answered in words").getByRole("button", { name: "Answer…" }).waitFor();
       await card("Answered here").getByText("You chose").waitFor();
       await card("Settled").getByText("Decided:").waitFor();
+      // The manager's queue (fleet-clients §9.1): each state in its words.
+      await card("Answered, queued for the manager").getByText("Queued, it will be delivered: the manager's input box has text that isn't from Morndo").waitFor();
+      await card("Answered, delivered to the manager").getByText("Delivered", { exact: false }).first().waitFor();
+      await card("Answered, may have been delivered").getByText("May have been delivered", { exact: false }).waitFor();
+      await card("Open again: the answer never reached the manager").getByText("Not delivered: the answer never reached the manager. Answer again.").waitFor();
       // Answering, by clicking as a person would (review L3): the confirmation, words, sending, refused.
       const answering = (i: number) => page.locator(`[data-answering="${i}"]`);
       const ship = (i: number) => answering(i).getByRole("button", { name: "Ship Friday", exact: true });

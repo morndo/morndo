@@ -10,7 +10,7 @@
     title: null, lastMessageAt: null, needsYou: false, waitingOn: null, state: "active", changedAt: 1, offline: false,
   } as RosterEntry;
   const task = {
-    key: "T-18", n: 18, title: "Athenum: max reviews of #955,#958,#959 after the window", description: "",
+    key: "T-18", n: 18, title: "Example project: refresh the sample reports for items #101, #102 and #103 once the review window closes, then archive the old drafts", description: "",
     status: "doing", assignee: "manager", priority: "normal", blockedReason: null, createdAt: 1, updatedAt: 1,
     createdBy: { kind: "manager", name: "manager", token: "m" }, rev: 1, doneAt: null, comments: 0,
   } as Task;

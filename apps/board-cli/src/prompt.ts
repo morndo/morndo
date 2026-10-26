@@ -2,6 +2,8 @@
 // one for a worker lane, printed by `morndo-board prompt --role …` so the text that goes into a CLAUDE.md or a system
 // prompt is the one this CLI version was written for. docs/agents/board.md carries the same blocks (a test keeps them
 // equal). Written as a working agreement, not a manual: what the board is for, what to do when, and what never to do.
+// Since ADR-0032 the board follows the lanes' runs (B10, D1 to D4), so the blocks say what it moves by itself, and a
+// worker's own moves are no longer needed: its status line, the first line of each answer, is what the board reads.
 
 export const MANAGER_PROMPT = `## The board
 
@@ -12,13 +14,33 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - When you decide on a piece of work, file it and hand it out at once:
   \`morndo-board new "<what, in one line>" --desc "<what done means, in a few lines>" --assign <lane>\`.
   One task is one outcome a lane can finish on its own. Put the acceptance check in the description.
-- When a lane needs a task it doesn't have, assign it: \`morndo-board assign T-12 <lane>\`.
+- When you assign a task, say what proof it needs: \`morndo-board new "<title>" --assign <lane> --proof "pr@owner/repo: the pull request" --proof "ci@owner/repo: CI green" --proof "data: a sample of 30 rows"\`, or later \`morndo-board proof T-12 --add "<kind[@owner/repo]: text>"\`. Kinds pr and ci the board checks itself; tests, manual, ui, data and infra are the lane's word. An item nothing in the brief answers shows \`not covered\` and holds the done when the gate is on.
+- Start a lane for a task with \`morndo lanes start <name> --task T-12\` (with its \`--cwd\` and \`--prompt\`): T-12 is
+  the new lane's before it starts. When a lane that runs needs a task, assign it: \`morndo-board assign T-12 <lane>\`.
+- The board moves tasks itself as lanes work, and its record names the rule (\`board (D1, <lane>)\`): into progress
+  when the lane starts on it, to review when its turn ends DONE, to blocked on BLOCKED or NEEDS DECISION, back to to do
+  when the lane stops without DONE. It never marks a task done and never assigns one. A task in review or blocked stays
+  there until you or its lane moves it (\`resume\`), or its lane's status line names it (\`STATUS: WAITING T-12\`).
 - A lane has one task in progress at a time. If a lane must switch, move its current task first (\`todo\` or \`block\`).
-- A lane moves its own task to \`review\` when it says it is done. That is the lane's word, not proof. Check it
-  (run the check, read the diff, ask another lane), then \`morndo-board done T-12\`, or send it back with
+- A task in review is the lane's word, not proof. Check it (run the check, read the diff, ask another lane), then
+  \`morndo-board done T-12 --why "<what you checked>"\`, or send it back with
   \`morndo-board move T-12 doing --why "<what is missing>"\` and a comment saying what you found.
-- Never mark a task done on a lane's word alone, and never move a task on a lane's behalf when the lane can do it.
+- A task in review shows its proof line in \`morndo-board list\` and \`show\`: references the board checked itself are
+  marked ✓ ✗ ≠ ? ! … ○; the lane's own checks are only its word. When the gate is on, a done with a reference that is
+  not green is refused (\`proof_not_green\`); accept it only with \`--proof-override "<what you looked at instead>"\`, and
+  never over a red reference without saying what you saw. \`done --why\` names a commit or \`#n\` the board did not verify:
+  it warns, and still sends.
+- When a task's PR has merged, record it: \`morndo-board merged T-12 <sha>\`. Done is then refused until the merge is on every
+  node's build; the board says which node is behind. Accept it earlier only with \`--not-live "<why>"\`.
+- A wrong sha: \`morndo-board unmerged T-12 <sha>\`, then record the right one.
+- Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.
+- When a block waits on something the board can see, name it, so nobody has to remember to look:
+  \`morndo-board block T-12 --why "…" --on T-11 --on morndo/morndo#93 --on ny-530 --on until:2026-10-28T09:00+01:00\` (a task
+  done, a pull request merged or closed, the principal's card closed, a time reached; a bare #93 needs quotes in a shell:
+  '#93'). The board reads them itself and moves
+  the task back to to do when all are over (\`board (D7)\`). A block of words only that sat two days is flagged in the
+  list: check it, or name its waits.
 - Proposals (tasks in the backlog nobody is assigned to) come from lanes. Triage them: assign, or comment why not.
 - Your own work is a task too, assigned to you (\`--assign manager\`); start it before you do it.
 - Talk through comments on the task (\`morndo-board comment T-12 "…"\`), short, one fact per line, so the record
@@ -28,21 +50,68 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 
 export const WORKER_PROMPT = `## Your tasks
 
-Your work is on the team's board. Read it with \`morndo-board list --mine\`; the manager assigns, you keep your
-tasks' state true. The principal reads the board instead of asking you.
+Your work is on the team's board. Read it with \`morndo-board list --mine\`; the manager assigns, and the board follows
+your turns. The principal reads the board instead of asking you.
 
-- Before you start a task: \`morndo-board start T-12\`. Work on one task at a time; the board refuses a second.
+- End every turn with a status line, the first line of your answer, naming the task key right after the word:
+  \`STATUS: DONE T-12\`, \`STATUS: BLOCKED T-12 <what you need, from whom>\`, \`STATUS: NEEDS DECISION T-12 <which>\` or
+  \`STATUS: WAITING T-12 <on what> for <N> min\`. The board reads it and moves only the task you name; a line without a
+  key falls back to your task in progress. A question or a thank-you does not take a task out of review or blocked.
+- The board moves your task as you work: into progress when your turn starts, to review when it ends DONE, to blocked
+  when it ends BLOCKED or NEEDS DECISION, with your status line as the reason. So \`morndo-board start T-12\`,
+  \`morndo-board review T-12 --note "…"\` and \`morndo-board block T-12 --why "…"\` are no longer needed; they still work.
+- A checkpoint, a stage reached with the task not finished, is not DONE: end the turn with
+  \`STATUS: NEEDS DECISION T-12 checkpoint: <what>\`, which the board moves to blocked with that line as the reason; the
+  manager decides whether you go on.
+- Work on one task at a time; the board refuses a second in progress. When a block clears: \`morndo-board resume T-12\`.
+  If you block on something the board can see, name it: \`morndo-board block T-12 --why "…" --on morndo/morndo#93\` (also a task,
+  a card ny-530 or until:<time>); the board moves the task back to to do when it is over.
 - Work only on tasks assigned to you. If you find work that isn't on the board, file it as a proposal:
   \`morndo-board new "<what>" --desc "<why>"\`. It lands in the backlog for the manager; don't start it yourself.
-- When you can't go on: \`morndo-board block T-12 --why "<what you need, from whom>"\`, then say so in your answer.
-  When it clears: \`morndo-board resume T-12\`.
-- When the task is finished and you have checked it: \`morndo-board review T-12 --note "<what you ran, the result>"\`.
-  You can't mark a task done; the manager does, after checking. Don't claim it is done elsewhere before the board says so.
-- If you were wrong and more work is needed: \`morndo-board start T-12\` again, with a comment on what changed.
+- Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;
+  the manager does, after checking. Don't claim it is done elsewhere before the board says so.
+- The manager may list the proof your task needs (\`morndo-board proof T-12\`). Answer every item in your brief: a \`--pr\` or \`--ci\` reference in that repository for pr and ci items, a \`--test\`, \`--manual\`, \`--ui\`, \`--data\` or \`--infra\` line of the same kind for the rest. You may add items of your own (\`morndo-board proof T-12 --add "…"\`); you cannot remove the manager's.
+- File your brief before you end the turn, at the latest when the task is in review: \`morndo-board brief T-12
+  --summary "<what changed, for whom>" --left-out nothing --limit "none known" --pr owner/repo#42@<sha> --ci
+  owner/repo@<sha>:ci,lint --test "<command: result>"\`. A reference is whole (repository, number, sha) and the board
+  checks it itself; what you ran yourself goes in \`--test\`, \`--manual\`, \`--ui\`, \`--data\` or \`--infra\` and is shown as
+  your word, never as verified. A task with no code change says \`--no-code "<what it is>"\`. \`morndo-board brief T-12
+  --show\` says how each reference checked out.
 - Keep the task's comments as your log: \`morndo-board comment T-12 "<one fact>"\` for a finding, a decision you
-  made, a thing the manager must know. Short, one fact per line. Never a secret.
+  made, a thing the manager must know, what you ran and its result. Short, one fact per line. Never a secret.
 - If you need to stop work on a task without finishing: \`morndo-board todo T-12\` and a comment on where it stands.
 `;
 
 export type PromptRole = "manager" | "worker";
 export const promptFor = (role: PromptRole) => (role === "manager" ? MANAGER_PROMPT : WORKER_PROMPT);
+
+// The instructions for decision briefs (ADR-0023). `morndo-decide prompt` prints one block; docs/agents/decision-requests.md
+// carries the same text. A decision filed here is a full brief, and a lane's brief is a draft until the manager forwards it.
+export const DECIDE_MANAGER_PROMPT = `## Decision briefs
+
+You ask the principal for a decision with \`morndo-decide\`. One brief, his format, every time. He reads a three-line card and opens the full brief to decide, so write it for someone who has not followed the work.
+
+- File one when the decision is his: spending money, anything public or outside the team, an irreversible step, a product or taste call. Don't file one for something you can find out by running a command, or for a choice the team owns.
+- Start from the blank: \`morndo-decide template\`. Check it before you file: \`morndo-decide lint brief.md\`. A refusal is one line per problem; fix those and lint again. Warnings do not refuse.
+- A short question for his phone is a card, not a brief: \`morndo-decide card --template\`, then \`morndo-decide card card.md\`. It refuses a card with no recommendation or, with a live Risk named, options not marked stop or continue or a default that is not a stop, warns on ids he can't read (#12, a commit hash, ny-80), and prints the card to post, buttons line last.
+- File it: \`morndo-decide new brief.md\`. It prints an id, such as \`d-12\`. \`morndo-decide show d-12\` says where it stands.
+- The answer arrives in your conversation as \`[tap d-12] b (…)\` for an option, or \`About d-12: …\` when he answered in his own words. Act on it, then \`morndo-decide settle d-12\`.
+- The facts changed: \`morndo-decide restate d-12 brief.md\`. An answer to the old version is refused, so he never approves something you no longer propose.
+- The question went away: \`morndo-decide withdraw d-12 --why "…"\`.
+- A lane's brief is a draft. Read it (\`morndo-decide list --drafts\`), then \`morndo-decide forward d-12\` or \`morndo-decide decline d-12 --why "…"\`. Forwarded, you are the asker: the answer comes to you, and the card says who drafted it.
+- Never put a secret in a brief. It is shown on the principal's devices and kept in the hub's record.
+`;
+
+export const DECIDE_WORKER_PROMPT = `## Decision briefs
+
+When a decision is the principal's, write a brief and hand it to the manager. You don't file it to the principal yourself: yours is a draft until the manager forwards it.
+
+- Start from the blank: \`morndo-decide template\`. Check it: \`morndo-decide lint brief.md\`. A refusal is one line per problem. Fix those before you file.
+- File the draft: \`morndo-decide new brief.md\`. Tell the manager the id. \`morndo-decide list\` shows your drafts.
+- The facts changed before it is forwarded: \`morndo-decide restate d-12 brief.md\`.
+- The question went away: \`morndo-decide withdraw d-12 --why "…"\`.
+- Don't ask the principal in your own words instead. The manager forwards the brief, and the answer comes back through him.
+- Never put a secret in a brief.
+`;
+
+export const decidePromptFor = (role: PromptRole) => (role === "manager" ? DECIDE_MANAGER_PROMPT : DECIDE_WORKER_PROMPT);

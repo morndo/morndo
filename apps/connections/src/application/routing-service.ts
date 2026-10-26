@@ -1,15 +1,19 @@
 // The routing policy is saved whole, then written through EngineSettings. A chain changed outside is drift (R7–R15).
 import {
-  engineText, ensureRole, observeDrift, parseEngine, planWrites, prepareWrite, project, sameOrder, switchesAuto,
-  setOverride, setPicks, setPriority, setRole, type Engine, type Listed, type Mode, type Override, type Policy, type Priority,
+  engineText, ensureRole, findConnection, observeDrift, parseEngine, planWrites, prepareWrite, project, sameOrder, switchesAuto,
+  setOverride, setPicks, setPriority, setRole, withPools, type Engine, type Listed, type Mode, type Override, type Policy, type Priority,
 } from "@morndo/domain";
 import { err, ok, type Result } from "@morndo/domain";
-import type { Deps, Failure } from "./ports.ts";
+import type { Deps, Failure, PoolNames } from "./ports.ts";
 import { blockedRemoval, syncRevoked } from "./providers.ts";
 
 export class RoutingService {
   readonly #deps: Deps;
-  constructor(deps: Deps) { this.#deps = deps; }
+  readonly #pools: () => readonly PoolNames[];
+  constructor(deps: Deps, pools: () => readonly PoolNames[] = () => []) {
+    this.#deps = deps;
+    this.#pools = pools;
+  }
 
   setPriority(mode: Mode, order: readonly string[], command: string): Result<void, Failure> {
     return this.#policy(policy => setPriority(policy, { mode, order }, this.#listed(), command, this.#deps.clock.now()));
@@ -18,11 +22,12 @@ export class RoutingService {
   // A page command is one check, then one persist. A refusal or a failed chain write leaves the stored policy as it was.
   commitPriority(mode: Mode, order: readonly string[], command: string, auto?: boolean): Result<void, Failure> {
     const { directory, policy, version } = this.#deps.store.load();
-    const priority = auto === undefined ? { mode, order } : { mode, order, auto };
-    const next = setPriority(policy, priority, this.#listed(), command, this.#deps.clock.now(), auto === undefined ? "session" : "step-up");
+    const sent = withPools(order, policy.priority.order, this.#poolNames(directory));
+    const priority = auto === undefined ? { mode, order: sent } : { mode, order: sent, auto };
+    const next = setPriority(policy, priority, this.#listed(directory), command, this.#deps.clock.now(), auto === undefined ? "session" : "step-up");
     if (!next.ok) return problem(next.error);
     // R16: an auto-only switch writes no chain, pending or not; it only saves the policy.
-    if (switchesAuto(policy, priority) && sameOrder(policy.priority, mode, order)) {
+    if (switchesAuto(policy, priority) && sameOrder(policy.priority, mode, sent)) {
       return this.#deps.store.save(directory, next.value, version) ? ok(undefined) : err({ problem: "conflict" });
     }
     return this.#write(directory, next.value, version, this.#deps.engines.chains(), policy);
@@ -36,7 +41,9 @@ export class RoutingService {
     const riskTexts = risk === undefined ? kept : risk === null || risk.length === 0 ? null : risk;
     const parsed = parsedPicks(texts, riskTexts, role);
     if (!parsed.ok) return parsed;
-    const next = setRole(policy, role, override, priority, parsed.value.picks, parsed.value.riskPicks, this.#listed(directory), command, this.#deps.clock.now());
+    const own = policy.roles.find(item => item.role === role)?.priority?.order ?? [];
+    const sent = priority === null ? null : { ...priority, order: withPools(priority.order, own, this.#poolNames(directory)) };
+    const next = setRole(policy, role, override, sent, parsed.value.picks, parsed.value.riskPicks, this.#listed(directory), command, this.#deps.clock.now());
     if (!next.ok) {
       const detail = next.error.name?.includes(":") ? ` ${next.error.name}` : "";
       return err({ problem: `${next.error.problem}${detail}`, ...(next.error.role ? { role: next.error.role } : {}) });
@@ -72,6 +79,14 @@ export class RoutingService {
   save(): Result<void, Failure> {
     const { directory, policy, version } = this.#deps.store.load();
     return this.#write(directory, policy, version, this.#deps.engines.chains());
+  }
+
+  // Fold or unfold a pool, then derive chains the same way a priority save does. An unchanged policy still goes through
+  // the write; a chain that already matches is left as it stands.
+  refold(step: (policy: Policy, listed: readonly Listed[]) => Policy): Result<void, Failure> {
+    const { directory, policy, version } = this.#deps.store.load();
+    const next = step(policy, this.#listed(directory));
+    return this.#write(directory, next, version, this.#deps.engines.chains(), policy);
   }
 
   #write(
@@ -164,14 +179,52 @@ export class RoutingService {
   }
 
   #kinds() {
-    return this.#live().map(connection => ({ name: connection.name, kind: connection.kind }));
+    const rows = this.#live().map(connection => ({ name: connection.name, kind: connection.kind }));
+    const seen = new Set(rows.map(row => row.name));
+    for (const pool of this.#pools()) {
+      if (seen.has(pool.name)) continue;
+      seen.add(pool.name);
+      rows.push({ name: pool.name, kind: "api-key" });
+    }
+    return rows;
   }
 
   #listed(directory = this.#deps.store.load().directory): Listed[] {
-    return directory.connections.filter(connection => connection.status !== "revoked").map(connection => {
-      const rows = this.#deps.models.models({ name: connection.name, vendor: connection.vendor });
-      return { name: connection.name, kind: connection.kind, models: rows.map(row => row.id), efforts: rows[0]?.efforts ?? null };
+    const rows: Listed[] = directory.connections.filter(connection => connection.status !== "revoked").map(connection => {
+      const models = this.#deps.models.models({ name: connection.name, vendor: connection.vendor });
+      return { name: connection.name, kind: connection.kind, models: models.map(row => row.id), efforts: models[0]?.efforts ?? null };
     });
+    const seen = new Set(rows.map(row => row.name));
+    for (const pool of this.#pools()) {
+      if (seen.has(pool.name)) continue;
+      seen.add(pool.name);
+      const listing = this.#poolModels(directory, pool.members);
+      rows.push({ name: pool.name, kind: "api-key", models: listing.models, efforts: listing.efforts });
+    }
+    return rows;
+  }
+
+  // A pool never replaces a Connection of the same name, and never appears twice.
+  #poolNames(directory: ReturnType<Deps["store"]["load"]>["directory"]): string[] {
+    const seen = new Set(directory.connections.filter(connection => connection.status !== "revoked").map(connection => connection.name));
+    const names: string[] = [];
+    for (const pool of this.#pools()) {
+      if (seen.has(pool.name)) continue;
+      seen.add(pool.name);
+      names.push(pool.name);
+    }
+    return names;
+  }
+
+  #poolModels(directory: ReturnType<Deps["store"]["load"]>["directory"], members: readonly string[]): { models: string[]; efforts: readonly string[] | null } {
+    for (const name of members) {
+      const connection = findConnection(directory, name);
+      if (!connection || connection.status === "revoked") continue;
+      const rows = this.#deps.models.models({ name, vendor: connection.vendor });
+      if (rows.length === 0) continue;
+      return { models: rows.map(row => row.id), efforts: rows[0]?.efforts ?? null };
+    }
+    return { models: [], efforts: null };
   }
 
   #live() {

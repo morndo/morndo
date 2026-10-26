@@ -37,7 +37,19 @@ describe("config.json", () => {
     expect(loadConfig(h).hub).toBe("http://127.0.0.1:8788");
     const bad = home();
     writeConfig(bad, { hub: "ws://127.0.0.1:8788" });
-    expect(() => loadConfig(bad)).toThrow(/hub must be an http or https URL/);
+    expect(() => loadConfig(bad)).toThrow(/hub must be an https URL, or an http URL to this machine/);
+  });
+  it("refuses a plain http hub on another machine, where the node's token would cross the network; https anywhere and http to this machine pass", () => {
+    for (const hub of ["http://100.64.0.1:8788", "http://hub.tail1234.ts.net", "http://0.0.0.0:8788", "http://127.0.0.1.nip.io", "http://127.0.0.1@evil.example/", "http://hub.example"]) {
+      const h = home();
+      writeConfig(h, { hub });
+      expect(() => loadConfig(h), hub).toThrow(/hub must be an https URL, or an http URL to this machine \(127\.0\.0\.1, localhost or \[::1\]\)/);
+    }
+    for (const hub of ["https://hub.tail1234.ts.net", "http://127.0.0.1:8788", "http://127.4.5.6:8788/", "http://localhost:8788", "http://[::1]:8788"]) {
+      const h = home();
+      writeConfig(h, { hub });
+      expect(loadConfig(h).hub, hub).toBe(hub);
+    }
   });
   it("refuses a bad node name or URL, naming the field", () => {
     const a = home();
@@ -62,6 +74,17 @@ describe("config.json", () => {
 });
 
 describe("policy.json", () => {
+  it("draftStash (#64): the manager after 60 minutes by default; another list, another age, or off; nonsense refused", () => {
+    expect(DEFAULT_POLICY.draftStash).toEqual({ lanes: ["manager"], afterMin: 60 });
+    const h = home();
+    const at = (draftStash: unknown) => { writeConfig(h, {}, { draftStash }); return loadConfig(h).policy.draftStash; };
+    expect(at({ lanes: ["manager", "lead"], afterMin: 30 })).toEqual({ lanes: ["manager", "lead"], afterMin: 30 });
+    expect(at({ lanes: [] })).toEqual({ lanes: [], afterMin: 60 });
+    for (const [bad, message] of [
+      [{ afterMin: 0 }, /afterMin must be a whole number/], [{ afterMin: 1.5 }, /afterMin/], [{ afterMin: 1441 }, /afterMin/],
+      [{ lanes: "manager" }, /lanes must be a list/], [{ lane: ["manager"] }, /unknown field lane/], [[], /must be an object/],
+    ] as const) expect(() => at(bad), JSON.stringify(bad)).toThrow(message);
+  });
   it("keeps the defaults for fields it doesn't set", () => {
     const h = home();
     writeConfig(h, {}, { session: "work", ops: ["inventory.get", "pane.frame"] });

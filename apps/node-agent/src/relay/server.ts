@@ -6,6 +6,13 @@
 //   session (spec §1, hooks docs checked 2026-10-06);
 // - /hook/stop: 200 {"ok":true,"queued":true}; /hook/failure, /notify and /file: 202; when the spool can't be written
 //   they answer 503, so the calling script's own fallback runs;
+// - /hook/stop that `ask` asks (status-ask.ts: the status ask, reliable lanes §3.1, or the waker ask, ADR-0032 W1): 200
+//   {"decision":"block","reason":…}; the turn goes on, and its next Stop is the one that counts. The asked one, either
+//   way, is spooled with `statusAsked: true` added to its body, so subscribers still get the answer it carried, and the
+//   fleet makes no lane event of it;
+// - /hook/stop or /hook/failure from a session that positively says it is headless (B6; window-of.ts foreignStop): the
+//   Stop 200 {"ok":true,"queued":false}, the failure 202 (as a kept one, so the script's fallback stays off); neither is
+//   spooled, never asked for a status; a lane's own and every unknown case go on as above;
 // - /file {path, …}: the file is copied under today's confinement rules into relay-files and the event carries
 //   {…, ref, name, size} instead of the path; 413 over 25 MiB, 403 where files are never shared, 404 when missing, 503
 //   when the node's disk budget can't hold the copy (counted as a drop, like a spool that can't be written).
@@ -27,6 +34,10 @@ export type RelayDeps = {
   spool: Spool;
   files: RelayFiles;
   windowOf: (body: unknown) => string | null;
+  // The reply style ask is async: it may read the hub's board (digest-check.ts).
+  ask?: (body: unknown, window: string | null) => string | null | Promise<string | null>;
+  // B6: a Stop or a StopFailure from a session that positively says it is headless, answered and dropped.
+  foreign?: (body: unknown) => boolean;
   onAppended: () => void;
   log: Logger;
   now?: () => number;
@@ -78,8 +89,16 @@ export async function startRelay(d: RelayDeps): Promise<Relay> {
     if (raw === "too_large") { answer(res, 413); return; }
     let body = parse(raw);
     if (Buffer.byteLength(JSON.stringify(body)) > HOOK_BODY_MAX) { answer(res, 413); return; }
+    if ((path === "/hook/stop" || path === "/hook/failure") && d.foreign?.(body)) {
+      d.log.info("a Stop or a failure from a session that positively says it is headless is not a lane event: not passed on (B6)");
+      if (path === "/hook/stop") res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true,"queued":false}');
+      else answer(res, 202);                                        // 202, as a kept failure: the calling script's fallback stays off
+      return;
+    }
     const session = field(body, "session_id");
     const event = { path: path as "/hook/stop" | "/hook/failure" | "/notify" | "/file", at: now(), session: typeof session === "string" ? session : null, window: d.windowOf(body) };
+    const asked = path === "/hook/stop" ? await d.ask?.(body, event.window) ?? null : null;
+    if (asked !== null) body = { ...(body as Record<string, unknown>), statusAsked: true };
     let appended: Appended;
     if (path === "/file") {
       const target = field(body, "path");
@@ -101,7 +120,8 @@ export async function startRelay(d: RelayDeps): Promise<Relay> {
       appended = d.spool.append({ ...event, body });
     }
     if (!appended.ok) { answer(res, 503); return; }
-    if (path === "/hook/stop") res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true,"queued":true}');
+    if (asked !== null) res.writeHead(200, { "Content-Type": "application/json" }).end(JSON.stringify({ decision: "block", reason: asked }));
+    else if (path === "/hook/stop") res.writeHead(200, { "Content-Type": "application/json" }).end('{"ok":true,"queued":true}');
     else answer(res, 202);
     after();
   };

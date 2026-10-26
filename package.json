@@ -12,19 +12,23 @@
   },
   "scripts": {
     "test": "vitest run",
-    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/brand && tsc -p apps/hub && tsc -p apps/board-cli && tsc -p apps/connections && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && npm run check -w @morndo/web",
+    "check": "tsc -p packages/domain && tsc -p packages/protocol && tsc -p packages/node-ops && tsc -p packages/service-kit && tsc -p packages/fleet-client && tsc -p packages/brand && tsc -p apps/hub && tsc -p apps/board-cli && tsc -p apps/memory-cli && tsc -p apps/connections && npm run typecheck --workspaces --if-present && tsc -p tsconfig.tests.json && tsc -p tsconfig.web-tests.json && tsc -p plugins/transcribe-whisper-cpp && npm run check -w @morndo/web",
     "build": "npm run build -w @morndo/web",
     "check:build": "npm run check:build -w @morndo/web --",
     "hub": "node apps/hub/src/main.ts",
     "fleet": "node apps/fleet/src/main.ts",
-    "e2e": "npm run build && npm run check:build && node e2e/web-endpoint.e2e.ts && node e2e/desktop.e2e.ts && node e2e/ink.e2e.ts && node e2e/signal.e2e.ts && node e2e/push.e2e.ts && node e2e/catchup.e2e.ts && node e2e/catchup-edges.e2e.ts && node e2e/horizon.e2e.ts && node e2e/readability.e2e.ts && node e2e/fleet-two-node.e2e.ts && node e2e/gallery.e2e.ts && node e2e/inbox.e2e.ts && node e2e/engines.e2e.ts && node e2e/board.e2e.ts && node e2e/home.e2e.ts && node e2e/phone-chat.e2e.ts && node e2e/uploads.e2e.ts",
+    "e2e": "npm run build && npm run check:build && node e2e/web-endpoint.e2e.ts && node e2e/desktop.e2e.ts && node e2e/ink.e2e.ts && node e2e/signal.e2e.ts && node e2e/push.e2e.ts && node e2e/catchup.e2e.ts && node e2e/catchup-edges.e2e.ts && node e2e/worker-grace.e2e.ts && node e2e/horizon.e2e.ts && node e2e/readability.e2e.ts && node e2e/fleet-two-node.e2e.ts && node e2e/gallery.e2e.ts && node e2e/engines.e2e.ts && node e2e/board.e2e.ts && node e2e/home.e2e.ts && node e2e/usage-claude.e2e.ts && node e2e/phone-chat.e2e.ts && node e2e/uploads.e2e.ts && node e2e/briefs.e2e.ts && node e2e/board-proof.e2e.ts",
     "lint": "oxlint --format=stylish",
     "knowledge:sop-check": "node knowledge/skills/recurring-job/scripts/sop-check.mjs",
     "knowledge:build": "node knowledge/tools/sop-check/build.ts",
     "knowledge:models": "node knowledge/tools/models-dev/main.ts",
     "e2e:engines": "npm run build && node e2e/engines.e2e.ts",
+    "e2e:update": "node e2e/update.e2e.ts",
+    "e2e:update-fleet": "node e2e/update-fleet.e2e.ts",
     "e2e:board": "npm run build && node e2e/board.e2e.ts",
-    "e2e:home": "npm run build && node e2e/home.e2e.ts"
+    "e2e:board-proof": "npm run build && node e2e/board-proof.e2e.ts",
+    "e2e:home": "npm run build && node e2e/home.e2e.ts",
+    "plugin:transcribe": "node plugins/transcribe-whisper-cpp/scripts/install.ts"
   },
   "devDependencies": {
     "@types/node": "^24.19.0",

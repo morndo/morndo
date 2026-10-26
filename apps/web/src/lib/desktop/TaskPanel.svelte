@@ -12,11 +12,13 @@
   import Picker, { type PickerOption } from "./Picker.svelte";
   import StatusIcon from "./StatusIcon.svelte";
   import "./board-controls.css";
-  import { COLUMNS, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, eventLine, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
+  import ProofSection from "./ProofSection.svelte";
+  import { acceptLabel, COLUMNS, decodeProof, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, waitWords, whoOf, type MergedView, type ProofView, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
   import { clock } from "./grouping.ts";
 
-  let { task, lanes, now, pendingBlock = false, notice = null, onAct, onOpenLane, onClose }: {
+  let { task, lanes, now, merged = null, pendingBlock = false, notice = null, onAct, onOpenLane, onClose }: {
     task: Task; lanes: string[]; now: number;
+    merged?: MergedView | null;                           // where the task's merges stand (B11), from the board frame; null: none
     pendingBlock?: boolean;                               // opened by a drop on Blocked: ask the reason first
     notice?: string | null;                               // why a drop on the board was refused, in words
     // One change, as the hub takes it; null when it went, else the words for why not.
@@ -25,6 +27,7 @@
   } = $props();
 
   let events = $state<TaskEvent[]>([]);
+  let proof = $state<ProofView | null>(null);
   let loadFailed = $state(false);
   let busy = $state(false);
   let error = $state<string | null>(null);
@@ -41,14 +44,20 @@
   // that read it would run on every change anywhere on the board.
   const key = $derived(task.key);
   const rev = $derived(task.rev);
-  // The record, when the task opens and when it changes (its rev), not when any other task does.
+  const status = $derived(task.status);
+  const accept = $derived(acceptLabel(proof, merged));
+  // The record and proof, when the task opens and when it changes (its rev); in review, proof is re-read on a timer
+  // because a re-check changes rows without bumping the task's rev.
   $effect(() => {
     void rev;
+    void status;
     let gone = false;
-    api.get<{ task: Task; events: TaskEvent[] }>(`/api/board/tasks/${encodeURIComponent(key)}`, { "x-morndo-background": "1" })
-      .then(r => { if (!gone) { events = r.events; loadFailed = false; } }, () => { if (!gone) loadFailed = true; })
+    const load = () => api.get<{ task: Task; events: TaskEvent[]; proof?: unknown }>(`/api/board/tasks/${encodeURIComponent(key)}`, { "x-morndo-background": "1" })
+      .then(r => { if (!gone) { events = r.events; proof = decodeProof(r.proof); loadFailed = false; } }, () => { if (!gone) loadFailed = true; })
       .catch(() => {});
-    return () => { gone = true; };
+    void load();
+    const timer = status === "review" ? setInterval(() => { void load(); }, 20_000) : null;
+    return () => { gone = true; if (timer) clearInterval(timer); };
   });
   // The panel is remounted per task ({#key}); these only answer what the board hands in: a drop on Blocked asks why,
   // and a refused drop shows its words. Neither touches a draft (a comment, a reason, an edit) in progress.
@@ -139,12 +148,17 @@
         <dt>Status</dt>
         <dd>
           <Picker value={task.status} options={statusOptions} label="Status" size="sm" disabled={busy} onPick={v => void move(v as TaskStatus)} />
-          {#if task.status === "review"}<button class="bd-btn primary sm" disabled={busy} onclick={() => void act({ action: "move", to: "done", ifRev: task.rev })}><CircleCheckBig size={14} />Accept as done</button>{/if}
+          {#if task.status === "review"}<button class="bd-btn primary sm" disabled={busy} title={accept.title} onclick={() => void act({ action: "move", to: "done", ifRev: task.rev })}><CircleCheckBig size={14} />{accept.label}</button>{/if}
+          {#if merged}<p class="merge" class:bad={merged.live === false} data-merge-label>{merged.label}</p>{/if}
+          {#each merged?.merges.filter(m => m.override !== null) ?? [] as m}
+            <p class="merge bad" data-merge-override>Accepted while not live: {m.override}</p>
+          {/each}
         </dd>
       </div>
       <div><dt>Priority</dt><dd>{PRIORITY_WORDS[task.priority]}</dd></div>
       {#if task.blockedReason}<div><dt>Blocked</dt><dd class="bad">{task.blockedReason}</dd></div>{/if}
-      <div><dt>Filed</dt><dd>{ago(task.createdAt, now)} by {task.createdBy.kind === "principal" ? "you" : task.createdBy.name}</dd></div>
+      {#if task.status === "blocked" && task.waits?.length}<div><dt>Waits on</dt><dd data-waits title="The board watches these and moves the task to do when all are over">{task.waits.map(waitWords).join(", ")}</dd></div>{/if}
+      <div><dt>Filed</dt><dd>{ago(task.createdAt, now)} by {task.createdBy.kind === "principal" ? "you" : whoOf(task.createdBy)}</dd></div>
     </dl>
 
     {#if blocking}
@@ -156,13 +170,15 @@
     {/if}
     {#if error}<p class="error" role="alert">{error}</p>{/if}
 
+    {#if proof}<ProofSection {proof} status={task.status} />{/if}
+
     <h3>Record</h3>
     {#if loadFailed}<p class="ph">Couldn't load the record.</p>{/if}
     <ol class="log">
       {#each events as e (e.rev)}
         {@const l = eventLine(e)}
         <li>
-          <Avatar name={l.who} kind={e.actor.kind === "principal" ? "principal" : e.actor.kind === "manager" ? "peer" : "agent"} size={20} />
+          <Avatar name={l.who} kind={avatarOf(e.actor)} size={20} />
           <div>
             <p><strong>{l.who}</strong> {l.text}<time title={new Date(e.at).toLocaleString()}>{clock(e.at)}</time></p>
             {#if l.comment}<p class="cmt">{l.comment}</p>{/if}
@@ -201,6 +217,10 @@
   .facts dt { font: 400 12px/18px var(--font); color: var(--muted); }
   .facts dd { margin: 0; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font: 400 13px/20px var(--font); min-width: 0; }
   .facts dd.bad { color: var(--bad-fg); }
+  /* Where the task's merges stand (B11): one quiet line under the status picker, its own row when it wraps; the bad
+     colour only when a merge is not live. */
+  .facts dd .merge { flex-basis: 100%; margin: 0; font: 400 12px/18px var(--font); color: var(--muted); }
+  .facts dd .merge.bad { color: var(--bad-fg); }
   .edit { display: grid; gap: 10px; }
   .row { display: flex; align-items: center; gap: 10px; }
   .other { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }

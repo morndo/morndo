@@ -14,7 +14,7 @@
 // can take: a row fleet.db refuses (busy past its timeout, or full) is logged with what it would have said, and never
 // takes the outcome's place (B6 V21; OWASP Logging Cheat Sheet: "Ensure failures in the logging processes/systems do
 // not prevent the application from otherwise running", read 2026-10-07).
-import { KEYED_OPS, NODE_NAME, OP_ARGS, parseBody, parseWorkerId, type OpName } from "@morndo/protocol";
+import { KEYED_OPS, LIMITS, NODE_NAME, OP_ARGS, parseBody, parseWorkerId, type OpName, type OpResult } from "@morndo/protocol";
 import type { Audit } from "../adapters/audit.ts";
 import type { Logger } from "../adapters/log.ts";
 import type { Connections } from "./connections.ts";
@@ -23,13 +23,17 @@ import { SIDE_EFFECT_OPS, failed, type Outcome } from "./requests.ts";
 
 export type Target = { workerId: string } | { node: string } | { lane: string };
 // client: the client that asks (the client API's x-morndo-client header), for the audit.
-export type OpOptions = { key?: string; timeoutMs?: number; client?: string; audit?: boolean };
+// actor: who the audit names. The owner socket's calls stay "client"; the worker socket passes "worker".
+export type OpOptions = { key?: string; timeoutMs?: number; client?: string; audit?: boolean; actor?: string };
 
 export const DEFAULT_TIMEOUT_MS = 15_000;
 export const MAX_TIMEOUT_MS = 120_000;
 // How long a name stays reserved after its lane.start was answered, for the node's next inventory to report it.
 export const RESERVE_AFTER_START_MS = 10_000;
-const PANE_OPS: ReadonlySet<OpName> = new Set<OpName>(["pane.frame", "pane.keys", "pane.send"]);
+const PANE_OPS: ReadonlySet<OpName> = new Set<OpName>(["pane.frame", "pane.keys", "pane.send", "pane.capture"]);
+// lane.stop's "exit" waits up to LIMITS.laneStopWaitMs for the window to close (fleet clients spec §5): its default
+// deadline leaves it that long plus the usual 15 s.
+const DEFAULT_TIMEOUT_OF: { readonly [O in OpName]?: number } = { "lane.stop": LIMITS.laneStopWaitMs + DEFAULT_TIMEOUT_MS };
 const EXPECT_OPS: ReadonlySet<OpName> = new Set<OpName>(["pane.keys", "pane.send"]);
 
 export class Router {
@@ -51,16 +55,24 @@ export class Router {
   async op(target: Target, op: OpName, args: Record<string, unknown>, o: OpOptions = {}): Promise<Outcome> {
     const routed = this.#route(target, op, args, o);
     const out = await routed.outcome;
-    if (SIDE_EFFECT_OPS.has(op) && o.audit !== false) this.#audited(op, routed.node, target, o, out);
+    if (SIDE_EFFECT_OPS.has(op) && o.audit !== false) this.#audited(op, routed.node, target, o, out, args);
+    if (op === "lane.start" && out.ok) this.#fellBack(routed.node, args, out.result as OpResult["lane.start"]);
     return out;
   }
 
-  // The op's audit row; one fleet.db can't take is logged with its detail (no text, keystrokes or bytes are in it).
-  #audited(op: OpName, node: string | null, target: Target, o: OpOptions, out: Outcome): void {
+  // The op's audit row; one fleet.db can't take is logged with its detail (no text, keystrokes or bytes are in it). A
+  // lane.start also keeps the role or engine it named, why, and the engine that ran (reliable lanes §3.3).
+  #audited(op: OpName, node: string | null, target: Target, o: OpOptions, out: Outcome, args: Record<string, unknown>): void {
+    const engine = op === "lane.start" ? {
+      ...(typeof args.role === "string" ? { role: args.role } : {}), ...(typeof args.engine === "string" ? { engine: args.engine } : {}),
+      ...(typeof args.reason === "string" ? { reason: args.reason } : {}),
+      ...(out.ok && (out.result as OpResult["lane.start"]).engine ? { ran: (out.result as OpResult["lane.start"]).engine?.entry } : {}),
+    } : {};
     const detail = {
       target, keyNs: o.key === undefined ? null : o.key.slice(0, o.key.indexOf(":")), outcome: out.ok ? "ok" : out.error.code, client: o.client ?? "unknown",
+      ...engine,
     };
-    try { this.#audit.record("client", `op.${op}`, node, detail); }
+    try { this.#audit.record(o.actor ?? "client", `op.${op}`, node, detail); }
     catch (e) { this.#log?.error(`audit: op.${op} on ${node ?? "?"} could not be recorded (fleet.db busy or full?): ${JSON.stringify(detail)}`, e); }
   }
 
@@ -101,7 +113,7 @@ export class Router {
     // doesn't know never reaches the node.
     const checked = parseBody(OP_ARGS[op], a) as Record<string, unknown> | null;
     if (checked === null) return refuse(failed("bad_args", `arguments that don't fit ${op}`), node);
-    const timeoutMs = Math.min(o.timeoutMs ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
+    const timeoutMs = Math.min(o.timeoutMs ?? DEFAULT_TIMEOUT_OF[op] ?? DEFAULT_TIMEOUT_MS, MAX_TIMEOUT_MS);
     const send = () => this.#connections.request(node, op, checked, { timeoutMs, ...(o.key === undefined ? {} : { key: o.key }) });
     if (op !== "lane.start" || typeof checked.name !== "string") return { node, outcome: send() };
     // Lane names are fleet-wide (spec 4): only the fleet sees every node's names, so it refuses a taken one here, and
@@ -119,6 +131,15 @@ export class Router {
         return out;
       }),
     };
+  }
+
+  // A lane that started on an engine the resolver reached only after passing over others (reliable lanes §3.3): one
+  // engine_fallback alert, so a chain that keeps falling back is seen, not found later in the lane's own output.
+  #fellBack(node: string | null, args: Record<string, unknown>, result: OpResult["lane.start"]): void {
+    const engine = result.engine;
+    if (!engine?.skipped?.length) return;
+    try { this.#audit.alert("engine_fallback", node, { lane: args.name, ...(engine.role ? { role: engine.role } : {}), entry: engine.entry, skipped: engine.skipped }); }
+    catch (e) { this.#log?.error(`audit: the engine_fallback alert of ${String(args.name)} could not be recorded`, e); }
   }
 
   #reserved(name: string): boolean {

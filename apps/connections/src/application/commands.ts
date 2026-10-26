@@ -3,7 +3,7 @@ import { findConnection, type Actor, type Mode, type Override, type RepoRule, ty
 import type { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
 import { ConnectionsService } from "./connections-service.ts";
 import { buildPage, type OutsideChain, type PageUsage } from "./page.ts";
-import type { Deps, Failure } from "./ports.ts";
+import type { ConnectionLifecycle, Deps, Failure, PoolNames } from "./ports.ts";
 import { RoutingService } from "./routing-service.ts";
 
 type Out = Result<void, Failure>;
@@ -47,9 +47,10 @@ export type BoundCommands = {
 
 const done = (result: Out): { ok: true } | { ok: false; problem: string } => (result.ok ? { ok: true } : { ok: false, problem: result.error.problem });
 
-export function bindCommands(deps: Deps, usage: () => Readonly<Record<string, PageUsage>> = () => ({})): BoundCommands {
-  const routing = new RoutingService(deps);
-  const connections = new ConnectionsService(deps);
+export function bindCommands(deps: Deps, usage: () => Readonly<Record<string, PageUsage>> = () => ({}), pools: () => readonly PoolNames[] = () => [], life?: ConnectionLifecycle): BoundCommands {
+  const routing = new RoutingService(deps, pools);
+  // A revoke from the page tells the key pools as a revoke at the machine does.
+  const connections = new ConnectionsService(deps, life);
   const current = () => deps.store.load().version;
   const stale = (version: number) => version !== current();
   const outside = (): OutsideChain[] => deps.engines.chains().map(chain => ({ role: chain.role, chain: chain.chain, risk: chain.risk }));
@@ -58,7 +59,7 @@ export function bindCommands(deps: Deps, usage: () => Readonly<Record<string, Pa
       const loaded = deps.store.load();
       return buildPage({
         version: loaded.version, directory: loaded.directory, policy: loaded.policy, presets: deps.catalog.presets(),
-        alerts: deps.alerts.recent(), outside: outside(), usage: usage(), now: deps.clock.now(),
+        alerts: deps.alerts.recent(), outside: outside(), usage: usage(), now: deps.clock.now(), pools: pools(),
       });
     },
     priority: (body, command) => (stale(body.version) ? { ok: false, problem: "conflict" } : done(applyPriority(routing, body, command))),

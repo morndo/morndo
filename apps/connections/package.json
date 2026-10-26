@@ -11,7 +11,8 @@
   },
   "bin": {
     "morndo-keys": "./src/main.ts",
-    "morndo-secrets": "./src/secrets-main.ts"
+    "morndo-secrets": "./src/secrets-main.ts",
+    "morndo-usage-claude": "./src/adapters/usage-claude-main.ts"
   },
   "exports": {
     "./compose": "./src/compose.ts",
@@ -23,6 +24,7 @@
     "@morndo/protocol": "0.0.0",
     "@morndo/service-kit": "0.0.0",
     "age-encryption": "0.3.1",
-    "better-sqlite3": "^13.0.3"
+    "better-sqlite3": "^13.0.3",
+    "openpgp": "6.3.2"
   }
 }

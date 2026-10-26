@@ -25,6 +25,8 @@ afterEach(async () => {
 });
 
 const emptyInventory = { refresh: async () => ({ invVersion: 1, stamp: null, panes: [], lanes: [], rows: [] }) } as unknown as Inventory;
+// The pane and delivery parts of lane.start: never reached, since the host is asked first.
+const unused = (): never => { throw new Error("not reached: the host is asked first"); };
 
 function start(host: (opts: { socket: string | null }) => Promise<unknown>) {
   const home = tempHome();
@@ -37,6 +39,7 @@ function start(host: (opts: { socket: string | null }) => Promise<unknown>) {
   const ops = laneOps({
     node: "pc", policy: { ...DEFAULT_POLICY, tmuxSocket: tmux.socket }, inventory: emptyInventory,
     home: home.home, stateDir: join(home.home, "state"), stamp: async () => "3fa2c1d0", host,
+    tmux: { capture: unused, pasteLiteral: unused, sendKeyNames: unused }, send: unused, deliver: unused, sessions: () => new Map(),
   }) as OpTable;
   const ex = new OpExecutor({ ops, allowed: new Set<OpName>(["lane.start"]), doneKeys, invVersion: () => 1, log: captureLog().log });
   const call = (key: string) => ex.handle({

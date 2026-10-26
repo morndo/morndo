@@ -40,7 +40,7 @@ beforeAll(async () => {
   config = {
     dataDir: dir, port: 0, origin: "https://hub.example.test", rpId: "hub.example.test", rpName: "Morndo",
     requireProxyIdentity: true, principalLogin: LOGIN, tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 1000,
-    managerWindow: "manager", ledgerPath: null, paneLock: null, managerInbox: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
   };
   const access = new AccessService(store, passkeys(config));
   const tmux = { listWorkers: async () => [], capture: async () => null, captureMany: async () => new Map<string, string | null>(), send: async () => ({ problem: null, typedAt: Date.now() }) };
@@ -50,7 +50,7 @@ beforeAll(async () => {
     ledger: null, store, managerName: "manager", send: async () => ({ problem: null, typedAt: 0 }),
   });
   const remote = new RemoteService({ store, terminal: { frame: async () => null, keys: async () => false }, panes: () => ["%1"], desktop: () => null });
-  http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, observation, steering: new SteeringService(store, tmux), escalations, remote });
+  http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, store, observation, steering: new SteeringService(store, tmux), escalations, remote });
   await http.ready;
   base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
 });
@@ -155,7 +155,7 @@ describe("health", () => {
     expect(res.status).toBe(200);
     expect(ServiceHealth.safeParse(body).success).toBe(true);
     const root = JSON.parse(readFileSync(join(import.meta.dirname, "../../../package.json"), "utf8")) as { version: string };
-    expect(body).toMatchObject({ version: root.version, schema: SCHEMA_VERSION, ready: true, inFlight: [{ kind: "http", id: "POST /api/workers/%1/send" }] });
+    expect(body).toMatchObject({ version: root.version, commit: expect.stringMatching(/^[0-9a-f]{40}$/), schema: SCHEMA_VERSION, ready: true, held: false, inFlight: [{ kind: "http", id: "POST /api/workers/%1/send" }] });
   });
   it("through the proxy, with no session, reports ready and nothing else", async () => {
     const res = await req("/api/health");

@@ -3,7 +3,7 @@
 // wall-clock jump (plan Review Focus 4).
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { OpName } from "@morndo/protocol";
+import { LIMITS, type Delivery, type OpName } from "@morndo/protocol";
 import { Flight } from "@morndo/service-kit";
 import { ALL_OPS } from "../src/config.ts";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
@@ -49,13 +49,14 @@ describe("the shared rules", () => {
     for (const args of [
       { ...sendArgs(), workerId: "%3" },                               // a legacy pane id is not a worker id
       { ...sendArgs(), workerId: "pc.0a1b2c3d.04" },                    // a leading zero: not the pane's one worker ID
-      { ...sendArgs(), text: "x".repeat(8001) },                        // over LIMITS.maxSendText
+      { ...sendArgs(), text: "x".repeat(LIMITS.maxMessageText + 1) },  // over LIMITS.maxMessageText
       { ...sendArgs(), text: "" },
       { ...sendArgs(), expect: { server: "XYZ", window: "api" } },
       { ...sendArgs(), expect: { server: "0a1b2c3d", window: "a\tb" } },  // a control character in the window name
     ]) {
       expect(await call("pane.send", args, { key: "hub:k" })).toMatchObject({ ok: false, error: { code: "bad_args" } });
     }
+    expect(await call("pane.send", sendArgs("ü".repeat(LIMITS.maxMessageText)), { key: "hub:long" })).toMatchObject({ ok: true });   // a whole message, to the new bound
   });
   it("refuses a key on an op that takes none, as the fleet does (plan Contracts)", async () => {
     const { call } = executor({
@@ -210,7 +211,7 @@ describe("deadlines (spec §5.3) under a wall-clock jump (Review Focus 4)", () =
         if (a.data === "blocker") { await new Promise(r => setTimeout(r, 600)); acted.push(a.data); return ok<"pane.keys">({ ok: true }); }
         const late = ctx.ready();
         if (late) return { ok: false, error: late };
-        acted.push(a.data);
+        acted.push(a.data ?? "");
         return ok<"pane.keys">({ ok: true });
       }),
     });
@@ -243,6 +244,7 @@ describe("a hold, and a stop that waits for the op in flight", () => {
       "connections.narrow": effect(() => "q", async () => ok<"connections.narrow">({ ok: true })),
       "lane.stop": effect(() => "q", async () => ok<"lane.stop">({ ok: true })),
       "job.cancel": effect(() => "q", async () => ok<"job.cancel">({ ok: true })),
+      "delivery.cancel": effect(a => `delivery:${a.id}`, async () => ok<"delivery.cancel">({ delivery: { id: "hub:q", state: "given_up", why: "cancelled" } as Delivery })),
     }, ALL_OPS, { held: () => true });
     expect(await x.call("pane.send", sendArgs(), { key: "hub:held" })).toMatchObject({ ok: false, error: { code: "updating", executed: "no" } });
     expect(x.doneKeys.status("hub:held")).toEqual({ state: "unknown" });
@@ -250,6 +252,7 @@ describe("a hold, and a stop that waits for the op in flight", () => {
     expect(await x.call("connections.narrow", { version: 1, name: "work", action: "off" }, { key: "hub:narrow" })).toMatchObject({ ok: true });
     expect(await x.call("lane.stop", { name: "gone" }, { key: "hub:stop" })).toMatchObject({ ok: true });
     expect(await x.call("job.cancel", { id: "job-1", token: "lane-token" })).toMatchObject({ ok: true });
+    expect(await x.call("delivery.cancel", { id: "hub:q" }), "delivery.cancel while held").toMatchObject({ ok: true });
   });
   it("a stop waits until the keyed op finishes and records done", async () => {
     let release: () => void = () => {};

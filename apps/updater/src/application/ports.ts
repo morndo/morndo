@@ -1,0 +1,277 @@
+// The updater's ports (design §4.6). The application decides; these touch the network, the disk and the clock.
+import type {
+  Channel, DatabaseName, DbState, HealthReport, InstallMethod, KeySet, SafePointReport, Update, UpdateMode,
+  UpdateService, UpdateSettings, Version, Window,
+} from "@morndo/domain";
+import type { RolloutWire, UpdateStateFile } from "@morndo/protocol";
+
+// A signed document as fetched: its bytes and the bytes of the signature file beside it (`<url>.sig`), both unparsed.
+export type Signed = { bytes: Uint8Array; signature: Uint8Array };
+// Why a fetch failed: the network or TLS, an HTTP status other than 200, a body over its cap, or the timeout.
+export class FetchFailed extends Error {
+  readonly reason: "network" | "status" | "too_large" | "timeout";
+  constructor(reason: "network" | "status" | "too_large" | "timeout", message: string) {
+    super(message); this.name = "FetchFailed"; this.reason = reason;
+  }
+}
+
+// The feed host (§9.5, §9.6): keys/<n>.json, <channel>.json and each Release's manifest.json, each with its .sig.
+export interface ReleaseFeed {
+  /** keys/<version>.json and its .sig; null when that version is not published (HTTP 404). Capped at 64 KiB. */
+  keySet(version: number): Promise<Signed | null>;
+  /** <channel>.json and its .sig. Capped at 64 KiB. */
+  channel(name: Channel): Promise<Signed>;
+  /** The Manifest at `url` and `${url}.sig`; the Manifest is capped at `maxBytes` (its Feed entry's manifestSize). */
+  manifest(url: string, maxBytes: number): Promise<Signed>;
+}
+
+// One Artifact download into the downloads directory. The body is written up to maxBytes and no further.
+export type Download = { path: string; size: number; overLimit: boolean; cut: boolean };
+export interface ArtifactStore {
+  /** overLimit: the server had more than maxBytes; cut: the connection ended before the body did.
+   *  deadlineMs: the download's one wall, idle gaps and slow dribbles included. */
+  fetch(url: string, o: { name: string; maxBytes: number; timeoutMs: number; deadlineMs: number }): Promise<Download>;
+  /** Removes the download named `name`, if any. */
+  discard(name: string): void;
+}
+
+// What the verifier found for one SSH signature block (PROTOCOL.sshsig): `valid` is true only for an ssh-ed25519 key,
+// the sha512 hash and a signature that verifies over the message under the namespace the block itself states.
+export type SignatureFact = { valid: boolean; fingerprint: string; namespace: string; reason: string };
+export interface Verifier {
+  /** One fact per armored block in `signatures` (a .sig file may hold several, one per signer). Never throws. */
+  signatures(message: Uint8Array, signatures: Uint8Array): SignatureFact[];
+  sha256(bytes: Uint8Array): string;
+  sha256File(path: string): Promise<string>;
+}
+
+export type Layout = { method: InstallMethod; current: string | null; previous: string | null; good: string | null };
+export type TreeFinding = { path: string; problem: "list_digest" | "missing" | "changed" | "mode" | "extra" | "unreadable" };
+export interface Installer {
+  /** How this machine runs Morndo: "updater" when ~/.local/share/morndo-releases/current is a link to a Version. */
+  layout(): Layout;
+  /** trust/keys.json shipped inside the current Version, or null. */
+  shippedKeySet(): Uint8Array | null;
+  /** Removes leftover .staging-* directories (call only while holding the lock). */
+  sweep(): void;
+  /** Whether <version>/ is installed (promoted). */
+  has(version: string): boolean;
+  /** Unpacks the archive into .staging-<version>/ and checks it against its signed file list (RL1 file_list).
+   *  ok false: the staging directory is already removed, `reason` says what was refused. */
+  unpack(archive: string, version: string, o: { filesSha256: string; maxBytes: number }): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Runs .staging-<version>/bin/morndo --version; ok when it prints exactly `version`. */
+  selftest(version: string): Promise<{ ok: true } | { ok: false; reason: string }>;
+  /** Writes install.json, makes the tree read-only, renames .staging-<version> to <version>. */
+  promote(version: string, record: { manifestSha256: string; filesSha256: string; at: number }): void;
+  /** Removes .staging-<version>/ if present. */
+  discard(version: string): void;
+  /** Removes an installed <version>/ tree; refuses (throws) while current, previous or good points at it. */
+  removeVersion(version: string): void;
+  /** §6.2 step 6: `previous` first, then `current` — each a new link beside the old, renamed over it, the
+   *  releases directory synced after each. A crash between the two leaves both links on the old Version.
+   *  `previous: null` removes the previous link (a first install has none to keep). */
+  swap(pair: { current: string; previous: string | null }): void;
+  /** §6.5 step 2: the recorded pre-update pair goes back, `current` first, then `previous`, each the same
+   *  atomic relink as swap's. A crash between the two leaves both links on the pre-update Version.
+   *  `previous: null` removes the previous link (there was none before the update). */
+  swapBack(pair: { current: string; previous: string | null }): void;
+  /** Points `good` at the last committed Version (§5), the same atomic way. */
+  setGood(version: string): void;
+  /** Removes every installed <version>/ not named — never the ones current, previous or good point at (§6.2 step 10). */
+  prune(keep: readonly string[]): void;
+  /** Re-checks an installed Version against its files.json (and that list against `filesSha256` when known). */
+  verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]>;
+  /** Free bytes on the file system holding the releases directory. */
+  freeBytes(): number;
+}
+
+export type TrustState = { keySet: KeySet | null; highestFeedSeq: { stable: number; latest: number } };
+export type StagedRecord = { version: string; manifestSha256: string; filesSha256: string; at: number; manifest: string };
+export type CheckRecord = {
+  at: number; channel: Channel; outcome: string; detail: string; version: string | null;
+  feedSeq: number | null; feedExpiresAt: number | null;
+};
+// The step record (RL4, §6.2): the Update as it stands in update.db — the domain's own fields plus the format
+// its steps were written in, when the attempt began, the marks recorded done so far, the attempt id this Update
+// reports itself under (§5.4: the offer's on a node, the control plane's own minted one — the fleet's word, not
+// this row's id, and null for the records written before it), and two fields only a walking record carries: the
+// health baseline this attempt was judged against (§6.7 — a commit writes it down for the next boot apply, and a
+// recovery that finishes the attempt still knows it), and, for a rollback, the id of the update whose Backups it
+// would restore (§6.5: the commit's own, not this attempt's).
+export type StoredUpdate = Update & {
+  format: number; startedAt: number; doneMarks: string[];
+  judgeBaseline: Record<string, string[]> | null;
+  backupOf: string | null;
+  attempt: string | null;
+};
+// A step record that has ended (recentUpdates, for --status): when it ended, or null while it runs.
+export type UpdateHistory = StoredUpdate & { finishedAt: number | null };
+export interface UpdateStore {
+  /** The apply lock (RL4, §5 apply.lock): held until release() or the process dies; null when another holds it. */
+  tryLock(): { release(): void } | null;
+  trust(): TrustState;
+  /** Saves the trust state; never lowers a Key set version or a Feed number (RL3), whatever it is given. */
+  saveTrust(t: TrustState): void;
+  highestCommitted(): string | null;
+  badVersions(): string[];
+  recordStaged(r: StagedRecord): void;
+  /** The newest staged record whose Version is above every committed one, or null. */
+  staged(): StagedRecord | null;
+  /** Drops staged records whose Version is above both `version` and the highest committed Version, so `staged()`
+   *  is the one a named `--to` just staged. A record at or below the highest committed Version stays. */
+  retireStagedAbove(version: string): void;
+  versionRecord(version: string): StagedRecord | null;
+  recordCheck(r: CheckRecord): void;
+  /** Newest first. */
+  checks(limit: number): CheckRecord[];
+  /** The newest check that carries the feed's word, however far back among the kept rows, or null. A later
+   *  refusal leaves the last good word standing (§4.5): ten failed checks in a row must not hide it. */
+  lastFeedCheck(): CheckRecord | null;
+  /** Writes the step record: one transaction, synced, before the step it stands for runs (RL4). */
+  saveUpdate(u: StoredUpdate): void;
+  /** The newest update not in a terminal state, or null: what a recovery picks up (§6.6). */
+  openUpdate(): StoredUpdate | null;
+  /** Ends an attempt; `state` names how (§4.4's terminal states a finish may write). Unknown id: throws. */
+  finishUpdate(id: string, state: "committed" | "abandoned" | "rolled_back" | "rollback_failed", at: number): void;
+  /** The commit's own memory (RL2): highestCommitted only ever rises. The baseline is §6.7's — what passed at
+   *  the commit is what the next boot apply holds the services to — null when none was judged. */
+  recordCommitted(version: string, at: number, baseline: Record<string, string[]> | null): void;
+  /** The last commit's recorded baseline (§6.7), or null: what a boot apply judges the services against. */
+  commitBaseline(): Record<string, string[]> | null;
+  /** A Version that failed here is never auto-installed again (RL7). */
+  recordBad(version: string, at: number): void;
+  /** The Manifest text recorded when the Version was staged, or null (staged before it was kept). */
+  manifestOf(version: string): string | null;
+  /** The last attempts, newest first (§8.1 --status). */
+  recentUpdates(limit: number): UpdateHistory[];
+  /** RL12: a rollback here halts that Version's Rollout; the fleet acts on the record (PR 6). */
+  recordHalt(version: string, reason: string, at: number): void;
+  /** Every halt recorded here, newest first. */
+  halts(): { version: string; reason: string; at: number }[];
+  /** This node's drawn jitter for a Version's Rollout (§7), or null: none drawn yet. */
+  jitterOf(version: string): number | null;
+  /** Draws it once and keeps it (§7): a Version that already has an entry keeps the one it has. */
+  recordJitter(version: string, until: number): void;
+  /** True the first time this record raises this kind of Alert, false every later time: the recovery unit runs
+   *  every 5 minutes, and a record it cannot act on is one Alert, not one each run. */
+  firstAlert(updateId: string, kind: AlertKind, at: number): boolean;
+}
+
+// The fleet's word for the Rollout (updates §4.5, §6.7, §7): what the control plane committed, the Rollout itself,
+// and the offer this machine's agent last heard with it — the Version and the attempt id a node applies under
+// (§5.4). Only reads: the fleet's write routes are closed (§4.3), so the updater's own word out is its state file,
+// which the fleet reads itself; a node's view is what its agent last heard (fleet-view.json). view() null is "no
+// word": a fleet that cannot be asked, or an agent that never heard.
+export type FleetWord = {
+  controlPlane: { version: string; commit: string | null } | null;
+  rollout: RolloutWire | null;
+  offer: { version: string; attempt: string } | null;
+  observedAt: number;
+};
+// One node as the control plane's skew gate asks for it (§7, RL11): the highest agent protocol it speaks, null when
+// it is offline or unknown; `joined` and `revoked` as the fleet itself keeps them.
+export type FleetNode = { name: string; agentProtocol: number | null; joined: boolean; revoked: boolean };
+export interface FleetView {
+  view(): Promise<FleetWord | null>;
+  /** Every node the fleet knows (the control plane's skew gate, §7); null when the fleet cannot be asked. */
+  nodes(): Promise<FleetNode[] | null>;
+}
+
+// What the updater writes of itself (updates §6.3, §7): state.json, one write per outcome — staged, deferred,
+// applying, committed, rolled back, rollback_failed. A port so the application stays free of I/O; the adapter
+// writes atomically at 0600. Never throws: a state file that cannot be written changes no outcome.
+export interface UpdateStateSink {
+  write(s: UpdateStateFile): void;
+}
+
+// The settings file with the soak of §4.5: null is the domain's default. A MachineSettings is an UpdateSettings
+// everywhere the domain reads one.
+export type MachineSettings = UpdateSettings & { soakMinutes: number | null };
+
+export interface SettingsSource { read(): MachineSettings }
+
+// One edit of the settings file (§8.1, §8.3). The application names the change; the adapter reads the file again,
+// applies this and nothing else, and writes it back. A value the file already holds is still a write.
+export type SettingsChange =
+  | { kind: "channel"; channel: Channel }
+  | { kind: "mode"; mode: UpdateMode }
+  | { kind: "pin"; version: Version }
+  | { kind: "unpin" }
+  | { kind: "window"; window: Window }
+  | { kind: "windowAny" };
+
+export interface SettingsSink { change(c: SettingsChange): MachineSettings }
+export interface Clock { now(): number }
+
+// ---- the apply's own ports (§4.6); the adapters for the machine come with the apply's PR, tests fake them
+
+// The machine's services (§4.6 ServiceManager). The adapters are systemd and launchd; tests fake it.
+export interface ServiceManager {
+  /** The Morndo services this machine runs, of hub, fleet, node. */
+  services(): UpdateService[];
+  stop(s: UpdateService): Promise<void>;
+  start(s: UpdateService): Promise<void>;
+  /** How many times the service manager restarted it since `since` (systemd NRestarts). */
+  restarts(s: UpdateService): Promise<number>;
+  /** Render the units of `version` and reload the manager (§6.2 step 6). `role`, when given, renders only that
+   *  role's service units beside the update units — what `morndo install` writes for the role it was asked for.
+   *  Only files Morndo wrote are replaced or removed: one of a shipped name without Morndo's mark throws, unless
+   *  `replaceForeign`, which keeps it aside first. Returns where each replaced file was kept. */
+  renderUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { replaceForeign?: boolean }): Promise<string[]>;
+  /** The unit files a render of `version` for `role` would replace that are not Morndo's (no mark of ours). `tree`:
+   *  read the units from that unpacked tree, for an install whose Version is not in the releases yet. */
+  foreignUnits(version: string, role?: { services: readonly UpdateService[] }, o?: { tree?: string }): Promise<string[]>;
+  /** RL13: true when the tmux server sits inside the node agent's unit. */
+  tmuxInAgentUnit(): Promise<boolean>;
+  /** §6.2's apply runs as its own unit, so a crash of whoever asked for it never interrupts the walk: start
+   *  `morndo-update-apply@<version>.service` and return when the unit's own run has ended. `wait: false`
+   *  (PR 6c's --detach, the hub's one command) returns at the start — systemd's --no-block — and the unit's
+   *  own record, not this caller, tells how the walk ended. */
+  runApply(version: string, o?: { wait?: boolean }): Promise<void>;
+  /** `morndo install`'s last act: enable and start the update timers, the boot and recovery units, and the
+   *  role's own services (systemd enable --now; launchd bootstraps the plists). */
+  enable(units: readonly string[]): Promise<void>;
+  /** Whether the user's services keep running after logout (systemd linger): `morndo install` refuses without it. */
+  lingerEnabled(): Promise<boolean>;
+}
+export interface RoleProbe {
+  /** Whether the service has read hold.json (its health's `held`, from service-kit HoldWatch); null: no answer. */
+  seesHold(s: UpdateService): Promise<boolean | null>;
+  safePoint(s: UpdateService): Promise<SafePointReport | null>;
+  health(s: UpdateService): Promise<HealthReport | null>;
+}
+export interface SchemaInspector {
+  read(db: DatabaseName): DbState | null;
+}
+export type BackupResult = { ok: true; schema: number } | { ok: false; reason: string };
+export interface Backup {
+  take(updateId: string, db: DatabaseName): Promise<BackupResult>;
+  has(updateId: string, db: DatabaseName): boolean;
+  restore(updateId: string, db: DatabaseName): void;
+  prune(keep: readonly string[]): void;
+}
+export interface HoldWriter {
+  write(h: { services: UpdateService[]; reason: "drain" | "probation"; version: string; since: number }): void;
+  clear(): void;
+}
+// §5's `applying` mark: present from the drain until the Update ends in a terminal state — committed, abandoned,
+// rolled back, rollback_failed — and the only thing the recovery unit runs for. What keeps the mark is what keeps
+// the record open: a rollback waiting on tmux, and an attempt a dead process left mid-step.
+export interface ApplyingMarker {
+  set(updateId: string): void;
+  clear(): void;
+  present(): boolean;
+}
+export interface Sleeper { sleep(ms: number): Promise<void> }
+export type AlertKind =
+  | "update_rolled_back" | "update_rollback_failed" | "update_rollback_waiting" | "update_deferred"
+  | "update_unknown_record" | "update_check_already_failing" | "update_origin_not_judged";
+export interface AlertSink { raise(kind: AlertKind, detail: string): void }
+
+// RL10, before the journals arrive (PR 5c): a restore must not undo a revocation. During a probation that may restore,
+// the services still take revocations (RL9), and those rows live only in the database the restore would replace.
+export interface Revocations {
+  /** The ids revoked in the live database that are not revoked in this update's Backup of it: what a restore would
+   *  bring back. Empty for a database that holds no revocations, or when there is no Backup to compare. */
+  droppedBy(updateId: string, db: DatabaseName, target: string): string[];
+}

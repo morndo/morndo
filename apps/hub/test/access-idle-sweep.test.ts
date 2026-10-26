@@ -97,7 +97,7 @@ beforeEach(async () => {
   const config: Config = {
     dataDir: dir, port: 0, origin: ORIGIN, rpId: "hub.example.test", rpName: "Morndo",
     requireProxyIdentity: true, principalLogin: LOGIN, tmuxSocket: null, tmuxSession: null, claudeDir: null, webDir: web, officeName: null, pollMs: 1000, quietAfterMs: 1000,
-    managerWindow: "manager", ledgerPath: null, paneLock: null, managerInbox: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
+    managerWindow: "manager", ledgerPath: null, paneLock: null, vnc: null, filesDir: join(dir, "files"), inboxDir: join(dir, "inbox"),
   };
   access = new AccessService(store, fakePasskeys(), () => now);
   const tmux = { listWorkers: async () => [], capture: async () => null, captureMany: async () => new Map<string, string | null>(), send: async () => ({ problem: null, typedAt: Date.now() }) };
@@ -111,7 +111,7 @@ beforeEach(async () => {
     policy: () => access.policy(), now: () => now,
   });
   http = startHttp({
-    config, identity: loadOrCreateIdentity(dir), access, observation: new ObservationService(tmux, 1000),
+    config, identity: loadOrCreateIdentity(dir), access, store, observation: new ObservationService(tmux, 1000),
     steering: new SteeringService(store, tmux, () => now, () => access.policy()), escalations, remote,
   });
   await http.ready;

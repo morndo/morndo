@@ -17,6 +17,7 @@ const SMALL: Limits = {
   engineReads: { capacity: 2, refillPerSecond: 0.01 },
   agentCalls: { capacity: 3, refillPerSecond: 0.01 },
   agentRefusals: { capacity: 2, refillPerSecond: 0.01 },
+  transcriptions: { capacity: 2, refillPerSecond: 0.01 },
 };
 let hub: InProcessHub;
 beforeEach(async () => { hub = await startInProcessHub({ limits: SMALL }); });
@@ -90,6 +91,15 @@ describe("per Endpoint", () => {
     expect((await up()).status).toBe(200);
     expect((await up()).status).toBe(200);
     const r = await up();
+    expect(r.status).toBe(429);
+    expect(r.headers.get("retry-after")).toMatch(/^\d+$/);
+  });
+  it("transcription requests have their own bucket, spent even when the feature is off", async () => {
+    const c = await cookie();
+    const ask = () => post("/api/transcriptions", { id: "v1", recording: { kind: "upload", id: "nope" }, language: "auto" }, { cookie: `__Host-morndo=${c}` });
+    expect((await ask()).status).toBe(404);   // no plugin on this install, but the ask is still an ask
+    expect((await ask()).status).toBe(404);
+    const r = await ask();
     expect(r.status).toBe(429);
     expect(r.headers.get("retry-after")).toMatch(/^\d+$/);
   });

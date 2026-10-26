@@ -1,6 +1,7 @@
 // How decisions are shown (ADR-0006 addendum "Decisions"): urgency, due labels, groups, and what each refusal means
 // in plain words. The rules themselves live in the domain and the hub; this only presents their results.
 import type { DecisionItem, LedgerState } from "@morndo/protocol";
+import { WAITING } from "../queue-words.ts";
 
 export type { DecisionItem, LedgerState };
 export type Board = { items: DecisionItem[]; ledger: LedgerState };
@@ -38,6 +39,18 @@ export function dueLabel(deadline: number, now: number): string {
   return `Due ${d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}${at}`;
 }
 
+const dayStart = (t: number) => { const d = new Date(t); return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime(); };
+
+// Calendar days in the principal's time zone, the same day-count dueLabel uses. A date-only due is the end of that day.
+export function dueLine(deadline: number, now: number): string {
+  const label = dueLabel(deadline, now);
+  if (deadline <= now) return label;
+  const days = Math.round((dayStart(deadline) - dayStart(now)) / 86_400_000);
+  if (days > 1) return `${label} (in ${days} days)`;
+  if (days === 1) return `${label} (in 1 day)`;
+  return label;
+}
+
 export function ago(t: number, now: number): string {
   const m = Math.round((now - t) / 60_000);
   if (m < 1) return "just now";
@@ -47,25 +60,44 @@ export function ago(t: number, now: number): string {
   return days === 1 ? "yesterday" : `${days} days ago`;
 }
 
-// ADR-0010: a Decision for the manager waits in the manager's inbox until it reached the manager. Why it waits, in
-// words (the inbox's reasons; one this app doesn't know says nothing more than "queued").
-const INBOX_WAITS: Record<string, string> = {
-  menu: "a menu is open in the manager's terminal; it goes in once that's answered",
-  foreign_text: "the manager's input box has text that isn't from Morndo; it goes in once that's sent or cleared",
-  no_manager: "the manager isn't running right now; it goes in once it's back",
-  busy: "the manager is busy; it takes it when it gets to it",
-  lock: "another message is being typed into the manager right now",
-  unseen: "the manager's screen can't be read right now",
-  unconfirmed: "it was typed, but the manager hasn't shown it yet; the box owner has been told",
-  lost_in_queue: "it fell out of the manager's own queue; the box owner has been told",
-};
-export type DeliveryLine = { state: "queued"; why: string | null } | { state: "delivered"; at: number | null };
+// An answer for the manager in the fleet's delivery queue (E13; fleet-clients §9.1): queued (with why it waits, in words),
+// delivered (and when), or may have been delivered. Null for an answer that went straight in.
+export type DeliveryLine = { state: "queued"; why: string | null } | { state: "delivered"; at: number | null } | { state: "uncertain" };
 export function deliveryLine(d: DecisionItem): DeliveryLine | null {
   const del = d.decision?.delivery;
   if (!del) return null;
   if (del.state === "delivered") return { state: "delivered", at: del.at };
-  const reason = d.inbox?.reason ?? null;
-  return { state: "queued", why: reason ? INBOX_WAITS[reason] ?? null : null };
+  if (del.state === "uncertain") return { state: "uncertain" };
+  return { state: "queued", why: d.waiting ? WAITING[d.waiting] ?? null : null };
+}
+
+// A decision refused before it starts, in the words catch-up, Today and the phone sheet share (§6.3).
+export const OFFLINE_DECISION = "You're offline. A decision goes only while Morndo is connected, so nothing was sent; it stays here.";
+export const STILL_OFFLINE = "Still offline. It goes when you try again online.";
+// The passkey check didn't finish. Catch-up's word is "Not answered" (§6.3: an answer goes as catch-up's do).
+export const PASSKEY_UNFINISHED = "Not answered: the passkey check didn't finish.";
+// A passkey confirm that cannot be sent, in the words the catch-up card and the phone sheet share.
+export const STEP_UP_CHANGED = "Not sent: the brief changed since that answer, so it was not sent.";
+export const STEP_UP_MISMATCH = "Not sent: this isn't the answer that passkey check was for.";
+
+// Where a sent answer stands, in one line: the phone's sheet and the desktop modal say it the same way. The feed's
+// via is the whole truth — the hub derives it per client — so it holds after a reload and on a second tab:
+// "Answered on another device" when the record says elsewhere, "Sent. You chose …" when it says here. A record that
+// doesn't say stays neutral: it claims neither.
+export function standingLine(item: DecisionItem, whom: string): string {
+  const d = item.decision;
+  if (!d) return "Sent. The manager gets it as your decision and acts on it.";
+  const where = d.via;
+  if (where === "elsewhere") {
+    const said = d.choice.kind === "option" ? `“${d.choice.label}”` : "in words";
+    return `Answered on another device: ${said}.`;
+  }
+  const choice = d.choice.kind === "option" ? d.choice.label : "in words";
+  if (where !== "here") return `Answered: ${choice}.`;
+  const dl = deliveryLine(item);
+  if (dl?.state === "queued") return `Queued${dl.why ? `, ${dl.why}` : ""}.`;
+  if (dl?.state === "delivered") return `Delivered. You chose ${choice}.`;
+  return `Sent. You chose ${choice}. ${whom} has it.`;
 }
 
 export const REFUSALS: Record<string, string> = {

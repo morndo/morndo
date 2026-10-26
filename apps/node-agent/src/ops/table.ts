@@ -1,18 +1,29 @@
 // Every op of the protocol (plan Contracts: OpName), wired to this node's tmux, Claude Code files, disk and database.
+// Fleet clients:
+// - lane.deliver and delivery.cancel go to the deliverer;
+// - pane.capture and pane.keys by name use the policy's tmux server;
+// - lane.start and lane.stop use the policy's launcher and protected names; they type /exit through the executor, and
+//   queue a first prompt with the deliverer.
+// Memory (ADR-0031): memory.sync writes into the node's state directory and the policy's memory.skillDirs.
+// The deliverer and the executor are made from this table, so it reaches them late (runtime.ts), by the time an op runs.
 import { join } from "node:path";
 import type Database from "better-sqlite3";
-import { paneLock, sessionRegistry, stampServer, terminalAdapter, tmuxAdapter, type PaneLock } from "@morndo/node-ops";
+import { paneLock, stampServer, terminalAdapter, type PaneLock, type SessionSource, type Tmux } from "@morndo/node-ops";
 import type { AgentConfig } from "../config.ts";
+import type { Deliverer, PaneView } from "../deliveries/deliverer.ts";
 import type { AgentPaths } from "../paths.ts";
+import { deliveryOps } from "./delivery-ops.ts";
 import type { DoneKeys } from "./done-keys.ts";
-import { ok, read, type OpTable } from "./executor.ts";
+import { ok, read, type OpTable, type Reply, type Request } from "./executor.ts";
 import { fileOps } from "./file-ops.ts";
 import type { Inventory } from "./inventory.ts";
-import { laneOps } from "./lane-ops.ts";
+import { laneOps, type LaneWaits } from "./lane-ops.ts";
+import { memoryOps, skillDirsOf } from "./memory-ops.ts";
 import { nodeOpener, relayRef } from "./node-files.ts";
 import { paneOps, type GuardInput } from "./pane-ops.ts";
 import { transcriptOps } from "./transcript-ops.ts";
 import type { UploadInbox } from "./upload-inbox.ts";
+import { updateOps, type CommandRunner } from "./update-ops.ts";
 import { worktreeOps } from "./worktree-ops.ts";
 
 export type OpsDeps = {
@@ -22,13 +33,27 @@ export type OpsDeps = {
   doneKeys: DoneKeys;
   inventory: Inventory;
   inbox: UploadInbox;
-  registry: ReturnType<typeof sessionRegistry>;
+  registry: SessionSource;
   now: () => number;
   guard?: (g: GuardInput) => boolean;
   lock?: (path: string, waitS: number) => PaneLock;
+  tmux: Tmux;                                              // the policy's tmux server
+  panes: PaneView;                                         // the deliverer's view (lane.deliver reads it first)
+  deliverer: () => Deliverer;                              // late: made from the executor this table goes into
+  send: (req: Request) => Promise<Reply>;                  // late: that executor (lane.stop's /exit and its answer)
+  laneWaits?: Partial<LaneWaits>;
+  runCommand?: CommandRunner;                              // update.apply's start, faked in tests (update-ops.ts)
 };
 
 export function claudeDir(home: string): string { return join(home, ".claude"); }
+// Where the engine layer's lanes record themselves: its own variable (lane.py ENGINES_SESSIONS), else its default.
+export function enginesSessionsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  return env.ENGINES_SESSIONS || join(home, ".local", "share", "engines", "sessions");
+}
+// And their transcripts (lane.py ENGINES_TRANSCRIPTS): the only place a lane's transcript is served from.
+export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
+  return env.ENGINES_TRANSCRIPTS || join(home, ".local", "share", "engines", "transcripts");
+}
 
 export function buildOps(d: OpsDeps): OpTable {
   const { config, paths } = d;
@@ -40,8 +65,7 @@ export function buildOps(d: OpsDeps): OpTable {
     }),
     "op.status": read(async a => ok<"op.status">(d.doneKeys.status(a.key))),
     ...paneOps({
-      node: config.node, policy, inventory: d.inventory,
-      tmux: tmuxAdapter({ socket: policy.tmuxSocket, session: policy.session }),
+      node: config.node, policy, inventory: d.inventory, tmux: d.tmux,
       terminal: terminalAdapter({ socket: policy.tmuxSocket }),
       sessions: () => d.registry.byPane(),
       lock: d.lock ?? ((path, waitS) => paneLock(path, waitS)),
@@ -54,7 +78,14 @@ export function buildOps(d: OpsDeps): OpTable {
       relayRef: relayRef(d.db),
       inbox: d.inbox,
     }),
-    ...laneOps({ node: config.node, policy, inventory: d.inventory, home: config.home, stateDir: paths.stateDir, stamp: stampServer }),
+    ...laneOps({
+      node: config.node, policy, inventory: d.inventory, home: config.home, stateDir: paths.stateDir, stamp: stampServer,
+      tmux: d.tmux, send: d.send, deliver: a => d.deliverer().enqueue(a), sessions: panes => d.registry.byPane(panes),
+      ...(d.laneWaits ? { waits: d.laneWaits } : {}),
+    }),
     ...worktreeOps({ repoRoots: policy.repoRoots, home: config.home, stateDir: paths.stateDir }),
+    ...deliveryOps({ deliverer: d.deliverer, panes: d.panes, policy }),
+    ...memoryOps({ root: paths.memoryDir, skillDirs: skillDirsOf(policy.memory.skillDirs, config.home) }),
+    ...updateOps({ home: config.home, ...(d.runCommand ? { run: d.runCommand } : {}) }),
   };
 }

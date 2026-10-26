@@ -4,7 +4,7 @@ import { writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ConfigError, HOOK_PATHS, configPath, homeOf, loadConfig } from "../src/config.ts";
+import { ConfigError, HOOK_PATHS, configPath, homeOf, loadConfig, workerSocketOf } from "../src/config.ts";
 import { tempDir } from "./helpers/temp.ts";
 
 const withFile = (content: unknown) => {
@@ -25,6 +25,9 @@ describe("fleet config", () => {
       keyPath: join(home, ".local/share/morndo-fleet/fleet-key.pem"),
       publicUrl: "ws://127.0.0.1:8791/agent",
       subscribers: [],
+      stickyLanes: ["manager"],
+      laneEvents: { deliverTo: "manager", header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000 },
+      laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: true },
     });
   });
 
@@ -60,6 +63,75 @@ describe("fleet config", () => {
     }
   });
 
+  it("takes the sticky lane names from the file, each once; none at all is allowed", () => {
+    for (const [stickyLanes, expected] of [[["manager", "ops lead", "manager"], ["manager", "ops lead"]], [[], []]] as const) {
+      const { home, env } = withFile({ stickyLanes });
+      expect(loadConfig({ env, home }).stickyLanes).toEqual(expected);
+    }
+  });
+
+  it("takes laneEvents' settings one by one over their defaults; the owner's header and globs as they are", () => {
+    const header = "[lane-event] Lane events from kira (handle them as the Dispatching work section says):";
+    const { home, env } = withFile({ laneEvents: { header, ignore: ["pooltest*", "pool-probe*"] } });
+    expect(loadConfig({ env, home }).laneEvents).toEqual({ deliverTo: "manager", header, ignore: ["pooltest*", "pool-probe*"], batchMs: 3000 });
+    const off = withFile({ laneEvents: { deliverTo: null, batchMs: 100 } });
+    expect(loadConfig(off).laneEvents).toMatchObject({ deliverTo: null, batchMs: 100 });
+  });
+
+  it("takes laneWatch's settings one by one over their defaults (reliable lanes §3.2)", () => {
+    expect(loadConfig(withFile({ laneWatch: { noStatusMin: 5 } })).laneWatch).toEqual({ waitingMin: 30, noStatusMin: 5, nudge: true });
+    expect(loadConfig(withFile({ laneWatch: { waitingMin: 1440, nudge: false } })).laneWatch).toEqual({ waitingMin: 1440, noStatusMin: 15, nudge: false });
+  });
+
+  it("takes the principal's pinned public key, and stays closed without one (updates §5.4)", () => {
+    expect(loadConfig(withFile({})).principalKey).toBeUndefined();
+    const key = Buffer.alloc(32, 7).toString("base64");
+    expect(loadConfig(withFile({ principalKey: key })).principalKey).toBe(key);
+  });
+
+  it("workerSocket defaults: a socket beside the owner's, the sticky and event lanes protected, no node to start on", () => {
+    const home = tempDir();
+    const c = loadConfig({ env: {}, home });
+    expect(c.workerSocket).toBeUndefined();                       // absent from the file and from the defaults: derived, so nothing else changes
+    expect(workerSocketOf(c)).toEqual({ path: join(home, ".local/state/morndo-fleet/fleet-worker.sock"), protectedLanes: ["manager"], startNodes: [] });
+    const own = loadConfig(withFile({ socketPath: "~/run/own.sock", stickyLanes: ["manager", "chief"], laneEvents: { deliverTo: "scribe" } }));
+    expect(workerSocketOf(own).path.endsWith("/run/fleet-worker.sock")).toBe(true);
+    expect(workerSocketOf(own).protectedLanes).toEqual(["manager", "chief", "scribe"]);
+  });
+
+  it("workerSocket settings: path, protectedLanes and startNodes are taken one by one", () => {
+    const home = tempDir();
+    const f = withFile({ workerSocket: { path: join(home, "w.sock"), protectedLanes: ["a b", "c"], startNodes: ["pc", "srv01"] } });
+    expect(workerSocketOf(loadConfig(f))).toEqual({ path: join(home, "w.sock"), protectedLanes: ["manager", "a b", "c"], startNodes: ["pc", "srv01"] });   // the file's lanes add to the defaults
+    const partial = workerSocketOf(loadConfig(withFile({ workerSocket: { startNodes: ["pc"] } })));
+    expect(partial.startNodes).toEqual(["pc"]);
+    expect(partial.protectedLanes).toEqual(["manager"]);
+  });
+
+  it("workerSocket.protectedLanes never removes a default: [] and another name leave the sticky and event lanes protected", () => {
+    expect(workerSocketOf(loadConfig(withFile({ workerSocket: { protectedLanes: [] } }))).protectedLanes).toEqual(["manager"]);
+    expect(workerSocketOf(loadConfig(withFile({ workerSocket: { protectedLanes: ["x"] } }))).protectedLanes).toEqual(["manager", "x"]);
+    const own = loadConfig(withFile({ stickyLanes: ["chief"], laneEvents: { deliverTo: "scribe" }, workerSocket: { protectedLanes: ["scribe", "x"] } }));
+    expect(workerSocketOf(own).protectedLanes).toEqual(["chief", "scribe", "x"]);
+  });
+
+  it("workerSocket refuses unknown keys, relative paths, a path equal to the owner's and bad names", () => {
+    const home = tempDir();
+    const cases: [unknown, RegExp][] = [
+      [{ workerSocket: [] }, /workerSocket must be an object/],
+      [{ workerSocket: { paths: "x" } }, /workerSocket has unknown settings: paths/],
+      [{ workerSocket: { path: "rel/w.sock" } }, /workerSocket.path must be absolute/],
+      [{ socketPath: join(home, "f.sock"), workerSocket: { path: join(home, "f.sock") } }, /workerSocket.path must differ from socketPath/],
+      [{ workerSocket: { protectedLanes: "manager" } }, /workerSocket.protectedLanes must be a list of lane names/],
+      [{ workerSocket: { startNodes: ["Bad Node"] } }, /workerSocket.startNodes must be a list of node names/],
+      [{ workerSocket: { startNodes: "pc" } }, /workerSocket.startNodes must be a list of node names/],
+    ];
+    for (const [content, message] of cases) {
+      const { home: h, env } = withFile(content);
+      expect(() => loadConfig({ env, home: h }), JSON.stringify(content)).toThrow(message);
+    }
+  });
+
   it("refuses a file that doesn't fit, naming the setting", () => {
     const cases: [unknown, RegExp][] = [
       ["{not json", /not valid JSON/],
@@ -80,6 +152,22 @@ describe("fleet config", () => {
       [{ subscribers: [{ name: "kira", url: "http://x/", paths: ["/everything"] }] }, /"\/everything" is not one of/],
       [{ subscribers: [{ name: "kira", url: "http://x/", paths: ["/cc"], secret: "x" }] }, /unknown settings: secret/],
       [{ subscribers: [{ name: "a", url: "http://x/", paths: ["/cc"] }, { name: "a", url: "http://y/", paths: ["/cc"] }] }, /used twice/],
+      [{ stickyLanes: "manager" }, /stickyLanes must be a list of lane names/],
+      [{ stickyLanes: [""] }, /stickyLanes must be a list of lane names/],
+      [{ stickyLanes: ["man\nager"] }, /stickyLanes must be a list of lane names/],
+      [{ laneEvents: [] }, /laneEvents must be an object/],
+      [{ laneWatch: [] }, /laneWatch must be an object/],
+      [{ laneWatch: { nudges: true } }, /laneWatch has unknown settings: nudges/],
+      [{ laneWatch: { noStatusMin: 0 } }, /laneWatch.noStatusMin must be a whole number of minutes from 1 to 1440/],
+      [{ laneWatch: { waitingMin: 1.5 } }, /laneWatch.waitingMin must be a whole number of minutes/],
+      [{ laneWatch: { nudge: "yes" } }, /laneWatch.nudge must be true or false/],
+      [{ laneEvents: { deliver: "manager" } }, /laneEvents has unknown settings: deliver/],
+      [{ laneEvents: { deliverTo: "" } }, /laneEvents.deliverTo must be a lane name, or null/],
+      [{ laneEvents: { header: "two\nlines" } }, /laneEvents.header must be one line/],
+      [{ laneEvents: { ignore: "pooltest*" } }, /laneEvents.ignore must be a list of lane names/],
+      [{ laneEvents: { batchMs: 10 } }, /laneEvents.batchMs must be a whole number of milliseconds from 100 to 60000/],
+      [{ principalKey: "" }, /principalKey must be the hub's public key/],
+      [{ principalKey: Buffer.alloc(31, 7).toString("base64") }, /principalKey must be 32 bytes.*this is 31/],
     ];
     for (const [content, message] of cases) {
       const { home, env } = withFile(content);

@@ -2,9 +2,15 @@
   // The status view (ADR-0011, H3): every lane in one line: whether it waits for him, what it is doing, since when. Who
   // waits comes first (the longest wait on top), then who works, then the rest; the manager leads. A tap opens its chat.
   import type { ConnState } from "../../feed.svelte.ts";
+  import type { AlertWire } from "@morndo/protocol";
   import { statusRows, type ChatListRow } from "./rows.ts";
+  import AlertList from "../../AlertList.svelte";
 
-  let { rows, status, primed, onOpen }: { rows: ChatListRow[]; status: ConnState; primed: boolean; onOpen: (worker: string) => void } = $props();
+  // `alerts`: the fleet's (the owner, 2026-10-12), seen up to `seenAt`; none without a fleet.
+  let { rows, status, primed, onOpen, alerts = [], seenAt = 0, onSeen = () => {} }: {
+    rows: ChatListRow[]; status: ConnState; primed: boolean; onOpen: (worker: string) => void;
+    alerts?: AlertWire[]; seenAt?: number; onSeen?: (at: number) => void;
+  } = $props();
   const sorted = $derived(statusRows(rows));
   const waits = $derived(rows.filter(r => r.status.kind === "waits").length);
   const working = $derived(rows.filter(r => r.status.kind === "working").length);
@@ -18,6 +24,10 @@
     </div>
     <span class="conn {status}" role="status"><i></i>{STATUS[status]}</span>
   </header>
+  {#if alerts.length}
+    <h2 class="alerts-head">Alerts from your fleet</h2>
+    <AlertList items={alerts} {seenAt} {onSeen} shown={10} />
+  {/if}
   <ul>
     {#each sorted as r (r.worker)}
       <li>
@@ -33,6 +43,7 @@
 </section>
 
 <style>
+  .alerts-head { margin: 12px 16px 4px; font-size: 13px; font-weight: 800; color: var(--morndo-text-muted); text-transform: uppercase; letter-spacing: 0.04em; }
   .status { flex: 1; display: flex; flex-direction: column; }
   .top {
     position: sticky; top: 0; z-index: 2; display: flex; align-items: flex-start; gap: 10px; background: var(--bg); border-bottom: 1px solid var(--line);

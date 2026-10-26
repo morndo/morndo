@@ -63,6 +63,23 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
     expect(migrate(db)).toEqual({ from: LATEST, to: LATEST });          // nothing pending: a no-op
   });
 
+  it("a dev hub that ran the unmerged hub_store as migration 24 still gets main's board_merges (24) from migration 25", () => {
+    // Before the stack met main, #106 numbered hub_store 24, the number main gave board_merges. A hub that ran that
+    // build stands at user_version 24 with hub_store and without board_merges; migration 25 must not leave it so.
+    const dir = tempDir();
+    const db = new Database(join(dir, "dev.db"));
+    try {
+      migrate(db, MIGRATIONS.filter(m => m.version <= 23));
+      db.exec("CREATE TABLE hub_store (id INTEGER PRIMARY KEY CHECK (id = 1), store TEXT NOT NULL, identity TEXT NOT NULL)");
+      db.pragma("user_version = 24");
+      migrate(db);
+      const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map(t => t.name);
+      expect(tables).toContain("board_merges");
+      expect(tables).toContain("hub_store");
+      expect(db.pragma("user_version", { simple: true })).toBe(MIGRATIONS[MIGRATIONS.length - 1]!.version);
+    } finally { db.close(); }
+  });
+
   it("migration 1 is today's schema and migration 2 is sessions.verified_at", () => {
     expect(MIGRATIONS.map(m => m.version)).toEqual(MIGRATIONS.map((_, i) => i + 1));    // numbered 1, 2, 3, … with no gaps
     expect(MIGRATIONS[0]?.name).toMatch(/schema/);
@@ -164,9 +181,128 @@ describe("numbered migrations (user_version)", { timeout: 30_000 }, () => {
   it("migration 17 remembers which board results the fleet has not acknowledged", () => {
     const db = new Database(join(tempDir(), "morndo.db"));
     migrate(db, MIGRATIONS.slice(0, 16));
-    expect(migrate(db)).toEqual({ from: 16, to: 17 });
+    expect(migrate(db, MIGRATIONS.slice(0, 17))).toEqual({ from: 16, to: 17 });
     expect(columns(db, "job_notices")).toEqual(["id", "result", "acked"]);
     expect(() => MIGRATIONS[16]?.up(db)).not.toThrow();
+  });
+
+  it("migration 18 is manager_deliveries, and 19 stores a decision brief", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 17));
+    expect(migrate(db, MIGRATIONS.slice(0, 18))).toEqual({ from: 17, to: 18 });
+    expect(columns(db, "manager_deliveries")).toEqual([
+      "delivery_id", "kind", "escalation_id", "ask", "choice", "endpoint_id", "session_id", "request_id",
+      "queued_at", "state", "updated_at",
+    ]);
+    expect(tables(db)).not.toContain("decision_briefs");
+    expect(migrate(db, MIGRATIONS.slice(0, 20))).toEqual({ from: 18, to: 20 });
+    expect(columns(db, "decision_briefs")).toEqual([
+      "id", "version", "ref", "asker_kind", "asker_name", "token_id", "filed_by_kind", "filed_by_name",
+      "brief", "state", "filed_at", "resolution", "drafted_by", "closed_at",
+    ]);
+    expect(() => MIGRATIONS[17]?.up(db)).not.toThrow();
+    expect(() => MIGRATIONS[18]?.up(db)).not.toThrow();
+    expect(tables(db)).toContain("transcriptions");
+    expect(() => MIGRATIONS[19]?.up(db)).not.toThrow();
+  });
+
+  // The session an escalation answer was sent under (review of PR #55): on sends, so a row in doubt settled later is
+  // recorded with its own sender's provenance. 20 is transcriptions (PR #50, ADR-0021), so this column is 21.
+  it("migration 21 keeps the session a sends row's request was sent under", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 19));
+    expect(columns(db, "sends")).not.toContain("request_session");
+    expect(migrate(db, MIGRATIONS.slice(0, 21))).toEqual({ from: 19, to: 21 });
+    expect(columns(db, "sends")).toContain("request_session");
+    expect(tables(db)).toContain("transcriptions");
+    expect(() => MIGRATIONS[20]?.up(db)).not.toThrow();
+  });
+
+  // A database main's hub already migrated (PR #50): at 20, with transcriptions, without the column. It runs only 21.
+  it("a database already at main's 20, with transcriptions, gains sends.request_session at 21", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 20));
+    expect(version(db)).toBe(20);
+    expect(tables(db)).toContain("transcriptions");
+    expect(columns(db, "sends")).not.toContain("request_session");
+    expect(migrate(db, MIGRATIONS.slice(0, 21))).toEqual({ from: 20, to: 21 });
+    expect(columns(db, "sends")).toContain("request_session");
+    expect(version(db)).toBe(21);
+  });
+
+  // The option label an escalation answer was typed with (round 4.5 of the PR #55 review): on sends, so an answer found
+  // typed for an earlier version of its ask is recorded with the label that version showed, not the ask's label now.
+  it("migration 22 keeps the label a sends row's answer was typed with", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 21));
+    expect(columns(db, "sends")).not.toContain("label");
+    expect(migrate(db, MIGRATIONS.slice(0, 22))).toEqual({ from: 21, to: 22 });
+    expect(columns(db, "sends")).toContain("label");
+    expect(version(db)).toBe(22);
+    expect(() => MIGRATIONS[21]?.up(db)).not.toThrow();
+  });
+
+  // The last change of a task's state (D6): a task already on the board takes its updated_at, so no run of before is
+  // read as newer than it.
+  it("migration 23 gives a task already on the board the time it was last updated as its last change of state", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 22));
+    expect(columns(db, "board_tasks")).not.toContain("state_changed_at");
+    db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, created_at, updated_at, created_by, rev)
+      VALUES ('T-1', 1, 'Old task', '', 'doing', 'builder', 'normal', 100, 250, '{"kind":"console"}', 3)`).run();
+    expect(migrate(db, MIGRATIONS.slice(0, 23))).toEqual({ from: 22, to: 23 });
+    expect(db.prepare("SELECT state_changed_at AS s FROM board_tasks WHERE key = 'T-1'").get()).toEqual({ s: 250 });
+    expect(version(db)).toBe(23);
+    expect(() => MIGRATIONS[22]?.up(db)).not.toThrow();
+  });
+
+  // B11: the board's merge records, a new table only, so an older hub opens the database as it is (the floor stays 0).
+  it("migration 24 gives a database at 23 board_merges, keeps its tasks, and changes nothing run again", () => {
+    const db = new Database(join(tempDir(), "morndo.db"));
+    migrate(db, MIGRATIONS.slice(0, 23));
+    expect(version(db)).toBe(23);
+    db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, created_at, updated_at, created_by, rev)
+      VALUES ('T-1', 1, 'A task', '', 'review', 'builder', 'normal', 100, 250, '{"kind":"console"}', 2)`).run();
+    expect(migrate(db, MIGRATIONS.slice(0, 24))).toEqual({ from: 23, to: 24 });
+    expect(tables(db)).toContain("board_merges");
+    expect(columns(db, "board_merges")).toEqual(["key", "repo", "sha", "at", "by", "override"]);
+    expect(db.prepare("SELECT key, status FROM board_tasks").all()).toEqual([{ key: "T-1", status: "review" }]);
+    expect(() => MIGRATIONS[23]?.up(db)).not.toThrow();               // guarded: the table is there already
+  });
+
+  // A hub from before migration 23 opens a database at 23 as it is (the floor is additive), and its saves leave
+  // state_changed_at as it was. Opened again by this hub, no Run may read as newer than a move made meanwhile (D6).
+  it("the Store takes state_changed_at from the task's events when a hub that does not know it saved the task since", () => {
+    const dir = tempDir();
+    const db = new Database(join(dir, "morndo.db"));
+    migrate(db);
+    const task = db.prepare(`INSERT INTO board_tasks (key, n, title, description, status, assignee, priority, created_at, updated_at, state_changed_at, created_by, rev)
+      VALUES (?, ?, 'A task', '', ?, 'builder', 'normal', 100, ?, ?, '{"kind":"console"}', ?)`);
+    const event = db.prepare("INSERT INTO board_events (key, rev, at, actor, change) VALUES (?, ?, ?, '{\"kind\":\"console\"}', ?)");
+    // T-1: this hub's own save of a comment after the move: updated_at is later, state_changed_at is right.
+    task.run("T-1", 1, "doing", 300, 250, 3);
+    event.run("T-1", 1, 100, '{"kind":"created","status":"todo","assignee":"builder"}');
+    event.run("T-1", 2, 250, '{"kind":"moved","from":"todo","to":"doing","reason":null}');
+    event.run("T-1", 3, 300, '{"kind":"commented","text":"Halfway"}');
+    // T-2: the older hub moved it to review (event at 400) and a person's comment came after (500); state_changed_at is still 250.
+    task.run("T-2", 2, "review", 500, 250, 5);
+    event.run("T-2", 1, 100, '{"kind":"created","status":"todo","assignee":"builder"}');
+    event.run("T-2", 2, 250, '{"kind":"moved","from":"todo","to":"doing","reason":null}');
+    event.run("T-2", 3, 300, '{"kind":"commented","text":"Halfway"}');
+    event.run("T-2", 4, 400, '{"kind":"moved","from":"doing","to":"review","reason":"done"}');
+    event.run("T-2", 5, 500, '{"kind":"commented","text":"Looks fine"}');
+    // T-3: the older hub edited the description (600), then the title (700): only the description is a change of state.
+    task.run("T-3", 3, "doing", 700, 250, 4);
+    event.run("T-3", 1, 100, '{"kind":"created","status":"todo","assignee":"builder"}');
+    event.run("T-3", 2, 250, '{"kind":"moved","from":"todo","to":"doing","reason":null}');
+    event.run("T-3", 3, 600, '{"kind":"edited","description":"More"}');
+    event.run("T-3", 4, 700, '{"kind":"edited","title":"Renamed"}');
+    // T-4: a task with no events keeps what it has.
+    task.run("T-4", 4, "doing", 900, 800, 1);
+    db.close();
+    const store = new Store(dir);
+    expect(store.tasks().map(t => [t.key, t.stateChangedAt])).toEqual([["T-1", 250], ["T-2", 400], ["T-3", 600], ["T-4", 800]]);
+    store.close();
   });
 
   it("the Store migrates the database it opens", () => {

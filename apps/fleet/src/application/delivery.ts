@@ -9,6 +9,13 @@
 //   - A dead letter raises a dead_letter alert once per subscriber episode: the first since that subscriber's last
 //     successful delivery (or since start); later ones are kept and counted (`morndo-fleet status`), not alerted, so a
 //     subscriber that refuses everything can't bury the other alerts.
+// The subscriber contract (fleet clients spec §6; docs/fleet-api.md): a subscriber answers 2xx once it has the event and
+// never refuses one for a reason of its own downstream (a blocked chat service, a failed handler): it keeps what it
+// can't act on yet and acts later. The bus's side: each stream in order, one event in flight, so a refused event holds
+// up the ones behind it; `outcomeOf` is the whole classification. A subscriber whose oldest undelivered event is older
+// than LIMITS.subscriberLagMs (60 s, by the time it was stored) raises subscriber_lagging, once per episode: the next one
+// only after nothing of it was that old (checked every tick). Its detail: { subscriber, oldestAgeMs, streams }, streams
+// being how many streams have an event waiting for it (reconciliation ruling 25); its node, the oldest event's.
 // A retry time is stored on the wall clock; one further away than the longest backoff can only come from a clock that
 // jumped back, and is due at once (Review Focus 4). On start: rows of subscribers no longer configured are deleted;
 // every hour: outbox rows LIMITS.outboxKeepMs after their last delivery, and dead letters as long after they died
@@ -36,9 +43,16 @@ export const httpPost: Post = async (url, body, headers, signal) => {
   return r.status;
 };
 
-const ok = (status: number) => status >= 200 && status < 300;
 const streamKey = (subscriber: string, node: string, streamId: string) => `${subscriber}\n${node}\n${streamId}`;
-const permanent = (status: number) => status >= 400 && status < 500 && status !== 408 && status !== 429;
+
+// What an answer means (the subscriber contract): 2xx delivered; any other 4xx than 408 and 429 dead at once (the
+// subscriber refused it, and would again); everything else (408, 429, 5xx, no answer, anything unexpected) tried again
+// later, up to LIMITS.deadLetterAttempts. RFC 9110 §15.5.9 and RFC 6585 §4 invite a retry of 408 and 429.
+export function outcomeOf(status: number | null): "delivered" | "retry" | "dead" {
+  if (status !== null && status >= 200 && status < 300) return "delivered";
+  if (status !== null && status >= 400 && status < 500 && status !== 408 && status !== 429) return "dead";
+  return "retry";
+}
 
 export class DeliveryWorker {
   #store: OutboxStore;
@@ -54,6 +68,7 @@ export class DeliveryWorker {
   #abort = new AbortController();
   #timers: ReturnType<typeof setInterval>[] = [];
   #deadEpisodes = new Set<string>();                    // subscribers alerted since their last successful delivery
+  #lagging = new Set<string>();                         // subscribers alerted lagging, until none of theirs is that old
   // Per stream and subscriber: outcome writes fleet.db refused in a row, and until when that stream waits (B6 V39).
   #storeFailures = new Map<string, { n: number; until: number }>();
   // Per stream and subscriber: a seq below which none of the stream's rows is pending for the subscriber, where its next
@@ -91,7 +106,23 @@ export class DeliveryWorker {
     try { f(); } catch (e) { this.#log.error(`hook bus: ${what} failed (fleet.db busy or full?); trying again later`, e); }
   }
 
-  #tick(): void { this.#safely("a delivery round", () => this.runOnce()); }
+  #tick(): void {
+    this.#safely("a delivery round", () => this.runOnce());
+    this.#safely("the lag check", () => this.checkLag());
+  }
+
+  // subscriber_lagging, once per episode per subscriber.
+  checkLag(): void {
+    const now = this.#now();
+    for (const s of this.#subscribers) {
+      const oldest = this.#store.oldestPending(s.name);
+      const ageMs = oldest === null ? 0 : now - oldest.createdAt;
+      if (ageMs <= LIMITS.subscriberLagMs) { this.#lagging.delete(s.name); continue; }
+      if (this.#lagging.has(s.name) || oldest === null) continue;
+      this.#lagging.add(s.name);
+      this.#audit.alert("subscriber_lagging", oldest.node, { subscriber: s.name, oldestAgeMs: ageMs, streams: this.#store.pendingStreams(s.name) });
+    }
+  }
 
   // Aborts what is in flight (those rows stay pending and go again after a restart) and waits for it to settle.
   async stop(): Promise<void> {
@@ -188,10 +219,11 @@ export class DeliveryWorker {
       failure = e instanceof Error ? e.name : "error";
     }
     const now = this.#now();
-    if (status !== null && ok(status)) { this.#store.delivered(d.outboxId, s.name, now); this.#deadEpisodes.delete(s.name); return; }
+    const outcome = outcomeOf(status);
+    if (outcome === "delivered") { this.#store.delivered(d.outboxId, s.name, now); this.#deadEpisodes.delete(s.name); return; }
     const attempts = d.attempts + 1;
     const reason = status === null ? `no answer (${failure})` : `HTTP ${status}`;
-    if ((status !== null && permanent(status)) || attempts >= LIMITS.deadLetterAttempts) {
+    if (outcome === "dead" || attempts >= LIMITS.deadLetterAttempts) {
       this.#store.deadLetter(d, reason, attempts, now);
       if (!this.#deadEpisodes.has(s.name)) {
         this.#deadEpisodes.add(s.name);

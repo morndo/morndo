@@ -38,10 +38,10 @@ function serveFiles(a: FakeAgent, files: Map<string, Buffer>) {
 }
 
 describe("the client API", () => {
-  it("speaks /v1/ and lists its versions; another version or route is a 404", async () => {
-    const fleet = await startTestFleet();
+  it("speaks /v1/ and lists its versions and sticky lane names; another version or route is a 404", async () => {
+    const fleet = await startTestFleet({ config: { stickyLanes: ["manager", "ops lead"] } });
     const api = client(fleet.config.socketPath);
-    expect(await api.get("/v1/caps")).toEqual({ status: 200, body: { api: [1] } });
+    expect(await api.get("/v1/caps")).toEqual({ status: 200, body: { api: [1], stickyLanes: ["manager", "ops lead"] } });
     expect(await api.get("/v9/caps")).toEqual({ status: 404, body: { error: "unsupported_api", api: [1] } });
     expect(await api.get("/caps")).toMatchObject({ status: 404 });
     expect(await api.get("/v1/nothing-here")).toEqual({ status: 404, body: { error: "no such route" } });
@@ -54,9 +54,20 @@ describe("the client API", () => {
     await fleet.joined("mac");
     await vi.waitFor(() => expect(fleet.connections.latest("pc").health).not.toBeNull());
     expect((await client(fleet.config.socketPath).get("/v1/nodes"))?.body).toEqual([
-      { name: "mac", status: "offline", health: null, agent: null },
-      { name: "pc", status: "online", health: expect.objectContaining({ load1: 2 }), agent: "test-agent/1" },
+      { name: "mac", status: "offline", health: null, agent: null, commit: null, proto: null, update: null },
+      { name: "pc", status: "online", health: expect.objectContaining({ load1: 2 }), agent: "test-agent/1", commit: null, proto: [1], update: null },
     ]);
+  });
+
+  it("/v1/nodes lists each node's build", async () => {
+    const fleet = await startTestFleet();
+    const old = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678";
+    const fresh = "0123456789abcdef0123456789abcdef01234567";
+    await fleet.online("pc", { commit: old });
+    await fleet.online("mac", { commit: fresh });
+    await fleet.online("vm");                                      // an older agent: its hello has no commit
+    const body = (await client(fleet.config.socketPath).get("/v1/nodes"))?.body as { name: string; agent: string | null; commit: string | null }[];
+    expect(body.map(n => [n.name, n.agent, n.commit])).toEqual([["mac", "test-agent/1", fresh], ["pc", "test-agent/1", old], ["vm", "test-agent/1", null]]);
   });
 
   it("lane names with spaces, unicode, dots and slashes survive the list, their own URL and an op by lane", async () => {
@@ -193,7 +204,7 @@ describe("the client API", () => {
     if (r) expect(r.body.length).toBeLessThanOrEqual(100);
   });
 
-  it("the events socket starts with every node's status, then each online node's inventory and health, then each change", async () => {
+  it("the events socket starts with every node's status, then each online node's inventory and health, every Run, then each change", async () => {
     const fleet = await startTestFleet();
     const gone = await fleet.online("gone");
     gone.inventory([{ workerId: "gone.3fa2c1d0.1", window: "old", cwd: "/w" }]);
@@ -204,16 +215,19 @@ describe("the client API", () => {
     a.inventory([{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w" }]);
     a.health(health({ load1: 3 }));
     await vi.waitFor(() => expect(fleet.connections.latest("pc").health).not.toBeNull());
+    await vi.waitFor(() => expect(fleet.runs.view().map(r => `${r.lane}:${r.phase}`)).toEqual(["api:ended", "old:unknown"]));
     const ev = await client(fleet.config.socketPath).events();
-    await vi.waitFor(() => expect(ev.received.map(e => `${e.t}:${e.node}`)).toEqual(["status:gone", "status:pc", "inventory:pc", "health:pc"]));
+    // Every lane's Run last, by lane (ADR-0032): gone's old window is unknown while gone is offline.
+    await vi.waitFor(() => expect(ev.received.map(e => `${e.t}:${e.node}`)).toEqual(["status:gone", "status:pc", "inventory:pc", "health:pc", "run:pc", "run:gone"]));
     expect(ev.received.slice(0, 3).map(e => e.body)).toEqual([
-      { status: "offline" }, { status: "online" }, { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w" }], invVersion: 2 },
+      { status: "offline" }, { status: "online" }, { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w", status: null, pid: null }], invVersion: 2 },
     ]);
     const b = await fleet.online("mac");
     b.inventory([{ workerId: "mac.3fa2c1d0.1", window: "api", cwd: "/w" }]);
-    await vi.waitFor(() => expect(ev.received.slice(4).map(e => `${e.t}:${e.node}`)).toEqual(["status:mac", "inventory:mac", "conflict:pc", "alert:pc"]));
-    expect(ev.received.at(-2)?.body).toEqual({ name: "api", nodes: ["pc", "mac"] });
-    expect([ev.received.at(-1)?.body]).toEqual((await client(fleet.config.socketPath).get("/v1/alerts"))?.body);
+    const changes = () => ev.received.slice(6).filter(e => e.t !== "run");
+    await vi.waitFor(() => expect(changes().map(e => `${e.t}:${e.node}`)).toEqual(["status:mac", "inventory:mac", "conflict:pc", "alert:pc"]));
+    expect(changes().at(-2)?.body).toEqual({ name: "api", nodes: ["pc", "mac"] });
+    expect([changes().at(-1)?.body]).toEqual((await client(fleet.config.socketPath).get("/v1/alerts"))?.body);
     ev.close();
   });
 

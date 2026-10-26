@@ -44,9 +44,12 @@ export const CONNECTION_WORDS = {
   budget: { steady: "Within budget", half: "Half the budget used", high: "Near the budget", full: "At the budget" },
   spend: { estimate: "Estimate", provider: "Provider", manual: "Manual", balance: "Balance" },
   // The machine runs these. Claude Code: `claude auth login` (https://code.claude.com/docs/en/authentication, read 2026-10-10).
-  // Codex: `codex login` (https://developers.openai.com/codex/auth/, read 2026-10-10).
+  // Codex: `codex login --device-auth` signs in a machine without a browser (a node). Device code sign-in is a beta that is
+  // first turned on in ChatGPT's security settings, or by a workspace admin (https://learn.chatgpt.com/docs/auth, read
+  // 2026-10-15; developers.openai.com/codex/auth redirects there). `codex login` still works where a browser opens.
   // Cursor: `agent login` (https://cursor.com/docs/cli/reference/authentication, read 2026-10-10).
-  signIn: { claude: "claude auth login", codex: "codex login", cursor: "agent login" },
+  signIn: { claude: "claude auth login", codex: "codex login --device-auth", cursor: "agent login" },
+  signInNotes: { codex: "Turn on device code sign-in in ChatGPT's security settings first. On a machine with a browser, codex login works too." },
   addLine: "morndo-keys add",
   runtimes: { claude: "Claude Code", codex: "Codex", cursor: "Cursor agent" },
   auto: {
@@ -158,6 +161,17 @@ export const VendorPreset = z.strictObject({
   }).check(z.refine((t: { revision: string; sources: readonly string[] }) => (t.revision === "unknown") === (t.sources.length === 0))),
 });
 export const VendorCatalog = z.array(VendorPreset).check(z.minLength(1));
+
+export type KeyPoolTerms = { errorDialect: string; termsRevision: string; termsLine: string };
+export const KeyPoolEntry = z.strictObject({
+  vendor: name(),
+  errorDialect: text(64),
+  termsRevision: text(64),
+  termsLine: text(1500),
+});
+export const KeyPoolCatalog = z.array(KeyPoolEntry).check(z.refine(
+  (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
+));
 
 const mode = z.enum(["subscriptions-first", "keys-first", "subscriptions-only", "keys-only", "custom"]);
 const budgetLevel = z.enum(["steady", "half", "high", "full"]);
@@ -276,6 +290,7 @@ export type ConnectionView = z.output<typeof ConnectionView>;
 export type LeaseView = z.output<typeof LeaseView>;
 export type PolicyView = z.output<typeof PolicyView>;
 export type VendorPreset = z.output<typeof VendorPreset>;
+export type KeyPoolEntry = z.output<typeof KeyPoolEntry>;
 export type ConnectionsPage = z.output<typeof ConnectionsPage>;
 export type AutoPickView = z.output<typeof AutoPickView>;
 export type RouteAnswer = z.output<typeof RouteAnswer>;
@@ -286,5 +301,10 @@ export type NarrowCommand = z.output<typeof NarrowCommand>;
 
 export function parseVendorCatalog(value: unknown): VendorPreset[] | null {
   const parsed = z.safeParse(VendorCatalog, value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseKeyPoolCatalog(value: unknown): KeyPoolEntry[] | null {
+  const parsed = z.safeParse(KeyPoolCatalog, value);
   return parsed.success ? parsed.data : null;
 }

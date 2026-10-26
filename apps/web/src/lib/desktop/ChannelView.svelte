@@ -21,11 +21,12 @@
   import Avatar from "./Avatar.svelte";
   import Composer from "./Composer.svelte";
   import MessageList, { type Outgoing } from "./MessageList.svelte";
+  import { ABSENT_MANAGER } from "../manager.ts";
   // Desktop and Terminal carry noVNC and xterm.js: loaded when their tab first opens, so the chat stays light.
   const loadDesktop = () => import("./DesktopView.svelte");
   const loadTerminal = () => import("./TerminalView.svelte");
 
-  let { worker, displayName, feed, outgoing, verifiedAt, stepUpMs, panel, prefs, onDetails, onSecurity, onPanel, onQueue, onRetry, onDiscard,
+  let { worker, displayName, feed, outgoing, verifiedAt, stepUpMs, panel, prefs, onDetails, onSecurity, onPanel, onQueue, onRetry, onDiscard, onCancel = () => {},
     onVerify, onEdit, editRequest, onEdited, onVerified, dividerMark = undefined, onAtBottom = () => {}, decisions, decisionsOpen, onDecisions, screenRequest, decisionOf, card, focus, desktop,
     task = null, onOpenTask = () => {}, composerEl = $bindable(null) }: {
     worker: RosterEntry; displayName: string; feed: LiveFeed; outgoing: Outgoing[]; verifiedAt: number | null; stepUpMs: number | null;
@@ -36,6 +37,7 @@
     decisionOf: (messageId: string) => DecisionItem | undefined; card: Snippet<[DecisionItem]>; focus: { id: string; n: number } | null;
     onQueue: (c: { target: string; targetName: string; text: string; uploads: string[]; images: string[]; files: SentFile[]; seen: string; held?: string }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onVerify: (id: string) => void; onEdit: (id: string) => void;
+    onCancel?: (id: string) => void;                    // a message the manager's queue still holds (ruling 83)
     editRequest: { worker: string; text: string; n: number } | null; onEdited: () => void; onVerified: (at: number) => void;
     dividerMark?: number | null | undefined; onAtBottom?: (atBottom: boolean, worker: string) => void;
     task?: Task | null; onOpenTask?: (key: string) => void;   // ADR-0015: the task this lane has in progress, by the board
@@ -47,7 +49,14 @@
   // "Answer in its terminal" from a decision opens this worker on its Terminal tab.
   $effect(() => { if (screenRequest && screenRequest.worker === worker.id) tab = "terminal"; });
   const isManager = $derived(worker.name === "manager");
-  const stateLabel = $derived(worker.offline ? "Offline" : worker.needsYou ? "Needs you" : worker.state === "active" ? "Working" : "Idle");
+  // The manager while it has no window (a restart): not running. A message waits for it in the fleet's queue when the hub
+  // has one on; without it, the box stays shut until it runs again. Its files would go onto its machine: none now.
+  const absent = $derived(worker.id === ABSENT_MANAGER);
+  const canWrite = $derived(!absent || feed.managerQueue === true);
+  const scope = $derived(absent
+    ? (canWrite ? "Waits for the manager while it isn't running, up to a day" : "Start the manager to message it")
+    : isManager && feed.managerQueue ? "Goes to the manager's queue; typed in once its box is free" : null);
+  const stateLabel = $derived(absent ? "Not running" : worker.offline ? "Offline" : worker.needsYou ? "Needs you" : worker.state === "active" ? "Working" : "Idle");
 </script>
 
 <section class="chan">
@@ -62,28 +71,34 @@
       {:else if worker.title}<span class="topic" title={worker.title}>{worker.title}</span>{/if}
     </div>
     <div class="right">
-      <span class="state {worker.offline ? 'offline' : worker.needsYou ? 'needs' : worker.state}">{stateLabel}</span>
+      <span class="state {absent || worker.offline ? 'offline' : worker.needsYou ? 'needs' : worker.state}">{stateLabel}</span>
       {#if isManager}
         <button class="dec" class:on={decisionsOpen} class:has={decisions > 0} onclick={onDecisions} aria-label="Decisions: {decisions} waiting" title="Decisions">
           <Signpost size={15} />{decisions ? `${decisions} to decide` : "Decisions"}
         </button>
       {/if}
-      <span class="loc" title="Working folder"><Folder size={14} />{worker.location}</span>
+      {#if !absent}<span class="loc" title="Working folder"><Folder size={14} />{worker.location}</span>{/if}
       <button class="ib" class:on={panel} onclick={onPanel} aria-pressed={panel} aria-label={panel ? "Hide the right panel" : "Show the right panel"} title={panel ? "Hide the right panel" : "Show the right panel (decisions)"}><PanelRight size={18} /></button>
     </div>
   </header>
   <div class="tabs" role="tablist">
     <button role="tab" aria-selected={tab === "messages"} class:on={tab === "messages"} onclick={() => (tab = "messages")}><MessageSquare size={14} />Messages</button>
     {#if desktop}<button role="tab" aria-selected={tab === "desktop"} class:on={tab === "desktop"} onclick={() => (tab = "desktop")}><Monitor size={14} />Desktop</button>{/if}
-    <button role="tab" aria-selected={tab === "terminal"} class:on={tab === "terminal"} onclick={() => (tab = "terminal")}><Terminal size={14} />Terminal</button>
+    {#if !absent}<button role="tab" aria-selected={tab === "terminal"} class:on={tab === "terminal"} onclick={() => (tab = "terminal")}><Terminal size={14} />Terminal</button>{/if}
   </div>
   {#if tab === "messages"}
     <MessageList {worker} {prefs} messages={feed.historyFor === worker.id ? feed.messages : []} loading={feed.historyFor !== worker.id} {outgoing} {displayName} {decisionOf} {card} {focus}
-      {onRetry} {onDiscard} {onVerify} {onEdit} {dividerMark} {onAtBottom}
+      {onRetry} {onDiscard} {onVerify} {onEdit} {onCancel} {dividerMark} {onAtBottom}
       older={feed.older} olderPages={feed.olderPages} onOlder={() => feed.loadOlder()} detached={feed.detached} newWhileDetached={feed.newWhileDetached} onLatest={() => feed.latest()} />
+    {#if absent}
+      <p class="absent" data-absent>{canWrite
+        ? "The manager isn't running right now. What you write waits for it, up to a day, and goes in once it runs again."
+        : "The manager isn't running. Start it to message it."}</p>
+    {/if}
     <!-- One composer per conversation: a draft and its images never carry over to another (a switch drops them). -->
     {#key worker.id}<Composer target={worker.id} targetName={displayName} conversation={worker.name} working={worker.state === "active"} waitingOn={worker.waitingOn} {verifiedAt} {stepUpMs} {onSecurity}
-      {onQueue} {onVerified} edit={editRequest?.worker === worker.id ? editRequest : null} {onEdited} bind:inputEl={composerEl} />{/key}
+      {onQueue} {onVerified} edit={editRequest?.worker === worker.id ? editRequest : null} {onEdited} bind:inputEl={composerEl}
+      closed={!canWrite} noFiles={absent} {scope} />{/key}
   {:else if tab === "desktop"}
     {#await loadDesktop() then m}<m.default {verifiedAt} {onVerified} />{/await}
   {:else}
@@ -92,6 +107,7 @@
 </section>
 
 <style>
+  .absent { margin: 0 20px 8px; padding: 10px 12px; border-radius: 8px; background: var(--muted-bg); font: 400 13px/18px var(--font); color: var(--muted); }
   .chan { display: flex; flex-direction: column; min-width: 0; min-height: 0; flex: 1; background: var(--main-bg); container-type: inline-size; }
   /* A narrow conversation keeps the name and the state; the folder and the topic give way first. */
   @container (max-width: 720px) { .loc { display: none; } }

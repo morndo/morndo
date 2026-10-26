@@ -1,9 +1,9 @@
 // The hub's ports onto the machines its workers run on (fleet core §3.1, ADR-0012). Each has a local implementation,
 // this machine as the one node "local" (adapters/local-node.ts), and a fleet one (Task 14), chosen in main.ts by
 // MORNDO_FLEET_SOCKET. Worker IDs are opaque here: "%N" locally, "<node>.<server>.<pane>" in a fleet.
-import type { Upload } from "@morndo/domain";
+import type { CheckRunFacts, PrFacts, Upload } from "@morndo/domain";
 import type { Frame, SendProblem, SessionInfo, Terminal as PaneTerminal } from "@morndo/node-ops";
-import type { ErrorCode } from "@morndo/protocol";
+import type { Delivery, ErrorCode, RunView } from "@morndo/protocol";
 
 // `typedAt`: when the node typed it, on the node's own clock, which that node's transcript times are on (echo matching).
 // "node_offline": the fleet refused it before anything was typed (fleet core §5.3, §7; never from this machine's tmux).
@@ -91,3 +91,49 @@ export type HubPorts = {
   tmux: Tmux; terminal: Terminal; sessions: Sessions | null; transcripts: TranscriptSource | null;
   files: RemoteFiles; uploads: UploadSink; sendStatus: SendStatus | null; nodeStates: NodeStates | null;
 };
+
+// The fleet's delivery queue (fleet-clients §4, §8; ADR-0014), as the hub uses it for the manager (§9.1). Fleet only.
+// `refused`: nothing was queued (the fleet's or the node's code, executed "no"; "node_offline" when the request never
+// reached the fleet, §10). `inDoubt`: the fleet took the request and never answered, so it may have been queued.
+export type DeliverAnswer = { ok: true; delivery: Delivery } | { ok: false; refused: ErrorCode } | { ok: false; inDoubt: true };
+// A cancel's answer, or `unknown`: the fleet has no delivery of that id (404 no_such_delivery; ruling 56).
+export type CancelAnswer = DeliverAnswer | { ok: false; unknown: true };
+export type Deliveries = {
+  // ttlMs: how long it may wait to be typed (the fleet's own 24 hours when absent, LIMITS.deliveryTtlMs).
+  deliver(d: { id: string; lane: string; text: string; ttlMs?: number }): Promise<DeliverAnswer>;
+  cancel(id: string): Promise<CancelAnswer>;
+  // null: the fleet knows no such delivery; "unreadable": its answer about this one doesn't read (a mismatch: the other
+  // deliveries may still be asked about); "unavailable": the fleet can't be asked now.
+  get(id: string): Promise<Delivery | null | "unreadable" | "unavailable">;
+  subscribe(on: (d: Delivery) => void, onOpen: () => void): () => void;
+  stickyLanes(): Promise<string[] | null>;                              // null: the fleet can't be asked now
+  // True when `lane`'s node is online (its replay after the welcome would have mirrored a delivery it stored).
+  // False when that node is not online. null when the fleet can't be asked, or the lane isn't listed.
+  laneNodeOnline(lane: string): Promise<boolean | null>;
+};
+
+// The Fleet's Runs (ADR-0032, docs/design/agent-board/README.md §2, §6), as the Board reads them: the Fleet supplies, the
+// Board never writes a run and the Fleet never reads the board. Fleet only (a hub without one has no runs).
+// - runs(): every lane's Run now (GET /v1/runs), each decoded on its own: one this build can't read is left out. Throws
+//   when the fleet can't be asked or its answer isn't a list of runs, so a caller never takes "no answer" for "no runs".
+// - subscribe(): each Run as it changes (the `run` event on /v1/events). `onOpen` after every (re)subscription, the first
+//   included: a `run` sent while the hub was away is not replayed, so the caller reads runs() again then.
+export type RunsSource = {
+  runs(): Promise<RunView[]>;
+  subscribe(on: (r: RunView) => void, onOpen: () => void): () => void;
+};
+
+// The forge the hub reads a brief's references from (ADR-0035 step 3, B14): a pull request as it stands, and one
+// commit's check runs. The adapter (adapters/github-checks.ts) speaks the forge's own web api and holds the credential;
+// this port is all the proof service takes, so the application layer holds no address and no token. A failure is a
+// reason and a detail, never a thrown error, and the detail never carries the credential.
+export type ForgeFailure = { reason: "not_found" | "denied" | "bad_sha" | "rate_limited" | "timeout" | "network" | "unexpected" | "too_many"; detail: string };
+export type ForgeAnswer<T> = { ok: true; value: T } | { ok: false; failure: ForgeFailure };
+export interface ForgeChecks {
+  pullRequest(repo: string, number: number): Promise<ForgeAnswer<PrFacts>>;
+  checkRuns(repo: string, sha: string): Promise<ForgeAnswer<CheckRunFacts[]>>;
+  requiredChecks(repo: string, branch: string): Promise<ForgeAnswer<string[]>>;
+}
+// An unfetchable result whose detail starts so is one the proof timer tries again later; the rest (not found, denied,
+// an unknown commit, an answer of no shape) stay as they are until a person looks at the card.
+export const RETRYABLE_DETAIL = /^(rate limit|timeout|network)/;

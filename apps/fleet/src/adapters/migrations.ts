@@ -211,6 +211,76 @@ export const MIGRATIONS: readonly Migration[] = [
     compat: "additive",
     up: db => { db.exec("ALTER TABLE jobs ADD COLUMN node_notice TEXT"); },
   },
+  {
+    version: 15,
+    name: "fleet clients: the deliveries' mirror, sticky lane names, lane events (fleet clients spec §4.6, §7)",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The latest state of each delivery its node reported (ev.delivery, or the answer to lane.deliver and
+      -- delivery.cancel): never its text. target: {"lane":…} or {"workerId":…} as JSON; body: the Delivery as JSON.
+      -- alerted: how many of LIMITS.deliveryAlertMs's thresholds raised delivery_waiting for it (0 to 3).
+      -- Not synced (spec §6). Named lane_deliveries: the hook bus's own table is deliveries (migration 1).
+      CREATE TABLE IF NOT EXISTS lane_deliveries (
+        id TEXT PRIMARY KEY, node TEXT NOT NULL, target TEXT NOT NULL, state TEXT NOT NULL, body TEXT NOT NULL,
+        updated_at INTEGER NOT NULL, alerted INTEGER NOT NULL DEFAULT 0);
+      CREATE INDEX IF NOT EXISTS lane_deliveries_by_updated ON lane_deliveries (updated_at);
+      -- The node that last reported a window of each sticky lane name (stickyLanes). Not synced.
+      CREATE TABLE IF NOT EXISTS sticky_lanes (name TEXT PRIMARY KEY, node TEXT NOT NULL, at INTEGER NOT NULL);
+      -- Lane events (spec §7), written in the synced intake with the hooks they come from. at: the hook's time on its
+      -- node; body: the event's own fields as JSON. to_manager: 0 waiting for the manager, 1 in a delivery its node
+      -- stored, NULL not for the manager. delivery_id: the delivery that carries it while to_manager is 1.
+      CREATE TABLE IF NOT EXISTS lane_events (
+        seq INTEGER PRIMARY KEY AUTOINCREMENT, node TEXT NOT NULL, window TEXT, lane TEXT, session_id TEXT, event TEXT NOT NULL,
+        at INTEGER NOT NULL, body TEXT NOT NULL, to_manager INTEGER CHECK (to_manager IN (0, 1)), delivery_id TEXT);
+      CREATE INDEX IF NOT EXISTS lane_events_waiting ON lane_events (seq) WHERE to_manager = 0;
+      CREATE INDEX IF NOT EXISTS lane_events_by_delivery ON lane_events (delivery_id) WHERE delivery_id IS NOT NULL;
+      CREATE INDEX IF NOT EXISTS lane_events_by_at ON lane_events (at);
+      -- A session's latest lane event (a needs_input repeated after an agent restart is dropped).
+      CREATE INDEX IF NOT EXISTS lane_events_by_session ON lane_events (session_id, seq) WHERE session_id IS NOT NULL;
+    `),
+  },
+  {
+    version: 16,
+    name: "the Rollout the fleet carries (updates §4.2, §7): one row per Version, the halted state durable",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The Rollout of each Version the control plane committed (rollouts). halt_* are set when a node's rollback
+      -- stopped it (RL12) and cleared by a resume; they are synced (a halt must outlive the machine), so the fleet
+      -- answers GET /v1/rollout with the same Rollout after a restart. resumed_at: the last resume, for the audit's
+      -- story. No CHECK constraints (the additive lint's rule) — the application service holds the words.
+      CREATE TABLE IF NOT EXISTS rollouts (
+        version TEXT PRIMARY KEY, control_plane_committed_at INTEGER, soak_minutes INTEGER NOT NULL DEFAULT 30,
+        halted INTEGER NOT NULL DEFAULT 0, halted_by TEXT, halt_reason TEXT, halted_at INTEGER, resumed_at INTEGER,
+        updated_at INTEGER NOT NULL DEFAULT 0);
+      -- Every attempt id the fleet issued (rollout_attempts, review of #107 round 4): one per machine and Version it
+      -- offered (a Rollout a node may follow, an update.apply forwarded to it, the control plane's own announced
+      -- apply), random, spent (used_at) when a rollback report under it is accepted. A report halts only under an
+      -- issued, unspent id for that machine and Version. Pruned after 30 days, the newest offer of each kept.
+      CREATE TABLE IF NOT EXISTS rollout_attempts (attempt TEXT PRIMARY KEY, machine TEXT NOT NULL, version TEXT NOT NULL,
+        issued_at INTEGER NOT NULL DEFAULT 0, used_at INTEGER);
+    `),
+  },
+  {
+    version: 17,
+    name: "a node's last hello protocols (review of #111): the skew gate counts an offline node too",
+    compat: "additive",
+    up: db => db.exec(`
+      -- The agent protocols a node's last hello named, as JSON (nodes.last_proto): an offline node still depends on
+      -- them, so GET /v1/nodes reports them when it is offline and the control plane's skew gate counts them (RL11).
+      ALTER TABLE nodes ADD COLUMN last_proto TEXT;
+    `),
+  },
+  {
+    version: 18,
+    name: "a node's enrolment: which join made its key, so a revocation names the enrolment it revoked (RL10)",
+    compat: "additive",
+    // A node keeps its name across a revoke and a join again; the revocation journal (updates design §11.5) keys a
+    // node's revocation by this, so it never revokes the next enrolment under the same name. Rows from before get one
+    // of their own now, as if each had joined once.
+    up: db => db.exec(`
+      ALTER TABLE nodes ADD COLUMN enrolment TEXT;
+      UPDATE nodes SET enrolment = lower(hex(randomblob(16))) WHERE enrolment IS NULL;`),
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

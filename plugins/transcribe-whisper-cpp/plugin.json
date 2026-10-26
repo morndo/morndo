@@ -1,0 +1,35 @@
+{
+  "name": "transcribe",
+  "version": "0.0.0",
+  "protocol": 1,
+  "engine": "whisper.cpp",
+  "engineVersion": "1.9.5",
+  "tag": "v1.9.5",
+  "commit": "d1be6fde11ac6e0407606b4e42fe72d34add8037",
+  "repository": "https://github.com/ggml-org/whisper.cpp.git",
+  "languages": "multi",
+  "maxSeconds": 600,
+  "models": {
+    "base": {
+      "model": "base",
+      "file": "ggml-base.bin",
+      "bytes": 147951465,
+      "sha256": "60ed5bc3dd14eea856493d334349b405782ddcaf0028d4b5df4088345fba2efe",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base.bin"
+    },
+    "small": {
+      "model": "small",
+      "file": "ggml-small.bin",
+      "bytes": 487601967,
+      "sha256": "1be3a9b2063867b937e64e2ec7483364a79917e157fa98c5d94b5c1fffea987b",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small.bin"
+    },
+    "turbo": {
+      "model": "large-v3-turbo-q5_0",
+      "file": "ggml-large-v3-turbo-q5_0.bin",
+      "bytes": 574041195,
+      "sha256": "394221709cd5ad1f40c46e6031ca61bce88931e6e088c188294c6d5a55ffa7e2",
+      "url": "https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-large-v3-turbo-q5_0.bin"
+    }
+  }
+}

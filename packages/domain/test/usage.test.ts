@@ -1,7 +1,7 @@
 // Usage (ADR-0016; U1–U4 in docs/domain.md): the newest report sets an account's windows, a missing window is kept
 // until its reset passes, sessions count while fresh, and the headline picks the account nearest its limit.
 import { describe, expect, it } from "vitest";
-import { SESSION_FRESH_MS, accountNow, applyReport, pruneSessions, tightest, usageLevel, type UsageReport } from "../src/index.ts";
+import { SESSION_FRESH_MS, accountLabel, accountNow, applyReport, cleanProfile, pruneSessions, takeNamed, tightest, usageLevel, type AccountProfile, type AccountUsage, type NamedWindow, type UsageReport } from "../src/index.ts";
 
 const NOW = 1_700_000_000_000;
 const HOUR = 3_600_000;
@@ -32,10 +32,34 @@ describe("one report (U2)", () => {
     expect(a.fiveHour?.usedPercentage).toBe(23.5);
     expect(a.sessions.map(s => s.sessionId)).toEqual(["s1", "s2"]);
   });
-  it("a session's own older report never replaces its newer one; percentages are clamped to 0..100", () => {
+  it("a session's own older report never replaces its newer one; a limit window outside 0..101 is dropped, context still clamps", () => {
     const a = applyReport(applyReport(null, report({ contextUsed: 50 }), NOW), report({ at: NOW - 1, contextUsed: 10 }), NOW);
     expect(a.sessions[0]?.contextUsed).toBe(50);
-    expect(applyReport(null, report({ fiveHour: { usedPercentage: 140, resetsAt: null }, contextUsed: -3 }), NOW)).toMatchObject({ fiveHour: { usedPercentage: 100 }, sessions: [{ contextUsed: 0 }] });
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: 140, resetsAt: null }, contextUsed: -3 }), NOW)).toMatchObject({ fiveHour: null, sessions: [{ contextUsed: 0 }] });
+  });
+  it("a value that is not a percentage is not a reading", () => {
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: 1.7e9, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour).toBeNull();   // an epoch value, not a percentage
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: 101, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour?.usedPercentage).toBe(100);
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: -3, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour).toBeNull();
+    expect(applyReport(null, report({ fiveHour: { usedPercentage: NaN, resetsAt: NOW + 2 * HOUR } }), NOW).fiveHour).toBeNull();
+    expect(applyReport(null, report({ fiveHour: null, sevenDay: null, limits: [{ label: "W", usedPercentage: 150, resetsAt: NOW + 24 * HOUR, resetsOn: null }] }), NOW).limits).toBeNull();
+    expect(applyReport(null, report({ fiveHour: null, sevenDay: null, spend: { usedPercentage: 1.7e9, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 1, limitUsd: 2, period: null } }), NOW).spend).toBeNull();
+  });
+  it("a window the report carries but cannot read is unknown, not the old number kept fresh (U14)", () => {
+    const first = applyReport(null, report({ fiveHour: { usedPercentage: 60, resetsAt: NOW + 2 * HOUR }, spend: { usedPercentage: 30, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 1, limitUsd: 3, period: "monthly" } }), NOW);
+    expect(first.fiveHour?.usedPercentage).toBe(60);
+    // an epoch value in the field: that window is unknown, the other one is as reported
+    const bad = applyReport(first, report({ at: NOW + 10 * 60_000, fiveHour: { usedPercentage: 1_700_000_000, resetsAt: NOW + 2 * HOUR }, sevenDay: { usedPercentage: 12, resetsAt: NOW + 3 * 24 * HOUR } }), NOW + 10 * 60_000);
+    expect(bad.fiveHour).toBeNull();
+    expect(bad.sevenDay?.usedPercentage).toBe(12);
+    // a window the report flags as present but unreadable (the hub's adapter does this for a null percentage): unknown too, for spend as well
+    const flagged = applyReport(first, report({ at: NOW + 10 * 60_000, fiveHour: null, sevenDay: null, spend: null, unknown: ["fiveHour", "spend"] }), NOW + 10 * 60_000);
+    expect(flagged.fiveHour).toBeNull();
+    expect(flagged.spend).toBeNull();
+    // a window the report simply leaves out is still kept until its reset (U2)
+    const left = applyReport(first, report({ at: NOW + 10 * 60_000, fiveHour: null, sevenDay: null, spend: null }), NOW + 10 * 60_000);
+    expect(left.fiveHour?.usedPercentage).toBe(60);
+    expect(left.spend?.usedPercentage).toBe(30);
   });
   it("spend follows the same rule, with its dollars", () => {
     const a = applyReport(null, report({ spend: { usedPercentage: 62.8, resetsAt: NOW + 20 * 24 * HOUR, usedUsd: 314.12, limitUsd: 500, period: "monthly" } }), NOW);
@@ -108,6 +132,19 @@ describe("an account's own windows", () => {
     expect(kept.limits?.map(w => w.label)).toEqual(["Cursor models", "Other models"]);
     expect(kept.onDemand).toBe("off");
   });
+
+  it("a named row's length, rolling flag and note survive takeNamed; a bad length or long note is cleaned", () => {
+    const row = (o: Partial<NamedWindow> = {}) => ({ label: "W", usedPercentage: 50, resetsAt: NOW + 24 * HOUR, resetsOn: null, ...o });
+    const rows = takeNamed([
+      row({ lengthMins: 10080, rolling: true, note: "shared with a second product" }),
+      row({ lengthMins: 0 }), row({ lengthMins: -5 }), row({ lengthMins: "x" as unknown as number }),
+      row({ note: "n".repeat(100) }),
+    ]);
+    expect(rows?.[0]).toMatchObject({ label: "W", lengthMins: 10080, rolling: true, note: "shared with a second product" });
+    expect([rows?.[1]?.lengthMins, rows?.[2]?.lengthMins, rows?.[3]?.lengthMins]).toEqual([null, null, null]);
+    expect(rows?.[4]?.note).toBe("n".repeat(40));
+    expect(rows?.[4]?.rolling).toBeUndefined();       // a field that is absent stays absent
+  });
 });
 
 describe("the headline", () => {
@@ -120,5 +157,55 @@ describe("the headline", () => {
   });
   it("levels: ok below 75, warning from 75, critical from 90", () => {
     expect([0, 74.9, 75, 89.9, 90, 100].map(usageLevel)).toEqual(["ok", "ok", "warning", "warning", "critical", "critical"]);
+  });
+});
+
+describe("named windows with no reset time (review of the Codex runtime, point 2)", () => {
+  const nameless = (at: number) => report({ at, sessionId: "s1", fiveHour: null, sevenDay: null, limits: [{ label: "Window", usedPercentage: 90, resetsAt: null, resetsOn: null }] });
+  it("a read that named a window with no reset, then ordinary 5-hour and weekly reads: the old named row goes within a day, not never", () => {
+    const first = applyReport(null, nameless(NOW), NOW);
+    expect(first.limits?.map(w => w.label)).toEqual(["Window"]);
+    const soon = applyReport(first, report({ at: NOW + HOUR }), NOW + HOUR);
+    expect(soon.limits?.map(w => w.label)).toEqual(["Window"]);               // kept for now: its own reset is unknown
+    const later = applyReport(first, report({ at: NOW + 25 * HOUR }), NOW + 25 * HOUR);
+    expect(later.limits).toBeNull();                                             // a day on, the fixed rows show again
+    expect(later.fiveHour?.usedPercentage).toBe(23.5);
+  });
+  it("what the dashboard shows drops such a row a day after the report that set it", () => {
+    const a = applyReport(null, nameless(NOW), NOW);
+    expect(accountNow(a, NOW + 23 * HOUR).limits).not.toBeNull();
+    expect(accountNow(a, NOW + 25 * HOUR).limits).toBeNull();
+  });
+  it("a named window that does name its reset stays until that reset, however long", () => {
+    const a = applyReport(null, report({ fiveHour: null, sevenDay: null, limits: [{ label: "Weekly", usedPercentage: 50, resetsAt: NOW + 6 * 24 * HOUR, resetsOn: null }] }), NOW);
+    expect(accountNow(a, NOW + 5 * 24 * HOUR).limits).not.toBeNull();
+  });
+});
+
+describe("an account's profile (U5)", () => {
+  const team: AccountProfile = { email: "ada@example.test", org: "team", plan: "Max 5x" };
+
+  it("the label is the name, then email, organization and plan; a missing part is skipped; no profile is the name alone", () => {
+    expect(accountLabel({ account: "a3", profile: team })).toBe("a3 · ada@example.test · Team · Max 5x");
+    expect(accountLabel({ account: "a3", profile: { ...team, email: null } })).toBe("a3 · Team · Max 5x");
+    expect(accountLabel({ account: "a3", profile: { ...team, org: null } })).toBe("a3 · ada@example.test · Max 5x");
+    expect(accountLabel({ account: "a3", profile: { ...team, plan: null } })).toBe("a3 · ada@example.test · Team");
+    expect(accountLabel({ account: "a3", profile: null })).toBe("a3");
+  });
+
+  it("a report never sets a profile and never clears one; a row stored without the field reads back as null", () => {
+    expect(applyReport(null, report(), NOW).profile).toBeNull();
+    const current: AccountUsage = { account: "max-1", reportedAt: NOW - 1000, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: team, sessions: [] };
+    expect(applyReport(current, report({ sessionId: "s2", at: NOW }), NOW).profile).toEqual(team);
+    const stored: Omit<AccountUsage, "profile"> = { account: "max-1", reportedAt: NOW, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, sessions: [] };
+    expect(accountNow(stored as AccountUsage, NOW).profile).toBeNull();
+  });
+
+  it("cleanProfile trims and caps its texts, drops an email without an '@', and an empty profile is none", () => {
+    expect(cleanProfile({ email: " ada@example.test ", org: "team", plan: " pro " })).toEqual({ email: "ada@example.test", org: "team", plan: "pro" });
+    expect(cleanProfile({ plan: "p".repeat(100) })).toEqual({ email: null, org: null, plan: "p".repeat(80) });
+    expect(cleanProfile({ email: "ada at example.test", plan: "pro" })).toEqual({ email: null, org: null, plan: "pro" });
+    expect(cleanProfile({ org: "family" })).toBeNull();
+    expect(cleanProfile({})).toBeNull();
   });
 });

@@ -6,12 +6,12 @@
 // - the headline is the earliest open item that needs him, or, with something waiting now, how many wait.
 // It never guesses when an agent will finish.
 // From 2026-10-04 (the owner's feedback) a row reads short: its title is the list's own or its text's first clause
-// (brief.ts), and the row carries its item for the rest (sentence, meta, More, buttons). A task he kept for later on
-// this device (its row's Later, quick.ts) is off today: under its own heading at the end, never waiting, never the
-// headline.
-import type { RosterEntry } from "@morndo/domain";
+// (@morndo/domain, the compact card's own rule, ADR-0023 §4.4), and the row carries its item for the rest (sentence,
+// meta, More, buttons). A task he kept for later on this device (its row's Later, quick.ts) is off today: under its
+// own heading at the end, never waiting, never the headline.
+import { clause, type RosterEntry } from "@morndo/domain";
 import { deliveryLine, type DecisionItem } from "../desktop/decisions.ts";
-import { clause } from "./brief.ts";
+import { MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
 
 export type Row = {
   key: string;
@@ -66,11 +66,14 @@ export function horizon(p: {
       const mine = p.said?.[d.id];
       const here = mine && dec && mine.at >= dec.at - SAID_SKEW_MS ? mine : undefined;
       const said = !dec ? "Answered." : dec.via === "elsewhere" ? "Answered on another device."
+        : dec.via !== "here" ? `Answered: ${dec.choice.kind === "option" ? dec.choice.label : "in words"}.`
         : dec.choice.kind === "option" ? `You said “${dec.choice.label}” at ${hm(dec.at)}.`
         : here?.label === "your own words" ? `You answered in your own words at ${hm(dec.at)}.`
         : here ? `You said “${here.label}” at ${hm(dec.at)}.` : `You answered in words at ${hm(dec.at)}.`;
-      const queued = deliveryLine(d)?.state === "queued";      // ADR-0010: still in the manager's inbox
-      rows.push({ key: `d:${d.id}`, needsYou: false, at: d.deadline, title: short(d), detail: queued ? `${said} Queued, it will be delivered.` : `${said} ${asker(d)} takes it from here.`, decisionId: null, item: d });
+      // In the manager's queue (fleet-clients §9.1): not there yet, or may have been.
+      const dl = deliveryLine(d);
+      const then = dl?.state === "queued" ? `${QUEUED}.` : dl?.state === "uncertain" ? `${MAY_HAVE_BEEN}.` : `${asker(d)} takes it from here.`;
+      rows.push({ key: `d:${d.id}`, needsYou: false, at: d.deadline, title: short(d), detail: `${said} ${then}`, decisionId: null, item: d });
     }
   }
   for (const w of p.workers) {

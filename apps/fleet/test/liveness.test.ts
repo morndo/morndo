@@ -48,13 +48,15 @@ describe("liveness", () => {
   it("reports inventory and health as events and in the node list", async () => {
     const fleet = await startTestFleet();
     const seen: FleetEvent[] = [];
-    fleet.events.subscribe(e => seen.push(e));
+    fleet.events.subscribe(e => { if (e.t !== "run") seen.push(e); });                // a lane's Run: runs.test.ts
     const a = await fleet.online("pc");
     a.inventory([{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/work/api" }]);
     a.health(health({ load1: 1.25 }));
     await vi.waitFor(() => expect(seen.map(e => e.t)).toEqual(["status", "inventory", "health"]));
-    expect(seen[1]).toEqual({ t: "inventory", node: "pc", body: { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/work/api" }], invVersion: 2 } });
-    expect(fleet.connections.list()).toEqual([{ name: "pc", status: "online", health: expect.objectContaining({ load1: 1.25 }), agent: "test-agent/1" }]);
+    // An agent that sends no session state (one from before it): the fleet reads both as null (fleet clients §5).
+    expect(seen[1]).toEqual({ t: "inventory", node: "pc", body: { panes: [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/work/api", status: null, pid: null }], invVersion: 2 } });
+    expect(fleet.connections.list()).toEqual([{ name: "pc", status: "online", health: expect.objectContaining({ load1: 1.25 }), agent: "test-agent/1", commit: null,
+      proto: expect.any(Array), update: null }]);
   });
 });
 

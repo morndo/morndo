@@ -1,21 +1,39 @@
-// Notifications (ADR-0008 phase F; N1–N5 in docs/domain.md): a content-free alert to the principal's devices that a
-// number of Decisions wait, of workers need him, or of devices were linked. Counts only (N1), raised only on those
-// three changes (N2), never while he is attending (N3), and granting nothing (N5). Pure: time comes in as `now`.
+// Notifications (ADR-0008 phase F; N1–N6 in docs/domain.md): a content-free alert to the principal's devices that a
+// number of Decisions wait, of workers need him, of devices were linked, of urgent fleet alerts came in, or of usage
+// notices the hub wrote. Counts only (N1), raised only on those five changes (N2), never while he is attending (N3),
+// granting nothing (N5), each kind under its own Topic a push service takes (N6). Pure: time comes in as `now`.
 // Design reference, not code: Signal-Desktop ts/services/notifications.preload.ts (the latest one wins, after a pause).
 
 export const NOTIFY_DEBOUNCE_MS = 1000;            // N3: per kind, the latest one wins after a 1-second pause
 export const ATTENDING_INPUT_MS = 2 * 60_000;      // "Attending": focus, and his input in the last 2 minutes
 
-export type NotificationKind = "decision" | "worker" | "linked";
-export const NOTIFICATION_KINDS: readonly NotificationKind[] = ["decision", "worker", "linked"];
-export type Counts = { decisions: number; workers: number; linked: number };
+export type NotificationKind = "decision" | "worker" | "linked" | "alert" | "usage";
+export const NOTIFICATION_KINDS: readonly NotificationKind[] = ["decision", "worker", "linked", "alert", "usage"];
+// N6: each kind's Topic at the push service (RFC 8030 section 5.4): a newer push with the same Topic replaces one still
+// waiting there, so every kind has its own. A Topic is at most 32 characters of the URL-safe Base64 alphabet, of a length
+// that decodes as Base64 (never 1 mod 4): Apple's push service refuses any other with 400 BadWebPushTopic. It refused the
+// 5-character "alert" (2026-10-12) and "usage" (2026-10-25), each only on the owner's phone and only after a release, so
+// the rule lives here, once: `topic` throws at load and the domain tests check every kind, so a kind added without a
+// Topic, or with one that doesn't decode, never reaches a release.
+export type PushTopic = string & { readonly __brand: "PushTopic" };
+export const isPushTopic = (s: string): s is PushTopic => /^[A-Za-z0-9_-]{1,32}$/.test(s) && s.length % 4 !== 1;
+const topic = (s: string): PushTopic => {
+  if (!isPushTopic(s)) throw new Error(`N6: "${s}" is not a push Topic (at most 32 URL-safe Base64 characters, a length that decodes)`);
+  return s;
+};
+export const PUSH_TOPICS: Readonly<Record<NotificationKind, PushTopic>> = {
+  decision: topic("decision"), worker: topic("worker"), linked: topic("linked"), alert: topic("alerts"), usage: topic("usages"),
+};
+// `alerts`: urgent fleet alerts he hasn't seen (the fleet's alerts in the app, 2026-10-12). `usage`: usage notices the
+// hub itself wrote since the last such Notification went (plan 4.4, S4).
+export type Counts = { decisions: number; workers: number; linked: number; alerts: number; usage: number };
 
 // What goes to the push service, numbers only (N1; the product lane's amendment 4): the kind as its number, then the
 // counts. The device builds its words from these.
-export type NotificationPayload = { kind: number; decisions: number; workers: number; linked: number };
+export type NotificationPayload = { kind: number; decisions: number; workers: number; linked: number; alerts: number; usage: number };
 export const kindCode = (k: NotificationKind) => NOTIFICATION_KINDS.indexOf(k);
 export const payloadOf = (kind: NotificationKind, c: Counts): NotificationPayload =>
-  ({ kind: kindCode(kind), decisions: c.decisions, workers: c.workers, linked: c.linked });
+  ({ kind: kindCode(kind), decisions: c.decisions, workers: c.workers, linked: c.linked, alerts: c.alerts, usage: c.usage });
 
 // What one device's app last said: focused or not, and when it saw his input. Its report ages: a device that stopped
 // reporting (asleep, gone) isn't attending.
@@ -29,12 +47,16 @@ export const anyAttending = (reports: Iterable<AttendingReport>, now: number) =>
 export type Raise =
   | { kind: "decision"; waiting: number }                                          // a Decision started waiting; how many wait now
   | { kind: "worker"; needsYou: boolean; was: boolean; muted: boolean; isAsk: boolean }
-  | { kind: "linked" };
+  | { kind: "linked" }
+  | { kind: "alert"; urgent: boolean }                                              // a fleet alert came in
+  | { kind: "usage" };                                                              // the hub wrote a usage notice (S4)
 export function raises(r: Raise): boolean {
   switch (r.kind) {
     case "decision": return r.waiting > 0;
     case "worker": return r.needsYou && !r.was && !r.muted && !r.isAsk;
     case "linked": return true;
+    case "alert": return r.urgent;
+    case "usage": return true;
   }
 }
 

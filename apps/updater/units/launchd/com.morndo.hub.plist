@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- The hub's agent (design §5, U19: launchd.plist(5), the mirror the design cites; Apple's own copy is
+     UNVERIFIED). KeepAlive with SuccessfulExit false restarts a job that exited non-zero, at most once every
+     ThrottleInterval seconds; the launcher turns an exit 78 into a status file and exit 0, so a setup to fix
+     is not restarted forever. @HOME@ becomes the user's home at render time: launchd has no %h. -->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.morndo.hub</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>@HOME@/.local/bin/morndo</string>
+    <string>serve</string>
+  </array>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+  <key>RunAtLoad</key>
+  <true/>
+</dict>
+</plist>

@@ -1,6 +1,7 @@
 // The JSON bodies the app posts to the hub (ADR-0004, ADR-0006). Unknown fields are dropped; a body that doesn't fit
 // is refused with 400 before any service sees it.
 import * as z from "./z.ts";
+import { LIMITS } from "./fleet.ts";
 
 const text = (max: number) => z.string().check(z.maxLength(max));
 // What a browser's WebAuthn call returned; the passkey library checks the rest.
@@ -25,7 +26,7 @@ export const LinkDecisionBody = z.object({
   code: z.exactOptional(code()),                                     // what the approver typed of the new device's code
 });
 export const SendBody = z.object({
-  text: text(100_000),
+  text: text(LIMITS.maxMessageText),
   requestId,
   // S6: what the principal saw the worker wait for when he wrote it: "none", or a question or menu identity.
   seen: text(2000),
@@ -36,11 +37,17 @@ export const SendBody = z.object({
   // When the principal wrote it, on the device's clock (S7). The hub's notAfter counts from this, not from arrival.
   // Absent from an older app: the hub uses its own arrival time.
   createdAt: z.exactOptional(z.number().check(z.gte(0), z.lte(Number.MAX_SAFE_INTEGER))),
-  // Set only by the owner's Retry. A plain repeat of the same request id must not revive an expired command.
-  retry: z.exactOptional(z.boolean()),
-  // Set only by Send again. A plain repeat, including the phone's status check, is a read and must not queue another copy.
+  // Set only by the phone's Send again (ADR-0011) of a message to the manager the queue gave up: queued once more, as a
+  // new attempt. A plain repeat, the phone's status check included, is a read and never queues another copy.
   again: z.exactOptional(z.boolean()),
+  // RL10 (updates design §11.5): the hub store this device saw before its first attempt of this Command, from the
+  // Morndo-Store header of an answer. A hub restored from another database — another store — answers it "uncertain"
+  // and never types it (S5). Absent from an older app, or a record written before any answer: as before.
+  hubStore: z.exactOptional(z.uuid()),
 });
+// The principal's cancel of one of his messages to the manager still waiting in the fleet's delivery queue (ruling 83).
+export const CancelBody = z.object({ requestId });
+export type CancelBody = z.output<typeof CancelBody>;
 // `seen`: the version of the ask the answer was given for (askVersion; review of PR #7, finding 5). Optional: the
 // desktop answers at once.
 const seen = z.exactOptional(text(64));

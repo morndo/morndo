@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import { CONNECTION_WORDS } from "@morndo/protocol";
-import { expiryMillis, expiryText, keyAddLine, subscriptionAddLine } from "../src/lib/connections/line.ts";
+import { expiryMillis, expiryText, keyAddLine, signInLine, signInNote, subscriptionAddLine } from "../src/lib/connections/line.ts";
 
 const board = readFileSync(new URL("../src/lib/connections/ConnectionsBoard.svelte", import.meta.url), "utf8");
 const page = readFileSync(new URL("../src/routes/engines/+page.svelte", import.meta.url), "utf8");
@@ -37,5 +37,14 @@ describe("the connections page uses the protocol words", () => {
     expect(expiryText(Number(expires))).toBe("10 Oct 2026");
     expect(expiryMillis("32 Oct 2026")).toBe("");
     expect(keyAddLine({ name: "key-a", vendor: "openai", runtime: "codex", budget: "20", expires })).toContain(`--expires ${expires}`);
+  });
+});
+
+describe("a Codex subscription signs in by device code", () => {
+  it("shows the device-code command and what to turn on first", () => {
+    expect(signInLine("codex")).toBe("codex login --device-auth");
+    expect(signInNote("codex")).toBe("Turn on device code sign-in in ChatGPT's security settings first. On a machine with a browser, codex login works too.");
+    expect(signInNote("claude")).toBeNull();
+    expect(board).toContain("signInNote(");
   });
 });

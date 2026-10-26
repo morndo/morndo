@@ -2,6 +2,8 @@
 // authentication, welcome, every close code (4409's retry every 5 minutes on fake timers), reconnect with the same
 // instanceId, the ping watchdog (35 s by default), and the refusal of a plain ws:// URL to another machine.
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "@morndo/protocol";
 import { FleetConnection, UNSUPPORTED_RETRY_MS, type ConnectionOptions, type Welcomed } from "../src/conn/connection.ts";
@@ -11,6 +13,10 @@ import { startFakeFleet, type FakeFleet } from "./fake-fleet.ts";
 import { captureLog, until, wait } from "./helpers.ts";
 
 // UUIDs, as the protocol's Hello requires (the fake fleet closes 1008 on a hello that doesn't fit).
+// The version the product is: the root package.json's, read here directly, so the assertion checks the version the agent
+// reports against the file it is meant to come from, not against the function the agent itself calls.
+const ROOT_VERSION = (JSON.parse(readFileSync(join(import.meta.dirname, "..", "..", "..", "package.json"), "utf8")) as { version: string }).version;
+
 const INSTANCE = randomUUID();
 const STREAM = randomUUID();
 let fleet: FakeFleet;
@@ -57,7 +63,7 @@ describe("handshake", () => {
     expect(c.conn.status().connEpoch).toBe(7);
     expect(hellos()[0]).toMatchObject({
       v: 1, t: "hello", node: "pc", instanceId: INSTANCE, streamId: STREAM, proto: [1],
-      agent: { version: "0.0.0" }, claude: { version: "2.1.286" }, caps: ["inventory.get"],
+      agent: { version: ROOT_VERSION }, claude: { version: "2.1.286" }, caps: ["inventory.get"],
     });
     expect(String(hellos()[0]?.clientNonce)).toMatch(/^[A-Za-z0-9_-]{43}$/);   // 32 random bytes
     expect(fleet.received.some(r => r.msg.t === "proof")).toBe(true);          // the fake verified it, or it closes 4401
@@ -95,7 +101,7 @@ describe("close codes", () => {
     expect(fleet.connections()).toBe(1);
     const s = c.conn.status();
     expect(s.retryInMs).toBeGreaterThan(200_000);                           // 5 minutes ± 20 % away
-    const text = formatStatus({ node: "pc", fleetUrl: fleet.url }, { ...s, node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0 });
+    const text = formatStatus({ node: "pc", fleetUrl: fleet.url }, { ...s, node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0, inFlight: [] });
     expect(text).toMatch(/conflict: another agent with this node's key is connected \(4409\)\. This one tries again every 5 minutes/);
     expect(text).toMatch(/retry in\s+\d+ s/);
   });
@@ -190,7 +196,7 @@ describe("status text", () => {
   it("shows jobs disabled by a config error, with the reason", () => {
     const text = formatStatus({ node: "pc", fleetUrl: "ws://127.0.0.1/agent" }, {
       state: "online", since: Date.now(), connEpoch: 1, lastClose: null, retryInMs: null,
-      node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0,
+      node: "pc", instanceId: INSTANCE, pid: process.pid, spoolDepth: 0, drops: 0, inFlight: [],
       jobs: "disabled by config error: policy.json: jobs.classes.default: limit must be a whole number from 1 to 1000",
     });
     expect(text).toMatch(/jobs\s+disabled by config error: policy\.json: jobs\.classes\.default: limit/);

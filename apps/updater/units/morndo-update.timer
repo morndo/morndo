@@ -1,0 +1,15 @@
+# The tick's schedule (design §5, §7): 5 minutes after boot, then every 15 minutes, spread by up to 5 minutes so
+# a fleet does not check as one. The tick itself asks the feed at most every 6 hours (§7); the 15 minutes are for
+# the Rollout — a node follows its control plane's commit as soon as its agent hears it, not at the feed's pace.
+# Persistent=true (systemd.timer(5), systemd 255) fires a run a sleeping machine missed, on its next start.
+[Unit]
+Description=Run the Morndo update tick every 15 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=15min
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

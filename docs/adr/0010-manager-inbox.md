@@ -1,6 +1,7 @@
 # ADR-0010: Answers and messages for the manager go through its inbox
 
 - **Status:** Accepted, 2026-10-04. The owner asked for it; the manager approved the design; built by lane manager-inbox on `feat/manager-inbox`.
+- **Superseded** by ADR-0014 (fleet clients, §9.1): the manager's answers and messages go through the fleet's delivery queue. The inbox adapter and MORNDO_MANAGER_INBOX were removed (Task 12, 2026-10). The domain rules here stay: an answer counts as given once queued (E8), and is recorded once it reached the manager (E13).
 - **Design and incident:** an internal decision record (the inbox and its protocol, outside this tree).
 - **Builds on:** ADR-0006 (decisions, the hub typing into the manager's pane under its lock), ADR-0008 phase C (the outbox, S4 to S8).
 

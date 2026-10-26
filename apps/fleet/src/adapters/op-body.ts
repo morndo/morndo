@@ -13,8 +13,13 @@ export type OpBody = { target: Target; op: OpName; args: Record<string, unknown>
 const OPS: Record<OpName, "client" | "agent"> = {
   "inventory.get": "client", "pane.captureMany": "client", "pane.frame": "client", "pane.keys": "client", "pane.send": "client", "op.status": "client",
   "transcript.size": "client", "transcript.read": "client", "transcript.locate": "client", "file.stat": "client", "file.get": "client", "file.put": "client",
-  "lane.start": "client", "lane.stop": "client", "worktree.list": "client", "worktree.add": "client", "job.cancel": "client", "job.notice": "agent", "job.noticeResult": "client",
+  "lane.start": "client", "lane.stop": "client", "worktree.list": "client", "worktree.add": "client", "memory.sync": "client", "job.cancel": "client", "job.notice": "agent", "job.noticeResult": "client",
   "connections.priority": "client", "connections.role": "client", "connections.revoke": "client", "connections.narrow": "client",
+  // fleet clients: a delivery goes through /v1/deliveries; client-api.ts refuses lane.deliver and delivery.cancel here
+  "pane.capture": "client", "lane.deliver": "client", "delivery.cancel": "client",
+  // updates §5.4: the control plane asks a node to move to a Version. A client's ask (the hub's board sends it);
+  // Connections refuses it without CAP_UPDATE, above the control plane's own Version (RL11) or on a halted Rollout (RL12).
+  "update.apply": "client",
 };
 const FIELDS = new Set(["node", "workerId", "lane", "op", "args", "key", "timeoutMs"]);
 // A client's namespace, a colon, then printable ASCII (spec 5.3: keys are namespaced by client, e.g. "hub:", "kira:"):

@@ -14,17 +14,21 @@
 // its source address; a refused join is audited as before; a source over its bucket is only logged, so no one outside
 // can fill the audit or the alerts.
 // Once live: results go to the requests, inventory and health to the connection registry (rate limited per node),
-// hook events to the hook sink in batches, acknowledged after their commit. Hook events are exempt from the rate
-// limit: the agent's replay window paces them (spec 5.4).
+// hook events to the hook sink (the intake window), each acknowledged once the commit that holds it is synced to the
+// disk. Hook events are exempt from the rate limit: the agent's replay window paces them (spec 5.4). So are delivery
+// states (ev.delivery, to the deliveries' mirror): after every reconnect a node sends each open delivery's state at
+// once (fleet clients spec §4.4), and its own store bounds them.
 import { randomBytes } from "node:crypto";
 import type { WebSocket } from "ws";
 import {
   AgentMessage, CLOSE, FLEET_PROTO, LIMITS, fleetSigPayload, nodeSigPayload, parseBody,
-  type FleetMessage, type HookEvent,
+  type FleetMessage,
 } from "@morndo/protocol";
 import type { Connections, Peer } from "../application/connections.ts";
-import type { HookSink } from "../application/hook-sink.ts";
+import type { Deliveries } from "../application/deliveries.ts";
+import type { HookSink, IntakeHandle } from "../application/hook-sink.ts";
 import type { JobMirror } from "../application/job-mirror.ts";
+import type { Rollouts } from "../application/rollouts.ts";
 import type { Audit } from "./audit.ts";
 import type { FleetKey } from "./keys.ts";
 import { verifySig } from "./keys.ts";
@@ -34,6 +38,9 @@ import type { RateLimiter } from "./rate-limit.ts";
 
 export type SessionDeps = {
   connections: Connections; nodes: NodesStore; audit: Audit; fleetKey: FleetKey; hooks: HookSink; jobs: JobMirror; log: Logger;
+  deliveries: Pick<Deliveries, "fromNode" | "heldByOther">;
+  // The welcome's two updates fields (updates §7): this fleet's own build, and the Rollout as it stands.
+  rollouts: Pick<Rollouts, "latest" | "offerFor">; build: { version: string; commit: string | null };
   limiter: RateLimiter; handshakes: { take(source: string): boolean }; handshakeMs: number; source: string;
 };
 
@@ -56,8 +63,7 @@ export const CLOSE_GRACE_MS = 2000;
 
 export function runSession(ws: WebSocket, d: SessionDeps): void {
   let state: State = { kind: "new" };
-  let batch: HookEvent[] = [];
-  let flushQueued = false;
+  let intake: IntakeHandle | null = null;                // the intake's handle for this connection's hook events, once live
   let closing = false;                                   // closed by us: later messages are ignored
   const send = (m: FleetMessage) => { if (ws.readyState === ws.OPEN) ws.send(JSON.stringify(m)); };
   let grace: ReturnType<typeof setTimeout> | null = null;
@@ -72,7 +78,8 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
   const closeFromFleet = (code: number, reason: string) => {
     closing = true;
     state = { kind: "done" };
-    batch = [];
+    intake?.cancel();                                    // its events not yet committed are dropped, never acknowledged
+    intake = null;
     closeWithGrace(code, reason);
   };
   const peer: Peer = {
@@ -86,23 +93,15 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
   const tooMany = () => close(1013, "too many joins or hellos from this address; try again later");
   const handshake = setTimeout(() => { if (state.kind !== "live") close(1008, "handshake timeout"); }, d.handshakeMs);
 
-  // Stores the batch (one transaction), then acknowledges the highest accepted seq if the connection is still ours.
-  const flush = () => {
-    flushQueued = false;
-    if (state.kind !== "live" && state.kind !== "done") return;
-    const events = batch;
-    batch = [];
-    if (events.length === 0) return;
-    const first = events[0];
-    if (!first) return;
-    try {
-      const seq = d.hooks.accept(first.node, first.streamId, events);
-      if (state.kind === "live") send({ v: 1, t: "ack", streamId: first.streamId, seq });
-    } catch (e) {
-      d.log.error(`node ${first.node}: storing ${events.length} hook events failed; not acknowledged`, e);
+  // The intake acknowledges the highest accepted seq once its commit is on the disk, if the connection is still live.
+  const openIntake = (node: string, streamId: string): IntakeHandle => d.hooks.open({
+    node, streamId,
+    acked: seq => { if (state.kind === "live") send({ v: 1, t: "ack", streamId, seq }); },
+    failed: e => {
+      d.log.error(`node ${node}: storing hook events failed; not acknowledged`, e);
       if (state.kind === "live") close(1011, "internal error");
-    }
-  };
+    },
+  });
 
   function onMessage(raw: Buffer, isBinary: boolean) {
     if (closing || state.kind === "done") return;
@@ -152,16 +151,25 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
         // order (it waits for its welcome).
         state = { kind: "admitting" };
         d.connections.admit({
-          node: hello.node, instanceId: hello.instanceId, streamId: hello.streamId, peer, source: d.source, agentVersion: hello.agent.version,
-          claudeVersion: hello.claude.version, caps: hello.caps,
+          node: hello.node, instanceId: hello.instanceId, streamId: hello.streamId, peer, source: d.source, agentVersion: hello.agent.version, agentCommit: hello.agent.commit ?? null,
+          claudeVersion: hello.claude.version, caps: hello.caps, proto: hello.proto,
         }, epoch => {
           clearTimeout(handshake);
           state = { kind: "live", node: hello.node, instanceId: hello.instanceId, streamId: hello.streamId };
+          intake = openIntake(hello.node, hello.streamId);
           const mark = d.hooks.known(hello.node, hello.streamId);
           // The highest store sequence this store has shown (fleet.db): an agent whose database is behind it was put
           // back from an older copy, and starts a new store before it runs anything (spec §5.2). None known: omitted.
           const seen = d.connections.storeSeqSeen(hello.node, hello.streamId);
-          send({ v: 1, t: "welcome", connEpoch: epoch, ackSeq: mark.seq, streamKnown: mark.known, ...(seen === null ? {} : { storeSeqSeen: seen }) });
+          // What this node may follow, with the attempt id the fleet issued it for that (review of #107, round 4).
+          const offer = d.rollouts.offerFor(hello.node);
+          // With it (updates §7) the control plane's own build — what a node's updater checks its Versions against
+          // (RL11) — and the Rollout as it stands, null while the control plane has committed none.
+          send({
+            v: 1, t: "welcome", connEpoch: epoch, ackSeq: mark.seq, streamKnown: mark.known, ...(seen === null ? {} : { storeSeqSeen: seen }),
+            controlPlane: { version: d.build.version, commit: d.build.commit }, rollout: d.rollouts.latest(),
+            ...(offer === null ? {} : { offer }),
+          });
           try { d.jobs.retry(hello.node); } catch (e) { d.log.error(`node ${hello.node}: retrying job notices failed`, e); }
           try { d.jobs.pushNotices(hello.node); } catch (e) { d.log.error(`node ${hello.node}: sending notice results failed`, e); }
         }).then(admitted => {
@@ -181,8 +189,7 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
       case "ev.hook": {
         if (state.kind !== "live") return close(1008, "unexpected event");
         if (m.event.node !== state.node || m.event.streamId !== state.streamId) return close(1008, "an event for another node or stream");
-        batch.push(m.event);
-        if (!flushQueued) { flushQueued = true; setImmediate(flush); }
+        intake?.add(m.event);
         return;
       }
       case "ev.inventory":
@@ -193,6 +200,13 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
         if (state.kind !== "live") return close(1008, "unexpected event");
         if (!d.limiter.take(state.node)) return rateLimited(state.node);
         return d.connections.health(state.node, m.health);
+      case "ev.delivery":
+        if (state.kind !== "live") return close(1008, "unexpected event");
+        if (m.delivery.node !== state.node) return close(1008, "an event for another node or stream");
+        // An id another node holds is dropped (heldByOther logged and audited it); the connection stays: the node replays
+        // its deliveries after every welcome, so closing it would close it again on every reconnect (review #2).
+        if (d.deliveries.heldByOther(state.node, m.delivery.id)) return;
+        return d.deliveries.fromNode(state.node, m.delivery);
       case "job":
         // A reconnect resends every open job. Like hook events, that replay is not rate limited.
         if (state.kind !== "live") return close(1008, "unexpected event");
@@ -217,8 +231,7 @@ export function runSession(ws: WebSocket, d: SessionDeps): void {
     clearTimeout(handshake);
     if (grace) clearTimeout(grace);
     const live = state.kind === "live" ? state : null;
-    state = { kind: "done" };
-    flush();                                                          // events received are stored, unacknowledged
+    state = { kind: "done" };                                         // events received are stored, unacknowledged
     if (live) d.connections.closed(live.node, peer);
   });
 }

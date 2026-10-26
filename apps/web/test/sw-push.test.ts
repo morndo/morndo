@@ -29,10 +29,27 @@ describe("what a notification says (N1)", () => {
       title: "A device was added", body: "Not you? Review your devices.", tag: "morndo-linked", url: "/devices",
     });
   });
+  it("fleet alerts: the urgent ones he hasn't seen, counted; a hub from before sends no count (none)", () => {
+    expect(notificationFor({ kind: 3, decisions: 0, workers: 0, linked: 0, alerts: 2 })).toEqual({
+      title: "Your fleet has 2 alerts", body: "Open Morndo to see what happened.", tag: "morndo-alert", url: "/?view=alerts",
+    });
+    expect(notificationFor({ kind: 3, decisions: 0, workers: 0, linked: 0, alerts: 1 }).title).toBe("Your fleet has an alert");
+    expect(notificationFor({ kind: 2, decisions: 0, workers: 0, linked: 1 }).tag).toBe("morndo-linked");
+  });
   it("anything it can't read still shows one, saying only that something needs him", () => {
     for (const junk of [null, "text", { kind: 9, decisions: 1, workers: 0, linked: 0 }, { kind: 0, decisions: "2", workers: 0, linked: 0 }, { kind: 0 }]) {
       expect(notificationFor(junk)).toEqual({ title: "Morndo", body: "Something needs you.", tag: "morndo", url: "/" });
     }
+  });
+  it("usage notices (S4, plan 4.4): counted, a tag of its own, Home; a hub from before sends no count (one)", () => {
+    expect(notificationFor({ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 2 })).toEqual({
+      title: "2 usage changes need a look", body: "Open Morndo to see what changed.", tag: "morndo-usage", url: "/?view=dashboard",
+    });
+    expect(notificationFor({ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0, usage: 1 }).title).toBe("Usage needs a look");
+    expect(notificationFor({ kind: 4, decisions: 0, workers: 0, linked: 0, alerts: 0 }).title).toBe("Usage needs a look");
+  });
+  it("a kind this code doesn't know still shows a notification (the round before, kind 4 read that way)", () => {
+    expect(notificationFor({ kind: 5, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 })).toEqual({ title: "Morndo", body: "Something needs you.", tag: "morndo", url: "/" });
   });
 });
 

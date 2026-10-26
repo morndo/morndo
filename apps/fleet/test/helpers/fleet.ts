@@ -17,7 +17,7 @@ export type TestFleet = Fleet & {
   code(name: string): string;
   agent(o?: { node?: string; key?: AgentKey; instanceId?: string; streamId?: string }): FakeAgent;
   joined(name: string, o?: { instanceId?: string; streamId?: string }): Promise<FakeAgent>;
-  online(name: string, o?: { instanceId?: string; streamId?: string }): Promise<FakeAgent>;
+  online(name: string, o?: { instanceId?: string; streamId?: string; caps?: string[]; commit?: string }): Promise<FakeAgent>;
 };
 
 const running = new Set<Fleet>();
@@ -35,7 +35,9 @@ export const WIDE: BucketConfig = { capacity: 100_000, refillPerSecond: 100_000 
 export function testConfig(dir: string, over: Partial<FleetConfig> = {}): FleetConfig {
   return {
     listen: { host: "127.0.0.1", port: 0 }, socketPath: join(dir, "s", "f.sock"), dbPath: join(dir, "fleet.db"),
-    keyPath: join(dir, "key.pem"), publicUrl: "ws://127.0.0.1:8791/agent", subscribers: [], ...over,
+    keyPath: join(dir, "key.pem"), publicUrl: "ws://127.0.0.1:8791/agent", subscribers: [], stickyLanes: ["manager"],
+    laneEvents: { deliverTo: null, header: "[lane-event] Lane events (handle them as your instructions say):", ignore: [], batchMs: 3000 },
+    laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: false }, ...over,
   };
 }
 
@@ -60,7 +62,7 @@ export async function startTestFleet(o: FleetOptions & { dir?: string; config?: 
     },
     online: async (name, a = {}) => {
       const fa = await t.joined(name, a);
-      const r = await fa.connect();
+      const r = await fa.connect({ ...(a.caps ? { caps: a.caps } : {}), ...(a.commit ? { commit: a.commit } : {}) });
       if (!r.ok) throw new Error(`connect refused: ${r.closed.code} ${r.closed.reason}`);
       return fa;
     },

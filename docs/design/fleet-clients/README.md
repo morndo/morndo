@@ -45,7 +45,7 @@ Read on 2026-10-08, read-only, on the owner's PC (WSL2) and in this repo at `849
   - `remove` also comes with `delivered_to_agent` (twice);
   - `cleared_on_cancel` didn't occur in those two days.
 - **`lane-events-push`** (Python, 256 lines) follows `events.jsonl` and types batches of them into the manager every 3 s, under the same lock, as one message with the header `[lane-event] Lane events from kira (handle them as the Dispatching work section says):` and one JSON line per event. It skips `answered` and the account-pool test lanes.
-- **Open PR #10** (ADR-0010, conflicting with main since #12): the hub writes the manager's answers into that inbox's files on disk, a contract that only works on one machine. Its domain rules stand: an answer counts as given once queued (E8) and is recorded once it reached the manager (E13); the card says "Queued, it will be delivered".
+- **PR #29 on main** (ADR-0010 rebuilt, 2026-10-09; it replaced the open PR #10): the hub writes the manager's answers into that inbox's files on disk, behind `MORNDO_MANAGER_INBOX`, a contract that only works on one machine. Not live on the PC: no `MORNDO_MANAGER_INBOX` there. Its domain rules stand: an answer counts as given once queued (E8) and is recorded once it reached the manager (E13); the card says "Queued, it will be delivered".
 - **Open PR #18:** the hub runs `lanes --json` locally to tell when an engine lane (no transcript) is working.
 - **The fleet today** ([fleet core](../fleet-core/README.md), §5): typed ops, among them `pane.send` with two-phase done keys (only `started` synced to the disk, §16.4), `lane.start` and `lane.stop` (off in the PC's policy), and `inventory.get`; the hook relay on each node (§5.5); the hook bus with an outbox and at-least-once delivery to static subscribers (§5.6); the client API on a Unix socket (`/v1/nodes`, `/v1/lanes`, `/v1/op`, `/v1/events`, `/v1/files`, `/v1/alerts`). The fleet already commits the hook events that arrive in one event-loop turn together (`agent-session.ts`, `ev.hook`), each batch with one `FULL` sync.
 - **`lane.start`** runs `claude`, or `claude-as <account>` when an account is given, as the pane's own command (`lane-ops.ts`): the owner's launcher, inside Morndo. `claude-pool` refuses to move a lane whose pane has no shell under Claude (`claude-pool:673-677`), so such a lane loses account failover; `lanes start` and kira's restore type the launcher into a shell instead.
@@ -83,7 +83,7 @@ Read on 2026-10-08, read-only, on the owner's PC (WSL2) and in this repo at `849
 | `packages/fleet-client` (new) | the TypeScript client of the API, moved out of `apps/hub/src/adapters/fleet-client.ts`; used by the hub and `morndo lanes`, importable by kira |
 | `docs/fleet-api.md` (new) | the client API reference, the subscriber contract and the hook bodies; every example request and answer in it runs as a test (§12) |
 | `apps/hub` | answers and messages for the manager through the queue, with ADR-0010's domain rules (§9.1); the console gains `morndo lanes` (§9.2) |
-| `apps/web` | the manager's "Queued, it will be delivered", "Delivered" and "May have been delivered" states (from PR #10's design) |
+| `apps/web` | the manager's "Queued, it will be delivered", "Delivered" and "May have been delivered" states (on #29's decision cards, which are reused) |
 | outside Morndo | kira (its repo), the owner's `lanes` wrapper, `manager-inbox` (a shim, then retired), `lane-events-push` (retired) (§9.3 to §9.5) |
 
 ## 4. The delivery queue
@@ -98,9 +98,9 @@ Read on 2026-10-08, read-only, on the owner's PC (WSL2) and in this repo at `849
   - **A worker id** is bound to that pane: gone, the delivery is given up.
 
   A name that two windows claim is refused `lane_conflict`.
-- **`text`** is at most 8000 characters, as for `pane.send`.
+- **`text`** is at most 100,000 characters (`LIMITS.maxMessageText`), as for `pane.send` (ADR-0033). Over 8000 it goes only to a node whose hello says it takes it.
 - **`ttlMs`** defaults to 24 hours. The node turns it into `notAfter` on its own clock when it stores the delivery: no client sends a clock time, so clocks that differ between machines (the PC ran 1.1 s behind the control plane) don't matter.
-- **Only a lane running Claude Code takes deliveries:** one with a live session (its session file, and its process alive), whatever its `status` (§5). A pane without one waits (`no_session`) when it is a sticky lane (a manager mid-restart) or was started in the last 2 minutes (Claude Code still starting; measured from the pane process's own start time, so an agent restart doesn't reset it). Any other such pane (a shell, an engine lane) refuses the delivery `no_session` (not executed), and clients type into those directly (`pane.send`, `pane.keys`).
+- **Only a lane with a live session takes deliveries:** Claude Code's (its session file, and its process alive) or a lane of the engine layer's (its file in the engine registry, its process alive and the foreground job of the pane; [ADR-0030](../../adr/0030-engine-lane-sessions.md)), whatever its `status` (§5). A pane without one waits (`no_session`) when it is a sticky lane (a manager mid-restart) or was started in the last 2 minutes (Claude Code still starting; measured from the pane process's own start time, so an agent restart doesn't reset it). Any other such pane (a shell) refuses the delivery `no_session` (not executed), and clients type into those directly (`pane.send`, `pane.keys`).
 
 ### 4.2 States
 
@@ -142,7 +142,7 @@ The agent sends `ev.delivery { id, state, … }` on every change, and after ever
 
 ### 4.5 Alerts
 
-A delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes raises a fleet alert, once each (`delivery_waiting`, with its state and reason). kira posts alerts to the owner (§9.4).
+A delivery still `queued`, `typed` or `held` after 2, 15 and 60 minutes raises a fleet alert, once each (`delivery_waiting`, with its state and reason). The hub shows the fleet's alerts in the app, on the desktop's Activity and the phone's Status, and pushes the urgent ones, counts only (the owner, 2026-10-12: kira is one owner's bot, so the open-source app shows them itself). kira may post them too (§9.4).
 
 ### 4.6 The fleet's part
 
@@ -164,7 +164,7 @@ It also remembers the node that last had each sticky lane name (`sticky_lanes`, 
 - **Folder trust.** A lane started in a folder Claude Code doesn't trust yet waits at its trust dialog: `lane.start` answers `{ workerId, waiting: "trust" }` when it sees it. Accepting it stays the client's decision: the owner's `lanes` asks `claude-pool accept-trust` for his known folders, then sends the keys.
 - **A first prompt.** `lane.start` takes `prompt?`: it becomes a delivery to the new pane (id `<key>:prompt`), which waits for Claude Code to start (`no_session`, §4.1) and is typed once it can take it. So `lanes start … PROMPT` and kira's `/new` don't race Claude Code's startup.
 - **Stopping.** `lane.stop { name, mode? }`:
-  - `mode: "exit"`, the default, types `/exit` the way a delivery is typed (never into a menu or over text), answers Claude Code's exit prompt when it asks ("Exit and stop tasks": 1, as `claude-pool` does), then answers once the window has closed or is back at its shell, or `uncertain` after 30 s;
+  - `mode: "exit"`, the default, types `/exit` the way a delivery is typed (never into a menu or over text), answers Claude Code's exit prompt when it asks ("Exit and stop tasks": 1, as `claude-pool` does), then answers once the window has closed or is back at its shell (and closes that window, unless `keepWindow: true`), or `uncertain` after 30 s;
   - `mode: "kill"` closes the window.
 
   The policy's `protected` names (default `["manager"]`) are refused `denied`.
@@ -234,9 +234,11 @@ Clients name themselves (`x-morndo-client`, a-z, at most 16 characters: `hub`, `
   - `delivered`: it is recorded (`EscalationAnswered`, E13, at its time);
   - `uncertain`: the card says "May have been delivered", like a send in doubt today, and the ask is not opened again;
   - `given_up` (`expired`, `cancelled`, `gone`): nothing reached the manager, so the ask opens again.
+- A Command to the manager waits in the queue for up to 24 hours (`ttlMs`), its card showing why it waits, and can be cancelled. #29's two-minute deadline and Retry go (the owner, 2026-10-09).
 - Commands to other lanes stay typed directly (`pane.send`), as today.
 - **The switch:** `MORNDO_MANAGER_QUEUE`, on by default when the hub has a fleet; `off` types to the manager directly, as before (step 2's rollback, §13). Because the delivery's id and the direct send's key are one key, a direct retry after the switch finds the delivery's key (`done`: a duplicate, already typed; `started`: in doubt) and never types again. A delivery still queued when the switch goes off is cancelled first.
 - **Without a fleet** (legacy mode), the hub types to the manager directly, as before.
+- **The manager is always on the list** (the owner, 2026-10-12). While it has no window (a restart), the app lists it as not running. With the queue on, a message written to it goes to `POST /api/manager/send`, which queues it for the sticky lane `manager` (§4.1): it waits on the node that last had it and goes in once a window of that name is back. With the queue off, or without a fleet, nothing can hold it, so the app says to start the manager. Files go onto its machine, so none while it isn't running.
 
 ### 9.2 `morndo lanes`
 
@@ -249,7 +251,7 @@ A subcommand of the `morndo` console, for any user, over the fleet socket (`MORN
 | `morndo lanes send <lane> <text \| ->` | a delivery (`--id` to choose it); waits for `delivered` up to `--wait <s>` (default 0: print the state and return); `--direct` types at once (`pane.send`), for a lane without Claude Code |
 | `morndo lanes keys <lane> <key…>` | `pane.keys` by key name |
 | `morndo lanes start <name> --cwd <dir> [--account <a>] [--resume <session>] [--prompt <text>]` | `lane.start`, with a first prompt typed once the lane can take it |
-| `morndo lanes stop <lane> [--kill]` | `lane.stop` |
+| `morndo lanes stop <lane> [--kill \| --keep-window]` | `lane.stop` |
 | `morndo lanes status <delivery id>` | a delivery's state |
 | `morndo lanes events` | lane events as they happen |
 
@@ -296,7 +298,7 @@ kira keeps every behaviour: Telegram topics, cards and buttons, the Mini App, sc
 - **`manager-inbox`** stops taking messages once kira and the hub use deliveries. Its deliverer keeps running until its queue is empty, then is retired. The `manager-inbox` command stays as a thin shim for any caller left:
   - `enqueue` → a delivery to the manager with id `inbox:<sender>:<id>`;
   - `status` and `ls` → `/v1/deliveries`.
-- **PR #10** is closed as superseded by this design once §9.1 is live. Its web pieces for the Queued state are reused.
+- **#29's inbox path is removed with §9.1** (the owner, 2026-10-09). That covers the adapter, `MORNDO_MANAGER_INBOX`, the services' inbox branches, the outbox's inbox fields and `e2e/inbox`. Its domain functions, store helpers and decision cards stay, with the queue's states. Its table `pending_answers` (migration 15) stays, unused.
 
 ## 10. Failures
 
@@ -444,4 +446,5 @@ Confirmed unchanged:
 30. **`GET /v1/caps` answers the API versions and the sticky names** (ruling 8).
 31. **A client in doubt asks again under the same id,** never types the text itself and never says "not delivered". `morndo lanes` exits 5 then (plan review, ruling 49).
 32. **The fleet syncs a node's connection epoch** (plan review, ruling 62).
+33. **#29 (ADR-0010 rebuilt on main) gives way to the fleet's queue:** its inbox path is removed, its domain and cards are reused, and the hub migration is 16 (the plan's refresh, rulings 81–87).
 

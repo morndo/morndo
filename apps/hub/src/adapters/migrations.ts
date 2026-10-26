@@ -171,6 +171,150 @@ export const MIGRATIONS: readonly Migration[] = [
     compat: "additive",
     up: db => { if (!hasColumn(db, "job_notices", "acked")) db.exec("ALTER TABLE job_notices ADD COLUMN acked INTEGER NOT NULL DEFAULT 0"); },
   },
+  {
+    // PR #34 (fleet-clients) merges first. 18 is that line's manager_deliveries, already running live.
+    // A database at 18 runs only 19. Numbers stay contiguous, so this list and that one agree on 18.
+    version: 18,
+    name: "manager_deliveries (migration 18): the manager's answers and messages in the fleet's delivery queue, followed across hub restarts (fleet-clients §9.1)",
+    compat: "additive",
+    up: db => {
+      db.exec(`CREATE TABLE IF NOT EXISTS manager_deliveries (
+        delivery_id TEXT PRIMARY KEY, kind TEXT NOT NULL CHECK (kind IN ('answer', 'command')),
+        escalation_id TEXT, ask TEXT, choice TEXT, endpoint_id TEXT NOT NULL, session_id TEXT NOT NULL, request_id TEXT NOT NULL,
+        queued_at INTEGER NOT NULL,
+        state TEXT NOT NULL CHECK (state IN ('sending', 'queued', 'typed', 'held', 'delivered', 'uncertain', 'given_up')),
+        updated_at INTEGER NOT NULL)`);
+      db.exec("CREATE INDEX IF NOT EXISTS manager_deliveries_request ON manager_deliveries (endpoint_id, request_id)");
+      db.exec("CREATE INDEX IF NOT EXISTS manager_deliveries_answer ON manager_deliveries (escalation_id, queued_at)");
+    },
+  },
+  {
+    version: 19,
+    name: "decision briefs (ADR-0023): one row per version, so a restate keeps the earlier brief; the counter lives in settings",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS decision_briefs (
+        id TEXT NOT NULL, version INTEGER NOT NULL, ref TEXT,
+        asker_kind TEXT NOT NULL, asker_name TEXT NOT NULL, token_id TEXT NOT NULL,
+        filed_by_kind TEXT NOT NULL, filed_by_name TEXT NOT NULL,
+        brief TEXT NOT NULL, state TEXT NOT NULL, filed_at INTEGER NOT NULL,
+        resolution TEXT, drafted_by TEXT, closed_at INTEGER,
+        PRIMARY KEY (id, version));
+      CREATE INDEX IF NOT EXISTS decision_briefs_state ON decision_briefs (state, asker_kind, asker_name);
+    `),
+  },
+  {
+    version: 20,
+    name: "transcriptions (ADR-0021): one row per endpoint, recording and language, the body the domain already decided",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS transcriptions (
+        id TEXT NOT NULL, recording_kind TEXT NOT NULL, recording_id TEXT NOT NULL, language TEXT NOT NULL,
+        endpoint_id TEXT NOT NULL,
+        accepted_at INTEGER NOT NULL, body TEXT NOT NULL,
+        PRIMARY KEY (id, recording_kind, recording_id, language, endpoint_id));
+      CREATE INDEX IF NOT EXISTS transcriptions_id ON transcriptions (id);
+    `),
+  },
+  {
+    // PR #50 (transcriptions) merged first, so 20 is that line's table, already running live; this column is 21.
+    // A database at 20 runs only 21.
+    version: 21,
+    name: "sends.request_session: the session an escalation answer was sent under, so a row in doubt settled later is recorded with its own sender's provenance (A1; review of PR #55)",
+    compat: "additive",
+    up: db => { if (!hasColumn(db, "sends", "request_session")) db.exec("ALTER TABLE sends ADD COLUMN request_session TEXT"); },
+  },
+  {
+    version: 22,
+    name: "sends.label: the option label an escalation answer was typed with, so an answer found typed for an earlier version of its ask keeps that version's label (E9; review of PR #55)",
+    compat: "additive",
+    up: db => { if (!hasColumn(db, "sends", "label")) db.exec("ALTER TABLE sends ADD COLUMN label TEXT"); },
+  },
+  {
+    version: 23,
+    name: "board_tasks.state_changed_at: the last change of status, assignee or description, which the board's own moves compare a Run with (D6), so a comment no longer stops D1; a task already there takes its updated_at",
+    compat: "additive",
+    up: db => {
+      if (hasColumn(db, "board_tasks", "state_changed_at")) return;
+      db.exec("ALTER TABLE board_tasks ADD COLUMN state_changed_at INTEGER");
+      db.exec("UPDATE board_tasks SET state_changed_at = updated_at");
+    },
+  },
+  {
+    version: 24,
+    name: "board_merges (B11): one recorded merge of a task's PR (repo, sha, who, when), and the override when done was accepted while it was not live; a new table only, so an older hub opens the database as it is",
+    compat: "additive",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS board_merges (
+      key TEXT NOT NULL, repo TEXT NOT NULL, sha TEXT NOT NULL, at INTEGER NOT NULL, by TEXT NOT NULL, override TEXT,
+      PRIMARY KEY (key, repo, sha))`),
+  },
+  {
+    version: 25,
+    name: "hub_store: the store id of this database file, renewed by every restore, so a Command stamped with another store is answered uncertain and never typed twice (RL10, amending S5)",
+    compat: "additive",
+    up: db => {
+      db.exec(`CREATE TABLE IF NOT EXISTS hub_store (
+        id INTEGER PRIMARY KEY CHECK (id = 1), store TEXT NOT NULL, identity TEXT NOT NULL)`);
+      // Before the updater's PR 5c met main it numbered hub_store 24, main's number for board_merges: a dev hub that
+      // ran that build stands at 24 without board_merges and would never get it. Migration 24's own up, run again,
+      // makes it (CREATE ... IF NOT EXISTS: a hub that has it is unchanged). No released hub ever had that numbering.
+      const known = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'board_merges'").get();
+      if (known === undefined) MIGRATIONS.find(m => m.version === 24)!.up(db);
+    },
+  },
+  {
+    // Usage detection S2 (plan 4.2 to 4.5): one row per source and node (its health, its last reading and the one
+    // before it), the notices the hub itself wrote, the plan/threshold/cycle watches, the seat record, and the lane
+    // an account is used from (written by a later slice; the table and its store methods exist now).
+    version: 26,
+    name: "usage (S2): per-source health and readings, notices, watches and seat records (plan 4.2 to 4.5)",
+    compat: "additive",
+    up: db => db.exec(`
+      CREATE TABLE IF NOT EXISTS usage_sources (account TEXT NOT NULL, source TEXT NOT NULL, node TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (account, source, node));
+      CREATE TABLE IF NOT EXISTS usage_notices (id TEXT PRIMARY KEY, account TEXT NOT NULL, kind TEXT NOT NULL, signature TEXT NOT NULL, at INTEGER NOT NULL, text TEXT NOT NULL);
+      CREATE INDEX IF NOT EXISTS usage_notices_at ON usage_notices (at);
+      CREATE TABLE IF NOT EXISTS usage_watch (account TEXT NOT NULL, kind TEXT NOT NULL, key TEXT NOT NULL, body TEXT NOT NULL, PRIMARY KEY (account, kind, key));
+      CREATE TABLE IF NOT EXISTS usage_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS lane_accounts (node TEXT NOT NULL, lane TEXT NOT NULL, account TEXT NOT NULL, at INTEGER NOT NULL, PRIMARY KEY (node, lane));
+    `),
+  },
+  {
+    // Usage detection S3 (plan 4.5 item 4, U15, U17): an agent token's scopes (comma-separated names of the closed
+    // list, empty: none) and the seat records the accounts pool owns — the derived ones stay in usage_seats (S2). The
+    // fix round on PR #127 (finding 4b) adds how a lane record was written: 'start' by a lane_account tap, 'report' by
+    // a status-line report; every row before the column is a report. Fix round 2 on PR #127 (finding 1) adds which
+    // token wrote or last confirmed a lane record (null for a hub-issued start) and until when a disagreement between
+    // two tokens makes the record ambiguous; both null on every earlier row.
+    version: 27,
+    name: "usage (S3): agent token scopes, the pool-owned seat records, how a lane record was written and by which token (plan 4.5 item 4, U15, U17)",
+    compat: "additive",
+    up: db => {
+      if (!hasColumn(db, "agent_tokens", "scopes")) db.exec("ALTER TABLE agent_tokens ADD COLUMN scopes TEXT NOT NULL DEFAULT ''");
+      db.exec("CREATE TABLE IF NOT EXISTS usage_pool_seats (account TEXT PRIMARY KEY, body TEXT NOT NULL)");
+      if (!hasColumn(db, "lane_accounts", "source")) db.exec("ALTER TABLE lane_accounts ADD COLUMN source TEXT NOT NULL DEFAULT 'report'");
+      if (!hasColumn(db, "lane_accounts", "token")) db.exec("ALTER TABLE lane_accounts ADD COLUMN token TEXT");
+      if (!hasColumn(db, "lane_accounts", "conflict_until")) db.exec("ALTER TABLE lane_accounts ADD COLUMN conflict_until INTEGER");
+    },
+  },
+  {
+    version: 28,
+    name: "board_proofs (B14): one row per reference of a task's brief, its state as the hub read it, kept in rows of their own so a re-check never touches the task or its events; a new table only, so an older hub opens the database as it is",
+    compat: "additive",
+    up: db => db.exec(`CREATE TABLE IF NOT EXISTS board_proofs (
+      key TEXT NOT NULL, brief_rev INTEGER NOT NULL, ref TEXT NOT NULL, state TEXT NOT NULL, detail TEXT, checked_at INTEGER NOT NULL,
+      PRIMARY KEY (key, brief_rev, ref))`),
+  },
+  {
+    // A plain worker token's usage readings: how many, and when the last one was. A manager token, or a worker token
+    // with the usage-pool scope, is not counted.
+    version: 29,
+    name: "usage (T-430 slice 1): per-token count of readings posted with a plain worker token",
+    compat: "additive",
+    up: db => {
+      if (!hasColumn(db, "agent_tokens", "unbound_count")) db.exec("ALTER TABLE agent_tokens ADD COLUMN unbound_count INTEGER NOT NULL DEFAULT 0");
+      if (!hasColumn(db, "agent_tokens", "last_unbound_at")) db.exec("ALTER TABLE agent_tokens ADD COLUMN last_unbound_at INTEGER");
+    },
+  },
 ];
 
 export const SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;

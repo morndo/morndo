@@ -5,8 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { post } from "../src/lib/outbox/device.ts";
 import { Outbox, type PostOutcome } from "../src/lib/outbox/outbox.ts";
 import { memoryStore, type OutboxStore } from "../src/lib/outbox/store.ts";
-import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, RETRY_MS, RETRY_WINDOW_MS, canRetry, type OutboxRecord } from "../src/lib/outbox/state.ts";
-import { sendLabel } from "../src/lib/outbox/words.ts";
+import { ATTEMPT_TIMEOUT_MS, BUDGET_MS, RETRY_MS, RETRY_WINDOW_MS, type OutboxRecord } from "../src/lib/outbox/state.ts";
 
 const T0 = Date.UTC(2026, 9, 2, 12);
 let store: OutboxStore;
@@ -15,6 +14,8 @@ let posts: { id: string; worker: string; at: number; storedFirst: boolean }[];
 let answer: (r: OutboxRecord, attempt: number, signal: AbortSignal) => Promise<PostOutcome>;
 let seen: OutboxRecord[];
 let n: number;
+// The hub store this device last saw an answer name (RL10): what a new record is stamped with, as api.ts keeps it.
+let seenStore: string | null;
 
 function outbox() {
   return new Outbox({
@@ -28,6 +29,7 @@ function outbox() {
     connected: () => connected,
     onChange: rs => { seen = rs; },
     newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`,
+    hubStore: () => seenStore,
   });
 }
 const cmd = (worker = "%1", text = "ship it") => ({ worker, workerName: "alpha", text, uploads: [], seen: "none" });
@@ -38,83 +40,12 @@ const state = (o: Outbox, id: string) => o.records.find(r => r.id === id);
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(T0);
-  store = memoryStore(); connected = true; posts = []; seen = []; n = 0;
+  store = memoryStore(); connected = true; posts = []; seen = []; n = 0; seenStore = null;
   answer = async () => ({ kind: "typed" });
 });
 afterEach(() => vi.useRealTimers());
 
 describe("queueing (S4)", () => {
-  it("Retry of an expired command is posted as the owner's retry, and that flag does not stay", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired", reason: null });
-    const o = outbox();
-    const r = await o.enqueue(cmd("%0"));
-    await flush();
-    let revived = false;
-    answer = async rec => { revived = rec.revive === true; return { kind: "typed", queued: true, inbox: "queued", reason: null }; };
-    await o.retry(r.id);
-    await flush();
-    expect(revived).toBe(true);
-    expect(state(o, r.id)?.revive).toBeUndefined();
-  });
-  it("asks again after 2 minutes, so an expired command does not stay Queued", async () => {
-    answer = async () => ({ kind: "typed", queued: true });
-    const o = outbox();
-    const r = await o.enqueue(cmd("%0", "ship it"));
-    await flush();
-    expect(state(o, r.id)).toMatchObject({ state: "sent", queued: true });
-    expect(state(o, r.id)?.inbox).toBeUndefined();
-    const sentAt = state(o, r.id)?.sentAt;
-    let asks = 0;
-    answer = async rec => {
-      asks += 1;
-      expect(rec.revive).toBeUndefined();
-      expect(rec.again).toBeUndefined();
-      return { kind: "typed", queued: true, inbox: "expired", reason: null };
-    };
-    await advance(BUDGET_MS);
-    expect(asks).toBe(1);
-    const saved = state(o, r.id);
-    expect(saved?.inbox).toBe("expired");
-    expect(saved?.sentAt).toBe(sentAt);
-    expect(saved && sendLabel(saved, [saved], T0 + BUDGET_MS)).toBe("Not sent");
-    expect(saved && canRetry(saved, T0 + BUDGET_MS)).toBe(true);
-  });
-  it("a successful Retry drops the expired spool word, so it is not still Not sent", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired", reason: null });
-    const o = outbox();
-    const r = await o.enqueue(cmd("%0"));
-    await flush();
-    answer = async () => ({ kind: "typed", queued: true });
-    await o.retry(r.id);
-    await flush();
-    const saved = state(o, r.id);
-    expect(saved?.inbox).toBeUndefined();
-    expect(saved?.inboxReason).toBeUndefined();
-    expect(saved && sendLabel(saved, [saved], T0)).toBe("Queued, it will be delivered");
-    expect(saved && canRetry(saved, T0)).toBe(false);
-  });
-  it("a Retry the hub says was delivered is Sent, not still queued as lost", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "lost", reason: null });
-    const o = outbox();
-    const r = await o.enqueue(cmd("%0"));
-    await flush();
-    const deliveredAt = T0 + 30_000;
-    answer = async () => ({ kind: "typed", at: deliveredAt });
-    await o.retry(r.id);
-    await flush();
-    const saved = state(o, r.id);
-    expect(saved?.queued).toBeUndefined();
-    expect(saved?.inbox).toBeUndefined();
-    expect(saved?.inboxReason).toBeUndefined();
-    expect(saved && sendLabel(saved, [saved], deliveredAt)).toBe("Sent");
-  });
-  it("keeps the spool status a queued answer reported, so the label can name it", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "accepted", reason: null });
-    const o = outbox();
-    const r = await o.enqueue(cmd("%0"));
-    await flush();
-    expect(state(o, r.id)).toMatchObject({ state: "sent", queued: true, inbox: "accepted", inboxReason: null });
-  });
   it("writes the Command down before its first attempt, and it ends Sent", async () => {
     const o = outbox();
     const r = await o.enqueue(cmd());
@@ -410,12 +341,15 @@ describe("echoes (S8)", () => {
 });
 
 describe("phase C review fixes", () => {
-  it("a POST that never answers is given up after 15 s and tried again; past the budget, Not sent (H3)", async () => {
+  // 20 s: longer than the hub may wait on the fleet for a message to the manager.
+  it("a POST that never answers is given up after ATTEMPT_TIMEOUT_MS and tried again; past the budget, Not sent (H3)", async () => {
     let aborted = 0;
     answer = (_r, _n, signal) => new Promise(() => { signal.addEventListener("abort", () => aborted++); });
     const o = outbox();
     const r = await o.enqueue(cmd());
-    await advance(15_000);
+    await advance(ATTEMPT_TIMEOUT_MS - 1);
+    expect(aborted).toBe(0);
+    await advance(1);
     expect(aborted).toBe(1);
     expect(posts.length).toBeGreaterThanOrEqual(1);
     await advance(130_000);
@@ -503,93 +437,73 @@ describe("pasted but not submitted (409 not_submitted)", () => {
   });
 });
 
-// Send again on the phone (review, 2026-10-05): a message Sent into the manager's inbox but never echoed goes again with
-// the same request id (the hub queues it once more only if the inbox gave the first up), and its clock starts over.
+// Send again on the phone (ADR-0011), on the fleet's queue (fleet-clients §9.1): a message the manager's queue gave up
+// goes again with the same request id and the again flag, and the hub queues it once more as the next attempt. Once: a
+// second copy given up is final. A status read never carries the flag.
+const GIVEN_UP = { state: "given_up" as const, waiting: null, why: "expired" };
+const QUEUED_AGAIN = { state: "queued" as const, waiting: null, why: null };
 describe("again", () => {
-  it("re-posts a Sent-into-the-inbox record with the same request id; it is Sent again with a fresh time", async () => {
-    answer = async () => ({ kind: "typed", queued: true });
+  it("re-posts a message the queue gave up with the same request id, flagged; the next attempt is Sent and resent", async () => {
+    answer = async () => ({ kind: "typed", delivery: GIVEN_UP });
     const o = outbox();
-    await o.start();
     const r = await o.enqueue(cmd("%0", "hello"));
-    await advance(10);
-    expect(state(o, r.id)).toMatchObject({ state: "sent", queued: true });
-    const first = state(o, r.id)?.sentAt ?? 0;
-    await advance(61 * 60_000);
-    const tapped = Date.now();
-    // The wait also runs the inbox poll (a queued command is asked again after two minutes). Send again is the next post.
+    await flush();
+    expect(state(o, r.id)).toMatchObject({ state: "sent", delivery: GIVEN_UP });
+    let flagged: boolean | undefined;
+    answer = async rec => { flagged = rec.again; return { kind: "typed", delivery: QUEUED_AGAIN }; };
     const before = posts.length;
     await o.again(r.id);
-    await advance(10);
+    await flush();
     expect(posts.slice(before).map(p => p.id)).toEqual([r.id]);
-    expect(posts.every(p => p.id === r.id)).toBe(true);
-    expect(state(o, r.id)).toMatchObject({ state: "sent", queued: true });
-    expect(state(o, r.id)?.sentAt).toBeGreaterThanOrEqual(tapped);
-    expect(tapped - first).toBeGreaterThan(60 * 60_000);
-    expect((await store.all()).map(x => x.id)).toEqual([r.id]);                // kept on the device all along
+    expect(flagged).toBe(true);
+    expect(state(o, r.id)).toMatchObject({ state: "sent", delivery: QUEUED_AGAIN, resent: true });
+    expect(state(o, r.id)?.again).toBeUndefined();
   });
-  it("a status check is not Send again, and a second copy the inbox then gives up is final", async () => {
-    const flags: boolean[] = [];
-    answer = async rec => { flags.push(rec.again === true); return { kind: "typed", queued: true, inbox: "queued" }; };
+  it("only for a message the queue gave up, and only once: a second copy given up is final", async () => {
+    answer = async () => ({ kind: "typed", delivery: QUEUED_AGAIN });
     const o = outbox();
     const r = await o.enqueue(cmd("%0", "ship it"));
     await flush();
-    await advance(BUDGET_MS);
-    expect(flags.at(-1)).toBe(false);
-    expect(state(o, r.id)?.resendFailed).toBeUndefined();
-    answer = async rec => { flags.push(rec.again === true); return { kind: "typed", queued: true, inbox: "expired" }; };
-    await advance(5_000);
-    expect(flags.at(-1)).toBe(false);
-    expect(state(o, r.id)?.resendFailed).toBeUndefined();
-    answer = async rec => { flags.push(rec.again === true); return { kind: "typed", queued: true, inbox: "queued" }; };
+    await o.again(r.id);                                                     // still queued: nothing to send again
+    await flush();
+    expect(posts).toHaveLength(1);
+    await o.deliveries([{ requestId: r.id, ...GIVEN_UP }]);
     await o.again(r.id);
     await flush();
-    expect(flags.at(-1)).toBe(true);
-    expect(state(o, r.id)?.again).toBeUndefined();
+    expect(posts).toHaveLength(2);
     expect(state(o, r.id)?.resent).toBe(true);
-    answer = async rec => { flags.push(rec.again === true); return { kind: "typed", queued: true, inbox: "expired" }; };
-    await advance(BUDGET_MS);
-    expect(flags.at(-1)).toBe(false);
-    expect(state(o, r.id)?.resendFailed).toBe(true);
-  });
-  it("sets resent only after the hub accepts the copy, and Retry clears it so a later expiry is not final", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired" });
-    const o = outbox();
-    const r = await o.enqueue(cmd("%0", "ship it"));
-    await flush();
-    let posted: { again: boolean | undefined; resent: boolean | undefined } | null = null;
-    answer = async rec => { posted = { again: rec.again, resent: rec.resent }; return { kind: "typed", queued: true, inbox: "queued" }; };
+    await o.deliveries([{ requestId: r.id, ...GIVEN_UP }]);                  // the second copy, given up too
     await o.again(r.id);
     await flush();
-    expect(posted).toEqual({ again: true, resent: undefined });
-    expect(state(o, r.id)?.resent).toBe(true);
-    expect(state(o, r.id)?.again).toBeUndefined();
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired" });
-    await advance(BUDGET_MS);
-    expect(state(o, r.id)?.resendFailed).toBe(true);
-    answer = async rec => { expect(rec.again).toBeUndefined(); expect(rec.resent).toBeUndefined(); return { kind: "typed", queued: true, inbox: "queued" }; };
-    await o.retry(r.id);
-    await flush();
-    expect(state(o, r.id)?.resent).toBeUndefined();
-    expect(state(o, r.id)?.resendFailed).toBeUndefined();
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired" });
-    await advance(BUDGET_MS);
-    expect(state(o, r.id)?.resendFailed).toBeUndefined();
+    expect(posts).toHaveLength(2);
   });
-  it("a refused Send again does not keep the again or resent flags", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired" });
+  it("leaves alone a message typed directly (no queue)", async () => {
+    const o = outbox();
+    const r = await o.enqueue(cmd("%1", "typed one"));
+    await flush();
+    await o.again(r.id);
+    await flush();
+    expect(posts).toHaveLength(1);
+  });
+  it("a refused Send again does not keep the again or resent flags, and Retry is a plain repeat", async () => {
+    answer = async () => ({ kind: "typed", delivery: GIVEN_UP });
     const o = outbox();
     const r = await o.enqueue(cmd("%0", "ship it"));
     await flush();
-    answer = async rec => { expect(rec.again).toBe(true); expect(rec.resent).toBeUndefined(); return { kind: "refused", code: "step_up", status: 403 }; };
+    answer = async rec => { expect(rec.again).toBe(true); return { kind: "refused", code: "step_up", status: 403 }; };
     await o.again(r.id);
     await flush();
     expect(state(o, r.id)).toMatchObject({ state: "failed", error: "step_up" });
     expect(state(o, r.id)?.again).toBeUndefined();
     expect(state(o, r.id)?.resent).toBeUndefined();
-    expect(state(o, r.id)?.resendFailed).toBeUndefined();
+    answer = async rec => { expect(rec.again).toBeUndefined(); return { kind: "typed", delivery: GIVEN_UP }; };
+    await o.retry(r.id);
+    await flush();
+    expect(state(o, r.id)).toMatchObject({ state: "sent", delivery: GIVEN_UP });
+    expect(state(o, r.id)?.resendFailed).toBeUndefined();                  // Send again is still possible
   });
-  it("a Send again the inbox cannot take stays queued, and is not marked final", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired" });
+  it("a Send again the hub can't take now stays queued for another try, and is not marked final", async () => {
+    answer = async () => ({ kind: "typed", delivery: GIVEN_UP });
     const o = outbox();
     const r = await o.enqueue(cmd("%0", "ship it"));
     await flush();
@@ -599,48 +513,11 @@ describe("again", () => {
     expect(state(o, r.id)?.state).not.toBe("failed");
     expect(state(o, r.id)?.resendFailed).toBeUndefined();
   });
-  it("Check asks where a queued command stands and does not send it again", async () => {
-    const flags: boolean[] = [];
-    answer = async rec => { flags.push(rec.again === true); return { kind: "typed", queued: true, inbox: "held" }; };
-    const o = outbox();
-    const r = await o.enqueue(cmd("%0", "ship it"));
-    await flush();
-    const sentAt = state(o, r.id)?.sentAt;
-    flags.length = 0;
-    await o.check(r.id);
-    await flush();
-    expect(flags).toEqual([false]);
-    expect(state(o, r.id)).toMatchObject({ state: "sent", queued: true, inbox: "held", sentAt });
-    expect(state(o, r.id)?.again).toBeUndefined();
-  });
-  it("leaves alone a record that isn't Sent into the inbox", async () => {
-    const o = outbox();
-    await o.start();
-    const r = await o.enqueue(cmd("%1", "typed one"));
-    await advance(10);
-    await o.again(r.id);
-    await advance(10);
-    expect(posts).toHaveLength(1);
-  });
-});
-
-describe("review #2 (2026-10-05): where it stands in the manager's inbox", () => {
-  it("a repeat's answer with the inbox's state is kept on the record", async () => {
-    let n = 0;
-    answer = async () => (++n === 1 ? { kind: "typed", queued: true } : { kind: "typed", queued: true, inbox: { status: "held", reason: "foreign_text" } });
-    const o = outbox();
-    await o.start();
-    const r = await o.enqueue(cmd("%0", "hello"));
-    await advance(10);
-    await o.again(r.id);
-    await advance(10);
-    expect(state(o, r.id)).toMatchObject({ state: "sent", queued: true, inbox: { status: "held", reason: "foreign_text" } });
-  });
 });
 
 describe("a lasting Send-again refusal", () => {
-  it("marks the bubble dead on the answer and does not ask again", async () => {
-    answer = async () => ({ kind: "typed", queued: true, inbox: "expired" });
+  it("cannot_resend: Sent and given up as it stood, with no Send again left, and not asked again", async () => {
+    answer = async () => ({ kind: "typed", delivery: GIVEN_UP });
     const o = outbox();
     const r = await o.enqueue(cmd("%0", "ship it"));
     await flush();
@@ -650,26 +527,20 @@ describe("a lasting Send-again refusal", () => {
     await flush();
     await advance(BUDGET_MS);
     expect(n).toBe(1);
-    expect(state(o, r.id)).toMatchObject({ state: "sent", queued: true, resendFailed: true });
-    expect(state(o, r.id)?.state).not.toBe("failed");
+    expect(state(o, r.id)).toMatchObject({ state: "sent", delivery: GIVEN_UP, resendFailed: true });
+    await o.again(r.id);
+    await flush();
+    expect(n).toBe(1);
   });
-});
-
-describe("medium verify (2026-10-05), issue 1: a Send again the hub couldn't queue once more", () => {
-  it("a record the inbox gave up, sent again and answered still given up, is marked: no further resend is possible", async () => {
-    const given = { status: "cancelled", reason: null };
-    answer = async () => ({ kind: "typed", queued: true, inbox: "queued" });
+  it("a Send again answered still given up (no copy queued) is final as well", async () => {
+    answer = async () => ({ kind: "typed", delivery: GIVEN_UP });
     const o = outbox();
     const r = await o.enqueue(cmd("%0", "hello"));
     await flush();
-    answer = async rec => { expect(rec.again).toBeUndefined(); return { kind: "typed", queued: true, inbox: given }; };
-    await advance(BUDGET_MS);
-    expect(state(o, r.id)).toMatchObject({ inbox: given });
-    expect(state(o, r.id)?.resendFailed).toBeUndefined();                  // a status check learned it; Send again is still possible
-    answer = async rec => { expect(rec.again).toBe(true); return { kind: "typed", queued: true, inbox: given }; };
+    answer = async rec => { expect(rec.again).toBe(true); return { kind: "typed", delivery: GIVEN_UP }; };
     await o.again(r.id);
     await flush();
-    expect(state(o, r.id)).toMatchObject({ inbox: given, resendFailed: true });
+    expect(state(o, r.id)).toMatchObject({ delivery: GIVEN_UP, resendFailed: true });
   });
 });
 
@@ -697,5 +568,60 @@ describe("a hub that is updating", () => {
     expect(n).toBe(2);
     expect(state(o, r.id)?.state).toBe("sent");
     vi.unstubAllGlobals();
+  });
+});
+
+// RL10 (updates design §11.5, amending S5): a record is stamped with the hub store this device saw before its first
+// attempt, and every attempt sends that stamp (device.ts's post), so a hub restored from another database answers the
+// Command "uncertain" instead of typing it twice. A later answer naming another store (the restore itself) never
+// rewrites a record already written: its stamp is the store seen before its first attempt, and only Retry sends again.
+describe("the hub's store stamped on each Command (RL10)", () => {
+  const STORE_A = "11111111-1111-4111-8111-111111111111";
+  const STORE_B = "22222222-2222-4222-8222-222222222222";
+  const timers = { now: () => Date.now(), setTimeout: (fn: () => void, ms: number) => setTimeout(fn, ms), clearTimeout: (id: ReturnType<typeof setTimeout>) => clearTimeout(id) };
+  const stubAnswer = (bodies: Record<string, unknown>[]) => vi.stubGlobal("fetch", async (_path: unknown, init: RequestInit) => {
+    bodies.push(JSON.parse(init.body as string) as Record<string, unknown>);
+    return new Response(JSON.stringify({}), { status: 200, headers: { "content-type": "application/json" } });
+  });
+
+  it("a record written after an answer carries that store, and post sends it as hubStore", async () => {
+    seenStore = STORE_A;
+    const bodies: Record<string, unknown>[] = [];
+    stubAnswer(bodies);
+    const o = new Outbox({ store: memoryStore(), post, timers, connected: () => true, onChange: () => {}, newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`, hubStore: () => seenStore });
+    const r = await o.enqueue(cmd());
+    await flush();
+    expect(r.hubStore).toBe(STORE_A);
+    expect(bodies).toEqual([expect.objectContaining({ hubStore: STORE_A })]);
+    vi.unstubAllGlobals();
+  });
+
+  it("a record written before any answer sends none", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    stubAnswer(bodies);
+    const o = new Outbox({ store: memoryStore(), post, timers, connected: () => true, onChange: () => {}, newId: () => `00000000-0000-4000-8000-${String(++n).padStart(12, "0")}`, hubStore: () => seenStore });
+    const r = await o.enqueue(cmd());
+    await flush();
+    expect(r.hubStore).toBeUndefined();
+    expect("hubStore" in (bodies[0] ?? {})).toBe(false);
+    vi.unstubAllGlobals();
+  });
+
+  it("a header change after writing leaves the record's stamp: its attempts keep the store they were written with", async () => {
+    const attempts: { id: string; hubStore?: string }[] = [];
+    answer = async r => { attempts.push({ id: r.id, ...(r.hubStore ? { hubStore: r.hubStore } : {}) }); return { kind: "unanswered" }; };
+    seenStore = STORE_A;
+    const o = outbox();
+    const a = await o.enqueue(cmd("%1", "first"));
+    await advance(10_000);                                    // a few attempts of the first record, all under A
+    const before = attempts.filter(x => x.id === a.id).length;
+    seenStore = STORE_B;                                      // an answer names another store: the hub was restored
+    const b = await o.enqueue(cmd("%2", "second"));
+    await advance(10_000);
+    expect(attempts.filter(x => x.id === a.id).length).toBeGreaterThan(before);   // still retrying, still stamped A
+    expect(attempts.filter(x => x.id === a.id).every(x => x.hubStore === STORE_A)).toBe(true);
+    expect(attempts.filter(x => x.id === b.id).every(x => x.hubStore === STORE_B)).toBe(true);
+    expect(state(o, a.id)?.hubStore).toBe(STORE_A);
+    expect(state(o, b.id)?.hubStore).toBe(STORE_B);
   });
 });

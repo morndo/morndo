@@ -3,7 +3,7 @@
 // wins), and then, unless he is attending on any device, sends the counts, numbers only, to every Push subscription.
 // A push service answering 404 or 410 drops that subscription (N4). It grants and starts nothing (N5): it reads the
 // board and the roster and writes only push_subscriptions and the audit's Notification rows.
-import { NotificationQueue, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
+import { NotificationQueue, PUSH_TOPICS, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
 import { UNUSABLE_KEY, isP256Point, isPushService, type PushOptions, type PushResult, type PushSender, type PushSubscription } from "../adapters/webpush.ts";
 import { log } from "../adapters/log.ts";
 
@@ -16,11 +16,15 @@ export type PushStore = {
 export type Timers = { setTimeout(fn: () => void, ms: number): unknown; clearTimeout(id: unknown): void };
 
 // How long a push service keeps it for an offline device, and how urgently it delivers (RFC 8030 sections 5.2, 5.3).
-// The topic is the kind's name: a newer one of the same kind replaces one still waiting there (section 5.4).
+// The Topic is the kind's own (N6, PUSH_TOPICS): a newer one of the same kind replaces one still waiting there (section
+// 5.4). The domain holds the rule a Topic must meet, because Apple refused "alert" (2026-10-12) and "usage"
+// (2026-10-25) with 400 BadWebPushTopic, each only after it shipped.
 const OPTIONS: Record<NotificationKind, PushOptions> = {
-  decision: { ttlSeconds: 12 * 3600, topic: "decision", urgency: "high" },
-  worker: { ttlSeconds: 3600, topic: "worker", urgency: "normal" },
-  linked: { ttlSeconds: 3600, topic: "linked", urgency: "high" },
+  decision: { ttlSeconds: 12 * 3600, topic: PUSH_TOPICS.decision, urgency: "high" },
+  worker: { ttlSeconds: 3600, topic: PUSH_TOPICS.worker, urgency: "normal" },
+  linked: { ttlSeconds: 3600, topic: PUSH_TOPICS.linked, urgency: "high" },
+  alert: { ttlSeconds: 6 * 3600, topic: PUSH_TOPICS.alert, urgency: "high" },
+  usage: { ttlSeconds: 6 * 3600, topic: PUSH_TOPICS.usage, urgency: "normal" },
 };
 const delivered = (status: number) => status >= 200 && status < 300;
 
@@ -30,22 +34,25 @@ export class NotificationService {
   #now: () => number;
   #timers: Timers;
   #muted: (workerId: string) => boolean;
+  #alerts: () => number;                               // urgent fleet alerts he hasn't seen
   #extraOrigins: readonly string[];
   #queue = new NotificationQueue();
   #reports = new Map<string, AttendingReport>();       // per feed connection
   #waiting: Set<string> | null = null;                 // the Decisions waiting, by id; null until the first board
   #needing = new Map<string, boolean>();               // per worker: whether it needs him with something that isn't an Ask
   #linked = 0;                                         // devices linked since the last such Notification went
+  #usageNotices = 0;                                   // usage notices the hub wrote since the last such Notification went (S4)
   #timer: unknown = null;
   #sending: Promise<void> = Promise.resolve();
 
   // `extraOrigins`: push services a test runs, besides the browsers' own (never set in production).
-  constructor(d: { store: PushStore; send: PushSender; now?: () => number; timers?: Timers; muted?: (workerId: string) => boolean; extraOrigins?: readonly string[] }) {
+  constructor(d: { store: PushStore; send: PushSender; now?: () => number; timers?: Timers; muted?: (workerId: string) => boolean; extraOrigins?: readonly string[]; alerts?: () => number }) {
     this.#store = d.store;
     this.#send = d.send;
     this.#now = d.now ?? Date.now;
     this.#timers = d.timers ?? { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: id => clearTimeout(id as ReturnType<typeof setTimeout>) };
     this.#muted = d.muted ?? (() => false);
+    this.#alerts = d.alerts ?? (() => 0);
     this.#extraOrigins = d.extraOrigins ?? [];
   }
 
@@ -88,13 +95,25 @@ export class NotificationService {
     if (raises({ kind: "linked" })) this.#raise("linked");
   }
 
+  // A fleet alert came in (AlertsService): an urgent one raises a Notification, counts only (N1).
+  alert(urgent: boolean) {
+    if (raises({ kind: "alert", urgent })) this.#raise("alert");
+  }
+
+  // A usage notice the hub itself wrote (S4, plan 4.4): one more is counted, and one Notification is raised — the
+  // debounce and the reset-on-send work as `linked` does.
+  usage() {
+    this.#usageNotices++;
+    if (raises({ kind: "usage" })) this.#raise("usage");
+  }
+
   // What each device's app says about the principal using it (N3); a connection that closes says nothing any more.
   attending(connection: string, attending: boolean) { this.#reports.set(connection, { attending, at: this.#now() }); }
   left(connection: string) { this.#reports.delete(connection); }
 
   counts(): Counts {
     const workers = [...this.#needing].filter(([id, needs]) => needs && !this.#muted(id)).length;
-    return { decisions: this.#waiting?.size ?? 0, workers, linked: this.#linked };
+    return { decisions: this.#waiting?.size ?? 0, workers, linked: this.#linked, alerts: this.#alerts(), usage: this.#usageNotices };
   }
 
   // Resolves once everything due has been sent (for tests and an orderly stop).
@@ -126,8 +145,9 @@ export class NotificationService {
     for (const p of due) {
       if (attending && suppressedWhileAttending(p.kind)) continue;     // …but a device linked always does (review M2)
       const counts = this.counts();                                  // as things are now, not as they were a second ago
-      const relevant = p.kind === "decision" ? counts.decisions : p.kind === "worker" ? counts.workers : counts.linked;
+      const relevant = p.kind === "decision" ? counts.decisions : p.kind === "worker" ? counts.workers : p.kind === "alert" ? counts.alerts : p.kind === "usage" ? counts.usage : counts.linked;
       if (p.kind === "linked") this.#linked = 0;
+      if (p.kind === "usage") this.#usageNotices = 0;
       if (relevant === 0) continue;                                  // answered meanwhile: nothing to say
       const payload = Buffer.from(JSON.stringify(payloadOf(p.kind, counts)));
       let sent = 0;

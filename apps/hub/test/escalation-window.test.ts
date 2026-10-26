@@ -130,7 +130,7 @@ function liveHub() {
     captureMany: async ids => new Map(ids.map(id => [id, "❯ \n"])),
   };
   const sessions = {
-    byPane: async () => new Map([["%0", { sessionId: "sess-1", name: null, pane: "%0", cwd: dir, version: "2.1.286", pid: process.pid }]]),
+    byPane: async () => new Map([["%0", { sessionId: "sess-1", name: null, pane: "%0", cwd: dir, version: "2.1.286", pid: process.pid, status: null }]]),
   };
   const observation = new ObservationService(tmux, 15_000, () => now, { sessions, transcripts: localTranscripts({ transcriptPath: () => transcript }) });
   const watch: Watch = {                                    // wired as main.ts wires it

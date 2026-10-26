@@ -3,11 +3,25 @@
 // while he is attending on any device. Pure.
 import { describe, expect, it } from "vitest";
 import {
-  ATTENDING_INPUT_MS, NOTIFY_DEBOUNCE_MS, NotificationQueue, anyAttending, isAttending, kindCode, payloadOf, raises, reasonCode,
+  ATTENDING_INPUT_MS, NOTIFICATION_KINDS, NOTIFY_DEBOUNCE_MS, NotificationQueue, PUSH_TOPICS, anyAttending, isAttending, isPushTopic, kindCode, payloadOf, raises, reasonCode,
+  suppressedWhileAttending,
 } from "../src/index.ts";
 
 const NOW = 1_000_000;
-const counts = { decisions: 2, workers: 1, linked: 0 };
+const counts = { decisions: 2, workers: 1, linked: 0, alerts: 0, usage: 0 };
+
+describe("a Notification's Topic (N6: one a push service takes)", () => {
+  it("is at most 32 URL-safe Base64 characters, of a length that decodes", () => {
+    for (const ok of ["alerts", "usages", "decision", "worker", "linked", "ab", "abc", "abcd", "A-_9", "x".repeat(32)]) expect(isPushTopic(ok), ok).toBe(true);
+    // Apple's push service refused these two with 400 BadWebPushTopic (2026-10-12, 2026-10-25): 5 characters, 1 mod 4.
+    for (const no of ["alert", "usage", "a", "abcde", "x".repeat(33), "x".repeat(29), "", "bad topic", "a.b", "a/b", "a+b", "a=b", "äbc"]) expect(isPushTopic(no), no).toBe(false);
+  });
+  it("every kind has one, and each one passes, so a new kind can't ship a topic Apple refuses", () => {
+    expect(Object.keys(PUSH_TOPICS).sort()).toEqual([...NOTIFICATION_KINDS].sort());
+    for (const k of NOTIFICATION_KINDS) expect(isPushTopic(PUSH_TOPICS[k]), `${k}: ${PUSH_TOPICS[k]}`).toBe(true);
+    expect(new Set(Object.values(PUSH_TOPICS)).size).toBe(NOTIFICATION_KINDS.length);   // a newer one replaces only its own kind
+  });
+});
 
 describe("a push service's reason for a refusal (N1: codes, never text)", () => {
   it("keeps a short code of letters and digits, and nothing else", () => {
@@ -19,13 +33,20 @@ describe("a push service's reason for a refusal (N1: codes, never text)", () => 
 describe("the payload (N1)", () => {
   it("is numbers only: the kind as its number, then the counts", () => {
     const p = payloadOf("worker", counts);
-    expect(p).toEqual({ kind: 1, decisions: 2, workers: 1, linked: 0 });
+    expect(p).toEqual({ kind: 1, decisions: 2, workers: 1, linked: 0, alerts: 0, usage: 0 });
     expect(Object.values(p).every(v => typeof v === "number")).toBe(true);
-    expect([kindCode("decision"), kindCode("worker"), kindCode("linked")]).toEqual([0, 1, 2]);
+    expect([kindCode("decision"), kindCode("worker"), kindCode("linked"), kindCode("alert"), kindCode("usage")]).toEqual([0, 1, 2, 3, 4]);
+  });
+  it("a usage notice (S4, plan 4.4): appended, so the older kind codes stay what they were; the count rides along", () => {
+    expect(payloadOf("usage", { ...counts, usage: 3 })).toEqual({ kind: 4, decisions: 2, workers: 1, linked: 0, alerts: 0, usage: 3 });
   });
 });
 
 describe("what raises one (N2)", () => {
+  it("an urgent fleet alert, and only an urgent one", () => {
+    expect(raises({ kind: "alert", urgent: true })).toBe(true);
+    expect(raises({ kind: "alert", urgent: false })).toBe(false);
+  });
   it("a Decision starting to wait, even in a muted conversation's world: mute isn't asked", () => {
     expect(raises({ kind: "decision", waiting: 1 })).toBe(true);
     expect(raises({ kind: "decision", waiting: 0 })).toBe(false);
@@ -42,6 +63,9 @@ describe("what raises one (N2)", () => {
   it("a device linked (AC13)", () => {
     expect(raises({ kind: "linked" })).toBe(true);
   });
+  it("a usage notice the hub wrote (S4): always", () => {
+    expect(raises({ kind: "usage" })).toBe(true);
+  });
 });
 
 describe("attending (N3, the product lane's amendment 3)", () => {
@@ -51,6 +75,11 @@ describe("attending (N3, the product lane's amendment 3)", () => {
     expect(isAttending({ attending: false, at: NOW }, NOW)).toBe(false);
     expect(anyAttending([{ attending: false, at: NOW }, { attending: true, at: NOW - 1000 }], NOW)).toBe(true);
     expect(anyAttending([], NOW)).toBe(false);
+  });
+  it("a usage notification is suppressed while he is attending, like a Decision (S4); a linked one never is", () => {
+    expect(suppressedWhileAttending("usage")).toBe(true);
+    expect(suppressedWhileAttending("decision")).toBe(true);
+    expect(suppressedWhileAttending("linked")).toBe(false);
   });
 });
 

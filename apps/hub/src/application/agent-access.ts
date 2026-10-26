@@ -5,6 +5,8 @@
 // claims is recorded with each change as what it claimed, and the app marks an assignee that isn't a running lane.
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { LANE_NAME, type BoardActor } from "@morndo/domain";
+import { AGENT_SCOPES } from "@morndo/protocol";
+import type { RevocationJournal } from "@morndo/service-kit";
 import type { AgentToken, Store } from "../adapters/store.ts";
 
 export const TOKEN_PREFIX = "mat_";                     // "morndo agent token"
@@ -16,21 +18,29 @@ export class AgentAccess {
   #store: Store;
   #now: () => number;
   #managerName: string;
-  constructor(store: Store, managerName: string, now: () => number = Date.now) {
-    this.#store = store; this.#managerName = managerName; this.#now = now;
+  #journal: RevocationJournal | null;
+  constructor(store: Store, managerName: string, now: () => number = Date.now, journal?: RevocationJournal) {
+    this.#store = store; this.#managerName = managerName; this.#now = now; this.#journal = journal ?? null;
   }
 
-  // A new token for the console. The secret is returned once; the store keeps its hash.
-  issue(name: string, role: AgentToken["role"]): { token: AgentToken; secret: string } {
+  // A new token for the console. The secret is returned once; the store keeps its hash. `scopes` (U15): what the token
+  // may do beyond its role, words of the closed list only — anything else is a caller's mistake, never stored.
+  issue(name: string, role: AgentToken["role"], scopes: readonly string[] = []): { token: AgentToken; secret: string } {
+    for (const s of scopes) if (!(AGENT_SCOPES as readonly string[]).includes(s)) throw new TypeError(`an agent token's scope is one of: ${AGENT_SCOPES.join(", ")}`);
     const secret = `${TOKEN_PREFIX}${randomBytes(32).toString("base64url")}`;
-    const token: AgentToken = { id: randomUUID(), name: name.trim().slice(0, 80) || role, role, secretHash: hash(secret), createdAt: this.#now(), lastUsedAt: null, revokedAt: null };
+    const token: AgentToken = { id: randomUUID(), name: name.trim().slice(0, 80) || role, role, scopes: [...new Set(scopes)], secretHash: hash(secret), createdAt: this.#now(), lastUsedAt: null, revokedAt: null, unboundCount: 0, lastUnboundAt: null };
     this.#store.saveAgentToken(token);
     return { token, secret };
   }
   list(): AgentToken[] { return this.#store.agentTokens(); }
+  // A usage reading posted with a plain worker token, counted once per request.
+  noteUnbound(id: string): void { this.#store.noteUnboundReading(id, this.#now()); }
   revoke(id: string): boolean {
     const t = this.#store.agentToken(id);
     if (!t || t.revokedAt !== null) return false;
+    // RL10 (updates design §11.5): journaled before the store write, so a crash between the two is repaired at the
+    // next start and a database restored from an older copy can't bring the token back.
+    this.#journal?.append({ kind: "agent_token", id, at: this.#now() });
     this.#store.saveAgentToken({ ...t, revokedAt: this.#now() });
     return true;
   }

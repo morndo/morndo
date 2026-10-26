@@ -1,10 +1,11 @@
 <script lang="ts">
   // The phone's settings (ADR-0011): when the digest after an absence shows (H4; his choice, on this device), the way
-  // to his devices and sign-out that the old Agents tab carried, and to the Engines page (ADR-0013) when the hub has it.
+  // to his devices and sign-out that the old Agents tab carried, to the Engines page (ADR-0013) when the hub has it,
+  // and to Updates (updates §8.2) when the hub can show it.
   import { AWAY_CHOICES, type AwaySetting } from "@morndo/domain";
   import { AWAY_WORDS } from "./away.ts";
 
-  let { setting, engines = false, onChoose, onClose }: { setting: AwaySetting; engines?: boolean; onChoose: (v: AwaySetting) => void; onClose: () => void } = $props();
+  let { setting, engines = false, updates = false, onChoose, onClose }: { setting: AwaySetting; engines?: boolean; updates?: boolean; onChoose: (v: AwaySetting) => void; onClose: () => void } = $props();
 </script>
 
 <div class="scrim" role="presentation" onclick={onClose}></div>
@@ -17,6 +18,7 @@
     {/each}
   </div>
   {#if engines}<a class="pbtn" href="/engines">Engines: which AI does what</a>{/if}
+  {#if updates}<a class="pbtn" href="/updates">Updates: every machine's Version</a>{/if}
   <a class="pbtn" href="/devices">Devices and sign out</a>
   <button class="pbtn primary" onclick={onClose}>Done</button>
 </div>

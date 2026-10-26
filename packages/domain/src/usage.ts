@@ -3,11 +3,16 @@
 // comes only through an agent token, named for an account (U1); per account the newest report sets the windows, and a
 // window missing from a report is kept until its reset time has passed (U2); the sessions reporting are kept while
 // fresh (U3); usage grants and decides nothing (U4): it is a read model, like Observation.
+import { cleanLength, cleanNote, takePercent } from "./usage-reading.ts";
+import type { DisagreeView, SeatView, SourceView } from "./usage-view.ts";
+
 export type UsageWindow = { usedPercentage: number; resetsAt: number | null };            // resetsAt in ms
 export type SpendWindow = UsageWindow & { usedUsd: number | null; limitUsd: number | null; period: string | null };
 // A window the account names itself (Cursor's "Cursor models"), with the calendar date the provider printed
 // (`resetsOn`, YYYY-MM-DD) when the reset is a day rather than an instant.
-export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null };
+// `title` (U7): the cadence title the hub computed from the window's own numbers, never a caption the provider
+// printed. Optional, so every account stored before it exists parses as it is.
+export type NamedWindow = UsageWindow & { label: string; resetsOn: string | null; lengthMins?: number | null; rolling?: boolean; note?: string | null; title?: string | null };
 export type SessionUsage = { sessionId: string; lane: string | null; model: string | null; contextUsed: number | null; at: number };
 
 // One status-line report, as the adapter translates it (the raw shape is the agent CLI's own).
@@ -16,12 +21,24 @@ export type UsageReport = {
   account: string; sessionId: string; lane: string | null; model: string | null; at: number;
   fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; spend: SpendWindow | null; contextUsed: number | null;
   limits: NamedWindow[] | null; onDemand: string | null;
+  // U14: windows this report carries but could not read (a percentage that is not one). They are unknown now: the number kept
+  // from before is not shown as if this report had said it. A window the report leaves out is not listed here.
+  unknown?: readonly ("fiveHour" | "sevenDay" | "spend")[];
 };
+// U5: what names an account besides its name, for the label. Only the hub sets it, from the pool's usage file; a
+// Report never does, and no part of it reaches the agent door's reply.
+export type AccountProfile = { email: string | null; org: "team" | "personal" | null; plan: string | null };
 export type AccountUsage = {
   account: string; reportedAt: number;
   fiveHour: UsageWindow | null; sevenDay: UsageWindow | null; spend: SpendWindow | null;
   limits: NamedWindow[] | null; onDemand: string | null;
+  profile: AccountProfile | null;
   sessions: SessionUsage[];
+  // The S2 view fields (plan 4.4): each source's health, the account's seat, and any disagreement between sources.
+  // All optional, so an older hub's account (and every stored row) parses as it is.
+  sources?: readonly SourceView[];
+  seat?: SeatView | null;
+  disagree?: readonly DisagreeView[];
 };
 
 export const ACCOUNT_NAME = /^[A-Za-z0-9][A-Za-z0-9._@-]{0,79}$/;
@@ -35,7 +52,18 @@ export type UsageLevel = "ok" | "warning" | "critical";
 export const usageLevel = (usedPercentage: number): UsageLevel => (usedPercentage >= USAGE_CRITICAL ? "critical" : usedPercentage >= USAGE_WARNING ? "warning" : "ok");
 
 const clampPct = (v: number) => Math.min(100, Math.max(0, v));
-const window = (w: UsageWindow | null): UsageWindow | null => (w ? { usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt } : null);
+// U14: a percentage that is not a finite number in 0..101 is not a reading of that window: dropped, never clamped
+// (contextUsed is not a limit window, so it keeps its clamp).
+const window = (w: UsageWindow | null): UsageWindow | null => {
+  if (!w) return null;
+  const usedPercentage = takePercent(w.usedPercentage);
+  return usedPercentage === null ? null : { usedPercentage, resetsAt: w.resetsAt };
+};
+const spendOf = (s: SpendWindow | null): SpendWindow | null => {
+  if (!s) return null;
+  const usedPercentage = takePercent(s.usedPercentage);
+  return usedPercentage === null ? null : { ...s, usedPercentage };
+};
 // A window kept from before is dropped once its reset time has passed (the CLI drops it then too).
 const keep = <W extends UsageWindow>(w: W | null, now: number): W | null => (w && (w.resetsAt === null || w.resetsAt > now) ? w : null);
 const DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -83,13 +111,22 @@ export function resetsOnLabel(resetsOn: string | null): string | null {
 }
 const named = (w: NamedWindow): NamedWindow | null => {
   const label = labelOf(w.label);
-  if (!label || !Number.isFinite(w.usedPercentage)) return null;
-  return { label, usedPercentage: clampPct(w.usedPercentage), resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
+  const usedPercentage = takePercent(w.usedPercentage);
+  if (!label || usedPercentage === null) return null;
+  // U14: the length, rolling flag and note are kept cleaned; a field that is absent stays absent.
+  const out: NamedWindow = { label, usedPercentage, resetsAt: w.resetsAt, resetsOn: calendarDate(w.resetsOn) };
+  if (w.lengthMins !== undefined) out.lengthMins = cleanLength(w.lengthMins);
+  if (w.rolling !== undefined) out.rolling = w.rolling === true;
+  if (w.note !== undefined) out.note = cleanNote(w.note);
+  return out;
 };
 // An empty list is not named mode: every row dropped, or every window reset, falls back to the 5-hour and weekly rows.
-const keepNamed = (ws: NamedWindow[] | null | undefined, now: number): NamedWindow[] | null => {
+// A window that names no reset is kept for a day after the report that set it, not forever: nothing else would ever end it, and
+// it would hide the 5-hour and weekly rows that later reports carry.
+const NAMED_NO_RESET_MS = 24 * 3_600_000;
+const keepNamed = (ws: NamedWindow[] | null | undefined, now: number, reportedAt: number): NamedWindow[] | null => {
   if (ws == null) return null;
-  const kept = ws.filter(w => w.resetsAt === null || w.resetsAt > now);
+  const kept = ws.filter(w => (w.resetsAt === null ? now - reportedAt < NAMED_NO_RESET_MS : w.resetsAt > now));
   return kept.length ? kept : null;
 };
 // Drop a blank or non-numeric row, then keep at most NAMED_CAP. The hub does not apply a second cap or label rule.
@@ -103,30 +140,37 @@ export function takeNamed(raw: readonly NamedWindow[]): NamedWindow[] | null {
   }
   return out.length ? out : null;
 };
-const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0;
+// S6 (plan 4.6): an account names its windows only when it has no fixed 5-hour or weekly one (Cursor's status line).
+// A mixed account — named windows beside the fixed pair (Codex with other limits) — counts both: its card shows the
+// fixed rows and the named ones after them.
+const showsNamed = (a: AccountUsage): boolean => (a.limits?.length ?? 0) > 0 && a.fiveHour === null && a.sevenDay === null;
 
+// A window the report carried (readable or not) is what the report says of it; only one it left out is kept from before.
+const settled = <W>(read: W | null, carried: boolean, kept: W | null): W | null => (carried ? read : kept);
 // U2: the account after one report. A report older than the account's last never moves the windows (reports from
 // several sessions of one account can cross), but its session is still noted when it is newer than that session's last.
 export function applyReport(current: AccountUsage | null, r: UsageReport, now: number): AccountUsage {
   const base: AccountUsage = current
     ? { ...current, limits: current.limits ?? null, onDemand: current.onDemand ?? null }
-    : { account: r.account, reportedAt: 0, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, sessions: [] };
+    : { account: r.account, reportedAt: 0, fiveHour: null, sevenDay: null, spend: null, limits: null, onDemand: null, profile: null, sessions: [] };
   const newer = r.at >= base.reportedAt;
   const session: SessionUsage = { sessionId: r.sessionId, lane: r.lane, model: r.model, contextUsed: r.contextUsed === null ? null : clampPct(r.contextUsed), at: r.at };
   const had = base.sessions.find(s => s.sessionId === r.sessionId);
   const sessions = had && had.at > r.at ? base.sessions : [...base.sessions.filter(s => s.sessionId !== r.sessionId), session];
   if (!newer) return { ...base, sessions: pruneSessions(sessions, now) };
   // A report that names its windows replaces them. An empty list is not that report: the previous windows stay until each reset.
+  const unreadable = (w: "fiveHour" | "sevenDay" | "spend") => r.unknown?.includes(w) === true;
   const namedNow = r.limits == null ? null : takeNamed(r.limits);
-  const limits = namedNow ?? keepNamed(base.limits, now);
+  const limits = namedNow ?? keepNamed(base.limits, now, base.reportedAt);
   return {
     account: base.account,
     reportedAt: r.at,
-    fiveHour: window(r.fiveHour) ?? keep(base.fiveHour, now),
-    sevenDay: window(r.sevenDay) ?? keep(base.sevenDay, now),
-    spend: r.spend ? { ...r.spend, usedPercentage: clampPct(r.spend.usedPercentage) } : keep(base.spend, now),
+    fiveHour: settled(window(r.fiveHour), r.fiveHour !== null || unreadable("fiveHour"), keep(base.fiveHour, now)),
+    sevenDay: settled(window(r.sevenDay), r.sevenDay !== null || unreadable("sevenDay"), keep(base.sevenDay, now)),
+    spend: settled(spendOf(r.spend), r.spend !== null || unreadable("spend"), keep(base.spend, now)),
     limits,
     onDemand: namedNow ? demandOf(r.onDemand) : (limits === null ? null : base.onDemand),
+    profile: base.profile ?? null,
     sessions: pruneSessions(sessions, now),
   };
 }
@@ -136,20 +180,53 @@ export const pruneSessions = (sessions: readonly SessionUsage[], now: number): S
   sessions.filter(s => now - s.at < SESSION_FRESH_MS).sort((a, b) => b.at - a.at);
 
 // What the dashboard shows of an account now: its windows as kept, with past resets dropped, and only fresh sessions.
+// A row stored before profiles existed has no `profile`; it reads back as null.
 export function accountNow(a: AccountUsage, now: number): AccountUsage {
-  const limits = keepNamed(a.limits, now);
+  const limits = keepNamed(a.limits, now, a.reportedAt);
   return {
     ...a, fiveHour: keep(a.fiveHour, now), sevenDay: keep(a.sevenDay, now), spend: keep(a.spend, now),
-    limits, onDemand: limits === null ? null : (a.onDemand ?? null), sessions: pruneSessions(a.sessions, now),
+    limits, onDemand: limits === null ? null : (a.onDemand ?? null), profile: a.profile ?? null, sessions: pruneSessions(a.sessions, now),
   };
 }
 
-// The notice's level: named windows count, and a hidden 5-hour or weekly row does not.
+// U5: how an organization is said, and the whole label: "a3 · ada@example.test · Team · Max 5x". A part that is
+// missing is not shown; no profile is the name alone.
+export const ORG_WORDS = { team: "Team", personal: "personal" } as const;
+export function accountLabel(a: { account: string; profile?: AccountProfile | null }): string {
+  const p = a.profile ?? null;
+  const parts = p ? [p.email, p.org ? ORG_WORDS[p.org] : null, p.plan] : [];
+  const shown = parts.filter(v => v);
+  return shown.length ? [a.account, ...shown].join(" · ") : a.account;
+}
+
+// What may be read into a profile: text is trimmed and capped, an email without an "@" is nothing, the org is one of
+// the two words, and a profile with nothing in it is no profile.
+export function cleanProfile(p: { email?: unknown; org?: unknown; plan?: unknown }): AccountProfile | null {
+  const text = (v: unknown): string | null => {
+    if (typeof v !== "string") return null;
+    const t = v.trim().slice(0, TEXT_LIMIT);
+    return t === "" ? null : t;
+  };
+  const email = text(p.email);
+  const org: "team" | "personal" | null = p.org === "team" ? "team" : p.org === "personal" ? "personal" : null;
+  const plan = text(p.plan);
+  const profile = { email: email !== null && email.includes("@") ? email : null, org, plan };
+  return profile.email || profile.org || profile.plan ? profile : null;
+}
+
+// The notice's level: named windows count, and a hidden 5-hour or weekly row does not. A mixed account counts its
+// fixed windows, its named windows and its spend (S6); a fixed-only account counts its two fixed rows, as ever.
 const LEVEL_RANK: Record<UsageLevel, number> = { ok: 0, warning: 1, critical: 2 };
 export function shownLevel(accounts: readonly AccountUsage[]): UsageLevel {
   let worst: UsageLevel = "ok";
   for (const a of accounts) {
-    const windows: readonly (UsageWindow | null)[] = showsNamed(a) ? [...(a.limits ?? []), a.spend] : [a.fiveHour, a.sevenDay];
+    const named = showsNamed(a);
+    const mixed = !named && (a.limits?.length ?? 0) > 0;
+    const windows: readonly (UsageWindow | null)[] = named
+      ? [...(a.limits ?? []), a.spend]
+      : mixed
+        ? [...(a.limits ?? []), a.fiveHour, a.sevenDay, a.spend]
+        : [a.fiveHour, a.sevenDay];
     for (const w of windows) {
       if (!w) continue;
       const level = usageLevel(w.usedPercentage);
@@ -160,7 +237,8 @@ export function shownLevel(accounts: readonly AccountUsage[]): UsageLevel {
 }
 
 // The account nearest its limit on a window, for the headline tiles; null when no account reports that window.
-// A named account's 5-hour and weekly rows are not on its card, so they are not candidates.
+// A named-only account's 5-hour and weekly rows are not on its card, so they are not candidates; a mixed account's
+// are, since S6.
 export function tightestShown(accounts: readonly AccountUsage[], which: "fiveHour" | "sevenDay"): { account: string; window: UsageWindow } | null {
   return tightest(accounts.filter(a => !showsNamed(a)), which);
 }

@@ -1,46 +1,79 @@
 #!/usr/bin/env node
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
-import { CONVERSATION_CAP, formatFingerprint, type AccessPolicy } from "@morndo/domain";
-import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig } from "./config.ts";
+import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, type AccessPolicy } from "@morndo/domain";
+import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
 import { Store } from "./adapters/store.ts";
+import { GithubChecks } from "./adapters/github-checks.ts";
+import { readTokenFile } from "./adapters/token-file.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
-import { NotLocalDisk, argvWantsVersion, holdFile, productVersion } from "@morndo/service-kit";
+import { DatabaseUnreadable, NotLocalDisk, RevocationJournal, argvWantsVersion, exitAfterOutput, holdFile, buildLabel, productStamp, quietBrokenPipe } from "@morndo/service-kit";
 import { log } from "./adapters/log.ts";
+import { shutdownStack, type Shutdown } from "./adapters/shutdown.ts";
 import { exitOnCrash } from "./adapters/crash.ts";
 import { startRetention } from "./application/retention.ts";
 import { ReadingService } from "./application/reading-service.ts";
 import { PresenceService } from "./application/presence-service.ts";
 import { NotificationService } from "./application/notification-service.ts";
 import { loadOrCreateVapid, pushSender } from "./adapters/webpush.ts";
-import { loadOrCreateIdentity } from "./adapters/identity.ts";
+import { loadOrCreateIdentity, writeIdentityPub } from "./adapters/identity.ts";
+import { fleetForUpdates } from "./adapters/fleet-updates.ts";
+import { principalSigner } from "./adapters/principal-signer.ts";
+import { updaterCli } from "./adapters/updater-cli.ts";
+import { UpdatesService } from "./application/updates-service.ts";
 import { passkeys } from "./adapters/passkeys.ts";
 import { denyConfigFromEnv, denyConfigWithClaudeDir, denyRoots, paneLock } from "@morndo/node-ops";
-import { CLIENT_API } from "@morndo/protocol";
+import { AGENT_SCOPES, CLIENT_API } from "@morndo/protocol";
 import type { HubPorts, Tmux } from "./application/ports.ts";
 import { startHttp } from "./adapters/http.ts";
 import { AccessService } from "./application/access-service.ts";
 import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
-import { managerInbox } from "./adapters/manager-inbox.ts";
-import { EscalationService, managerOf } from "./application/escalation-service.ts";
+import { PR_READS_PER_HOUR, PR_READS_PER_HOUR_ANONYMOUS, WAIT_PASS_MS, WaitWatch } from "./application/wait-watch.ts";
+import { EscalationService, managerOf, type MemoryAsks } from "./application/escalation-service.ts";
+import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
+import { ManagerQueue } from "./application/manager-queue.ts";
+import { fleetDeliveries } from "./adapters/fleet-deliveries.ts";
 import { fileStore } from "./adapters/files.ts";
-import { uploadInbox } from "./adapters/uploads.ts";
+import { parseConsoleArgs } from "./console/args.ts";
+import { processIo, runLanes } from "./console/lanes.ts";
+import { noteMissingFfmpeg, uploadInbox } from "./adapters/uploads.ts";
 import { desktopTarget, legacyPorts } from "./adapters/local-ports.ts";
 import { engineLanesFor } from "./adapters/engine-registry.ts";
-import { FleetClient, checkFleet } from "./adapters/fleet-client.ts";
+import { FleetClient, checkFleet } from "@morndo/fleet-client";
 import { fleetPorts, type FleetPorts, type LocalFileStore } from "./adapters/fleet-adapters.ts";
 import { connectionsCli, connectionsEnv } from "./adapters/connections-cli.ts";
 import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
+import { ProofService } from "./application/proof-service.ts";
+import { BoardProjector } from "./application/board-projector.ts";
+import { fleetRuns } from "./adapters/fleet-runs.ts";
+import { gitAncestry, gitHasCommit } from "./adapters/git-ancestry.ts";
+import { MergeLiveness } from "./application/merge-liveness.ts";
+import { NodeBuilds } from "./application/node-builds.ts";
 import { AgentAccess } from "./application/agent-access.ts";
+import { applyRevocationJournal, raiseUnreadable } from "./application/revocations.ts";
 import { UsageService } from "./application/usage-service.ts";
+import { poolProfiles } from "./adapters/pool-accounts.ts";
 import { JobsService } from "./application/jobs-service.ts";
-import { mkdtempSync } from "node:fs";
+import { AlertsService, SEEN_MARK } from "./application/alerts-service.ts";
+import { locateTranscriber } from "./adapters/transcriber-path.ts";
+import { processTranscriber } from "./adapters/transcriber-process.ts";
+import { guardNow, loadTranscriptionSettings, openMachineGuard } from "./adapters/transcription-config.ts";
+import { fileOnDisk, TranscriptionService } from "./application/transcription-service.ts";
+import { MemoryStore } from "./adapters/memory-store.ts";
+import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
+import { MemoryService } from "./application/memory-service.ts";
+import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
+import { readCodeLine, runMemory } from "./console/memory.ts";
+import { runUpdaterProgram } from "./console/update.ts";
+import { AUDIT_SYNOPSIS, AUDIT_USAGE, parseAuditArgs } from "./console/audit.ts";
+import { agentTokenLine, agentTokenMade } from "./console/agent-token.ts";
+import { mkdtempSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -49,29 +82,58 @@ const HELP = `morndo: your agents, on your phone.
   morndo serve            run the hub on 127.0.0.1:$MORNDO_PORT (default 8790)
   morndo pair             show a one-time QR (10 minutes) to pair a phone or laptop
   morndo devices          list paired devices
-  morndo revoke <id>      revoke a device; its sessions end at once
-  morndo audit            the latest device and session events
-  morndo agent-token new <name> --role manager|worker
+  morndo revoke <id>      revoke a device; its sessions end at once (morndo revoke --help)
+  morndo audit [count]    the latest device and session events (morndo audit --help)
+  morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
+                          events (morndo lanes --help)
+  morndo agent-token new <name> --role manager|worker [--scope usage-pool]
                           a token for the manager's lane, or one the worker lanes share (shown once)
   morndo agent-token list
   morndo agent-token revoke <id>
+  morndo memory list [--scope S] [--pending] [--all]
+                          what the lanes learned (Memory); also show <id>, approve <id>, invalidate <id> --reason R,
+                          import --dir D --scope S [--label L] [--procedure FILE]..., sync (morndo memory --help)
 
 Settings (environment): MORNDO_ORIGIN (the URL your browser opens), MORNDO_HOME, MORNDO_PORT,
 MORNDO_REQUIRE_PROXY_IDENTITY=1, MORNDO_PRINCIPAL_LOGIN, MORNDO_TMUX_SOCKET, MORNDO_TMUX_SESSION,
 MORNDO_CLAUDE_DIR, MORNDO_MANAGER_WINDOW (default "manager"), MORNDO_LEDGER (the manager's needs-you list),
-MORNDO_PANE_LOCK (the lock file other typists into the manager's pane take), MORNDO_MANAGER_INBOX (the manager's
-inbox directory: its answers and messages queue there instead of being typed), MORNDO_VNC (host:port of the desktop's
+MORNDO_PANE_LOCK (the lock file other typists into the manager's pane take), MORNDO_VNC (host:port of the desktop's
 VNC server), MORNDO_VNC_PASSWORD_FILE, MORNDO_FLEET_SOCKET (the fleet service's client socket; unset, this
 machine's tmux and Claude Code directly), MORNDO_ENGINE_SESSIONS (engine-lane registry directory; off unless set),
-MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet) and MORNDO_ENGINES (the engine layer's
-CLI, engine-layer bin/engines: the Engines page).`;
+MORNDO_ENGINE_NODE (this machine's fleet node name, required with a fleet), MORNDO_ENGINES (the engine layer's
+CLI, engine-layer bin/engines: the Engines page), MORNDO_MANAGER_QUEUE (with a fleet, the manager's answers and
+messages go through the fleet's delivery queue; "off" types them directly) and MORNDO_REPO (a local Morndo checkout:
+the board compares merge commits with the nodes' builds in it). MORNDO_TRANSCRIBER (absolute path of a
+protocol-1 plugin; otherwise <MORNDO_HOME>/plugins/transcribe/bin/morndo-transcribe).`;
 
+// A reader that closes the pipe early (`morndo audit | head`) ends the output, not the process; a console command that leaves
+// early does so with `exitAfterOutput`, after its lines are out (service-kit exit-after-output.ts). `throw await …` where a
+// check below needs to know the code after it does not run. The two refusals of openStore stay `process.exit`: that
+// function is not async, and says one sentence.
+quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
-  process.stdout.write(`${productVersion()}\n`);
-  process.exit(0);
+  process.stdout.write(`${buildLabel()}\n`);
+  await exitAfterOutput(0);
 }
 
-exitOnCrash(log);
+const crash = exitOnCrash(log);
+// `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
+// on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
+if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
+// `serve`, `pair`, `devices`, `revoke` and `agent-token` answer `--help` here too, before settings and the database
+// are read: `revoke --help` is usage, not a device named "--help" (console/args.ts).
+const consoleArgs = parseConsoleArgs(process.argv.slice(2));
+if (consoleArgs.kind === "help") { process.stdout.write(`${consoleArgs.usage}\n`); await exitAfterOutput(0); }
+if (consoleArgs.kind === "refused") { process.stderr.write(`morndo ${consoleArgs.command}: ${consoleArgs.why} ${consoleArgs.synopsis}\n`); await exitAfterOutput(2); }
+// `morndo update`, `morndo doctor` and `morndo install` (design §4.8, §10.3) run here too, before the hub's
+// settings and database are read: they need neither, and a machine with no hub still updates and installs. The
+// hub runs the updater's program, as it runs the engines CLI, and leaves with its exit code.
+if (process.argv[2] === "update" || process.argv[2] === "doctor" || process.argv[2] === "install")
+  await exitAfterOutput(await runUpdaterProgram(process.argv.slice(2)));
+// `morndo audit`'s arguments are read here too: `--help` and a bad count need no hub (T-423, console/audit.ts).
+const auditArgs = process.argv[2] === "audit" ? parseAuditArgs(process.argv.slice(3)) : null;
+if (auditArgs?.kind === "help") { process.stdout.write(`${AUDIT_USAGE}\n`); await exitAfterOutput(0); }
+if (auditArgs?.kind === "refused") { process.stderr.write(`morndo audit: ${auditArgs.why} ${AUDIT_SYNOPSIS}\n`); await exitAfterOutput(2); }
 const EXIT_CONFIG = 78;                                  // EX_CONFIG (sysexits.h): a setting or the data needs fixing, not a restart
 const EXIT_DATABASE_FROM_FUTURE = EXIT_CONFIG;          // see openStore below
 const config = loadConfig();
@@ -90,7 +152,21 @@ function openStore(dir: string): Store {
   }
 }
 const identity = loadOrCreateIdentity(config.dataDir);
-const access = new AccessService(store, passkeys(config));
+// The same key where the fleet reads it (PR 6c round 2, R2): every start rewrites identity.pub, so a production
+// fleet without a pinned principalKey finds the hub's key without anyone installing it by hand.
+writeIdentityPub(config.dataDir, identity.publicKeyRaw);
+// RL10 (updates design §11.5): every revocation is journaled to revoked.log beside morndo.db before its database
+// write, and every start applies the journal again, so a database restored from an older copy brings no revoked
+// device or agent token back.
+const journal = new RevocationJournal(join(config.dataDir, "revoked.log"));
+const access = new AccessService(store, passkeys(config), Date.now, journal);
+const agents = new AgentAccess(store, config.managerWindow, Date.now, journal);
+const reapplied = applyRevocationJournal(journal, { access, agents });
+if (reapplied.applied > 0) log.info(`re-applied ${reapplied.applied} revocations from revoked.log`);
+// A bad line is reported and skipped, never a refusal to start: logged here, and an urgent Alert once `serve` has its
+// Alerts (raiseUnreadable).
+for (const b of reapplied.bad) log.error(`revoked.log line ${b.line} skipped, not a revocation entry: ${b.why}`);
+if (journal.compact()) log.info("revoked.log compacted to one entry per revocation");
 const [cmd = "serve", ...args] = process.argv.slice(2);
 const when = (t: number | null) => (t === null ? "-" : new Date(t).toLocaleString());
 // The console commands' own output, for the person at the box (a pairing link must show as it is): not a log.
@@ -103,24 +179,47 @@ switch (cmd) {
     const pushContact = config.pushContact ?? DEFAULT_PUSH_CONTACT;
     if (!isPushContact(pushContact)) {
       log.error(`MORNDO_PUSH_CONTACT must be an https URL or a mailto address on a public name (push services refuse others): ${JSON.stringify(pushContact)}. Set one, or unset it for the default.`);
-      process.exit(EXIT_CONFIG);
+      await exitAfterOutput(EXIT_CONFIG);
     }
     // The same for a fleet socket that isn't an absolute path (config.ts fleetSocket): `serve` only, so the console
     // commands still work.
     if (config.fleetSocket && !fleetSocketOk(config.fleetSocket)) {
       log.error(`MORNDO_FLEET_SOCKET must be an absolute path to the fleet service's client socket, not ${JSON.stringify(config.fleetSocket)}; set the full path, or unset it to use this machine's tmux.`);
-      process.exit(EXIT_CONFIG);
+      await exitAfterOutput(EXIT_CONFIG);
     }
     if (config.engineSessions && !engineSessionsOk(config.engineSessions)) {
       log.error(`MORNDO_ENGINE_SESSIONS must be an absolute path to the engine-lane registry, not ${JSON.stringify(config.engineSessions)}; set the full path, or unset it to leave engine-lane status off.`);
-      process.exit(EXIT_CONFIG);
+      await exitAfterOutput(EXIT_CONFIG);
     }
+    // The same for a Morndo checkout that isn't an absolute path (config.ts morndoRepo): `git -C` would read it against
+    // wherever the service started. Unset is fine: the board just never says a merge is live.
+    if (config.morndoRepo && !morndoRepoOk(config.morndoRepo)) {
+      log.error(`MORNDO_REPO must be an absolute path to a Morndo checkout, not ${JSON.stringify(config.morndoRepo)}; set the full path, or unset it to judge every merge unknown.`);
+      await exitAfterOutput(EXIT_CONFIG);
+    }
+    // From here on, a SIGTERM or SIGINT at any moment ends the hub as it ends one that serves: what the start has made so far
+    // is closed (adapters/shutdown.ts), then exit 0. Each resource names its close when it exists; every wait of the start
+    // goes through `shutdown.whileRunning`, so a start that is waiting when the stop begins goes no further.
+    const shutdown = shutdownStack(log);
+    const running = shutdown.whileRunning;
+    const stop = () => shutdown.stop().then(() => exitAfterOutput(shutdown.exitCode));
+    // A start that fails (a taken port, a throw) closes what it made too, and exits 1; once it serves, a crash exits at once.
+    crash.beforeExit(() => { shutdown.exitCode ||= 1; return shutdown.stop(); });
+    process.on("SIGINT", () => void stop());
+    process.on("SIGTERM", () => void stop());
+    shutdown.onStop(() => store.close());
     const files = fileStore({ dir: config.filesDir, deny: denyRoots(homedir(), config.dataDir, denyConfigWithClaudeDir(denyConfigFromEnv(process.env), config.claudeDir)) });
     // MORNDO_FLEET_SOCKET set: every port goes through the fleet service; unset: this machine's tmux and Claude Code, as
     // before (spec §10). Nothing below this line knows which.
     const jobs = new JobsService();
-    const fleet = config.fleetSocket ? await openFleet(config.fleetSocket, files, jobs) : null;
-    const ports: HubPorts = fleet ?? legacyPorts(config, { files });
+    shutdown.onStop(() => jobs.close());
+    // The fleet's alerts in the app; an urgent new one is a push (counts only), told once the notifications exist below.
+    let alertPush: (urgent: boolean) => void = () => {};
+    // A hub without a fleet has Alerts only when its own journal had a line it could not read (the start's, above).
+    const alerts = config.fleetSocket || reapplied.bad.length > 0 ? new AlertsService({ onNew: (_a, urgent) => alertPush(urgent) }) : null;
+    if (alerts !== null) raiseUnreadable(alerts, reapplied.bad, Date.now());
+    const fleet = config.fleetSocket ? await running(openFleet(config.fleetSocket, files, jobs, alerts, shutdown)) : null;
+    const ports: HubPorts = fleet?.ports ?? legacyPorts(config, { files });
     // Engine lanes on this machine, only when MORNDO_ENGINE_SESSIONS names their registry. Off otherwise: nothing is read.
     const engineLanes = engineLanesFor(config);
     if (engineLanes.notice) log.info(engineLanes.notice);
@@ -129,6 +228,7 @@ switch (cmd) {
       sessions: ports.sessions, transcripts: ports.transcripts, files: ports.files, nodeStates: ports.nodeStates, nodeWaitMs: config.pollMs,
       lanes: engineLanes.lanes, engineNode: engineLanes.engineNode,
     });
+    shutdown.onStop(() => observation.stop());
     // Typing into the manager's pane takes the lock its other typists take, so two pastes never merge into one message.
     // Legacy only: with a fleet, the node's agent takes it (spec §3.1, "Pane lock").
     // The workers as escalations see them: with each one's conflict (two windows claim its name, Task 14).
@@ -144,13 +244,22 @@ switch (cmd) {
       },
     };
     const inbox = uploadInbox({ dir: config.inboxDir, registry: store });
+    // The manager's answers and messages through the fleet's delivery queue (fleet-clients §9.1), the only queue for them
+    // (ruling 81): with a fleet, on unless MORNDO_MANAGER_QUEUE is off. Off, what is still queued is cancelled at start and
+    // the rest followed to its end.
+    const queue = fleet ? new ManagerQueue({ store, deliveries: fleetDeliveries(fleet.client), lane: config.managerWindow, on: config.managerQueue === true }) : null;
+    void noteMissingFfmpeg(line => log.warn(line));
     // A Command is judged on arrival against what the worker waits for now (S6). With a fleet, a repeat of a send in
     // doubt asks the worker's node (op.status, spec §3.1).
-    // The manager's inbox (ADR-0010): the manager's answers and messages queue there; one deliverer types each once.
-    const queue = config.managerInbox ? managerInbox(config.managerInbox) : null;
     const steering = new SteeringService(store, typist, Date.now, () => access.policy(), inbox, id => observation.waitingOn(id),
-      id => observation.nameOf(id), ports.uploads, ports.sendStatus,
-      queue ? { isManager: id => id === managerPane(), inbox: queue } : null);
+      id => observation.nameOf(id), ports.uploads, ports.sendStatus, queue ? { queue, isManager: id => id === managerPane() } : null,
+      () => managerPane() ?? null, config.managerWindow);
+    const filed: { briefs: BriefService | null } = { briefs: null };
+    // Memory is opened below, after Decisions: its pending Notes reach the board through this holder once it exists
+    // (ADR-0031 round 2); a hub without Memory never files an Ask.
+    const memoryHolder: { service: MemoryService | null } = { service: null };
+    // The manager's needs-you list: the decision cards read it, and so do a block's card waits (B18).
+    const ownersList = config.ledgerPath ? ledgerReader(config.ledgerPath) : null;
     const escalations = new EscalationService({
       watch: {
         workers,
@@ -158,12 +267,30 @@ switch (cmd) {
         openQuestions: id => observation.openQuestions(id),
         screen: id => observation.screen(id),
       },
-      ledger: config.ledgerPath ? ledgerReader(config.ledgerPath) : null,
+      ledger: ownersList,
       store, managerName: config.managerWindow, send: (pane, text, key) => typist.send(pane, text, key), policy: () => access.policy(),
+      workerGraceMs: config.workerAskGraceMs,
       // An answer in doubt is settled as a send is, with its node (op.status; final review C1).
       settle: (key, workerId) => steering.settleInDoubt(key, workerId),
-      inbox: queue,
+      queue,
+      briefs: () => filed.briefs?.sightings() ?? [],
+      memory: () => {
+        const m = memoryHolder.service;
+        return m && { pending: () => m.pendingApprovals(), decide: (a, id, d) => m.decide(a, id, d) } satisfies MemoryAsks;
+      },
     });
+    const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
+    filed.briefs = briefs;
+    shutdown.onStop(() => escalations.stop());
+    if (queue) {
+      shutdown.onStop(() => queue.stop());
+      // Off: what is still queued is cancelled here, before any answer (the hub types directly once it serves). On:
+      // nothing has to come first; the sticky check and the first round run while the hub serves (review #8).
+      const first = queue.start();
+      if (queue.on) void first.catch((e: unknown) => log.error("manager queue: its first round failed; each poll tries again", e));
+      else await running(first);
+      log.info(`manager queue: ${queue.on ? "on" : "off (MORNDO_MANAGER_QUEUE)"}`);   // once, at start (reconciliation ruling 39)
+    }
     const remote = new RemoteService({
       store, terminal: ports.terminal, policy: () => access.policy(),
       panes: () => observation.snapshot().workers.map(w => w.id as string),
@@ -181,42 +308,176 @@ switch (cmd) {
     const notifications = new NotificationService({
       store, send: pushSender(vapid), extraOrigins: config.pushExtraOrigins ?? [],
       muted: id => { const name = nameOf(id); return name !== undefined && reading.state().muted.includes(name); },
+      alerts: () => alerts?.urgentSince(reading.state().reads[SEEN_MARK] ?? 0) ?? 0,
     });
+    shutdown.onStop(() => notifications.stop());
+    alertPush = urgent => notifications.alert(urgent);
     // ADR-0013: the Engines page, through the engine layer's CLI when MORNDO_ENGINES names it.
     const engines = config.enginesBin ? new EnginesService({ cli: enginesCli(config.enginesBin), store, policy: () => access.policy() }) : null;
     // The connections program, named like the engines CLI. A private home only, and never the engines program.
     const connections = openConnections(access.policy.bind(access));
+    // Updates §8.1 (PR 6c): every machine's Version, the owner's one screen. The control plane's own updater CLI runs
+    // beside the hub, but without a fleet there is no Rollout to move and no node to command, so the page stays off.
+    // The fleet's `rollout` events keep the service's last word on where the Rollout stands, for a view the fleet
+    // can't answer (its own subscription, like the runs' and the deliveries').
+    const updatesService = fleet ? new UpdatesService({
+      fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
+      policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
+    }) : null;
+    const stopRolloutEvents = fleet && updatesService
+      ? fleet.client.events(e => { if (e.t === "rollout") updatesService.onRolloutEvent(e.body); })
+      : null;
+    if (stopRolloutEvents) shutdown.onStop(stopRolloutEvents);
     // Said once at start: a CLI older than the page needs, or one that can't run (the page says it again when opened).
     engines?.ready().then(why => { if (why) log.warn(`engines: ${why}`); }, e => log.warn("engines: the CLI can't run", e));
     // ADR-0015: the board, changed by the principal (a Command) and by the agents (their tokens, issued below).
-    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name) });
-    const agents = new AgentAccess(store, config.managerWindow);
-    // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens.
-    const usage = new UsageService({ store });
+    // ADR-0032: with a fleet, the board also follows the lanes' Runs (the projector, on the fleet client the alerts and
+    // the deliveries use): each lane's run goes out with the board, and its tasks move by D1 to D4 as actor "board".
+    // B11: with a fleet it also learns each node's build, and each merge's liveness over them, read from a local
+    // Morndo checkout (MORNDO_REPO). Without either, nothing is live: done waits, or is accepted with an override.
+    const builds = fleet ? new NodeBuilds({ source: () => fleet.client.nodes(), log }) : null;
+    builds?.start();
+    // When a background check settles what a merge's liveness is, the board says so at once: the frames wait for no
+    // next look. `board` is made below, so it is reached through a holder, as the projector is.
+    const held: { board: BoardService | null } = { board: null };
+    const liveness = new MergeLiveness({
+      builds: () => builds?.list() ?? [],
+      ancestry: gitAncestry(config.morndoRepo ?? null),
+      onChange: () => held.board?.runsChanged(),
+    });
+    const following: { projector: BoardProjector | null } = { projector: null };
+    const board = new BoardService({ store, policy: () => access.policy(), lanes: () => observation.snapshot().workers.map(w => w.name), runs: () => following.projector?.runs() ?? [], orphans: (ts, now) => following.projector?.orphans(ts, now) ?? [], liveness: sha => liveness.of(sha), knows: gitHasCommit(config.morndoRepo ?? null), standIn: config.forgeUrl != null, repos: () => config.proofRepos ?? [MORNDO_REPO], cards: config.ledgerPath != null });
+    // ADR-0035: the proof of work, over the same store — a brief filed on the board seeds its references as rows. Step
+    // 3: the rows come from the forge (github-checks.ts holds the credential; nothing else reads it), the mode and the
+    // checked repositories from MORNDO_PROOF_GATE and MORNDO_PROOF_REPOS. A pass every minute re-reads what is still
+    // pending or was rate-limited; on stop the timer is cleared and the checks in flight are awaited — registered after
+    // the store's close, so they end before it runs.
+    const githubToken = readTokenFile(config.githubTokenFile ?? null, m => log.warn(m));
+    const standIn = standInNotice(config);
+    if (standIn !== null) log.warn(standIn);
+    // One forge for the proof and the waits: one credential, one rate-limit wall (github-checks.ts).
+    const forge = new GithubChecks({ token: githubToken, ...(config.forgeUrl ? { baseUrl: config.forgeUrl } : {}) });
+    const proof = new ProofService({
+      store, board, forge, mode: config.proofGate ?? "warn",
+      allowedRepos: config.proofRepos ?? [MORNDO_REPO], authenticated: githubToken !== null, standIn: standIn !== null,
+    });
+    const proofTimer = setInterval(() => { void proof.tick().catch((e: unknown) => log.error("proof: the timer pass failed", e)); }, 60_000);
+    proofTimer.unref();
+    shutdown.onStop(async () => { clearInterval(proofTimer); await proof.idle(); });
+    // B18, D7 (ADR-0038): the hub reads what each block waits on — the board, the forge, the owner's list, the clock —
+    // every WAIT_PASS_MS, and soon after a block that names waits (WaitWatch.follow); a task whose waits are all over goes
+    // to do. Its forge reads have a budget of their own, smaller without a token, so the proof checks keep theirs.
+    const waits = new WaitWatch({
+      board, forge, ledger: ownersList, repos: () => config.proofRepos ?? [MORNDO_REPO],
+      prReadsPerHour: githubToken !== null ? PR_READS_PER_HOUR : PR_READS_PER_HOUR_ANONYMOUS,
+    });
+    board.attachWaits(waits);
+    waits.follow(board);
+    const waitTimer = setInterval(() => { void waits.tick().catch((e: unknown) => log.error("waits: the pass failed", e)); }, WAIT_PASS_MS);
+    waitTimer.unref();
+    shutdown.onStop(async () => { clearInterval(waitTimer); waits.stop(); await waits.idle(); });
+    held.board = board;
+    following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
+    shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
+    // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
+    // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
+    const memoryStore = openMemory(config.dataDir);
+    if (memoryStore) shutdown.onStop(() => memoryStore.close());
+    const memory = memoryStore ? new MemoryService({ store: memoryStore, policy: () => access.policy() }) : null;
+    memoryHolder.service = memory;                              // Memory off (null): the board files no Ask
+    const memorySync = memoryStore && memory && fleet ? new MemorySync({ service: memory, store: memoryStore, fleet: fleet.client }) : null;
+    // ADR-0016: the accounts' usage, from the status lines the lanes post with their agent tokens. ADR-0034: their
+    // labels (email, organization, plan) come from the pool's usage file, read by the one adapter and overlaid on the
+    // principal's view only. The file can change with every lane quiet, so it is looked at again every minute (never
+    // blocking: ADR-0034).
+    const pool = poolProfiles(config.poolUsageFile ?? null, log);
+    // S3 (plan 4.5 item 4): a lane's node, from the observation loop's synchronous roster, for the lane records a
+    // report writes and a failure resolves through. Without a fleet the hub knows no lane's node: nothing changes.
+    const laneNode = fleet ? (lane: string) => observation.snapshot().workers.find(w => w.name === lane)?.node ?? null : undefined;
+    // S4 (plan 4.4): a usage notice the hub newly wrote raises one count-only Notification. Late-bound: the
+    // NotificationService is built above, and the closure only ever runs once the UsageService exists.
+    const usage = new UsageService({ store, profiles: pool.current, ...(laneNode ? { laneNode } : {}), onNotice: () => notifications.usage() });
+    // The fleet's usage taps (plan 4.5 item 4): a lane's start with an account, and its limit failures.
+    const stopUsageEvents = fleet ? fleet.client.events(e => { if (e.t !== "usage") return; try { usage.fromFleet(e.node, e.body); } catch (err) { log.warn("a usage tap from the fleet could not be taken", err); } }) : null;
+    if (stopUsageEvents) shutdown.onStop(stopUsageEvents);
+    const lookAtPool = () => { void pool.refresh().then(changed => { if (changed) usage.refreshProfiles(); }, e => log.warn("the pool's usage file could not be looked at", e)); };
+    lookAtPool();
+    const poolRefresh = setInterval(lookAtPool, 60_000);
+    poolRefresh.unref();
+    shutdown.onStop(() => clearInterval(poolRefresh));
+    // Usage S2 (plan 4.3): the silence and forgetting pass — a source quiet for two weeks is forgotten, with one
+    // notice. Once a minute is plenty: nothing it decides is nearer than days.
+    const sweepUsage = setInterval(() => usage.sweep(), 60_000);
+    sweepUsage.unref();
+    shutdown.onStop(() => clearInterval(sweepUsage));
     const presence = new PresenceService(store);                   // his last activity per device (ADR-0011, H4)
     jobs.attach({ store, board });
-    const http = startHttp({
-      config, identity, access, observation, steering, escalations, remote, files, inbox, reading, presence,
-      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents }, usage, jobs,
-      updates: { holdPath: holdFile(process.env.HOME || homedir()) },
+    // The runs read once, which applies what is due since the hub last ran; never in the way of the hub's start (a fleet
+    // that doesn't answer is logged, and asked again when it does).
+    void following.projector?.start().catch((e: unknown) => log.error("board: following the runs failed to start", e));
+    const txSettings = loadTranscriptionSettings(config.dataDir, line => log.warn(line));
+    const machine = openMachineGuard(txSettings.guard);
+    shutdown.onStop(() => machine.close());
+    try { await running(machine.refresh()); }
+    catch (e) { log.warn("transcription: machine figure unread", e); }
+    // Each probe looks again: a plugin installed while the hub runs turns the feature on, and one removed or turned
+    // unsafe turns it off (design §6). The one known path, never PATH.
+    const transcription = new TranscriptionService({
+      store,
+      transcriber: null,
+      locate: () => {
+        const located = locateTranscriber(process.env, config.dataDir);
+        return located.path !== null
+          ? { transcriber: processTranscriber(located.path), unavailable: null }
+          : { transcriber: null, unavailable: { ready: false, reason: located.reason, detail: located.detail } };
+      },
+      // An upload is a recording only for the endpoint that made it (S2's rule); an agent's file is anyone's, as
+      // the design has it. Whatever the id names, the bytes settle whether it is audio (S1).
+      file: (recording, caller) => {
+        if (recording.kind === "upload") {
+          const upload = inbox.get(recording.id);
+          if (!upload || (caller && upload.endpointId !== caller.endpointId)) return null;
+          return fileOnDisk(upload.path);
+        }
+        return fileOnDisk(files.get(recording.id)?.file);
+      },
+      limit: txSettings.limit, timeoutSec: txSettings.timeoutSec, maxSeconds: txSettings.maxSeconds, threads: txSettings.threads,
+      guard: () => guardNow(txSettings.guard, machine.read),
+      log: line => log.info(line),
     });
+    shutdown.onStop(() => transcription.close());
+    void transcription.start().then(() => {}, e => log.warn("transcription: probe failed", e));
+    const http = startHttp({
+      config, identity, access, observation, steering, escalations, remote, store, files, inbox, reading, presence,
+      push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents, proof }, usage, jobs, queue, alerts,
+      transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) }, updatesService,
+    });
+    shutdown.onStop(async () => { await http.idle(); await http.close(); });
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
+    shutdown.onStop(() => clearInterval(sweepInbox));
+    const syncMemory = memorySync ? setInterval(() => void memorySync.tick(), SYNC_EVERY_MS) : null;
+    if (syncMemory) shutdown.onStop(() => clearInterval(syncMemory));
     // Old pairing tokens and long-ended sessions, on start and daily; never the audit or the decisions (A8).
     const stopRetention = startRetention(store, Date.now,
       r => { if (r.tokens || r.sessions || r.sends) log.info(`retention: pruned ${r.tokens} pairing tokens, ${r.sessions} sessions and ${r.sends} send records`); },
       e => log.warn("retention: pruning failed; trying again tomorrow", e));
-    await http.ready;                                    // report "on" only once the socket really listens
+    shutdown.onStop(stopRetention);
+    // Everything that polls on a timer stops before the drain above waits for the requests in flight (up to 10 s): none of it
+    // is still asking the fleet when the store closes at the end. Each stop is idempotent; the closes registered where each was
+    // made stay, for a stop in the middle of the start.
+    shutdown.onStop(() => { observation.stop(); escalations.stop(); notifications.stop(); queue?.stop(); following.projector?.stop(); board.stop(); });
+    await running(http.ready);                                    // report "on" only once the socket really listens
     // What already waits when the hub starts raises no Notification: one complete look first, then only changes count. A
     // look that fails, or isn't complete (the fleet not answering yet, a node's first round slower than a poll), is tried
     // again a few times, since an empty or partial first look would make everything waiting look new (review L4; N2).
     for (let i = 0; i < 5; i++) {
       try {
-        const look = await observation.poll();
+        const look = await running(observation.poll());
         escalations.poll();
         if (look.complete) break;
         log.warn(`first look failed (${i + 1} of 5): incomplete, the fleet or a node hasn't answered yet`);
       } catch (e) { log.warn(`first look failed (${i + 1} of 5)`, e); }
-      await new Promise(r => setTimeout(r, 2000));
+      await running(new Promise(r => setTimeout(r, 2000)));
     }
     notifications.board(escalations.board().items);
     for (const w of observation.snapshot().workers) notifications.worker(w.id, w.needsYou, w.waitingOn, true);
@@ -233,16 +494,10 @@ switch (cmd) {
     access.onLinked(() => notifications.linked());
     observation.start(config.pollMs);
     escalations.start(Math.max(config.pollMs, 1000));
-    // A retried command has no deadline of the deliverer's. Withdraw one still untyped after its two minutes.
-    const withdrawCommands = setInterval(() => {
-      try { steering.withdrawOverdue(); }
-      catch (e) { log.warn("a queued command's deadline could not be checked", e); }
-    }, Math.max(config.pollMs, 1000));
-    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${productVersion()})`);
+    void memorySync?.tick();                             // the first round now; then the loop's, every minute
+    log.info(`morndo hub on http://127.0.0.1:${config.port}, for ${config.origin} (${buildLabel()})`);
     log.info(`hub identity ${formatFingerprint(identity.fingerprint)}`);
-    const stop = async () => { clearInterval(sweepInbox); clearInterval(withdrawCommands); stopRetention(); observation.stop(); escalations.stop(); notifications.stop(); fleet?.stop(); await http.idle(); await http.close(); store.close(); process.exit(0); };
-    process.on("SIGINT", () => void stop());
-    process.on("SIGTERM", () => void stop());
+    crash.beforeExit(null);
     break;
   }
   case "pair": {
@@ -264,41 +519,57 @@ switch (cmd) {
   }
   case "revoke": {
     const id = args[0];
-    if (!id) { process.stderr.write("usage: morndo revoke <device id>\n"); process.exit(2); }
+    if (!id) { process.stderr.write("usage: morndo revoke <device id>\n"); throw await exitAfterOutput(2); }
     print(access.revoke(id) ? `revoked ${id}` : `no active device ${id}`);
     store.close();
     break;
   }
   case "audit": {
-    for (const a of store.audit(Number(args[0] ?? 30)).reverse()) print(`${when(a.at)}  ${a.type}  ${JSON.stringify(a.body)}`);
+    for (const a of store.audit(auditArgs?.kind === "list" ? auditArgs.limit : 30).reverse()) print(`${when(a.at)}  ${a.type}  ${JSON.stringify(a.body)}`);
     store.close();
     break;
   }
   // ADR-0015: the agents' credentials for the board, issued here (the trust root), shown once, kept as a hash.
   case "agent-token": {
-    const agents = new AgentAccess(store, config.managerWindow);
+    // `agents` is the one the start already made, with the revocation journal (RL10).
     const [sub, ...rest] = args;
     if (sub === "new") {
-      // `--role R` and the name, in either order: the role's value is never taken as the name.
+      // `--role R`, any number of `--scope S` (U15: the closed list's words), and the name, in any order: a flag's
+      // value is never taken as the name.
       const roleAt = rest.indexOf("--role");
       const role = roleAt >= 0 ? rest[roleAt + 1] : undefined;
-      const name = rest.filter((a, i) => i !== roleAt && i !== roleAt + 1).find(a => !a.startsWith("--")) ?? "";
-      if (!name || (role !== "manager" && role !== "worker")) { process.stderr.write("usage: morndo agent-token new <name> --role manager|worker\n"); store.close(); process.exit(2); }
-      const { token, secret } = agents.issue(name, role);
+      const scopeAt = rest.map((a, i) => [a, i] as const).filter(([a]) => a === "--scope").map(([, i]) => i);
+      const scopes = scopeAt.map(i => rest[i + 1]);
+      const used = new Set<number>([...(roleAt >= 0 ? [roleAt, roleAt + 1] : []), ...scopeAt, ...scopeAt.map(i => i + 1)]);
+      const name = rest.filter((a, i) => !used.has(i)).find(a => !a.startsWith("--")) ?? "";
+      if (!name || (role !== "manager" && role !== "worker") || scopes.some(s => !(AGENT_SCOPES as readonly string[]).includes(s ?? ""))) {
+        process.stderr.write(`usage: morndo agent-token new <name> --role manager|worker [--scope ${AGENT_SCOPES.join("|--scope ")}]\n`);
+        store.close(); throw await exitAfterOutput(2);
+      }
+      const { token, secret } = agents.issue(name, role, scopes as string[]);
       print(`${secret}`);
-      print(`Token ${token.id} (${token.name}, ${token.role}). Shown once: put it in MORNDO_AGENT_TOKEN for ${role === "manager" ? "the manager's lane" : "the worker lanes"}, with MORNDO_HUB=${config.origin}.`);
+      print(agentTokenMade(token, config.origin));
     } else if (sub === "list") {
-      for (const t of agents.list()) print(`${t.id}  ${t.name.padEnd(20)}  ${t.role.padEnd(7)}  made ${when(t.createdAt)}  last used ${when(t.lastUsedAt)}  ${t.revokedAt ? `REVOKED ${when(t.revokedAt)}` : "active"}`);
+      for (const t of agents.list()) print(agentTokenLine(t, when));
     } else if (sub === "revoke") {
       const id = rest[0];
-      if (!id) { process.stderr.write("usage: morndo agent-token revoke <id>\n"); store.close(); process.exit(2); }
+      if (!id) { process.stderr.write("usage: morndo agent-token revoke <id>\n"); store.close(); throw await exitAfterOutput(2); }
       print(agents.revoke(id) ? `revoked ${id}` : `no active agent token ${id}`);
     } else {
-      process.stderr.write("usage: morndo agent-token new <name> --role manager|worker | list | revoke <id>\n");
+      process.stderr.write("usage: morndo agent-token new <name> --role manager|worker [--scope usage-pool] | list | revoke <id>\n");
       store.close();
-      process.exit(2);
+      await exitAfterOutput(2);
     }
     store.close();
+    break;
+  }
+  // ADR-0031: Memory at the console, which acts for the principal; it opens memory.db itself (console/memory.ts).
+  case "memory": {
+    // The one-time code is read from stdin (a prompt on a terminal, one line when piped), never from argv (console/memory.ts).
+    const stdin = process.stdin;
+    const code = await runMemory(args, { ...processIo(), readCode: () => readCodeLine(stdin, stdin.isTTY === true, text => void process.stderr.write(text)) }, { dataDir: config.dataDir });
+    store.close();
+    await exitAfterOutput(code);
     break;
   }
   default:
@@ -311,17 +582,33 @@ switch (cmd) {
 //   (openStore above);
 // - a fleet that doesn't answer yet is only said: the observation loop keeps asking, and the hub serves meanwhile
 //   (spec §7, "Fleet service down or restarting").
-async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService): Promise<FleetPorts> {
-  const client = new FleetClient(socket);
-  const check = await checkFleet(client);
+async function openFleet(socket: string, files: LocalFileStore, jobs: JobsService, alerts: AlertsService | null, shutdown: Shutdown): Promise<{ ports: FleetPorts; client: FleetClient }> {
+  const client = new FleetClient(socket, { log });
+  const check = await shutdown.whileRunning(checkFleet(client));
   if (check === "unsupported") {
     log.error(`the fleet service at ${socket} doesn't offer client API version ${CLIENT_API}; update morndo-fleet or this hub`);
-    process.exit(EXIT_CONFIG);
+    shutdown.exitCode = EXIT_CONFIG;                     // a signal while the output drains still ends the process with 78
+    await exitAfterOutput(EXIT_CONFIG);
   }
   if (check === "unreachable") log.warn(`the fleet service at ${socket} doesn't answer yet; the hub keeps asking`);
-  const ports = fleetPorts(client, { files, jobs, stagingDir: mkdtempSync(join(tmpdir(), "morndo-fleet-files-")) });
-  await ports.start();
-  return ports;
+  // The staging dir is named for removal the moment it exists; the ports remove it again when they stop (idempotent).
+  const stagingDir = mkdtempSync(join(tmpdir(), "morndo-fleet-files-"));
+  shutdown.onStop(() => rmSync(stagingDir, { recursive: true, force: true }));
+  const ports = fleetPorts(client, { files, jobs, ...(alerts ? { alerts } : {}), stagingDir });
+  shutdown.onStop(() => ports.stop());
+  await shutdown.whileRunning(ports.start());
+  return { ports, client };
+}
+
+// Memory's file (ADR-0031). One this hub can't open (a newer floor, not SQLite) is said in one sentence and leaves
+// Memory off: its agent routes answer memory_off and nothing is synced, while the rest of the hub serves.
+function openMemory(dir: string): MemoryStore | null {
+  try { return new MemoryStore(dir); }
+  catch (e) {
+    if (!(e instanceof MemoryFromFuture) && !(e instanceof DatabaseUnreadable)) throw e;
+    log.error(`Memory is off: ${e.message} Run the newer hub, or move ${dir}/memory.db away to start Memory empty.`);
+    return null;
+  }
 }
 
 function openConnections(policy: () => AccessPolicy): ConnectionsPageService | null {

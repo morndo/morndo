@@ -5,6 +5,7 @@
   // COLOR.md 2: an icon plus the state in words).
   import Bell from "@lucide/svelte/icons/bell";
   import ChevronDown from "@lucide/svelte/icons/chevron-down";
+  import CircleArrowUp from "@lucide/svelte/icons/circle-arrow-up";
   import Cpu from "@lucide/svelte/icons/cpu";
   import Hash from "@lucide/svelte/icons/hash";
   import ListFilter from "@lucide/svelte/icons/list-filter";
@@ -12,14 +13,16 @@
   import SquarePen from "@lucide/svelte/icons/square-pen";
   import Signpost from "@lucide/svelte/icons/signpost";
   import Unplug from "@lucide/svelte/icons/unplug";
-  import type { RosterEntry } from "@morndo/domain";
+  import type { RosterEntry, Run } from "@morndo/domain";
   import Avatar from "./Avatar.svelte";
+  import { ABSENT_MANAGER } from "../manager.ts";
+  import { BACKGROUND_LABEL, inBackground, partitionAgents } from "../lanes.ts";
   import type { ConversationPrefs } from "./present.ts";
 
-  let { office, workers, manager, selected, view, unread, needsYouCount, decisions, decisionsOpen, prefsOf, engines = false, onMenu, onSelect, onActivity, onDecisions, onCompose }: {
+  let { office, workers, manager, selected, view, unread, needsYouCount, decisions, decisionsOpen, prefsOf, engines = false, updates = false, runs = null, onMenu, onSelect, onActivity, onDecisions, onCompose }: {
     office: string; workers: RosterEntry[]; manager: RosterEntry | null; selected: string | null; view: "home" | "activity" | "board" | "dashboard";
     unread: (w: RosterEntry) => boolean; needsYouCount: number; decisions: number; decisionsOpen: boolean; prefsOf: (name: string) => ConversationPrefs;
-    engines?: boolean;
+    engines?: boolean; updates?: boolean; runs?: ReadonlyMap<string, Run> | null;
     onMenu: (id: string, x: number, y: number) => void;
     onSelect: (id: string) => void; onActivity: () => void; onDecisions: () => void; onCompose: () => void;
   } = $props();
@@ -28,16 +31,15 @@
   let filter = $state("");
   let collapsed = $state<Record<string, boolean>>({});
   const match = (w: RosterEntry) => !filter.trim() || `${w.name} ${w.title ?? ""}`.toLowerCase().includes(filter.trim().toLowerCase());
-  const byName = (a: RosterEntry, b: RosterEntry) => a.name.localeCompare(b.name);
   const agents = $derived(workers.filter(w => w !== manager && match(w)));
-  const starred = $derived(agents.filter(w => prefsOf(w.name).starred).sort(byName));
-  const working = $derived(agents.filter(w => !prefsOf(w.name).starred && (w.state === "active" || w.needsYou)).sort(byName));
-  const idle = $derived(agents.filter(w => !prefsOf(w.name).starred && w.state !== "active" && !w.needsYou).sort(byName));
+  const parts = $derived(partitionAgents(agents, runs, w => prefsOf(w.name).starred));
   const sections = $derived([
-    ...(starred.length ? [{ key: "starred", label: "Starred", items: starred }] : []),
-    { key: "working", label: "Working", items: working },
-    { key: "idle", label: "Idle", items: idle },
+    ...(parts.starred.length ? [{ key: "starred", label: "Starred", items: parts.starred }] : []),
+    { key: "working", label: "Working", items: parts.working },
+    { key: "idle", label: "Idle", items: parts.idle },
   ]);
+  // A working row whose lane waits on its own background work says so beside the name.
+  const tagged = (key: string, w: RosterEntry) => key === "working" && inBackground(w, runs);
 </script>
 
 <aside class="side" aria-label="Agents">
@@ -45,6 +47,7 @@
     <button class="title" onclick={onActivity}><span>{office}</span><ChevronDown size={16} /></button>
     <div class="acts">
       {#if engines}<a class="ib" href="/engines" aria-label="Engines" title="Engines: which AI does what"><Cpu size={18} /></a>{/if}
+      {#if updates}<a class="ib" href="/updates" aria-label="Updates" title="Updates: every machine's Version"><CircleArrowUp size={18} /></a>{/if}
       <a class="ib" href="/devices" aria-label="Devices and settings"><Settings size={18} /></a>
       <button class="ib" aria-label="Message the manager" onclick={onCompose}><SquarePen size={18} /></button>
     </div>
@@ -74,7 +77,7 @@
           onclick={() => onSelect(manager.id)} oncontextmenu={ctx(manager)}>
           <span class="ic face"><Avatar name="Manager" kind="peer" size={20} /><i class="presence" class:on={manager.state === "active"}></i></span>
           <span class="nm">Manager</span>
-          {#if manager.offline}<span class="off">offline</span>{/if}
+          {#if manager.id === ABSENT_MANAGER}<span class="off">not running</span>{:else if manager.offline}<span class="off">offline</span>{/if}
           {#if manager.needsYou}<span class="badge">!</span>{/if}
         </button>
       {/if}
@@ -92,6 +95,7 @@
               onclick={() => onSelect(w.id)} oncontextmenu={ctx(w)} title={w.title ?? w.location}>
               <span class="ic">{#if w.offline}<Unplug size={16} />{:else if w.state === "active"}<i class="spin"></i>{:else}<Hash size={16} />{/if}</span>
               <span class="nm">{w.name}</span>
+              {#if tagged(s.key, w)}<span class="bg" title={BACKGROUND_LABEL}>background</span>{/if}
               {#if w.offline}<span class="off">offline</span>{/if}
               {#if w.needsYou}<span class="badge">!</span>{/if}
             </button>
@@ -155,6 +159,8 @@
   /* Muted text, which a tinted row turns to full text (COLOR.md 8); a needs-you badge follows it. */
   .off { margin-left: auto; font: 400 12px/18px var(--font); color: var(--muted); flex: none; }
   .off + .badge { margin-left: 0; }
+  /* Working in the background is a quiet note, not a fault: its own class, not the offline tag's. */
+  .bg { margin-left: auto; font: 400 12px/18px var(--font); font-style: italic; color: var(--muted); flex: none; }
   .presence { position: absolute; right: -3px; bottom: -3px; width: 9px; height: 9px; border-radius: 50%; border: 2px solid var(--sidebar-bg); background: var(--idle-dot); }
   .presence.on { background: var(--working); }
   .spin {

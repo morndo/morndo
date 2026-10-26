@@ -11,14 +11,19 @@
 // as they were when copied. The lane registry is the real one's (Task 12): one row per
 // name, owned by the first node that claimed it, in conflict while two windows claim it (its workerId null when both are
 // on the owner), and routing by a name in conflict is lane_conflict. A test can take a node offline, announce an
-// inventory, and put itself in front of any op (to drop an answer after the paste, say). Synthetic data only.
+// inventory, and put itself in front of any op (to drop an answer after the paste, say). Deliveries (fleet-clients §4,
+// §8): the fleet keeps each one and never types it; a test moves it on as a node's deliverer would (moveDelivery), and
+// every subscriber hears each change as a `delivery` event. Synthetic data only.
 import { randomUUID } from "node:crypto";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { WebSocketServer, type WebSocket } from "ws";
-import { CLIENT_API, ERROR_EXECUTED, LIMITS, formatWorkerId, parseWorkerId, type Alert, type ErrorCode, type OpError, type Pane } from "@morndo/protocol";
+import {
+  CLIENT_API, ERROR_EXECUTED, LIMITS, formatWorkerId, parseWorkerId,
+  type Alert, type Delivery, type ErrorCode, type LaneEvent, type LaneWatchEntry, type OpError, type Pane, type SessionStatus,
+} from "@morndo/protocol";
 import type { SendProblem, SessionInfo, Terminal } from "@morndo/node-ops";
 import type { Sessions, Tmux, TranscriptSource } from "../../src/application/ports.ts";
 
@@ -48,6 +53,9 @@ export type NodeBackend = {
   transcripts?: TranscriptSource;
   readFile?: (path: string) => Promise<{ bytes: Uint8Array; mtime: number } | null>;
   inboxDir?: string;
+  keyNames?: (pane: string, names: string[]) => Promise<boolean>;      // pane.keys by key name (fleet-clients §5)
+  // The session's title and last prompt (its transcript's `ai-title` and `last-prompt`; reconciliation ruling 13).
+  topicOf?: (pane: string) => { topic?: string; lastPrompt?: string } | undefined;
 };
 export type KeyRow = { state: "started" | "done"; hash: string; reply?: Reply };
 export type FakeNode = {
@@ -103,9 +111,12 @@ export function localNode(name: string, server: string, b: NodeBackend, o: { sto
       const workerId = idOf(w.id);
       if (workerId === null) return [];
       const s = sessions.get(w.id);
+      const t = b.topicOf?.(w.id);
       return [{
         workerId, window: w.name, cwd: s?.cwd || w.location,
         ...(s ? { sessionId: s.sessionId } : {}), ...(s?.name ? { sessionName: s.name } : {}), ...(s?.version ? { claudeVersion: s.version } : {}),
+        status: s?.status ?? null, pid: s ? s.pid : null,
+        ...(t?.topic !== undefined ? { topic: t.topic } : {}), ...(t?.lastPrompt !== undefined ? { lastPrompt: t.lastPrompt } : {}),
       }];
     });
     const now = JSON.stringify(panes);
@@ -164,7 +175,13 @@ export function localNode(name: string, server: string, b: NodeBackend, o: { sto
       case "pane.keys": {
         const p = await expected(str("workerId"), a.expect);
         if (p === null) return refusal("no_pane");
+        if (Array.isArray(a.names)) return ok({ ok: b.keyNames ? await b.keyNames(p, a.names.filter((x): x is string => typeof x === "string")) : false });
         return ok({ ok: b.terminal ? await b.terminal.keys(p, str("data")) : false });
+      }
+      case "pane.capture": {
+        const p = paneOf(str("workerId"));
+        const screen = p === null ? null : await b.tmux.capture(p);
+        return ok({ text: screen === null ? null : screen.split("\n").slice(-Math.max(1, num("lines"))).join("\n"), truncated: false });
       }
       case "pane.send":
         return keyed(key, op, args, async () => {
@@ -232,11 +249,16 @@ export function localNode(name: string, server: string, b: NodeBackend, o: { sto
 // A node's machine in memory: panes by tmux id with a window name, a cwd, a screen and maybe a session; what was typed
 // into them; transcripts by session and files by path. `problem` makes sends to that pane come back so (a refusal before
 // the paste, or "not_submitted" after it). `hold()` makes the next send wait in the pane after its paste until released.
-export type MemoryPane = { name: string; cwd: string; screen: string; sessionId?: string; problem?: SendProblem | null };
+export type MemoryPane = {
+  name: string; cwd: string; screen: string; sessionId?: string; problem?: SendProblem | null;
+  status?: SessionStatus; pid?: number;                    // its session's, with a session (default "idle", 1)
+  topic?: string; lastPrompt?: string;                      // its session's title and last prompt
+};
 export type MemoryBackend = NodeBackend & {
   panes: Record<string, MemoryPane>;
   typed: { pane: string; text: string; key: string }[];
   keysTyped: { pane: string; data: string }[];
+  keyNamesTyped: { pane: string; names: string[] }[];
   typedAt: number | null;                                   // the node's clock for typedAt; null: Date.now()
   hold(): () => void;
 };
@@ -247,7 +269,7 @@ export function memoryBackend(
   let held: Promise<void> | null = null;
   const transcriptOf = (sessionId: string) => o.transcripts?.[sessionId] ?? null;
   const b: MemoryBackend = {
-    panes, typed: [], keysTyped: [], typedAt: null,
+    panes, typed: [], keysTyped: [], keyNamesTyped: [], typedAt: null,
     hold() {
       let release = () => {};
       held = new Promise<void>(r => { release = r; });
@@ -281,11 +303,20 @@ export function memoryBackend(
         return true;
       },
     },
+    topicOf: id => {
+      const p = b.panes[id];
+      return p ? { ...(p.topic !== undefined ? { topic: p.topic } : {}), ...(p.lastPrompt !== undefined ? { lastPrompt: p.lastPrompt } : {}) } : undefined;
+    },
+    keyNames: async (id, names) => {
+      if (!b.panes[id]) return false;
+      b.keyNamesTyped.push({ pane: id, names });
+      return true;
+    },
     sessions: {
       byPane: async () => {
         const out = new Map<string, SessionInfo>();
         for (const [id, p] of Object.entries(b.panes)) {
-          if (p.sessionId !== undefined) out.set(id, { sessionId: p.sessionId, name: null, pane: id, cwd: p.cwd, version: null, pid: 1 });
+          if (p.sessionId !== undefined) out.set(id, { sessionId: p.sessionId, name: null, pane: id, cwd: p.cwd, version: null, pid: p.pid ?? 1, status: p.status ?? "idle" });
         }
         return out;
       },
@@ -328,13 +359,34 @@ export type FakeFleet = {
   announce(node: string): Promise<void>;                    // an inventory event with the node's panes now
   raise(alert: Alert): void;                                // served by GET /v1/alerts from now on, and sent as an event
   intercept(op: string, f: Intercept | null): void;
+  // Deliveries (fleet-clients §4, §8): what each one is and carries, every POST /v1/deliveries in order, every cancel.
+  readonly deliveries: ReadonlyMap<string, { delivery: Delivery; text: string }>;
+  readonly deliveryCalls: { id: string; lane: string | null; workerId: string | null; text: string }[];
+  readonly cancels: string[];
+  moveDelivery(id: string, change: Partial<Delivery>): Delivery;   // as the node's deliverer would; a `delivery` event
+  quietDeliveries(quiet: boolean): void;                    // true: no `delivery` events (one sent while unsubscribed)
+  // The next n deliveries are stored, and their answer lost: the connection drops ("drop"), or no answer ever comes and
+  // the client times out ("hang").
+  loseDeliveryAnswers(n: number, how?: "drop" | "hang"): void;
+  // The next n POSTs of a delivery are answered uncertain (executed maybe) and not stored.
+  refuseDeliveries(n: number): void;
+  // true: every GET /v1/deliveries/<id> from now on gets no answer (a fleet stuck on a busy fleet.db); each one's time.
+  holdDeliveryReads(hold: boolean): void;
+  // Every cancel from now on is answered this long after it arrived (a node slow to answer delivery.cancel).
+  delayCancels(ms: number): void;
+  readonly deliveryReads: { id: string; at: number }[];
+  laneEvent(e: LaneEvent): void;                            // kept for GET /v1/lane-events, and sent as a `lane` event
+  usage(node: string, body: unknown): void;                 // sent as a `usage` event, as the fleet's taps would be (S3)
+  setLaneWatch(entries: LaneWatchEntry[]): void;            // served by GET /v1/lane-watch from now on
+  subscriberCount(): number;                                // events WebSockets open now
   close(): Promise<void>;
 };
 
 // A file the fleet refuses before its first byte (plan.md, "Client API"): the status for the node's error code.
 const FILE_STATUS: Partial<Record<ErrorCode, number>> = { bad_args: 400, denied: 403, too_large: 413, node_offline: 503, timeout: 504, uncertain: 502, internal: 502 };
 
-export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; socketPath?: string }): Promise<FakeFleet> {
+// `stickyLanes`: the fleet's sticky lane names (default ["manager"]), which GET /v1/caps lists (fleet-clients §4.6, §8).
+export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; socketPath?: string; stickyLanes?: string[] }): Promise<FakeFleet> {
   const dir = o.socketPath === undefined ? mkdtempSync(join(tmpdir(), "mf-")) : null;
   const socketPath = o.socketPath ?? join(dir ?? "", "fleet.sock");
   const nodes = new Map(o.nodes.map(n => [n.name, n]));
@@ -348,6 +400,8 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
   const subscribers = new Set<WebSocket>();
   let fileFault: FileFault | null = null;
   const alerts: Alert[] = [];
+  const sticky = o.stickyLanes ?? ["manager"];
+  const lastNodeOf = new Map<string, string>();             // a sticky name → the node that last had it (spec §4.6)
 
   const inventoryOf = async (name: string): Promise<{ panes: Pane[]; invVersion: number }> => {
     const n = nodes.get(name);
@@ -369,6 +423,7 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
       const mine = claims.filter(c => c.name === name);
       const owner = mine.some(c => c.node === owners.get(name)) ? owners.get(name) ?? "" : mine[0]?.node ?? "";
       owners.set(name, owner);
+      if (sticky.includes(name)) lastNodeOf.set(name, owner);
       const owned = mine.filter(c => c.node === owner);
       return { name, node: owner, workerId: owned.length === 1 ? owned[0]?.workerId ?? null : null, conflict: mine.length > 1 };
     });
@@ -411,16 +466,114 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
     return { ...reply, invVersion: n.invVersion(), store, ...(n.storeSeq === null ? {} : { storeSeq: n.storeSeq }) };
   }
 
+  // Deliveries (fleet-clients §4, §8; plan.md Contracts, "Client API routes"; reconciliation ruling 3): stored here, never
+  // typed. A delivery to a sticky name whose window is gone goes to the node that last had it. A refusal is 200
+  // { ok: false, error } (the client API's mapping for op refusals); an id the fleet doesn't know is 404 no_such_delivery.
+  const deliveries = new Map<string, { delivery: Delivery; text: string }>();
+  const deliveryCalls: { id: string; lane: string | null; workerId: string | null; text: string }[] = [];
+  const cancels: string[] = [];
+  const laneEvents: LaneEvent[] = [];
+  let laneWatch: LaneWatchEntry[] = [];
+  let quiet = false;
+  let lose = 0;
+  let loseBy: "drop" | "hang" = "drop";
+  let refuseDeliver = 0;
+  let holdReads = false;
+  let cancelDelayMs = 0;
+  const deliveryReads: { id: string; at: number }[] = [];
+  const stale = (d: Delivery) => status.get(d.node) !== "online";
+  const deliveryEvent = (d: Delivery) => { if (!quiet) broadcast({ t: "delivery", node: d.node, body: { ...d, stale: stale(d) } }); };
+  const refused = (code: ErrorCode, message: string = code) => ({ status: 200, body: { ok: false, error: { code, executed: ERROR_EXECUTED[code], message } } });
+  const unknownDelivery = { status: 404, body: { error: "no_such_delivery" } };
+  const withoutWaiting = (d: Delivery): Delivery => { const { waiting: _w, ...rest } = d; return rest; };
+  // null: stored, and its answer is to be lost.
+  async function deliver(b: Record<string, unknown>): Promise<{ status: number; body: unknown } | null> {
+    const id = typeof b.id === "string" ? b.id : "";
+    const text = typeof b.text === "string" ? b.text : "";
+    const lane = typeof b.lane === "string" ? b.lane : null;
+    const workerId = typeof b.workerId === "string" ? b.workerId : null;
+    if (!/^[a-z]+:/.test(id) || id.length > LIMITS.maxDeliveryId || !text || text.length > LIMITS.maxMessageText || (lane === null) === (workerId === null)) return refused("bad_args");
+    deliveryCalls.push({ id, lane, workerId, text });
+    if (refuseDeliver > 0) { refuseDeliver--; return refused("uncertain", "the fleet stopped while the delivery was in flight"); }
+    const target = lane !== null ? { lane } : { workerId: workerId ?? "" };
+    const known = deliveries.get(id);
+    if (known) {
+      const same = known.text === text && JSON.stringify(known.delivery.target) === JSON.stringify(target);
+      return same ? { status: 200, body: { ok: true, delivery: known.delivery } } : refused("id_conflict", "this id names another delivery");
+    }
+    let node: string | null = null;
+    if (lane !== null) {
+      const row = (await lanes()).find(l => l.name === lane);
+      if (row?.conflict) return refused("lane_conflict", "two windows claim this lane");
+      node = row?.node ?? (sticky.includes(lane) ? lastNodeOf.get(lane) ?? null : null);
+    } else node = parseWorkerId(workerId ?? "")?.node ?? null;
+    if (node === null || !nodes.has(node)) return refused("no_pane", "no such lane");
+    if (status.get(node) !== "online") return refused("node_offline", "the node is not online");
+    const at = Date.now();
+    const delivery: Delivery = { id, node, target, state: "queued", queuedAt: at, notAfter: at + (typeof b.ttlMs === "number" ? b.ttlMs : LIMITS.deliveryTtlMs) };
+    deliveries.set(id, { delivery, text });
+    deliveryEvent(delivery);
+    if (lose > 0) { lose--; return null; }
+    return { status: 200, body: { ok: true, delivery } };
+  }
+  function cancel(id: string): { status: number; body: unknown } {
+    cancels.push(id);
+    const d = deliveries.get(id);
+    if (!d) return unknownDelivery;
+    if (stale(d.delivery)) return refused("node_offline", "the node is not online");
+    if (d.delivery.state !== "queued") return refused("already_typed", "it was typed already");
+    d.delivery = { ...withoutWaiting(d.delivery), state: "given_up", why: "cancelled" };
+    deliveryEvent(d.delivery);
+    return { status: 200, body: { ok: true, delivery: d.delivery } };
+  }
+
   async function handle(req: IncomingMessage, res: ServerResponse) {
     const url = new URL(req.url ?? "/", "http://fleet");
     clients.push(String(req.headers["x-morndo-client"] ?? ""));
     const json = (code: number, body: unknown) => { res.writeHead(code, { "content-type": "application/json" }); res.end(JSON.stringify(body)); };
-    if (req.method === "GET" && url.pathname === "/v1/caps") return json(200, { api: o.api ?? [CLIENT_API] });
+    const body = async () => {
+      const chunks: Buffer[] = [];
+      for await (const c of req) chunks.push(c as Buffer);
+      return JSON.parse(Buffer.concat(chunks).toString("utf8") || "{}") as Record<string, unknown>;
+    };
+    if (req.method === "GET" && url.pathname === "/v1/caps") return json(200, { api: o.api ?? [CLIENT_API], stickyLanes: sticky });
+    if (req.method === "POST" && url.pathname === "/v1/deliveries") {
+      const r = await deliver(await body());
+      // Stored, and the answer lost on its way: as a fleet that stops after it published the change (its event first).
+      if (r === null) { if (loseBy === "drop") setTimeout(() => req.socket.destroy(), 50); return; }
+      return json(r.status, r.body);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/deliveries") {
+      const lane = url.searchParams.get("lane");
+      const state = url.searchParams.get("state");
+      const since = Date.now() - LIMITS.deliveryKeepMs;          // the newest 1000 of the last 7 days
+      const all = [...deliveries.values()].map(d => d.delivery)
+        .filter(d => d.queuedAt >= since && (lane === null || ("lane" in d.target && d.target.lane === lane)) && (state === null || d.state === state))
+        .sort((a, b) => b.queuedAt - a.queuedAt).slice(0, 1000).reverse();   // the newest 1000, oldest first, as the real fleet answers
+      return json(200, { deliveries: all.map(d => ({ ...d, stale: stale(d) })) });
+    }
+    const one = /^\/v1\/deliveries\/([^/]+)(\/cancel)?$/.exec(url.pathname);
+    if (one && req.method === "GET" && one[2] === undefined) {
+      deliveryReads.push({ id: decodeURIComponent(one[1] ?? ""), at: Date.now() });
+      if (holdReads) return;                                // no answer: the client's own timeout ends it
+      const d = deliveries.get(decodeURIComponent(one[1] ?? ""));
+      return d ? json(200, { delivery: d.delivery, stale: stale(d.delivery) }) : json(unknownDelivery.status, unknownDelivery.body);
+    }
+    if (one && req.method === "POST" && one[2] !== undefined) {
+      if (cancelDelayMs > 0) await new Promise(r => setTimeout(r, cancelDelayMs));
+      const r = cancel(decodeURIComponent(one[1] ?? ""));
+      return json(r.status, r.body);
+    }
+    if (req.method === "GET" && url.pathname === "/v1/lane-events") {
+      const since = Number(url.searchParams.get("since") ?? 0);
+      return json(200, { events: laneEvents.filter(e => e.seq > since).slice(0, 1000) });
+    }
     if (req.method === "GET" && url.pathname === "/v1/nodes") {
       return json(200, [...nodes.keys()].map(name => ({ name, status: status.get(name) ?? "offline", health: null, agent: "fake" })));
     }
     if (req.method === "GET" && url.pathname === "/v1/lanes") return json(200, await lanes());
     if (req.method === "GET" && url.pathname === "/v1/alerts") return json(200, alerts);
+    if (req.method === "GET" && url.pathname === "/v1/lane-watch") return json(200, { lanes: laneWatch });
     if (req.method === "POST" && url.pathname === "/v1/op") {
       const chunks: Buffer[] = [];
       for await (const c of req) chunks.push(c as Buffer);
@@ -499,6 +652,25 @@ export async function startFakeFleet(o: { nodes: FakeNode[]; api?: number[]; soc
     async announce(name) { broadcast({ t: "inventory", node: name, body: await inventoryOf(name) }); },
     raise(alert) { alerts.push(alert); broadcast({ t: "alert", node: alert.node ?? "", body: alert }); },
     intercept(opName, f) { if (f) intercepts.set(opName, f); else intercepts.delete(opName); },
+    deliveries, deliveryCalls, cancels,
+    moveDelivery(id, change) {
+      const d = deliveries.get(id);
+      if (!d) throw new Error(`no delivery ${id}`);
+      const moved = { ...d.delivery, ...change };
+      d.delivery = change.state !== undefined && change.state !== "queued" && change.waiting === undefined ? withoutWaiting(moved) : moved;
+      deliveryEvent(d.delivery);
+      return d.delivery;
+    },
+    quietDeliveries(q) { quiet = q; },
+    loseDeliveryAnswers(n, how = "drop") { lose = n; loseBy = how; },
+    refuseDeliveries(n) { refuseDeliver = n; },
+    holdDeliveryReads(hold) { holdReads = hold; },
+    delayCancels(ms) { cancelDelayMs = ms; },
+    deliveryReads,
+    laneEvent(e) { laneEvents.push(e); broadcast({ t: "lane", node: e.node, body: e }); },
+    usage(node, body) { broadcast({ t: "usage", node, body }); },
+    setLaneWatch(entries) { laneWatch = entries; },
+    subscriberCount: () => subscribers.size,
     async close() {
       for (const ws of subscribers) ws.terminate();
       wss.close();
