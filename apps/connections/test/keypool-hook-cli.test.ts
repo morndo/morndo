@@ -134,12 +134,12 @@ describe("the hook marks the member the run is on", () => {
     expect(calls(dir).map(c => c.key)).toEqual([KEYS[0], KEYS[1]]);
     expect(await states(env)).toEqual(["exhausted", "active", "active"]);
   });
-  it("a spend-limit refusal exhausts it too, a 401 marks it failing and blocks the pool, and a rate limit changes nothing", async () => {
+  it("a spend-limit refusal exhausts it too, a 401 marks it failing and blocks the pool, and a rate limit or an overload changes nothing", async () => {
     for (const [name, outcome, after] of [
       ["spend-limit-400", "exhausted", ["exhausted", "active"]],
       ["invalid-key-401", "failing", ["failing", "active"]],
       ["rate-limit-429", "limited", ["active", "active"]],
-      ["overloaded-529", "unknown", ["active", "active"]],
+      ["overloaded-529", "ignored", ["active", "active"]],
     ] as const) {
       const { env, dir } = await world(2);
       const ran = await run(env, dir, job(dir, { [KEYS[0]]: { exit: 0, hook: saved(name) } }));

@@ -173,7 +173,7 @@ describe("what is not a mark changes nothing", () => {
     for (let i = 0; i < 3; i++) expect(w.pools.reportRefusal("p", { kind: "member", member: "k1" }, signalOf(418, { kind: "teapot_error", text: PLANTED }), w.mem.clock.now()).ok).toBe(true);
     const raised = w.mem.alerts.raised.filter(a => a.kind === "unclassified");
     expect(raised).toHaveLength(1);
-    expect(raised[0]).toMatchObject({ name: "p", detail: "418 teapot_error" });
+    expect(raised[0]).toMatchObject({ name: "k1", detail: "418 teapot_error" });
   });
 });
 

@@ -26,9 +26,14 @@ describe("the saved payloads, one per refusal the real CLI gave", () => {
     ["invalid-key-401", { kind: "failing", reason: "rejected" }],
     ["forbidden-403", { kind: "failing", reason: "denied" }],
     ["account-on-hold-403", { kind: "failing", reason: "held" }],
-    ["overloaded-529", { kind: "unknown" }],
   ])("%s", (name, expected) => {
     expect(classify(saved(name))).toEqual(expected);
+  });
+});
+
+describe("a 529 arrives as server_error: no refusal of the key, no signal", () => {
+  it("overloaded-529", () => {
+    expect(signalFromHook(saved("overloaded-529"))).toBeNull();
   });
 });
 
