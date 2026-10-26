@@ -1,0 +1,9 @@
+# The key pools' recheck (ADR-0037, slice 3): probe the exhausted members whose next check has come, once each, and report
+# what the provider said. Started by its timer, never enabled on its own, so it carries no [Install] section. The command
+# prints one JSON line per probe (words only) and nothing when nothing is due.
+[Unit]
+Description=Morndo key pools: recheck the exhausted keys that are due
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/morndo-keys keypool recheck
