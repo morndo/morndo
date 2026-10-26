@@ -199,7 +199,8 @@ describe("following the log", () => {
     writeFileSync(w.log, `${"ordinary line of the server\n".repeat(5)}`);
     follow(w, "--member", "k3");
     await sleep(2500);
-    writeFileSync(`${w.log}.new`, `${"ordinary line of the server\n".repeat(50)}${CREDIT}\n`);
+    // The phrase is at the very start of the new file, before where the old file ended: only a reader that starts the new file over finds it.
+    writeFileSync(`${w.log}.new`, `${CREDIT}\n${"ordinary line of the server\n".repeat(50)}`);
     renameSync(`${w.log}.new`, w.log);
     await until(async () => (await states(w))[2] === "exhausted", "k3 to be reported dry after the rotation");
   });
