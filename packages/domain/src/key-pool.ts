@@ -9,6 +9,10 @@ export const KEY_POOL_RECHECK_MIN_MS = 3_600_000;
 export const KEY_POOL_RECHECK_MAX_MS = 7 * 86_400_000;
 export const KEY_POOL_RECHECK_DEFAULT_MS = 86_400_000;
 export const KEY_POOL_RESUME_MAX_MS = 365 * 86_400_000;
+export const KEY_PROBE_CLAIM_MS = 30_000;
+// The recorded estimate of one probe, about 10 input and 1 output token on the probe model, a margin over the Haiku
+// prices read 2026-10-25, which also covers the older dearer Haiku 4.5.
+export const KEY_PROBE_COST_USD = 0.00002;
 
 export type ExhaustedReason = "credit" | "spend-limit";
 export type FailingReason = "rejected" | "denied" | "held" | "cap";
@@ -24,8 +28,13 @@ export type Outcome =
   | { kind: "unknown" };
 export type KeyMember = {
   credential: string; joined: number; health: KeyHealth; since: number; lastChange: number;
-  nextCheck: number | null; organization: string | null;
+  nextCheck: number | null; probingUntil: number | null; failedProbes: number; lastProbe: number | null;
+  // A mark of the last detail alerted for each kind of probe alert (`unclassified`, `probe-config`). A hash, not the detail:
+  // the detail holds a status code and the provider's error type, which the pool never keeps (KP12).
+  alerted: Readonly<Record<string, string>>;
+  organization: string | null;
 };
+export type ProbeWhy = "due" | "manual" | "suspect";
 export type Names = { connections: readonly string[]; pools: readonly string[]; deleted: readonly string[] };
 export type Standing = "ok" | "empty" | "blocked";
 export type RecoverHow = "probe" | "report" | "revive" | "rotation";
@@ -51,6 +60,8 @@ export type KeyPoolEvent =
   | { type: "KeyFailed"; member: string; reason: FailingReason; at: number }
   | { type: "KeyLimited"; member: string; retryAfterSeconds: number | null; at: number }
   | { type: "KeyRecovered"; member: string; how: RecoverHow; at: number }
+  | { type: "ProbeClaimed"; member: string; why: ProbeWhy; at: number }
+  | { type: "ProbeReleased"; member: string; at: number }
   | { type: "PoolEmpty"; backAt: number | null; at: number }
   | { type: "PoolBlocked"; member: string; reason: FailingReason; at: number }
   | { type: "PoolRefilled"; at: number }
@@ -96,7 +107,9 @@ function withEvents(p: KeyPool, events: readonly KeyPoolEvent[]): KeyPool {
 }
 
 function withMember(p: KeyPool, credential: string, health: KeyHealth, at: number, nextCheck: number | null): KeyPool {
-  const members = p.members.map(m => m.credential === credential ? { ...m, health, since: at, lastChange: at, nextCheck } : m);
+  const members = p.members.map(m => m.credential === credential
+    ? { ...m, health, since: at, lastChange: at, nextCheck, probingUntil: null, failedProbes: 0 }
+    : m);
   return { ...p, members };
 }
 
@@ -183,7 +196,7 @@ export function joinKeyPool(
   }
   const member: KeyMember = {
     credential: connection.name, joined: now, health: { state: "active" }, since: now, lastChange: now,
-    nextCheck: null, organization,
+    nextCheck: null, probingUntil: null, failedProbes: 0, lastProbe: null, alerted: {}, organization,
   };
   events.push({ type: "MemberJoined", member: connection.name, at: now, command: who.value });
   return ok(settleKeyPool(withEvents({ ...p, members: [...p.members, member], ownedOrgs }, events), now));
@@ -271,7 +284,22 @@ function cappedResume(resumeAt: number | null, now: number): number | null {
   return resumeAt;
 }
 
-function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report"): KeyPool | null {
+// A probe's answer that names a date that is not in the future names no date: the member waits the interval, not
+// "due again at once". One that is in the future is held to a year. (The first refusal keeps a past date: the member is
+// due at once, once, and the claim then moves its next check.)
+function futureResume(resumeAt: number | null, now: number): number | null {
+  if (resumeAt === null || resumeAt <= now) return null;
+  return cappedResume(resumeAt, now);
+}
+
+// How long until the next probe. Each time a probe finds the member still dry, the wait doubles, up to a week.
+function probeInterval(failedProbes: number, policy: RotationPolicy): number {
+  return Math.min(policy.recheckEveryMs * 2 ** failedProbes, KEY_POOL_RECHECK_MAX_MS);
+}
+
+function applyOutcome(
+  p: KeyPool, member: KeyMember, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report", why?: ProbeWhy,
+): KeyPool | null {
   switch (outcome.kind) {
     case "unknown":
       return null;
@@ -281,15 +309,34 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
         retryAfterSeconds: outcome.retryAfterMs === null ? null : outcome.retryAfterMs / 1000, at: now,
       }]);
     case "ok":
-      if (member.health.state !== "exhausted" || outcome.evidence !== "messages") return null;
-      return withEvents(withMember(p, member.credential, { state: "active" }, observedAt, null), [{ type: "KeyRecovered", member: member.credential, how: via, at: now }]);
+      if (outcome.evidence !== "messages") return null;
+      if (member.health.state === "exhausted") {
+        return withEvents(withMember(p, member.credential, { state: "active" }, observedAt, null), [{ type: "KeyRecovered", member: member.credential, how: via, at: now }]);
+      }
+      // An active member that answers a probe stays as it is, claim included. The claim lapses by itself.
+      return null;
     case "exhausted": {
-      if (member.health.state !== "active") return null;
-      const resumeAt = cappedResume(outcome.resumeAt, now);
-      return withEvents(
-        withMember(p, member.credential, { state: "exhausted", reason: outcome.reason, resumeAt }, observedAt, resumeAt ?? observedAt + p.policy.recheckEveryMs),
-        [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt, at: now }],
-      );
+      if (member.health.state === "active") {
+        const resumeAt = cappedResume(outcome.resumeAt, now);
+        return withEvents(
+          withMember(p, member.credential, { state: "exhausted", reason: outcome.reason, resumeAt }, observedAt, resumeAt ?? observedAt + p.policy.recheckEveryMs),
+          [{ type: "KeyExhausted", member: member.credential, reason: outcome.reason, resumeAt, at: now }],
+        );
+      }
+      // Still dry. Only a due probe counts: it is not a new transition (KP11), so since and lastChange stay, and so does
+      // the claim, which lapses by itself. A manual probe, and a report of the same refusal, change nothing.
+      if (member.health.state === "exhausted" && via === "probe") {
+        if (why !== "due") return null;
+        const failedProbes = member.failedProbes + 1;
+        const resumeAt = futureResume(outcome.resumeAt, now);
+        const nextCheck = resumeAt === null ? now + probeInterval(failedProbes, p.policy) : resumeAt;
+        const health: KeyHealth = { state: "exhausted", reason: outcome.reason, resumeAt };
+        return {
+          ...p,
+          members: p.members.map(m => m.credential === member.credential ? { ...m, failedProbes, health, nextCheck } : m),
+        };
+      }
+      return null;
     }
     case "failing":
       if (member.health.state === "failing") return null;
@@ -300,14 +347,95 @@ function applyOutcome(p: KeyPool, member: KeyMember, outcome: Outcome, observedA
 }
 
 export function reportKeyOutcome(
-  p: KeyPool, credential: string, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report" = "report",
+  p: KeyPool, credential: string, outcome: Outcome, observedAt: number, now: number, via: "probe" | "report" = "report", why?: ProbeWhy,
 ): Result<KeyPool, "missing"> {
   const member = p.members.find(m => m.credential === credential);
   if (!member) return err("missing");
   if (observedAt < member.lastChange) return ok(p);
-  const changed = applyOutcome(p, member, outcome, observedAt, now, via);
+  const changed = applyOutcome(p, member, outcome, observedAt, now, via, via === "probe" ? why ?? "due" : why);
   if (!changed) return ok(p);
   return ok(settleKeyPool(changed, now));
+}
+
+// A probe is claimed before it is made. A due claim moves the next check in the same write; a manual claim and a suspect
+// claim leave it. Every claim records when it was made. A claim still in the future is refused. A due or suspect claim inside
+// one recheck interval of the last probe, of whatever kind, is not due (a manual claim is the principal's, held by the claim alone). A claim is not a health change, so since and lastChange stay.
+export function claimProbe(
+  p: KeyPool, credential: string, now: number, why: ProbeWhy,
+): Result<KeyPool, "missing" | "claimed" | "not_due" | "state"> {
+  const member = p.members.find(m => m.credential === credential);
+  if (!member) return err("missing");
+  switch (why) {
+    case "due":
+    case "manual":
+      if (member.health.state !== "exhausted") return err("state");
+      break;
+    case "suspect":
+      if (member.health.state !== "active") return err("state");
+      break;
+    default:
+      return unreachable(why);
+  }
+  if (member.probingUntil !== null && member.probingUntil > now) return err("claimed");
+  if (why === "due" && (member.nextCheck === null || member.nextCheck > now)) return err("not_due");
+  if (why !== "manual" && member.lastProbe !== null && now - member.lastProbe < p.policy.recheckEveryMs) return err("not_due");
+  const nextCheck = why === "due" ? now + probeInterval(member.failedProbes, p.policy) : member.nextCheck;
+  const members = p.members.map(m => m.credential === credential
+    ? { ...m, probingUntil: now + KEY_PROBE_CLAIM_MS, nextCheck, lastProbe: now }
+    : m);
+  return ok(withEvents({ ...p, members }, [{ type: "ProbeClaimed", member: credential, why, at: now }]));
+}
+
+// A claim whose probe never started is given back: only that claim, matched by the instant it was taken. Another
+// prober's claim, a missing member, or a member with no claim, is left as the same pool.
+export function releaseClaim(
+  p: KeyPool, credential: string, claimedAt: number, before: { nextCheck: number | null; lastProbe: number | null }, now: number,
+): KeyPool {
+  const member = p.members.find(m => m.credential === credential);
+  if (!member || member.probingUntil !== claimedAt + KEY_PROBE_CLAIM_MS) return p;
+  const members = p.members.map(m => m.credential === credential
+    ? { ...m, probingUntil: null, nextCheck: before.nextCheck, lastProbe: before.lastProbe }
+    : m);
+  return withEvents({ ...p, members }, [{ type: "ProbeReleased", member: credential, at: now }]);
+}
+
+// A short mark of a detail, to compare two without keeping the text (FNV-1a over the UTF-16 units, with the length).
+function detailMark(detail: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < detail.length; i++) hash = Math.imul(hash ^ detail.charCodeAt(i), 0x01000193) >>> 0;
+  return `${detail.length}-${hash.toString(16)}`;
+}
+
+// Whether a probe alert of this kind and detail is news for the member: the first one, or one that differs from the last
+// alerted. The mark of the detail is kept with the member, so it neither repeats after other alerts push it out of view
+// nor stays silent after a fix (clearAlerted).
+export function alertOnce(p: KeyPool, credential: string, kind: string, detail: string): { pool: KeyPool; raise: boolean } {
+  const member = p.members.find(m => m.credential === credential);
+  const mark = detailMark(detail);
+  if (!member || member.alerted[kind] === mark) return { pool: p, raise: false };
+  const members = p.members.map(m => m.credential === credential ? { ...m, alerted: { ...m.alerted, [kind]: mark } } : m);
+  return { pool: { ...p, members }, raise: true };
+}
+
+// A good answer, or one of another kind, is the fix: the same detail is news again afterwards.
+export function clearAlerted(p: KeyPool, credential: string, kind: string): KeyPool {
+  const member = p.members.find(m => m.credential === credential);
+  if (!member || !(kind in member.alerted)) return p;
+  const rest = Object.fromEntries(Object.entries(member.alerted).filter(([name]) => name !== kind));
+  return { ...p, members: p.members.map(m => m.credential === credential ? { ...m, alerted: rest } : m) };
+}
+
+// Exhausted members whose next check has arrived and that nobody is probing now, in ring order.
+export function dueMembers(p: KeyPool, now: number): string[] {
+  const names: string[] = [];
+  for (const member of p.members) {
+    if (member.health.state !== "exhausted" || member.nextCheck === null || member.nextCheck > now) continue;
+    if (member.probingUntil !== null && member.probingUntil > now) continue;
+    // A claim would refuse a member probed less than one interval ago, so it is not listed.
+    if (member.lastProbe !== null && now - member.lastProbe < p.policy.recheckEveryMs) continue;
+    names.push(member.credential);
+  }
+  return names;
 }
 
 function recover(p: KeyPool, credential: string, how: "revive" | "rotation", now: number): KeyPool {
@@ -391,17 +519,20 @@ export function closeGrant(p: KeyPool, id: string, now: number): KeyPool {
   return withEvents({ ...p, grants: p.grants.filter(g => g.id !== id) }, [{ type: "GrantClosed", grant: id, at: now }]);
 }
 
-// A session the grant has served is that session's member, and the window is left as it is. Otherwise a report inside the
-// hand-off window still belongs to the member that gave the run up. Past it, the current member owns it.
-export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number, session?: string | null): Result<{ pool: KeyPool; member: string }, "missing"> {
+// A session the grant has served is that session's member, and nothing is suspected. A session it has not seen, inside
+// the hand-off window, still belongs to the member that gave the run up, and the current member is suspected when the
+// two differ. Past the window, or with no earlier member, the current member owns the report and nothing is suspected.
+export function attributeToGrant(p: KeyPool, id: string, at: number, ttlMs: number, session?: string | null): Result<{ pool: KeyPool; member: string; suspect: string | null }, "missing"> {
   const grant = p.grants.find(g => g.id === id);
   if (!grant) return err("missing");
   const known = session ? grant.seen.find(row => row.session === session) : undefined;
-  if (known) return ok({ pool: p, member: known.member });
+  if (known) return ok({ pool: p, member: known.member, suspect: null });
   const earlier = grant.previous;
-  if (earlier && at < earlier.movedAt + ttlMs) return ok({ pool: p, member: earlier.member });
-  if (!earlier) return ok({ pool: p, member: grant.member });
-  return ok({ pool: { ...p, grants: p.grants.map(g => g.id === id ? { ...g, previous: null } : g) }, member: grant.member });
+  if (earlier && at < earlier.movedAt + ttlMs) {
+    return ok({ pool: p, member: earlier.member, suspect: earlier.member === grant.member ? null : grant.member });
+  }
+  if (!earlier) return ok({ pool: p, member: grant.member, suspect: null });
+  return ok({ pool: { ...p, grants: p.grants.map(g => g.id === id ? { ...g, previous: null } : g) }, member: grant.member, suspect: null });
 }
 
 export function keyRotated(p: KeyPool, credential: string, now: number): KeyPool {

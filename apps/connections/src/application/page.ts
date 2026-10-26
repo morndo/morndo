@@ -24,6 +24,7 @@ const ALERT_DETAIL: Record<string, string> = {
   defaults: "A default pick was skipped",
   threshold: "A budget or expiry line was crossed",
   "key-exhausted": "A pooled key ran out of credit or reached its spend limit",
+  "probe-config": "A key pool's probe was refused for its model or version: its settings need a look",
   "key-failing": "A pooled key or its account was refused",
   "pool-empty": "Every key in a pool is out of credit",
   "pool-blocked": "A pool is stopped until you act on a refused key",

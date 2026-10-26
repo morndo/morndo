@@ -186,6 +186,16 @@ export const AutoRoutingCatalog = z.array(AutoRoutingEntry).check(z.refine(
   (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
 ));
 
+// The probe model is its own file, so a build from before it, whose strict schemas refuse a field they do not know, never reads it (ADR-0037 decision 10b).
+export type KeyPoolProbe = { model: string };
+export const KeyPoolProbeEntry = z.strictObject({
+  vendor: name(),
+  model: z.string().check(z.minLength(1), z.maxLength(100), z.regex(/^[A-Za-z0-9][A-Za-z0-9._:/@-]{0,99}$/)),
+});
+export const KeyPoolProbeCatalog = z.array(KeyPoolProbeEntry).check(z.refine(
+  (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
+));
+
 const mode = z.enum(["subscriptions-first", "keys-first", "subscriptions-only", "keys-only", "custom"]);
 const budgetLevel = z.enum(["steady", "half", "high", "full"]);
 const spendSource = z.enum(["estimate", "provider", "manual", "balance"]);
@@ -305,6 +315,7 @@ export type PolicyView = z.output<typeof PolicyView>;
 export type VendorPreset = z.output<typeof VendorPreset>;
 export type KeyPoolEntry = z.output<typeof KeyPoolEntry>;
 export type AutoRoutingEntry = z.output<typeof AutoRoutingEntry>;
+export type KeyPoolProbeEntry = z.output<typeof KeyPoolProbeEntry>;
 export type ConnectionsPage = z.output<typeof ConnectionsPage>;
 export type AutoPickView = z.output<typeof AutoPickView>;
 export type RouteAnswer = z.output<typeof RouteAnswer>;
@@ -325,5 +336,10 @@ export function parseKeyPoolCatalog(value: unknown): KeyPoolEntry[] | null {
 
 export function parseAutoRoutingCatalog(value: unknown): AutoRoutingEntry[] | null {
   const parsed = z.safeParse(AutoRoutingCatalog, value);
+  return parsed.success ? parsed.data : null;
+}
+
+export function parseKeyPoolProbeCatalog(value: unknown): KeyPoolProbeEntry[] | null {
+  const parsed = z.safeParse(KeyPoolProbeCatalog, value);
   return parsed.success ? parsed.data : null;
 }

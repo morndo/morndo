@@ -1,0 +1,16 @@
+# On the hour, every hour, spread by up to five minutes. A probe costs a fraction of a cent and only a member that is due is
+# probed (24 hours after it ran dry by default, later after each probe that finds it dry again, at the date a spend limit
+# named), so the hour is the finest the check can happen, not the rate. Persistent=true fires a run a sleeping machine
+# missed on its next start, and that setting only has an effect on a timer with OnCalendar= (systemd.timer(5)), which is why
+# this is a calendar timer and not OnBootSec/OnUnitActiveSec.
+# Install: systemctl --user enable --now morndo-keys-recheck.timer
+[Unit]
+Description=Recheck the exhausted keys of the key pools every hour
+
+[Timer]
+OnCalendar=hourly
+RandomizedDelaySec=5min
+Persistent=true
+
+[Install]
+WantedBy=timers.target

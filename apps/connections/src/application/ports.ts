@@ -1,7 +1,7 @@
 // Ports for the connections application (ADR-0018). No secret bytes cross a port: a vault answers
 // whether a ref exists and what its fingerprint is, and nothing else.
 import type { Directory, Holder, Isolation, KeyPool, Outcome, Policy, Pool, Result, SecretDirectory } from "@morndo/domain";
-import type { AutoRoutingRules, KeyPoolTerms, VendorPreset } from "@morndo/protocol";
+import type { AutoRoutingRules, KeyPoolProbe, KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 
 export type Clock = { now(): number };
 
@@ -46,6 +46,7 @@ export type SpendMeter = {
 export type Catalog = {
   presets(): readonly VendorPreset[];
   keyPool(vendor: string): KeyPoolTerms | null;
+  keyPoolProbe(vendor: string): KeyPoolProbe | null;
   autoRouting(vendor: string): AutoRoutingRules | null;
 };
 
@@ -238,6 +239,9 @@ export type ProviderSignal = {
   code: string | null;
   resumeDate: string | null;
 };
+export type ProbeRequest = { connection: string; model: string; baseUrl: string };
+export type ProbeAnswer = { signal: ProviderSignal } | { unreachable: true } | { misconfigured: "model" | "version" };
+export type ProviderProbe = { probe(request: ProbeRequest): Promise<ProbeAnswer> };
 export type OutcomeClassifier = { classify(signal: ProviderSignal): Outcome };
 export type Classifiers = { for(dialect: string): OutcomeClassifier | null };
 

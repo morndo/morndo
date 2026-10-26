@@ -4,15 +4,15 @@
 // the audit line, and the next call repairs a crash between those writes. Alerts name a member or the pool and a reason
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
-  LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, closeGrant as dropGrant, createKeyPool, err, findConnection, isKey,
+  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
   joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
-  openGrant, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant,
-  KEY_POOL_RECHECK_DEFAULT_MS,
+  alertOnce, clearAlerted, openGrant, releaseClaim, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant, unreachable,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
-  type Lease, type Names, type Outcome, type Result, type RotationMode, type RotationPolicy, type Standing,
+  type Lease, type Names, type Outcome, type ProbeWhy, type Result, type RotationMode, type RotationPolicy, type Standing,
 } from "@morndo/domain";
+import { findPreset } from "./catalog.ts";
 import type { LeaseService } from "./lease-service.ts";
-import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, LeaseRequest, PoolNames, PoolRouting, ProcId, Processes, ProviderSignal } from "./ports.ts";
+import type { AlertSink, Catalog, Classifiers, Clock, ConnectionLifecycle, ConnectionStore, Failure, KeyPoolStore, LeaseRequest, PoolNames, PoolRouting, ProbeAnswer, ProcId, Processes, ProviderProbe, ProviderSignal } from "./ports.ts";
 
 export type KeyPoolFailure = Failure & { backAt?: number | null; member?: string };
 export type PoolView = {
@@ -31,6 +31,12 @@ export type PoolView = {
     since: number;
     nextCheck: number | null;
   }[];
+  probe: { costUsd: number; last24h: number };
+};
+export type ProbeResult = {
+  member: string;
+  outcome: "recovered" | "healthy" | "exhausted" | "failing" | "limited" | "unknown" | "unreachable" | "declined" | "skipped" | "misconfigured";
+  word?: string;
 };
 
 type Deps = {
@@ -43,10 +49,11 @@ type Deps = {
   classifiers: Classifiers;
   leases: Leases;
   helper: { limit: number; ttlMs: number };
+  probe: ProviderProbe;
 };
 export type GrantSeed = { lease: string; holder: Holder; request: GrantRequest; startedAt: number };
 type HandOffCaller = { id: ProcId; ppid: number | null; filter: string | null };
-type Leases = Pick<LeaseService, "swap" | "refresh" | "helper" | "serve">;
+type Leases = Pick<LeaseService, "swap" | "refresh" | "helper" | "serve" | "lease" | "close">;
 export type LaneProof = { kind: "lane"; lease: string; caller: { pid: number; startedAt: number; bootId: string } };
 export type ReportBy = Actor | LaneProof;
 type CreateInput = {
@@ -66,6 +73,9 @@ type Advance =
   | { kind: "stop"; error: KeyPoolFailure };
 
 const ATTEMPTS = 8;
+// The call cap a probe lease uses, the same figure the command line uses for one.
+const PROBE_LEASES = 8;
+const DAY_MS = 86_400_000;
 const fail = (problem: string): Result<never, Failure> => err({ problem });
 // A refresh refused for one of these swaps. Anything else (a missing lease, a lost save) is returned as it is.
 const REFRESH_SWAP = new Set(["budget", "expired", "off", "terms"]);
@@ -238,18 +248,16 @@ export class KeyPoolService implements ConnectionLifecycle {
     return fail("conflict");
   }
 
-  report(pool: string, member: string, outcome: Outcome, observedAt: number, by: ReportBy, via?: "probe" | "report"): Result<void, Failure> {
+  report(pool: string, member: string, outcome: Outcome, observedAt: number, by: ReportBy, via?: "probe" | "report", why?: ProbeWhy): Result<void, Failure> {
     const allowed = this.#mayReport(member, outcome, by);
     if (!allowed.ok) return allowed;
     return this.#change(pool, (current, now) => {
-      const next = via === undefined
-        ? reportKeyOutcome(current, member, outcome, observedAt, now)
-        : reportKeyOutcome(current, member, outcome, observedAt, now, via);
+      const next = reportKeyOutcome(current, member, outcome, observedAt, now, via ?? "report", why);
       return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
     });
   }
 
-  reportSignal(pool: string, member: string, signal: ProviderSignal, observedAt: number): Result<Outcome, Failure> {
+  reportSignal(pool: string, member: string, signal: ProviderSignal, observedAt: number, via: "probe" | "report" = "report", why?: ProbeWhy): Result<Outcome, Failure> {
     const loaded = this.#deps.store.load(pool);
     if (!loaded.pool) return fail("missing");
     const dialect = this.#deps.catalog.keyPool(loaded.pool.vendor)?.errorDialect;
@@ -259,15 +267,84 @@ export class KeyPoolService implements ConnectionLifecycle {
     const outcome = classifier.classify(signal);
     if (outcome.kind === "unknown" && signal.status !== null && signal.status >= 400 && signal.status <= 499) {
       const kind = (signal.kind ?? "-").slice(0, 64);
-      this.#deps.alerts.raise({ kind: "unclassified", name: member, detail: `${signal.status} ${kind}` });
+      this.#alertOnce(pool, member, "unclassified", `${signal.status} ${kind}`);
+    } else if (signal.status !== null) {
+      this.#clearAlert(pool, member, "unclassified");
     }
-    const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" });
+    const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" }, via, why);
     return reported.ok ? ok(outcome) : reported;
+  }
+
+  // Claim, then the member's own gate, then one probe. A refusal before the request sends nothing. The instant of the
+  // claim is the observation time, so an answer that left before a later change cannot undo it.
+  async probeMember(pool: string, member: string, input: { why: ProbeWhy; holder: Holder }): Promise<ProbeResult> {
+    const loaded = this.#deps.store.load(pool);
+    if (!loaded.pool) return { member, outcome: "skipped", word: "missing" };
+    const model = this.#deps.catalog.keyPoolProbe(loaded.pool.vendor)?.model;
+    if (!model) return { member, outcome: "skipped", word: "no_probe_model" };
+    const baseUrl = probeBase(this.#deps.catalog, loaded.pool);
+    const claimed = this.#change(pool, (current, now) => {
+      const row = current.members.find(item => item.credential === member);
+      const before = { nextCheck: row?.nextCheck ?? null, lastProbe: row?.lastProbe ?? null };
+      const next = claimProbe(current, member, now, input.why);
+      return next.ok ? { pool: next.value, result: ok({ at: now, before }) } : { pool: current, result: fail(next.error) };
+    });
+    if (!claimed.ok) return { member, outcome: "skipped", word: claimed.error.problem };
+    const { at, before } = claimed.value;
+    const granted = this.#deps.leases.lease(member, {
+      role: "probe", entry: model, holder: input.holder, workspacePath: "/",
+      limit: PROBE_LEASES, reserve: KEY_PROBE_COST_USD, margin: 0, probe: true,
+    });
+    if (!granted.ok) {
+      this.#change(pool, (current, now) => ({ pool: releaseClaim(current, member, at, before, now), result: ok(undefined) }));
+      const word = granted.error.problem;
+      return granted.error.exit === LEASE_REFUSED
+        ? { member, outcome: "declined", word }
+        : { member, outcome: "skipped", word };
+    }
+    const answer = await this.#ask(member, granted.value.id, { connection: member, model, baseUrl });
+    if ("misconfigured" in answer) {
+      this.#alertOnce(pool, member, "probe-config", answer.misconfigured);
+      return { member, outcome: "misconfigured", word: answer.misconfigured };
+    }
+    if (!("signal" in answer)) return { member, outcome: "unreachable" };
+    this.#clearAlert(pool, member, "probe-config");
+    const reported = this.reportSignal(pool, member, answer.signal, at, "probe", input.why);
+    if (!reported.ok) return { member, outcome: "skipped", word: reported.error.problem };
+    const active = this.#deps.store.load(pool).pool?.members.find(row => row.credential === member)?.health.state === "active";
+    return probed(member, reported.value, active, input.why);
+  }
+
+  // One pool, or every live pool. A named member is probed now; otherwise only the members that are due, in ring order.
+  async recheck(input: { holder: Holder; pool?: string; member?: string }): Promise<ProbeResult[]> {
+    const names = input.pool === undefined ? this.#deps.store.names().live : [input.pool];
+    const now = this.#deps.clock.now();
+    const results: ProbeResult[] = [];
+    for (const name of names) {
+      if (input.member !== undefined) {
+        results.push(await this.probeMember(name, input.member, { why: "manual", holder: input.holder }));
+        continue;
+      }
+      const loaded = this.#deps.store.load(name);
+      if (!loaded.pool) continue;
+      for (const member of dueMembers(loaded.pool, now)) {
+        results.push(await this.probeMember(name, member, { why: "due", holder: input.holder }));
+      }
+    }
+    return results;
+  }
+
+  // The principal's recheck. The inline probe in a pick calls `recheck` itself.
+  async recheckBy(actor: Actor, input: { holder: Holder; pool?: string; member?: string }): Promise<Result<ProbeResult[], Failure>> {
+    if (!isPrincipal(actor)) return fail("principal");
+    return ok(await this.recheck(input));
   }
 
   // Everything before the first `await` is synchronous, so two picks started together each see the ring position the
   // other already saved. A refusal puts that reservation back before the next member is tried, or before the call returns.
-  async pick<T>(pool: string, attempt: (member: string) => Promise<Result<T, Failure>>, options?: { skip?: readonly string[]; grant?: (member: string, value: T) => GrantSeed }): Promise<Result<{ member: string; value: T; grant?: string }, KeyPoolFailure>> {
+  // An empty pool with a member due claims that probe before this call yields, so the others find the claim and stop.
+  async pick<T>(pool: string, attempt: (member: string) => Promise<Result<T, Failure>>, options?: { skip?: readonly string[]; grant?: (member: string, value: T) => GrantSeed; probe?: Holder }): Promise<Result<{ member: string; value: T; grant?: string }, KeyPoolFailure>> {
+    if (options?.probe !== undefined && this.#dueToProbe(pool)) await this.recheck({ holder: options.probe, pool });
     return this.#choose(pool, attempt, options);
   }
 
@@ -394,17 +471,14 @@ export class KeyPoolService implements ConnectionLifecycle {
   }
 
   attribute(pool: string, grant: string, session?: string | null): Result<string, Failure> {
-    const helper = this.#deps.helper;
-    return this.#change(pool, (current, now) => {
-      const next = attributeToGrant(current, grant, now, helper.ttlMs, session);
-      if (!next.ok) return { pool: current, result: fail("grant_missing") };
-      return { pool: next.value.pool, result: ok(next.value.member) };
-    });
+    const found = this.#attributed(pool, grant, session);
+    return found.ok ? ok(found.value.member) : found;
   }
 
   // The grant is checked before the caller, and the caller before the outcome, so a stranger's refusal is not applied.
-  // A holder's report is about the session under the grant; an operator may name that session.
-  reportByGrant(pool: string, grant: string, outcome: Outcome, observedAt: number, by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId }): Result<void, Failure> {
+  // A holder's report is about the session under the grant; an operator may name that session. A credit refusal that
+  // fell back to the hand-off window names the current member to suspect, when that member was not the one credited.
+  reportByGrant(pool: string, grant: string, outcome: Outcome, observedAt: number, by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId }): Result<{ suspect: string | null }, Failure> {
     const held = this.#deps.store.load(pool).pool?.grants.find(row => row.id === grant);
     if (!held) return fail("grant_missing");
     if (by.kind === "holder") {
@@ -412,12 +486,16 @@ export class KeyPoolService implements ConnectionLifecycle {
       if (!MARKS.has(outcome.kind)) return fail("not_allowed");
     }
     const session = by.kind === "holder" ? this.#sessionKey(held.holder, by.caller.pid) : by.session;
-    const member = this.attribute(pool, grant, session);
-    if (!member.ok) return member;
+    const found = this.#attributed(pool, grant, session);
+    if (!found.ok) return found;
     // The member the grant names has left the pool. The report is accepted and changes nothing.
-    const there = this.#deps.store.load(pool).pool?.members.some(row => row.credential === member.value) ?? false;
-    if (!there) return ok(undefined);
-    return this.report(pool, member.value, outcome, observedAt, { kind: "operator" });
+    const there = this.#deps.store.load(pool).pool?.members.some(row => row.credential === found.value.member) ?? false;
+    if (!there) return ok({ suspect: null });
+    const reported = this.report(pool, found.value.member, outcome, observedAt, { kind: "operator" });
+    if (!reported.ok) return reported;
+    const suspect = found.value.suspect;
+    const named = outcome.kind === "exhausted" && suspect !== null && found.value.member !== suspect ? suspect : null;
+    return ok({ suspect: named });
   }
 
   closeGrant(pool: string, grant: string): void {
@@ -707,7 +785,33 @@ export class KeyPoolService implements ConnectionLifecycle {
         since: member.since,
         nextCheck: member.nextCheck,
       })),
+      probe: {
+        costUsd: KEY_PROBE_COST_USD,
+        last24h: pool.events.filter(event => event.type === "ProbeClaimed" && event.at > this.#deps.clock.now() - DAY_MS).length,
+      },
     };
+  }
+
+  // Empty, and at least one member is due: the pick probes before it chooses. A live claim makes the member not due.
+  #dueToProbe(name: string): boolean {
+    const loaded = this.#deps.store.load(name);
+    if (!loaded.pool || loaded.pool.standing !== "empty") return false;
+    return dueMembers(loaded.pool, this.#deps.clock.now()).length > 0;
+  }
+
+  async #ask(member: string, id: string, request: { connection: string; model: string; baseUrl: string }): Promise<ProbeAnswer> {
+    let reached = false;
+    let answer: ProbeAnswer = { unreachable: true };
+    try {
+      const got = await this.#deps.probe.probe(request);
+      if ("signal" in got) { reached = true; answer = got; }
+      else if ("misconfigured" in got) answer = got;
+    } catch {
+      reached = false;
+    } finally {
+      this.#deps.leases.close(member, id, reached ? "done" : "failed", reached ? KEY_PROBE_COST_USD : null);
+    }
+    return answer;
   }
 
   #joined(name: string, members: readonly string[]): Result<void, Failure> {
@@ -724,11 +828,34 @@ export class KeyPoolService implements ConnectionLifecycle {
     for (const event of newKeyPoolEvents(before, after)) this.#raise(after.name, event);
   }
 
+  // A probe alert is raised once per change of what the member's probe says: the last detail alerted is kept with the member
+  // (not read back from the recent alerts), and a good answer clears it.
+  #alertOnce(pool: string, member: string, kind: string, detail: string): void {
+    const changed = this.#change(pool, current => {
+      const next = alertOnce(current, member, kind, detail);
+      return { pool: next.pool, result: ok(next.raise) };
+    });
+    if (changed.ok && changed.value) this.#deps.alerts.raise({ kind, name: member, detail });
+  }
+
+  #clearAlert(pool: string, member: string, kind: string): void {
+    this.#change(pool, current => ({ pool: clearAlerted(current, member, kind), result: ok(undefined) }));
+  }
+
   #raise(pool: string, event: KeyPoolEvent): void {
     if (event.type === "KeyExhausted") this.#deps.alerts.raise({ kind: "key-exhausted", name: event.member, detail: event.reason });
     else if (event.type === "KeyFailed") this.#deps.alerts.raise({ kind: "key-failing", name: event.member, detail: event.reason });
     else if (event.type === "PoolEmpty") this.#deps.alerts.raise({ kind: "pool-empty", name: pool, detail: "empty" });
     else if (event.type === "PoolBlocked") this.#deps.alerts.raise({ kind: "pool-blocked", name: event.member, detail: event.reason });
+  }
+
+  #attributed(pool: string, grant: string, session?: string | null): Result<{ member: string; suspect: string | null }, Failure> {
+    const helper = this.#deps.helper;
+    return this.#change(pool, (current, now) => {
+      const next = attributeToGrant(current, grant, now, helper.ttlMs, session);
+      if (!next.ok) return { pool: current, result: fail("grant_missing") };
+      return { pool: next.value.pool, result: ok({ member: next.value.member, suspect: next.value.suspect }) };
+    });
   }
 
   #change<T>(name: string, step: (pool: KeyPool, now: number) => { pool: KeyPool; result: Result<T, Failure> }): Result<T, Failure> {
@@ -769,6 +896,24 @@ function adoptable(directory: Directory, pool: KeyPool, held: Grant): { name: st
     }
   }
   return null;
+}
+
+function probeBase(catalog: Catalog, pool: KeyPool): string {
+  const runtime = findPreset(catalog, pool.vendor)?.runtimes.find(row => row.runtime === pool.runtime);
+  return runtime?.baseUrl ?? "";
+}
+
+function probed(member: string, outcome: Outcome, active: boolean, why: ProbeWhy): ProbeResult {
+  switch (outcome.kind) {
+    case "ok":
+      if (why === "suspect" && outcome.evidence === "messages" && active) return { member, outcome: "healthy" };
+      return { member, outcome: active ? "recovered" : "unknown" };
+    case "exhausted": return { member, outcome: "exhausted" };
+    case "failing": return { member, outcome: "failing" };
+    case "limited": return { member, outcome: "limited" };
+    case "unknown": return { member, outcome: "unknown" };
+    default: return unreachable(outcome);
+  }
 }
 
 function blocked(pool: KeyPool): Result<never, KeyPoolFailure> {

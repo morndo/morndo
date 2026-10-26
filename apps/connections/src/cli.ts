@@ -2,7 +2,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type KeyConnection, type Lease, type Mode, type SubscriptionConnection } from "@morndo/domain";
+import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Holder, type KeyConnection, type Lease, type Mode, type SubscriptionConnection } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, type VendorPreset } from "@morndo/protocol";
 import { findPreset as presetOf, firstPartyHost, floorOf } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
@@ -99,6 +99,7 @@ morndo-keys lease --connection <name> [--lane L] [--role R] [--workspace DIR] [-
 
 morndo-keys keypool create <name> --vendor V --runtime R --by <who> [--mode round-robin|drain] [--recheck 24h] [--confirm-own-account] <key-connection>...
 morndo-keys keypool add|remove|revive <pool> <connection> [--confirm-own-account]    keypool move <pool> <connection> --to N
+morndo-keys keypool recheck [<pool>] [--member M]    probes the exhausted keys that are due (a probe costs a fraction of a cent: one request with one token); --member probes that key now. The hourly timer is apps/connections/units/morndo-keys-recheck.timer (systemctl --user enable --now morndo-keys-recheck.timer)
 morndo-keys keypool policy <pool> [--mode …] [--recheck …]    keypool list    keypool delete <pool>
 morndo-keys keypool report <pool> --member M --outcome exhausted|failing|limited [--reason R] [--lease <id>]
 morndo-keys keypool report <pool> --outcome exhausted|failing|limited --grant <id>
@@ -538,8 +539,9 @@ async function launchPooled(home: Opened, parsed: Parsed, io: Io): Promise<numbe
       const began = current.now();
       const claude = current.keypools.state(pool)?.runtime === "claude";
       const workspace = parsed.get("workspace") ?? current.env.PWD ?? process.cwd();
+      const probe = pooledProbe(current, pool, parsed.get("lane") ?? null);
       const picked = await current.keypools.pick(pool, async member => startRun(current, parsed, member), claude ? {
-        skip,
+        skip, ...probe,
         // The grant remembers the request the first lease was gated with, so a hand-off runs that gate again (CN8).
         grant: (_member, value) => ({
           lease: value.lease.id, holder: value.lease.holder, startedAt: value.lease.start,
@@ -548,7 +550,7 @@ async function launchPooled(home: Opened, parsed: Parsed, io: Io): Promise<numbe
             limit: LEASES, reserve: Number(parsed.get("reserve") ?? "5"), margin: 0,
           },
         }),
-      } : { skip });
+      } : { skip, ...probe });
       if (!picked.ok) {
         // A retry that finds no other member leaves the first run's result as the answer, with the word beside it.
         if (first === null) return fail(io, picked.error.problem, picked.error.exit);
@@ -594,7 +596,7 @@ async function leaseKey(home: Opened, parsed: Parsed, io: Io): Promise<number> {
   if (pool !== undefined) {
     // A caller names a pool, never a key: --connection and --member are refused (ADR-0037).
     if (parsed.get("connection") !== undefined || parsed.get("member") !== undefined) return fail(io, "usage");
-    const picked = await home.keypools.pick(pool, member => prepareLease(home, parsed, member));
+    const picked = await home.keypools.pick(pool, member => prepareLease(home, parsed, member), pooledProbe(home, pool, parsed.get("lane") ?? null));
     if (!picked.ok) return fail(io, picked.error.problem, picked.error.exit);
     return serveLeased(home, io, picked.value.value);
   }
@@ -1047,7 +1049,16 @@ export function ask(home: Opened, name: string, parsed: Parsed, probeLease: bool
   return { ok: true, id: granted.value.id };
 }
 
-function gateRuntime(home: Opened, runtime: string) {
+// An empty pool probes a due member before it picks. The holder's gate is the one `run` uses for that pool's runtime.
+function pooledProbe(home: Opened, pool: string, lane: string | null): { probe: Holder } | undefined {
+  const runtimeName = home.keypools.state(pool)?.runtime;
+  const holder = selfHolder(lane);
+  if (runtimeName === undefined || holder === null) return undefined;
+  home.runtime.current = gateRuntime(home, runtimeName);
+  return { probe: holder };
+}
+
+export function gateRuntime(home: Opened, runtime: string) {
   if (runtime === "codex") {
     return new CodexRuntime({
       bin: home.env.MORNDO_CODEX_BIN ?? "codex",

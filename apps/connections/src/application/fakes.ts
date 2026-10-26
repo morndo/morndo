@@ -1,8 +1,8 @@
 // In-memory ports. Tests move the clock and the runtime by hand. No ambient I/O.
 import { emptyDirectory, emptyPolicy, emptySecretDirectory, type Directory, type Isolation, type KeyPool, type Policy } from "@morndo/domain";
-import type { AutoRoutingRules, KeyPoolTerms, VendorPreset } from "@morndo/protocol";
+import type { AutoRoutingRules, KeyPoolProbe, KeyPoolTerms, VendorPreset } from "@morndo/protocol";
 import { chainHolders } from "./providers.ts";
-import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type KeyPoolStore, type ModelLister, type ModelRow, type ProcId, type Processes, type ProviderEntry, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
+import { copyCommand, type Alert, type AlertSink, type Catalog, type Clock, type CommandShape, type ConnectionStore, type Deps, type EngineChain, type EngineSettings, type KeyPoolStore, type ModelLister, type ModelRow, type ProbeAnswer, type ProcId, type Processes, type ProviderEntry, type ProviderProbe, type ProviderRegistration, type RepoInspector, type RunHandle, type RunPlan, type Runtime, type SecretVault, type SpendMeter } from "./ports.ts";
 import type { IndexChange, IndexWriter, Ids, PreparedIndex, SecretsDirectory, SecretsState, WorkspaceRoots } from "./ports.ts";
 import { savedVaultRefs } from "./vault-refs.ts";
 
@@ -41,6 +41,11 @@ export class MemoryModels implements ModelLister {
   }
 }
 
+// A probe that is never sent. Callers that do not probe still satisfy the service's required port.
+export class NoProbe implements ProviderProbe {
+  probe(): Promise<ProbeAnswer> { return Promise.resolve({ unreachable: true }); }
+}
+
 export class MemorySpend implements SpendMeter {
   cost: number | null = null;
   figure: number | null = null;
@@ -51,9 +56,11 @@ export class MemorySpend implements SpendMeter {
 export class MemoryCatalog implements Catalog {
   rows: readonly VendorPreset[] = [];
   keyPools: Readonly<Record<string, KeyPoolTerms>> = {};
+  keyPoolProbes: Readonly<Record<string, KeyPoolProbe>> = {};
   autoRules: Readonly<Record<string, AutoRoutingRules>> = {};
   presets(): readonly VendorPreset[] { return this.rows; }
   keyPool(vendor: string): KeyPoolTerms | null { return this.keyPools[vendor] ?? null; }
+  keyPoolProbe(vendor: string): KeyPoolProbe | null { return this.keyPoolProbes[vendor] ?? null; }
   autoRouting(vendor: string): AutoRoutingRules | null { return this.autoRules[vendor] ?? null; }
 }
 
@@ -83,10 +90,13 @@ function tombstoneBody(body: string): boolean {
 }
 
 // A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
-// (the filter null).
+// (the filter null). A member saved before probes loads with probingUntil null, failedProbes 0 and lastProbe null.
 function withHistory(pool: KeyPool): KeyPool {
   const grants = (pool.grants ?? []).map(grant => ({ ...grant, seen: grant.seen ?? [], lent: grant.lent ?? [], filter: grant.filter ?? null }));
-  return { ...pool, grants };
+  const members = (pool.members ?? []).map(member => ({
+    ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0, lastProbe: member.lastProbe ?? null, alerted: member.alerted ?? {},
+  }));
+  return { ...pool, grants, members };
 }
 
 // The same rules as the SQLite store: version 0 inserts once, a later save lands only on the version it read, and a

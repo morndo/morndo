@@ -226,3 +226,22 @@ describe("fix round 6: a grant is bound once to the filter socket of the run tha
     expect(moved(bound, T + SEC).grants[0]?.filter).toBe(SOCK);
   });
 });
+
+describe("slice 3, kp18: a report that fell back to the window names the member to suspect", () => {
+  const movedPool = () => moved(ok(openGrant(pool(), grant(), T)), T + 10 * SEC);
+  it("an unseen session inside the window is the old member's, and the current member is the one to suspect", () => {
+    const answer = ok(attributeToGrant(movedPool(), "gl1", T + 15 * SEC, TTL));
+    expect(answer.member).toBe("k1");
+    expect(answer.suspect).toBe("k2");
+  });
+  it("a session the grant has seen is that session's member exactly, and nothing is suspected", () => {
+    let p = noteSeen(movedPool(), "gl1", "s-new", "k2");
+    p = noteSeen(p, "gl1", "s-old", "k1");
+    expect(ok(attributeToGrant(p, "gl1", T + 15 * SEC, TTL, "s-new"))).toMatchObject({ member: "k2", suspect: null });
+    expect(ok(attributeToGrant(p, "gl1", T + 15 * SEC, TTL, "s-old"))).toMatchObject({ member: "k1", suspect: null });
+  });
+  it("past the window the current member owns the report and nothing is suspected; with no move there is nothing to suspect", () => {
+    expect(ok(attributeToGrant(movedPool(), "gl1", T + 10 * SEC + TTL, TTL))).toMatchObject({ member: "k2", suspect: null });
+    expect(ok(attributeToGrant(ok(openGrant(pool(), grant(), T)), "gl1", T + SEC, TTL))).toMatchObject({ member: "k1", suspect: null });
+  });
+});

@@ -2,6 +2,7 @@
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
 import { Encrypter } from "age-encryption";
+import { findConnection, isKey } from "@morndo/domain";
 import type { EngineSettings, Runtime } from "./application/ports.ts";
 import { bindCommands, type BoundCommands } from "./application/commands.ts";
 import { ConnectionsService } from "./application/connections-service.ts";
@@ -10,6 +11,7 @@ import { KeyPoolService } from "./application/key-pool-service.ts";
 import { PoolRoutingSync } from "./application/key-pool-routing.ts";
 import { PoolService } from "./application/pool-service.ts";
 import { RoutingService } from "./application/routing-service.ts";
+import { AnthropicProbe } from "./adapters/probe-anthropic.ts";
 import { FileAlerts } from "./adapters/alerts-file.ts";
 import { builtinClassifiers } from "./adapters/classifiers.ts";
 import { FileCatalog } from "./adapters/catalog-file.ts";
@@ -103,6 +105,14 @@ export function openHome(env: NodeJS.ProcessEnv): Opened {
   const keypools = new KeyPoolService({
     clock, store: keyPoolStore, connections: store, catalog, alerts: deps.alerts, processes, classifiers: builtinClassifiers,
     leases, helper: { limit: HELPER_LIMIT, ttlMs: HELPER_TTL_MS },
+    probe: new AnthropicProbe({
+      refOf: name => {
+        const connection = findConnection(store.load().directory, name);
+        if (!connection || !isKey(connection)) return null;
+        return connection.ref;
+      },
+      open: async ref => new TextDecoder().decode((await vault.open(ref)).bytes()),
+    }),
   });
   const pools = () => keypools.routingPools();
   const routing = new RoutingService(deps, pools);
