@@ -4,7 +4,7 @@
 // the audit line, and the next call repairs a crash between those writes. Alerts name a member or the pool and a reason
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
-  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, addKeySink, removeKeySink, sinkSidecar, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
+  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, addKeySink, removeKeySink, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
   joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
   alertOnce, clearAlerted, openGrant, releaseClaim, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant, unreachable,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
@@ -266,13 +266,38 @@ export class KeyPoolService implements ConnectionLifecycle {
     return this.#deps.store.load(pool).pool?.sinks ?? null;
   }
 
-  // Every live pool's sinks and the sidecar of each: what the lane deny list names.
-  allSinks(): readonly string[] {
-    const paths: string[] = [];
+  // Every live pool's sinks, and apart from them the retired ones (removed, or of a deleted pool): a file that may still
+  // hold a key, so the lane deny list still names it. No sidecar or temp path here; the caller derives those (`sinkFiles`).
+  sinkPaths(): { live: readonly string[]; retired: readonly string[] } {
+    const live: string[] = [];
+    const retired: string[] = [];
     for (const name of this.#deps.store.names().live) {
-      for (const sink of this.#deps.store.load(name).pool?.sinks ?? []) paths.push(sink, sinkSidecar(sink));
+      const { pool } = this.#deps.store.load(name);
+      if (!pool) continue;
+      live.push(...pool.sinks);
+      for (const path of pool.retired) if (!retired.includes(path)) retired.push(path);
     }
-    return paths;
+    for (const path of this.#deps.store.retiredSinks()) if (!retired.includes(path)) retired.push(path);
+    return { live, retired: retired.filter(path => !live.includes(path)) };
+  }
+
+  // When a sink was registered on the pool: null when the pool or the path is unknown.
+  sinkRegisteredAt(pool: string, path: string): number | null {
+    return this.#deps.store.load(pool).pool?.sinkSince[path] ?? null;
+  }
+
+  // Whether a live run lease of a key connection began before the sink was registered: that run's deny list was built
+  // without the file, so it is not protected for it. A probe lease is never a run.
+  runsPredating(pool: string, path: string): boolean {
+    const since = this.sinkRegisteredAt(pool, path);
+    if (since === null) return false;
+    for (const connection of this.#deps.connections.load().directory.connections) {
+      if (!isKey(connection)) continue;
+      for (const row of connection.leases) {
+        if (row.authority === "live" && row.probe === false && row.start < since) return true;
+      }
+    }
+    return false;
   }
 
   delete(pool: string, actor: Actor): Result<void, Failure> {
@@ -281,7 +306,8 @@ export class KeyPoolService implements ConnectionLifecycle {
       const loaded = this.#deps.store.load(pool);
       if (!loaded.pool) return fail("missing");
       const members = loaded.pool.members.map(row => row.credential);
-      if (!this.#deps.store.tombstone(pool, loaded.version, this.#deps.clock.now())) continue;
+      const sinks = [...loaded.pool.sinks, ...loaded.pool.retired];
+      if (!this.#deps.store.tombstone(pool, loaded.version, this.#deps.clock.now(), sinks)) continue;
       return this.#left(pool, members, []);
     }
     return fail("conflict");
@@ -303,9 +329,10 @@ export class KeyPoolService implements ConnectionLifecycle {
     return reported.ok ? ok(classified.value) : reported;
   }
 
-  // A refusal read from a consumer's own hook (slice 4). Only a mark (exhausted or failing) is applied; a rate limit, an unknown answer or an ok
-  // changes and writes nothing, so a hook that fires on every limited turn cannot fill the event list. By grant, the caller must hold the grant
-  // before anything else happens: a stranger raises no alert and writes nothing.
+  // A refusal read from a consumer's own hook (slice 4). Only a credit refusal (exhausted) is applied; a rate limit, an unknown answer or an ok
+  // changes and writes nothing, so a hook that fires on every limited turn cannot fill the event list. A refused key (failing) is not marked on a
+  // hook's word either: it is named to be probed. By grant, the caller must hold the grant before anything else happens: a stranger raises no
+  // alert and writes nothing.
   reportRefusal(pool: string, target: RefusalTarget, signal: ProviderSignal, observedAt: number): Result<{ outcome: Outcome["kind"]; suspect: string | null }, Failure> {
     const loaded = this.#deps.store.load(pool).pool;
     if (!loaded) return fail("missing");
@@ -324,7 +351,8 @@ export class KeyPoolService implements ConnectionLifecycle {
     const classified = this.#classified(pool, member, signal, target.kind === "member");
     if (!classified.ok) return classified;
     const outcome = classified.value;
-    if (outcome.kind !== "exhausted" && outcome.kind !== "failing") return ok({ outcome: outcome.kind, suspect: null });
+    if (outcome.kind === "failing") return ok({ outcome: outcome.kind, suspect: member });
+    if (outcome.kind !== "exhausted") return ok({ outcome: outcome.kind, suspect: null });
     if (target.kind !== "grant") {
       const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" });
       return reported.ok ? ok({ outcome: outcome.kind, suspect: null }) : reported;
@@ -335,10 +363,11 @@ export class KeyPoolService implements ConnectionLifecycle {
 
   // The member a session was last served: looking from the caller's nearest ancestor outwards (a few levels: a hook runs under a shell under the agent
   // CLI), the first one that is the parent of a KeyServed of a member of the pool within the hour (the helper's cache is minutes) gives the newest such
-  // member. A hand-written apiKeyHelper is exec'd by the agent CLI, so the parent of its lease is the CLI; the nearest ancestor wins, so a key leased by hand
-  // from a shell further out is not taken for the CLI's.
+  // member. The parent must be named with its start time as well as its pid, so a reused pid is not the session, and a caller that could not name one is
+  // never matched. A hand-written apiKeyHelper is exec'd by the agent CLI, so the parent of its lease is the CLI; the nearest ancestor wins, so a key
+  // leased by hand from a shell further out is not taken for the CLI's.
   #served(pool: KeyPool, caller: ProcId): string | null {
-    const ancestors = this.#deps.processes.ancestors(caller.pid).slice(1, 1 + SERVED_LEVELS).map(row => row.pid);
+    const ancestors = this.#deps.processes.ancestors(caller.pid).slice(1, 1 + SERVED_LEVELS);
     const members = new Set(pool.members.map(row => row.credential));
     const since = this.#deps.clock.now() - SERVED_WINDOW_MS;
     const events = this.#deps.connections.load().directory.events;
@@ -346,7 +375,8 @@ export class KeyPoolService implements ConnectionLifecycle {
       for (let i = events.length - 1; i >= 0; i--) {
         const event = events[i];
         if (event === undefined || event.at < since) break;
-        if (event.type === "KeyServed" && members.has(event.name) && event.caller.ppid === parent) return event.name;
+        if (event.type === "KeyServed" && members.has(event.name) && event.caller.ppid === parent.pid
+          && typeof event.caller.parentStartedAt === "number" && event.caller.parentStartedAt === parent.startedAt) return event.name;
       }
     }
     return null;

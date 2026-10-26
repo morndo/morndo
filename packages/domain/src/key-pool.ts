@@ -74,6 +74,10 @@ export type KeyPool = {
   name: string; runtime: string; vendor: string; policy: RotationPolicy; members: readonly KeyMember[];
   grants: readonly Grant[];
   sinks: readonly string[];
+  // Sinks that were removed but may still hold a key in their file, newest last, at most KEY_POOL_RETIRED_MAX, with when
+  // each live sink was registered (T-459): a run that began before that time was denied the file.
+  retired: readonly string[];
+  sinkSince: Readonly<Record<string, number>>;
   lastPick: string | null; terms: TermsAck | null; ownedOrgs: readonly string[]; standing: Standing;
   events: readonly KeyPoolEvent[]; seq: number;
 };
@@ -85,19 +89,26 @@ export type CreateKeyPool = { name: string; runtime: string; vendor: string; pol
 
 const EVENT_LIMIT = 500;
 export const KEY_POOL_SINKS_MAX = 16;
+export const KEY_POOL_RETIRED_MAX = 64;
 const SINK_MAX_LENGTH = 4096;
 const SINK_SEGMENT = /^[A-Za-z0-9._@+=,:-]+$/;
 const SIDECAR = ".member";
+// The suffixes a sink itself never has: the sidecar, and the two files a write passes through (T-459).
+const RESERVED = [SIDECAR, ".tmp", ".lock"];
 
 // A sink is the file `write-env` writes a pool's key to (KP20): absolute, normalised, safe characters only (no space, glob, quote or control
-// character, so it is one literal in a deny rule), and never a sidecar (`<sink>.member`).
+// character, so it is one literal in a deny rule), and never one of the reserved files beside it (the sidecar `<sink>.member`,
+// the temp file `<sink>.tmp`, the lock `<sink>.lock`).
 export function isSinkPath(path: string): boolean {
-  if (path.length < 2 || path.length > SINK_MAX_LENGTH || !path.startsWith("/") || path.endsWith(SIDECAR)) return false;
+  if (path.length < 2 || path.length > SINK_MAX_LENGTH || !path.startsWith("/") || RESERVED.some(end => path.endsWith(end))) return false;
   return path.slice(1).split("/").every(segment => SINK_SEGMENT.test(segment) && segment !== "." && segment !== "..");
 }
 
 // The file beside a sink that names the member whose key was last written there.
 export const sinkSidecar = (path: string): string => `${path}${SIDECAR}`;
+
+// Every file a write of a sink can leave a key in: the sink, its sidecar and its temp file.
+export const sinkFiles = (path: string): string[] => [path, sinkSidecar(path), `${path}.tmp`];
 
 function commandOf(actor: Actor): Result<string, "principal"> {
   return actor.kind === "principal" && actor.command.trim() !== "" ? ok(actor.command) : err("principal");
@@ -177,11 +188,13 @@ export function createKeyPool(
   if (names.connections.includes(input.name) || names.pools.includes(input.name) || names.deleted.includes(input.name)) return err("taken");
   const created: KeyPool = {
     name: input.name, runtime: input.runtime, vendor: input.vendor, policy: policy.value,
-    members: [], grants: [], sinks: [], lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
+    members: [], grants: [], sinks: [], retired: [], sinkSince: {}, lastPick: null, terms: null, ownedOrgs: [], standing: "ok", events: [], seq: 0,
   };
   return ok(settleKeyPool(withEvents(created, [{ type: "KeyPoolCreated", pool: input.name, at: now, command: who.value }]), now));
 }
 
+// A sink remembers when it was registered, and one added back leaves the retired list, where a removed sink stays until
+// its file is gone: the file may still hold a key. The events carry the count of live sinks only.
 export function addKeySink(p: KeyPool, path: string, actor: Actor, now: number): Result<KeyPool, "principal" | "bad_path" | "exists" | "too_many"> {
   const who = commandOf(actor);
   if (!who.ok) return who;
@@ -189,7 +202,9 @@ export function addKeySink(p: KeyPool, path: string, actor: Actor, now: number):
   if (p.sinks.includes(path)) return err("exists");
   if (p.sinks.length >= KEY_POOL_SINKS_MAX) return err("too_many");
   const sinks = [...p.sinks, path];
-  return ok(withEvents({ ...p, sinks }, [{ type: "SinkAdded", sinks: sinks.length, at: now, command: who.value }]));
+  const retired = p.retired.filter(row => row !== path);
+  const sinkSince = { ...p.sinkSince, [path]: now };
+  return ok(withEvents({ ...p, sinks, retired, sinkSince }, [{ type: "SinkAdded", sinks: sinks.length, at: now, command: who.value }]));
 }
 
 export function removeKeySink(p: KeyPool, path: string, actor: Actor, now: number): Result<KeyPool, "principal" | "missing"> {
@@ -197,7 +212,10 @@ export function removeKeySink(p: KeyPool, path: string, actor: Actor, now: numbe
   if (!who.ok) return who;
   if (!p.sinks.includes(path)) return err("missing");
   const sinks = p.sinks.filter(row => row !== path);
-  return ok(withEvents({ ...p, sinks }, [{ type: "SinkRemoved", sinks: sinks.length, at: now, command: who.value }]));
+  const retired = [...p.retired.filter(row => row !== path), path].slice(-KEY_POOL_RETIRED_MAX);
+  const sinkSince = { ...p.sinkSince };
+  delete sinkSince[path];
+  return ok(withEvents({ ...p, sinks, retired, sinkSince }, [{ type: "SinkRemoved", sinks: sinks.length, at: now, command: who.value }]));
 }
 
 export function acknowledgeKeyPoolTerms(p: KeyPool, revision: string, by: string, actor: Actor, now: number): Result<KeyPool, "principal" | "ack_needed"> {

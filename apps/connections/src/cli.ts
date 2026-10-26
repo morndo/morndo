@@ -2,7 +2,7 @@
 import { createHash, randomBytes, randomUUID } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, realpathSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
-import { effectiveIsolation, engineText, findConnection, spentOf, type Actor, type Connection, type Directory, type Holder, type KeyConnection, type Lease, type Mode, type SubscriptionConnection } from "@morndo/domain";
+import { effectiveIsolation, engineText, findConnection, sinkFiles, spentOf, type Actor, type Connection, type Directory, type Holder, type KeyConnection, type Lease, type Mode, type SubscriptionConnection } from "@morndo/domain";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand, type VendorPreset } from "@morndo/protocol";
 import { findPreset as presetOf, firstPartyHost, floorOf } from "./application/catalog.ts";
 import { loginKeyRefused } from "./application/login-key.ts";
@@ -345,10 +345,12 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let helperLine = [keys.command, ...keys.args, "helper", "--lease", lease.id].join(" ");
   const subscription = connection.kind === "subscription";
   const configDir = connection.kind === "subscription" ? connection.configDir : join(home.dir, "runtime", name);
+  // Every file a pool's key can sit in, live sinks and retired ones alike (a removed sink's file may still hold a key).
+  const sinks = home.keypools.sinkPaths();
   const plan = {
     lease: lease.id, connection: name, ref: connection.kind === "api-key" ? connection.ref : null,
     configDir, model, effort: choice.effort, smallModel: small, workspace: parsed.get("workspace") ?? home.env.PWD ?? process.cwd(),
-    deny: [home.vaultDir, home.db, home.identity, ...home.keypools.allSinks(), ...(connection.repo?.deny ?? [])],
+    deny: [home.vaultDir, home.db, home.identity, ...sinks.live.flatMap(sinkFiles), ...sinks.retired.flatMap(sinkFiles), ...(connection.repo?.deny ?? [])],
     reservation: lease.reservation, probe: false, subscription,
   };
   const bin = connection.runtime === "codex" ? home.env.MORNDO_CODEX_BIN ?? "codex" : home.env.MORNDO_CLAUDE_BIN ?? "claude";
@@ -650,7 +652,7 @@ export async function serveLeased(home: Opened, io: Io, p: Prepared, deliver?: (
   let outcome = "failed";
   try {
     const secret = await home.open(p.ref);
-    const served = home.leases.serve(p.name, p.id, { pid: process.pid, ppid: process.ppid, lane: p.holder.lane, workspace: p.workspace, isolation: p.seen, proof: p.proof });
+    const served = home.leases.serve(p.name, p.id, { pid: process.pid, ppid: process.ppid, parentStartedAt: home.processes.identity(process.ppid)?.startedAt ?? null, lane: p.holder.lane, workspace: p.workspace, isolation: p.seen, proof: p.proof });
     if (!served.ok) return fail(io, served.error.problem);
     if (deliver) {
       // The key goes where the caller says, never to stdout; a refusal there closes the lease failed.

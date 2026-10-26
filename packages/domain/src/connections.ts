@@ -43,8 +43,9 @@ export type Connection = SubscriptionConnection | KeyConnection | LayerConnectio
 
 // Who a served key went to (T-340): the helper's pid and its parent's, and the isolation it was served under, with how that
 // is known: `verified` (the parent was read, check 2) or `claimed` (the caller said so; the gate only guards a mistake).
-// `lane` and `workspace` are always the caller's claims.
-export type KeyCaller = { pid: number; ppid: number | null; lane: string | null; workspace: string; isolation: Isolation; proof: "verified" | "claimed" };
+// `parentStartedAt` is the start time of the caller's parent (T-459): a ppid alone is not its identity, since a pid is
+// reused. `lane` and `workspace` are always the caller's claims.
+export type KeyCaller = { pid: number; ppid: number | null; parentStartedAt?: number | null; lane: string | null; workspace: string; isolation: Isolation; proof: "verified" | "claimed" };
 
 export type ConnEvent =
   | { type: "ConnectionAdded"; name: string; at: number; command: string }
