@@ -33,7 +33,7 @@ function tools(root: string, systemctl: string, systemdRun = "#!/bin/sh\nexit 0\
 }
 
 // `script(home)` is the fake `systemctl --user <verb> ...` ($2 is the verb); its marker files live in `home`.
-function rig(script: (home: string) => string, over: { logBytes?: number; limits?: Record<string, number>; systemdRun?: (home: string) => string } = {}): Rig {
+function rig(script: (home: string) => string, over: { logBytes?: number; limits?: Record<string, number>; systemdRun?: (home: string) => string; log?: { error: (message: string, error?: unknown) => void } } = {}): Rig {
   const h = tempHome();
   const adb = openAgentDb(join(h.home, "agent.db"));
   const dir = join(h.home, "job-logs");
@@ -44,7 +44,7 @@ function rig(script: (home: string) => string, over: { logBytes?: number; limits
     home: h.home, stateDir: paths.stateDir, socketPath: paths.jobSock,
     ...(over.limits ? { limits: over.limits } : {}),
     systemd: { slice: "morndofake.slice", toolEnv: tools(h.home, script(h.home), over.systemdRun?.(h.home)) },
-    log: { error: () => {} },
+    log: over.log ?? { error: () => {} },
   });
   rigs.push({ adb, cleanup: h.cleanup, sup });
   return { store, sup, home: h.home, dir };
@@ -232,5 +232,80 @@ exit 0
     expect((await sup.cancel("jA")).ok).toBe(true);
     expect(store.get("jB")).toMatchObject({ outcome: "exited", error: "did_not_start" });
     expect(store.get("jC")?.state).toBe("running");
+  });
+});
+
+// A unit systemd is already stopping (its RuntimeMaxSec, or a stop from outside) stays deactivating after a SIGTERM until
+// TimeoutStopSec; a SIGKILL ends it at once, and Result=timeout is already set while it stops (systemd 255, observed
+// 2026-10-26 with a transient unit that ignores SIGTERM).
+const stoppingFor = (result: string) => `printf '%s\\n' LoadState=loaded ActiveState=deactivating SubState=stop-sigterm Result=${result} ExecMainCode=0 ExecMainStatus=0 MainPID=0 RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=0`;
+const failedBy = (result: string, status: number) => `printf '%s\\n' LoadState=loaded ActiveState=failed SubState=failed Result=${result} ExecMainCode=2 ExecMainStatus=${status} MainPID=0 RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=9000000000000000`;
+const runningNoPid = "printf '%s\\n' LoadState=loaded ActiveState=active SubState=running Result=success ExecMainCode=0 ExecMainStatus=0 MainPID=0 RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=0";
+// The unit shows `before` until it is signalled, `onTerm` after a SIGTERM and `onKill` after a SIGKILL.
+const signals = (before: string, onTerm: string, onKill: string) => (home: string) => `#!/bin/sh
+case "$*" in *--signal=SIGKILL*) touch '${join(home, "sigkill")}';; *--signal=SIGTERM*) touch '${join(home, "sigterm")}';; esac
+if [ "$2" = "show" ]; then
+  if [ -f '${join(home, "sigkill")}' ]; then ${onKill}
+  elif [ -f '${join(home, "sigterm")}' ]; then ${onTerm}
+  else ${before}; fi
+fi
+exit 0
+`;
+
+describe("a unit systemd is already stopping", () => {
+  it("a cancel sends SIGKILL to a unit still deactivating after its SIGTERM and ends the job cancelled", async () => {
+    const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), failedBy("signal", 9)));
+    plant(store, "j1");
+    expect((await sup.cancel("j1")).ok).toBe(true);
+    expect(existsSync(join(home, "sigkill"))).toBe(true);
+    expect(store.get("j1")).toMatchObject({ outcome: "cancelled", exitCode: null });
+    expect(sup.trackedJobs()).toBe(0);
+  });
+
+  it("a cancel of a unit stopping for its timeout keeps timed_out", async () => {
+    const { store, sup, dir } = rig(signals(stoppingFor("timeout"), failedBy("timeout", 15), failedBy("timeout", 9)));
+    plant(store, "j1");
+    expect((await sup.cancel("j1")).ok).toBe(true);
+    expect(store.get("j1")).toMatchObject({ outcome: "timed_out", exitCode: null });
+    expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
+  });
+
+  it("a signalled cancel of a unit stopping for its timeout leaves the end to systemd: timed_out", async () => {
+    // Neither signal ends it within the wait; systemd's own SIGKILL does, later.
+    const { store, sup, home, dir } = rig(h => `#!/bin/sh
+if [ "$2" = "show" ]; then if [ -f '${join(h, "over")}' ]; then ${failedBy("timeout", 9)}; else ${stoppingFor("timeout")}; fi; fi
+exit 0
+`);
+    plant(store, "j1");
+    expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
+    expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
+    writeFileSync(join(home, "over"), "");
+    await sup.sweep();
+    expect(store.get("j1")).toMatchObject({ outcome: "timed_out", exitCode: null });
+  });
+
+  it("the cap stop sends SIGKILL to a unit still deactivating after its SIGTERM and records no exit code", async () => {
+    const { store, sup, dir, home } = rig(signals(runningNoPid, stoppingFor("success"), failedBy("signal", 9)), { logBytes: 8 });
+    plant(store, "j1");
+    writeFileSync(join(dir, "j1.log"), "0123456789abcdef");
+    await sup.sweep();
+    expect(existsSync(join(home, "sigkill"))).toBe(true);
+    expect(store.get("j1")).toMatchObject({ outcome: "exited", exitCode: null });
+  });
+});
+
+describe("a cancel mark that cannot be written", () => {
+  it("is logged, so losing it to an agent restart is not silent", async () => {
+    const logged: string[] = [];
+    const { store, sup, dir } = rig(killedThenUnreadable(() => SIGTERMED), { log: { error: (message: string) => { logged.push(message); } } });
+    plant(store, "j1");
+    chmodSync(dir, 0o500);
+    try {
+      expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
+    } finally {
+      chmodSync(dir, 0o700);
+    }
+    expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
+    expect(logged.some(m => m.includes("j1"))).toBe(true);
   });
 });
