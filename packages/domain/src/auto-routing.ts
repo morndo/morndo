@@ -85,6 +85,7 @@ export type CandidateFacts = {
   family: string;
   modelClass: RoutingModelClass;
   inChain: boolean;
+  ownModel: boolean;
   rank: number;
   available: true | { reason: string; until: number | null };
   gate: GateVerdict;
@@ -154,6 +155,13 @@ export function familyOf(model: string, families: readonly { pattern: string; fa
 export function modelClassOf(model: string, rows: readonly { pattern: string; class: RoutingModelClass }[]): RoutingModelClass {
   const id = modelId(model);
   return rows.find(row => glob(row.pattern, id))?.class ?? "unknown";
+}
+
+// True when the model is one of the vendor's own pool models. No list means the vendor runs any model it offers.
+export function ownModelOf(model: string, ownModels: readonly string[] | undefined): boolean {
+  if (ownModels === undefined) return true;
+  const id = modelId(model);
+  return ownModels.some(pattern => glob(pattern, id));
 }
 
 function glob(pattern: string, model: string): boolean {
@@ -316,6 +324,7 @@ export function decide(input: DecideInput): RulesResult {
 
 function firstExclusion(candidate: CandidateFacts, input: DecideInput): Reason | null {
   if (!candidate.inChain || !input.derived.includes(candidate.entry)) return { code: "not-in-chain", stage: "rules" };
+  if (!candidate.ownModel) return { code: "outside-pool", stage: "rules" };
   if (candidate.family === "unknown") return { code: "unknown-family", stage: "rules" };
   if (candidate.available !== true) {
     const reason: Reason = { code: "unavailable", stage: "rules" };
@@ -346,18 +355,21 @@ function cents(usd: number): number {
   return Math.round(usd * 100);
 }
 
+// An unknown cost is not free: a metered key with no price, no cap or no recorded spend fails closed.
 function budgetExclusion(candidate: CandidateFacts): Reason | null {
   if (candidate.kindOf !== "api-key") return null;
   const cap = candidate.dailyCap;
   const spent = candidate.committedToday;
-  if (candidate.expectedUsd === null) {
-    if (cap !== null && spent !== null && cents(spent) >= cents(cap)) return { code: "budget", stage: "rules", name: "daily-cap" };
-    return null;
+  if (candidate.expectedUsd === null && cap !== null && spent !== null && cents(spent) >= cents(cap)) {
+    return { code: "budget", stage: "rules", name: "daily-cap" };
   }
+  if (cap === null) return { code: "budget", stage: "rules", name: "no-cap" };
+  if (spent === null) return { code: "budget", stage: "rules", name: "no-spend" };
+  if (candidate.expectedUsd === null) return { code: "budget", stage: "rules", name: "no-price" };
   if (candidate.reservation !== null && cents(candidate.expectedUsd) > cents(candidate.reservation)) {
     return { code: "budget", stage: "rules", name: "reservation", n: candidate.expectedUsd };
   }
-  if (cap !== null && spent !== null && cents(spent) + cents(candidate.expectedUsd) > cents(cap)) {
+  if (cents(spent) + cents(candidate.expectedUsd) > cents(cap)) {
     return { code: "budget", stage: "rules", name: "daily-cap", n: candidate.expectedUsd };
   }
   return null;
@@ -404,13 +416,15 @@ function trustedFor(level: RoutingLevel, tier: RoutingTier): boolean {
 
 function sortKey(tier: RoutingTier, candidate: CandidateFacts, settings: AutoSettings, derived: readonly string[]): number[] {
   const trust = tier === "routine" ? 0 : trustedFor(candidate.level, tier) ? 0 : 1;
+  const metered = candidate.kindOf === "api-key" ? 1 : 0;
   const band = BAND_RANK[candidate.band];
   const model = CLASS_RANK[candidate.modelClass];
   const minutes = candidate.minutes ?? Number.POSITIVE_INFINITY;
   const cost = costRank(candidate, settings);
   const place = derived.indexOf(candidate.entry);
   const order = place === -1 ? Number.POSITIVE_INFINITY : place;
-  if (tier === "hard") return [trust, band, model, order];
+  // Hard work: a subscription that can do it never gives way to a metered key, whatever the class (owner rule).
+  if (tier === "hard") return [trust, metered, cost.rank, cost.usd, band, model, order];
   if (tier === "standard") return [trust, cost.rank, cost.usd, band, minutes, order];
   if (tier === "routine") return [cost.rank, cost.usd, band, minutes, order];
   return unreachable(tier);
@@ -431,7 +445,7 @@ function compare(a: readonly number[], b: readonly number[]): number {
 
 function pickReason(tier: RoutingTier, winner: CandidateFacts, other: CandidateFacts | undefined, settings: AutoSettings, derived: readonly string[]): Reason {
   if (tier !== "routine" && !trustedFor(winner.level, tier)) return { code: "no-trusted-available", stage: "rules" };
-  if (!other) return { code: soleCode(tier, winner, settings), stage: "rules" };
+  if (!other) return { code: soleCode(winner, settings), stage: "rules" };
   const left = sortKey(tier, winner, settings, derived);
   const right = sortKey(tier, other, settings, derived);
   for (let i = 0; i < left.length; i++) {
@@ -440,13 +454,18 @@ function pickReason(tier: RoutingTier, winner: CandidateFacts, other: CandidateF
   return { code: "role-order", stage: "rules" };
 }
 
-function soleCode(tier: RoutingTier, winner: CandidateFacts, settings: AutoSettings): string {
-  if (tier === "hard") return "trusted-for";
+function soleCode(winner: CandidateFacts, settings: AutoSettings): string {
   return costRank(winner, settings).rank === 0 ? "included" : "cheapest";
 }
 
 function keyCode(tier: RoutingTier, index: number, winner: CandidateFacts, settings: AutoSettings): string {
-  if (tier === "hard") return ["trusted-for", "band", "model-class", "role-order"][index] ?? "role-order";
+  if (tier === "hard") {
+    if (index === 0) return "trusted-for";
+    if (index === 1 || index === 2 || index === 3) return costRank(winner, settings).rank === 0 ? "included" : "cheapest";
+    if (index === 4) return "band";
+    if (index === 5) return "model-class";
+    return "role-order";
+  }
   const costAt = tier === "standard" ? index === 1 || index === 2 : index === 0 || index === 1;
   if (costAt) return costRank(winner, settings).rank === 0 ? "included" : "cheapest";
   if (tier === "standard" && index === 0) return "trusted-for";
@@ -549,9 +568,10 @@ export function recordFact(
 }
 
 function winning(facts: readonly OutcomeFact[], route: string, kind: FactKind): OutcomeFact | null {
-  const rows = facts.filter(fact => fact.route === route && fact.kind === kind);
-  rows.sort((a, b) => TRUST[b.source] - TRUST[a.source] || b.at - a.at);
-  return rows[0] ?? null;
+  const rows = facts.map((fact, index) => ({ fact, index })).filter(row => row.fact.route === route && row.fact.kind === kind);
+  // An equal trust and time is a correction: the later recorded fact wins.
+  rows.sort((a, b) => TRUST[b.fact.source] - TRUST[a.fact.source] || b.fact.at - a.fact.at || b.index - a.index);
+  return rows[0]?.fact ?? null;
 }
 
 // Cost and minutes belong to a Lease: a route's Outcome adds up one winning fact per Lease (design 7.1).

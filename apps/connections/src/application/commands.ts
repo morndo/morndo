@@ -1,6 +1,6 @@
 // Page commands. A role save calls RoutingService and nothing else: the service is what writes a chain.
 import { findConnection, type Actor, type Mode, type Override, type RepoRule, type Result } from "@morndo/domain";
-import type { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "@morndo/protocol";
+import { HUB_COMMAND, type NarrowCommand, type PriorityCommand, type RevokeCommand, type RoleCommand } from "@morndo/protocol";
 import { ConnectionsService } from "./connections-service.ts";
 import { buildPage, type OutsideChain, type PageUsage } from "./page.ts";
 import type { ConnectionLifecycle, Deps, Failure, PoolNames } from "./ports.ts";
@@ -10,8 +10,10 @@ type Out = Result<void, Failure>;
 type Routing = Pick<RoutingService, "commitPriority" | "commitRole" | "reapply">;
 type Register = Pick<ConnectionsService, "revoke" | "turnOff" | "setBudget" | "setRepo">;
 
+// The hub is the only caller that has checked the passkey; nothing in the body counts.
 export function applyPriority(routing: Routing, body: { mode: Mode; order: readonly string[]; auto?: boolean | undefined }, command: string): Out {
-  return routing.commitPriority(body.mode, [...body.order], command, body.auto);
+  const authority = command === HUB_COMMAND ? "step-up" : "session";
+  return routing.commitPriority(body.mode, [...body.order], command, body.auto, authority);
 }
 
 export function applyRole(routing: Routing, body: { role: string; override: Override; order: readonly string[]; picks: readonly string[]; riskPicks?: readonly string[]; action: "save" | "reapply" | "keep-hand" }, command: string): Out {

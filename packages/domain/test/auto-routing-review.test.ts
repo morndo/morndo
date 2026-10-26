@@ -24,7 +24,7 @@ function cand(over: Partial<CandidateFacts> & { entry: string }): CandidateFacts
     kindOf: "subscription", family: "fam-a", modelClass: "everyday", inChain: true, rank: 0,
     available: true, gate: "ok", reservation: null, expectedUsd: null, costFrom: null,
     committedToday: 0, dailyCap: 10, window: null, level: "hard", band: "new", minutes: null,
-    heldSince: null, heldWhy: null, ...over,
+    heldSince: null, heldWhy: null, ownModel: true, ...over,
   };
 }
 
@@ -52,14 +52,14 @@ describe("unknown metered cost and the daily cap", () => {
     expect(past.excluded[0]?.reason.name).toBe("daily-cap");
   });
 
-  it("leaves a metered key eligible when the unknown cost is still under the cap, and ranks it last", () => {
+  it("excludes a metered key of unknown cost under the cap: an unknown cost is not free", () => {
     const got = run([
       cand({ entry: "key-a:m@high", kindOf: "api-key", expectedUsd: null, committedToday: 1, dailyCap: 10, level: "routine", rank: 0 }),
       cand({ entry: "sub-a:m@high", window: null, level: "hard", rank: 1 }),
     ], ["key-a:m@high", "sub-a:m@high"], routine);
-    expect(got.excluded).toEqual([]);
+    expect(got.excluded).toEqual([{ entry: "key-a:m@high", reason: { code: "budget", stage: "rules", name: "no-price" } }]);
     expect(got.pick).toBe("sub-a:m@high");
-    expect(got.ranked).toEqual(["sub-a:m@high", "key-a:m@high"]);
+    expect(got.ranked).toEqual(["sub-a:m@high"]);
   });
 
   it("treats a sum that lands on the cap as allowed, in cents", () => {

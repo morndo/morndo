@@ -44,6 +44,7 @@ function cand(over: Partial<CandidateFacts> & { entry: string }): CandidateFacts
     minutes: null,
     heldSince: null,
     heldWhy: null,
+    ownModel: true,
     ...over,
   };
 }
@@ -181,7 +182,7 @@ describe("R18: the first hard rule wins, and usage cannot admit a gate refusal",
   it("excludes an unknown family, then unavailability, then the gate, then budget, quota and held", () => {
     const unknown = run([
       cand({ entry: "sub-a:m@high", family: "unknown", rank: 0 }),
-      cand({ entry: "key-a:m@high", rank: 1, kindOf: "api-key", level: "routine" }),
+      cand({ entry: "key-a:m@high", rank: 1, kindOf: "api-key", level: "routine", expectedUsd: 1, reservation: 5 }),
     ], derived);
     expect(unknown.excluded).toEqual([{ entry: "sub-a:m@high", reason: { code: "unknown-family", stage: "rules" } }]);
 
@@ -226,7 +227,7 @@ describe("R18: the first hard rule wins, and usage cannot admit a gate refusal",
     expect(quota.excluded[0]?.reason).toMatchObject({ code: "quota", n: 0.9 });
     const under = run([
       cand({ entry: "sub-a:m@high", window: 0.89, rank: 0 }),
-      cand({ entry: "key-a:m@high", rank: 1, kindOf: "api-key", level: "routine" }),
+      cand({ entry: "key-a:m@high", rank: 1, kindOf: "api-key", level: "routine", expectedUsd: 1, reservation: 5 }),
     ], derived);
     expect(under.excluded).toEqual([]);
 
@@ -392,16 +393,16 @@ describe("R17 and R24: the pick is one entry of the derived chain, then the rest
 describe("R21: ranking is lexicographic per tier, and the role order breaks ties", () => {
   const hard = { size: { value: "L" as Size, source: "flag" as const } };
 
-  it("hard: trust, then band, then model class, then role order", () => {
+  it("hard: trust, then a subscription before a metered key, then band and class", () => {
     const trustedFast = cand({ entry: "sub-a:m@high", level: "hard", band: "A", modelClass: "fast", rank: 1 });
     const trustedFlagship = cand({ entry: "key-a:m@high", level: "hard", band: "B", modelClass: "flagship", rank: 0, kindOf: "api-key", expectedUsd: 1, reservation: 5 });
     expect(run([trustedFlagship, trustedFast], ["key-a:m@high", "sub-a:m@high"], hard).pick).toBe("sub-a:m@high");
 
     const sameBand = [
-      cand({ entry: "sub-a:m@high", level: "hard", band: "A", modelClass: "everyday", rank: 1 }),
-      cand({ entry: "key-a:m@high", level: "hard", band: "A", modelClass: "flagship", rank: 0, kindOf: "api-key", expectedUsd: 1, reservation: 5 }),
+      cand({ entry: "sub-a:m@high", level: "hard", band: "A", modelClass: "everyday", rank: 0 }),
+      cand({ entry: "sub-b:m@high", connection: "sub-b", level: "hard", band: "A", modelClass: "flagship", rank: 1 }),
     ];
-    expect(run(sameBand, ["key-a:m@high", "sub-a:m@high"], hard).pick).toBe("key-a:m@high");
+    expect(run(sameBand, ["sub-a:m@high", "sub-b:m@high"], hard).pick).toBe("sub-b:m@high");
 
     const probation = cand({ entry: "key-a:m@high", level: "routine", band: "A", modelClass: "flagship", rank: 0, kindOf: "api-key", expectedUsd: 1, reservation: 5 });
     const trusted = cand({ entry: "sub-a:m@high", level: "hard", band: "C", modelClass: "fast", rank: 1 });

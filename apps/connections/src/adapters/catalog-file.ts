@@ -39,7 +39,9 @@ function readAutoRouting(path: string): ReadonlyMap<string, AutoRoutingRules> {
   try {
     const parsed = parseAutoRoutingCatalog(JSON.parse(readFileSync(path, "utf8")));
     if (!parsed) return new Map();
-    return new Map(parsed.map(entry => [entry.vendor, { families: entry.families, class: entry.class }]));
+    return new Map(parsed.map(entry => [entry.vendor, {
+      families: entry.families, class: entry.class, ...(entry.ownModels ? { ownModels: entry.ownModels } : {}),
+    }]));
   } catch {
     return new Map();
   }

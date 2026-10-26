@@ -575,17 +575,41 @@ export function parsePolicy(raw: unknown): Policy | null {
       auto: typeof row.auto === "boolean" ? row.auto : routingRoleGroup(row.role) === "implement",
     });
   }
-  const settings = typeof body.autoSettings === "object" && body.autoSettings !== null ? body.autoSettings as Record<string, unknown> : {};
   return {
     priority: { mode: priority.mode, order: priority.order, auto: typeof priority.auto === "boolean" ? priority.auto : false },
     roles,
     events: body.events as RouteEvent[],
-    autoSettings: {
-      taskCeiling: finiteOr(settings.taskCeiling, DEFAULT_AUTO_SETTINGS.taskCeiling),
-      saveLine: finiteOr(settings.saveLine, DEFAULT_AUTO_SETTINGS.saveLine),
-      dailyCaps: numberMap(settings.dailyCaps),
-      reserves: numberMap(settings.reserves),
-    },
+    autoSettings: storedSettings(body.autoSettings),
+  };
+}
+
+function storedSettings(value: unknown): AutoSettings {
+  const settings = typeof value === "object" && value !== null ? value as Record<string, unknown> : {};
+  return {
+    taskCeiling: finiteOr(settings.taskCeiling, DEFAULT_AUTO_SETTINGS.taskCeiling),
+    saveLine: finiteOr(settings.saveLine, DEFAULT_AUTO_SETTINGS.saveLine),
+    dailyCaps: numberMap(settings.dailyCaps),
+    reserves: numberMap(settings.reserves),
+  };
+}
+
+// A stored policy the strict parser refuses still loads: the pre-Auto behaviour trusted the stored shape. Only the Auto
+// fields are filled in, exactly as parsePolicy defaults them. A body without a priority object and a roles array is refused.
+export function adoptPolicy(raw: unknown): Policy | null {
+  const parsed = parsePolicy(raw);
+  if (parsed) return parsed;
+  if (typeof raw !== "object" || raw === null) return null;
+  const body = raw as Record<string, unknown>;
+  if (typeof body.priority !== "object" || body.priority === null || !Array.isArray(body.roles)) return null;
+  const priority = { ...(body.priority as Priority) };
+  if (typeof priority.auto !== "boolean") priority.auto = false;
+  const roles = (body.roles as RoleRoute[]).map(row =>
+    typeof row.auto === "boolean" ? row : { ...row, auto: routingRoleGroup(row.role ?? "") === "implement" });
+  return {
+    priority,
+    roles,
+    events: (Array.isArray(body.events) ? body.events : []) as RouteEvent[],
+    autoSettings: storedSettings(body.autoSettings),
   };
 }
 

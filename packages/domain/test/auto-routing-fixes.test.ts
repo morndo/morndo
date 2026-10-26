@@ -64,7 +64,7 @@ function cand(entry: string, family: string): CandidateFacts {
   return {
     entry, connection: entry.split(":")[0] ?? "c", kindOf: "subscription", family, modelClass: "everyday", inChain: true,
     rank: 0, available: true, gate: "ok", reservation: null, expectedUsd: null, costFrom: null, committedToday: 0,
-    dailyCap: 10, window: null, level: "hard", band: "new", minutes: null, heldSince: null, heldWhy: null,
+    dailyCap: 10, window: null, level: "hard", band: "new", minutes: null, heldSince: null, heldWhy: null, ownModel: true,
   };
 }
 

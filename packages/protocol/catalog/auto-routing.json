@@ -9,8 +9,8 @@
   {"vendor": "custom-openai", "families": [], "class": []},
   {"vendor": "claude", "families": [], "class": [{"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}]},
   {"vendor": "codex", "families": [], "class": []},
-  {"vendor": "cursor", "families": [{"pattern": "claude-*", "family": "anthropic"}, {"pattern": "gpt-*", "family": "openai"}, {"pattern": "auto", "family": "unknown"}], "class": [{"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}, {"pattern": "auto", "class": "unknown"}]},
+  {"vendor": "cursor", "families": [], "class": [], "ownModels": ["grok-*", "composer-*"]},
   {"vendor": "studio", "families": [], "class": []},
-  {"vendor": "cursor-cloud", "families": [{"pattern": "claude-*", "family": "anthropic"}, {"pattern": "gpt-*", "family": "openai"}, {"pattern": "auto", "family": "unknown"}], "class": [{"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}, {"pattern": "auto", "class": "unknown"}]},
+  {"vendor": "cursor-cloud", "families": [], "class": [], "ownModels": ["grok-*", "composer-*"]},
   {"vendor": "agy", "families": [], "class": []}
 ]

@@ -196,11 +196,6 @@ describe("vendor catalog", () => {
       else expect(preset.terms.sources[0], preset.id).toMatch(/^https:\/\//);
       expect(preset.isolation === null, preset.id).toBe(preset.custody === "engine-layer");
     }
-    const cursorFamilies = [
-      { pattern: "claude-*", family: "anthropic" },
-      { pattern: "gpt-*", family: "openai" },
-      { pattern: "auto", family: "unknown" },
-    ];
     const modelClass = [
       { pattern: "*opus*", class: "flagship" },
       { pattern: "*fable*", class: "flagship" },
@@ -208,10 +203,14 @@ describe("vendor catalog", () => {
       { pattern: "*haiku*", class: "fast" },
     ];
     const rules = (vendor: string) => autoRules.find(row => row.vendor === vendor);
-    expect(rules("cursor")?.families).toEqual(cursorFamilies);
-    expect(rules("cursor-cloud")?.families).toEqual(cursorFamilies);
-    expect(rules("cursor")?.class).toEqual([...modelClass, { pattern: "auto", class: "unknown" }]);
-    expect(rules("cursor-cloud")?.class).toEqual(rules("cursor")?.class);
+    // Cursor runs only its own pool models (owner rule 2026-10-24), so it has no third-party family or class rows.
+    const ownPool = ["grok-*", "composer-*"];
+    expect(rules("cursor")?.families).toEqual([]);
+    expect(rules("cursor-cloud")?.families).toEqual([]);
+    expect(rules("cursor")?.class).toEqual([]);
+    expect(rules("cursor-cloud")?.class).toEqual([]);
+    expect(rules("cursor")?.ownModels).toEqual(ownPool);
+    expect(rules("cursor-cloud")?.ownModels).toEqual(ownPool);
     expect(rules("openrouter")?.families).toEqual([
       { pattern: "openrouter/auto", family: "unknown" },
       { pattern: "anthropic/*", family: "anthropic" },
@@ -222,5 +221,32 @@ describe("vendor catalog", () => {
     // The catalog file names every preset once, and no family row is a bare "*".
     expect(autoRules.map(row => row.vendor)).toEqual(catalog.map(preset => preset.id));
     for (const row of autoRules) expect(row.families.some(item => item.pattern === "*"), row.vendor).toBe(false);
+  });
+});
+
+describe("auto-routing catalog", () => {
+  const entry = {
+    vendor: "vendor-a",
+    families: [{ pattern: "m-*", family: "fam-a" }],
+    class: [{ pattern: "m-1", class: "flagship" as const }],
+  };
+
+  it("returns entries for the shipped file, and ownModels is optional", () => {
+    const shipped = parseAutoRoutingCatalog(JSON.parse(readFileSync(join(import.meta.dirname, "../catalog/auto-routing.json"), "utf8")));
+    expect(shipped).not.toBeNull();
+    expect(shipped?.length).toBeGreaterThan(0);
+    expect(parseAutoRoutingCatalog([entry])).not.toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: ["grok-*", "composer-*"] }])).not.toBeNull();
+  });
+
+  it("returns null for a shape the schema refuses", () => {
+    expect(parseAutoRoutingCatalog([{ ...entry, extra: true }])).toBeNull();
+    expect(parseAutoRoutingCatalog([entry, { ...entry }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, class: [{ pattern: "m-1", class: "premium" }] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, class: [{ pattern: "m-1", class: "flagship", extra: 1 }] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, families: [{ pattern: "a".repeat(81), family: "fam-a" }] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: "grok-*" }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: [1] }])).toBeNull();
+    expect(parseAutoRoutingCatalog([{ ...entry, ownModels: [""] }])).toBeNull();
   });
 });

@@ -173,6 +173,7 @@ export const KeyPoolCatalog = z.array(KeyPoolEntry).check(z.refine(
 export type AutoRoutingRules = {
   families: readonly { pattern: string; family: string }[];
   class: readonly { pattern: string; class: "flagship" | "everyday" | "fast" | "unknown" }[];
+  ownModels?: readonly string[];
 };
 export const AutoRoutingEntry = z.strictObject({
   vendor: name(),
@@ -181,6 +182,8 @@ export const AutoRoutingEntry = z.strictObject({
     pattern: text(80),
     class: z.enum(["flagship", "everyday", "fast", "unknown"]),
   })),
+  // Ordered globs; when present, the vendor's connection may run only models matching one of them.
+  ownModels: z.optional(z.array(text(80))),
 });
 export const AutoRoutingCatalog = z.array(AutoRoutingEntry).check(z.refine(
   (rows: readonly { vendor: string }[]) => new Set(rows.map(row => row.vendor)).size === rows.length,
@@ -308,6 +311,8 @@ export const COMMAND_KINDS = ["priority", "role", "revoke", "narrow"] as const;
 export type CommandKind = (typeof COMMAND_KINDS)[number];
 // Widening (priority, a role save, revoke) needs a fresh passkey. Narrowing does not.
 export const commandNeedsStepUp = (kind: CommandKind): boolean => kind !== "narrow";
+// The command word of the hub, which checks a fresh passkey before it calls.
+export const HUB_COMMAND = "hub";
 
 export type ConnectionView = z.output<typeof ConnectionView>;
 export type LeaseView = z.output<typeof LeaseView>;

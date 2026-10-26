@@ -184,3 +184,56 @@ describe("page commands", () => {
     expect(mem.engines.chains().find(chain => chain.role === "implement")?.chain).toEqual(["key-a:m@high"]);
   });
 });
+
+describe("auto authority", () => {
+  async function oneKey() {
+    const mem = memory();
+    mem.catalog.rows = [preset()];
+    mem.vault.put("ref-a", "0123456789ab");
+    const connections = new ConnectionsService(mem.deps);
+    expect((await connections.addKey({ name: "key-a", vendor: "vendor-a", runtime: "runtime-a", ref: "ref-a", billing: "metered", budget: { kind: "capped", amount: 10 }, expiry: null }, who)).ok).toBe(true);
+    return mem;
+  }
+
+  it("an auto switch from a command word other than the hub's is refused as step-up and changes nothing", async () => {
+    const mem = await oneKey();
+    const writes = mem.engines.writes.length;
+    const events = mem.store.policy.events.length;
+    const bound = bindCommands(mem.deps);
+    const refused = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: true }, "cli");
+    expect(refused.ok).toBe(false);
+    expect(refused.ok ? "" : refused.problem).toBe("step-up");
+    expect(mem.store.policy.priority.auto).toBe(false);
+    expect(mem.store.policy.events.length).toBe(events);
+    expect(mem.engines.writes.length).toBe(writes);
+  });
+
+  it("the same body from the hub's command word switches Auto", async () => {
+    const mem = await oneKey();
+    const switched = bindCommands(mem.deps).priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: true }, "hub");
+    expect(switched.ok).toBe(true);
+    expect(mem.store.policy.priority.auto).toBe(true);
+    expect(mem.store.policy.events.some(event => event.type === "AutoSwitched" && event.on)).toBe(true);
+  });
+
+  it("a body without auto behaves as before from either command word", async () => {
+    const mem = await oneKey();
+    const bound = bindCommands(mem.deps);
+    for (const command of ["cli", "hub"]) {
+      const saved = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"] }, command);
+      expect(saved.ok, command).toBe(true);
+      expect(mem.store.policy.priority.mode).toBe("keys-only");
+    }
+  });
+
+  it("turning auto off from a non-hub command word is also refused", async () => {
+    const mem = await oneKey();
+    const bound = bindCommands(mem.deps);
+    const on = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: true }, "hub");
+    expect(on.ok).toBe(true);
+    const off = bound.priority({ version: mem.store.version, mode: "keys-only", order: ["key-a"], auto: false }, "cli");
+    expect(off.ok).toBe(false);
+    expect(off.ok ? "" : off.problem).toBe("step-up");
+    expect(mem.store.policy.priority.auto).toBe(true);
+  });
+});
