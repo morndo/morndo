@@ -11,8 +11,8 @@ const TEXT_LIMIT = 256;
 const RESUME_DATE = /regain access on (\d{4}-\d{2}-\d{2})/;
 // Only the identifiers: ordinary words ("authentication failed" from git or ssh) in a run's output say nothing about the key.
 const HELD = /account_on_hold|authentication_failed/i;
-const CREDIT = /credit balance (?:is )?too low/i;
-const SPEND = /you have reached your specified (?:workspace )?API usage limits/i;
+export const CREDIT = /credit balance (?:is )?too low/i;
+export const SPEND = /you have reached your specified (?:workspace )?API usage limits/i;
 
 function resumeDateIn(text: string): string | null {
   return RESUME_DATE.exec(text)?.[1] ?? null;

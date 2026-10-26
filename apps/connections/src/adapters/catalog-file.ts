@@ -1,8 +1,9 @@
 // The vendor catalog is a JSON file validated by the protocol schema (design section 8). Key-pool terms are the
-// sibling file key-pools.json. Missing, unreadable or not a key-pool catalog: there are no key pools.
+// sibling file key-pools.json, and probe models are key-pool-probes.json. Missing, unreadable or invalid: there
+// are no key pools, or no probes.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { parseKeyPoolCatalog, parseVendorCatalog, type KeyPoolTerms, type VendorPreset } from "@morndo/protocol";
+import { parseKeyPoolCatalog, parseKeyPoolProbeCatalog, parseVendorCatalog, type KeyPoolProbe, type KeyPoolTerms, type VendorPreset } from "@morndo/protocol";
 import type { Catalog } from "../application/ports.ts";
 
 export class CatalogRefused extends Error {
@@ -24,9 +25,20 @@ function readKeyPools(path: string): ReadonlyMap<string, KeyPoolTerms> {
   }
 }
 
+function readKeyPoolProbes(path: string): ReadonlyMap<string, KeyPoolProbe> {
+  try {
+    const parsed = parseKeyPoolProbeCatalog(JSON.parse(readFileSync(path, "utf8")));
+    if (!parsed) return new Map();
+    return new Map(parsed.map(entry => [entry.vendor, { model: entry.model }]));
+  } catch {
+    return new Map();
+  }
+}
+
 export class FileCatalog implements Catalog {
   readonly #presets: readonly VendorPreset[];
   readonly #pools: ReadonlyMap<string, KeyPoolTerms>;
+  readonly #probes: ReadonlyMap<string, KeyPoolProbe>;
   constructor(path: string) {
     let parsed: unknown;
     try { parsed = JSON.parse(readFileSync(path, "utf8")); }
@@ -34,8 +46,11 @@ export class FileCatalog implements Catalog {
     const presets = parseVendorCatalog(parsed);
     if (!presets) throw new CatalogRefused(path);
     this.#presets = presets;
-    this.#pools = readKeyPools(join(dirname(path), "key-pools.json"));
+    const dir = dirname(path);
+    this.#pools = readKeyPools(join(dir, "key-pools.json"));
+    this.#probes = readKeyPoolProbes(join(dir, "key-pool-probes.json"));
   }
   presets(): readonly VendorPreset[] { return this.#presets; }
   keyPool(vendor: string): KeyPoolTerms | null { return this.#pools.get(vendor) ?? null; }
+  keyPoolProbe(vendor: string): KeyPoolProbe | null { return this.#probes.get(vendor) ?? null; }
 }

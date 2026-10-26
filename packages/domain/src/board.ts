@@ -7,8 +7,11 @@
 // Decision, Evidence or a Verdict. Done is the manager's (or the principal's) acceptance of a lane's word, not proof; the
 // manager's says what it checked (B9). The board also moves a task by itself, following its assignee's Run, along the
 // fixed edges of B10 (D1 to D6, ADR-0032): never to Done, never an assignment. The lane files a brief with references
-// the board verifies itself, and Done waits for them or a recorded override (B13 to B16, ADR-0035).
+// the board verifies itself, and Done waits for them or a recorded override (B13 to B16, ADR-0035). A block may name what
+// it waits on in a form the board checks itself, and when all of it is over the board moves the task to do (B18, D7,
+// ADR-0038; board-waits.ts).
 import type { Run } from "./run.ts";
+import { parseWaits, type Wait } from "./board-waits.ts";
 import { LIST_MAX, MERGE_SHA, REPO_NAME, checkBrief, parseItemSpec, proofOf, type BriefInput, type ProofBrief, type ProofGate } from "./proof.ts";
 import { cutText, err, ok, type EndpointId, type Result, type SessionId } from "./shared.ts";
 
@@ -31,7 +34,7 @@ export type BoardActor =
 
 // Who changed a task: an agents' door actor, the control plane's console (which acts for the principal there, as
 // `memory approve` does), or the board itself following a Run (B10), naming the rule and the lane it read.
-export type BoardRule = "D1" | "D2" | "D3" | "D4";
+export type BoardRule = "D1" | "D2" | "D3" | "D4" | "D7";
 export type TaskActor = BoardActor | { kind: "console" } | { kind: "board"; rule: BoardRule; lane: string };
 
 export type Task = {
@@ -43,6 +46,7 @@ export type Task = {
   assignee: string | null;                // a lane name; null: nobody's yet
   priority: TaskPriority;
   blockedReason: string | null;           // while blocked: why, in the mover's words
+  waits?: Wait[];                         // while blocked: what the board checks itself (B18); absent: words only
   createdAt: number;
   updatedAt: number;
   stateChangedAt: number;                 // the last change of status, assignee or description; a comment or a title or priority edit leaves it (D6)
@@ -54,7 +58,7 @@ export type Task = {
 
 export type TaskChange =
   | { kind: "created"; status: TaskStatus; assignee: string | null }
-  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string; proofSeen?: string }
+  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string; proofSeen?: string; waits?: Wait[] }
   | { kind: "assigned"; from: string | null; to: string | null }
   | { kind: "edited"; title?: string; description?: string; priority?: TaskPriority }
   | { kind: "commented"; text: string }
@@ -66,7 +70,7 @@ export type TaskEvent = { key: TaskKey; rev: number; at: number; actor: TaskActo
 
 export type NewTask = { title: string; description?: string; assignee?: string | null; priority?: TaskPriority; status?: TaskStatus };
 export type TaskAction =
-  | { action: "move"; to: TaskStatus; reason?: string; notLive?: string; proofOverride?: string; ifRev?: number }
+  | { action: "move"; to: TaskStatus; reason?: string; notLive?: string; proofOverride?: string; waits?: string[]; ifRev?: number }
   | { action: "assign"; to: string | null; ifRev?: number }
   | { action: "edit"; title?: string; description?: string; priority?: TaskPriority; ifRev?: number }
   | { action: "comment"; text: string }
@@ -92,7 +96,8 @@ export type BoardProblem =
   | "proof_not_green"   // done waits for the proof: a reference is not green, or there is none to check (B16)
   | "bad_ref" | "ref_unrelated" | "ref_repo"  // a brief's reference isn't one, hangs off no pull request or merge of the task, or names a repository the board does not check (B14)
   | "empty" | "too_long" | "bad_name" | "bad_text"
-  | "bad_item" | "no_item";
+  | "bad_item" | "no_item"
+  | "bad_wait";         // a block's wait the board could never check, or waits on a move that is no block (B18)
 // `other`: the task in the way (one_doing); `from`: where the task is (bad_transition), so a refusal can say so;
 // `detail`: the not_live label, so a refusal can say what the board sees (B11).
 export type BoardRefusal = { problem: BoardProblem; other?: TaskKey; from?: TaskStatus; detail?: string };
@@ -147,12 +152,12 @@ const WORKER_MOVES: Record<TaskStatus, readonly TaskStatus[]> = {
   review: ["doing"],
   done: [],
 };
-// B10: the board's own moves, the edges D1 to D4 follow; never to Done (D5).
+// B10: the board's own moves, the edges D1 to D4 follow, and D7's blocked to to do; never to Done (D5).
 const BOARD_MOVES: Record<TaskStatus, readonly TaskStatus[]> = {
   backlog: [],
   todo: ["doing"],
   doing: ["review", "blocked", "todo"],
-  blocked: ["doing"],
+  blocked: ["doing", "todo"],
   review: ["doing"],
   done: [],
 };
@@ -227,7 +232,9 @@ export function mergedView(key: TaskKey, merges: readonly MergeRecord[], livenes
 // What applyAction judges a move to done against (B11): the task's recorded merges, and liveness per sha. Absent: done
 // is not held for any merge (a board without the fleet knows none). `proof` (B16, ADR-0035): the brief and the results
 // the hub read for its references, in a mode; absent: done is not held for proof either (the hub passes none yet).
-export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate };
+// `repos` (B18): the repositories whose pull requests the hub reads, for a block's waits; absent: morndo/morndo only.
+// `cards`: whether the hub reads the owner's list, for a card wait; absent: it does.
+export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate; repos?: readonly string[]; cards?: boolean };
 
 // `board`: the tasks in progress now, for B5 when a task is filed straight into progress.
 export function createTask(input: NewTask, actor: BoardActor | { kind: "console" }, n: number, now: number, board: readonly Task[] = []): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
@@ -265,11 +272,25 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
   };
   switch (action.action) {
     case "move": {
-      // B10: the board moves only its assignee's task, the one whose Run it read.
-      if (actor.kind === "board" && task.assignee !== actor.lane) return refuse("not_yours");
+      // B10: the board moves only its assignee's task, the one whose Run it read. D7 reads no Run: it follows the task's
+      // own waits, so it moves an unassigned task too, and only from blocked to to do; D1 to D4 never take that edge.
+      if (actor.kind === "board" && actor.rule !== "D7" && task.assignee !== actor.lane) return refuse("not_yours");
       if (actor.kind !== "board" && !runsTheBoard(actor) && !mine) return refuse("not_yours");
-      if (action.to === task.status) return refuse("same");
-      if (!mayMove(actor, task.status, action.to)) return refuse("bad_transition", undefined, task.status);
+      if (actor.kind === "board" && (actor.rule === "D7") !== (task.status === "blocked" && action.to === "todo")) return refuse("bad_transition", undefined, task.status);
+      // B18: waits go with a block, and a blocked task may be blocked again to restate its reason or name its waits.
+      const named = action.waits ?? [];
+      if (named.length > 0 && action.to !== "blocked") return refuse("bad_wait", undefined, undefined, "waits go with a move to blocked");
+      let waits: Wait[] = [];
+      if (named.length > 0) {
+        const parsed = parseWaits(named, task.key, now, gate?.repos ?? [MORNDO_REPO], gate?.cards === false ? { cards: false } : {});
+        if (!parsed.ok) return refuse(parsed.error.problem, undefined, undefined, parsed.error.detail);
+        waits = parsed.value;
+      }
+      const restated = action.to === "blocked" && task.status === "blocked";
+      // Only a person or the task's own lane restates a block; no rule of the board's does (D1 to D7 never take that edge).
+      if (restated && actor.kind === "board") return refuse("bad_transition", undefined, task.status);
+      if (action.to === task.status && !restated) return refuse("same");
+      if (!restated && !mayMove(actor, task.status, action.to)) return refuse("bad_transition", undefined, task.status);
       if (action.to === "doing" && !task.assignee) return refuse("needs_assignee");
       // B4: blocked says why. B9: the manager's done says what was checked; the principal's may say, and need not.
       // B10: the board's own move keeps the reason it read on every edge (D1: the status line; D3: GONE_REASON).
@@ -326,8 +347,10 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
         else if (mode === "on") return refuse("proof_not_green", undefined, undefined, seen.line);
         else proofSeen = fit(seen.line, warnSuffix);
       }
-      const moved: Task = { ...task, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null };
-      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }) });
+      if (restated && reason === task.blockedReason && sameWaits(waits, task.waits ?? [])) return refuse("same");
+      const { waits: _left, ...rest } = task;
+      const moved: Task = { ...rest, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null, ...(waits.length > 0 ? { waits } : {}) };
+      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }), ...(waits.length > 0 ? { waits } : {}) });
     }
     case "assign": {
       if (!runsTheBoard(actor)) return refuse("not_allowed");                // D5: never the board
@@ -443,6 +466,8 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
     }
   }
 }
+
+const sameWaits = (a: readonly Wait[], b: readonly Wait[]) => JSON.stringify(a) === JSON.stringify(b);
 
 // The board as it is shown: every open task, and Done for a week (DONE_SHOWN_MS). Within a column, the urgent first
 // (priority), then what is in motion newest first, and what waits oldest first, so nothing starves at the bottom.
