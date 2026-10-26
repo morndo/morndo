@@ -2,7 +2,9 @@
 // control plane's own updater status, the fleet's Rollout and nodes — the rows the page shows, one per machine, the
 // control plane first ("This machine", named control-plane as the hub's updates service does), then the nodes by
 // name. Pure words: no Svelte, no fetch. A node's Channel and mode are its own machine's word (`morndo update` on
-// it); the view does not carry them, so the row says null and the page says so, never a guess.
+// it); the view does not carry them, so the row says null and the page says so, never a guess. The control plane's
+// own node (the hub's MORNDO_CONTROL_PLANE_NODE) is folded into This machine: it has no row of its own, and what is
+// wrong with it (offline, rolled back, above the control plane) is said on This machine's row.
 import { compareVersions, parseVersion } from "@morndo/domain";
 import type { NodeUpdateHealth, RolloutWire, UpdateStateFile, UpdatesNode, UpdatesView, UpdaterStatus } from "@morndo/protocol";
 
@@ -24,6 +26,8 @@ export type UpdatesRow = {
   rollback: string | null;
   /** A node instead of a Roll back button: its rollback is its own hand (§5.4), the command to run on it. */
   rollbackNote: string | null;
+  /** This machine only: what is wrong with the control plane's own node agent, folded into this row instead of a row of its own. */
+  agent: string | null;
 };
 
 export type RolloutLine = { version: string; sentence: string; resume: boolean };
@@ -121,7 +125,22 @@ const nodeState = (n: UpdatesNode, rollout: RolloutWire | null, controlPlane: st
   }
 };
 
-const controlPlaneRow = (v: UpdatesView): UpdatesRow => {
+// What is wrong with the control plane's own node agent, said on This machine's row now that it has none of its own;
+// null when nothing is. The fleet's node names are [a-z0-9-]{1,32} and compared as written; the hub trims and
+// lower-cases its setting to match. A rollback on it is This machine's own (its Roll back), never a command to run on a node.
+const ownNodeNote = (n: UpdatesNode | undefined, controlPlane: string): string | null => {
+  if (n === undefined) return null;
+  if (n.status === "offline") return `its node agent ${n.name} is offline`;
+  const running = n.update?.version ?? n.version;
+  if (running !== null && above(running, controlPlane)) return `its node agent ${n.name} runs ${running}, above this machine's ${controlPlane}`;
+  if (n.update?.state === "rolled_back") {
+    return `its node agent ${n.name} rolled back from ${movingTo(n.update)}${n.update.failedCheck !== undefined ? `: ${n.update.failedCheck} failed` : ""}`;
+  }
+  if (n.update?.state === "rollback_failed") return `its node agent ${n.name} failed a rollback`;
+  return null;
+};
+
+const controlPlaneRow = (v: UpdatesView, own: UpdatesNode | undefined): UpdatesRow => {
   const s = v.controlPlane.status;
   return {
     machine: CONTROL_PLANE,
@@ -133,6 +152,7 @@ const controlPlaneRow = (v: UpdatesView): UpdatesRow => {
     apply: s !== null && s.staged !== null ? s.staged : null,
     rollback: s !== null && s.previous !== null ? s.previous : null,
     rollbackNote: null,
+    agent: ownNodeNote(own, v.controlPlane.version),
   };
 };
 
@@ -151,11 +171,15 @@ const nodeRow = (n: UpdatesNode, rollout: RolloutWire | null, controlPlane: stri
       ? rollout.version : null,
     rollback: null,
     rollbackNote: `run morndo update --rollback on ${n.name}`,
+    agent: null,
   };
 };
 
 export function updatesRows(v: UpdatesView): UpdatesRow[] {
-  return [controlPlaneRow(v), ...[...v.nodes].sort((a, b) => a.name.localeCompare(b.name)).map(n => nodeRow(n, v.rollout, v.controlPlane.version))];
+  // The control plane's own node has no row of its own: that machine is This machine, already shown first.
+  const own = v.nodes.find(n => n.name === v.controlPlane.node);
+  const nodes = v.nodes.filter(n => n !== own);
+  return [controlPlaneRow(v, own), ...[...nodes].sort((a, b) => a.name.localeCompare(b.name)).map(n => nodeRow(n, v.rollout, v.controlPlane.version))];
 }
 
 // The Rollout as one line (§8.2): its Version, committed or soaking with the minutes left, or halted by whom and why

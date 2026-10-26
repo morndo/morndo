@@ -84,8 +84,9 @@ const who = (verifiedAt: number, now: number): Authenticated => ({
   endpoint: { id: "e-1" as never, name: "phone", credential: { id: "c-1", publicKey: new Uint8Array([1]), counter: 1, transports: [] }, pairedAt: now - 3_600_000, pairedWith: "t-1" as never, lastSeenAt: now, revokedAt: null },
 });
 
-const service = (fleet: FleetForUpdates, cli: ReturnType<typeof cliWith>["cli"], now: () => number, events: UpdateCommanded[]) =>
+const service = (fleet: FleetForUpdates, cli: ReturnType<typeof cliWith>["cli"], now: () => number, events: UpdateCommanded[], ownNode: string | null = null, warn?: (line: string) => void) =>
   new UpdatesService({
+    ownNode, ...(warn === undefined ? {} : { warn }),
     fleet, cli, sign: principalSigner(identity), policy: () => ({ stay: "12h", stepUp: "1h" }) as AccessPolicy, now,
     store: { record(es: UpdateCommanded[]) { events.push(...es); } } as never as Store,
     build: () => ({ version: "0.4.2", commit: null }),
@@ -197,10 +198,36 @@ describe("the updates service (no HTTP)", () => {
     const { fleet, rollout, nodes } = fleetWith();
     const svc = service(fleet, cliWith("0.5.0").cli, () => now, []);
     expect(await svc.view()).toEqual({
-      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }), state: null },
+      controlPlane: { version: "0.4.2", commit: null, status: expect.objectContaining({ staged: "0.5.0" }), state: null, node: null },
       rollout, aboveControlPlane: [],
       nodes: [{ name: "pc", status: "online", version: "0.4.2", proto: [1], update: nodes[0]!.update }],
     });
+  });
+
+  it("view: one warning line, not one per request, when MORNDO_CONTROL_PLANE_NODE names no node the fleet lists", async () => {
+    const warned: string[] = [];
+    const { fleet } = fleetWith();                                           // the fleet lists pc only
+    const svc = service(fleet, cliWith(null).cli, () => 1_800_000_000_000, [], "cp", l => warned.push(l));
+    await svc.view(); await svc.view(); await svc.view();
+    expect(warned).toHaveLength(1);
+    expect(warned[0]).toContain("MORNDO_CONTROL_PLANE_NODE");
+    expect(warned[0]).toContain('"cp"');
+    expect(warned[0]).toContain("pc");                                       // what the fleet does list
+    // No word when the name is listed, when none is set, or when the fleet lists nothing (an empty list proves nothing).
+    const quiet: string[] = [];
+    await service(fleet, cliWith(null).cli, () => 1, [], "pc", l => quiet.push(l)).view();
+    await service(fleet, cliWith(null).cli, () => 1, [], null, l => quiet.push(l)).view();
+    const none: FleetForUpdates = { ...fleet, nodes: async () => ({ ok: true, nodes: [] }) };
+    await service(none, cliWith(null).cli, () => 1, [], "cp", l => quiet.push(l)).view();
+    const down: FleetForUpdates = { ...fleet, nodes: async () => ({ ok: false, problem: "unavailable", message: "no fleet" }) };
+    await service(down, cliWith(null).cli, () => 1, [], "cp", l => quiet.push(l)).view();
+    expect(quiet).toEqual([]);
+  });
+
+  it("view: names the control plane's own fleet node (MORNDO_CONTROL_PLANE_NODE) so the page can fold it into This machine", async () => {
+    const { fleet } = fleetWith();
+    const view = await service(fleet, cliWith(null).cli, () => 1_800_000_000_000, [], "e2e-cp").view();
+    expect(view.controlPlane.node).toBe("e2e-cp");
   });
 });
 

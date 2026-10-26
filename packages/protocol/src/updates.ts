@@ -39,8 +39,10 @@ export type UpdatesNode = {
 };
 export type UpdatesView = {
   // `state`: the control plane's updater's last record (its state.json, as the fleet reads it too): why it waits,
-  // which --status does not say. Null when there is none, or it is not the protocol's shape.
-  controlPlane: { version: string; commit: string | null; status: UpdaterStatus | null; state: UpdateStateFile | null };
+  // which --status does not say. Null when there is none, or it is not the protocol's shape. `node`: the fleet node
+  // the control plane's own node agent is (MORNDO_CONTROL_PLANE_NODE); the Updates page shows it inside This machine;
+  // null when the hub is not told it.
+  controlPlane: { version: string; commit: string | null; status: UpdaterStatus | null; state: UpdateStateFile | null; node?: string | null };
   rollout: RolloutWire | null;
   aboveControlPlane: RolloutWire[];
   nodes: UpdatesNode[];
