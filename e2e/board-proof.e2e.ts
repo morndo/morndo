@@ -152,8 +152,13 @@ try {
     const panel = page.locator('[data-task-panel="T-2"]');
     await panel.locator('[data-proof-need][data-status="not_covered"]').waitFor({ timeout: 10_000 });
     assert((await panel.locator('[data-proof-need][data-status="not_covered"]').innerText()).includes("data: a sample of 30 rows"), "data item should show not covered");
+    // The pull request is green before the Done is tried, here and after the re-brief: a Done filed while the hub still waits on
+    // the forge would stall on it (this process serves the forge and the CLI call blocks it), and the refusal would name a
+    // timeout, not the data that is not covered.
+    const untilGreen = () => waitFor(() => manager("show", "T-2").out.includes("1 of 1 green"), 20_000);
+    await untilGreen();
     const refused = manager("done", "T-2", "--why", "read the diff");
-    assert(refused.code === 1 && refused.out.includes("not covered: data: a sample of 30 rows"), `done refused: ${refused.out}`);
+    assert(refused.code === 1 && refused.out.includes("not covered: data: a sample of 30 rows") && !refused.out.includes("timeout"), `done refused: ${refused.out}`);
     assert(builder("brief", "T-2",
       "--pr", PR_GREEN,
       "--data", "30 rows read by hand",
@@ -163,9 +168,7 @@ try {
     ).code === 0, "re-brief failed");
     await panel.locator('[data-proof-need][data-status="told"]').waitFor({ timeout: 10_000 });
     // The panel shows the data as told at once (it comes from the brief); the pull request's new check lands a moment later.
-    // The Done waits for the green line, as the other checks here do: a CLI call made while the hub still waits on the forge
-    // blocks this process, which serves the forge, and the hub gives up after 8 s (T-477).
-    await waitFor(() => manager("show", "T-2").out.includes("1 of 1 green"), 20_000);
+    await untilGreen();
     const done = manager("done", "T-2", "--why", "read the diff");
     assert(done.code === 0, `done should pass once data is told: ${done.out}`);
   });
