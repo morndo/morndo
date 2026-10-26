@@ -51,6 +51,8 @@ export type NodeBackend = {
   terminal?: Terminal;
   sessions?: Sessions;
   transcripts?: TranscriptSource;
+  altScreen?: (pane: string) => boolean;                               // the pane is on tmux's alternate screen (no scrollback)
+  refuseTranscripts?: boolean;                                         // a worker socket: transcript ops come back not_allowed
   readFile?: (path: string) => Promise<{ bytes: Uint8Array; mtime: number } | null>;
   inboxDir?: string;
   keyNames?: (pane: string, names: string[]) => Promise<boolean>;      // pane.keys by key name (fleet-clients §5)
@@ -181,7 +183,8 @@ export function localNode(name: string, server: string, b: NodeBackend, o: { sto
       case "pane.capture": {
         const p = paneOf(str("workerId"));
         const screen = p === null ? null : await b.tmux.capture(p);
-        return ok({ text: screen === null ? null : screen.split("\n").slice(-Math.max(1, num("lines"))).join("\n"), truncated: false });
+        const missing = p !== null && screen !== null && b.altScreen?.(p) === true && num("lines") > screen.split("\n").length;
+        return ok({ text: screen === null ? null : screen.split("\n").slice(-Math.max(1, num("lines"))).join("\n"), truncated: false, ...(missing ? { scrollbackMissing: true } : {}) });
       }
       case "pane.send":
         return keyed(key, op, args, async () => {
@@ -198,8 +201,10 @@ export function localNode(name: string, server: string, b: NodeBackend, o: { sto
         return ok(k.state === "done" && k.reply ? { state: "done", outcome: k.reply.ok ? k.reply.result : k.reply.error } : { state: "started" });
       }
       case "transcript.size":
+        if (b.refuseTranscripts) return refusal("not_allowed", "transcript.size is not allowed on the worker socket");
         return ok({ size: b.transcripts ? await b.transcripts.size(str("sessionId")) : null });
       case "transcript.read": {
+        if (b.refuseTranscripts) return refusal("not_allowed", "transcript.read is not allowed on the worker socket");
         const r = b.transcripts ? await b.transcripts.read(str("sessionId"), num("offset"), Math.min(num("max"), LIMITS.chunkBytes)) : null;
         return r ? ok({ bytes: Buffer.from(r.bytes).toString("base64"), eof: r.eof }) : refusal("bad_args", "no such transcript");
       }
@@ -251,6 +256,7 @@ export function localNode(name: string, server: string, b: NodeBackend, o: { sto
 // the paste, or "not_submitted" after it). `hold()` makes the next send wait in the pane after its paste until released.
 export type MemoryPane = {
   name: string; cwd: string; screen: string; sessionId?: string; problem?: SendProblem | null;
+  altScreen?: boolean;                                      // on tmux's alternate screen: the screen is all there is
   status?: SessionStatus; pid?: number;                    // its session's, with a session (default "idle", 1)
   topic?: string; lastPrompt?: string;                      // its session's title and last prompt
 };
@@ -270,6 +276,7 @@ export function memoryBackend(
   const transcriptOf = (sessionId: string) => o.transcripts?.[sessionId] ?? null;
   const b: MemoryBackend = {
     panes, typed: [], keysTyped: [], keyNamesTyped: [], typedAt: null,
+    altScreen: id => b.panes[id]?.altScreen === true,
     hold() {
       let release = () => {};
       held = new Promise<void>(r => { release = r; });
