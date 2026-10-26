@@ -749,16 +749,23 @@ export class JobSupervisor {
     const view = look.kind === "found" ? look.view : null;
     // A unit that is still stopping owes its end to this cancel too, so deactivating counts as not over.
     const live = view !== null && this.#unfinished(view);
+    // A unit systemd is stopping for its RuntimeMaxSec timed out before this cancel: the cancel ends it, and the
+    // timeout stays its end.
+    const timedOut = view !== null && view.active === "deactivating" && view.result === "timeout";
     if (live) {
       const after = await this.#endLive(id);
       if (after === "unsignalled") return err("unavailable");
-      if (after === "signalled") { this.#markCancel(id); return err("signalled"); }
+      if (after === "signalled") {
+        if (!timedOut) this.#markCancel(id);
+        return err("signalled");
+      }
       const current = this.#store.get(id);
       if (!current) return err("missing");
       if (current.outcome !== null) return this.#replay(current);
       const durationMs = after.kind === "found" ? runMs(after.view, current.startedAt) : 0;
+      const event: FinishEvent = timedOut ? { outcome: "timed_out", exitCode: null, durationMs } : { outcome: "cancelled", exitCode: null, durationMs };
       try {
-        const decided = this.#settle(id, { outcome: "cancelled", exitCode: null, durationMs });
+        const decided = this.#settle(id, event);
         if (!decided.ok) return this.#ended(id) ?? err("signalled");
         try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
         await resetJobUnit(id, this.#toolEnv);
