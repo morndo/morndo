@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, screenNamedUpload, sniffImage, utf8Text, type Upload } from "../src/index.ts";
+import { MAX_UPLOAD_BYTES, TEXT_MAX_BYTES, UPLOAD_ACCEPT, UPLOAD_TTL_MS, acceptNamedUpload, acceptUpload, attachable, commandText, endpointId, isUtf8Text, screenNamedUpload, sniffImage, uploadByteLimit, utf8Text, type Upload } from "../src/index.ts";
 
 const bytes = (...b: number[]) => new Uint8Array([...b, ...new Array(16).fill(0)]);
 const T0 = Date.UTC(2026, 9, 1, 12);
@@ -64,10 +64,9 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     const longPdf = acceptNamedUpload(text("%PDF-1.7\n"), pdf90);
     expect(longPdf.ok && longPdf.value.name.endsWith(".pdf") && longPdf.value.name.length <= 80).toBe(true);
   });
-  it("refuses executables, archives, HTML, SVG, a mismatched type, bad UTF-8, and a file over its limit", () => {
+  it("refuses executables, archives, SVG, a mismatched type, bad UTF-8, and a file over its limit", () => {
     expect(acceptNamedUpload(text("MZ"), "run.exe")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(new Uint8Array([0x50, 0x4b, 0x03, 0x04]), "a.zip")).toEqual({ ok: false, error: "not_allowed" });
-    expect(acceptNamedUpload(text("<!doctype html><script>"), "page.html")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "pic.svg")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'/>"), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
     expect(acceptNamedUpload(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), "notes.md")).toEqual({ ok: false, error: "not_utf8" });
@@ -78,6 +77,43 @@ describe("S1: a named upload is allowed only when its extension and its bytes ag
     expect(acceptNamedUpload(new Uint8Array(TEXT_MAX_BYTES + 1), "notes.md")).toEqual({ ok: false, error: "too_big" });
     expect(acceptNamedUpload(new Uint8Array(MAX_UPLOAD_BYTES + 1), "spec.pdf")).toEqual({ ok: false, error: "too_big" });
     expect(acceptNamedUpload(text("hi"), "")).toEqual({ ok: false, error: "not_allowed" });
+  });
+});
+
+describe("S1: an HTML page is its own kind: UTF-8 markup, up to 10 MB", () => {
+  it("accepts .html and .htm, script and all, as a page the worker reads", () => {
+    expect(acceptNamedUpload(text("<!doctype html><title>Report</title><script>run()</script>"), "report.html"))
+      .toEqual({ ok: true, value: { kind: "html", mime: "text/html", name: "report.html" } });
+    expect(acceptNamedUpload(text("<html><body>hi</body></html>"), "old.HTM")).toEqual({ ok: true, value: { kind: "html", mime: "text/html", name: "old.htm" } });
+    expect(acceptNamedUpload(text("<?xml version='1.0'?><html xmlns='http://www.w3.org/1999/xhtml'/>"), "x.html")).toMatchObject({ ok: true, value: { kind: "html" } });
+    expect(acceptNamedUpload(new Uint8Array([0xef, 0xbb, 0xbf, ...text("<html>")]), "bom.html")).toMatchObject({ ok: true, value: { kind: "html" } });
+    expect(acceptNamedUpload(text("<p>Grüße 日本 😀</p>"), "words.html")).toMatchObject({ ok: true, value: { kind: "html" } });
+  });
+  it("keeps a page's name as safe as any other", () => {
+    expect(acceptNamedUpload(text("<p>x</p>"), "../../Q3 Report.html")).toMatchObject({ ok: true, value: { kind: "html", name: "Q3_Report.html" } });
+  });
+  it("takes a page up to 10 MB, the size of a document, not the 1 MB of a note", () => {
+    expect(uploadByteLimit("html")).toBe(MAX_UPLOAD_BYTES);
+    expect(acceptNamedUpload(new Uint8Array(TEXT_MAX_BYTES + 1).fill(0x61), "big.html")).toMatchObject({ ok: true, value: { kind: "html" } });
+    expect(screenNamedUpload("big.html", MAX_UPLOAD_BYTES)).toMatchObject({ ok: true, value: { kind: "html", name: "big.html" } });
+    expect(screenNamedUpload("big.html", MAX_UPLOAD_BYTES + 1)).toEqual({ ok: false, error: "too_big" });
+    expect(acceptNamedUpload(new Uint8Array(MAX_UPLOAD_BYTES + 1).fill(0x61), "big.html")).toEqual({ ok: false, error: "too_big" });
+  });
+  it("refuses a page that isn't UTF-8 text (negative controls)", () => {
+    expect(acceptNamedUpload(new Uint8Array([0x3c, 0x70, 0x00, 0x3e]), "nul.html")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(new Uint8Array([0x3c, 0x70, 0x3e, 0xe9, 0x3c]), "latin1.html")).toEqual({ ok: false, error: "not_utf8" });
+    expect(acceptNamedUpload(png(), "shot.html")).toEqual({ ok: false, error: "not_allowed" });
+  });
+  it("still refuses SVG, and markup dressed as a note (negative controls)", () => {
+    expect(acceptNamedUpload(text("<svg xmlns='http://www.w3.org/2000/svg'><script/></svg>"), "pic.svg")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("<!doctype html><script>"), "page.txt")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("<html><script>"), "notes.md")).toEqual({ ok: false, error: "not_allowed" });
+    expect(acceptNamedUpload(text("<html>"), "page.xhtml")).toEqual({ ok: false, error: "not_allowed" });
+  });
+  it("offers .html and .htm in the file picker, and still not .svg", () => {
+    const offered = UPLOAD_ACCEPT.split(",");
+    expect(offered).toEqual(expect.arrayContaining([".html", ".htm", ".md", ".pdf", ".png"]));
+    expect(offered).not.toContain(".svg");
   });
 });
 
@@ -109,6 +145,16 @@ describe("S1: UTF-8 is read from the bytes themselves, with no platform decoder"
   it("refuses a NUL byte", () => {
     expect(utf8Text(new Uint8Array([0]))).toBeNull();
     expect(utf8Text(new Uint8Array([0x61, 0x00, 0x62]))).toBeNull();
+  });
+  it("judges a page's bytes by the same rules without building its text, so a 10 MB page costs no string", () => {
+    const good = [new Uint8Array(0), text("plain"), text("café 日本語 a 😀"), new Uint8Array([0xef, 0xbb, 0xbf, 0x3c])];
+    const bad = [
+      [0xc0, 0xaf], [0xe0, 0x80, 0xaf], [0xf0, 0x80, 0x80, 0xaf], [0xed, 0xa0, 0x80], [0xed, 0xbf, 0xbf], [0xf4, 0x90, 0x80, 0x80],
+      [0xe2, 0x82], [0xf0, 0x9f, 0x98], [0x61, 0x80], [0xfe, 0xff], [0], [0x61, 0x00, 0x62],
+    ].map(b => new Uint8Array(b));
+    for (const b of good) expect([isUtf8Text(b), utf8Text(b) !== null]).toEqual([true, true]);
+    for (const b of bad) expect([isUtf8Text(b), utf8Text(b)]).toEqual([false, null]);
+    expect(isUtf8Text(new Uint8Array(MAX_UPLOAD_BYTES).fill(0x61))).toBe(true);
   });
   it("still notices HTML behind a BOM", () => {
     expect(acceptNamedUpload(new Uint8Array([0xef, 0xbb, 0xbf, ...text("<html><script>")]), "notes.md")).toEqual({ ok: false, error: "not_allowed" });

@@ -19,7 +19,7 @@ export function refusalMessage(name: string, error: UploadRefusal): string {
   if (error === "bad_name") return `${shown} has a file name that can't be kept.`;
   if (error === "not_an_image") return `${shown} isn't a PNG, JPEG, GIF or WebP image.`;
   if (error === "too_many") return `${shown} is waiting on too many other recordings. Try again in a minute.`;
-  return `${shown} can't be attached. Use an image, a PDF, or a text file (.md, .txt, .json, .csv, .yaml, .yml, .log).`;
+  return `${shown} can't be attached. Use an image, a PDF, an HTML page, or a text file (.md, .txt, .json, .csv, .yaml, .yml, .log).`;
 }
 
 export function fileSize(n: number): string {
@@ -28,7 +28,7 @@ export function fileSize(n: number): string {
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-export function fileType(name: string, kind: AttachmentKind): string {
+export function fileType(name: string, kind: AttachmentKind | UploadKind): string {
   if (kind === "pdf") return "PDF";
   const ext = name.includes(".") ? name.split(".").pop()?.toUpperCase() ?? "" : "";
   return ext || "File";

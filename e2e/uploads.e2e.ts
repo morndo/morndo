@@ -1,5 +1,8 @@
-// A text file attached on the desktop and on the phone reaches the lane as a path, the way an image does.
-// An executable and an oversized text file are refused in words. Run: npm run build && node e2e/uploads.e2e.ts
+// A text file attached on the desktop and on the phone reaches the lane as a path, the way an image does; so does an
+// HTML page, byte for byte, without its script running in the app. An executable, an oversized text file and a page
+// over 10 MB are refused in words. Run: npm run build && node e2e/uploads.e2e.ts
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { chromium } from "playwright";
 import { assert, checks, outDir, pairedPage, startOffice } from "./harness.ts";
 
@@ -48,6 +51,27 @@ try {
     assert(paths.some(p => p.endsWith("notes.md")) && paths.some(p => p.endsWith("rows.csv")), `paths: ${paths.join(" ")}`);
   });
 
+  await check("the desktop attaches an HTML page, script and all; the lane gets it byte for byte and the app runs none of it", async () => {
+    tmux("send-keys", "-t", panes.builder ?? "", "clear", "Enter");
+    // Two markers: a <script> runs if the page is loaded as a page, an onerror also if its markup is put into the app's DOM.
+    const html = `<!doctype html><meta charset="utf-8"><title>Q3</title><p>Grüße</p><script>window.__ran = 1</script><img src=x onerror="window.__ran = 2">\n`;
+    const input = page.locator('.box input[type="file"]');
+    await input.setInputFiles({ name: "huge.html", mimeType: "text/html", buffer: Buffer.alloc(10 * 1024 * 1024 + 1, 0x61) });
+    await page.getByText("huge.html is over 10 MB.").waitFor();
+    await input.setInputFiles({ name: "Q3 report.html", mimeType: "text/html", buffer: Buffer.from(html) });
+    const chip = page.locator(".filechip", { hasText: "Q3_report.html" });
+    await chip.waitFor({ timeout: 8000 });
+    assert((await chip.innerText()).includes("HTML"), `the chip doesn't say HTML: ${await chip.innerText()}`);
+    assert(!(await chip.getAttribute("class"))?.includes("error"), `the page was refused: ${await chip.getAttribute("title")}`);
+    await page.locator("#composer").fill("read the report");
+    await page.locator(".tools").getByRole("button", { name: "Send" }).click();
+    await until(() => screen().includes("read the report") && /Q3_report\.html\]/.test(screen()), 12_000, "the page was not typed");
+    const path = /\[The owner attached a file: (\/[^\]]+Q3_report\.html)\]/.exec(screen())?.[1] ?? "";
+    assert(readFileSync(path, "utf8") === html, `the lane's copy at ${path} differs from the page sent`);
+    assert(await page.evaluate(() => (window as unknown as { __ran?: number }).__ran) === undefined, "the page's script ran in the app");
+    await page.screenshot({ path: join(OUT, "html-sent.png") });
+  });
+
   await desk.context.close();
 
   await check("the phone attaches a markdown file and the lane receives it", async () => {
@@ -58,12 +82,17 @@ try {
     const convo = p.getByRole("region", { name: "Conversation with builder" });
     await convo.getByRole("textbox", { name: "Message builder" }).waitFor();
     tmux("send-keys", "-t", panes.builder ?? "", "clear", "Enter");
-    await convo.locator('input[type="file"]').setInputFiles({ name: "phone.md", mimeType: "text/markdown", buffer: Buffer.from("# From the phone\n") });
+    await convo.locator('input[type="file"]').setInputFiles([
+      { name: "phone.md", mimeType: "text/markdown", buffer: Buffer.from("# From the phone\n") },
+      { name: "phone.html", mimeType: "text/html", buffer: Buffer.from("<!doctype html><p>From the phone</p>\n") },
+    ]);
     await convo.locator(".chip", { hasText: "phone.md" }).waitFor({ timeout: 8000 });
     assert((await convo.locator(".chip", { hasText: "phone.md" }).innerText()).includes("MD"), "the phone chip has no type");
+    await convo.locator(".chip", { hasText: "phone.html" }).waitFor({ timeout: 8000 });
+    assert((await convo.locator(".chip", { hasText: "phone.html" }).innerText()).includes("HTML"), "the phone's page chip doesn't say HTML");
     await convo.getByRole("textbox", { name: "Message builder" }).fill("from the phone");
     await convo.getByRole("button", { name: "Send" }).click();
-    await until(() => screen().includes("from the phone") && /phone\.md\]/.test(screen()), 12_000, "the phone file was not typed");
+    await until(() => screen().includes("from the phone") && /phone\.md\]/.test(screen()) && /phone\.html\]/.test(screen()), 12_000, "the phone files were not typed");
     await phone.context.close();
   });
 
