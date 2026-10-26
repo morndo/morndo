@@ -258,12 +258,14 @@ describe("release-commits-verified", () => {
   let bin: string;
   beforeEach(() => {
     bin = mkdtempSync(join(tmpdir(), "fakegh-"));
-    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_GH_LOG"\ncase "$2" in\n  */pulls) [ -f "$FAKE_GH_PULLS" ] && cat "$FAKE_GH_PULLS" || exit 1 ;;\n  *) [ -f "$FAKE_GH_COMMIT" ] && cat "$FAKE_GH_COMMIT" || exit 1 ;;\nesac\n`, { mode: 0o755 });
+    // FAKE_GH_PULLS_LATE: how many of the first pull request asks answer [] (GitHub has not linked the commit yet).
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_GH_LOG"\ncase "$2" in\n  */pulls) [ "$(grep -c '/pulls$' "$FAKE_GH_LOG")" -gt "\${FAKE_GH_PULLS_LATE:-0}" ] || { echo '[]'; exit 0; }\n    [ -f "$FAKE_GH_PULLS" ] && cat "$FAKE_GH_PULLS" || exit 1 ;;\n  *) [ -f "$FAKE_GH_COMMIT" ] && cat "$FAKE_GH_COMMIT" || exit 1 ;;\nesac\n`, { mode: 0o755 });
   });
   afterEach(() => { rmSync(bin, { recursive: true, force: true }); });
 
   // The range holds one commit by the App's identity and one by Ada; the API is told `commit` and `pulls` (undefined: the call fails).
-  function list(commit: unknown, pulls: unknown, who: Who = BOT) {
+  // `late` pull request asks answer [] first; the script waits 0 s between asks here.
+  function list(commit: unknown, pulls: unknown, who: Who = BOT, o: { late?: number; tries?: string } = {}) {
     const base = git(["rev-parse", "HEAD"]);
     const mine = commit_(ADA, WEB, "fix: other", { "src/a.ts": "export const a = 5;\n" });
     const app = commit_(who, WEB, "chore(main): release 0.1.0", RELEASE);
@@ -273,7 +275,8 @@ describe("release-commits-verified", () => {
     writeFileSync(files.log, "");
     if (commit !== undefined) writeFileSync(files.c, JSON.stringify(commit));
     if (pulls !== undefined) writeFileSync(files.p, JSON.stringify(pulls));
-    const r = spawnSync("sh", [LISTER, `${base}..HEAD`], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, REPO, FAKE_GH_COMMIT: files.c, FAKE_GH_PULLS: files.p, FAKE_GH_LOG: files.log } });
+    const retry = { RELEASE_PR_WAIT: "0", FAKE_GH_PULLS_LATE: String(o.late ?? 0), ...(o.tries === undefined ? {} : { RELEASE_PR_TRIES: o.tries }) };
+    const r = spawnSync("sh", [LISTER, `${base}..HEAD`], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, REPO, FAKE_GH_COMMIT: files.c, FAKE_GH_PULLS: files.p, FAKE_GH_LOG: files.log, ...retry } });
     return { listed: r.stdout.split("\n").filter(Boolean), app, mine, status: r.status, calls: readFileSync(files.log, "utf8").split("\n").filter(Boolean) };
   }
   function commit_(author: Who, committer: Who, message: string, files: Files) { write(files); return commit(author, committer, message); }
@@ -315,6 +318,18 @@ describe("release-commits-verified", () => {
   it("lists the commit when any one of several pull requests is the App's", () => {
     const lane = { ...GOOD_PR, number: 7, user: { login: "ada-dev", type: "User" } };
     expect(list(GOOD_COMMIT, [lane, GOOD_PR]).listed).toHaveLength(1);
+  });
+
+  it("asks again for a pull request GitHub has not linked yet, and lists the commit once it is there", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR], BOT, { late: 2 });
+    expect(r.listed).toEqual([r.app]);
+    expect(r.calls.filter((c) => c.endsWith("/pulls"))).toHaveLength(3);
+  });
+
+  it("gives up after RELEASE_PR_TRIES asks and lists nothing", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR], BOT, { late: 3, tries: "3" });
+    expect(r.listed).toEqual([]);
+    expect(r.calls.filter((c) => c.endsWith("/pulls"))).toHaveLength(3);
   });
 
   it("lists nothing when an API call fails, and never lists a commit of another author", () => {
