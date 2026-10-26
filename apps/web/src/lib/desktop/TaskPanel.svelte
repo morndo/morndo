@@ -13,7 +13,7 @@
   import StatusIcon from "./StatusIcon.svelte";
   import "./board-controls.css";
   import ProofSection from "./ProofSection.svelte";
-  import { acceptLabel, COLUMNS, decodeProof, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, whoOf, type MergedView, type ProofView, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
+  import { acceptLabel, COLUMNS, decodeProof, PRIORITY_OPTIONS, PRIORITY_WORDS, STATUS_WORDS, ago, avatarOf, eventLine, waitWords, whoOf, type MergedView, type ProofView, type Task, type TaskEvent, type TaskStatus } from "./board.ts";
   import { clock } from "./grouping.ts";
 
   let { task, lanes, now, merged = null, pendingBlock = false, notice = null, onAct, onOpenLane, onClose }: {
@@ -157,6 +157,7 @@
       </div>
       <div><dt>Priority</dt><dd>{PRIORITY_WORDS[task.priority]}</dd></div>
       {#if task.blockedReason}<div><dt>Blocked</dt><dd class="bad">{task.blockedReason}</dd></div>{/if}
+      {#if task.status === "blocked" && task.waits?.length}<div><dt>Waits on</dt><dd data-waits title="The board watches these and moves the task to do when all are over">{task.waits.map(waitWords).join(", ")}</dd></div>{/if}
       <div><dt>Filed</dt><dd>{ago(task.createdAt, now)} by {task.createdBy.kind === "principal" ? "you" : whoOf(task.createdBy)}</dd></div>
     </dl>
 
