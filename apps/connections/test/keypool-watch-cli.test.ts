@@ -128,32 +128,32 @@ describe("--once", () => {
     writeFileSync(w.log, `${CREDIT}\n${CREDIT}\n${SPEND}\n`);
     expect(lines(await watch(w, "--member", "k1", "--once"))).toHaveLength(1);
   });
-  it("--env-file reads the member from the sidecar at the match", async () => {
+  it("--sink reads the member from the sidecar at the match", async () => {
     const w = await world();
     writeFileSync(`${w.file}.member`, "k3\n");
     writeFileSync(w.log, `${CREDIT}\n`);
-    expect(lines(await watch(w, "--env-file", w.file, "--once"))).toEqual([{ pool: "p", member: "k3", outcome: "exhausted" }]);
+    expect(lines(await watch(w, "--sink", w.file, "--once"))).toEqual([{ pool: "p", member: "k3", outcome: "exhausted" }]);
     expect(await states(w)).toEqual(["active", "active", "exhausted"]);
   });
-  it("--env-file with no sidecar, or one naming a member that is not in the pool, reports nothing", async () => {
+  it("--sink with no sidecar, or one naming a member that is not in the pool, reports nothing", async () => {
     const w = await world();
     writeFileSync(w.log, `${CREDIT}\n`);
-    expect((await watch(w, "--env-file", w.file, "--once")).stdout).toBe("");
+    expect((await watch(w, "--sink", w.file, "--once")).stdout).toBe("");
     writeFileSync(`${w.file}.member`, "k9\n");
-    const out = await watch(w, "--env-file", w.file, "--once");
+    const out = await watch(w, "--sink", w.file, "--once");
     expect([out.code, out.stdout]).toEqual([0, ""]);
     expect(await states(w)).toEqual(["active", "active", "active"]);
   });
-  it("usage and missing: one of --member or --env-file, --log needed, a pool and a member that exist, a file that is a sink", async () => {
+  it("usage and missing: one of --member or --sink, --log needed, a pool and a member that exist, a file that is a sink", async () => {
     const w = await world();
     writeFileSync(w.log, "x\n");
     const word = async (args: string[]) => (await cli(args, w.env)).stderr.trim();
     expect(await word(["keypool", "watch", "p", "--once"])).toBe("usage");
     expect(await word(["keypool", "watch", "p", "--log", w.log, "--once"])).toBe("usage");
-    expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k1", "--env-file", w.file, "--once"])).toBe("usage");
+    expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k1", "--sink", w.file, "--once"])).toBe("usage");
     expect(await word(["keypool", "watch", "nope", "--log", w.log, "--member", "k1", "--once"])).toBe("missing");
     expect(await word(["keypool", "watch", "p", "--log", w.log, "--member", "k9", "--once"])).toBe("missing");
-    expect(await word(["keypool", "watch", "p", "--log", w.log, "--env-file", join(w.sinks, "other.env"), "--once"])).toBe("not_a_sink");
+    expect(await word(["keypool", "watch", "p", "--log", w.log, "--sink", join(w.sinks, "other.env"), "--once"])).toBe("not_a_sink");
   });
   it("a log that is not there is an error with --once", async () => {
     const w = await world();
@@ -199,11 +199,11 @@ describe("following the log", () => {
     writeFileSync(w.log, `${CREDIT}\n`);
     await until(async () => (await states(w))[0] === "exhausted", "k1 to be reported dry once the log appeared");
   });
-  it("--env-file follows a rotated key: the member is read from the sidecar at each match", async () => {
+  it("--sink follows a rotated key: the member is read from the sidecar at each match", async () => {
     const w = await world();
     writeFileSync(`${w.file}.member`, "k1\n");
     writeFileSync(w.log, "");
-    follow(w, "--env-file", w.file);
+    follow(w, "--sink", w.file);
     await sleep(2500);
     appendFileSync(w.log, `${CREDIT}\n`);
     await until(async () => (await states(w))[0] === "exhausted", "k1 to be reported dry");

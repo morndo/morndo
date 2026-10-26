@@ -1,12 +1,14 @@
 // `morndo-keys keypool …` (ADR-0037). Exit 0 when done; 1 when refused, with the reason word on stderr. A pick that is refused (the pool
 // is empty or blocked, a gate says no) exits 75, as `lease` and `run` do. `create`, `add`, `move` and `revive` are the principal's
 // (KP10): the command id is "cli", as every other command of this bin.
-import { existsSync, readFileSync, realpathSync, statSync } from "node:fs";
-import { isSinkPath, type Actor, type Outcome } from "@morndo/domain";
+import { closeSync, existsSync, openSync, readFileSync, readSync, realpathSync, statSync } from "node:fs";
+import { StringDecoder } from "node:string_decoder";
+import { findConnection, isKey, isSinkPath, type Actor, type Outcome } from "@morndo/domain";
 import type { ProbeResult, ReportBy } from "./application/key-pool-service.ts";
 import type { Opened } from "./compose.ts";
 import { fail, gateRuntime, need, pooledProbe, prepareLease, serveLeased, type Io, type Parsed } from "./cli.ts";
 import { ENV_NAME, envPathProblem, writeEnvFile } from "./adapters/env-file.ts";
+import { lineScanner, redactingWriter, type Verdict } from "./adapters/log-watch.ts";
 import { signalFromHook } from "./adapters/outcome-anthropic.ts";
 import { selfHolder, selfId } from "./adapters/processes.ts";
 
@@ -96,6 +98,7 @@ export async function keyPoolCommand(home: Opened, parsed: Parsed, io: Io): Prom
     }
     case "sink": return sink(home, parsed, io);
     case "write-env": return writeEnv(home, need(pool), parsed, io);
+    case "watch": return watch(home, need(pool), parsed, io);
     case "sync": return done(home.keypools.sync(), io);
     case "recheck": return recheck(home, parsed, io);
     case "revive": return done(home.keypools.revive(need(pool), need(member), ACTOR), io);
@@ -178,6 +181,92 @@ function due(members: readonly { credential: string; state: string }[], file: st
   const named = readFileSync(sidecar, "utf8").trim();
   if (members.find(row => row.credential === named)?.state !== "active") return true;
   return rotate !== undefined && Date.now() - written >= rotate;
+}
+
+const WATCH_POLL_MS = 250;
+const WATCH_ONCE_MS = 10_000;
+const READ_CHUNK = 65_536;
+// What a verdict is told to the pool as: a canned phrase, never a part of the log line.
+const WATCH_SIGNAL: Readonly<Record<Exclude<Verdict, "none">, string>> = {
+  "exhausted-credit": "credit balance is too low",
+  "exhausted-spend": "you have reached your specified API usage limits",
+};
+
+// `keypool watch <pool> --log <file> (--member M | --sink <sink>) [--once]` (plan 3.6). The matched line is never printed or kept: a verdict is a word,
+// the report names the member, a member is reported at most once in ten seconds, and what is printed passes the exact-value filter of the pool's keys.
+async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promise<number> {
+  const log = parsed.get("log");
+  const named = parsed.get("member");
+  const sinkPath = parsed.get("sink");
+  const once = parsed.get("once") === "true";
+  if (log === undefined || (named === undefined) === (sinkPath === undefined)) return fail(io, "usage");
+  const state = home.keypools.state(pool);
+  if (state === null) return fail(io, "missing");
+  if (named !== undefined && !state.members.some(row => row.credential === named)) return fail(io, "missing");
+  if (sinkPath !== undefined && !(home.keypools.sinksOf(pool) ?? []).includes(sinkPath)) return fail(io, "not_a_sink");
+  if (once && !existsSync(log)) return fail(io, "no_log");
+  const secrets: string[] = [];
+  for (const row of state.members) {
+    const connection = findConnection(home.store.load().directory, row.credential);
+    if (!connection || !isKey(connection) || connection.custody !== "morndo") continue;
+    try { secrets.push(await home.open(connection.ref)); } catch { /* not readable: nothing to filter */ }
+  }
+  const print = redactingWriter(text => { io.stdout(text); }, secrets);
+  const reportedAt = new Map<string, number>();
+  const memberNow = (): string | null => {
+    if (named !== undefined) return named;
+    try { return readFileSync(`${sinkPath ?? ""}.member`, "utf8").trim() || null; } catch { return null; }
+  };
+  const act = (verdicts: readonly Verdict[]): void => {
+    for (const verdict of verdicts) {
+      if (verdict === "none") continue;
+      const member = memberNow();
+      if (member === null) continue;
+      const last = reportedAt.get(member);
+      if (last !== undefined && Date.now() - last < WATCH_ONCE_MS) continue;
+      const signal = { status: null, kind: null, text: WATCH_SIGNAL[verdict], retryAfterSeconds: null, code: null, resumeDate: null };
+      const reported = home.keypools.reportRefusal(pool, { kind: "member", member }, signal, home.now());
+      if (!reported.ok || reported.value.outcome !== "exhausted") continue;
+      reportedAt.set(member, Date.now());
+      print(`${JSON.stringify({ pool, member, outcome: "exhausted" })}\n`);
+    }
+  };
+  // Where the log is read from: its end when it is there at the start; the start of a file that appears later, is truncated or is replaced.
+  let offset = 0;
+  let inode: number | null = null;
+  let scanner = lineScanner();
+  let decoder = new StringDecoder("utf8");
+  let first = true;
+  for (;;) {
+    let size = -1;
+    let ino = -1;
+    try { const found = statSync(log); size = found.size; ino = found.ino; } catch { /* not there (yet) */ }
+    if (size >= 0) {
+      let renewed = false;
+      if (first && !once) offset = size;
+      else if ((inode !== null && ino !== inode) || size < offset) { offset = 0; renewed = true; }
+      if (renewed) { scanner = lineScanner(); decoder = new StringDecoder("utf8"); }
+      inode = ino;
+      first = false;
+      const fd = openSync(log, "r");
+      try {
+        const buffer = Buffer.alloc(READ_CHUNK);
+        while (offset < size) {
+          const got = readSync(fd, buffer, 0, Math.min(READ_CHUNK, size - offset), offset);
+          if (got <= 0) break;
+          offset += got;
+          act(scanner.push(decoder.write(buffer.subarray(0, got))));
+        }
+      } finally { closeSync(fd); }
+    } else if (first) {
+      first = false;
+    } else {
+      inode = null;
+      offset = 0;
+    }
+    if (once || io.gone?.aborted) return 0;
+    await new Promise<void>(resolve => { setTimeout(resolve, WATCH_POLL_MS); });
+  }
 }
 
 // A KP18 report that fell back to the hand-off window names the current member to suspect: one claimed probe of it decides.

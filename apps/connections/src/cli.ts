@@ -106,6 +106,7 @@ morndo-keys keypool report <pool> --outcome exhausted|failing|limited --grant <i
 morndo-keys keypool report <pool> (--member M | --grant <id>) --from-hook    the agent CLI's StopFailure payload on stdin (a pooled run's settings name this command as the hook): read, classified and dropped, never stored; only a refusal of the key (credit, spend limit, 401/403, hold) changes anything. Prints the pool and one word.
 morndo-keys keypool sink add|remove|list <pool> [<path>]    the files write-env writes the pool's key to; every registered path (and its .member sidecar) is denied to the tools of a run
 morndo-keys keypool write-env <pool> --file <sink> --var NAME --isolation rules [--if-due [--rotate-every 12h]]    writes the next member's key to a registered sink as NAME=value (0600, by rename) and its name to <sink>.member, under one gated lease; --if-due only when that member can no longer serve, a file is missing or --rotate-every has passed (round-robin only). The writer's isolation is its own claim, as for lease. It prints the pool and a word, never the key or the path. Refused for a path in a repository or in a directory group or others can write.
+morndo-keys keypool watch <pool> --log <file> (--member M | --sink <sink>) [--once]    for a server that cannot report a dry key itself: reads its log and, on the credit-balance or the usage-limit phrase, reports the member (--sink: the one named in <sink>.member at that moment). It never prints the line it matched, only the pool, the member and a word; a member is reported at most once in ten seconds. Without --once it follows the log from its end, from the start of a file that is new, truncated or replaced; --once reads what the log holds now and exits.
 morndo-keys keypool sync
 morndo-keys lease --pool <name> …        morndo-keys run --pool <name> [--role R] [--workspace DIR] [--reserve USD] -- <agent arguments>
 morndo-keys check --pool <name>
@@ -1157,7 +1158,7 @@ function parse(argv: readonly string[]): Parsed {
   const values = new Map<string, string[]>();
   for (let i = 1; i < ours.length; i++) {
     const token = ours[i] ?? "";
-    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed" || token === "--confirm-own-account" || token === "--from-hook" || token === "--if-due") {
+    if (token === "--subscription" || token === "--all" || token === "--risk" || token === "--json" || token === "--report" || token === "--notify" || token === "--yes" || token === "--keep" || token === "--signed" || token === "--confirm-own-account" || token === "--from-hook" || token === "--if-due" || token === "--once") {
       values.set(token.slice(2), ["true"]);
       continue;
     }
