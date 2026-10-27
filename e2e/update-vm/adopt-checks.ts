@@ -55,3 +55,33 @@ export function missingRows(answer: string, expected: readonly string[]): string
   const have = new Set(answer.split("\n").map(l => l.trim()));
   return expected.filter(e => !have.has(e));
 }
+
+/** The hash SHA256SUMS gives a file ("<64 hex>  name" or "<64 hex> *name"); the name must match whole. */
+export function sha256For(sumsText: string, fileName: string): string | null {
+  for (const line of sumsText.split("\n")) {
+    const m = /^([0-9a-f]{64}) [ *](.+?)\s*$/.exec(line);
+    if (m !== null && m[2] === fileName) return m[1] ?? null;
+  }
+  return null;
+}
+
+/** The text of the README's single-quoted `echo '...' > morndo.allowed_signers` line; null when absent or ambiguous. */
+export function allowedSignersLine(readmeText: string): string | null {
+  const found = new Set<string>();
+  for (const line of readmeText.split("\n")) {
+    const m = /^\s*echo '([^']*)' > morndo\.allowed_signers\s*$/.exec(line);
+    if (m !== null && m[1] !== undefined) found.add(m[1]);
+  }
+  return found.size === 1 ? [...found][0] ?? null : null;
+}
+
+const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
+
+/** `--published <semver>` from the arguments; null when the flag is absent, a throw when its value is missing or no version. */
+export function parsePublished(argv: readonly string[]): string | null {
+  const at = argv.indexOf("--published");
+  if (at < 0) return null;
+  const value = argv[at + 1];
+  if (value === undefined || !SEMVER.test(value)) throw new Error(`--published needs a version like 0.1.1, got ${JSON.stringify(value ?? null)}`);
+  return value;
+}
