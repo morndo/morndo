@@ -398,3 +398,30 @@ describe("a Decision pushes only once it has waited a minute without a break (N2
     expect(sent).toEqual([]);
   });
 });
+
+describe("the settle on a busy board, and while he attends (review of the N2 settle)", () => {
+  let quiet: NotificationService;
+  const later = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); await quiet.settled(); };
+  beforeEach(() => {
+    quiet = new NotificationService({ store, send: async (s, payload, options) => { sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options }); return { status: 201 }; } });
+    quiet.board([]);
+  });
+  afterEach(() => quiet.stop());
+
+  it("a board fed again with the same Decision keeps its minute: the hub feeds the whole board on every change", async () => {
+    quiet.board([decision("ny-4")]);
+    await later(30_000);
+    quiet.board([decision("ny-4")]);
+    await later(20_000);
+    quiet.board([decision("ny-4"), decision("ny-5", "settled")]);
+    await later(11_000);
+    expect(sent).toHaveLength(2);                                    // at the minute, not a minute after the last feed
+  });
+  it("a settle that ends while he is attending sends nothing (N3)", async () => {
+    quiet.board([decision("ny-6")]);
+    await later(59_000);
+    quiet.attending("tab-1", true);
+    await later(2_000);
+    expect(sent).toEqual([]);
+  });
+});
