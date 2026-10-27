@@ -223,6 +223,11 @@ const OLD_UNITS = new Map(SERVICES.map(s => [s.unit, legacyUnitText(s)]));
 const OLD_WRAPPERS = new Map(SERVICES.map(s => [s.wrapper, legacyWrapperText(s)]));
 const OLD_ENV_LINE = "Environment=PATH=%h/.nvm/versions/node/v24.0.0/bin:/usr/local/bin:/usr/bin:/bin";
 
+// A legacy unit of ours that is not a shipped one (the install ignores it) and is neither running nor enabled at backup
+// time: the restore has to leave it stopped even though something started it after the backup.
+const SPARE_UNIT = "morndo-spare.service";
+const SPARE_TEXT = "[Unit]\nDescription=Morndo spare (rehearsal)\n\n[Service]\nExecStart=/bin/sleep 100000\n";
+
 const DBS = [["hub", HUB_DB], ["fleet", FLEET_DB], ["node", NODE_DB]] as const;
 const MARKERS = [LANE, NODE_NAME];
 
@@ -422,12 +427,14 @@ async function main(): Promise<number> {
   // ---- c: the backup and the dead-man's switch (no ok marker). The node unit has a drop-in folder, as a tuned machine does.
   mkdirSync(DROPIN_DIR, { recursive: true });
   writeFileSync(join(DROPIN_DIR, "limits.conf"), OLD_DROPIN);
+  writeFileSync(join(UNIT_DIR, SPARE_UNIT), SPARE_TEXT);
   run("systemctl", ["--user", "daemon-reload"]);
   const backed = command("c-backup", "sh", [join(E2E, "scripts/c6/backup.sh"), BACKUP, ...DBS.flatMap(([n, p]) => ["--db", `${n}=${p}`]), "--db", `memory=${MEMORY_DB}`]);
   const backedOk = backed.code === 0 && existsSync(join(BACKUP, "restore.sh")) && existsSync(join(BACKUP, "ROLLBACK.md"))
     && DBS.every(([n]) => existsSync(join(BACKUP, `dbs/${n}.db`)) && missingRows(sqlite(join(BACKUP, `dbs/${n}.db`), "SELECT v FROM c6_marker"), MARKERS).length === 0)
     && existsSync(join(BACKUP, "units/morndo-node.service.d/limits.conf"))
-    && SERVICES.every(s => existsSync(join(BACKUP, "units", s.unit)) && existsSync(join(BACKUP, "wrappers", s.wrapper)));
+    && SERVICES.every(s => existsSync(join(BACKUP, "units", s.unit)) && existsSync(join(BACKUP, "wrappers", s.wrapper)))
+    && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").includes(`${SPARE_UNIT} active=no enabled=no`);
   check("c-backup", backedOk, `backup.sh exited ${backed.code}: ${firstLines(backed, 2)}; units: ${readdirSync(join(BACKUP, "units")).join(", ")}; wrappers: ${readdirSync(join(BACKUP, "wrappers")).join(", ")}`);
   if (failed) return finish(server);
   const armed = command("c-arm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(DEADMAN_SECONDS)]);
@@ -461,6 +468,9 @@ async function main(): Promise<number> {
   check("d-services-healthy", afterRestart.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))),
     `${sawNew === "new" ? "no restart needed" : "after systemctl --user restart of the three units"}: ${afterRestart.detail}`);
   if (failed) { journals("d-restart"); return finish(server); }
+  // Simulates the install (or anyone) starting a unit that was stopped at backup time.
+  run("systemctl", ["--user", "start", SPARE_UNIT]);
+  check("d-spare-started", unitActive(SPARE_UNIT), `${SPARE_UNIT} (stopped and not enabled at backup time) was started by hand after the install`);
 
   // ---- e: the proofs on the adopted machine.
   await proofs("e", baseline);
@@ -471,10 +481,13 @@ async function main(): Promise<number> {
   const rearmed = command("f-rearm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(FIRING_SECONDS)]);
   const armedAt = Date.now();
   check("f-rearmed", disarmed.code === 0 && rearmed.code === 0, `long switch disarmed (${disarmed.code}), fresh ${FIRING_SECONDS} s switch armed (${rearmed.code}): ${firstLines(rearmed, 2)}`);
-  sqlite(NODE_DB, "INSERT INTO c6_marker VALUES ('after-backup')");
+  // An extra row in a database whose schema does not change (the dead-man must leave it alone), and a migration of the
+  // node database after the install (a new column and a row): the dead-man must keep a copy of it and put the old one back.
+  sqlite(HUB_DB, "INSERT INTO c6_marker VALUES ('after-backup')");
+  sqlite(NODE_DB, "ALTER TABLE c6_marker ADD COLUMN extra TEXT; INSERT INTO c6_marker (v) VALUES ('after-migration')");
   const remaining = FIRING_SECONDS - Math.round((Date.now() - armedAt) / 1000);
   check("f-armed-still-pending", remaining > 0 && run("systemctl", ["--user", "is-active", "c6-deadman-m1.timer"]).out.trim() === "active",
-    `an extra row is written after the backup; the timer has ${remaining} s left`);
+    `an extra row is written into the hub database and the node database gets a new column and a row after the backup; the timer has ${remaining} s left`);
   if (failed) return finish(server);
   const fired = await waitDeadmanGone("m1", (Math.max(remaining, 0) + 150) * 1000);
   await sleep(2000);
@@ -483,7 +496,7 @@ async function main(): Promise<number> {
   check("f-deadman-fired", fired && !dm1.failedRun, `the timer fired and no failed result was logged (clean-exit line present: ${dm1.ranOk}); last journal lines: ${dm1.text}`);
   const unitsBack = SERVICES.every(s => readFileSync(join(UNIT_DIR, s.unit), "utf8") === OLD_UNITS.get(s.unit));
   const morndoUnits = readdirSync(UNIT_DIR).filter(n => n.startsWith("morndo-")).sort();
-  const expectedUnits = [...SERVICES.map(s => s.unit), "morndo-node.service.d"].sort();
+  const expectedUnits = [...SERVICES.map(s => s.unit), SPARE_UNIT, "morndo-node.service.d"].sort();
   check("f-units-restored", unitsBack && JSON.stringify(morndoUnits) === JSON.stringify(expectedUnits),
     `the three units are the old unmarked text again: ${unitsBack}; morndo-* in the unit folder: ${morndoUnits.join(", ")}`);
   const dropinFiles = existsSync(DROPIN_DIR) ? readdirSync(DROPIN_DIR).sort() : [];
@@ -498,9 +511,27 @@ async function main(): Promise<number> {
   const backCmd = SERVICES.map(s => cmdlineOf(s.unit));
   check("f-old-folder-running", backHealthy.ok && backCmd.every(runsOld), `${backHealthy.detail}; processes: ${backCmd.join(" || ")}`);
   const quicksF = DBS.map(([n, path]) => `${n}=${quickCheck(path)}`);
-  const extra = missingRows(sqlite(NODE_DB, "SELECT v FROM c6_marker"), ["after-backup", ...MARKERS]);
+  const extra = missingRows(sqlite(HUB_DB, "SELECT v FROM c6_marker"), ["after-backup", ...MARKERS]);
   check("f-extra-row-kept", quicksF.every(q => q.endsWith("=ok")) && extra.length === 0,
-    `the row written after the backup is still in the node database (missing: ${extra.join(",") || "none"}); quick_check ${quicksF.join(" ")}`);
+    `the row written after the backup is still in the hub database, whose schema did not change (missing: ${extra.join(",") || "none"}); quick_check ${quicksF.join(" ")}`);
+  const nodeColumns = sqlite(NODE_DB, "SELECT name FROM pragma_table_info('c6_marker')").split("\n");
+  const nodeRows = sqlite(NODE_DB, "SELECT v FROM c6_marker").split("\n");
+  const asides = readdirSync(BACKUP).filter(n => n.startsWith("aside-")).sort();
+  const asideFiles = asides.flatMap(a => readdirSync(join(BACKUP, a)).map(f => `${a}/${f}`));
+  const asideNode = asides.map(a => join(BACKUP, a, "node.db")).find(f => existsSync(f));
+  const asideRows = asideNode === undefined ? [] : sqlite(asideNode, "SELECT v FROM c6_marker").split("\n");
+  const asideColumns = asideNode === undefined ? [] : sqlite(asideNode, "SELECT name FROM pragma_table_info('c6_marker')").split("\n");
+  check("f-changed-schema-node-restored", !nodeColumns.includes("extra") && !nodeRows.includes("after-migration") && missingRows(nodeRows.join("\n"), MARKERS).length === 0,
+    `the node database is the backup's again: columns ${nodeColumns.join(",")}, rows ${nodeRows.join(",")}`);
+  check("f-changed-schema-aside-copy", asideNode !== undefined && asideRows.includes("after-migration") && asideColumns.includes("extra") && quickCheck(asideNode) === "ok",
+    `copies in the backup folder: ${asideFiles.join(", ") || "(none)"}; the node copy holds the post-install row: ${asideRows.includes("after-migration")} and the new column: ${asideColumns.includes("extra")}`);
+  const report = (() => { try { return readFileSync(join(BACKUP, "deadman-report.txt"), "utf8"); } catch { return null; } })();
+  check("f-changed-schema-report", report !== null && report.includes("node") && asides.length > 0 && asides.every(a => report.includes(a)),
+    report === null ? "deadman-report.txt does not exist" : `deadman-report.txt: ${report.split("\n").filter(l => l.trim() !== "").slice(-4).join(" | ")}`);
+  const spareText = (() => { try { return readFileSync(join(UNIT_DIR, SPARE_UNIT), "utf8"); } catch { return null; } })();
+  const spareState = run("systemctl", ["--user", "is-active", SPARE_UNIT]).out.trim();
+  check("f-spare-stays-stopped", spareState !== "active" && spareText === SPARE_TEXT,
+    `${SPARE_UNIT} was started after the install; after the restore it is ${spareState}; its unit file is byte-identical: ${spareText === SPARE_TEXT}`);
   const laneF = sameProcess(baseline.lane, ownerOf(baseline.lanePid));
   check("f-lane-kept", laneF.ok, laneF.detail);
   check("f-no-ok-marker", !existsSync(join(BACKUP, "ok")), "no ok marker was in the backup folder when the switch fired");
@@ -529,9 +560,10 @@ async function main(): Promise<number> {
   check("g-services-healthy", secondHealthy.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))), secondHealthy.detail);
   if (failed) { journals("g-restart"); return finish(server); }
 
-  writeFileSync(join(BACKUP, "ok"), "");
+  // Arm first (arm-deadman.sh refuses while the ok marker exists), then sign off: the firing finds the marker.
   const armed2 = command("g-arm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1b", BACKUP, "--seconds", "60"]);
-  check("g-deadman-armed", armed2.code === 0, `armed for 60 s with the ok marker in place: ${firstLines(armed2, 2)}`);
+  writeFileSync(join(BACKUP, "ok"), "");
+  check("g-deadman-armed", armed2.code === 0, `armed for 60 s, then the ok marker put in place: ${firstLines(armed2, 2)}`);
   const firedB = await waitDeadmanGone("m1b", 5 * 60_000);
   await sleep(2000);
   const dm2 = deadmanJournal("m1b");

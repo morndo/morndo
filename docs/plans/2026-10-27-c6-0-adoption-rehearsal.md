@@ -144,12 +144,25 @@ That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs 
   itself, refuses any other `*.db` under `~/.local/share/morndo*` and `~/.local/state/morndo*` unless `--allow-unlisted`,
   (the hub also keeps `memory.db` next to `morndo.db`: name it with `--db memory=<path>`), refuses a machine with no database unless `--no-db`, and records the host, `HOME`, the schema signature of each
   database and which units were active or enabled. A failure after the folder exists removes the folder again.
-- **Step 6 (restore refusals):** `restore.sh` refuses another host or `HOME` (exit 3). It refuses (exit 4, before it
-  changes anything) when the schema of a live database differs from the backup's, which is the case whenever ANY
-  migration ran between the old build and the installed one; the choice is then `--with-db` (puts the old data back,
-  loses every write since the backup) or `--keep-data` (old code on the newer schema anyway). The dead-man's run refuses
-  the same way, and a failed unit is the alert. A manual run ignores a stale `ok` marker (it says so); only `--deadman`
-  honours it. Only the units that were active are restarted and the timers that were enabled are enabled again; a
-  failing restart does not stop the others, and the exit is non-zero naming them.
+- **Step 6 (restore refusals):** `restore.sh` refuses another host or `HOME` (exit 3). A manual run refuses (exit 4, before
+  it changes anything) when the schema signature of a live database differs from the backup's. The signature covers the
+  tables, indexes and triggers (`sqlite_master`), `PRAGMA user_version` and every row of any table whose name contains
+  "migrat", so it also sees a data-only migration; ordinary new rows do not change it. When it changed, the choice is
+  `--with-db` (puts the old data back, loses every write since the backup) or `--keep-data` (old code on the newer
+  schema anyway). The dead-man's run (`--deadman`) does not stop on a changed schema, because nobody is there to
+  choose: for each database whose signature changed it first takes an online copy into `<backup>/aside-<UTC time>/<name>.db`
+  (no script deletes that folder; the writes made since the backup live only there), then behaves like `--with-db` for
+  those databases (stops the services, puts the backed-up database back, starts the units), and writes
+  `<backup>/deadman-report.txt` (what it did, which databases changed, the aside folder), also printed to the service
+  journal. Databases whose schema did not change are left alone and not copied. If the copy of a database fails, that
+  database is not replaced. A manual run ignores a stale `ok` marker (it says so); only `--deadman` honours it.
+  Every unit goes back to its recorded state: a service that was inactive is stopped, a timer that was disabled is
+  disabled with `--now`, an active service is restarted, an enabled timer is enabled; nothing that was not active or
+  enabled is started. A failing unit does not stop the others, and the exit is non-zero naming them. Once `--with-db`
+  (or the dead-man's database restore) has stopped the services, every exit path, a failed copy included, starts the
+  recorded units again before it exits non-zero naming the database or unit.
+- **Step 2 (arming):** `arm-deadman.sh` restarts the timer after enabling it, so arming again moves the time. It refuses
+  (exit 1, writes nothing) while `<backup>/ok` exists; remove that file to arm, so the order is arm, then `touch ok`,
+  then `--disarm`.
 - **Step 6 (rollback):** after `restore.sh`, a second install first needs `~/.local/share/morndo-releases` and the
   updater's state and config removed (`restore.sh` leaves them; it never touches data).
