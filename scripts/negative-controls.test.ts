@@ -2,7 +2,7 @@
 // test and no breakage. The outputs are vitest 5.0.3's, as it prints them (colors off). And a control marked for one
 // platform: skipped elsewhere, a fifth outcome that is never a bite or a pass.
 import { describe, expect, it } from "vitest";
-import { CONTROLS, check, classify, needs, needsFullRun, parseShard, shardOf, verdict, type Control } from "./negative-controls.ts";
+import { CONTROLS, check, classify, needs, needsFullRun, parseShard, select, shardOf, verdict, type Control } from "./negative-controls.ts";
 
 const FAILED_TEST = [
   " RUN  v5.0.3 /repo", "", " FAIL  |units| packages/protocol/test/fleet.test.ts > messages > reads a code",
@@ -145,5 +145,20 @@ describe("needsFullRun: when a bailed run is made again in full", () => {
   it("a pass and a timeout are the same in full: not made again", () => {
     expect(needsFullRun(classify(0, null, " Test Files  1 passed (1)\n"))).toBe(false);
     expect(needsFullRun(classify(null, null, "", true))).toBe(false);
+  });
+});
+
+// Which controls a command line picks: --only ids, or --shard i/n, or all; never --only and --shard together (T-467 review: --shard
+// was ignored beside --only).
+describe("select: --only, --shard", () => {
+  it("picks all, the named ids, or one shard", () => {
+    expect(select({}, CONTROLS)).toEqual({ controls: CONTROLS });
+    expect(select({ only: ["t2-confine-case-fold"] }, CONTROLS)).toEqual({ controls: CONTROLS.filter(c => c.id === "t2-confine-case-fold") });
+    expect(select({ shard: "2/6" }, CONTROLS)).toEqual({ controls: shardOf(CONTROLS, 2, 6) });
+  });
+  it("refuses --only with --shard, a bad shard and an unknown id (exit 2 in the runner)", () => {
+    expect(select({ only: ["t2-confine-case-fold"], shard: "1/2" }, CONTROLS)).toHaveProperty("error", expect.stringMatching(/--only.*--shard|--shard.*--only/));
+    expect(select({ shard: "7/6" }, CONTROLS)).toHaveProperty("error", expect.stringContaining("7/6"));
+    expect(select({ only: ["nope-not-a-control"] }, CONTROLS)).toHaveProperty("error", expect.stringContaining("nope-not-a-control"));
   });
 });
