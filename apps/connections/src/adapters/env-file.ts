@@ -2,7 +2,7 @@
 // over the old file, so a reader never sees half a file or a key anyone else can read. Nothing is written for a path in a git work tree, in a directory
 // group or others can write, through a link, or under a protected directory. A name and a value are checked against a closed alphabet so that no quoting
 // or escaping exists. A problem is a word; no path, value or system message is returned.
-import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { chmodSync, closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import Database from "better-sqlite3";
 import { processIdentity } from "@morndo/node-ops";
 import { basename, dirname, isAbsolute, join } from "node:path";
@@ -176,29 +176,42 @@ function noteHolder(note: string): EnvLockHolder | null {
   } catch { return null; }
 }
 
+// Sinks being taken or held by this process, by the real place of the lock file. A POSIX file lock belongs to the process, and closing ANY descriptor of
+// the file releases it, so a second taker in this process must not open the lock file at all: it waits for the first, or is busy. The lock file is
+// opened by one SQLite handle and by nothing else (no read, open or create of it elsewhere); `lstat` opens nothing.
+const inProcess = new Set<string>();
+
+function lockKey(lock: string): string {
+  try { return join(realpathSync(dirname(lock)), basename(lock)); } catch { return lock; }
+}
+
 // One writer at a time: `BEGIN EXCLUSIVE` on an empty SQLite database beside the sink, a lock the kernel itself releases when its holder dies, in
 // whatever pid namespace the holder lives — so no lock is ever stale and nothing is ever taken over. Waiting is polling in an async loop, not a
 // blocking busy timeout, so the timers of this process keep running while it waits. The owner note beside the lock says who holds it, for messages
-// only; it never decides anything. `release` is idempotent and removes only the note this process wrote; the lock file itself stays, an empty
-// database whose existence means nothing.
+// only; it never decides anything. `release` is idempotent, removes the note (only if it still reads as written) before it lets the lock go, and the
+// lock file itself stays, an empty database whose existence means nothing. Anything at the lock path that is not an SQLite database (a text file of
+// an earlier build that never shipped included) is busy and is never deleted.
 export async function acquireEnvLock(path: string, options: { waitMs: number }): Promise<{ ok: true; release(): void } | { ok: false; problem: "busy"; holder: EnvLockHolder | null }> {
   const lock = `${path}.lock`;
   const note = `${lock}.owner`;
-  // The text locks of rounds 2 and 3: a small regular file of exactly their shape is the past form, removed once so the kernel lock can take its
-  // place. Anything else at that path is left alone.
-  try {
-    const found = lstatSync(lock);
-    if (found.isFile() && found.size <= 64 && /^\d+( \d+){0,2}\n$/.test(readFileSync(lock, "utf8"))) unlinkSync(lock);
-  } catch { /* not there */ }
-  // A symlink at the lock path is never removed and never followed: busy at once.
+  const key = lockKey(lock);
+  const began = Date.now();
+  // A symlink at the lock path is never followed: busy at once.
   if (symlinked(lock)) return { ok: false, problem: "busy", holder: null };
+  while (inProcess.has(key)) {
+    if (Date.now() - began >= options.waitMs) return { ok: false, problem: "busy", holder: noteHolder(note) };
+    await new Promise<void>(resolve => { setTimeout(resolve, LOCK_POLL_MS); });
+  }
+  inProcess.add(key);
+  const leave = (): void => { inProcess.delete(key); };
   let db: Database.Database;
   try {
-    closeSync(openSync(lock, "a", 0o600));
+    // SQLite creates the file when it is not there; 0600 is set after, by the path, never through a descriptor of our own.
+    const created = !existsSync(lock);
     db = new Database(lock);
+    if (created) chmodSync(lock, 0o600);
     db.pragma("busy_timeout = 0");
-  } catch { return { ok: false, problem: "busy", holder: null }; }
-  const began = Date.now();
+  } catch { leave(); return { ok: false, problem: "busy", holder: null }; }
   for (;;) {
     try {
       db.exec("BEGIN EXCLUSIVE");
@@ -206,8 +219,8 @@ export async function acquireEnvLock(path: string, options: { waitMs: number }):
       // Busy or locked is another holder: wait and try again until waitMs has passed, then say who the note names. Any other error (not a
       // database, cannot be opened) is a file not ours to touch: busy at once, without retry.
       const code = (error as { code?: string }).code ?? "";
-      if (code !== "SQLITE_BUSY" && code !== "SQLITE_LOCKED") { db.close(); return { ok: false, problem: "busy", holder: null }; }
-      if (Date.now() - began >= options.waitMs) { db.close(); return { ok: false, problem: "busy", holder: noteHolder(note) }; }
+      if (code !== "SQLITE_BUSY" && code !== "SQLITE_LOCKED") { db.close(); leave(); return { ok: false, problem: "busy", holder: null }; }
+      if (Date.now() - began >= options.waitMs) { db.close(); leave(); return { ok: false, problem: "busy", holder: noteHolder(note) }; }
       await new Promise<void>(resolve => { setTimeout(resolve, LOCK_POLL_MS); });
       continue;
     }
@@ -227,10 +240,11 @@ export async function acquireEnvLock(path: string, options: { waitMs: number }):
       release: () => {
         if (released) return;
         released = true;
+        // The note first, while the lock is still held, so no taker can see a note of a holder that has let go; then the lock.
+        try { if (owner !== null && readFileSync(note, "utf8") === owner) unlinkSync(note); } catch { /* already gone */ }
         try { db.exec("ROLLBACK"); } catch { /* already gone */ }
         db.close();
-        // Only the note this process wrote is removed; a newer holder's stays.
-        try { if (owner !== null && readFileSync(note, "utf8") === owner) unlinkSync(note); } catch { /* already gone */ }
+        leave();
       },
     };
   }
