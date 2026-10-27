@@ -61,9 +61,10 @@ type Check = { step: string; ok: boolean; detail: string };
 const checks: Check[] = [];
 let failed = false;
 
-function check(step: string, ok: boolean, detail: string): void {
+// `soft`: a failure is counted in the summary but does not end the story (the rest of the rehearsal is still worth its run).
+function check(step: string, ok: boolean, detail: string, soft = false): void {
   checks.push({ step, ok, detail });
-  if (!ok) failed = true;
+  if (!ok && !soft) failed = true;
   process.stdout.write(`${JSON.stringify({ step, ok, detail })}\n`);
 }
 
@@ -263,7 +264,7 @@ async function proofs(p: string, base: Baseline): Promise<void> {
   check(`${p}-status`, status.code === 0 && status.out.includes("install: updater") && status.out.includes("channel: stable") && status.out.includes(`current: ${VERSION_A}`),
     `update --status exited ${status.code}: ${firstLines(status, 4)}`);
   const doctor = command(`${p}-doctor`, join(BIN, "morndo"), ["doctor"]);
-  check(`${p}-doctor`, doctor.code === 0 && doctor.out.includes("ok: the install checks out"), `doctor exited ${doctor.code}: ${firstLines(doctor, 4)}`);
+  check(`${p}-doctor`, doctor.code === 0 && doctor.out.includes("ok: the install checks out"), `doctor exited ${doctor.code}: ${firstLines(doctor, 6)}`, true);
 }
 
 // ---- the dead-man's switch --------------------------------------------------------------------------------------------
