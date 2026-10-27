@@ -11,7 +11,7 @@
 # GitHub links a commit to its pull request a little after the push, and the traces run starts right after it (on the
 # release pull request's head 9fe82f1d it asked 14 s after the commit, found no pull request, and a rerun passed). So the
 # pull request is asked for up to RELEASE_PR_TRIES times (default 6), RELEASE_PR_WAIT seconds apart (default 10), before
-# the commit is left out.
+# the commit is left out. Each commit left out gets one line on stderr naming the check it failed; stdout is the list.
 set -eu
 : "${REPO:?set REPO to owner/name}"
 tries=${RELEASE_PR_TRIES:-6}
@@ -31,9 +31,12 @@ app_pull() {
   done
 }
 
+skip() { echo "release-commits-verified: $1 left out: $2" >&2; }
+
 for sha in $(git log --format=%H --author='morndo-release' "$@"); do
-  commit=$(gh api "repos/$REPO/commits/$sha" 2>/dev/null) || continue
-  printf '%s' "$commit" | jq -e '.commit.verification.verified == true and .committer.login == "web-flow"' >/dev/null 2>&1 || continue
-  app_pull "$sha" || continue
+  commit=$(gh api "repos/$REPO/commits/$sha" 2>/dev/null) || { skip "$sha" "the commit API call failed"; continue; }
+  printf '%s' "$commit" | jq -e '.commit.verification.verified == true and .committer.login == "web-flow"' >/dev/null 2>&1 ||
+    { skip "$sha" "GitHub does not report it verified and committed by web-flow"; continue; }
+  app_pull "$sha" || { skip "$sha" "no pull request of the App's on a release-please branch after $tries asks"; continue; }
   echo "$sha"
 done
