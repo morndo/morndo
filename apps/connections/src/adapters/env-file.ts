@@ -2,7 +2,7 @@
 // over the old file, so a reader never sees half a file or a key anyone else can read. Nothing is written for a path in a git work tree, in a directory
 // group or others can write, through a link, or under a protected directory. A name and a value are checked against a closed alphabet so that no quoting
 // or escaping exists. A problem is a word; no path, value or system message is returned.
-import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { processIdentity } from "@morndo/node-ops";
 import { basename, dirname, isAbsolute, join } from "node:path";
@@ -136,25 +136,38 @@ export function readEnvStamp(path: string): EnvStamp | null {
   };
 }
 
-// The key a server holds is the one in the file when it started: the member of the last write at or before its start. Nobody when the pair does not
-// agree, or the server started before the first write on record.
-export function memberLoadedAt(stamp: { consistent: boolean; history: readonly { at: number; member: string }[] }, startedAtMs: number): string | null {
+// The key a server holds is the one in the file when it started: the member of the last write at or before its start. A start known only to the clock's
+// resolution is a window, and a write inside it cannot be told apart from one the server started after, so nobody is blamed. Nobody when the pair does
+// not agree, or the server started before the first write on record.
+export function memberLoadedAt(stamp: { consistent: boolean; history: readonly { at: number; member: string }[] }, start: number | { from: number; to: number }): string | null {
   if (!stamp.consistent) return null;
+  const { from, to } = typeof start === "number" ? { from: start, to: start } : start;
+  if (stamp.history.some(row => from < row.at && row.at <= to)) return null;
   let found: string | null = null;
-  for (const row of stamp.history) if (row.at <= startedAtMs) found = row.member;
+  for (const row of stamp.history) if (row.at <= from) found = row.member;
   return found;
 }
 
 const LOCK_POLL_MS = 50;
 
-// The lock names its owner by pid and start ticks, so a pid that was reused is not mistaken for the owner.
+// The pid namespace this process runs in, as a number: an owner in another namespace cannot be looked up here.
+function pidNamespace(): number | null {
+  let link: string | null;
+  try { link = readlinkSync("/proc/self/ns/pid"); } catch { return null; }
+  const ns = Number(/\[(\d+)\]/.exec(link)?.[1]);
+  return Number.isInteger(ns) && ns > 0 ? ns : null;
+}
+
+// The lock names its owner by pid, start ticks and pid namespace, so a pid that was reused, or lives where we cannot look it up, is not mistaken for the owner.
 function ownerText(): string | null {
   const id = processIdentity(process.pid);
-  return id ? `${process.pid} ${id.ticks}\n` : null;
+  const ns = pidNamespace();
+  return id !== null && ns !== null ? `${process.pid} ${id.ticks} ${ns}\n` : null;
 }
 
 // The lock is created with its owner already in it: written to a temp file and linked into place, so there is no moment at which it exists empty.
-function tryEnvLock(lock: string): "taken" | "busy" | "retry" {
+// A stale lock is taken over by one rename of the exact file that was read, so a newer lock that appeared meanwhile is put back, never removed.
+function tryEnvLock(lock: string, beforeTakeover?: () => void): "taken" | "busy" | "retry" {
   const owner = ownerText();
   if (owner === null) return "busy";
   const temp = `${lock}.${process.pid}.${randomBytes(6).toString("hex")}`;
@@ -170,32 +183,51 @@ function tryEnvLock(lock: string): "taken" | "busy" | "retry" {
   if (symlinked(lock)) return "busy";
   let text: string;
   try { text = readFileSync(lock, "utf8"); } catch { return "busy"; }
-  // Stale only when the owner is provably gone: no such process, or the pid now belongs to another process. An empty, partial or unreadable lock is an
-  // unknown owner, and a live owner is never stale however old the lock.
-  const match = /^(\d+) (\d+)\n$/.exec(text);
-  if (!match) return "busy";
+  // Stale means provably gone and nothing else: the lock must name our pid namespace (the older two-field form is an unknown namespace), and then the
+  // pid must be gone, or belong to another process than the one that took the lock. An empty, partial or unreadable lock is an unknown owner, and a
+  // live owner is never stale however old the lock.
+  const match = /^(\d+) (\d+) (\d+)\n$/.exec(text);
+  const mine = pidNamespace();
+  if (!match || mine === null || Number(match[3]) !== mine) return "busy";
   const live = processIdentity(Number(match[1]));
   if (live !== null && String(live.ticks) === match[2]) return "busy";
-  // Another taker may have removed it and made its own meanwhile: remove only what was read as stale.
-  try { if (readFileSync(lock, "utf8") === text) unlinkSync(lock); } catch { /* taken over meanwhile */ }
+  // Another taker may have removed it and made its own meanwhile: move the exact file that was read aside, and remove it only after checking it is
+  // still the stale one.
+  beforeTakeover?.();
+  const grave = `${lock}.stale.${process.pid}.${randomBytes(6).toString("hex")}`;
+  try { renameSync(lock, grave); } catch { return "retry"; }
+  let moved: string;
+  try { moved = readFileSync(grave, "utf8"); } catch {
+    try { unlinkSync(grave); } catch { /* already gone */ }
+    return "retry";
+  }
+  if (moved !== text) {
+    // A newer, live lock was moved: put it back where it stood and wait for its holder.
+    try { linkSync(grave, lock); } catch { /* another lock already stands */ }
+    try { unlinkSync(grave); } catch { /* already gone */ }
+    return "busy";
+  }
+  try { unlinkSync(grave); } catch { /* already gone */ }
   return "retry";
 }
 
-// One writer at a time: the lock file holds the writer's pid. A holder that is gone, or a lock older than ten minutes, is stale and taken
-// over; a live holder is waited for until waitMs has passed. `release` is idempotent and ignores a lock already gone.
-export async function acquireEnvLock(path: string, options: { waitMs: number }): Promise<{ ok: true; release(): void } | { ok: false; problem: "busy" }> {
+// One writer at a time: the lock file names its owner by pid, start ticks and pid namespace. A holder in another namespace is never taken over; a
+// stale one is taken over through a rename that cannot hit a newer lock. A live holder is waited for until waitMs has passed. `release` is idempotent,
+// ignores a lock already gone, and removes only the lock this process wrote.
+export async function acquireEnvLock(path: string, options: { waitMs: number; beforeTakeover?: () => void }): Promise<{ ok: true; release(): void } | { ok: false; problem: "busy" }> {
   const lock = `${path}.lock`;
   const began = Date.now();
   for (;;) {
-    const taken = tryEnvLock(lock);
+    const taken = tryEnvLock(lock, options.beforeTakeover);
     if (taken === "taken") {
       let released = false;
+      const owner = ownerText();
       return {
         ok: true,
         release: () => {
           if (released) return;
           released = true;
-          try { unlinkSync(lock); } catch { /* already gone */ }
+          try { if (owner !== null && readFileSync(lock, "utf8") === owner) unlinkSync(lock); } catch { /* already gone */ }
         },
       };
     }

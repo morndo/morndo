@@ -11,7 +11,7 @@ import { fail, gateRuntime, need, pooledProbe, prepareLease, serveLeased, type I
 import { acquireEnvLock, ENV_NAME, envPathProblem, memberLoadedAt, readEnvStamp, writeEnvFile } from "./adapters/env-file.ts";
 import { lineScanner, redactingWriter, type Verdict } from "./adapters/log-watch.ts";
 import { signalFromHook } from "./adapters/outcome-anthropic.ts";
-import { processStartMs, selfHolder, selfId } from "./adapters/processes.ts";
+import { processStartWindow, selfHolder, selfId } from "./adapters/processes.ts";
 
 const ACTOR: Actor = { kind: "principal", command: "cli" };
 const HOUR = 3_600_000;
@@ -264,7 +264,7 @@ async function watch(home: Opened, pool: string, parsed: Parsed, io: Io): Promis
     if (named !== undefined) return named;
     const stamp = readEnvStamp(sinkPath ?? "");
     const pid = serverPid();
-    const started = pid === null ? null : processStartMs(pid);
+    const started = pid === null ? null : processStartWindow(pid);
     return stamp === null || started === null ? null : memberLoadedAt(stamp, started);
   };
   const act = async (verdicts: readonly Verdict[]): Promise<void> => {
