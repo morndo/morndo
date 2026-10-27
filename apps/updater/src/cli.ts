@@ -1230,8 +1230,20 @@ export async function runUpdater(
       : joined ? (["node"] as const) : [];
     await m.enable([...UPDATE_UNITS, ...startable.map(s => `morndo-${s}.service`)]);
     io.out(`Morndo ${versionText} installed (${parsed.role}, channel ${parsed.channel}).\n`);
+    // §10.3's last step: the first check, the same one the timer runs, so the Feed's word is on record from the first
+    // minute. Best effort — an unreachable or refusing feed is said and recorded by the check itself and the install
+    // stands; the doctor then reports the feed as it is, never as verified.
+    const firstCheck = async (): Promise<void> => {
+      try {
+        const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" });
+        printOutcome(checkLine(outcome), checkCode(outcome));
+      } catch (error) {
+        io.err(`the first check failed: ${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    };
     if (!joined) {
       io.out("the agent waits to join: morndo-node join <code>, then systemctl --user start morndo-node\n");
+      await firstCheck();
       return EXIT_OK;
     }
     // §6.4's health deadline is the install's own patience: each service gets the whole of it to answer.
@@ -1244,6 +1256,7 @@ export async function runUpdater(
         await realSleeper.sleep(1_000);
       }
     }
+    await firstCheck();
     return EXIT_OK;
   } finally {
     store.close();

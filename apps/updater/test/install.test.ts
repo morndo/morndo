@@ -15,9 +15,10 @@ import { DirsInstaller } from "../src/adapters/installer-dirs.ts";
 import { updaterPaths } from "../src/adapters/paths.ts";
 import { openUpdateStore } from "../src/adapters/store-sqlite.ts";
 import { runUpdater } from "../src/cli.ts";
+import { FetchFailed } from "../src/application/ports.ts";
 import { Die, FakeProbe, FakeServices, NOW } from "./helpers/apply-fakes.ts";
-import { wipe } from "./helpers/fakes.ts";
-import { keySetDocument, makeKeys } from "./helpers/release-fixtures.ts";
+import { FakeArtifacts, FakeFeed, wipe } from "./helpers/fakes.ts";
+import { feedFixture, keySetDocument, makeKeys, manifestSignature, releaseFixture } from "./helpers/release-fixtures.ts";
 
 const VERSION = "0.2.0";
 const YEAR = 365 * 24 * 3600_000;
@@ -67,13 +68,24 @@ type World = {
   paths: ReturnType<typeof updaterPaths>;
   services: FakeServices;
   tree: string;
+  feed: FakeFeed;
   run(argv: string[]): Promise<{ code: number; out: string; err: string }>;
 };
-const world = (o: { joined?: boolean } = {}): World => {
+// `feed` is what the install's first check finds: a stub feed that signs this Version in (`served`), or a host that
+// cannot be reached (the default — no test of the install may reach the real network).
+const world = (o: { joined?: boolean; feed?: "served" | "unreachable" } = {}): World => {
   const home = join(scratch, `home-${(worldCount += 1)}`);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const paths = updaterPaths(home);
-  const { tree } = makeTree(worldCount);
+  const { tree, keys } = makeTree(worldCount);
+  const feed = new FakeFeed();
+  if (o.feed === "served") {
+    const release = releaseFixture({ version: VERSION, now: Date.now() });
+    feed.channels.set("stable", feedFixture(keys, [release], { channel: "stable", now: Date.now() }).served);
+    feed.manifests.set(release.manifestUrl, { bytes: release.manifestBytes, signature: manifestSignature(keys, release) });
+  } else {
+    feed.fail = { op: "channel", error: new FetchFailed("network", "getaddrinfo ENOTFOUND feed.example.invalid") };
+  }
   const tape: string[] = [];
   const die = new Die();
   const installer = new DirsInstaller({ releases: paths.releases });
@@ -84,12 +96,12 @@ const world = (o: { joined?: boolean } = {}): World => {
     writeFileSync(join(home, ".config/morndo-node/config.json"), "{}\n", { mode: 0o600 });
   }
   return {
-    home, paths, services, tree,
+    home, paths, services, tree, feed,
     run: async argv => {
       const out: string[] = [], err: string[] = [];
       const code = await runUpdater(argv, { HOME: home, PATH: process.env.PATH }, {
         out: s => out.push(s), err: s => err.push(s),
-      }, { services, probe, tree });
+      }, { services, probe, tree, feed, artifacts: new FakeArtifacts(paths.downloads) });
       return { code, out: out.join(""), err: err.join("") };
     },
   };
@@ -125,20 +137,40 @@ describe("`morndo install --role control-plane` (§10.3)", () => {
     for (const s of ["hub", "fleet", "node"]) expect(r.out).toMatch(new RegExp(`${s}: healthy at ${VERSION}`));
   });
 
-  it("leaves the signed file list in the installed Version, so `morndo doctor` right after the install finds no tree or provenance problem (T-486)", async () => {
+  it("leaves the signed file list in the installed Version (T-486)", async () => {
     const w = world({ joined: true });
     expect((await w.run(["install", "--role", "control-plane"])).code).toBe(0);
     const versionDir = join(w.paths.releases, VERSION);
     // files.json is not in its own list (scripts/release/files.ts), so copying "the listed files" dropped it
     expect(readFileSync(join(versionDir, "files.json"), "utf8")).toBe(readFileSync(join(w.tree, "files.json"), "utf8"));
     expect((statSync(join(versionDir, "files.json")).mode & 0o777)).toBe(0o444);
-    // What the doctor says right after the install: the tree checks out against its list, and the Version the install
-    // committed is not "unknown" to the store. The one thing left is the feed, which no check has verified yet — that
-    // is a first check's to answer, not the install's (see the T-486 report).
+  });
+
+  it("runs the first check as its last step, so `morndo doctor` right after the install is clean (§10.3, T-486)", async () => {
+    const w = world({ joined: true, feed: "served" });
+    const r = await w.run(["install", "--role", "control-plane"]);
+    expect(r.code, r.err).toBe(0);
+    expect(w.feed.calls.channels).toEqual(["stable"]);
+    expect(r.out).toContain(`Up to date: ${VERSION}.`);
+    const doctor = await w.run(["doctor", "--json"]);
+    expect(JSON.parse(doctor.out)).toMatchObject({ ok: true, findings: [] });
+    expect(doctor.code, doctor.out).toBe(0);
+  });
+
+  it("an unreachable feed at install is said and recorded, the install still succeeds, and the doctor names the feed (T-486)", async () => {
+    const w = world({ joined: true, feed: "unreachable" });
+    const r = await w.run(["install", "--role", "control-plane"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.out).toContain(`Morndo ${VERSION} installed`);
+    expect(r.err).toMatch(/Unreachable: .*ENOTFOUND/);
+    const store = openUpdateStore({ db: w.paths.db, lock: w.paths.lock });
+    expect(store.checks(1)[0]).toMatchObject({ outcome: "unreachable", feedSeq: null });
+    store.close();
     const doctor = await w.run(["doctor", "--json"]);
     const report = JSON.parse(doctor.out) as { ok: boolean; findings: { area: string; detail: string }[] };
-    expect(report.findings.map(f => f.area)).toEqual(["feed"]);
+    expect(report.findings.map(f => f.area)).toEqual(["feed"]);      // never a fake "verified": the tree and provenance are clean
     expect(report.findings[0]!.detail).toMatch(/never/);
+    expect(doctor.code).toBe(1);
   });
 
   it("a fresh install defaults to mode apply and channel stable", async () => {
