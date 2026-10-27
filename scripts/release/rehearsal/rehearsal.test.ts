@@ -133,9 +133,11 @@ const GOOD_CONTAINER = {
     PublishAllPorts: false,
     Tmpfs: { "/run": "", "/run/lock": "", "/tmp": "" },
     SecurityOpt: null,
+    DeviceRequests: null,
+    CgroupParent: "",
   },
   Mounts: [],
-  NetworkSettings: { Ports: {} },
+  NetworkSettings: { Ports: {}, Networks: { "c4-rehearsal_net": {} } },
 };
 const GOOD_NETWORK = {
   Name: "c4-rehearsal_net",
@@ -199,6 +201,11 @@ describe("check-container.sh", () => {
     ["a MORNDO_ variable", c => { c.Config.Env.push("MORNDO_AGENT_TOKEN=x"); }, "FAIL: the container's environment sets MORNDO_AGENT_TOKEN (the rehearsal sets MORNDO_ variables inside, never through the container)"],
     ["no container=docker", c => { c.Config.Env = ["PATH=/usr/bin:/bin"]; }, "FAIL: the container's environment lacks container=docker"],
     ["another image", c => { c.Config.Image = "morndo-c2-e2e:local"; }, "FAIL: the image is morndo-c2-e2e:local, not morndo-rehearsal:c4-5"],
+    ["a second network attached", c => { c.NetworkSettings.Networks.bridge = {}; }, "FAIL: the container is attached to bridge,c4-rehearsal_net, not only the rehearsal network c4-rehearsal_net"],
+    ["no network attached", c => { c.NetworkSettings.Networks = {}; }, "FAIL: the container is attached to none, not only the rehearsal network c4-rehearsal_net"],
+    ["a device request", c => { c.HostConfig.DeviceRequests = [{ Driver: "nvidia", Count: -1, Capabilities: [["gpu"]] }]; }, "FAIL: the container requests devices (DeviceRequests)"],
+    ["no Privileged field", c => { delete c.HostConfig.Privileged; }, "FAIL: the inspect does not say whether the container is privileged"],
+    ["a cgroup parent", c => { c.HostConfig.CgroupParent = "/system.slice"; }, "FAIL: CgroupParent is /system.slice (a machine stays in Docker's own cgroup)"],
   ])("fails on %s", (_what, change, line) => {
     const r = check(change);
     expect(r.code).toBe(1);
@@ -305,6 +312,22 @@ describe("env.sh", () => {
     const r = envRun([url]);
     expect(r.code).toBe(1);
     expect(r.err).toContain("rehearsal-env: the feed address holds a character it may not");
+    expect(r.conf).toBeNull();
+  });
+
+  it.each([
+    "https://MORNDO.github.io/morndo/",
+    "https://morndo.github.io:443/morndo/",
+    "https://morndo.github.io./morndo/",
+    "https://morndo.github.io/./morndo/",
+    "https://morndo.github.io/x/../morndo",
+    "https://%6Dorndo.github.io/morndo/",
+    "https://morndo.github.io//morndo/",
+  ])("refuses %s, a spelling that may reach production's feed", url => {
+    const r = envRun([url]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("rehearsal-env: the feed address must be https://<host>/<path>/ in lower case, with no port, escape, empty, . or .. segment");
+    expect(r.out).not.toContain("ok");
     expect(r.conf).toBeNull();
   });
 
