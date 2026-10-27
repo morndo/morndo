@@ -287,7 +287,7 @@ async function proofs(p: string, base: Baseline): Promise<void> {
   check(`${p}-old-folder-unchanged`, folder.ok, folder.detail);
 
   const status = command(`${p}-update-status`, join(BIN, "morndo"), ["update", "--status"]);
-  check(`${p}-status`, status.code === 0 && status.out.includes("install: updater") && status.out.includes("channel: ${CHANNEL}") && status.out.includes(`current: ${VERSION_A}`),
+  check(`${p}-status`, status.code === 0 && status.out.includes("install: updater") && status.out.includes(`channel: ${CHANNEL}`) && status.out.includes(`current: ${VERSION_A}`),
     `update --status exited ${status.code}: ${firstLines(status, 4)}`);
   // Not a pass/fail of the adoption: a fresh install is not "clean" for the doctor today (see the plan, section 8), so the
   // word is recorded as a finding and the story goes on.
