@@ -20,6 +20,7 @@
     "test",
     "e2e/update-vm",
     "e2e/update.e2e.ts",
+    "e2e/update-adopt.e2e.ts",
     "scripts",
     "knowledge",
     "vitest.config.ts"
