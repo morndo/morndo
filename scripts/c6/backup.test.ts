@@ -41,8 +41,9 @@ function machine() {
   writeFileSync(join(state, "enabled"), "");
   writeFileSync(join(state, "failrestart"), "");
   writeFileSync(fake, `#!/bin/sh
-echo "$@" >> '${calls}'
+echo "$@ #$(cksum < '${dbPath}')" >> '${calls}'
 case "$2" in
+  list-units) sed -n 's/\\(.*\\.service\\)$/\\1 loaded active running x/p' '${state}/active'; exit 0 ;;
   is-active) grep -qx "$3" '${state}/active' && { echo active; exit 0; }; echo inactive; exit 3 ;;
   is-enabled) grep -qx "$3" '${state}/enabled' && { echo enabled; exit 0; }; echo disabled; exit 1 ;;
   restart) grep -qx "$3" '${state}/failrestart' && exit 1; exit 0 ;;
@@ -341,17 +342,17 @@ describe("round 2 of the review of PR 176", () => {
     expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(NEW_UNIT);
   };
 
-  it("sees a data-only migration: a user_version bump, a row in a migrations table", () => {
+  it("sees a data-only migration: a user_version bump, a change of the _morndo_schema floor row", () => {
     const a = machine();
     expect(backup(a).status).toBe(0);
     install(a);
     exec(a.dbPath, "PRAGMA user_version = 7;");
     refused(a);
     const b = machine();
-    exec(b.dbPath, "CREATE TABLE schema_migrations (id INTEGER); INSERT INTO schema_migrations VALUES (1);");
+    exec(b.dbPath, "CREATE TABLE _morndo_schema (floor INTEGER); INSERT INTO _morndo_schema VALUES (1);");
     expect(backup(b).status).toBe(0);
     install(b);
-    exec(b.dbPath, "INSERT INTO schema_migrations VALUES (2);");
+    exec(b.dbPath, "UPDATE _morndo_schema SET floor = 3;");
     refused(b);
   });
   it("does not call ordinary new rows a schema change", () => {
@@ -436,5 +437,110 @@ describe("round 2 of the review of PR 176", () => {
     expect(refusedArm.status).not.toBe(0);
     expect(refusedArm.stderr).toContain(join(m.dest, "ok"));
     expect(existsSync(join(m.units, "c6-deadman-m1.timer"))).toBe(false);
+  });
+});
+
+describe("round 3 of the review of PR 176", () => {
+  const backup = (m: ReturnType<typeof machine>, extra: string[] = []) => sh(BACKUP, [m.dest, "--db", `node=${m.dbPath}`, ...extra], m.env);
+  const exec = (path: string, sql: string) => { const d = new DatabaseSync(path); d.exec(sql); d.close(); };
+  const sum = (path: string) => spawnSync("cksum", { input: readFileSync(path), encoding: "utf8" }).stdout.trim();
+  const unit = (m: ReturnType<typeof machine>, name: string, body = "[Service]\nExecStart=/bin/true\n") => writeFileSync(join(m.units, name), body);
+
+  it("the signature ignores runtime rows of a migration-looking table (locks, last-run times) and counts only user_version and _morndo_schema", () => {
+    const m = machine();
+    exec(m.dbPath, "CREATE TABLE migration_locks (holder TEXT, at INTEGER); INSERT INTO migration_locks VALUES ('a', 1);");
+    expect(backup(m).status).toBe(0);
+    install(m);
+    exec(m.dbPath, "INSERT INTO migration_locks VALUES ('b', 2); UPDATE migration_locks SET at = 9 WHERE holder = 'a';");
+    expect(sh(join(m.dest, "restore.sh"), [], m.env).status).toBe(0);
+  });
+
+  it("a service recorded disabled that the install enabled is disabled again; one recorded enabled is enabled", () => {
+    const m = machine();
+    unit(m, "morndo-fleet.service");
+    writeFileSync(join(m.state, "enabled"), "morndo-node.service\n");
+    expect(backup(m).status).toBe(0);            // fleet: inactive, disabled; node: active, enabled
+    install(m);
+    writeFileSync(join(m.state, "enabled"), "morndo-fleet.service\n");
+    rmSync(m.calls, { force: true });
+    expect(sh(join(m.dest, "restore.sh"), [], m.env).status).toBe(0);
+    const calls = readFileSync(m.calls, "utf8");
+    expect(calls).toMatch(/--user disable( --now)? morndo-fleet\.service/);
+    expect(calls).toMatch(/--user enable( --now)? morndo-node\.service/);
+  });
+
+  it("a timer put back on its schedule is restarted after enable --now, so a running timer takes the old schedule", () => {
+    const m = machine();
+    unit(m, "morndo-sweep.timer", "[Timer]\nOnCalendar=daily\n");
+    writeFileSync(join(m.state, "enabled"), "morndo-sweep.timer\n");
+    expect(backup(m).status).toBe(0);
+    install(m);
+    rmSync(m.calls, { force: true });
+    expect(sh(join(m.dest, "restore.sh"), [], m.env).status).toBe(0);
+    const calls = readFileSync(m.calls, "utf8");
+    expect(calls.indexOf("--user restart morndo-sweep.timer")).toBeGreaterThan(calls.indexOf("--user enable --now morndo-sweep.timer"));
+    expect(calls.indexOf("--user enable --now morndo-sweep.timer")).toBeGreaterThanOrEqual(0);
+  });
+
+  it("before a database is put back, every morndo service running now is stopped, whatever was recorded", () => {
+    const m = machine();
+    unit(m, "morndo-fleet.service");
+    expect(backup(m).status).toBe(0);            // fleet recorded inactive
+    install(m);
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-fleet.service\nmorndo-newthing.service\n");
+    const migrated = sum(m.dbPath);
+    rmSync(m.calls, { force: true });
+    expect(sh(join(m.dest, "restore.sh"), ["--with-db"], m.env).status).toBe(0);
+    const lines = readFileSync(m.calls, "utf8").split("\n");
+    const at = (needle: string) => lines.findIndex(l => l.includes(needle));
+    for (const s of ["morndo-node.service", "morndo-fleet.service", "morndo-newthing.service"]) {
+      const i = at(`--user stop ${s}`);
+      expect(i, s).toBeGreaterThanOrEqual(0);
+      expect(lines[i]).toContain(`#${migrated}`);               // the database was still the migrated one when this stop ran
+    }
+    const restart = lines.find(l => l.includes("--user restart morndo-node.service"))!;
+    expect(restart).not.toContain(`#${migrated}`);                // and was the backed-up one when the unit started
+  });
+
+  it("the dead-man whose aside copy fails leaves that database alone, still puts the units back, exits non-zero, and says so in the report and on stderr", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    exec(m.dbPath, "ALTER TABLE t ADD COLUMN extra TEXT; INSERT INTO t (v) VALUES ('after-migration');");
+    const wrapper = join(m.root, "node-fails-backup");
+    writeFileSync(wrapper, `#!/bin/sh\n[ "$4" = backup ] && exit 1\nexec '${process.execPath}' "$@"\n`, { mode: 0o755 });
+    const r = sh(join(m.dest, "restore.sh"), ["--deadman"], { ...m.env, C6_NODE: wrapper });
+    expect(r.status).not.toBe(0);
+    expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(OLD_UNIT);
+    expect(rows(m.dbPath)).toContain("after-migration");
+    const report = readFileSync(join(m.dest, "deadman-report.txt"), "utf8");
+    expect(report).toContain("FAILED");
+    expect(report).toContain("node");
+    expect(r.stderr).toContain("FAILED");
+  });
+
+  it("a date or mkdir failure in the dead-man path still puts the units back, then exits non-zero with a report", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    exec(m.dbPath, "ALTER TABLE t ADD COLUMN extra TEXT;");
+    const bin = join(m.root, "bad-bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "date"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const r = sh(join(m.dest, "restore.sh"), ["--deadman"], { ...m.env, PATH: `${bin}:${process.env.PATH}` });
+    expect(r.status).not.toBe(0);
+    expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(OLD_UNIT);
+    expect(readFileSync(join(m.dest, "deadman-report.txt"), "utf8")).toContain("FAILED");
+    expect(r.stderr).toContain("FAILED");
+  });
+
+  it("arm-deadman quotes the restore.sh path in the unit (a space is quoted, a % is doubled)", () => {
+    const m = machine();
+    const dest = join(m.root, "back up 5%");
+    expect(sh(BACKUP, [dest, "--db", `node=${m.dbPath}`], m.env).status).toBe(0);
+    const r = sh(ARM, ["m1", dest], { ...m.env, C6_NOW: "1800000000" });
+    expect(r.status, r.stderr).toBe(0);
+    const service = readFileSync(join(m.units, "c6-deadman-m1.service"), "utf8");
+    expect(service).toContain(`ExecStart="${dest.replaceAll("%", "%%")}/restore.sh" --deadman`);
   });
 });
