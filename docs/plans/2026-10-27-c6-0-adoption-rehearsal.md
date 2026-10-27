@@ -161,14 +161,36 @@ That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs 
   one recorded disabled is disabled (also when the install enabled it), an active service is restarted, an inactive one
   stopped; a timer recorded enabled gets `enable --now` and then `restart` (a running timer takes the restored schedule),
   one recorded disabled `disable --now`. A unit the install added is stopped and disabled.
+  Every file is replaced by copy-then-rename: the new one is written under a temp name in the same folder
+  (`<name>.c6-restore.tmp`), then renamed over the old one; a unit folder (drop-ins) is copied beside and swapped (new
+  renamed in, old removed after). Nothing is removed first, so a failure leaves the old file whole, removes the temp, is
+  named, and the service that file belongs to (the unit, or the services `<wrapper>.*`, `<wrapper>@*`, `<wrapper>-*`) is not
+  started. A database is copied from the backup beside the live file, checked with `PRAGMA quick_check`
+  (`db-backup.ts check`), its `-wal`/`-shm` removed only then, and renamed in; if any of that fails the live file is as it
+  was, no temp is left, and the services that use it stay stopped (hub and memory: `morndo-hub*`, fleet: `morndo-fleet*`,
+  node: `morndo-node*`; an unknown database name keeps every service stopped). The run exits non-zero and stderr (the
+  journal) and `deadman-report.txt` say `database <name> was NOT put back; the service ... stays stopped; copy
+  <backup>/dbs/<name>.db to <path> by hand and start it`. This covers a missing or corrupt backup copy, a failed aside
+  copy of a changed database, and a service that would not stop (a database is never overwritten under a running service).
+  Before any database is touched the restore stops every loaded morndo unit in an active-like state (`systemctl --user
+  list-units --state=active,activating,reloading,auto-restart 'morndo-*'`: services, timers, sockets and paths, template
+  instances included), timers first so none fires in the window, whatever was recorded; at the end `apply_state` puts each
+  recorded unit back exactly (an instance recorded active is restarted, one that was not recorded active stays stopped, a
+  timer gets `enable --now` and `restart`). `backup.sh` records the same set in `state.txt`, so an instance running at backup
+  time is recorded `active=yes` although only its template has a file.
   Every failure (a unit, a database copy, an aside copy that fails, a `date` or `mkdir` that fails, a report that cannot
   be written) is carried past: everything else is still done and the units are put back, and then the exit is non-zero,
-  with a `FAILED:` line on stderr (the journal) and in `<backup>/deadman-report.txt`, which every dead-man run past the
-  `ok` check writes. A database whose aside copy fails is not replaced. `restore.sh` has no `set -e`: each step is
-  checked on its own. `arm-deadman.sh` writes the restore path into `ExecStart=` quoted and escaped for systemd (`%`
-  doubled, `\` and `"` escaped) when it holds anything but plain characters, and `restore.sh` builds the same string to
-  find its own unit. The failing-aside, `date`/`mkdir` and quoting properties are unit-tested only
-  (`scripts/c6/backup.test.ts`); the container rehearsal covers the unit state set.
+  with a `FAILED:` line on stderr (the journal) and in `<backup>/deadman-report.txt`. Every dead-man exit leaves a line in
+  both: the normal path writes the report; the `ok` marker writes `ok marker present; nothing to do` to stderr and appends
+  it to the report; a host or HOME mismatch (exit 3) writes `<backup-folder>.deadman-report.txt` NEXT TO the folder (the
+  folder is not this machine's) and prints that path. A database whose aside copy fails is not replaced and its services
+  stay stopped. `restore.sh` has no `set -e`: each step is checked on its own. `arm-deadman.sh` writes the restore path into
+  `ExecStart=` quoted and escaped for systemd (`%` doubled, `\` and `"` escaped) when it holds anything but plain characters,
+  and `restore.sh` builds the same string to find its own unit. The container rehearsal covers the unit state set and one
+  failed database copy (the fleet copy is corrupted before the firing; the fleet service stays inactive, the report names it,
+  the live file is untouched; then the copy is put back by hand as the report says). Unit-tested only
+  (`scripts/c6/backup.test.ts`): the failing aside, `date`/`mkdir`, quoting, a timer that would fire in the restore window,
+  unit files and wrappers that cannot be copied back, and the host-mismatch report.
 - **Step 2 (arming):** `arm-deadman.sh` restarts the timer after enabling it, so arming again moves the time. It refuses
   (exit 1, writes nothing) while `<backup>/ok` exists; remove that file to arm, so the order is arm, then `touch ok`,
   then `--disarm`.

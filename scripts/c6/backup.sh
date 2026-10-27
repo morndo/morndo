@@ -161,6 +161,8 @@ cat > "$dest/restore.sh" <<'RESTORE'
 #   --with-db    also put the databases back (loses writes since the backup); needed when the schema changed
 #   --keep-data  put the old code back on the databases as they are, even when their schema changed
 # Refuses another host (exit 3) and, for a manual run, a changed schema (exit 4) before it touches anything.
+# Every file and database is replaced by copy-then-rename (a temp beside it, checked, then renamed in); a database that could
+# not be put back whole keeps its services stopped and is named. Every dead-man exit leaves a report line (exit 3: next to the folder).
 # Any failure after that (a unit that does not reach its state, a copy that fails, a date or mkdir that fails) is carried on
 # past: everything else is still done, the units are put back, and then the exit status is 1, a line "FAILED: ..." is on
 # stderr (the journal for the dead-man's unit) and, for the dead-man, in deadman-report.txt. No `set -e` here on purpose.
@@ -552,18 +554,31 @@ or restore the old code on the newer schema anyway, if you know it can run there
     sh $dest/restore.sh --keep-data
 
 The dead-man's run (--deadman) does not refuse on a changed schema, because nobody is there to choose. Before it touches
-any database it stops every morndo service that is running at that moment (whatever was recorded) and every one that was
-recorded active. For each database whose schema changed it then copies the live database into
-\`$dest/aside-<UTC time>/<name>.db\` (no script ever deletes that folder; the writes made since the backup live only
-there), then behaves like --with-db for those databases: puts the backed-up database back and starts the units. A database
-whose copy fails is left as it is. Databases whose schema did not change are not touched and not copied.
+any database it stops every loaded morndo unit in an active-like state (active, activating, reloading, auto-restart;
+services, timers, sockets and paths, template instances included; timers first, so none fires while it works), whatever
+was recorded, and every service recorded active. For each database whose schema changed it then copies the live database
+into \`$dest/aside-<UTC time>/<name>.db\` (no script ever deletes that folder; the writes made since the backup live only
+there), then behaves like --with-db for those databases: puts the backed-up database back and starts the units.
+Databases whose schema did not change are not touched and not copied.
 
-Every dead-man run past the \`ok\` check writes \`$dest/deadman-report.txt\` and prints it to the service journal. If anything
-failed (a unit that did not reach its state, a copy, a date or mkdir that failed, a report that could not be written) the
-units are still put back, every failure is a line \`FAILED: ...\` in the journal and in the report, and the exit status is
-non-zero. The same non-zero exit holds for a manual run.
+Every file is replaced by copy-then-rename: written under a temp name beside the old one (\`<name>.c6-restore.tmp\`), then
+renamed over it; a drop-in folder is copied beside and swapped. Nothing is removed first, so a failure leaves the old
+file whole and removes the temp. A database copy is also checked with PRAGMA quick_check, and its -wal/-shm are removed
+only right before the rename. If a database could not be put back whole (no copy, a copy that fails the check, a rename
+that fails, a changed database whose aside copy failed, a service that would not stop) the services that use it are NOT
+started: hub and memory: morndo-hub*, fleet: morndo-fleet*, node: morndo-node*, any other name: every service. The run
+exits non-zero and says on stderr (and in deadman-report.txt) which database and what to do: copy
+$dest/dbs/<name>.db to the live path by hand, then start the service. A unit file or wrapper that could not be copied back
+is named the same way and its service is not started.
 
-Every unit goes back to the state recorded in state.txt, by one routine: a service that was enabled is enabled and one
+Every dead-man exit leaves a line in the service journal and in a report file: a run past the \`ok\` check writes
+\`$dest/deadman-report.txt\` and prints it; the \`ok\` marker writes "ok marker present; nothing to do" to the journal and
+appends it to that report; a run on another host or HOME (exit 3) writes \`$dest.deadman-report.txt\` next to this folder
+and prints its path. If anything failed (a unit that did not reach its state, a copy, a date or mkdir that failed, a
+report that could not be written) the units are still put back, every failure is a line \`FAILED: ...\` in the journal and
+in the report, and the exit status is non-zero. The same non-zero exit holds for a manual run.
+
+Every unit of the recorded set (state.txt; a template instance that ran at backup time is in it) goes back to its recorded state, by one routine: a service that was enabled is enabled and one
 that was disabled is disabled (also when the install enabled it); an active service is restarted, an inactive one is
 stopped; a timer that was enabled is enabled with \`--now\` and then restarted (so a running timer takes the restored
 schedule), one that was disabled is disabled with \`--now\`. A unit the install added is stopped and disabled.
