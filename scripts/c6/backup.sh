@@ -221,6 +221,7 @@ while read -r u a e; do
 done < "$bk/state.txt"
 
 stopped=no
+stopfailed=no
 applied=no
 
 # ONE function puts every unit of the set (state.txt) into its recorded state, enabled or not and active or not:
@@ -254,7 +255,7 @@ stop_running() {
   for s in $running $start_list; do
     case $seen in *" $s "*) continue ;; esac
     seen="$seen$s "
-    if ! "$sc" --user stop "$s"; then problem "service $s would not stop before the database was touched"; fi
+    if ! "$sc" --user stop "$s"; then stopfailed=yes; problem "service $s would not stop before the database was touched"; fi
   done
 }
 
@@ -339,6 +340,10 @@ done
 
 try "$sc" --user daemon-reload
 
+if [ -n "$restore_dbs" ] && [ "$stopfailed" = yes ]; then
+  problem "no database was put back: a service would not stop, and a database is never overwritten under a running service"
+  restore_dbs=""
+fi
 if [ -n "$restore_dbs" ]; then
   if [ "$restore_dbs" = all ]; then restore_dbs=$(cat "$bk/dbs/paths.txt"); fi
   oldIFS=$IFS; IFS=$NL
