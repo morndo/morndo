@@ -3,7 +3,7 @@
 // install.sh, apps/updater/). The owner reads it before the tap that lets a release run use a key (release plan,
 // decision 9). These tests build a small git repository per case and read what the card says about it.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -49,9 +49,47 @@ function commit(dir: string, subject: string, files: Record<string, string | nul
   return git(dir, "rev-parse", "HEAD");
 }
 
-function card(dir: string, ...args: string[]) {
-  const r = spawnSync("sh", [SCRIPT, ...args], { cwd: dir, env, encoding: "utf8" });
+function scratch(prefix: string): string {
+  const d = mkdtempSync(join(tmpdir(), prefix));
+  roots.push(d);
+  return d;
+}
+
+/** A stand-in for check-release-settings.sh: prints its lines on stdout, its arguments on stderr, exits with `code`. */
+function fakeCheck(code: number, lines: string[]): string {
+  const p = join(scratch("release-card-check-"), "check.sh");
+  writeFileSync(p, [...lines.map(l => `printf '%s\\n' '${l.replaceAll("'", "'\\''")}'`), 'printf \'args: %s\\n\' "$*" >&2', `exit ${code}`, ""].join("\n"));
+  return p;
+}
+const CHECK_OK = [
+  "WARN: main's code-owner review can be bypassed by RepositoryRole:5:pull_request (accepted with --allow-main-bypass)",
+  "check-release-settings: ok (acme/widgets: the settings hold)",
+];
+const SETTINGS_ARGS = ["--", "--reviewer-id", "1", "--app-id", "7"];
+
+/** sh release-card.sh <args> in `cwd`, with extra environment. */
+function run(cwd: string, args: string[], extra: NodeJS.ProcessEnv = {}, sh = "sh") {
+  const r = spawnSync(sh, [SCRIPT, ...args], { cwd, env: { ...env, ...extra }, encoding: "utf8" });
   return { code: r.status, out: r.stdout, err: r.stderr };
+}
+
+/** The card as the run book runs it: the two commits, then the settings check's arguments (a passing stand-in). */
+function card(dir: string, ...args: string[]) {
+  return run(dir, [...args, ...SETTINGS_ARGS], { RELEASE_CARD_SETTINGS_CHECK: fakeCheck(0, CHECK_OK) });
+}
+
+/** A bin directory whose git logs each call to `marker` and runs the real git, or fails on one subcommand. */
+function wrappedGit(opts: { marker?: string; failOn?: string }): string {
+  const bin = scratch("release-card-bin-");
+  writeFileSync(join(bin, "git"), [
+    "#!/bin/sh",
+    opts.marker ? `printf '%s\\n' "$1" >> '${opts.marker}'` : ":",
+    opts.failOn ? `[ "$1" = '${opts.failOn}' ] && { echo "fatal: simulated failure" >&2; exit 128; }` : ":",
+    'exec /usr/bin/git "$@"',
+    "",
+  ].join("\n"));
+  chmodSync(join(bin, "git"), 0o755);
+  return bin;
 }
 
 const short = (sha: string) => sha.slice(0, 8);
@@ -68,6 +106,7 @@ describe("release-card.sh", () => {
     expect(r.out).not.toContain("README.md");
     expect(r.out).not.toContain("apps/hub");
     expect(r.out).not.toContain("files:");
+    expect(r.out.split("\n")[1]).toBe("paths: .github/workflows/ .github/CODEOWNERS scripts/release/ trust/ install.sh apps/updater/ package.json package-lock.json");
   });
 
   it("lists added, modified and deleted files sorted by path, and the commits that touched them", () => {
@@ -92,7 +131,7 @@ describe("release-card.sh", () => {
       "",
     ].join("\n"));
     expect(r.out).not.toContain("readme only");
-    expect(r.out.trimEnd().split("\n").at(-1)).toBe(`release card: 3 file(s) changed in the release-critical paths since ${short(base)}`);
+    expect(r.out).toContain(`release card: 3 file(s) changed in the release-critical paths since ${short(base)}\n`);
   });
 
   it.each([
@@ -102,6 +141,8 @@ describe("release-card.sh", () => {
     "trust/feed_allowed_signers",
     "install.sh",
     "apps/updater/src/cli.ts",
+    "package.json",
+    "package-lock.json",
   ])("watches %s", path => {
     const dir = repo();
     const base = commit(dir, "chore: base", { "README.md": "a\n" });
@@ -120,6 +161,8 @@ describe("release-card.sh", () => {
       "apps/updater-old/a.ts": "x\n",
       "trust.md": "x\n",
       ".github/workflows-old/a.yml": "x\n",
+      "apps/web/package.json": "x\n",
+      "package.json.orig": "x\n",
     });
     const r = card(dir, base, head);
     expect(r.code).toBe(0);
@@ -161,7 +204,7 @@ describe("release-card.sh", () => {
     const head = git(dir, "rev-parse", "HEAD");
     const r = card(dir, base, head);
     expect(r.code).toBe(0);
-    expect(r.out).toContain(`commits:\n  ${short(work)} feat(release): a new step\nrelease card: 1 file(s)`);
+    expect(r.out).toContain(`commits:\n  ${short(work)} feat(release): a new step\nsettings:`);
     expect(r.out).not.toContain("Merge pull request");
   });
 
@@ -189,6 +232,124 @@ describe("release-card.sh", () => {
     const r = spawnSync("sh", [SCRIPT, base, head], { cwd: join(dir, "scripts"), env, encoding: "utf8" });
     expect(r.status).toBe(0);
     expect(r.stdout).toContain("  A install.sh\n");
+  });
+
+  it("carries the settings check's output, the command it ran, and passes when the check passes", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "fix(install): verify first", { "install.sh": "x\n" });
+    const check = fakeCheck(0, CHECK_OK);
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { RELEASE_CARD_SETTINGS_CHECK: check });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain([
+      `settings: sh ${check} --reviewer-id 1 --app-id 7`,
+      `  ${CHECK_OK[0]}`,
+      `  ${CHECK_OK[1]}`,
+      "  args: --reviewer-id 1 --app-id 7",
+      "",
+    ].join("\n"));
+    expect(r.out.trimEnd().split("\n").at(-1)).toBe("release card: settings check ok");
+  });
+
+  it("runs the check-release-settings.sh beside it when no other is named", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const bin = scratch("release-card-gh-");
+    writeFileSync(join(bin, "gh"), "#!/bin/sh\necho 'gh: offline in this test' >&2\nexit 1\n");
+    chmodSync(join(bin, "gh"), 0o755);
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { PATH: `${bin}:${process.env.PATH ?? "/usr/bin:/bin"}` });
+    expect(r.out).toContain(`settings: sh ${join(dirname(SCRIPT), "check-release-settings.sh")} --reviewer-id 1 --app-id 7\n`);
+  });
+
+  it("fails loudly when the settings check fails, with its lines on the card", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const failing = ["FAIL: environment feed lets repository administrators bypass its protection rules (can_admins_bypass is true); turn it off", "check-release-settings: 1 problem(s)"];
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { RELEASE_CARD_SETTINGS_CHECK: fakeCheck(1, failing) });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain(`  ${failing[0]}\n  ${failing[1]}\n`);
+    expect(r.out).toContain("  A install.sh\n");
+    expect(r.out.trimEnd().split("\n").at(-1)).toBe("release card: SETTINGS CHECK FAILED (exit 1): do not tap");
+  });
+
+  it("says loudly that the settings check did not run without its arguments", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const r = run(dir, [base, head], { RELEASE_CARD_SETTINGS_CHECK: fakeCheck(0, CHECK_OK) });
+    expect(r.code).toBe(3);
+    expect(r.out).toContain("  A install.sh\n");
+    expect(r.out).not.toContain("check-release-settings: ok");
+    expect(r.out.trimEnd().split("\n").at(-1)).toBe(
+      "release card: SETTINGS CHECK NOT RUN: no settings arguments (release-card.sh <base> <head> -- --reviewer-id <id> --app-id <id> [...]); this card is incomplete");
+  });
+
+  it.each<[string, () => string, string]>([
+    ["is not there", () => "/nonexistent/check-release-settings.sh", "/nonexistent/check-release-settings.sh is not there"],
+    ["refuses its arguments", () => fakeCheck(2, ["check-release-settings: usage: ..."]), "it exited 2"],
+  ])("says loudly that the settings check did not run when it %s", (_what, check, reason) => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { RELEASE_CARD_SETTINGS_CHECK: check() });
+    expect(r.code).toBe(3);
+    expect(r.out.trimEnd().split("\n").at(-1)).toBe(`release card: SETTINGS CHECK NOT RUN: ${reason}; this card is incomplete`);
+  });
+
+  it.each(["log", "diff"])("fails when git %s fails, and prints no card", sub => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const bin = wrappedGit({ failOn: sub });
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { PATH: `${bin}:/usr/bin:/bin`, RELEASE_CARD_SETTINGS_CHECK: fakeCheck(0, CHECK_OK) });
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(`release-card: git ${sub} failed`);
+    expect(r.out).toBe("");
+  });
+
+  it("uses the git on the caller's PATH", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const marker = join(scratch("release-card-marker-"), "calls");
+    const bin = wrappedGit({ marker });
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { PATH: `${bin}:/usr/bin:/bin`, RELEASE_CARD_SETTINGS_CHECK: fakeCheck(0, CHECK_OK) });
+    expect(r.code).toBe(0);
+    expect(existsSync(marker) ? readFileSync(marker, "utf8") : "").toContain("log\n");
+  });
+
+  it("says so when no git is on PATH", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const bin = scratch("release-card-nogit-bin-");
+    for (const name of readdirSync("/usr/bin")) if (!name.startsWith("git")) symlinkSync(join("/usr/bin", name), join(bin, name));
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { PATH: bin, RELEASE_CARD_SETTINGS_CHECK: fakeCheck(0, CHECK_OK) }, "/bin/sh");
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("release-card: git is not on PATH");
+  });
+
+  it("takes tags as base and head, and names the commits they point at", () => {
+    const dir = repo();
+    const c1 = commit(dir, "chore: base", { "README.md": "a\n" });
+    git(dir, "tag", "v0.1.0");
+    const c2 = commit(dir, "fix(install): one", { "install.sh": "1\n" });
+    git(dir, "tag", "-a", "-m", "release 0.1.1", "v0.1.1");
+    const c3 = commit(dir, "fix(release): two", { "scripts/release/a.sh": "2\n" });
+    git(dir, "tag", "-a", "-m", "release 0.1.2", "v0.1.2");
+    const r = card(dir, "v0.1.0", "v0.1.2");
+    expect(r.code).toBe(0);
+    expect(r.out.split("\n")[0]).toBe(`release card: ${short(c1)}..${short(c3)}`);
+    expect(r.out).toContain(`commits:\n  ${short(c3)} fix(release): two\n  ${short(c2)} fix(install): one\n`);
+    expect(r.out).toContain("release card: 2 file(s) changed in the release-critical paths since " + short(c1));
+    const one = card(dir, "v0.1.1", "v0.1.2");
+    expect(one.out.split("\n")[0]).toBe(`release card: ${short(c2)}..${short(c3)}`);
+    expect(one.out).not.toContain("install.sh");
+    const back = card(dir, "v0.1.2", "v0.1.0");
+    expect(back.code).toBe(1);
+    expect(back.err).toContain(`release-card: ${short(c3)} is not an ancestor of ${short(c1)}`);
   });
 
   it("refuses a base that is not an ancestor of the head", () => {
