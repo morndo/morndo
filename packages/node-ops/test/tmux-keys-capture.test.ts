@@ -87,6 +87,8 @@ describe("capture with lines and attributes", () => {
     const pane = await printed();
     const tmux = tmuxAdapter({ socket: t.socket, session: "main" });
     for (const lines of [0, 2001, 1.5]) expect(await tmux.capture(pane, { lines, attributes: false }), String(lines)).toBeNull();
+    // captureScreen is what capture reads through, and what the frame reads on its own: it bounds the count itself.
+    for (const lines of [0, 2001, 1.5]) expect(await tmux.captureScreen(pane, { lines, attributes: false }), `captureScreen ${lines}`).toBeNull();
     expect(await tmux.capture("main:0", { lines: 5, attributes: false })).toBeNull();
     expect(await tmux.capture("%999", { lines: 5, attributes: false })).toBeNull();
   });
