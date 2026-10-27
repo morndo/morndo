@@ -6,6 +6,8 @@ Run `npm ci` with the Node that will run these scripts before `manifest` or any 
 
 `schema-read.ts` starts that child with the repository as its working directory and no inherited Node flags. Node 24 strips TypeScript types by default, so none are required. A failure is reported as `schema read failed:` plus the child's own message. The Pages `feed-site` command does not load the apps and does not need `npm ci`.
 
+`sh scripts/release/release-card.sh <base> <head> [-- <check-release-settings.sh arguments>...]` prints the release card the owner reads before the tap that lets a release run use a key: every change to the release-critical paths (.github/workflows/, .github/CODEOWNERS, scripts/release/, trust/, install.sh, apps/updater/, package.json, package-lock.json) since the base commit, plus the release-settings check's output when its arguments follow `--`. It only reads.
+
 ## Release settings
 
 `check-release-settings.sh` proves, read-only, that the GitHub settings a release depends on are in place: the environments and their reviewers, the branch rules, the tag ruleset, and where the signing keys live. It changes nothing and prints secret names only, never values. The one-time setup it checks against, with the exact commands, is in `docs/release-settings.md`; it runs before every release and every Monday.

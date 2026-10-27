@@ -280,7 +280,7 @@ export class JobStore {
     let n = 0;
     for (const { id } of ids) {
       if (this.#remove(`${id}.log`)) this.#release(id);
-      for (const suffix of [".exit", ".pid", ".pid.at", ".child", ".child.at", ".argv", ".exit.tmp", ".cap"]) this.#remove(`${id}${suffix}`);
+      for (const suffix of [".exit", ".pid", ".pid.at", ".child", ".child.at", ".argv", ".exit.tmp", ".cap", ".cancel"]) this.#remove(`${id}${suffix}`);
       this.#capped.delete(id);
       this.#truncated.delete(id);
       this.#sent.delete(id);
