@@ -64,8 +64,9 @@ work=$(mktemp -d "$share/.morndo-install.XXXXXX" 2>/dev/null) || work=$(mktemp -
 cleanup() {
   status=$?
   if [ -n "${work:-}" ]; then
-    find "$work" -type d -exec chmod u+w {} +
-    rm -rf "$work"
+    # set -e is on: a failure here must not become the exit code, so neither may stop the trap
+    find "$work" -type d -exec chmod u+w {} + 2>/dev/null || :
+    rm -rf "$work" 2>/dev/null || :
     if [ -d "$work" ]; then
       echo "install.sh: could not remove $work" >&2
     fi

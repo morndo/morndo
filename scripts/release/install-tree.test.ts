@@ -197,6 +197,26 @@ describe("install.sh hands `morndo install` the tree as packed", () => {
     expect(leftovers(home, tmp)).toEqual([]);
   });
 
+  it("keeps a good install's exit code when its cleanup cannot remove the tree, and says so", () => {
+    const work = temp();
+    const home = join(work, "home");
+    const tmp = join(work, "tmp");
+    const bin = join(work, "bin");
+    mkdirSync(home);
+    mkdirSync(tmp);
+    mkdirSync(bin);
+    // an rm that removes nothing and fails, first on PATH: the cleanup's own failure must not become the exit code
+    writeFileSync(join(bin, "rm"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const { dest } = stagedRelease(keepingNode({ marker: join(work, "marker"), keep: join(work, "kept") }));
+    const release = published(packTree(stagedTreeFiles(dest), MTIME));
+    const r = spawnSync("sh", ["-c", 'umask 022; exec sh "$0" --role control-plane --signers "$1"', release.script, release.signers], {
+      encoding: "utf8",
+      env: { PATH: `${bin}:${process.env.PATH ?? ""}`, HOME: home, TMPDIR: tmp, MORNDO_RELEASE_BASE: `file://${release.base}` },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/install\.sh: could not remove /);
+  });
+
   it("exits with `morndo install`'s own code when it fails, and still cleans up", () => {
     const work = temp();
     const home = join(work, "home");
