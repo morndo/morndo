@@ -146,21 +146,29 @@ That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs 
   database and which units were active or enabled. A failure after the folder exists removes the folder again.
 - **Step 6 (restore refusals):** `restore.sh` refuses another host or `HOME` (exit 3). A manual run refuses (exit 4, before
   it changes anything) when the schema signature of a live database differs from the backup's. The signature covers the
-  tables, indexes and triggers (`sqlite_master`), `PRAGMA user_version` and every row of any table whose name contains
-  "migrat", so it also sees a data-only migration; ordinary new rows do not change it. When it changed, the choice is
+  tables, indexes and triggers (`sqlite_master`), `PRAGMA user_version` and the rows of the one-row `_morndo_schema` table (the compat floor the shared
+  migration runner writes, ADR-0019), so it also sees a data-only migration; ordinary new rows do not change it, and
+  neither do the rows of a table that merely has "migrat" in its name (a lock, a last-run time). When it changed, the choice is
   `--with-db` (puts the old data back, loses every write since the backup) or `--keep-data` (old code on the newer
   schema anyway). The dead-man's run (`--deadman`) does not stop on a changed schema, because nobody is there to
-  choose: for each database whose signature changed it first takes an online copy into `<backup>/aside-<UTC time>/<name>.db`
-  (no script deletes that folder; the writes made since the backup live only there), then behaves like `--with-db` for
-  those databases (stops the services, puts the backed-up database back, starts the units), and writes
-  `<backup>/deadman-report.txt` (what it did, which databases changed, the aside folder), also printed to the service
-  journal. Databases whose schema did not change are left alone and not copied. If the copy of a database fails, that
-  database is not replaced. A manual run ignores a stale `ok` marker (it says so); only `--deadman` honours it.
-  Every unit goes back to its recorded state: a service that was inactive is stopped, a timer that was disabled is
-  disabled with `--now`, an active service is restarted, an enabled timer is enabled; nothing that was not active or
-  enabled is started. A failing unit does not stop the others, and the exit is non-zero naming them. Once `--with-db`
-  (or the dead-man's database restore) has stopped the services, every exit path, a failed copy included, starts the
-  recorded units again before it exits non-zero naming the database or unit.
+  choose. Before it touches any database it stops every morndo service running at that moment (whatever was recorded)
+  and every one recorded active (`systemctl --user list-units --state=active 'morndo-*.service'`); then for each
+  database whose signature changed it takes an online copy into `<backup>/aside-<UTC time>/<name>.db` (no script deletes
+  that folder; the writes made since the backup live only there), puts the backed-up database back and starts the units.
+  Databases whose schema did not change are left alone and not copied. A manual run ignores a stale `ok` marker (it says
+  so); only `--deadman` honours it. The same stop comes before the `--with-db` copy.
+  One routine puts every unit of the recorded set back into its recorded state: a service recorded enabled is enabled,
+  one recorded disabled is disabled (also when the install enabled it), an active service is restarted, an inactive one
+  stopped; a timer recorded enabled gets `enable --now` and then `restart` (a running timer takes the restored schedule),
+  one recorded disabled `disable --now`. A unit the install added is stopped and disabled.
+  Every failure (a unit, a database copy, an aside copy that fails, a `date` or `mkdir` that fails, a report that cannot
+  be written) is carried past: everything else is still done and the units are put back, and then the exit is non-zero,
+  with a `FAILED:` line on stderr (the journal) and in `<backup>/deadman-report.txt`, which every dead-man run past the
+  `ok` check writes. A database whose aside copy fails is not replaced. `restore.sh` has no `set -e`: each step is
+  checked on its own. `arm-deadman.sh` writes the restore path into `ExecStart=` quoted and escaped for systemd (`%`
+  doubled, `\` and `"` escaped) when it holds anything but plain characters, and `restore.sh` builds the same string to
+  find its own unit. The failing-aside, `date`/`mkdir` and quoting properties are unit-tested only
+  (`scripts/c6/backup.test.ts`); the container rehearsal covers the unit state set.
 - **Step 2 (arming):** `arm-deadman.sh` restarts the timer after enabling it, so arming again moves the time. It refuses
   (exit 1, writes nothing) while `<backup>/ok` exists; remove that file to arm, so the order is arm, then `touch ok`,
   then `--disarm`.

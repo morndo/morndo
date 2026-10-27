@@ -10,6 +10,16 @@ usage() { echo "usage: arm-deadman.sh <machine> <backup-dir> [--seconds N] | arm
 sc=${C6_SYSTEMCTL:-systemctl}
 units="$HOME/.config/systemd/user"
 
+# The path as systemd reads it in ExecStart: a path with anything beyond plain characters is put in double quotes, with a
+# backslash and a double quote backslash-escaped, % doubled (a specifier) and $ doubled (variable expansion). A plain path
+# is written as it is. restore.sh builds the same string to find the unit that belongs to its backup.
+unit_path() {
+  case $1 in
+    *[!A-Za-z0-9_./+:@,=-]*) printf '"%s"' "$(printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' -e 's/%/%%/g' -e 's/\$/$$/g')" ;;
+    *) printf '%s' "$1" ;;
+  esac
+}
+
 checkname() { case $1 in ''|*[!A-Za-z0-9_.-]*) echo "arm-deadman.sh: bad machine name: $1" >&2; exit 2 ;; esac; }
 
 if [ $# -ge 1 ] && [ "$1" = "--disarm" ]; then
@@ -62,6 +72,7 @@ fi
 now=${C6_NOW:-$(date +%s)}
 when=$(date -d "@$((now + secs))" '+%Y-%m-%d %H:%M:%S')
 
+execpath=$(unit_path "$dir/restore.sh")
 mkdir -p "$units"
 cat > "$units/c6-deadman-$machine.service" <<UNIT
 [Unit]
@@ -69,7 +80,7 @@ Description=C6 dead-man's switch for $machine: put the machine back as backup.sh
 
 [Service]
 Type=oneshot
-ExecStart=$dir/restore.sh --deadman
+ExecStart=$execpath --deadman
 UNIT
 cat > "$units/c6-deadman-$machine.timer" <<UNIT
 [Unit]

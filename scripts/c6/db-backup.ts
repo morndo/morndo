@@ -1,6 +1,11 @@
 // SQLite helpers for backup.sh and restore.sh (node:sqlite), run with node --no-warnings:
 //   db-backup.ts backup <src> <dest>   online copy, then PRAGMA quick_check on the copy; prints the copy's schema signature
-//   db-backup.ts signature <path>      prints the schema signature: sha256 of sqlite_master (type,name,sql), PRAGMA user_version and the rows of every *migrat* table
+//   db-backup.ts signature <path>      prints the schema signature: sha256 of sqlite_master (type,name,sql), PRAGMA user_version
+//                                      and the rows of the table _morndo_schema
+// The signature counts exactly the migration record: the schema itself (sqlite_master), SQLite's PRAGMA user_version, and
+// the rows of _morndo_schema, the one-row compat-floor table the shared migration runner writes (packages/service-kit/src/
+// migrate.ts, ADR-0019). It does NOT count the rows of any other table that merely has "migrat" in its name: a lock, a
+// last-run time or a history table changes while the system runs and would make an ordinary run look like a migration.
 import { createHash } from "node:crypto";
 import { backup, DatabaseSync } from "node:sqlite";
 
@@ -12,14 +17,12 @@ function signature(path: string): string {
     for (const r of rows) h.update(`${r.type}\u0000${r.name}\u0000${r.sql ?? ""}\n`);
     const uv = db.prepare("PRAGMA user_version").get() as { user_version: number };
     h.update(`user_version\u0000${uv.user_version}\n`);
-    // A migration may also change data the old code reads: the contents of every migrations table count.
-    const tables = db.prepare("select name from sqlite_master where type = 'table' and name like '%migrat%' order by name").all() as { name: string }[];
+    // The compat floor a migration may move without changing any table: the rows of _morndo_schema (only that table).
     const json = (v: unknown) => JSON.stringify(v, (_k, x) => (typeof x === "bigint" ? `${x}n` : x instanceof Uint8Array ? Buffer.from(x).toString("hex") : x));
-    for (const t of tables) {
-      const q = `"${t.name.replaceAll('"', '""')}"`;
+    if (db.prepare("select 1 from sqlite_master where type = 'table' and name = '_morndo_schema'").get() !== undefined) {
       let data: unknown[];
-      try { data = db.prepare(`select * from ${q} order by rowid`).all(); } catch { data = db.prepare(`select * from ${q}`).all(); }
-      h.update(`table\u0000${t.name}\n`);
+      try { data = db.prepare("select * from _morndo_schema order by rowid").all(); } catch { data = db.prepare("select * from _morndo_schema").all(); }
+      h.update("table\u0000_morndo_schema\n");
       for (const row of data) h.update(`${json(row)}\n`);
     }
     return h.digest("hex");
