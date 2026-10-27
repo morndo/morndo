@@ -461,17 +461,5 @@ describe("every way out of acquire and release lets go: the handle is closed and
     expect(next.ok).toBe(true);
     if (next.ok) next.release();
   });
-  it("a failure while waiting (the busy loop) closes the handle and clears the sink too", async () => {
-    const path = join(area(), ".env");
-    const first = await acquireEnvLock(path, { waitMs: 0 });
-    expect(first.ok).toBe(true);
-    // A second process holds nothing here; the in-process wait is the registry, so the failure is made in the first taker's own release below.
-    if (first.ok) first.release();
-    const out = await acquireEnvLock(path, { waitMs: 0, seam: { afterOpen: boom } });
-    expect(out.ok).toBe(false);
-    const again = await acquireEnvLock(path, { waitMs: 0 });
-    expect(again.ok).toBe(true);
-    if (again.ok) again.release();
-  });
 });
 

@@ -181,6 +181,9 @@ function noteHolder(note: string): EnvLockHolder | null {
 // opened by one SQLite handle and by nothing else (no read, open or create of it elsewhere); `lstat` opens nothing.
 const inProcess = new Set<string>();
 
+// Test seams: where a failure is made to happen.
+export type LockSeam = { afterOpen?: () => void; afterBegin?: () => void; atClose?: () => void };
+
 function lockKey(lock: string): string {
   try { return join(realpathSync(dirname(lock)), basename(lock)); } catch { return lock; }
 }
@@ -191,7 +194,7 @@ function lockKey(lock: string): string {
 // only; it never decides anything. `release` is idempotent, removes the note (only if it still reads as written) before it lets the lock go, and the
 // lock file itself stays, an empty database whose existence means nothing. Anything at the lock path that is not an SQLite database (a text file of
 // an earlier build that never shipped included) is busy and is never deleted.
-export async function acquireEnvLock(path: string, options: { waitMs: number }): Promise<{ ok: true; release(): void } | { ok: false; problem: "busy"; holder: EnvLockHolder | null }> {
+export async function acquireEnvLock(path: string, options: { waitMs: number; seam?: LockSeam }): Promise<{ ok: true; release(): void } | { ok: false; problem: "busy"; holder: EnvLockHolder | null }> {
   const lock = `${path}.lock`;
   const note = `${lock}.owner`;
   const key = lockKey(lock);
@@ -203,49 +206,65 @@ export async function acquireEnvLock(path: string, options: { waitMs: number }):
     await new Promise<void>(resolve => { setTimeout(resolve, LOCK_POLL_MS); });
   }
   inProcess.add(key);
-  const leave = (): void => { inProcess.delete(key); };
-  let db: Database.Database;
+  // Every way out lets go: unless the lock is handed to the caller, the transaction is rolled back, the handle closed and the sink cleared, whatever threw.
+  let db: Database.Database | null = null;
+  let handedOut = false;
   try {
     // SQLite creates the file when it is not there; 0600 is set after, by the path, never through a descriptor of our own.
     const created = !existsSync(lock);
     db = new Database(lock);
     if (created) chmodSync(lock, 0o600);
+    options.seam?.afterOpen?.();
     db.pragma("busy_timeout = 0");
-  } catch { leave(); return { ok: false, problem: "busy", holder: null }; }
-  for (;;) {
-    try {
-      db.exec("BEGIN EXCLUSIVE");
-    } catch (error) {
-      // Busy or locked is another holder: wait and try again until waitMs has passed, then say who the note names. Any other error (not a
-      // database, cannot be opened) is a file not ours to touch: busy at once, without retry.
-      const code = (error as { code?: string }).code ?? "";
-      if (code !== "SQLITE_BUSY" && code !== "SQLITE_LOCKED") { db.close(); leave(); return { ok: false, problem: "busy", holder: null }; }
-      if (Date.now() - began >= options.waitMs) { db.close(); leave(); return { ok: false, problem: "busy", holder: noteHolder(note) }; }
-      await new Promise<void>(resolve => { setTimeout(resolve, LOCK_POLL_MS); });
-      continue;
-    }
-    const owner = ownerText();
-    if (owner !== null) {
-      // The note is information for messages only: a failure to write it is ignored.
-      const temp = `${note}.${process.pid}.tmp`;
+    for (;;) {
       try {
-        const fd = openSync(temp, "wx", 0o600);
-        try { writeSync(fd, owner); fsyncSync(fd); } finally { closeSync(fd); }
-        renameSync(temp, note);
-      } catch { /* the note is information only */ }
+        db.exec("BEGIN EXCLUSIVE");
+      } catch (error) {
+        // Busy or locked is another holder: wait and try again until waitMs has passed, then say who the note names. Any other error (not a
+        // database, cannot be opened) is a file not ours to touch: busy at once, without retry.
+        const code = (error as { code?: string }).code ?? "";
+        if (code !== "SQLITE_BUSY" && code !== "SQLITE_LOCKED") return { ok: false, problem: "busy", holder: null };
+        if (Date.now() - began >= options.waitMs) return { ok: false, problem: "busy", holder: noteHolder(note) };
+        await new Promise<void>(resolve => { setTimeout(resolve, LOCK_POLL_MS); });
+        continue;
+      }
+      options.seam?.afterBegin?.();
+      const owner = ownerText();
+      if (owner !== null) {
+        // The note is information for messages only: a failure to write it is ignored.
+        const temp = `${note}.${process.pid}.tmp`;
+        try {
+          const fd = openSync(temp, "wx", 0o600);
+          try { writeSync(fd, owner); fsyncSync(fd); } finally { closeSync(fd); }
+          renameSync(temp, note);
+        } catch { /* the note is information only */ }
+      }
+      const held = db;
+      let released = false;
+      handedOut = true;
+      return {
+        ok: true,
+        release: () => {
+          if (released) return;
+          released = true;
+          // The note first, while the lock is still held, so no taker can see a note of a holder that has let go; then the lock. Nothing here
+          // throws and nothing is skipped: the sink is cleared whatever failed.
+          try { if (owner !== null && readFileSync(note, "utf8") === owner) unlinkSync(note); } catch { /* already gone */ }
+          try { held.exec("ROLLBACK"); } catch { /* already gone */ }
+          try { options.seam?.atClose?.(); held.close(); } catch { /* the kernel lets go when the process ends */ }
+          inProcess.delete(key);
+        },
+      };
     }
-    let released = false;
-    return {
-      ok: true,
-      release: () => {
-        if (released) return;
-        released = true;
-        // The note first, while the lock is still held, so no taker can see a note of a holder that has let go; then the lock.
-        try { if (owner !== null && readFileSync(note, "utf8") === owner) unlinkSync(note); } catch { /* already gone */ }
-        try { db.exec("ROLLBACK"); } catch { /* already gone */ }
-        db.close();
-        leave();
-      },
-    };
+  } catch {
+    return { ok: false, problem: "busy", holder: null };
+  } finally {
+    if (!handedOut) {
+      if (db !== null) {
+        try { db.exec("ROLLBACK"); } catch { /* not in a transaction */ }
+        try { db.close(); } catch { /* already closed */ }
+      }
+      inProcess.delete(key);
+    }
   }
 }
