@@ -305,13 +305,19 @@ function deadmanJournal(machine: string): { ranOk: boolean; failedRun: boolean; 
   };
 }
 
-async function waitDeadmanGone(machine: string, timeoutMs: number): Promise<boolean> {
+// How many times the machine's dead-man service has been started (its journal outlives a firing, so a second firing is
+// waited for by a count above the one seen before it was armed).
+const deadmanStarts = (machine: string): number => {
+  const log = run("journalctl", ["--user", "-u", `c6-deadman-${machine}.service`, "--no-pager", "-o", "cat"]).out;
+  return log.split("\n").filter(l => l.includes(`Starting c6-deadman-${machine}.service`) || l.includes(`Started c6-deadman-${machine}.service`)).length;
+};
+
+async function waitDeadmanGone(machine: string, timeoutMs: number, startsBefore = 0): Promise<boolean> {
   const gone = await waitUntil(timeoutMs, async () => {
     const service = run("systemctl", ["--user", "is-active", `c6-deadman-${machine}.service`]).out.trim();
     // A persistent timer whose calendar time has passed stays "active (elapsed)" when restore.sh did not disable it (the ok
     // marker exits first), so "fired" is the service's own journal: it was started (and it is not running any more).
-    const log = run("journalctl", ["--user", "-u", `c6-deadman-${machine}.service`, "--no-pager", "-o", "cat"]).out;
-    const fired = log.includes(`Starting c6-deadman-${machine}.service`) || log.includes(`Started c6-deadman-${machine}.service`);
+    const fired = deadmanStarts(machine) > startsBefore;
     return fired && service !== "active" && service !== "activating" ? "gone" : null;
   });
   return gone !== null;
@@ -568,6 +574,7 @@ async function main(): Promise<number> {
   const disarmed2 = command("f2-disarm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "--disarm", "m1"]);
   const rearmed2 = command("f2-rearm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(FIRING_SECONDS)]);
   const armedAt2 = Date.now();
+  const startsBefore2 = deadmanStarts("m1");
   check("f2-rearmed", disarmed2.code === 0 && rearmed2.code === 0, `switch disarmed (${disarmed2.code}), fresh ${FIRING_SECONDS} s switch armed (${rearmed2.code}): ${firstLines(rearmed2, 2)}`);
   sqlite(FLEET_DB, "ALTER TABLE c6_marker ADD COLUMN extra TEXT; INSERT INTO c6_marker (v) VALUES ('after-migration')");
   const FLEET_BACKUP_COPY = join(BACKUP, "dbs/fleet.db");
@@ -578,7 +585,7 @@ async function main(): Promise<number> {
   check("f2-armed-still-pending", remaining2 > 0 && run("systemctl", ["--user", "is-active", "c6-deadman-m1.timer"]).out.trim() === "active",
     `the fleet database got a new column and a row, its backup copy is corrupted; the timer has ${remaining2} s left`);
   if (failed) return finish(server);
-  const fired2 = await waitDeadmanGone("m1", (Math.max(remaining2, 0) + 150) * 1000);
+  const fired2 = await waitDeadmanGone("m1", (Math.max(remaining2, 0) + 150) * 1000, startsBefore2);
   await sleep(2000);
   const dm1b = deadmanJournal("m1");
   writeFileSync(join(EVIDENCE, "deadman-m1-failed-copy-journal.txt"), dm1b.text);
