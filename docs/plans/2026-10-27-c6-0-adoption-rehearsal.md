@@ -119,10 +119,23 @@ Measured by the scenario on a throwaway machine, about 10.5 minutes a run:
 3. After `restore.sh`, a second install exits 78 (`already installed: use morndo update`): the releases folder and the
    updater's state stay. A retried install needs those removed first (not part of `restore.sh`, which never touches
    data).
-4. `morndo doctor` exits 1 right after a fresh install: `tree: files.json: unreadable` (the installed tree has no
+4. `morndo doctor` exits 1 right after a fresh install (filed as T-486): `tree: files.json: unreadable` (the installed tree has no
    `files.json`), no provenance record, no feed check yet, and (in the rehearsal) a key set near expiry. The plan's
    check "`morndo doctor` is clean" does not hold at install time; it needs to read "doctor's only findings are the
    feed never having been checked" at best, and the missing `files.json` is a product defect to file.
 5. Window: `morndo update window 03:30-05:00` is accepted and `--status` shows it.
 6. The fired `restore.sh` leaves the post-backup rows, the lane's processes, and runs the old folder again; with the
    `ok` marker, the timer's run changes nothing.
+
+### 8.1 The changes to section 3 of `docs/plans/2026-10-23-c4-c6.md`, by step
+
+That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs there (or in its pull request). Four changes:
+
+- **Step 2 (backup):** the backup also takes the three wrappers out of `~/.local/bin` (`backup.sh` already copies them);
+  after the backup they are moved away, because step 3's install refuses a real file in their place.
+- **Step 3 (install):** stop `morndo-hub`, `morndo-fleet` and `morndo-node` before `install`; run it; `install` starts them
+  and waits for health. Without the stop it takes about 276 s and leaves them on the old code.
+- **Step 2 (dead-man's switch):** the timer stays longer than the worst install and its checks; the 60 minutes hold with
+  the stop in step 3 (the rehearsal needed 480 s only for the case without it).
+- **Step 6 (rollback):** after `restore.sh`, a second install first needs `~/.local/share/morndo-releases` and the
+  updater's state and config removed (`restore.sh` leaves them; it never touches data).
