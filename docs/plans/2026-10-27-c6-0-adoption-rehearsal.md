@@ -105,3 +105,24 @@ listing equality, rows kept, marker behaviour), tested on fixture strings with n
 Container removed in `finally`, on SIGINT and SIGTERM; the sweep at the start removes a killed run's leftovers by
 label and owner; the image is removed by the run's last step (`E2E_KEEP=1` keeps scratch for debugging); a final
 `docker ps -a --filter label=morndo-c6-adopt-e2e` and `docker images` check is part of the run's own output.
+
+## 8. What the first runs found (for the per-machine steps)
+
+Measured by the scenario on a throwaway machine, about 10.5 minutes a run:
+
+1. `morndo install` over real-file wrappers exits 78 (`... exists and is not a link; remove it first; nothing was
+   installed`). The per-machine step 3 needs "move the wrappers into the backup first"; `restore.sh` puts them back.
+2. Over running legacy units the install exits 0 after 276 s with `no answer within 90 s` for each service; they keep
+   running the old folder. Stopping the three services first makes it take 6 s and all three are healthy at the new
+   version. The step needs "stop the services, then install". The dead-man timer must not be shorter than the
+   worst case without that stop (the rehearsal armed 480 s for it).
+3. After `restore.sh`, a second install exits 78 (`already installed: use morndo update`): the releases folder and the
+   updater's state stay. A retried install needs those removed first (not part of `restore.sh`, which never touches
+   data).
+4. `morndo doctor` exits 1 right after a fresh install: `tree: files.json: unreadable` (the installed tree has no
+   `files.json`), no provenance record, no feed check yet, and (in the rehearsal) a key set near expiry. The plan's
+   check "`morndo doctor` is clean" does not hold at install time; it needs to read "doctor's only findings are the
+   feed never having been checked" at best, and the missing `files.json` is a product defect to file.
+5. Window: `morndo update window 03:30-05:00` is accepted and `--status` shows it.
+6. The fired `restore.sh` leaves the post-backup rows, the lane's processes, and runs the old folder again; with the
+   `ok` marker, the timer's run changes nothing.
