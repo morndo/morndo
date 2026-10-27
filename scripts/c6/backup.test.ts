@@ -40,6 +40,7 @@ function machine() {
   writeFileSync(join(state, "active"), "morndo-node.service\n");
   writeFileSync(join(state, "enabled"), "");
   writeFileSync(join(state, "failrestart"), "");
+  writeFileSync(join(state, "failstop"), "");
   writeFileSync(fake, `#!/bin/sh
 echo "$@ #$(cksum < '${dbPath}')" >> '${calls}'
 case "$2" in
@@ -47,6 +48,7 @@ case "$2" in
   is-active) grep -qx "$3" '${state}/active' && { echo active; exit 0; }; echo inactive; exit 3 ;;
   is-enabled) grep -qx "$3" '${state}/enabled' && { echo enabled; exit 0; }; echo disabled; exit 1 ;;
   restart) grep -qx "$3" '${state}/failrestart' && exit 1; exit 0 ;;
+  stop) grep -qx "$3" '${state}/failstop' && exit 1; exit 0 ;;
 esac
 exit 0
 `, { mode: 0o755 });
@@ -542,5 +544,18 @@ describe("round 3 of the review of PR 176", () => {
     expect(r.status, r.stderr).toBe(0);
     const service = readFileSync(join(m.units, "c6-deadman-m1.service"), "utf8");
     expect(service).toContain(`ExecStart="${dest.replaceAll("%", "%%")}/restore.sh" --deadman`);
+  });
+
+  it("a service that will not stop keeps its database from being overwritten: the failure is named, the exit non-zero, the units still put back", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    writeFileSync(join(m.state, "failstop"), "morndo-node.service\n");
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("FAILED");
+    expect(r.stderr).toContain("morndo-node.service");
+    expect(rows(m.dbPath)).toEqual(["before-backup", "after-backup"]);          // not overwritten while the service runs
+    expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(OLD_UNIT);
   });
 });
