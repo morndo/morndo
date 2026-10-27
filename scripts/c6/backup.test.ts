@@ -782,3 +782,21 @@ describe("round 5 of the review of PR 176", () => {
     expect(readdirSync(elsewhere)).toEqual([]);
   });
 });
+
+describe("the node agent's own transient job units", () => {
+  const backup = (m: ReturnType<typeof machine>) => sh(BACKUP, [m.dest, "--db", `node=${m.dbPath}`], m.env);
+  it("morndo-job-<id>.service (made by the node agent with systemd-run, running work of other agents) is never recorded, stopped or restarted by the backup or the restore", () => {
+    const m = machine();
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-job-1f2e3d.service\n");
+    expect(backup(m).status).toBe(0);
+    expect(readFileSync(join(m.dest, "state.txt"), "utf8")).not.toContain("morndo-job-");
+    install(m);
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-job-1f2e3d.service\nmorndo-job-9a8b7c.service\n");
+    rmSync(m.calls, { force: true });
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(m.calls, "utf8")).not.toContain("morndo-job-");
+    expect(readFileSync(join(m.state, "active"), "utf8")).toContain("morndo-job-9a8b7c.service");
+  });
+});
+
