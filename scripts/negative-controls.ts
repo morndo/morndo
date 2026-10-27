@@ -11,7 +11,8 @@
 // uncommitted changes are not in it), runs `npm ci --offline` there once, and for each control:
 //   1. runs the named test files unchanged: they must pass, or the control would prove nothing (cached per file set);
 //   2. applies the change: `find` must occur exactly once in `file`;
-//   3. runs them again: they must fail, and print `expect` when the entry gives one;
+//   3. runs them again, stopping at the first failed test (--bail=1; in full again when that failure lacks `expect`): they
+//      must fail, and print `expect` when the entry gives one;
 //   4. restores the file with `git checkout -- <file>` inside the temporary worktree, and checks it is as it was.
 // At the end it removes that worktree (`git worktree remove --force <its path>`) and nothing else: it never prunes.
 // A control bites only when vitest reports at least one failed test and no breakage (a failed suite, a transform or syntax
@@ -5252,11 +5253,11 @@ export function classify(status: number | null, signal: string | null, out: stri
   return { kind: failedTests >= 1 && !BREAKAGE.test(out) ? "failed" : "broke", out, first };
 }
 
-function vitest(tree: string, files: string[]): Promise<Run> {
+function vitest(tree: string, files: string[], extra: string[] = []): Promise<Run> {
   const treeName = basename(dirname(tree));
   return new Promise(resolve => {
     let out = "";
-    const c = spawn(process.execPath, [join(tree, "node_modules/vitest/vitest.mjs"), "run", ...files], {
+    const c = spawn(process.execPath, [join(tree, "node_modules/vitest/vitest.mjs"), "run", ...extra, ...files], {
       cwd: tree, env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" }, detached: true,
     });
     child = c;
@@ -5379,7 +5380,10 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
       if (before?.kind === "timeout") { n.timeout++; say(`TIMEDOUT ${c.id}: ${c.run.join(", ")} did not finish unchanged: ${before.first}`); continue; }
       if (before?.kind !== "passed") { broke(`BASELINE ${c.id}: ${c.run.join(", ")} fail without the change, so it proves nothing\n      ${before?.first ?? ""}\n${tail(before?.out ?? "")}`); continue; }
       writeFileSync(path, original.replace(c.find, () => c.replace));
-      const after = await vitest(tree, c.run);
+      // Stops at the first failed test: a bite needs one, and the rest of a slow file only costs time (T-467). A first failure
+      // without the entry's `expect` text may be another test than the one that names it, so that run is made again in full.
+      let after = await vitest(tree, c.run, ["--bail=1"]);
+      if (after.kind === "failed" && c.expect && !after.out.includes(c.expect)) after = await vitest(tree, c.run);
       if (stopping) await parked();
       git(tree, "checkout", "--", c.file);
       if (readFileSync(path, "utf8") !== original) { say(`setup: ${c.file} was not restored in ${tree}`); setupFailed = true; return 2; }
