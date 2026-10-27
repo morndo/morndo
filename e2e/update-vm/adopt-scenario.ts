@@ -270,11 +270,14 @@ async function proofs(p: string, base: Baseline): Promise<void> {
 // ---- the dead-man's switch --------------------------------------------------------------------------------------------
 
 // The journal's word on a deadman's service: it ran and ended with exit 0 (systemd collects a finished transient unit).
+// A restore.sh that does its work runs `daemon-reload` inside its own transient unit: the manager then logs "Failed to
+// open /run/user/…/transient/c6-deadman-<machine>.service" for the unit it is running in, and the "Deactivated
+// successfully" line may never be written. So the fired restore is judged by its effects and by the absence of a failed result.
 function deadmanJournal(machine: string): { ranOk: boolean; failedRun: boolean; text: string } {
   const text = run("journalctl", ["--user", "-u", `c6-deadman-${machine}.service`, "--no-pager", "-o", "cat"]).out;
   return {
     ranOk: new RegExp(`c6-deadman-${machine}\\.service: (Deactivated successfully|Succeeded)`).test(text),
-    failedRun: /Failed|status=[1-9]|code=exited, status=[1-9]/.test(text),
+    failedRun: /Failed with result|status=[1-9]|code=exited, status=[1-9]/.test(text),   // not "Failed to open transient file": see below
     text: text.trim().split("\n").slice(-6).join(" | "),
   };
 }
@@ -454,7 +457,7 @@ async function main(): Promise<number> {
   await sleep(2000);
   const dm1 = deadmanJournal("m1");
   writeFileSync(join(EVIDENCE, "deadman-m1-journal.txt"), dm1.text);
-  check("f-deadman-fired", fired && dm1.ranOk && !dm1.failedRun, `the timer fired and restore.sh ended with exit 0: ${dm1.text}`);
+  check("f-deadman-fired", fired && !dm1.failedRun, `the timer fired and no failed result was logged (clean-exit line present: ${dm1.ranOk}); last journal lines: ${dm1.text}`);
   const unitsBack = SERVICES.every(s => readFileSync(join(UNIT_DIR, s.unit), "utf8") === OLD_UNITS.get(s.unit));
   const morndoUnits = readdirSync(UNIT_DIR).filter(n => n.startsWith("morndo-")).sort();
   const expectedUnits = SERVICES.map(s => s.unit).sort();
@@ -479,6 +482,7 @@ async function main(): Promise<number> {
   // ---- g: the second install (rehearsal-only reset), then the dead-man that does nothing.
   const again = installOnce("g-reinstall-after-restore");
   check("finding-reinstall", true, `install after the restore (nothing reset) exited ${again.code}: ${firstLines(again, 3)}; releases/current exists: ${existsSync(join(RELEASES, "current"))}`);
+  run("chmod", ["-R", "u+w", RELEASES]);                  // an installed Version is read-only (directories 0555)
   rmSync(RELEASES, { recursive: true, force: true });
   rmSync(UPDATE_STATE, { recursive: true, force: true });
   rmSync(UPDATE_CONFIG_DIR, { recursive: true, force: true });
