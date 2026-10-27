@@ -45,7 +45,7 @@ const pushes: PushStore = {
 // A hub start, as main.ts builds it: a service on the database, its board fed to the Notification service.
 const start = (workerGraceMs?: number) => {
   const s = new EscalationService({ watch, ledger: ledgerReader(ledgerPath, () => Date.now()), store, managerName: "manager", now: () => Date.now(), send: async () => ({ problem: null, typedAt: Date.now() }), workerGraceMs });
-  const n = new NotificationService({ store: pushes, send: async () => ({ status: 201 }) });
+  const n = new NotificationService({ decisionSettleMs: 0, store: pushes, send: async () => ({ status: 201 }) });
   n.board(s.board().items);
   s.subscribe(b => n.board(b.items));
   services.push(n);
