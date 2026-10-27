@@ -48,7 +48,7 @@ const readRootVersion = (): string => {
   try { return (JSON.parse(readFileSync(join(E2E, "tree-a/app/package.json"), "utf8")) as { version?: string }).version ?? "0.0.0"; } catch { return "0.0.0"; }
 };
 // a tree with no build.json reports the root package.json's (published: whatever that file of the unpacked app says)
-const OLD_VERSION = PUBLISHED === null ? "0.0.0" : readRootVersion();
+const OLD_VERSION = readRootVersion();   // the old folder has no build.json, so its services report the root package.json version (0.0.0 until the first release commit bumped it)
 const NODE_NAME = "node-demo";
 const LANE = "lane-demo";
 // The dead-man's first run only has to outlast the installs and the proofs (a naive install measured about 276 s; the
