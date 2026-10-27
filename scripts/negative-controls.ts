@@ -4266,6 +4266,13 @@ export const CONTROLS: Control[] = [
   { id: "t411-verified-only-the-apps-author", task: "T-411", file: "scripts/git-hooks/release-commits-verified",
     find: String.raw`--author='morndo-release' `, replace: String.raw``,
     run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "never lists a commit of another author" },
+  // ---- T-480: GitHub links a commit to its pull request a little after the push; the lister asks again before giving up.
+  { id: "t480-verified-pull-asked-once", task: "T-480", file: "scripts/git-hooks/release-commits-verified",
+    find: String.raw`    [ "$n" -lt "$tries" ] || return 1`, replace: String.raw`    return 1`,
+    run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "asks again for a pull request GitHub has not linked yet" },
+  { id: "t480-verified-pull-no-wait", task: "T-480", file: "scripts/git-hooks/release-commits-verified",
+    find: String.raw`    sleep "$wait_s"`, replace: String.raw`    :`,
+    run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "by default asks 6 times and waits 10 s between asks" },
   // ---- T-411: the traces workflow uses the list.
   { id: "t411-traces-workflow-list", task: "T-411", file: ".github/workflows/commit-traces.yml",
     find: String.raw`sh scripts/git-hooks/release-commits-verified "$@" > "$verified"`, replace: String.raw`true`,
