@@ -77,7 +77,13 @@ describe("the rehearsal image", () => {
 // ---- the compose project
 
 describe("the compose project", () => {
-  const doc = parse(readFileSync(join(DIR, "compose.yaml"), "utf8")) as Record<string, unknown>;
+  const text = readFileSync(join(DIR, "compose.yaml"), "utf8");
+  const doc = parse(text) as Record<string, unknown>;
+
+  it("does not claim the machines reach nothing of the host: the bridge gateway reaches its ports", () => {
+    expect(text).not.toMatch(/nothing in this project reaches the host/);
+    expect(text).toContain("bridge gateway");
+  });
   const services = doc.services as Record<string, Record<string, unknown>>;
 
   it("is the project c4-rehearsal with three machines and one network, nothing else", () => {
@@ -100,15 +106,43 @@ describe("the compose project", () => {
       tmpfs: ["/run", "/run/lock", "/tmp"],
       labels: { "morndo-c4-rehearsal": "1" },
       networks: ["net"],
+      mem_limit: "2g",
+      cpus: 2,
+      pids_limit: 2048,
     });
     expect(profiles).toEqual(name === "cp1" ? undefined : [name === "cp2" ? "p7" : "p8"]);
   });
 });
 
+// ---- the README's commands
+
+describe("the README", () => {
+  const readme = readFileSync(join(DIR, "README.md"), "utf8").replace(/\s+/g, " ");
+
+  it.each(["cp1", "cp2", "cp3"])("runs the fence check for %s, with its image", name => {
+    expect(readme).toContain(`docker inspect c4-rehearsal-${name}-1 >${name}.json`);
+    expect(readme).toContain(`sh scripts/release/rehearsal/check-container.sh ${name}.json n.json i.json`);
+  });
+
+  it("inspects the network and the image once", () => {
+    expect(readme).toContain("docker network inspect c4-rehearsal_net >n.json");
+    expect(readme).toContain("docker image inspect morndo-rehearsal:c4-5 >i.json");
+  });
+
+  it("cleans up this project only, its volumes and orphans included, then proves nothing is left", () => {
+    expect(readme).toContain("docker compose -f scripts/release/rehearsal/compose.yaml --profile p7 --profile p8 down -v --remove-orphans");
+    expect(readme).not.toMatch(/docker (system|container|network|volume) prune/);
+    expect(readme).toContain("docker ps -a --filter label=morndo-c4-rehearsal");
+    expect(readme).toContain("docker network ls --filter label=morndo-c4-rehearsal");
+  });
+});
+
 // ---- the container check
 
+const IMAGE_ID = "sha256:c9fe9a6dc88271fddbc068140ff255a5c55ee49561ea86c0dc3f5841de4c581a";
 const GOOD_CONTAINER = {
   Name: "/c4-rehearsal-cp1-1",
+  Image: IMAGE_ID,
   Config: {
     Hostname: "cp1.rehearsal.test",
     Image: "morndo-rehearsal:c4-5",
@@ -135,6 +169,9 @@ const GOOD_CONTAINER = {
     SecurityOpt: null,
     DeviceRequests: null,
     CgroupParent: "",
+    Memory: 2147483648,
+    NanoCpus: 2000000000,
+    PidsLimit: 2048,
   },
   Mounts: [],
   NetworkSettings: { Ports: {}, Networks: { "c4-rehearsal_net": {} } },
@@ -145,16 +182,23 @@ const GOOD_NETWORK = {
   Internal: false,
   Labels: { "com.docker.compose.network": "net", "com.docker.compose.project": "c4-rehearsal", "morndo-c4-rehearsal": "1" },
 };
+const GOOD_IMAGE = {
+  Id: IMAGE_ID,
+  RepoTags: ["morndo-rehearsal:c4-5"],
+  Config: { Labels: { "morndo-c4-rehearsal": "1", "org.opencontainers.image.version": "24.04" } },
+};
 type Json = Record<string, any>;
 
-function check(change: (c: Json, n: Json) => void = () => {}, raw?: { container?: string; network?: string }) {
+function check(change: (c: Json, n: Json, i: Json) => void = () => {}, raw?: { container?: string; network?: string; image?: string }) {
   const dir = scratch();
   const c = structuredClone(GOOD_CONTAINER) as Json;
   const n = structuredClone(GOOD_NETWORK) as Json;
-  change(c, n);
+  const i = structuredClone(GOOD_IMAGE) as Json;
+  change(c, n, i);
   writeFileSync(join(dir, "c.json"), raw?.container ?? JSON.stringify([c]));
   writeFileSync(join(dir, "n.json"), raw?.network ?? JSON.stringify([n]));
-  const r = spawnSync("sh", [CHECK, join(dir, "c.json"), join(dir, "n.json")], { encoding: "utf8" });
+  writeFileSync(join(dir, "i.json"), raw?.image ?? JSON.stringify([i]));
+  const r = spawnSync("sh", [CHECK, join(dir, "c.json"), join(dir, "n.json"), join(dir, "i.json")], { encoding: "utf8" });
   return { code: r.status, out: r.stdout, err: r.stderr };
 }
 
@@ -168,7 +212,7 @@ describe("check-container.sh", () => {
     expect(plain.code).toBe(0);
   });
 
-  it.each<[string, (c: Json, n: Json) => void, string]>([
+  it.each<[string, (c: Json, n: Json, i: Json) => void, string]>([
     ["privileged", c => { c.HostConfig.Privileged = true; }, "FAIL: the container is privileged"],
     ["an extra capability", c => { c.HostConfig.CapAdd = ["CAP_SYS_ADMIN", "CAP_NET_ADMIN"]; }, "FAIL: CapAdd is SYS_ADMIN,NET_ADMIN, not exactly SYS_ADMIN"],
     ["no capability added", c => { c.HostConfig.CapAdd = null; }, "FAIL: CapAdd is none, not exactly SYS_ADMIN"],
@@ -198,7 +242,19 @@ describe("check-container.sh", () => {
     ["the fleet e2e label", c => { c.Config.Labels["morndo-c3-fleet-e2e"] = "1"; }, "FAIL: the container carries the label morndo-c3-fleet-e2e, which an e2e sweep removes"],
     ["a real host name", c => { c.Config.Hostname = "srv01"; }, "FAIL: the hostname srv01 is not under rehearsal.test"],
     ["a look-alike host name", c => { c.Config.Hostname = "cp1.rehearsal.test.example.com"; }, "FAIL: the hostname cp1.rehearsal.test.example.com is not under rehearsal.test"],
-    ["a MORNDO_ variable", c => { c.Config.Env.push("MORNDO_AGENT_TOKEN=x"); }, "FAIL: the container's environment sets MORNDO_AGENT_TOKEN (the rehearsal sets MORNDO_ variables inside, never through the container)"],
+    ["a MORNDO_ variable", c => { c.Config.Env.push("MORNDO_AGENT_TOKEN=x"); }, "FAIL: the container's environment sets MORNDO_AGENT_TOKEN (only container and PATH may come through the container)"],
+    ["a GitHub token", c => { c.Config.Env.push("GH_TOKEN=x"); }, "FAIL: the container's environment sets GH_TOKEN (only container and PATH may come through the container)"],
+    ["an ssh agent socket", c => { c.Config.Env.push("SSH_AUTH_SOCK=/tmp/agent.sock"); }, "FAIL: the container's environment sets SSH_AUTH_SOCK (only container and PATH may come through the container)"],
+    ["a cloud key", c => { c.Config.Env.push("AWS_SECRET_ACCESS_KEY=x"); }, "FAIL: the container's environment sets AWS_SECRET_ACCESS_KEY (only container and PATH may come through the container)"],
+    ["a variable without a value", c => { c.Config.Env.push("DOCKER_HOST"); }, "FAIL: the container's environment sets DOCKER_HOST (only container and PATH may come through the container)"],
+    ["no memory limit", c => { c.HostConfig.Memory = 0; }, "FAIL: the container has no memory limit"],
+    ["no CPU limit", c => { c.HostConfig.NanoCpus = 0; }, "FAIL: the container has no CPU limit"],
+    ["no pids limit", c => { c.HostConfig.PidsLimit = null; }, "FAIL: the container has no pids limit"],
+    ["an unlimited pids limit", c => { c.HostConfig.PidsLimit = -1; }, "FAIL: the container has no pids limit"],
+    ["a container of another image id", c => { c.Image = "sha256:0000000000000000000000000000000000000000000000000000000000000000"; }, "FAIL: the container runs image sha256:000000000000, not morndo-rehearsal:c4-5's sha256:c9fe9a6dc882"],
+    ["an image without the tag", (_c, _n, i) => { i.RepoTags = ["other:latest"]; }, "FAIL: the image inspected is not tagged morndo-rehearsal:c4-5"],
+    ["an image with the e2e label", (_c, _n, i) => { i.Config.Labels["morndo-c2-e2e"] = "1"; }, "FAIL: the image carries the label morndo-c2-e2e, which an e2e sweep removes"],
+    ["an image without the rehearsal label", (_c, _n, i) => { delete i.Config.Labels["morndo-c4-rehearsal"]; }, "FAIL: the image lacks the label morndo-c4-rehearsal=1"],
     ["no container=docker", c => { c.Config.Env = ["PATH=/usr/bin:/bin"]; }, "FAIL: the container's environment lacks container=docker"],
     ["another image", c => { c.Config.Image = "morndo-c2-e2e:local"; }, "FAIL: the image is morndo-c2-e2e:local, not morndo-rehearsal:c4-5"],
     ["a second network attached", c => { c.NetworkSettings.Networks.bridge = {}; }, "FAIL: the container is attached to bridge,c4-rehearsal_net, not only the rehearsal network c4-rehearsal_net"],
@@ -215,9 +271,10 @@ describe("check-container.sh", () => {
   });
 
   it("names a secret-looking value in no line it prints", () => {
-    const r = check(c => { c.Config.Env.push("MORNDO_AGENT_TOKEN=canary-5f1e0c"); });
+    const r = check(c => { c.Config.Env.push("MORNDO_AGENT_TOKEN=canary-5f1e0c", "GH_TOKEN=canary-7a2b9d"); });
     expect(r.code).toBe(1);
     expect(r.out + r.err).not.toContain("canary-5f1e0c");
+    expect(r.out + r.err).not.toContain("canary-7a2b9d");
   });
 
   it("reports every problem, not only the first", () => {
@@ -237,13 +294,16 @@ describe("check-container.sh", () => {
     const r = check(undefined, { network: "[]" });
     expect(r.code).toBe(1);
     expect(r.err).toContain("is not the docker inspect of one network");
+    const img = check(undefined, { image: "{}" });
+    expect(img.code).toBe(1);
+    expect(img.err).toContain("is not the docker inspect of one image");
   });
 
-  it("is a usage error without exactly two files", () => {
-    for (const args of [[], ["a"], ["a", "b", "c"]]) {
+  it("is a usage error without exactly three files", () => {
+    for (const args of [[], ["a"], ["a", "b"], ["a", "b", "c", "d"]]) {
       const r = spawnSync("sh", [CHECK, ...args], { encoding: "utf8" });
       expect(r.status).toBe(64);
-      expect(r.stderr).toContain("check-container: usage: check-container.sh <container-inspect.json> <network-inspect.json>");
+      expect(r.stderr).toContain("check-container: usage: check-container.sh <container-inspect.json> <network-inspect.json> <image-inspect.json>");
     }
   });
 });
@@ -254,7 +314,7 @@ const BENCH = "https://morndo.github.io/morndo-release-test/";
 
 /** A fake systemctl first on PATH: `--user set-environment K=V` appends to $FAKE_STATE (unless FAKE_SET is "ignore",
  *  or "fail", which exits 1), `--user show-environment` prints it. */
-function envRun(args: string[], mode: "ok" | "ignore" | "fail" = "ok") {
+function envRun(args: string[], mode: "ok" | "ignore" | "fail" = "ok", host = "cp1.rehearsal.test") {
   const dir = scratch();
   const bin = join(dir, "bin");
   const home = join(dir, "home");
@@ -272,9 +332,11 @@ function envRun(args: string[], mode: "ok" | "ignore" | "fail" = "ok") {
     "",
   ].join("\n"));
   chmodSync(join(bin, "systemctl"), 0o755);
+  writeFileSync(join(bin, "uname"), '#!/bin/sh\n[ "$1" = -n ] && { printf \'%s\\n\' "$FAKE_HOST"; exit 0; }\nexec /usr/bin/uname "$@"\n');
+  chmodSync(join(bin, "uname"), 0o755);
   const r = spawnSync("sh", [ENV, ...args], {
     encoding: "utf8",
-    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, FAKE_STATE: join(dir, "state"), FAKE_SET: mode },
+    env: { PATH: `${bin}:/usr/bin:/bin`, HOME: home, FAKE_STATE: join(dir, "state"), FAKE_SET: mode, FAKE_HOST: host },
   });
   const conf = join(home, ".config/environment.d/morndo-rehearsal.conf");
   return { code: r.status, out: r.stdout, err: r.stderr, conf: existsSync(conf) ? readFileSync(conf, "utf8") : null };
@@ -328,6 +390,25 @@ describe("env.sh", () => {
     expect(r.code).toBe(1);
     expect(r.err).toContain("rehearsal-env: the feed address must be https://<host>/<path>/ in lower case, with no port, escape, empty, . or .. segment");
     expect(r.out).not.toContain("ok");
+    expect(r.conf).toBeNull();
+  });
+
+  it.each([
+    "https://evil.example/feed/",
+    "https://morndo.github.io/morndo-release-test-2/",
+    "https://morndo.github.io/morndo-release-test/latest/",
+    "https://other.github.io/morndo-release-test/",
+  ])("refuses %s, which is not the bench's own feed", url => {
+    const r = envRun([url]);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain("rehearsal-env: the feed address must be the bench's own, https://morndo.github.io/morndo-release-test/");
+    expect(r.conf).toBeNull();
+  });
+
+  it.each(["pc", "srv01", "cp1.rehearsal.test.example.com", "rehearsal.test"])("refuses to run on %s, which is not a rehearsal machine", host => {
+    const r = envRun([BENCH], "ok", host);
+    expect(r.code).toBe(1);
+    expect(r.err).toContain(`rehearsal-env: this is not a rehearsal machine (its host name ${host} is not under rehearsal.test); run it inside one`);
     expect(r.conf).toBeNull();
   });
 
