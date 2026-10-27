@@ -591,7 +591,7 @@ export const CONTROLS: Control[] = [
     run: ["packages/protocol/test/fleet.test.ts"], expect: "expected { code: 'internal', …(2) } to deeply equal" },
   { id: "t2-confine-case-fold", task: "2", file: "packages/node-ops/src/file-rules.ts",
     find: "const fold = (p: string) => (caseless ? p.toLowerCase() : p);", replace: "const fold = (p: string) => p;",
-    run: ["packages/node-ops/test/file-rules.test.ts"], expect: ".SSH/absent" },
+    run: ["packages/node-ops/test/file-rules.test.ts"], expect: "darwin /h/.SSH" },
   // Since B1 (V23 keeps a legacy answer's row) a retry by the same request is settled by its row; this bites through the
   // new tap after the restart (another request), which finds the answer in doubt by its key alone.
   { id: "t5-first-seen-restart", task: "5", file: "apps/hub/src/application/escalation-service.ts",
@@ -632,9 +632,10 @@ export const CONTROLS: Control[] = [
     find: "    if (!got.ok) { res.destroy(new Error(`file.get failed: ${got.error.code}`)); return; }",
     replace: "    if (!got.ok) { res.end(); return; }",
     run: ["apps/fleet/test/client-api.test.ts"] },
-  // The socket is also checked, later, where the client API listens (client-api.ts); this removes the early check only.
+  // The sockets are also checked, later, where the client API listens (client-api.ts); this removes the early checks only. Both
+  // lines go: since the worker socket (23c4c055) the second line alone also refuses a second start on the same directory.
   { id: "t12-socket-checked-before-db", task: "12", file: "apps/fleet/src/serve.ts",
-    find: "  await clearStaleSocket(config.socketPath);        // a live service owns fleet.db: refuse before touching it\n", replace: "",
+    find: "  await clearStaleSocket(config.socketPath);        // a live service owns fleet.db: refuse before touching it\n  await clearStaleSocket(worker.path);\n", replace: "",
     run: ["apps/fleet/test/socket-dir.test.ts"] },
   { id: "t14a-file-short-body", task: "14a", file: "packages/fleet-client/src/fleet-client.ts",
     find: "      if (got !== expected) throw new FleetUnavailable(", replace: "      if (false) throw new FleetUnavailable(",
@@ -781,7 +782,7 @@ export const CONTROLS: Control[] = [
     find: "    const storeBehind = w.storeSeqSeen !== undefined && seq < w.storeSeqSeen;", replace: "    const storeBehind = false;",
     run: ["apps/node-agent/test/agent.test.ts"], expect: "starts a new store before it runs anything" },
   { id: "fw-welcome-store-seq-not-sent", task: "A2", file: "apps/fleet/src/adapters/agent-session.ts",
-    find: "...(seen === null ? {} : { storeSeqSeen: seen })", replace: "",
+    find: ", ...(seen === null ? {} : { storeSeqSeen: seen })", replace: "",       // with its comma: a bare ", ," does not parse
     run: ["apps/fleet/test/requests.test.ts"], expect: "storeSeqSeen" },
   { id: "fw-store-seqs-not-kept", task: "A2", file: "apps/fleet/src/application/requests.ts",
     find: "    if (res.storeSeq !== undefined) this.#seqs.saw(node, res.store, res.storeSeq);\n", replace: "",
