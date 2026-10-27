@@ -320,6 +320,10 @@ export class DirsInstaller implements Installer {
         chmodSync(to, parseInt(entry.mode, 8));
       }
     }
+    // files.json is not an entry of its own list (scripts/release/files.ts), so the loop above never copied it; promote
+    // keeps it with the staged tree, and verifyTree (morndo doctor) reads it from the installed Version.
+    writeFileSync(join(target, "files.json"), listBytes);
+    chmodSync(join(target, "files.json"), 0o444);
     writeFileSync(join(target, "install.json"), `${JSON.stringify({
       method: "updater",
       installedAt: isoUtc(o.at),

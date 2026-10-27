@@ -125,6 +125,22 @@ describe("`morndo install --role control-plane` (§10.3)", () => {
     for (const s of ["hub", "fleet", "node"]) expect(r.out).toMatch(new RegExp(`${s}: healthy at ${VERSION}`));
   });
 
+  it("leaves the signed file list in the installed Version, so `morndo doctor` right after the install finds no tree or provenance problem (T-486)", async () => {
+    const w = world({ joined: true });
+    expect((await w.run(["install", "--role", "control-plane"])).code).toBe(0);
+    const versionDir = join(w.paths.releases, VERSION);
+    // files.json is not in its own list (scripts/release/files.ts), so copying "the listed files" dropped it
+    expect(readFileSync(join(versionDir, "files.json"), "utf8")).toBe(readFileSync(join(w.tree, "files.json"), "utf8"));
+    expect((statSync(join(versionDir, "files.json")).mode & 0o777)).toBe(0o444);
+    // What the doctor says right after the install: the tree checks out against its list, and the Version the install
+    // committed is not "unknown" to the store. The one thing left is the feed, which no check has verified yet — that
+    // is a first check's to answer, not the install's (see the T-486 report).
+    const doctor = await w.run(["doctor", "--json"]);
+    const report = JSON.parse(doctor.out) as { ok: boolean; findings: { area: string; detail: string }[] };
+    expect(report.findings.map(f => f.area)).toEqual(["feed"]);
+    expect(report.findings[0]!.detail).toMatch(/never/);
+  });
+
   it("a fresh install defaults to mode apply and channel stable", async () => {
     const w = world({ joined: true });
     const r = await w.run(["install", "--role", "control-plane"]);   // no --channel: the domain's own default

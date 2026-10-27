@@ -34,7 +34,10 @@ export async function doctor(p: { installer: Installer; store: UpdateStore; cloc
     const record = p.store.versionRecord(layout.current);
     const tree = await p.installer.verifyTree(layout.current, record?.filesSha256 ?? null);
     findings.push(...tree.map(finding => ({ area: "tree" as const, detail: `${finding.path}: ${finding.problem}` })));
-    if (record === null) {
+    // A first install (§10.3) stages nothing: install.sh verified the Manifest and `morndo install` committed the
+    // Version it ran from, so the store's committed row is that Version's provenance. Without even that, the store
+    // was reset.
+    if (record === null && p.store.highestCommitted() !== layout.current) {
       findings.push({ area: "provenance", detail: `no record of ${layout.current}: not staged by this updater, or the store was reset` });
     }
   } else {

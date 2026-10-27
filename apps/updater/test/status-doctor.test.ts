@@ -211,6 +211,15 @@ describe("doctor (§8.1)", () => {
     expect(report.ok).toBe(false);
   });
 
+  it("a current Version the store committed without staging it (a first install) is not a provenance finding", async () => {
+    const w = build(undefined, { manual: true });
+    await w.ready;
+    w.store.versions.clear();
+    w.store.recordCommitted(OFFERED, NOW, null);
+    const report = await w.doctor();
+    expect(report.findings.filter(f => f.area === "provenance")).toEqual([]);
+  });
+
   it("an expired key set, and one inside the Alert's 30 days, are keys findings", async () => {
     const expired = build(w => {
       w.store.saveTrust({ keySet: keySetDocument(w.keys, { version: 1, expiresAt: NOW - 1 }).decoded, highestFeedSeq: { stable: 1, latest: 0 } });
