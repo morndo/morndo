@@ -2,6 +2,7 @@
 // as NAME=value (0600, by rename), a sidecar naming the member and stamping the file it is about, one writer at a time (<sink>.lock), words only on stdout and stderr. `--if-due` rewrites only when the served member can no longer
 // serve (or the file is gone, or `--rotate-every` has passed). Every key is synthetic; the planted values must reach nothing but the file.
 import { spawn } from "node:child_process";
+import { acquireEnvLock } from "../src/adapters/env-file.ts";
 import { chmodSync, readlinkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -52,6 +53,7 @@ async function world(mode: "round-robin" | "drain" = "round-robin", register = t
   return { dir, env, file, sinks };
 }
 // The writer is a timer or a pre-start, no agent: its isolation is its own claim, as for `lease` (the vendor's floor is rules).
+const acquireNow = (w: World) => acquireEnvLock(w.file, { waitMs: 0 });
 const write = (w: World, ...more: string[]) => cli(["keypool", "write-env", "p", "--file", w.file, "--var", "ANTHROPIC_API_KEY", "--isolation", "rules", ...more], w.env);
 const content = (path: string): string => readFileSync(path, "utf8");
 // The sidecar: the member's name, then the stamp of the file it is about (inode and mtime).
@@ -115,7 +117,7 @@ describe("a write", () => {
     expect((await cli(["keypool", "report", "p", "--member", "k1", "--outcome", "failing", "--reason", "rejected"], blocked.env)).code).toBe(0);
     const out = await write(blocked);
     expect([out.code, out.stdout, out.stderr.trim()]).toEqual([75, "", "pool_blocked"]);
-    expect(readdirSync(blocked.sinks)).toEqual([]);
+    expect(readdirSync(blocked.sinks)).toEqual(["app.env.lock"]);
   });
 });
 
@@ -218,30 +220,53 @@ describe("one writer at a time, and a pair that agrees", () => {
     const member = memberOf(w.file);
     expect(content(w.file)).toBe(`ANTHROPIC_API_KEY=${KEYS[Number(member.slice(1)) - 1]}\n`);
     expect(content(`${w.file}.member`).split("\n")[1]).toBe(`${statSync(w.file).ino}:${Math.trunc(statSync(w.file).mtimeMs)}`);
-    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.lock", "app.env.member"]);
   });
-  it("a lock whose owner cannot be shown to be gone (a live process, or a lock with no readable owner) makes a write wait and then say busy; nothing is written and no lease is taken", async () => {
+  it("a lock held by a live process makes a write wait and then say busy, naming the holder and how to look at it; nothing is written, no lease is taken, and the lock is not forced", async () => {
     const w = await world();
-    writeFileSync(`${w.file}.lock`, `${process.pid}\n`);
+    const helper = join(import.meta.dirname, "fixtures/lock-hold.mjs");
+    const holder = spawn(process.execPath, ["--experimental-strip-types", helper, w.file]);
+    try {
+      const first = await new Promise<string>(resolve => { let out = ""; holder.stdout.on("data", chunk => { out += chunk; if (out.includes("\n")) resolve(out.trim()); }); });
+      expect(first).toBe("ok");
+      const started = Date.now();
+      const out = await write(w);
+      expect([out.code, out.stdout]).toEqual([1, ""]);
+      const lines = out.stderr.trim().split("\n");
+      expect(lines[0]).toBe("busy");
+      expect(out.stderr).toContain(`pid ${holder.pid}`);
+      expect(out.stderr).toContain(`ps -o pid,lstart,args -p ${holder.pid}`);
+      expect(out.stderr).not.toContain(w.file);
+      expect(Date.now() - started).toBeGreaterThanOrEqual(4000);
+      expect(readdirSync(w.sinks).filter(name => name === "app.env" || name === "app.env.member")).toEqual([]);
+      for (const name of ["k1", "k2", "k3"]) expect((await events(w, name)).filter(e => e.type === "LeaseGranted")).toEqual([]);
+      expect((await acquireNow(w)).ok).toBe(false);
+    } finally { holder.kill("SIGKILL"); }
+  });
+  it("a holder that was killed while holding frees the lock at once: the next write needs no waiting and no clean-up", async () => {
+    const w = await world();
+    const helper = join(import.meta.dirname, "fixtures/lock-hold.mjs");
+    const holder = spawn(process.execPath, ["--experimental-strip-types", helper, w.file]);
+    await new Promise<string>(resolve => { let out = ""; holder.stdout.on("data", chunk => { out += chunk; if (out.includes("\n")) resolve(out.trim()); }); });
+    holder.kill("SIGKILL");
+    await new Promise<void>(resolve => { holder.on("close", () => { resolve(); }); });
     const started = Date.now();
     const out = await write(w);
-    expect([out.code, out.stdout, out.stderr.trim()]).toEqual([1, "", "busy"]);
-    expect(Date.now() - started).toBeGreaterThanOrEqual(4000);
-    expect(readdirSync(w.sinks).sort()).toEqual(["app.env.lock"]);
-    for (const name of ["k1", "k2", "k3"]) expect((await events(w, name)).filter(e => e.type === "LeaseGranted")).toEqual([]);
+    expect([out.code, out.stderr]).toEqual([0, ""]);
+    expect(Date.now() - started).toBeLessThan(4000);
   });
-  it("a lock whose holder is gone is taken over, and the lock is gone after the write", async () => {
+  it("a lock file of the earlier text form is removed at the first run and the write goes through", async () => {
     const w = await world();
     writeFileSync(`${w.file}.lock`, `2147483646 1 ${NS}\n`);
     const out = await write(w);
     expect([out.code, out.stderr]).toEqual([0, ""]);
-    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.lock", "app.env.member"]);
   });
   it("a temp file left by a killed write is replaced, not kept", async () => {
     const w = await world();
     writeFileSync(`${w.file}.tmp`, `ANTHROPIC_API_KEY=${KEYS[2]}\n`, { mode: 0o600 });
     expect((await write(w)).code).toBe(0);
-    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.lock", "app.env.member"]);
   });
   it("a run that began before the sink was registered has the file open to its tools: write-env refuses while it lives, and writes once it is gone", async () => {
     const w = await world("round-robin", false);
@@ -279,7 +304,7 @@ describe("the value goes to the file and nowhere else", () => {
     const shown = [(await cli(["keypool", "list"], w.env)).stdout, (await cli(["log"], w.env)).stdout, ...await Promise.all(["k1", "k2", "k3"].map(async n => (await cli(["log", n], w.env)).stdout))];
     for (const text of shown) for (const key of KEYS) expect(text).not.toContain(key);
     for (const path of homeFiles(w.dir)) for (const key of KEYS) expect(readFileSync(path).toString("latin1"), path).not.toContain(key);
-    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
+    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.lock", "app.env.member"]);
     expect(memberOf(w.file)).toMatch(/^k\d$/);
   });
   it("a write that fails after the lease (the path is a directory by now) closes the lease failed and leaves no temp file", async () => {
@@ -287,7 +312,7 @@ describe("the value goes to the file and nowhere else", () => {
     mkdirSync(w.file);
     const out = await write(w);
     expect([out.code, out.stdout, out.stderr.trim()]).toEqual([1, "", "write_failed"]);
-    expect(readdirSync(w.sinks)).toEqual(["app.env"]);
+    expect(readdirSync(w.sinks)).toEqual(["app.env", "app.env.lock"]);
     const k1 = (await events(w, "k1")).filter(e => e.type === "LeaseClosed");
     expect(k1.map(e => e.outcome)).toEqual(["failed"]);
   });

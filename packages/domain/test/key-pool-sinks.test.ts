@@ -43,7 +43,7 @@ describe("kp20 a sink is an absolute, normalised path of safe characters", () =>
     ["a question mark", "/srv/?/.env"], ["brackets", "/srv/[a]/.env"], ["braces", "/srv/{a,b}/.env"], ["parentheses", "/srv/(a)/.env"],
     ["a quote", "/srv/'a'/.env"], ["a backslash", "/srv/a\\b"], ["a tilde", "~/app/.env"], ["a dollar", "/srv/$HOME/.env"],
     ["over 4096 characters", `/${"a".repeat(4096)}`], ["the sidecar of another file", "/srv/app/.env.member"],
-    ["the temp file of another file", "/srv/app/.env.tmp"], ["the lock of another file", "/srv/app/.env.lock"],
+    ["the temp file of another file", "/srv/app/.env.tmp"], ["the lock of another file", "/srv/app/.env.lock"], ["the lock owner note of another file", "/srv/app/.env.lock.owner"],
   ])("refuses %s", (_name, path) => {
     expect(isSinkPath(path)).toBe(false);
     expect(word(addKeySink(pool(), path, principal, T))).toBe("bad_path");
