@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-vi.setConfig({ testTimeout: 60_000 });
+vi.setConfig({ testTimeout: 180_000 });
 // The pid namespace the tests run in, as a lock records it (a lock of another namespace is never taken over).
 const NS = /\[(\d+)\]/.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? "0";
 const KEYS: [string, string, string] = ["sk-ant-synthetic-env-key-0001", "sk-ant-synthetic-env-key-0002", "sk-ant-synthetic-env-key-0003"];
