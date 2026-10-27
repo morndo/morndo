@@ -5,7 +5,7 @@
 // adapters, read through Observation; nothing is decided from them, O4).
 import { createHash } from "node:crypto";
 import {
-  DEFAULT_POLICY, Escalations, WORKER_ASK_GRACE_MS, answered, askFromBrief, askIdentity, askVersion, decidedChoice, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
+  DEFAULT_POLICY, Escalations, WORKER_ASK_GRACE_MS, answered, askContent, askFromBrief, askIdentity, askVersion, decidedChoice, endpointId, escalationId, mayCommand, refusal, sameDecision, sessionId, viaFor,
   type AccessPolicy, type AnswerRefusal, type Ask, type Choice, type Decision, type DecisionBrief, type EndpointId, type Escalation, type Message, type Note, type SessionId, type Sighting,
 } from "@morndo/domain";
 import type { BriefSighting } from "./brief-service.ts";
@@ -258,6 +258,15 @@ export class EscalationService {
     // A brief's version joins the hash (DB9, E12), so a restate counts even when the markdown reads the same.
     const brief = this.#briefOf.get(e.id);
     return askVersion(brief ? { ...base, briefVersion: brief.version } : base);
+  }
+
+  // What the card says now, apart from when it was asked (askContent): the same prompt coming back has the same content.
+  // Empty for an id that isn't on the board.
+  content(id: string): string {
+    const e = this.#x.get(id);
+    if (!e) return "";
+    const menu = e.contextKind === "screen" ? this.#menus.get(e.id) : undefined;
+    return askContent(menu === undefined ? e : { ...e, context: menu });
   }
 
   start(pollMs: number) {

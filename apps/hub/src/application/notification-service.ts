@@ -26,6 +26,7 @@ const OPTIONS: Record<NotificationKind, PushOptions> = {
   alert: { ttlSeconds: 6 * 3600, topic: PUSH_TOPICS.alert, urgency: "high" },
   usage: { ttlSeconds: 6 * 3600, topic: PUSH_TOPICS.usage, urgency: "normal" },
 };
+const cardKey = (i: { id: string; content?: string }) => `${i.id}\u0000${i.content ?? ""}`;
 const delivered = (status: number) => status >= 200 && status < 300;
 
 export class NotificationService {
@@ -40,7 +41,8 @@ export class NotificationService {
   #reports = new Map<string, AttendingReport>();       // per feed connection
   #waiting: Set<string> | null = null;                 // the Decisions waiting, by id; null until the first board
   #needing = new Map<string, boolean>();               // per worker: whether it needs him with something that isn't an Ask
-  #pushedFor = new Map<string, DecisionPush>();        // per Decision card: when a Notification last went for it (N7), pruned after an hour
+  #pushedFor = new Map<string, DecisionPush>();        // per Decision card and content: when a Notification that was sent last carried it (N7), pruned after an hour
+  #awaiting = new Set<string>();                       // the cards a raised, not yet sent Decision Notification is for
   #linked = 0;                                         // devices linked since the last such Notification went
   #usageNotices = 0;                                   // usage notices the hub wrote since the last such Notification went (S4)
   #timer: unknown = null;
@@ -73,19 +75,20 @@ export class NotificationService {
   subscribed(endpointId: string) { return this.#store.pushSubscriptions().some(s => s.endpointId === endpointId); }
 
   // The board, whole, each time it changes. A Decision id not waiting before starts waiting; the first board only tells
-  // what already waits (a restart raises nothing). One that closed and opened again unchanged, with the same number
-  // waiting, raises nothing within the hour after the last Notification for it (N7).
-  board(items: readonly { id: string; status: string; need: string }[]) {
-    const now = new Set(items.filter(i => i.status === "open" && i.need === "decision").map(i => i.id));
+  // what already waits (a restart raises nothing). `content`: what the card says (askContent). One that closed and
+  // opened again with the same content and the same number waiting raises nothing within the hour after a Notification
+  // went for it (N7); a card in the same update that is not such a repeat still raises one, and only it is stamped.
+  board(items: readonly { id: string; status: string; need: string; content?: string }[]) {
+    const open = items.filter(i => i.status === "open" && i.need === "decision");
+    const now = new Set(open.map(i => i.id));
     const before = this.#waiting;
     this.#waiting = now;
     const at = this.#now();
-    for (const [id, last] of this.#pushedFor) if (at - last.at >= DECISION_REPEAT_MS) this.#pushedFor.delete(id);
+    for (const [key, last] of this.#pushedFor) if (at - last.at >= DECISION_REPEAT_MS) this.#pushedFor.delete(key);
     if (before === null) return;
-    const fresh = [...now].filter(id => !before.has(id));
-    if (!fresh.some(id => !repeatsDecision(this.#pushedFor.get(id), now.size, at))) return;
-    if (!raises({ kind: "decision", waiting: now.size })) return;
-    for (const id of fresh) this.#pushedFor.set(id, { at, decisions: now.size });
+    const pushable = open.filter(i => !before.has(i.id)).map(i => cardKey(i)).filter(key => !repeatsDecision(this.#pushedFor.get(key), now.size, at));
+    if (!pushable.length || !raises({ kind: "decision", waiting: now.size })) return;
+    for (const key of pushable) this.#awaiting.add(key);
     this.#raise("decision");
   }
 
@@ -152,6 +155,8 @@ export class NotificationService {
     if (!due.length) return;
     const attending = anyAttending(this.#reports.values(), now);       // he is looking at it: nothing goes (N3)…
     for (const p of due) {
+      const cards = p.kind === "decision" ? [...this.#awaiting] : [];          // stamped only if this one is sent (N7)
+      if (p.kind === "decision") this.#awaiting.clear();
       if (attending && suppressedWhileAttending(p.kind)) continue;     // …but a device linked always does (review M2)
       const counts = this.counts();                                  // as things are now, not as they were a second ago
       const relevant = p.kind === "decision" ? counts.decisions : p.kind === "worker" ? counts.workers : p.kind === "alert" ? counts.alerts : p.kind === "usage" ? counts.usage : counts.linked;
@@ -175,7 +180,11 @@ export class NotificationService {
             : `a push service refused a ${p.kind} notification: ${r.status}${reason === undefined ? "" : ` ${reason}`}`);
         }
       }
-      if (sent) this.#store.record([{ type: "NotificationSent", kind: p.kind, counts, devices: sent, at: this.#now() }]);
+      if (sent) {
+        const sentAt = this.#now();
+        for (const key of cards) this.#pushedFor.set(key, { at: sentAt, decisions: counts.decisions });
+        this.#store.record([{ type: "NotificationSent", kind: p.kind, counts, devices: sent, at: sentAt }]);
+      }
     }
   }
 }
