@@ -21,7 +21,7 @@
 // removes vite, and ships the same built app in every one of its Releases.
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, linkSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, sep } from "node:path";
 import { KeySetSchema } from "@morndo/protocol";
@@ -182,6 +182,12 @@ function buildInto(repo: string, scratch: string, set: WorldSet): BuiltWorld {
       const findings = linkFindings(copy);
       throw new Error(`${error instanceof Error ? error.message : String(error)}\nlinks in the copy that escape or dangle:\n${
         findings.length === 0 ? "(none)" : findings.slice(0, 40).join("\n")}`);
+    }
+    // The repository now ships its own trust/keys.json (stage.ts copies it, 0444, into a 0555 folder): this run's key set
+    // takes its place, so the folder is opened for writing and the file removed first.
+    if (existsSync(join(stage, "trust", "keys.json"))) {
+      chmodSync(join(stage, "trust"), 0o755);
+      rmSync(join(stage, "trust", "keys.json"), { force: true });
     }
     writeFileSync(join(stage, "trust", "keys.json"), keysBytes, { mode: 0o444 });
     rmSync(join(stage, "files.json"));
