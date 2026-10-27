@@ -45,7 +45,7 @@ elif command -v node >/dev/null 2>&1; then
   node=$(command -v node)
 else
   node=$(find "$HOME/.nvm/versions/node" -mindepth 3 -maxdepth 3 -path '*/bin/node' 2>/dev/null | sort -V | tail -n 1 || true)
-  [ -n "$node" ] && [ -x "$node" ] || { echo "backup.sh: no node found (set C6_NODE)" >&2; exit 1; }
+  if [ -z "$node" ] || [ ! -x "$node" ]; then echo "backup.sh: no node found (set C6_NODE)" >&2; exit 1; fi
 fi
 
 # The databases: the ones named, the machine's three when present, and a refusal for any other we can see.
