@@ -146,6 +146,15 @@ describe("release-card.sh", () => {
     expect(control).toEqual([]);
   });
 
+  it("reads the paths from the top of the repository when run from a subdirectory", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n", "scripts/notes.md": "a\n" });
+    const head = commit(dir, "fix(install): verify first", { "install.sh": "x\n" });
+    const r = spawnSync("sh", [SCRIPT, base, head], { cwd: join(dir, "scripts"), env, encoding: "utf8" });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain("  A install.sh\n");
+  });
+
   it("refuses a base that is not an ancestor of the head", () => {
     const dir = repo();
     const root = commit(dir, "chore: root", { "README.md": "a\n" });

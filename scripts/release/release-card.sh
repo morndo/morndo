@@ -16,6 +16,9 @@ if [ $# -ne 2 ] || [ -z "$1" ] || [ -z "$2" ]; then
 fi
 
 git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "not inside a git repository"
+# The pathspecs below are relative to the current directory, so from a subdirectory they would match nothing and the
+# card would say nothing changed: read them from the top of the work tree.
+cd "$(git rev-parse --show-toplevel)"
 
 if ! base=$(git rev-parse --verify --quiet "$1^{commit}"); then
   fail "$1 does not resolve to a commit"
