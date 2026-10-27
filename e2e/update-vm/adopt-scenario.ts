@@ -300,7 +300,11 @@ async function waitDeadmanGone(machine: string, timeoutMs: number): Promise<bool
   const gone = await waitUntil(timeoutMs, async () => {
     const timer = run("systemctl", ["--user", "is-active", `c6-deadman-${machine}.timer`]).out.trim();
     const service = run("systemctl", ["--user", "is-active", `c6-deadman-${machine}.service`]).out.trim();
-    return timer !== "active" && service !== "active" && service !== "activating" ? "gone" : null;
+    // A persistent timer whose calendar time has passed stays "active (elapsed)" when restore.sh did not disable it (the ok
+    // marker exits first): it has fired once its last trigger time is set.
+    const last = run("systemctl", ["--user", "show", "-p", "LastTriggerUSec", "--value", `c6-deadman-${machine}.timer`]).out.trim();
+    const fired = timer !== "active" || (last !== "" && last !== "n/a" && last !== "0");
+    return fired && service !== "active" && service !== "activating" ? "gone" : null;
   });
   return gone !== null;
 }
