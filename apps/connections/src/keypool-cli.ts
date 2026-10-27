@@ -182,7 +182,14 @@ async function writeEnv(home: Opened, pool: string, parsed: Parsed, io: Io): Pro
   home.leases.sweep();
   if (home.keypools.runsPredating(pool, file)) return fail(io, "older_runs");
   const lock = await acquireEnvLock(file, { waitMs: 5000 });
-  if (!lock.ok) return fail(io, "busy");
+  if (!lock.ok) {
+    // The word first, as everywhere; then one line that names the holder for whoever is watching, never the path.
+    const code = fail(io, "busy");
+    io.stderr(lock.holder === null
+      ? "write-env: something holds the lock and did not say who. Find it with: fuser <sink>.lock  (the kernel releases the lock when its holder dies).\n"
+      : `write-env: another write holds the lock: pid ${lock.holder.pid} (pid namespace ${lock.holder.ns}). Look at it with: ps -o pid,lstart,args -p ${lock.holder.pid}  (if it is not listed, that pid is in another container or pid namespace: look there). The kernel releases the lock when its holder dies, so there is nothing to clear by hand.\n`);
+    return code;
+  }
   try {
     // The pool is read again under the lock: the writer before us may have changed what is due.
     const fresh = home.keypools.state(pool);

@@ -249,7 +249,9 @@ describe("the temp file has a fixed name, so a write that was killed leaves one 
 type Holder = { child: ChildProcess; first: string; killed: Promise<void> };
 async function hold(path: string, wrap: string[] = []): Promise<Holder> {
   const helper = join(import.meta.dirname, "fixtures/lock-hold.mjs");
-  const [command = process.execPath, ...head] = wrap.length > 0 ? [...wrap, process.execPath] : [process.execPath];
+  const argv = wrap.length > 0 ? [...wrap, process.execPath] : [process.execPath];
+  const command = argv[0] ?? process.execPath;
+  const head = argv.slice(1);
   const child = spawn(command, [...head, "--experimental-strip-types", helper, path]);
   const first = await new Promise<string>(resolve => {
     let out = "";
@@ -324,7 +326,7 @@ describe("one writer at a time: a lock the kernel releases when its holder dies"
   it("a holder in another pid namespace (a container) is busy while it lives, and gone when it dies: a pid there never has to be looked up", async () => {
     const dir = area();
     const path = join(dir, ".env");
-    const held = await hold(path, ["unshare", "--user", "--map-root-user", "--pid", "--fork", "--mount-proc"]);
+    const held = await hold(path, ["unshare", "--user", "--map-root-user", "--pid", "--fork", "--kill-child", "--mount-proc"]);
     if (held.first !== "ok") { await stop(held); return; }   // this box does not allow a user namespace: nothing to test
     try {
       expect(await acquireEnvLock(path, { waitMs: 100 })).toMatchObject({ ok: false, problem: "busy" });

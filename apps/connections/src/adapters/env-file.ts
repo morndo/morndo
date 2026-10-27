@@ -2,8 +2,8 @@
 // over the old file, so a reader never sees half a file or a key anyone else can read. Nothing is written for a path in a git work tree, in a directory
 // group or others can write, through a link, or under a protected directory. A name and a value are checked against a closed alphabet so that no quoting
 // or escaping exists. A problem is a word; no path, value or system message is returned.
-import { closeSync, existsSync, fsyncSync, linkSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { closeSync, existsSync, fsyncSync, lstatSync, openSync, readFileSync, readlinkSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
+import Database from "better-sqlite3";
 import { processIdentity } from "@morndo/node-ops";
 import { basename, dirname, isAbsolute, join } from "node:path";
 import { CONNECTION_NAME } from "@morndo/domain";
@@ -158,80 +158,80 @@ function pidNamespace(): number | null {
   return Number.isInteger(ns) && ns > 0 ? ns : null;
 }
 
-// The lock names its owner by pid, start ticks and pid namespace, so a pid that was reused, or lives where we cannot look it up, is not mistaken for the owner.
+// The owner note names this process by pid, start ticks and pid namespace, so a pid that was reused, or lives where we cannot look it up, is not mistaken for the holder.
 function ownerText(): string | null {
   const id = processIdentity(process.pid);
   const ns = pidNamespace();
   return id !== null && ns !== null ? `${process.pid} ${id.ticks} ${ns}\n` : null;
 }
 
-// The lock is created with its owner already in it: written to a temp file and linked into place, so there is no moment at which it exists empty.
-// A stale lock is taken over by one rename of the exact file that was read, so a newer lock that appeared meanwhile is put back, never removed.
-function tryEnvLock(lock: string, beforeTakeover?: () => void): "taken" | "busy" | "retry" {
-  const owner = ownerText();
-  if (owner === null) return "busy";
-  const temp = `${lock}.${process.pid}.${randomBytes(6).toString("hex")}`;
+// Who holds a lock: pid, start ticks and pid namespace, read from the note beside it.
+export type EnvLockHolder = { pid: number; ticks: number; ns: number };
+
+// What the owner note beside a lock says, or null when there is none or it is not of that shape.
+function noteHolder(note: string): EnvLockHolder | null {
   try {
-    const fd = openSync(temp, "wx", 0o600);
-    try { writeSync(fd, owner); fsyncSync(fd); } finally { closeSync(fd); }
-    linkSync(temp, lock);
-    return "taken";
-  } catch { /* held, or the directory is not ours to write in */ } finally {
-    try { unlinkSync(temp); } catch { /* never made */ }
-  }
-  // A symlink at the lock path is never removed, so it can never be taken over either.
-  if (symlinked(lock)) return "busy";
-  let text: string;
-  try { text = readFileSync(lock, "utf8"); } catch { return "busy"; }
-  // Stale means provably gone and nothing else: the lock must name our pid namespace (the older two-field form is an unknown namespace), and then the
-  // pid must be gone, or belong to another process than the one that took the lock. An empty, partial or unreadable lock is an unknown owner, and a
-  // live owner is never stale however old the lock.
-  const match = /^(\d+) (\d+) (\d+)\n$/.exec(text);
-  const mine = pidNamespace();
-  if (!match || mine === null || Number(match[3]) !== mine) return "busy";
-  const live = processIdentity(Number(match[1]));
-  if (live !== null && String(live.ticks) === match[2]) return "busy";
-  // Another taker may have removed it and made its own meanwhile: move the exact file that was read aside, and remove it only after checking it is
-  // still the stale one.
-  beforeTakeover?.();
-  const grave = `${lock}.stale.${process.pid}.${randomBytes(6).toString("hex")}`;
-  try { renameSync(lock, grave); } catch { return "retry"; }
-  let moved: string;
-  try { moved = readFileSync(grave, "utf8"); } catch {
-    try { unlinkSync(grave); } catch { /* already gone */ }
-    return "retry";
-  }
-  if (moved !== text) {
-    // A newer, live lock was moved: put it back where it stood and wait for its holder.
-    try { linkSync(grave, lock); } catch { /* another lock already stands */ }
-    try { unlinkSync(grave); } catch { /* already gone */ }
-    return "busy";
-  }
-  try { unlinkSync(grave); } catch { /* already gone */ }
-  return "retry";
+    const match = /^(\d+) (\d+) (\d+)\n$/.exec(readFileSync(note, "utf8"));
+    return match ? { pid: Number(match[1]), ticks: Number(match[2]), ns: Number(match[3]) } : null;
+  } catch { return null; }
 }
 
-// One writer at a time: the lock file names its owner by pid, start ticks and pid namespace. A holder in another namespace is never taken over; a
-// stale one is taken over through a rename that cannot hit a newer lock. A live holder is waited for until waitMs has passed. `release` is idempotent,
-// ignores a lock already gone, and removes only the lock this process wrote.
-export async function acquireEnvLock(path: string, options: { waitMs: number; beforeTakeover?: () => void }): Promise<{ ok: true; release(): void } | { ok: false; problem: "busy" }> {
+// One writer at a time: `BEGIN EXCLUSIVE` on an empty SQLite database beside the sink, a lock the kernel itself releases when its holder dies, in
+// whatever pid namespace the holder lives — so no lock is ever stale and nothing is ever taken over. Waiting is polling in an async loop, not a
+// blocking busy timeout, so the timers of this process keep running while it waits. The owner note beside the lock says who holds it, for messages
+// only; it never decides anything. `release` is idempotent and removes only the note this process wrote; the lock file itself stays, an empty
+// database whose existence means nothing.
+export async function acquireEnvLock(path: string, options: { waitMs: number }): Promise<{ ok: true; release(): void } | { ok: false; problem: "busy"; holder: EnvLockHolder | null }> {
   const lock = `${path}.lock`;
+  const note = `${lock}.owner`;
+  // The text locks of rounds 2 and 3: a small regular file of exactly their shape is the past form, removed once so the kernel lock can take its
+  // place. Anything else at that path is left alone.
+  try {
+    const found = lstatSync(lock);
+    if (found.isFile() && found.size <= 64 && /^\d+( \d+){0,2}\n$/.test(readFileSync(lock, "utf8"))) unlinkSync(lock);
+  } catch { /* not there */ }
+  // A symlink at the lock path is never removed and never followed: busy at once.
+  if (symlinked(lock)) return { ok: false, problem: "busy", holder: null };
+  let db: Database.Database;
+  try {
+    closeSync(openSync(lock, "a", 0o600));
+    db = new Database(lock);
+    db.pragma("busy_timeout = 0");
+  } catch { return { ok: false, problem: "busy", holder: null }; }
   const began = Date.now();
   for (;;) {
-    const taken = tryEnvLock(lock, options.beforeTakeover);
-    if (taken === "taken") {
-      let released = false;
-      const owner = ownerText();
-      return {
-        ok: true,
-        release: () => {
-          if (released) return;
-          released = true;
-          try { if (owner !== null && readFileSync(lock, "utf8") === owner) unlinkSync(lock); } catch { /* already gone */ }
-        },
-      };
+    try {
+      db.exec("BEGIN EXCLUSIVE");
+    } catch (error) {
+      // Busy or locked is another holder: wait and try again until waitMs has passed, then say who the note names. Any other error (not a
+      // database, cannot be opened) is a file not ours to touch: busy at once, without retry.
+      const code = (error as { code?: string }).code ?? "";
+      if (code !== "SQLITE_BUSY" && code !== "SQLITE_LOCKED") { db.close(); return { ok: false, problem: "busy", holder: null }; }
+      if (Date.now() - began >= options.waitMs) { db.close(); return { ok: false, problem: "busy", holder: noteHolder(note) }; }
+      await new Promise<void>(resolve => { setTimeout(resolve, LOCK_POLL_MS); });
+      continue;
     }
-    if (taken === "busy" && Date.now() - began >= options.waitMs) return { ok: false, problem: "busy" };
-    await new Promise<void>(resolve => { setTimeout(resolve, LOCK_POLL_MS); });
+    const owner = ownerText();
+    if (owner !== null) {
+      // The note is information for messages only: a failure to write it is ignored.
+      const temp = `${note}.${process.pid}.tmp`;
+      try {
+        const fd = openSync(temp, "wx", 0o600);
+        try { writeSync(fd, owner); fsyncSync(fd); } finally { closeSync(fd); }
+        renameSync(temp, note);
+      } catch { /* the note is information only */ }
+    }
+    let released = false;
+    return {
+      ok: true,
+      release: () => {
+        if (released) return;
+        released = true;
+        try { db.exec("ROLLBACK"); } catch { /* already gone */ }
+        db.close();
+        // Only the note this process wrote is removed; a newer holder's stays.
+        try { if (owner !== null && readFileSync(note, "utf8") === owner) unlinkSync(note); } catch { /* already gone */ }
+      },
+    };
   }
 }

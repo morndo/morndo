@@ -93,12 +93,12 @@ export const KEY_POOL_RETIRED_MAX = 64;
 const SINK_MAX_LENGTH = 4096;
 const SINK_SEGMENT = /^[A-Za-z0-9._@+=,:-]+$/;
 const SIDECAR = ".member";
-// The suffixes a sink itself never has: the sidecar, and the two files a write passes through (T-459).
-const RESERVED = [SIDECAR, ".tmp", ".lock"];
+// The suffixes a sink itself never has: the sidecar, and the files a write passes through or locks with (T-459).
+const RESERVED = [SIDECAR, ".tmp", ".lock", ".lock.owner"];
 
 // A sink is the file `write-env` writes a pool's key to (KP20): absolute, normalised, safe characters only (no space, glob, quote or control
 // character, so it is one literal in a deny rule), and never one of the reserved files beside it (the sidecar `<sink>.member`,
-// the temp file `<sink>.tmp`, the lock `<sink>.lock`).
+// the temp file `<sink>.tmp`, the lock `<sink>.lock` and its owner note `<sink>.lock.owner`).
 export function isSinkPath(path: string): boolean {
   if (path.length < 2 || path.length > SINK_MAX_LENGTH || !path.startsWith("/") || RESERVED.some(end => path.endsWith(end))) return false;
   return path.slice(1).split("/").every(segment => SINK_SEGMENT.test(segment) && segment !== "." && segment !== "..");
