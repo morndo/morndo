@@ -120,13 +120,18 @@ describe("the README", () => {
   const readme = readFileSync(join(DIR, "README.md"), "utf8").replace(/\s+/g, " ");
 
   it.each(["cp1", "cp2", "cp3"])("runs the fence check for %s, with its image", name => {
-    expect(readme).toContain(`docker inspect c4-rehearsal-${name}-1 >${name}.json`);
-    expect(readme).toContain(`sh scripts/release/rehearsal/check-container.sh ${name}.json n.json i.json`);
+    expect(readme).toContain(`docker inspect c4-rehearsal-${name}-1 >"$E/${name}.json"`);
+    expect(readme).toContain(`sh scripts/release/rehearsal/check-container.sh "$E/${name}.json" "$E/n.json" "$E/i.json"`);
   });
 
   it("inspects the network and the image once", () => {
-    expect(readme).toContain("docker network inspect c4-rehearsal_net >n.json");
-    expect(readme).toContain("docker image inspect morndo-rehearsal:c4-5 >i.json");
+    expect(readme).toContain(`docker network inspect c4-rehearsal_net >"$E/n.json"`);
+    expect(readme).toContain(`docker image inspect morndo-rehearsal:c4-5 >"$E/i.json"`);
+  });
+
+  it("writes the inspect files to a scratch directory, never into the work tree", () => {
+    expect(readme).toContain("E=$(mktemp -d)");
+    expect(readme).not.toMatch(/>\s*[A-Za-z0-9_.-]+\.json/);
   });
 
   it("cleans up this project only, its volumes and orphans included, then proves nothing is left", () => {
