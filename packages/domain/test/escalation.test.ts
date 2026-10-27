@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  askIdentity, askVersion,
+  askContent, askIdentity, askVersion,
   Escalations, LEDGER_GRACE_MS, TAP_TTL_MS, endpointId, escalationId, sessionId,
   type Ask, type Sighting, type SourceState,
 } from "../src/index.ts";
@@ -236,5 +236,15 @@ describe("E11: an earlier version's answer, found typed (recordEarlier)", () => 
     expect(x.recordEarlier("ny-1", askIdentity(v1), { kind: "option", key: "ship", label: "Ship it" }, by, T0 + MIN)).toBeNull();
     expect(x.get("ny-1")).toMatchObject({ status: "open", decision: null });
     expect(askIdentity({ messageId: null, askedAt: T0 })).toBe(`t${T0}`);
+  });
+});
+
+describe("askContent (N7): what an Ask says, apart from when it was asked", () => {
+  it("is the same when only its time and message differ, and differs when its wording, context or options do", () => {
+    const base = ask("ny-1");
+    expect(askContent(ask("ny-1", { askedAt: T0 + 5 * MIN, messageId: "m-other" }))).toBe(askContent(base));
+    expect(askContent({ ...base, title: "Another question" })).not.toBe(askContent(base));
+    expect(askContent({ ...base, context: "Another menu." })).not.toBe(askContent(base));
+    expect(askContent({ ...base, options: [{ key: "ship", label: "Ship it", detail: null }] })).not.toBe(askContent(base));
   });
 });

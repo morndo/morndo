@@ -3,7 +3,7 @@
 // while he is attending on any device. Pure.
 import { describe, expect, it } from "vitest";
 import {
-  ATTENDING_INPUT_MS, NOTIFICATION_KINDS, NOTIFY_DEBOUNCE_MS, NotificationQueue, PUSH_TOPICS, anyAttending, isAttending, isPushTopic, kindCode, payloadOf, raises, reasonCode,
+  ATTENDING_INPUT_MS, DECISION_REPEAT_MS, NOTIFICATION_KINDS, NOTIFY_DEBOUNCE_MS, NotificationQueue, PUSH_TOPICS, anyAttending, isAttending, isPushTopic, kindCode, payloadOf, raises, reasonCode, repeatsDecision,
   suppressedWhileAttending,
 } from "../src/index.ts";
 
@@ -97,4 +97,15 @@ describe("the queue (N3)", () => {
     expect(q.next).toBeNull();
     expect(q.due(NOW + 10_000)).toEqual([]);
   });
+});
+
+describe("a repeat Decision Notification (N7)", () => {
+  it("a card not pushed for before goes at once", () => expect(repeatsDecision(undefined, 2, NOW)).toBe(false));
+  it("the same card with the same number waiting repeats within the hour, and not from the hour on", () => {
+    const last = { at: NOW, decisions: 2 };
+    expect(repeatsDecision(last, 2, NOW + 2 * 60_000)).toBe(true);
+    expect(repeatsDecision(last, 2, NOW + DECISION_REPEAT_MS - 1)).toBe(true);
+    expect(repeatsDecision(last, 2, NOW + DECISION_REPEAT_MS)).toBe(false);
+  });
+  it("a different number waiting goes at once", () => expect(repeatsDecision({ at: NOW, decisions: 2 }, 1, NOW + 1000)).toBe(false));
 });

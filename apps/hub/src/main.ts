@@ -481,9 +481,10 @@ switch (cmd) {
       } catch (e) { log.warn(`first look failed (${i + 1} of 5)`, e); }
       await running(new Promise(r => setTimeout(r, 2000)));
     }
-    notifications.board(escalations.board().items);
+    const forNotifications = (items: readonly { id: string; status: string; need: string }[]) => items.map(i => ({ id: i.id, status: i.status, need: i.need, content: escalations.content(i.id) }));
+    notifications.board(forNotifications(escalations.board().items));
     for (const w of observation.snapshot().workers) notifications.worker(w.id, w.needsYou, w.waitingOn, true);
-    escalations.subscribe(b => notifications.board(b.items));
+    escalations.subscribe(b => notifications.board(forNotifications(b.items)));
     observation.subscribe({
       events: events => {
         for (const e of events) {

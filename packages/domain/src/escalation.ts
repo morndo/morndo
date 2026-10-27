@@ -134,10 +134,21 @@ export function askVersion(a: Pick<Ask, "askedAt" | "messageId" | "title" | "con
   const short = form.some(x => x !== null && x !== "") ? form : [];
   const shown = [a.askedAt, a.messageId, a.title, a.context, a.options.map(o => [o.key, o.label]), a.recommendation, a.ifNoAnswer, a.deadline, ...short];
   if (a.briefVersion !== undefined) shown.push(a.briefVersion);
-  const s = JSON.stringify(shown);
+  return fnv(JSON.stringify(shown), "v");
+}
+
+// FNV-1a over one string, with its length: the form askVersion and askContent give.
+function fnv(s: string, prefix: string): string {
   let h = 0x811c9dc5;
   for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
-  return `v${h.toString(16).padStart(8, "0")}${s.length.toString(16)}`;
+  return `${prefix}${h.toString(16).padStart(8, "0")}${s.length.toString(16)}`;
+}
+
+// What an Ask says, apart from when and in which message it was asked (N7): its wording and options. The same prompt
+// coming back after it left the screen has the same content; another prompt on the same worker has another. `context`:
+// for a menu on a screen, the menu itself (its identity), not the screen around it.
+export function askContent(a: Pick<Ask, "title" | "context" | "options" | "recommendation"> & Partial<Pick<Ask, "shortTitle" | "summary" | "details">>): string {
+  return fnv(JSON.stringify([a.title, a.context, a.options.map(o => [o.key, o.label]), a.recommendation, a.shortTitle ?? null, a.summary ?? null, a.details ?? null]), "c");
 }
 
 // Which asking of an Ask an answer was given for: the message that asked it or, with none, when it was asked. Every
