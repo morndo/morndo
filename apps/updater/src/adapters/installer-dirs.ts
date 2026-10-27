@@ -296,10 +296,13 @@ export class DirsInstaller implements Installer {
    *  (verifyTreeAt), copied into the releases directory read-only — the same layout promote leaves: files at
    *  the modes the list names, directories 0555, install.json beside them. A leftover directory of the same
    *  name (a first install that died before its links) is made writable and replaced; the manifest's digest is
-   *  unknown on this path — install.sh verified the Manifest, and this records only what it can check itself. */
-  installTree(o: { tree: string; version: string; at: number }): void {
+   *  unknown on this path — install.sh verified the Manifest, and this records only what it can check itself.
+   *  The tree is user-writable and was verified by an earlier call, so nothing is trusted from that call: the list
+   *  must still be the one `filesSha256` names, and every file and link is hashed from the very bytes written. */
+  installTree(o: { tree: string; version: string; at: number; filesSha256: string }): void {
     if (parseVersion(o.version) === null) throw new Error(`${o.version}: not a Version`);
     const listBytes = readFileSync(join(o.tree, "files.json"));
+    if (this.hashes.sha256(listBytes) !== o.filesSha256) throw new Error("files.json: list digest mismatch (the tree changed after it was verified)");
     const list = FileListSchema.parse(JSON.parse(listBytes.toString("utf8")));
     const target = join(this.releases, o.version);
     if (existsSync(target)) this.removeTree(target);       // nothing links at it on a first install
@@ -311,12 +314,17 @@ export class DirsInstaller implements Installer {
       try { st = lstatSync(from); } catch { this.removeTree(target); throw new Error(`${entry.path}: not in the tree`); }
       if (st.isDirectory()) mkdirSync(to, { recursive: true, mode: 0o755 });
       else if (st.isSymbolicLink()) {
+        const link = readlinkSync(from);
+        if (this.hashes.sha256(Buffer.from(link)) !== entry.sha256) { this.removeTree(target); throw new Error(`${entry.path}: changed since the tree was verified`); }
         mkdirSync(dirname(to), { recursive: true, mode: 0o755 });
-        symlinkSync(readlinkSync(from), to);
+        symlinkSync(link, to);
       } else {
-        // copy, then the list's mode: the modes come from the list, never the tree this ran from
+        // read once, hash what was read, write those bytes, then the list's mode: the modes come from the list,
+        // never the tree this ran from
+        const bytes = readFileSync(from);
+        if (this.hashes.sha256(bytes) !== entry.sha256) { this.removeTree(target); throw new Error(`${entry.path}: changed since the tree was verified`); }
         mkdirSync(dirname(to), { recursive: true, mode: 0o755 });
-        writeFileSync(to, readFileSync(from));
+        writeFileSync(to, bytes);
         chmodSync(to, parseInt(entry.mode, 8));
       }
     }
@@ -334,6 +342,15 @@ export class DirsInstaller implements Installer {
     // read-only from here (§5): every directory 0555, deepest first, then the whole rename onto the disk
     for (const dir of dirsDeepestFirst(target)) chmodSync(dir, 0o555);
     this.syncDir();
+  }
+
+  installRecord(version: string): { manifestSha256: string | null } | null {
+    try {
+      const doc: unknown = JSON.parse(readFileSync(join(this.releases, version, "install.json"), "utf8"));
+      if (typeof doc !== "object" || doc === null || !("manifestSha256" in doc)) return null;
+      const sha = doc.manifestSha256;
+      return sha === null || typeof sha === "string" ? { manifestSha256: sha } : null;
+    } catch { return null; }
   }
 
   freeBytes(): number {

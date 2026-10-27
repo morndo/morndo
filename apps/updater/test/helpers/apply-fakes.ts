@@ -133,6 +133,7 @@ export class TapedInstaller implements Installer {
   setGood(version: string): void { this.real.setGood(version); }
   prune(keep: readonly string[]): void { this.real.prune(keep); }
   async verifyTree(version: string, filesSha256: string | null) { return this.real.verifyTree(version, filesSha256); }
+  installRecord(version: string) { return this.real.installRecord(version); }
   freeBytes(): number { return this.real.freeBytes(); }
 }
 

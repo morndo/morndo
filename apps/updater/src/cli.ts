@@ -4,6 +4,7 @@
 // manager this machine runs. The command line is parsed here and nowhere else; the exit codes are sysexits.h's,
 // as in the rest of Morndo. The applies run as the machine's own units (§6.2): `morndo update` starts the apply
 // unit and reports its record; the tick, the boot and the recovery units run the same services themselves.
+import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import {
@@ -128,6 +129,7 @@ const checkLine = (o: CheckOutcome, to?: ToLine): string => {
   switch (o.kind) {
     case "staged": return `Staged ${o.version}. It applies at the next update --yes, the tick's window, or the next boot.`;
     case "up_to_date": return `Up to date: ${o.current}.`;
+    case "feed_verified": return `The ${o.channel} feed checks out (seq ${o.seq}); the update timer looks for a newer Version.`;
     case "refused": return `Refused: ${o.step} (${o.detail}). Nothing was staged.`;
     case "skipped": return `Skipped: ${o.reason}. Nothing was staged.`;
     case "busy": return "Busy: another process holds the apply lock.";
@@ -597,13 +599,13 @@ export async function runUpdater(
         return parsed.success ? parsed.data.protocol : null;
       } catch { return null; }
     };
-    const checkOnce = async (switches: { disableUpdates: boolean }, ask?: { to: Version }): Promise<CheckOutcome> =>
+    const checkOnce = async (switches: { disableUpdates: boolean }, ask?: { to: Version }, o: { feedOnly?: boolean; feed?: ReleaseFeed } = {}): Promise<CheckOutcome> =>
       await new CheckService({
-        feed: deps.feed ?? new HttpsFeed({ base: feedBase }),
+        feed: deps.feed ?? o.feed ?? new HttpsFeed({ base: feedBase }),
         artifacts: deps.artifacts ?? new HttpsArtifacts({ dir: paths.downloads }),
         verifier, installer, store, settings, clock: systemClock, platform, switches,
         fleet: await fleetOf(), state: stateSink,
-      }).check(ask);
+      }).check(ask, o.feedOnly === true ? { feedOnly: true } : {});
     // The sentences a `--to` refusal prints: the channel and the pin are the settings', the running Version the
     // installer's. Absent when this run did not name a Version.
     const toLine = (to: Version | undefined): ToLine | undefined => {
@@ -1144,7 +1146,11 @@ export async function runUpdater(
     }
     // The tree against its own files.json: what install.sh verified on the way in is verified again here, by the
     // program that is about to copy it.
-    const findings = await installer.verifyTreeAt(tree, null);
+    // The list is read once here and its digest pinned: verification checks the list is that one, and the copy
+    // checks it again and hashes every file as it writes it, so what was verified is what is installed.
+    let listDigest: string | null = null;
+    try { listDigest = createHash("sha256").update(readFileSync(join(tree, "files.json"))).digest("hex"); } catch { /* verifyTreeAt says unreadable */ }
+    const findings = await installer.verifyTreeAt(tree, listDigest);
     if (findings.length > 0) {
       io.err(`the tree does not check out against its own files.json (${findings[0]!.path}: ${findings[0]!.problem}); nothing was installed\n`);
       return EXIT_DATAERR;
@@ -1196,7 +1202,11 @@ export async function runUpdater(
       io.err(`${foreign.join(", ")}: not written by Morndo; move ${foreign.length === 1 ? "it" : "them"} away, or run with --force to keep ${foreign.length === 1 ? "it" : "them"} as <name>.before-morndo; nothing was installed\n`);
       return EXIT_CONFIG;
     }
-    installer.installTree({ tree, version: versionText, at: systemClock.now() });
+    try { installer.installTree({ tree, version: versionText, at: systemClock.now(), filesSha256: listDigest! }); }
+    catch (error) {
+      io.err(`${error instanceof Error ? error.message : String(error)}; nothing was installed\n`);
+      return EXIT_DATAERR;
+    }
     installer.swap({ current: versionText, previous: null });
     installer.setGood(versionText);
     // The store's first words: this Version committed, the tree's key set trusted. The channel goes into the
@@ -1230,12 +1240,15 @@ export async function runUpdater(
       : joined ? (["node"] as const) : [];
     await m.enable([...UPDATE_UNITS, ...startable.map(s => `morndo-${s}.service`)]);
     io.out(`Morndo ${versionText} installed (${parsed.role}, channel ${parsed.channel}).\n`);
-    // §10.3's last step: the first check, the same one the timer runs, so the Feed's word is on record from the first
-    // minute. Best effort — an unreachable or refusing feed is said and recorded by the check itself and the install
-    // stands; the doctor then reports the feed as it is, never as verified.
+    // §10.3's last step: the Feed read and verified, so its word is on record from the first minute. Only that: no
+    // offer is judged, nothing is staged and no artifact is fetched (the timer's check does that, minutes later), and
+    // the fetches get short walls so the install does not hang on a host that does not answer. Best effort — an
+    // unreachable or refusing feed is said and recorded by the check itself and the install stands; the doctor then
+    // reports the feed as it is, never as verified.
     const firstCheck = async (): Promise<void> => {
       try {
-        const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" });
+        const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" }, undefined,
+          { feedOnly: true, feed: new HttpsFeed({ base: feedBase, timeoutMs: 8_000, deadlineMs: 15_000 }) });
         printOutcome(checkLine(outcome), checkCode(outcome));
       } catch (error) {
         io.err(`the first check failed: ${error instanceof Error ? error.message : String(error)}\n`);

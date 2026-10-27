@@ -211,13 +211,39 @@ describe("doctor (§8.1)", () => {
     expect(report.ok).toBe(false);
   });
 
-  it("a current Version the store committed without staging it (a first install) is not a provenance finding", async () => {
+  // A first install writes install.json with no manifest (`morndo install` verified none itself) and commits the Version;
+  // that pair, and only that pair, stands in for the staged record an update leaves.
+  const asFirstInstall = (w: World): void => {
+    const record = join(w.installer.dir, OFFERED, "install.json");
+    rewrite(record, `${JSON.stringify({ method: "updater", installedAt: "2026-10-27T00:00:00Z", manifestSha256: null, filesSha256: "a".repeat(64) })}\n`);
+  };
+
+  it("a first install's Version (install.json names no manifest, and the store committed it) is not a provenance finding", async () => {
     const w = build(undefined, { manual: true });
     await w.ready;
     w.store.versions.clear();
+    asFirstInstall(w);
     w.store.recordCommitted(OFFERED, NOW, null);
     const report = await w.doctor();
     expect(report.findings.filter(f => f.area === "provenance")).toEqual([]);
+  });
+
+  it("a Version an update staged, with its versions rows gone but still committed, is a provenance finding", async () => {
+    const w = build(undefined, { manual: true });
+    await w.ready;
+    w.store.versions.clear();               // install.json still names the manifest the update staged
+    w.store.recordCommitted(OFFERED, NOW, null);
+    const report = await w.doctor();
+    expect(report.findings.filter(f => f.area === "provenance")).toEqual([{ area: "provenance", detail: expect.stringContaining(OFFERED) }]);
+  });
+
+  it("a first install's record without the store's commit is a provenance finding", async () => {
+    const w = build(undefined, { manual: true });
+    await w.ready;
+    w.store.versions.clear();
+    asFirstInstall(w);
+    const report = await w.doctor();
+    expect(report.findings.filter(f => f.area === "provenance")).toHaveLength(1);
   });
 
   it("an expired key set, and one inside the Alert's 30 days, are keys findings", async () => {

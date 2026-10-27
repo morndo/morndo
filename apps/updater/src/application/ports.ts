@@ -81,6 +81,9 @@ export interface Installer {
   prune(keep: readonly string[]): void;
   /** Re-checks an installed Version against its files.json (and that list against `filesSha256` when known). */
   verifyTree(version: string, filesSha256: string | null): Promise<TreeFinding[]>;
+  /** What <version>/install.json says of how it was installed: `manifestSha256` is null for a first install
+   *  (`morndo install` verified no Manifest itself), a digest for a Version an update staged. Null: no readable record. */
+  installRecord(version: string): { manifestSha256: string | null } | null;
   /** Free bytes on the file system holding the releases directory. */
   freeBytes(): number;
 }

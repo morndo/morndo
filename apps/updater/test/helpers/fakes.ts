@@ -197,6 +197,8 @@ export class FakeInstaller implements Installer {
     return this.real.verifyTree(version, filesSha256);
   }
 
+  installRecord(version: string): { manifestSha256: string | null } | null { return this.real.installRecord(version); }
+
   freeBytes(): number { return this.freeBytesValue; }
 }
 

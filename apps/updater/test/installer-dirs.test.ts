@@ -134,6 +134,48 @@ describe("DirsInstaller", () => {
     expect(readdirSync(releases)).toEqual([VERSION]);   // promoted away: no .staging-* left
   });
 
+  describe("installTree (§10.3's first install: the tree is verified and copied from the same bytes)", () => {
+    // The unpacked staging tree stands in for the tree `morndo install` runs from; its files.json digest is the one
+    // the verification step pinned.
+    const tree = async () => {
+      const { installer, filesSha256 } = await unpackGood();
+      return { installer, filesSha256, dir: join(releases, `.staging-${VERSION}`) };
+    };
+    const install = (installer: DirsInstaller, dir: string, filesSha256: string): void =>
+      installer.installTree({ tree: dir, version: "0.3.0", at: INSTALLED_AT, filesSha256 });
+
+    it("copies the tree and keeps files.json beside install.json", async () => {
+      const { installer, filesSha256, dir } = await tree();
+      install(installer, dir, filesSha256);
+      expect(await installer.verifyTree("0.3.0", filesSha256)).toEqual([]);
+      expect(readFileSync(join(releases, "0.3.0", "files.json"), "utf8")).toBe(readFileSync(join(dir, "files.json"), "utf8"));
+    });
+
+    it("refuses a file that changed after the tree was verified, and leaves nothing installed", async () => {
+      const { installer, filesSha256, dir } = await tree();
+      chmodSync(join(dir, "README.md"), 0o644);
+      writeFileSync(join(dir, "README.md"), "swapped after the check\n");
+      expect(() => install(installer, dir, filesSha256)).toThrow(/README\.md.*changed/);
+      expect(existsSync(join(releases, "0.3.0"))).toBe(false);
+    });
+
+    it("refuses a link that was repointed after the check", async () => {
+      const { installer, filesSha256, dir } = await tree();
+      rmSync(join(dir, "bin/morndo"));
+      symlinkSync("../app/other.sh", join(dir, "bin/morndo"));
+      expect(() => install(installer, dir, filesSha256)).toThrow(/bin\/morndo.*changed/);
+      expect(existsSync(join(releases, "0.3.0"))).toBe(false);
+    });
+
+    it("refuses a files.json that is not the one the verification pinned", async () => {
+      const { installer, filesSha256, dir } = await tree();
+      chmodSync(join(dir, "files.json"), 0o644);
+      writeFileSync(join(dir, "files.json"), "[]");
+      expect(() => install(installer, dir, filesSha256)).toThrow(/files\.json.*digest/);
+      expect(existsSync(join(releases, "0.3.0"))).toBe(false);
+    });
+  });
+
   it("an I/O error while unpacking is thrown, not returned as a refusal, and leaves no staging", async () => {
     const { installer, filesSha256 } = good();
     await expect(installer.unpack(join(scratch, "vanished.tar.gz"), VERSION, { filesSha256, maxBytes: 1 << 20 }))
