@@ -8,7 +8,7 @@
 | Part | Choice | Version | Why, with source |
 |---|---|---|---|
 | Language | TypeScript | 6.0.3 | 7.0.2 is `latest`, but `@sveltejs/kit` 2.70.3 and `svelte-check` 4.7.6 declare `typescript: ^5 \|\| ^6` as a peer (npm registry). Move to 7 when they do. |
-| Runtime | Node.js LTS "Krypton" | 24.21.0 | Latest LTS line (https://nodejs.org/dist/index.json: v24.21.0, 2026-09-07, lts "Krypton"; 26.x not LTS yet). Installed with nvm; the machine's default Node is untouched. `.nvmrc` pins it. |
+| Runtime | Node.js LTS "Krypton" | 24.22.1 | Latest LTS line (https://nodejs.org/dist/index.json: v24.22.1, 2026-10-20, lts "Krypton", security release, read 2026-10-26; 24.21.0 until then; 26.x not LTS yet). Installed with nvm; the machine's default Node is untouched. `.nvmrc` pins it. |
 | Front end | SvelteKit in SPA mode with `adapter-static`, Svelte 5 | kit 2.70.3, svelte 5.57.1, adapter-static 3.0.10, vite 8.3.1, vite-plugin-svelte 7.3.1 | Static files served by the hub, no second web server; SPA mode per https://svelte.dev/docs/kit/single-page-apps (its first-load cost matters little for an installed, cached app); service worker support per https://svelte.dev/docs/kit/service-workers. The owner picked it. |
 | Passkeys | `@simplewebauthn/server` and `/browser` | 14.0.3 / 14.0.0 | Supported runtimes: Node 22+ and Deno 2.4+ (https://simplewebauthn.dev/docs/packages/server). v14 API: `startRegistration({ optionsJSON })`, `verifyAuthenticationResponse({ credential })`. |
 | WebSocket | `ws` | 8.22.0 | `noServer` plus authenticating in the `upgrade` handler, and ping/pong heartbeats, as in its README (https://github.com/websockets/ws). |

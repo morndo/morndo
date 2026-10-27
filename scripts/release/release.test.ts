@@ -1484,12 +1484,12 @@ describe("stage, launchers, node pin, notice", () => {
   });
 
   it("names the pinned Node 24 tarballs and notices a newer 24", () => {
-    expect(BUNDLED_NODE).toBe("24.21.0");
-    expect(nodeTarball("linux-x64")).toBe("node-v24.21.0-linux-x64.tar.gz");
-    expect(nodeTarball("linux-arm64")).toBe("node-v24.21.0-linux-arm64.tar.gz");
-    expect(nodeTarball("darwin-arm64")).toBe("node-v24.21.0-darwin-arm64.tar.gz");
-    expect(newerNode24([{ version: "v24.21.0" }, { version: "v26.11.1" }])).toBeNull();
-    expect(newerNode24([{ version: "v24.22.0" }, { version: "v24.21.0" }])).toBe("24.22.0");
+    expect(BUNDLED_NODE).toBe("24.22.1");
+    expect(nodeTarball("linux-x64")).toBe("node-v24.22.1-linux-x64.tar.gz");
+    expect(nodeTarball("linux-arm64")).toBe("node-v24.22.1-linux-arm64.tar.gz");
+    expect(nodeTarball("darwin-arm64")).toBe("node-v24.22.1-darwin-arm64.tar.gz");
+    expect(newerNode24([{ version: "v24.22.1" }, { version: "v26.11.1" }])).toBeNull();
+    expect(newerNode24([{ version: "v24.22.2" }, { version: "v24.22.1" }])).toBe("24.22.2");
   });
 
   it("lists production packages from a lockfile, skipping dev ones", () => {
