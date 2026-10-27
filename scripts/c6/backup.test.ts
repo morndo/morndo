@@ -114,6 +114,7 @@ describe("restore.sh", () => {
     const m = machine();
     expect(sh(BACKUP, [m.dest, "--db", `node=${m.dbPath}`], m.env).status).toBe(0);
     install(m);
+    rmSync(m.calls, { force: true });                 // backup.sh asked is-active; the dead-man must call nothing
     writeFileSync(join(m.dest, "ok"), "");
     const r = sh(join(m.dest, "restore.sh"), ["--deadman"], m.env);
     expect(r.status).toBe(0);
