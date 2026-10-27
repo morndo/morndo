@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.1](https://github.com/morndo/morndo/compare/v0.1.0...v0.1.1) (2026-10-27)
+
+
+### Tests
+
+* **updater:** build release fixtures for the machine's own platform ([166df8d](https://github.com/morndo/morndo/commit/166df8dc283d15119765df6736f78f095b583497))
+
 ## 0.1.0 (2026-10-27)
 
 
