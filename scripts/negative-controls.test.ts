@@ -2,7 +2,7 @@
 // test and no breakage. The outputs are vitest 5.0.3's, as it prints them (colors off). And a control marked for one
 // platform: skipped elsewhere, a fifth outcome that is never a bite or a pass.
 import { describe, expect, it } from "vitest";
-import { CONTROLS, check, classify, needs, verdict, type Control } from "./negative-controls.ts";
+import { CONTROLS, check, classify, needs, parseShard, shardOf, verdict, type Control } from "./negative-controls.ts";
 
 const FAILED_TEST = [
   " RUN  v5.0.3 /repo", "", " FAIL  |units| packages/protocol/test/fleet.test.ts > messages > reads a code",
@@ -98,5 +98,32 @@ describe("a control marked for one platform (platform)", () => {
   });
   it("the Linux-only /proc/self/fd control is marked linux (it still runs on CI's weekly ubuntu run)", () => {
     expect(CONTROLS.find(c => c.id === "t2-openconfined-proc-fd")?.platform).toBe("linux");
+  });
+});
+
+// The weekly workflow runs the controls as a matrix of shards (T-467): one serial run of 1478 controls passed its 90 minutes.
+describe("--shard i/n", () => {
+  const c = (id: string, ...run: string[]): Control => ({ id, task: "0", file: "f.ts", find: "a", replace: "b", run });
+  it("parses i/n and refuses anything else", () => {
+    expect(parseShard("2/6")).toEqual({ index: 2, count: 6 });
+    for (const bad of ["0/6", "7/6", "1/0", "a/b", "2", "1/2/3", "-1/2", "1.5/2", ""]) expect(parseShard(bad), bad).toBeNull();
+  });
+  it("every control lands in exactly one shard, in the order the registry has them", () => {
+    const all = [c("a", "x"), c("b", "y"), c("c", "x"), c("d", "z"), c("e", "y"), c("f", "w")];
+    const shards = [1, 2, 3].map(i => shardOf(all, i, 3));
+    expect(shards.flat().map(x => x.id).sort()).toEqual(["a", "b", "c", "d", "e", "f"]);
+    for (const sh of shards) expect(sh.map(x => all.indexOf(x))).toEqual([...sh.map(x => all.indexOf(x))].sort((p, q) => p - q));
+  });
+  it("controls that run the same test files stay together, so each shard runs a file set's unchanged baseline once", () => {
+    const all = [c("a", "x", "y"), c("b", "z"), c("c", "y", "x"), c("d", "z"), c("e", "w")];
+    const home = (id: string) => [1, 2, 3].find(i => shardOf(all, i, 3).some(x => x.id === id));
+    expect(home("a")).toBe(home("c"));
+    expect(home("b")).toBe(home("d"));
+  });
+  it("the real registry splits into shards that differ in size by little, and shard 1/1 is all of it", () => {
+    const sizes = [1, 2, 3, 4, 5, 6].map(i => shardOf(CONTROLS, i, 6).length);
+    expect(sizes.reduce((a, b) => a + b, 0)).toBe(CONTROLS.length);
+    expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(CONTROLS.length * 0.05);
+    expect(shardOf(CONTROLS, 1, 1)).toEqual(CONTROLS);
   });
 });

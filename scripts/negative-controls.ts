@@ -6,6 +6,7 @@
 //   node scripts/negative-controls.ts --only <id>      run one; repeat --only for more
 //   node scripts/negative-controls.ts --check          read-only, in this checkout: every entry's text is there exactly once
 //   node scripts/negative-controls.ts --list           the entries
+//   node scripts/negative-controls.ts --shard i/n      only shard i of n (1-based); the weekly workflow runs a matrix of them
 // It never changes the checkout it was started from. It makes one temporary worktree of HEAD (git worktree add --detach;
 // uncommitted changes are not in it), runs `npm ci --offline` there once, and for each control:
 //   1. runs the named test files unchanged: they must pass, or the control would prove nothing (cached per file set);
@@ -5185,6 +5186,33 @@ function malformed(controls: readonly Control[]): string[] {
   return bad;
 }
 
+// `--shard 2/6` is shard 2 of 6. A serial run of every control passed the weekly workflow's 90 minutes (T-467); the workflow
+// runs one job per shard. Null when it is not a whole i/n with 1 <= i <= n.
+export function parseShard(text: string): { index: number; count: number } | null {
+  const m = /^(\d+)\/(\d+)$/.exec(text);
+  const index = Number(m?.[1]), count = Number(m?.[2]);
+  return m && count >= 1 && index >= 1 && index <= count ? { index, count } : null;
+}
+
+// The controls of shard `index` of `count`, in registry order. Controls that run the same test files stay together (the runner
+// runs a file set's unchanged baseline once per shard), and the file sets are dealt largest first to the shard with the fewest
+// controls so far, which is deterministic: every job of one workflow run computes the same split.
+export function shardOf(controls: readonly Control[], index: number, count: number): Control[] {
+  const sets = new Map<string, Control[]>();
+  for (const c of controls) {
+    const key = [...c.run].sort().join(" ");
+    sets.set(key, [...(sets.get(key) ?? []), c]);
+  }
+  const load = Array.from({ length: count }, () => 0);
+  const owner = new Map<string, number>();
+  for (const [key, group] of [...sets].sort((a, b) => b[1].length - a[1].length)) {   // sort is stable: ties keep registry order
+    const lightest = load.indexOf(Math.min(...load));
+    owner.set(key, lightest);
+    load[lightest] = (load[lightest] ?? 0) + group.length;
+  }
+  return controls.filter(c => owner.get([...c.run].sort().join(" ")) === index - 1);
+}
+
 // Every entry, whatever its platform: its text is in its file exactly once. The number that are not.
 export function check(controls: readonly Control[]): number {
   let stale = 0;
@@ -5323,6 +5351,7 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
   keepTree = keep;
   installSignalHandlers();
   const n: Tally = { bit: 0, passes: 0, broke: 0, timeout: 0, skipped: 0 };
+  const runStarted = Date.now();
   const broke = (line: string) => { n.broke++; say(line); };
   let setupFailed = false;
   try {
@@ -5335,6 +5364,8 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
     const baseline = new Map<string, Run>();
     for (const c of controls) {
       if (stopping) await parked();
+      const startedAt = Date.now();                           // each result line ends with what the control took (T-467)
+      const took = () => `(${((Date.now() - startedAt) / 1000).toFixed(1)} s)`;
       const path = join(tree, c.file);
       const original = readFileSync(path, "utf8");
       const found = occurrences(original, c.find);
@@ -5357,22 +5388,24 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
       if (after.kind === "broke") { broke(`BROKE    ${c.id}: ${c.run.join(", ")} broke without a failed test: ${after.first}`); continue; }
       if (c.expect && !after.out.includes(c.expect)) { broke(`ELSEWHERE ${c.id}: the tests failed, but without "${c.expect}"\n${tail(after.out)}`); continue; }
       n.bit++;
-      say(`bit      ${c.id}`);
+      say(`bit      ${c.id} ${took()}`);
     }
   } finally {
     if (keep) { reap(basename(tmp)); say(`kept: ${tree}`); }
     else removeTree();
   }
   const v = verdict(n, controls.length);
-  say(v.line);
+  say(`${v.line} in ${((Date.now() - runStarted) / 60_000).toFixed(1)} min`);
   return v.code === 0 && !setupFailed ? 0 : 1;
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { only: { type: "string", multiple: true }, check: { type: "boolean" }, list: { type: "boolean" }, keep: { type: "boolean" } } });
+  const { values } = parseArgs({ options: { only: { type: "string", multiple: true }, check: { type: "boolean" }, list: { type: "boolean" }, keep: { type: "boolean" }, shard: { type: "string" } } });
   const bad = malformed(CONTROLS);
   if (bad.length) { for (const b of bad) say(`ENTRY    ${b}`); process.exit(1); }
-  const chosen = values.only?.length ? CONTROLS.filter(c => values.only?.includes(c.id)) : CONTROLS;
+  const shard = values.shard === undefined ? null : parseShard(values.shard);
+  if (values.shard !== undefined && !shard) { say(`--shard needs i/n with 1 <= i <= n, not "${values.shard}"`); process.exit(2); }
+  const chosen = values.only?.length ? CONTROLS.filter(c => values.only?.includes(c.id)) : shard ? shardOf(CONTROLS, shard.index, shard.count) : CONTROLS;
   const unknown = (values.only ?? []).filter(id => !CONTROLS.some(c => c.id === id));
   if (unknown.length) { say(`no such control: ${unknown.join(", ")}`); process.exit(2); }
   if (values.list) { for (const c of chosen) say(`${c.id}\tTask ${c.task}\t${c.file}\t${c.run.join(" ")}`); process.exit(0); }
