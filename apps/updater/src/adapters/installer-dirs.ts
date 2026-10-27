@@ -239,6 +239,12 @@ export class DirsInstaller implements Installer {
     return await this.verifyTreeAt(join(this.releases, version), filesSha256);
   }
 
+  /** The SHA-256 of a tree's files.json as it reads now, or null when it cannot be read: the digest `morndo install`
+   *  pins between verifying the tree and copying it. */
+  listDigestAt(dir: string): string | null {
+    try { return this.hashes.sha256(readFileSync(join(dir, "files.json"))); } catch { return null; }
+  }
+
   /** The same verification against any tree directory, by path: `morndo install`'s door to it (§10.3), which
    *  checks the unpacked archive it runs from — a tree no link points at yet. */
   async verifyTreeAt(dir: string, filesSha256: string | null): Promise<TreeFinding[]> {

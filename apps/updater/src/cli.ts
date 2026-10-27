@@ -4,7 +4,6 @@
 // manager this machine runs. The command line is parsed here and nowhere else; the exit codes are sysexits.h's,
 // as in the rest of Morndo. The applies run as the machine's own units (§6.2): `morndo update` starts the apply
 // unit and reports its record; the tick, the boot and the recovery units run the same services themselves.
-import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join } from "node:path";
 import {
@@ -1148,8 +1147,7 @@ export async function runUpdater(
     // program that is about to copy it.
     // The list is read once here and its digest pinned: verification checks the list is that one, and the copy
     // checks it again and hashes every file as it writes it, so what was verified is what is installed.
-    let listDigest: string | null = null;
-    try { listDigest = createHash("sha256").update(readFileSync(join(tree, "files.json"))).digest("hex"); } catch { /* verifyTreeAt says unreadable */ }
+    const listDigest = installer.listDigestAt(tree);              // null when unreadable: verifyTreeAt says so
     const findings = await installer.verifyTreeAt(tree, listDigest);
     if (findings.length > 0) {
       io.err(`the tree does not check out against its own files.json (${findings[0]!.path}: ${findings[0]!.problem}); nothing was installed\n`);
