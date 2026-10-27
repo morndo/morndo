@@ -27,8 +27,10 @@ export type FakeForge = {
   // The checks one branch requires, as the forge reports them: `rules` from the active rulesets
   // (GET /repos/{r}/rules/branches/{b}), `classic` from branch protection (the `protection` of GET /repos/{r}/branches/{b}).
   required(repo: string, branch: string, sets: { rules?: string[]; classic?: string[] }): void;
-  // The check runs of one commit; registering again replaces what that commit said before.
-  runs(repo: string, sha: string, list: ForgeRun[], opts?: { total?: number; headers?: Record<string, string> }): void;
+  // The check runs of one commit; registering again replaces what that commit said before. `delayMs`: the answer comes that
+  // much later, as a slow forge's does. The forge runs in the test's own process: a test that blocks it (execFileSync) while
+  // the hub waits on an answer stalls the hub until its timeout.
+  runs(repo: string, sha: string, list: ForgeRun[], opts?: { total?: number; headers?: Record<string, string>; delayMs?: number }): void;
   fail(path: string, status: number, headers?: Record<string, string>): void;
   // A private repository: every path under it answers 404 (as the forge does for what a caller may not see) unless the
   // request carries `Authorization: Bearer <token>`.
@@ -104,7 +106,7 @@ export function startFakeForge(): Promise<FakeForge> {
           put({ path: `/repos/${repo}/pulls/${number}`, status: 200, headers: { ...JSON_HEADERS, ...(opts.headers ?? {}) }, body: JSON.stringify({ state: f.state, merged: f.merged, head: { sha: f.head }, base: { ref: base }, merge_commit_sha: f.merge }) });
           if (required !== null) registerRequired(repo, base, { rules: required });
         },
-        runs: (repo, sha, list, opts = {}) => put({ path: `/repos/${repo}/commits/${sha}/check-runs`, status: 200, headers: { ...JSON_HEADERS, ...(opts.headers ?? {}) }, body: "", runs: list, ...(opts.total !== undefined ? { total: opts.total } : {}) }),
+        runs: (repo, sha, list, opts = {}) => put({ path: `/repos/${repo}/commits/${sha}/check-runs`, status: 200, headers: { ...JSON_HEADERS, ...(opts.headers ?? {}) }, body: "", runs: list, ...(opts.total !== undefined ? { total: opts.total } : {}), ...(opts.delayMs !== undefined ? { delayMs: opts.delayMs } : {}) }),
         privateRepo: (repo, token) => { locked.set(repo.toLowerCase(), token); },
         fail: (path, status, headers = {}) => put({ path, status, headers: { ...JSON_HEADERS, ...headers }, body: "{}" }),
         delay: (path, ms) => put({ path, status: 200, headers: { ...JSON_HEADERS }, body: "{}", delayMs: ms }),
