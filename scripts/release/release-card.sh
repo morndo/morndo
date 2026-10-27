@@ -49,10 +49,12 @@ printf '%s\n' "$files" | while read -r status path; do
   printf '  %s %s\n' "$status" "$path"
 done
 
-# Newest first, no merges. The sha is cut to eight characters, not --short (a cut is stable across git versions),
-# and a subject may hold bytes no phone should render, so every control byte is removed from it.
+# Newest first. A plain merge is not listed (with a pathspec, git leaves out a merge whose watched paths equal one
+# parent's), but a merge that itself changes a watched path is, since the owner must see that change. The sha is cut
+# to eight characters, not --short (a cut is stable across git versions), and a subject may hold bytes no phone
+# should render, so every control byte is removed from it.
 printf 'commits:\n'
-git log --no-merges --format='%H %s' "$base..$head" -- "$@" | while IFS= read -r line; do
+git log --format='%H %s' "$base..$head" -- "$@" | while IFS= read -r line; do
   printf '  %s %s\n' "$(printf '%s' "$line" | cut -c1-8)" "$(printf '%s' "$line" | cut -d' ' -f2- | tr -d '\000-\037\177')"
 done
 

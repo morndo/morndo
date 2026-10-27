@@ -142,8 +142,44 @@ describe("release-card.sh", () => {
     const r = card(dir, base, head);
     expect(r.code).toBe(0);
     expect(r.out).toContain(`  ${short(head)} fix: [31mred[0m bell\n`);
-    const control = [...r.out].filter(ch => ch !== "\n" && (ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f));
+    const control: number[] = [];
+    for (let i = 0; i < r.out.length; i++) {
+      const c = r.out.charCodeAt(i);
+      if (c !== 0x0a && (c < 0x20 || c === 0x7f)) control.push(c);
+    }
     expect(control).toEqual([]);
+  });
+
+  it("lists the commits a merge brought in, not the merge itself", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    git(dir, "checkout", "-q", "-b", "feature");
+    const work = commit(dir, "feat(release): a new step", { "scripts/release/step.sh": "x\n" });
+    git(dir, "checkout", "-q", "main");
+    commit(dir, "docs: readme on main", { "README.md": "b\n" });
+    git(dir, "merge", "-q", "--no-ff", "-m", "Merge pull request #1 from feature", "feature");
+    const head = git(dir, "rev-parse", "HEAD");
+    const r = card(dir, base, head);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`commits:\n  ${short(work)} feat(release): a new step\nrelease card: 1 file(s)`);
+    expect(r.out).not.toContain("Merge pull request");
+  });
+
+  it("lists a merge that itself changes a watched path", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n", "install.sh": "a\n" });
+    git(dir, "checkout", "-q", "-b", "feature");
+    commit(dir, "docs: readme", { "README.md": "b\n" });
+    git(dir, "checkout", "-q", "main");
+    git(dir, "merge", "-q", "--no-ff", "--no-commit", "feature");
+    put(dir, "install.sh", "edited in the merge\n");
+    git(dir, "add", "install.sh");
+    git(dir, "commit", "-q", "-m", "Merge pull request #2 from feature");
+    const head = git(dir, "rev-parse", "HEAD");
+    const r = card(dir, base, head);
+    expect(r.code).toBe(0);
+    expect(r.out).toContain(`commits:\n  ${short(head)} Merge pull request #2 from feature\n`);
+    expect(r.out).toContain("  M install.sh\n");
   });
 
   it("reads the paths from the top of the repository when run from a subdirectory", () => {
