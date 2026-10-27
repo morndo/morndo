@@ -226,6 +226,10 @@ const OLD_ENV_LINE = "Environment=PATH=%h/.nvm/versions/node/v24.0.0/bin:/usr/lo
 // A legacy unit of ours that is not a shipped one (the install ignores it) and is neither running nor enabled at backup
 // time: the restore has to leave it stopped even though something started it after the backup.
 const SPARE_UNIT = "morndo-spare.service";
+// A second spare WITH an [Install] section, not enabled at backup time: the install is simulated enabling it by hand, and the
+// restore must disable it again (a unit with no [Install] reports "static" from is-enabled, so the first spare cannot show this).
+const SPARE2_UNIT = "morndo-spare2.service";
+const SPARE2_TEXT = "[Unit]\nDescription=Morndo spare with an install section (rehearsal)\n\n[Service]\nExecStart=/bin/sleep 100000\n\n[Install]\nWantedBy=default.target\n";
 const SPARE_TEXT = "[Unit]\nDescription=Morndo spare (rehearsal)\n\n[Service]\nExecStart=/bin/sleep 100000\n";
 
 const DBS = [["hub", HUB_DB], ["fleet", FLEET_DB], ["node", NODE_DB]] as const;
@@ -428,13 +432,15 @@ async function main(): Promise<number> {
   mkdirSync(DROPIN_DIR, { recursive: true });
   writeFileSync(join(DROPIN_DIR, "limits.conf"), OLD_DROPIN);
   writeFileSync(join(UNIT_DIR, SPARE_UNIT), SPARE_TEXT);
+  writeFileSync(join(UNIT_DIR, SPARE2_UNIT), SPARE2_TEXT);
   run("systemctl", ["--user", "daemon-reload"]);
   const backed = command("c-backup", "sh", [join(E2E, "scripts/c6/backup.sh"), BACKUP, ...DBS.flatMap(([n, p]) => ["--db", `${n}=${p}`]), "--db", `memory=${MEMORY_DB}`]);
   const backedOk = backed.code === 0 && existsSync(join(BACKUP, "restore.sh")) && existsSync(join(BACKUP, "ROLLBACK.md"))
     && DBS.every(([n]) => existsSync(join(BACKUP, `dbs/${n}.db`)) && missingRows(sqlite(join(BACKUP, `dbs/${n}.db`), "SELECT v FROM c6_marker"), MARKERS).length === 0)
     && existsSync(join(BACKUP, "units/morndo-node.service.d/limits.conf"))
     && SERVICES.every(s => existsSync(join(BACKUP, "units", s.unit)) && existsSync(join(BACKUP, "wrappers", s.wrapper)))
-    && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").some(l => l.startsWith(`${SPARE_UNIT} active=no `));
+    && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").some(l => l.startsWith(`${SPARE_UNIT} active=no `))
+    && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").some(l => l === `${SPARE2_UNIT} active=no enabled=no`);
   check("c-backup", backedOk, `backup.sh exited ${backed.code}: ${firstLines(backed, 2)}; units: ${readdirSync(join(BACKUP, "units")).join(", ")}; wrappers: ${readdirSync(join(BACKUP, "wrappers")).join(", ")}`);
   if (failed) return finish(server);
   const armed = command("c-arm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(DEADMAN_SECONDS)]);
@@ -470,6 +476,7 @@ async function main(): Promise<number> {
   if (failed) { journals("d-restart"); return finish(server); }
   // Simulates the install (or anyone) starting a unit that was stopped at backup time.
   run("systemctl", ["--user", "start", SPARE_UNIT]);
+  run("systemctl", ["--user", "enable", SPARE2_UNIT]);
   check("d-spare-started", unitActive(SPARE_UNIT), `${SPARE_UNIT} (stopped and not enabled at backup time) was started by hand after the install`);
 
   // ---- e: the proofs on the adopted machine.
@@ -496,7 +503,7 @@ async function main(): Promise<number> {
   check("f-deadman-fired", fired && !dm1.failedRun, `the timer fired and no failed result was logged (clean-exit line present: ${dm1.ranOk}); last journal lines: ${dm1.text}`);
   const unitsBack = SERVICES.every(s => readFileSync(join(UNIT_DIR, s.unit), "utf8") === OLD_UNITS.get(s.unit));
   const morndoUnits = readdirSync(UNIT_DIR).filter(n => n.startsWith("morndo-")).sort();
-  const expectedUnits = [...SERVICES.map(s => s.unit), SPARE_UNIT, "morndo-node.service.d"].sort();
+  const expectedUnits = [...SERVICES.map(s => s.unit), SPARE_UNIT, SPARE2_UNIT, "morndo-node.service.d"].sort();
   check("f-units-restored", unitsBack && JSON.stringify(morndoUnits) === JSON.stringify(expectedUnits),
     `the three units are the old unmarked text again: ${unitsBack}; morndo-* in the unit folder: ${morndoUnits.join(", ")}`);
   const dropinFiles = existsSync(DROPIN_DIR) ? readdirSync(DROPIN_DIR).sort() : [];
@@ -532,6 +539,11 @@ async function main(): Promise<number> {
   const spareState = run("systemctl", ["--user", "is-active", SPARE_UNIT]).out.trim();
   check("f-spare-stays-stopped", spareState !== "active" && spareText === SPARE_TEXT,
     `${SPARE_UNIT} was started after the install; after the restore it is ${spareState}; its unit file is byte-identical: ${spareText === SPARE_TEXT}`);
+  // The restore disables a service the install enabled that was disabled at backup time. (A failing aside copy exiting
+  // non-zero with a FAILED report line is covered by scripts/c6/backup.test.ts only: it cannot be forced on the real node.)
+  const spare2Enabled = run("systemctl", ["--user", "is-enabled", SPARE2_UNIT]).out.trim();
+  check("f-spare-service-disabled", spare2Enabled === "disabled" && !unitActive(SPARE2_UNIT),
+    `${SPARE2_UNIT} has an [Install] section, was disabled at backup time and enabled by hand after the install; after the restore is-enabled says "${spare2Enabled}" and it is active: ${unitActive(SPARE2_UNIT)}`);
   const laneF = sameProcess(baseline.lane, ownerOf(baseline.lanePid));
   check("f-lane-kept", laneF.ok, laneF.detail);
   check("f-no-ok-marker", !existsSync(join(BACKUP, "ok")), "no ok marker was in the backup folder when the switch fired");
