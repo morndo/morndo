@@ -245,6 +245,18 @@ export class DirsInstaller implements Installer {
     try { return this.hashes.sha256(readFileSync(join(dir, "files.json"))); } catch { return null; }
   }
 
+  /** A listed file's bytes from a tree whose files.json must still hash to `filesSha256`, only if they hash to the
+   *  list's own entry for it: what a caller parses is exactly what was checked, however the tree changes meanwhile. */
+  readListed(dir: string, filesSha256: string, path: string): Buffer {
+    const listBytes = readFileSync(join(dir, "files.json"));
+    if (this.hashes.sha256(listBytes) !== filesSha256) throw new Error("files.json: list digest mismatch (the tree changed after it was verified)");
+    const entry = FileListSchema.parse(JSON.parse(listBytes.toString("utf8"))).find(e => e.path === path);
+    if (entry === undefined) throw new Error(`${path}: not in the file list`);
+    const bytes = readFileSync(join(dir, path));
+    if (this.hashes.sha256(bytes) !== entry.sha256) throw new Error(`${path}: changed since the tree was verified`);
+    return bytes;
+  }
+
   /** The same verification against any tree directory, by path: `morndo install`'s door to it (§10.3), which
    *  checks the unpacked archive it runs from — a tree no link points at yet. */
   async verifyTreeAt(dir: string, filesSha256: string | null): Promise<TreeFinding[]> {

@@ -30,6 +30,7 @@ import { HttpsArtifacts } from "./adapters/artifacts-https.ts";
 import { SqliteBackup } from "./adapters/backup-sqlite.ts";
 import { FleetSocketView } from "./adapters/fleet-socket.ts";
 import { FleetStatusView, machineNameOf, ownOnlineNodeOf } from "./adapters/fleet-status.ts";
+import { DeadlineFeed } from "./adapters/feed-deadline.ts";
 import { HttpsFeed } from "./adapters/feed-https.ts";
 import { HoldFileWriter } from "./adapters/hold-file.ts";
 import { DirsInstaller } from "./adapters/installer-dirs.ts";
@@ -50,6 +51,8 @@ export const DEFAULT_FEED_BASE = "https://morndo.github.io/morndo/";
 // sysexits.h, as the rest of Morndo reads it (§8.4): 64 usage; 65 a verification failed (EX_DATAERR); 70 the
 // rollback itself failed (EX_SOFTWARE); 75 try later (EX_TEMPFAIL); 78 nothing to do on this machine, a setting
 // to fix (EX_CONFIG); 1 a rolled-back update, or a doctor finding.
+// The one budget of the install's closing check (§10.3): the key walk and the channel, together.
+const FIRST_CHECK_MS = 60_000;
 const EXIT_OK = 0;
 const EXIT_FAILED = 1;
 const EXIT_USAGE = 64;
@@ -226,6 +229,8 @@ export type UpdaterDeps = {
   timing?: Partial<ApplyTiming>;
   /** §10.3's tree the program runs from; production discovers it around argv[1]. */
   tree?: string;
+  /** The one budget of the install's closing check (§10.3); 60 s by default, tests shorten it. */
+  firstCheckMs?: number;
 };
 
 export async function runUpdater(
@@ -600,7 +605,7 @@ export async function runUpdater(
     };
     const checkOnce = async (switches: { disableUpdates: boolean }, ask?: { to: Version }, o: { feedOnly?: boolean; feed?: ReleaseFeed } = {}): Promise<CheckOutcome> =>
       await new CheckService({
-        feed: deps.feed ?? o.feed ?? new HttpsFeed({ base: feedBase }),
+        feed: o.feed ?? deps.feed ?? new HttpsFeed({ base: feedBase }),
         artifacts: deps.artifacts ?? new HttpsArtifacts({ dir: paths.downloads }),
         verifier, installer, store, settings, clock: systemClock, platform, switches,
         fleet: await fleetOf(), state: stateSink,
@@ -1154,8 +1159,9 @@ export async function runUpdater(
       return EXIT_DATAERR;
     }
     // The trust anchor the tree ships (§10.1): root signs the key set, once, and the store starts from it.
+    // Read through the verified list, like the files the copy hashes: the bytes parsed here are the bytes that were checked.
     let keyDoc: unknown;
-    try { keyDoc = JSON.parse(readFileSync(join(tree, "trust", "keys.json"), "utf8")); }
+    try { keyDoc = JSON.parse(installer.readListed(tree, listDigest!, "trust/keys.json").toString("utf8")); }
     catch {
       io.err("the tree ships no readable trust/keys.json; nothing was installed\n");
       return EXIT_DATAERR;
@@ -1240,13 +1246,19 @@ export async function runUpdater(
     io.out(`Morndo ${versionText} installed (${parsed.role}, channel ${parsed.channel}).\n`);
     // §10.3's last step: the Feed read and verified, so its word is on record from the first minute. Only that: no
     // offer is judged, nothing is staged and no artifact is fetched (the timer's check does that, minutes later), and
-    // the fetches get short walls so the install does not hang on a host that does not answer. Best effort — an
+    // the whole check gets one budget (FIRST_CHECK_MS), each fetch what is left of it, so the install does not hang on
+    // a host that does not answer. Best effort — an
     // unreachable or refusing feed is said and recorded by the check itself and the install stands; the doctor then
     // reports the feed as it is, never as verified.
     const firstCheck = async (): Promise<void> => {
       try {
-        const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" }, undefined,
-          { feedOnly: true, feed: new HttpsFeed({ base: feedBase, timeoutMs: 8_000, deadlineMs: 15_000 }) });
+        const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" }, undefined, {
+          feedOnly: true,
+          feed: new DeadlineFeed({
+            until: systemClock.now() + (deps.firstCheckMs ?? FIRST_CHECK_MS), now: () => systemClock.now(),
+            open: left => deps.feed ?? new HttpsFeed({ base: feedBase, timeoutMs: Math.min(8_000, left), deadlineMs: Math.min(15_000, left) }),
+          }),
+        });
         printOutcome(checkLine(outcome), checkCode(outcome));
       } catch (error) {
         io.err(`the first check failed: ${error instanceof Error ? error.message : String(error)}\n`);

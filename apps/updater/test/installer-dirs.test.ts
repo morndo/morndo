@@ -167,6 +167,16 @@ describe("DirsInstaller", () => {
       expect(existsSync(join(releases, "0.3.0"))).toBe(false);
     });
 
+    it("readListed hands back a listed file's bytes only when they hash to the list's entry", async () => {
+      const { installer, filesSha256, dir } = await tree();
+      expect(installer.readListed(dir, filesSha256, "README.md").toString("utf8")).toBe("morndo 0.2.0\n");
+      chmodSync(join(dir, "README.md"), 0o644);
+      writeFileSync(join(dir, "README.md"), "swapped after the check\n");
+      expect(() => installer.readListed(dir, filesSha256, "README.md")).toThrow(/README\.md.*changed/);
+      expect(() => installer.readListed(dir, filesSha256, "not-listed.txt")).toThrow(/not-listed\.txt.*not in the file list/);
+      expect(() => installer.readListed(dir, "0".repeat(64), "README.md")).toThrow(/files\.json.*digest/);
+    });
+
     it("refuses a files.json that is not the one the verification pinned", async () => {
       const { installer, filesSha256, dir } = await tree();
       chmodSync(join(dir, "files.json"), 0o644);

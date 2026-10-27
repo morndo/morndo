@@ -74,7 +74,7 @@ type World = {
 };
 // `feed` is what the install's first check finds: a stub feed that signs this Version in (`served`), or a host that
 // cannot be reached (the default — no test of the install may reach the real network).
-const world = (o: { joined?: boolean; feed?: "served" | "unreachable"; newer?: string } = {}): World => {
+const world = (o: { joined?: boolean; feed?: "served" | "unreachable"; newer?: string; firstCheckMs?: number } = {}): World => {
   const home = join(scratch, `home-${(worldCount += 1)}`);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const paths = updaterPaths(home);
@@ -108,7 +108,7 @@ const world = (o: { joined?: boolean; feed?: "served" | "unreachable"; newer?: s
       const out: string[] = [], err: string[] = [];
       const code = await runUpdater(argv, { HOME: home, PATH: process.env.PATH }, {
         out: s => out.push(s), err: s => err.push(s),
-      }, { services, probe, tree, feed, artifacts });
+      }, { services, probe, tree, feed, artifacts, ...(o.firstCheckMs === undefined ? {} : { firstCheckMs: o.firstCheckMs }) });
       return { code, out: out.join(""), err: err.join("") };
     },
   };
@@ -179,6 +179,17 @@ describe("`morndo install --role control-plane` (§10.3)", () => {
     expect(r.out.trimEnd().split("\n").at(-1)).toMatch(/feed/i);
     const doctor = await w.run(["doctor", "--json"]);
     expect(JSON.parse(doctor.out)).toMatchObject({ ok: true, findings: [] });
+  });
+
+  it("the first check has one overall budget: when it runs out the feed is reported unchecked, nothing is fetched, and the install still exits 0 (T-486)", async () => {
+    const w = world({ joined: true, feed: "served", firstCheckMs: 0 });
+    const r = await w.run(["install", "--role", "control-plane"]);
+    expect(r.code, r.err).toBe(0);
+    expect(w.feed.calls.channels).toEqual([]);
+    expect(r.err).toMatch(/Unreachable: .*ran out/);
+    const doctor = await w.run(["doctor", "--json"]);
+    const report = JSON.parse(doctor.out) as { findings: { area: string }[] };
+    expect(report.findings.map(f => f.area)).toEqual(["feed"]);
   });
 
   it("an unreachable feed at install is said and recorded, the install still succeeds, and the doctor names the feed (T-486)", async () => {
