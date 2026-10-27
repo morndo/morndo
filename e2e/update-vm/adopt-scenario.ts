@@ -289,7 +289,8 @@ function deadmanJournal(machine: string): { ranOk: boolean; failedRun: boolean; 
   const result = run("systemctl", ["--user", "show", "-p", "Result", "--value", `c6-deadman-${machine}.service`]).out.trim();
   const failedRun = (result !== "" && result !== "success") || /Failed with result|status=[1-9]|code=exited, status=[1-9]/.test(text) || failedList.includes(`c6-deadman-${machine}.service`);
   return {
-    ranOk: text.includes(`Started c6-deadman-${machine}.service`) && !failedRun,
+    // a persistent oneshot unit logs "Starting" and "Finished" (a transient one logged "Started")
+    ranOk: (text.includes(`Finished c6-deadman-${machine}.service`) || text.includes(`Started c6-deadman-${machine}.service`)) && !failedRun,
     failedRun,
     text: text.trim().split("\n").slice(-6).join(" | "),
   };
