@@ -5,12 +5,14 @@ import { renameSync, chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSyn
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { readlinkSync } from "node:fs";
 import { acquireEnvLock, memberLoadedAt, readEnvStamp, writeEnvFile } from "../src/adapters/env-file.ts";
 
 // The pid namespace this test runs in, as a lock records it.
 const NS = /\[(\d+)\]/.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? "0";
+// Whether this box lets an unprivileged process make a pid namespace (a CI runner may not): the container case is run when it does, and shown as skipped when it does not.
+const NAMESPACES = spawnSync("unshare", ["--user", "--map-root-user", "--pid", "--fork", "--kill-child", "--mount-proc", "true"], { timeout: 10_000 }).status === 0;
 const VALUE = "synthetic-value-for-the-env-file-0000";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -323,11 +325,11 @@ describe("one writer at a time: a lock the kernel releases when its holder dies"
     expect(taken.ok).toBe(true);
     if (taken.ok) taken.release();
   });
-  it("a holder in another pid namespace (a container) is busy while it lives, and gone when it dies: a pid there never has to be looked up", async () => {
+  it.skipIf(!NAMESPACES)("a holder in another pid namespace (a container) is busy while it lives, and gone when it dies: a pid there never has to be looked up", { timeout: 60_000 }, async () => {
     const dir = area();
     const path = join(dir, ".env");
     const held = await hold(path, ["unshare", "--user", "--map-root-user", "--pid", "--fork", "--kill-child", "--mount-proc"]);
-    if (held.first !== "ok") { await stop(held); return; }   // this box does not allow a user namespace: nothing to test
+    expect(held.first).toBe("ok");
     try {
       expect(await acquireEnvLock(path, { waitMs: 100 })).toMatchObject({ ok: false, problem: "busy" });
     } finally { await stop(held); }
