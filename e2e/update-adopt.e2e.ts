@@ -10,18 +10,21 @@
 // tree writable by a fresh cgroup2 mount where rootless Docker refuses the remount. The container is removed on every
 // way out, a killed run's leftovers are swept by label and owner at the start, and the image goes at the very end.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { randomBytes } from "node:crypto";
+import { cpSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { createHash, randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildWorld } from "./update-vm/build.ts";
-import { ownerOf, ownerText, sweepContainers, sweepScratch } from "./update-vm/checks.ts";
+import { allowedSignersLine, parsePublished, sha256For } from "./update-vm/adopt-checks.ts";
+import { makeOwnedScratch, ownerOf, ownerText, sweepContainers, sweepScratch } from "./update-vm/checks.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const IMAGE = "morndo-c6-adopt-e2e:local";
 const LABEL = "morndo-c6-adopt-e2e";
 const OWNER_LABEL = `${LABEL}.owner`;
 const CONTAINER = `morndo-c6-adopt-e2e-${randomBytes(4).toString("hex")}`;
+// `--published <version>`: the machine installs the PUBLISHED release by the README's commands, from the real feed.
+const PUBLISHED = parsePublished(process.argv.slice(2));
 const OWNER = ownerText(ownerOf(process.pid));                    // this run, as its container's label names it
 
 function docker(args: string[], o: { timeoutMs?: number } = {}): { code: number; out: string; err: string } {
@@ -95,20 +98,53 @@ sweepContainers({
 sweepScratch(tmpdir(), { keep: process.env.E2E_KEEP === "1", prefix: "morndo-c6", say: line => process.stdout.write(`${line}\n`) });
 
 try {
-  // ---- the one Release (A, 0.1.0), signed, and its publish point (build.ts does it the pipeline's way).
-  process.stdout.write(`building the release (this takes a few minutes)…\n`);
-  const world = buildWorld(ROOT, "adopt");
-  scratch = world.scratch;
+  let bundle: string;
+  let treeA: string;
+  if (PUBLISHED === null) {
+    // ---- the one Release (A, 0.1.0), signed, and its publish point (build.ts does it the pipeline's way).
+    process.stdout.write(`building the release (this takes a few minutes)…\n`);
+    const world = buildWorld(ROOT, "adopt");
+    scratch = world.scratch;
+    bundle = world.bundle;
 
-  // The A tree unpacked on the host (install.sh's own extraction): the scenario runs under this tree's Node, so
-  // it must exist before anything starts inside the machine. bin/ is chmod 0555 as install.sh does.
-  const treeA = join(world.bundle, "tree-a");
-  mkdirSync(treeA, { recursive: true });
-  const extract = spawnSync("tar", ["-xzf", world.archiveA, "-C", treeA], { encoding: "utf8", timeout: 300_000 });
-  if (extract.status !== 0) throw new Error(`unpacking the A archive failed: ${extract.stderr}`);
+    // The A tree unpacked on the host (install.sh's own extraction): the scenario runs under this tree's Node, so
+    // it must exist before anything starts inside the machine. bin/ is chmod 0555 as install.sh does.
+    treeA = join(bundle, "tree-a");
+    mkdirSync(treeA, { recursive: true });
+    const extract = spawnSync("tar", ["-xzf", world.archiveA, "-C", treeA], { encoding: "utf8", timeout: 300_000 });
+    if (extract.status !== 0) throw new Error(`unpacking the A archive failed: ${extract.stderr}`);
+  } else {
+    // ---- the published release: its archive from GitHub, checked against SHA256SUMS; no feeds, no TLS, no feed server.
+    scratch = makeOwnedScratch(tmpdir(), ownerText(ownerOf(process.pid)), { prefix: "morndo-c6" });
+    bundle = join(scratch, "bundle");
+    mkdirSync(bundle, { recursive: true });
+    const base = `https://github.com/morndo/morndo/releases/download/v${PUBLISHED}`;
+    const archiveName = `morndo-${PUBLISHED}-linux-x64.tar.gz`;
+    process.stdout.write(`downloading ${archiveName} and SHA256SUMS from ${base}/ …\n`);
+    for (const name of ["SHA256SUMS", archiveName]) {
+      const got = spawnSync("curl", ["-fsSL", "-o", join(scratch, name), `${base}/${name}`], { encoding: "utf8", timeout: 600_000 });
+      if (got.status !== 0) throw new Error(`downloading ${name} failed (curl exit ${got.status}): ${got.stderr}`);
+    }
+    const wanted = sha256For(readFileSync(join(scratch, "SHA256SUMS"), "utf8"), archiveName);
+    if (wanted === null) throw new Error(`SHA256SUMS has no line for ${archiveName}`);
+    const actual = createHash("sha256").update(readFileSync(join(scratch, archiveName))).digest("hex");
+    if (actual !== wanted) throw new Error(`the archive's sha256 ${actual} is not the ${wanted} that SHA256SUMS gives: refusing`);
+    process.stdout.write(`${archiveName} sha256 ${actual} matches SHA256SUMS\n`);
+    treeA = join(bundle, "tree-a");
+    mkdirSync(treeA, { recursive: true });
+    const extract = spawnSync("tar", ["-xzf", join(scratch, archiveName), "-C", treeA], { encoding: "utf8", timeout: 300_000 });
+    if (extract.status !== 0) throw new Error(`unpacking the archive failed: ${extract.stderr}`);
+    const key = allowedSignersLine(readFileSync(join(ROOT, "README.md"), "utf8"));
+    if (key === null) throw new Error("README.md has no single `echo '...' > morndo.allowed_signers` line");
+    writeFileSync(join(bundle, "allowed_signers"), `${key}\n`);
+    const c6 = join(bundle, "scripts", "c6");
+    mkdirSync(c6, { recursive: true });
+    for (const name of readdirSync(join(ROOT, "scripts/c6")).filter(n => !n.endsWith(".test.ts"))) cpSync(join(ROOT, "scripts/c6", name), join(c6, name));
+    for (const name of ["adopt-scenario.ts", "adopt-checks.ts", "checks.ts"]) cpSync(join(ROOT, "e2e/update-vm", name), join(bundle, name));
+  }
   if (!existsSync(join(treeA, "node/bin/node"))) throw new Error("the A tree ships no node/bin/node");
   if (!existsSync(join(ROOT, "e2e/update-vm/adopt-scenario.ts"))) throw new Error("e2e/update-vm/adopt-scenario.ts is not where this run expects it");
-  copyFileSync(join(ROOT, "e2e/update-vm/adopt-scenario.ts"), join(world.bundle, "adopt-scenario.ts"));   // (build.ts copies it too)
+  copyFileSync(join(ROOT, "e2e/update-vm/adopt-scenario.ts"), join(bundle, "adopt-scenario.ts"));   // (build.ts copies it too)
 
   // ---- the machine itself, and the bundle into it.
   process.stdout.write(`building the machine…\n`);
@@ -153,7 +189,7 @@ try {
 
   const into = docker(["exec", CONTAINER, "mkdir", "-p", "/srv/worker/e2e"]);
   if (into.code !== 0) throw new Error(`mkdir inside the machine failed: ${into.err}`);
-  const copied = docker(["cp", `${world.bundle}/.`, `${CONTAINER}:/srv/worker/e2e`], { timeoutMs: 600_000 });
+  const copied = docker(["cp", `${bundle}/.`, `${CONTAINER}:/srv/worker/e2e`], { timeoutMs: 600_000 });
   if (copied.code !== 0) throw new Error(`docker cp of the bundle failed: ${copied.err}`);
   const owned = docker(["exec", CONTAINER, "chown", "-R", "worker:worker", "/srv/worker/e2e"], { timeoutMs: 300_000 });
   if (owned.code !== 0) throw new Error(`chown of the bundle failed: ${owned.err}`);
@@ -165,6 +201,7 @@ try {
     "exec", "-u", "worker:1000",
     "-e", "HOME=/srv/worker", "-e", "XDG_RUNTIME_DIR=/run/user/1000",
     "-e", "DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/1000/bus",
+    ...(PUBLISHED === null ? [] : ["-e", `C6_PUBLISHED=${PUBLISHED}`]),
     CONTAINER, "/srv/worker/e2e/tree-a/node/bin/node", "/srv/worker/e2e/adopt-scenario.ts",
   ], 40 * 60_000);
   process.stdout.write(`${scenarioRun.out}\n`);
