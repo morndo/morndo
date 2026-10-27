@@ -754,8 +754,10 @@ describe("verifying (B14, B15)", () => {
         board.act("T-2", { action: "move", to: "doing" }, lane);
         board.act("T-2", { action: "move", to: "review" }, lane);
         await proof.file("T-1", prOnly, lane);
-        await proof.file("T-2", prOnly, lane);
         await proof.idle();
+        await proof.file("T-2", prOnly, lane);                                        // after the first: two checks at once would both miss the cache
+        await proof.idle();
+        expect([proof.view("T-1")?.state.kind, proof.view("T-2")?.state.kind]).toEqual(["verified", "verified"]);   // both tasks are verified, not only one
         const asks = () => fake.requests.filter(r => r.path.includes("/rules/branches/") || r.path.endsWith("/branches/main")).length;
         expect(asks()).toBe(2);                                                       // the branch and the rulesets, once for both tasks
         clock = NOW + 11 * 60_000;
@@ -763,6 +765,22 @@ describe("verifying (B14, B15)", () => {
         expect(asks()).toBe(4);                                                       // ten minutes on, read again
         store.close();
       });
+    });
+
+    it("a brief filed right after the move to review is checked, for each task, not left to the timer (T-477)", async () => {
+      fake.pr("morndo/morndo", 42, { head: FULL });
+      fake.runs("morndo/morndo", FULL, greenRuns());
+      const { store, board, proof } = withForge({ mode: "warn" });
+      const pr42: BriefInput = { ...brief, refs: ["morndo/morndo#42@3e9d1a7"] };
+      atReview(board);
+      board.create({ title: "A second task", assignee: "builder" }, manager);
+      board.act("T-2", { action: "move", to: "doing" }, lane);
+      board.act("T-2", { action: "move", to: "review" }, lane);
+      await proof.file("T-1", pr42, lane);
+      await proof.file("T-2", pr42, lane);                                          // both checks run at once
+      await proof.idle();
+      expect([proof.view("T-1")?.state.kind, proof.view("T-2")?.state.kind]).toEqual(["verified", "verified"]);
+      store.close();
     });
 
     it("a no-code brief on a task with no proof list from the assigner (case 3)", async () => {
@@ -1089,6 +1107,33 @@ describe("a Done task is a snapshot (B13, B16)", () => {
       { ref: "morndo/morndo#42@3e9d1a7", state: "pending", detail: null, checkedAt: NOW + 5_000 },
       { ref: "morndo/morndo@3e9d1a7:ci,lint", state: "pending", detail: null, checkedAt: NOW + 5_000 },
     ]);
+    store.close();
+  });
+
+  // The board-proof e2e on main (T-477): a brief filed again while the earlier brief's check was still out joined that check,
+  // which had read the old brief, so the new brief's rows stayed pending until the timer pass and the Done was held.
+  it("a brief filed while the earlier brief's check is out gets a check of its own", async () => {
+    const store = new Store(tempDir());
+    const board = new BoardService({ store, policy: () => DEFAULT_POLICY, now: () => NOW });
+    let release!: () => void;
+    const held = new Promise<void>(r => { release = r; });
+    let first = true;
+    const forge: ForgeChecks = {
+      pullRequest: async () => {
+        if (first) { first = false; await held; }             // only the earlier brief's read waits on the forge
+        return { ok: true, value: { state: "open", merged: false, headSha: FULL, mergeSha: null, baseRef: "main" } };
+      },
+      checkRuns: async () => ({ ok: true, value: [{ id: 1, name: "ci", status: "completed", conclusion: "success", url: null }] }),
+      requiredChecks: async () => ({ ok: true, value: ["ci"] }),
+    };
+    const proof = new ProofService({ store, board, now: () => NOW, forge, mode: "off" });
+    atReview(board);
+    const refs = ["morndo/morndo#42@3e9d1a7"];
+    await proof.file("T-1", { ...brief, refs }, lane);       // rev 4: its check starts and waits on the forge
+    await proof.file("T-1", { ...brief, summary: "Totals row rounds to cents, again", refs }, lane);   // rev 5, filed while it is out
+    release();
+    await proof.idle();
+    expect(store.proofResultsOf("T-1", 5)).toEqual([{ ref: "morndo/morndo#42@3e9d1a7", state: "green", detail: null, checkedAt: NOW }]);
     store.close();
   });
 });
