@@ -66,7 +66,9 @@ export type BuiltWorld = {
 // is PR 6d's two-machine set (e2e/update-fleet.e2e.ts): A 0.1.0, B 0.2.0 (one additive hub migration), G 0.3.0
 // (B's change and a node agent that dies at start on the machine named "node"), H 0.4.0 (B's change and a Manifest
 // whose agent protocol range [2,2] drops the protocol A–G's agents speak) — with the built web UI in every one.
-export type WorldSet = "vm" | "fleet";
+// "adopt" is the adoption rehearsal's (e2e/update-adopt.e2e.ts, C6-0): only A 0.1.0 and one feed, no web UI, and the
+// bundle also carries scripts/c6 and the rehearsal's own scenario files.
+export type WorldSet = "vm" | "fleet" | "adopt";
 
 // The three Releases and the three publish points, built once. Nothing here touches the repository: the tree is
 // copied into the scratch (without .git and .worktrees), the copies are edited, compiled, pruned and staged there.
@@ -74,7 +76,7 @@ export function buildWorld(repo: string, set: WorldSet = "vm"): BuiltWorld {
   // Owned from its first moment under the build's name: another run's sweep leaves it alone while this process runs
   // (checks.ts makeOwnedScratch: made under another name, its owner written, then renamed). The fleet run's set has
   // its own prefix, so each run's sweep takes only its own kind.
-  const scratch = makeOwnedScratch(tmpdir(), ownerText(ownerOf(process.pid)), { prefix: set === "fleet" ? "morndo-fleet" : "morndo-c2" });
+  const scratch = makeOwnedScratch(tmpdir(), ownerText(ownerOf(process.pid)), { prefix: set === "fleet" ? "morndo-fleet" : set === "adopt" ? "morndo-c6" : "morndo-c2" });
   // A build that fails leaves nothing of itself behind (unless E2E_KEEP=1): the repository copy is large.
   try { return buildInto(repo, scratch, set); }
   catch (error) {
@@ -126,7 +128,9 @@ function buildInto(repo: string, scratch: string, set: WorldSet): BuiltWorld {
   // staged, trusted (trust/keys.json is the tree's own anchor, §10.1 — the stage leaves trust/ empty for the
   // pipeline's own signing step, so it is written here and the file list is made again around it), packed and
   // signed.
-  const releases: readonly { version: string; edit: () => readonly ((copy: string) => void)[] }[] = set === "fleet"
+  const releases: readonly { version: string; edit: () => readonly ((copy: string) => void)[] }[] = set === "adopt"
+    ? [{ version: VERSION_A, edit: () => [] }]
+    : set === "fleet"
     ? [
       { version: "0.1.0", edit: () => [] },
       { version: "0.2.0", edit: () => [additiveMigration()] },
@@ -230,6 +234,14 @@ function buildInto(repo: string, scratch: string, set: WorldSet): BuiltWorld {
       try { linkSync(join(scratch, `archive-${earlier.version}.tar.gz`), artifact); }
       catch { cpSync(join(scratch, `archive-${earlier.version}.tar.gz`), artifact); }   // a filesystem without hard links
     }
+  }
+
+  if (set === "adopt") {
+    // The rehearsal's own files, beside the feeds: the scripts it exercises and what runs inside the machine.
+    const c6 = join(bundle, "scripts", "c6");
+    mkdirSync(c6, { recursive: true });
+    for (const name of readdirSync(join(repo, "scripts/c6")).filter(n => !n.endsWith(".test.ts"))) cpSync(join(repo, "scripts/c6", name), join(c6, name));
+    for (const name of ["adopt-scenario.ts", "adopt-checks.ts", "feed-server.ts", "checks.ts"]) cpSync(join(repo, "e2e/update-vm", name), join(bundle, name));
   }
 
   return {
