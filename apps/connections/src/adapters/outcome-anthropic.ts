@@ -59,6 +59,34 @@ export function signalFromBody(status: number | null, body: string | null, retry
   };
 }
 
+// The `error` codes of a StopFailure hook that are no refusal of the key: their text is never read.
+const NOT_THE_KEY = new Set(["server_error", "overloaded", "max_output_tokens", "model_not_found", "oauth_org_not_allowed", "cloud_credential_error"]);
+const HOOK_TEXT_LIMIT = 4096;
+// The agent CLI's own prefixes, anchored at the start: "API Error: 402 …", "Failed to authenticate. API Error: 403 …", "API Error: Request rejected (429) · …".
+const HOOK_STATUS = /^(?:Failed to authenticate\. )?API Error: (?:Request rejected \()?(\d{3})\b/;
+const HOOK_HINT_STATUS: Readonly<Record<string, number>> = { authentication_failed: 401, rate_limit: 429, account_on_hold: 403 };
+
+// The JSON a `StopFailure` hook gets on stdin (spike S2, 2026-10-26), read into the signal a provider's answer gives. The `error` code is a hint: a 402
+// and a spend limit arrive as `unknown`, so the text is read for every code that can be a refusal of the key. The status comes only from the CLI's
+// own prefix (anchored at the start). Nothing else of the payload is kept: not error_details, the transcript path, the session, nor the message beyond the clipped excerpt.
+export function signalFromHook(value: unknown): ProviderSignal | null {
+  const root = record(value);
+  if (!root || root.hook_event_name !== "StopFailure") return null;
+  const { error, last_assistant_message: message } = root;
+  if (typeof error !== "string" || typeof message !== "string" || message.length > HOOK_TEXT_LIMIT) return null;
+  if (NOT_THE_KEY.has(error)) return null;
+  const status = Number(HOOK_STATUS.exec(message)?.[1] ?? HOOK_HINT_STATUS[error] ?? NaN);
+  const text = error === "account_on_hold" ? `account_on_hold ${message}` : message;
+  return {
+    status: Number.isNaN(status) ? null : status,
+    kind: status === 402 ? "billing_error" : null,
+    text: clip(text),
+    retryAfterSeconds: null,
+    code: null,
+    resumeDate: resumeDateIn(message),
+  };
+}
+
 export type RunFailure = { signal: ProviderSignal; beforeWork: boolean };
 
 // The agent CLI prints one JSON value: a result record, or a list of records whose result is last. Anything else is not a refusal.

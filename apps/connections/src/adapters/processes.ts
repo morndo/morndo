@@ -16,6 +16,26 @@ function ppid(pid: number): number | null {
   return Number.isInteger(parent) && parent > 0 ? parent : null;
 }
 
+// When a process started, as a window: its start time in clock ticks since boot (field 22 of /proc/<pid>/stat; 100 ticks a second on Linux) added
+// to the boot time of /proc/stat, which is known only to the whole second, so `from` can be up to a second early and `to` is the latest it can be.
+// Null for anything that is not a readable process.
+export function processStartWindow(pid: number): { from: number; to: number } | null {
+  if (!Number.isInteger(pid) || pid <= 0) return null;
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, "utf8");
+    const close = stat.lastIndexOf(")");
+    const ticks = Number(stat.slice(close + 1).trim().split(/\s+/)[19]);
+    const btime = Number(/^btime (\d+)$/m.exec(readFileSync("/proc/stat", "utf8"))?.[1]);
+    if (close < 0 || !Number.isFinite(ticks) || !Number.isFinite(btime)) return null;
+    const from = Math.floor((btime + ticks / 100) * 1000);
+    return { from, to: from + 1000 };
+  } catch { return null; }
+}
+
+export function processStartMs(pid: number): number | null {
+  return processStartWindow(pid)?.from ?? null;
+}
+
 export function selfId(): ProcId | null {
   const id = processIdentity(process.pid);
   if (!id) return null;

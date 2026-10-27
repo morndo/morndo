@@ -226,8 +226,11 @@ export type KeyPoolStore = {
   // Version 0 inserts. False when the name already has a row, live or tombstone. Any other version updates only when
   // the stored version still equals `version`, and then bumps it.
   save(pool: KeyPool, version: number): boolean;
-  // Only the current version of a live pool. The body becomes {"deleted":true,"at":<ms>}.
-  tombstone(name: string, version: number, at: number): boolean;
+  // Only the current version of a live pool. The body becomes {"deleted":true,"at":<ms>,"retired":[…]}: the sink paths
+  // the pool held, live and retired, so they stay known after the delete. `retired` is empty when a caller passes none.
+  tombstone(name: string, version: number, at: number, retired?: readonly string[]): boolean;
+  // The retired paths of every deleted pool, deduped, in name order. A tombstone with no list contributes nothing.
+  retiredSinks(): readonly string[];
 };
 
 // A provider refusal, reduced to what a classifier may read. `text` is never stored.

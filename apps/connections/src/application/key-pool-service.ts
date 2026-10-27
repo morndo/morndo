@@ -4,7 +4,7 @@
 // the audit line, and the next call repairs a crash between those writes. Alerts name a member or the pool and a reason
 // word; a provider's text never lands here. A hand-off never sees a key.
 import {
-  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
+  KEY_PROBE_COST_USD, KEY_POOL_RECHECK_DEFAULT_MS, LEASE_REFUSED, acknowledgeKeyPoolTerms, addKeySink, forgetRetired, removeKeySink, attributeToGrant, bindFilter as bindGrantFilter, chooseKey, claimProbe, closeGrant as dropGrant, createKeyPool, dueMembers, err, findConnection, isKey,
   joinKeyPool, keyPicked, keyPoolBackAt, keyPoolStanding, keyRotated, leaveKeyPool, moveGrant, moveKeyMember, newKeyPoolEvents, nextHelperWindow, noteLent, noteSeen, ok,
   alertOnce, clearAlerted, openGrant, releaseClaim, releaseKey, reportKeyOutcome, reviveKey, servableOrder, setKeyPoolPolicy, settleKeyPool, touchGrant, unreachable,
   type Actor, type Directory, type Grant, type GrantRequest, type HelperWindow, type Holder, type KeyPool, type KeyPoolEvent,
@@ -56,6 +56,10 @@ type HandOffCaller = { id: ProcId; ppid: number | null; filter: string | null };
 type Leases = Pick<LeaseService, "swap" | "refresh" | "helper" | "serve" | "lease" | "close">;
 export type LaneProof = { kind: "lane"; lease: string; caller: { pid: number; startedAt: number; bootId: string } };
 export type ReportBy = Actor | LaneProof;
+export type RefusalTarget =
+  | { kind: "member"; member: string }
+  | { kind: "served"; caller: ProcId }
+  | { kind: "grant"; grant: string; by: { kind: "operator"; session?: string } | { kind: "holder"; caller: ProcId } };
 type CreateInput = {
   name: string;
   vendor: string;
@@ -76,6 +80,9 @@ const ATTEMPTS = 8;
 // The call cap a probe lease uses, the same figure the command line uses for one.
 const PROBE_LEASES = 8;
 const DAY_MS = 86_400_000;
+// How far back, and how many levels up, a session's last key is looked for.
+const SERVED_WINDOW_MS = 3_600_000;
+const SERVED_LEVELS = 5;
 const fail = (problem: string): Result<never, Failure> => err({ problem });
 // A refresh refused for one of these swaps. Anything else (a missing lease, a lost save) is returned as it is.
 const REFRESH_SWAP = new Set(["budget", "expired", "off", "terms"]);
@@ -236,13 +243,86 @@ export class KeyPoolService implements ConnectionLifecycle {
     });
   }
 
+  // The files a pool's key is written to (KP20). A path belongs to one pool; the principal registers and releases it.
+  addSink(pool: string, path: string, actor: Actor): Result<void, Failure> {
+    if (!isPrincipal(actor)) return fail("principal");
+    for (const other of this.#deps.store.names().live) {
+      if (other !== pool && this.#deps.store.load(other).pool?.sinks.includes(path)) return fail("sink_taken");
+    }
+    return this.#change(pool, (current, now) => {
+      const next = addKeySink(current, path, actor, now);
+      return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
+    });
+  }
+
+  removeSink(pool: string, path: string, actor: Actor): Result<void, Failure> {
+    return this.#change(pool, (current, now) => {
+      const next = removeKeySink(current, path, actor, now);
+      return next.ok ? { pool: next.value, result: ok(undefined) } : { pool: current, result: fail(next.error) };
+    });
+  }
+
+  sinksOf(pool: string): readonly string[] | null {
+    return this.#deps.store.load(pool).pool?.sinks ?? null;
+  }
+
+  // Every live pool's sinks, and apart from them the retired ones (removed, or of a deleted pool): a file that may still
+  // hold a key, so the lane deny list still names it. No sidecar or temp path here; the caller derives those (`sinkFiles`).
+  sinkPaths(): { live: readonly string[]; retired: readonly string[] } {
+    const live: string[] = [];
+    const retired: string[] = [];
+    for (const name of this.#deps.store.names().live) {
+      const { pool } = this.#deps.store.load(name);
+      if (!pool) continue;
+      live.push(...pool.sinks);
+      for (const path of pool.retired) if (!retired.includes(path)) retired.push(path);
+    }
+    for (const path of this.#deps.store.retiredSinks()) if (!retired.includes(path)) retired.push(path);
+    return { live, retired: retired.filter(path => !live.includes(path)) };
+  }
+
+  // When a sink was registered on the pool: null when the pool or the path is unknown.
+  sinkRegisteredAt(pool: string, path: string): number | null {
+    return this.#deps.store.load(pool).pool?.sinkSince[path] ?? null;
+  }
+
+  // Whether a live run lease of a key connection began before the sink was registered: that run's deny list was built
+  // without the file, so it is not protected for it. A probe lease is never a run.
+  runsPredating(pool: string, path: string): boolean {
+    const loaded = this.#deps.store.load(pool).pool;
+    if (!loaded?.sinks.includes(path)) return false;
+    // A sink registered before the time was kept counts as registered after every run began: the safe default, any live run predates it.
+    const since = loaded.sinkSince[path] ?? Number.POSITIVE_INFINITY;
+    for (const connection of this.#deps.connections.load().directory.connections) {
+      if (!isKey(connection)) continue;
+      for (const row of connection.leases) {
+        if (row.authority === "live" && row.probe === false && row.start < since) return true;
+      }
+    }
+    return false;
+  }
+
+  // A retired sink leaves the list when its files are gone (the caller says which), never for room. How many were forgotten.
+  pruneRetired(gone: (path: string) => boolean): number {
+    let dropped = 0;
+    for (const name of this.#deps.store.names().live) {
+      const result = this.#change(name, pool => {
+        const next = forgetRetired(pool, pool.retired.filter(gone));
+        return { pool: next, result: ok(pool.retired.length - next.retired.length) };
+      });
+      if (result.ok) dropped += result.value;
+    }
+    return dropped;
+  }
+
   delete(pool: string, actor: Actor): Result<void, Failure> {
     if (!isPrincipal(actor)) return fail("principal");
     for (let attempt = 0; attempt < ATTEMPTS; attempt++) {
       const loaded = this.#deps.store.load(pool);
       if (!loaded.pool) return fail("missing");
       const members = loaded.pool.members.map(row => row.credential);
-      if (!this.#deps.store.tombstone(pool, loaded.version, this.#deps.clock.now())) continue;
+      const sinks = [...loaded.pool.sinks, ...loaded.pool.retired];
+      if (!this.#deps.store.tombstone(pool, loaded.version, this.#deps.clock.now(), sinks)) continue;
       return this.#left(pool, members, []);
     }
     return fail("conflict");
@@ -258,8 +338,70 @@ export class KeyPoolService implements ConnectionLifecycle {
   }
 
   reportSignal(pool: string, member: string, signal: ProviderSignal, observedAt: number, via: "probe" | "report" = "report", why?: ProbeWhy): Result<Outcome, Failure> {
+    const classified = this.#classified(pool, member, signal, false);
+    if (!classified.ok) return classified;
+    const reported = this.report(pool, member, classified.value, observedAt, { kind: "operator" }, via, why);
+    return reported.ok ? ok(classified.value) : reported;
+  }
+
+  // A refusal read from a consumer's own hook (slice 4). Only a credit refusal (exhausted) is applied; a rate limit, an unknown answer or an ok
+  // changes and writes nothing, so a hook that fires on every limited turn cannot fill the event list. A refused key (failing) is not marked on a
+  // hook's word either: it is named to be probed. By grant, the caller must hold the grant before anything else happens: a stranger raises no
+  // alert and writes nothing.
+  reportRefusal(pool: string, target: RefusalTarget, signal: ProviderSignal, observedAt: number): Result<{ outcome: Outcome["kind"]; suspect: string | null }, Failure> {
+    const loaded = this.#deps.store.load(pool).pool;
+    if (!loaded) return fail("missing");
+    let member: string;
+    if (target.kind === "member") member = target.member;
+    else if (target.kind === "served") {
+      const found = this.#served(loaded, target.caller);
+      if (found === null) return fail("unserved");
+      member = found;
+    } else {
+      const held = loaded.grants.find(row => row.id === target.grant);
+      if (!held) return fail("grant_missing");
+      if (target.by.kind === "holder" && !this.#holds(held.holder, target.by.caller)) return fail("not_holder");
+      member = held.member;
+    }
+    const classified = this.#classified(pool, member, signal, target.kind === "member");
+    if (!classified.ok) return classified;
+    const outcome = classified.value;
+    if (outcome.kind === "failing") return ok({ outcome: outcome.kind, suspect: member });
+    if (outcome.kind !== "exhausted") return ok({ outcome: outcome.kind, suspect: null });
+    if (target.kind !== "grant") {
+      const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" });
+      return reported.ok ? ok({ outcome: outcome.kind, suspect: null }) : reported;
+    }
+    const reported = this.reportByGrant(pool, target.grant, outcome, observedAt, target.by);
+    return reported.ok ? ok({ outcome: outcome.kind, suspect: reported.value.suspect }) : reported;
+  }
+
+  // The member a session was last served: looking from the caller's nearest ancestor outwards (a few levels: a hook runs under a shell under the agent
+  // CLI), the first one that is the parent of a KeyServed of a member of the pool within the hour (the helper's cache is minutes) gives the newest such
+  // member. The parent must be named with its start time as well as its pid, so a reused pid is not the session, and a caller that could not name one is
+  // never matched. A hand-written apiKeyHelper is exec'd by the agent CLI, so the parent of its lease is the CLI; the nearest ancestor wins, so a key
+  // leased by hand from a shell further out is not taken for the CLI's.
+  #served(pool: KeyPool, caller: ProcId): string | null {
+    const ancestors = this.#deps.processes.ancestors(caller.pid).slice(1, 1 + SERVED_LEVELS);
+    const members = new Set(pool.members.map(row => row.credential));
+    const since = this.#deps.clock.now() - SERVED_WINDOW_MS;
+    const events = this.#deps.connections.load().directory.events;
+    for (const parent of ancestors) {
+      for (let i = events.length - 1; i >= 0; i--) {
+        const event = events[i];
+        if (event === undefined || event.at < since) break;
+        if (event.type === "KeyServed" && members.has(event.name) && event.caller.ppid === parent.pid
+          && typeof event.caller.parentStartedAt === "number" && event.caller.parentStartedAt === parent.startedAt) return event.name;
+      }
+    }
+    return null;
+  }
+
+  // The pool's dialect classifies the signal; an unmatched 4xx raises the one `unclassified` alert of status and type only.
+  #classified(pool: string, member: string, signal: ProviderSignal, named = true): Result<Outcome, Failure> {
     const loaded = this.#deps.store.load(pool);
     if (!loaded.pool) return fail("missing");
+    if (named && !loaded.pool.members.some(row => row.credential === member)) return fail("missing");
     const dialect = this.#deps.catalog.keyPool(loaded.pool.vendor)?.errorDialect;
     if (!dialect) return fail("no_classifier");
     const classifier = this.#deps.classifiers.for(dialect);
@@ -271,8 +413,7 @@ export class KeyPoolService implements ConnectionLifecycle {
     } else if (signal.status !== null) {
       this.#clearAlert(pool, member, "unclassified");
     }
-    const reported = this.report(pool, member, outcome, observedAt, { kind: "operator" }, via, why);
-    return reported.ok ? ok(outcome) : reported;
+    return ok(outcome);
   }
 
   // Claim, then the member's own gate, then one probe. A refusal before the request sends nothing. The instant of the

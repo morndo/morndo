@@ -16,8 +16,18 @@ function deleted(body: string): boolean {
   return value.deleted === true;
 }
 
+// The retired list a tombstone kept, read defensively: a body that names none, or not as an array of strings, has none.
+function retiredOf(body: string): readonly string[] {
+  try {
+    const value = JSON.parse(body) as { retired?: unknown };
+    return Array.isArray(value.retired) ? value.retired.filter((row): row is string => typeof row === "string") : [];
+  } catch {
+    return [];
+  }
+}
+
 // A pool saved before it had grants, or a grant saved before it had seen, lent or a filter, loads with those empty
-// (the filter null). A member saved before probes loads with probingUntil null, failedProbes 0 and lastProbe null. Saving still writes
+// (the filter null), and one saved before sinks loads with none, and no retired ones or registration times. A member saved before probes loads with probingUntil null, failedProbes 0 and lastProbe null. Saving still writes
 // the pool it was given.
 function withHistory(pool: KeyPool): KeyPool {
   const grants = ((pool.grants ?? []) as readonly (Grant & { seen?: Grant["seen"]; lent?: Grant["lent"]; filter?: Grant["filter"] })[]).map(grant => ({
@@ -26,7 +36,7 @@ function withHistory(pool: KeyPool): KeyPool {
   const members = (pool.members ?? []).map(member => ({
     ...member, probingUntil: member.probingUntil ?? null, failedProbes: member.failedProbes ?? 0, lastProbe: member.lastProbe ?? null, alerted: member.alerted ?? {},
   }));
-  return { ...pool, grants, members };
+  return { ...pool, grants, members, sinks: pool.sinks ?? [], retired: pool.retired ?? [], sinkSince: pool.sinkSince ?? {} };
 }
 
 function poolOf(body: string): KeyPool | null {
@@ -72,13 +82,24 @@ export class SqliteKeyPoolStore implements KeyPoolStore {
     }).immediate();
   }
 
-  tombstone(name: string, version: number, at: number): boolean {
-    const body = JSON.stringify({ deleted: true, at });
+  // The tombstone keeps the pool's sink paths (live and retired): the deny list still names them after the delete.
+  tombstone(name: string, version: number, at: number, retired: readonly string[] = []): boolean {
+    const body = JSON.stringify({ deleted: true, at, retired });
     return this.#db.transaction(() => {
       const row = this.#select.get(name) as Row | undefined;
       if (!row || row.version !== version || deleted(row.body)) return false;
       return this.#update.run(body, name, version).changes === 1;
     }).immediate();
+  }
+
+  // The retired paths of every deleted pool, deduped, in row order. A row with no retired list, or a non-array, contributes nothing.
+  retiredSinks(): readonly string[] {
+    const out: string[] = [];
+    for (const row of this.#list.all() as Named[]) {
+      if (!deleted(row.body)) continue;
+      for (const path of retiredOf(row.body)) if (!out.includes(path)) out.push(path);
+    }
+    return out;
   }
 
   close(): void {

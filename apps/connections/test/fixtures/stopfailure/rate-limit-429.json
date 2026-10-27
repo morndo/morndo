@@ -1,0 +1,12 @@
+{
+  "session_id": "00000000-0000-4000-8000-000000000001",
+  "transcript_path": "/work/.claude/projects/p/session.jsonl",
+  "cwd": "/work",
+  "prompt_id": "00000000-0000-4000-8000-000000000002",
+  "effort": {
+    "level": "medium"
+  },
+  "hook_event_name": "StopFailure",
+  "error": "rate_limit",
+  "last_assistant_message": "API Error: Request rejected (429) \u00b7 Number of request tokens has exceeded your per-minute rate limit"
+}

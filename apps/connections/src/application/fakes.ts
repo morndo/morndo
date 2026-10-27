@@ -138,12 +138,24 @@ export class MemoryKeyPoolStore implements KeyPoolStore {
     return true;
   }
 
-  tombstone(name: string, version: number, at: number): boolean {
+  tombstone(name: string, version: number, at: number, retired: readonly string[] = []): boolean {
     const row = this.#rows.get(name);
     if (!row || row.version !== version || tombstoneBody(row.body)) return false;
-    this.#rows.set(name, { version: row.version + 1, body: JSON.stringify({ deleted: true, at }) });
+    this.#rows.set(name, { version: row.version + 1, body: JSON.stringify({ deleted: true, at, retired }) });
     this.saves += 1;
     return true;
+  }
+
+  retiredSinks(): readonly string[] {
+    const out: string[] = [];
+    for (const name of [...this.#rows.keys()].sort()) {
+      const row = this.#rows.get(name);
+      if (!row || !tombstoneBody(row.body)) continue;
+      const value = JSON.parse(row.body) as { retired?: unknown };
+      if (!Array.isArray(value.retired)) continue;
+      for (const path of value.retired) if (typeof path === "string" && !out.includes(path)) out.push(path);
+    }
+    return out;
   }
 }
 

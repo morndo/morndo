@@ -83,12 +83,24 @@ function reports(answer) {
   catch (error) { appendFileSync(`${job.record}.report`, `${JSON.stringify({ code: error.status ?? 1, stderr: String(error.stderr ?? "") })}\n`); }
 }
 
+// `hook`: what a hook of an interactive session would do, as a child of this run: the pool report command with the grant the helper line names and
+// `hook` as the JSON on stdin (a string is sent as it is). Each result is recorded in `<record>.hook`, never shown. (The launcher's own settings carry no
+// hook: a headless run ends before a hook can finish.)
+function hooks(answer) {
+  if (answer.hook === undefined || !grantForm) return;
+  const stdin = typeof answer.hook === "string" ? answer.hook : JSON.stringify(answer.hook);
+  const pool = parts[parts.indexOf("--pool") + 1];
+  const out = spawnSync(parts[0], [...baseArgs, "keypool", "report", pool, "--from-hook", "--grant", parts.at(-1)], { encoding: "utf8", timeout: 20_000, input: stdin });
+  appendFileSync(`${job.record}.hook`, `${JSON.stringify({ code: out.status ?? 1, stdout: String(out.stdout ?? ""), stderr: String(out.stderr ?? "") })}\n`);
+}
+
 let result = helper();
 record(result, false);
 const first = job.keys?.[result.key] ?? { exit: 0 };
 commands(first);
 await bypasses(first);
 reports(first);
+hooks(first);
 // `killParent`: the run is killed before it can close its lease or its grant (what a SIGKILL of the launcher leaves behind).
 if (first.killParent) process.kill(process.ppid, "SIGKILL");
 let answer = first;
@@ -97,7 +109,7 @@ for (let i = 0; i < (first.rehelp ?? 0); i++) {
   record(result, true);
   answer = job.keys?.[result.key] ?? { exit: 0 };
 }
-if (answer !== first) reports(answer);
+if (answer !== first) { reports(answer); hooks(answer); }
 // `cmdsAfter`: commands run after the last helper call, before the child prints (a member removed or rotated once it was handed to).
 commands(answer, answer.cmdsAfter);
 if (answer.json) process.stdout.write(`${JSON.stringify(answer.json)}\n`);
