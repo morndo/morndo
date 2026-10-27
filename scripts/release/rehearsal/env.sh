@@ -4,7 +4,8 @@
 # (apps/updater/src/cli.ts:417) and, as a systemd user unit, from the user manager's environment; without it a
 # rehearsal machine would quietly read production's feed. So the address must be an https:// URL of plain
 # characters (no space, quote, $, backslash or newline: it is written into files and commands as it stands) and
-# must not be production's, with or without the trailing slash the updater adds; then it is written, with that
+# must not be production's, with or without the trailing slash the updater adds, and must be https://<host>/<path>/
+# in lower case, with no port, escape, empty, . or .. segment (other spellings can name production's host too); then it is written, with that
 # slash, to ~/.config/environment.d/morndo-rehearsal.conf (the manager reads that file at login) and handed to
 # the running manager with systemctl --user set-environment, and show-environment must carry the exact line, or
 # the step stops: a manager that lacks the address would let the updater read production's feed. Nothing but the
@@ -43,6 +44,13 @@ case $url in
   */) ;;
   *) url=$url/ ;;
 esac
+
+# The updater treats the value as a URL base, so spellings other than the one below can still name production:
+# an upper-case host, a :443 port, a trailing dot, percent-escapes, an empty or . or .. path segment. The shape
+# check admits only https://<host>/<path>/ in lower case; anything else stops before the comparison below.
+if ! printf '%s\n' "$url" | grep -Eqx 'https://[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+(/[a-z0-9_~-][a-z0-9._~-]*)*/'; then
+  fail "the feed address must be https://<host>/<path>/ in lower case, with no port, escape, empty, . or .. segment"
+fi
 
 [ "$url" != "https://morndo.github.io/morndo/" ] ||
   fail "that is production's feed; a rehearsal machine never reads it"

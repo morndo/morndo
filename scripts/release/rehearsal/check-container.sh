@@ -2,10 +2,12 @@
 # check-container.sh <container-inspect.json> <network-inspect.json> -- the release rehearsal's fence check
 # (docs/plans/2026-10-24-c4-5-rehearsal.md, step 4): the `docker inspect` output of one rehearsal machine and of
 # its network, each saved to a file, and every way that machine reaches past the rehearsal's fence becomes one
-# FAIL line on stdout, all of them, in a fixed order: privilege, a capability beyond SYS_ADMIN, AUDIT_WRITE kept,
-# devices, device cgroup rules, anything of the host mounted in (binds, volumes, the docker socket), a network
-# that is not the rehearsal's own bridge, a host or another container's namespace, a cgroup namespace that is not
-# private, published ports, security options, a missing rehearsal label, an e2e sweep's label (another lane's e2e
+# FAIL line on stdout, all of them, in a fixed order: privilege (or an inspect that does not say), a capability
+# beyond SYS_ADMIN, AUDIT_WRITE kept, devices, device cgroup rules, requested devices (DeviceRequests), anything
+# of the host mounted in (binds, volumes, the docker socket), a network mode, or attached networks, that are not
+# the rehearsal's own bridge alone, a host or another container's namespace, a cgroup namespace that is not
+# private, a cgroup parent outside Docker's own, published ports, security options, a missing rehearsal label,
+# an e2e sweep's label (another lane's e2e
 # run would remove the machine mid-rehearsal), a hostname outside rehearsal.test (a top-level domain the IETF
 # reserves, RFC 6761 §6.2), a MORNDO_ variable set through the container (the rehearsal sets those inside a
 # machine, never through it; the value is never printed), a missing container=docker, or another image. With any
@@ -48,14 +50,20 @@ rules='
 def caps($l): ($l // []) | map(sub("^CAP_"; "") | ascii_upcase);
 def joined($l): (caps($l) | join(",")) as $j | if $j == "" then "none" else $j end;
 ($containers[0][0]) as $c | ($networks[0][0]) as $n |
-(if $c.HostConfig.Privileged == true then "FAIL: the container is privileged" else empty end),
+(if $c.HostConfig.Privileged == null then "FAIL: the inspect does not say whether the container is privileged"
+ elif $c.HostConfig.Privileged == true then "FAIL: the container is privileged" else empty end),
 (if caps($c.HostConfig.CapAdd) != ["SYS_ADMIN"] then "FAIL: CapAdd is \(joined($c.HostConfig.CapAdd)), not exactly SYS_ADMIN" else empty end),
 (if caps($c.HostConfig.CapDrop) != ["AUDIT_WRITE"] then "FAIL: CapDrop is \(joined($c.HostConfig.CapDrop)), not exactly AUDIT_WRITE" else empty end),
 (if (($c.HostConfig.Devices // []) | length) > 0 then "FAIL: the container has devices" else empty end),
 (if (($c.HostConfig.DeviceCgroupRules // []) | length) > 0 then "FAIL: the container has device cgroup rules" else empty end),
+(if (($c.HostConfig.DeviceRequests // []) | length) > 0 then "FAIL: the container requests devices (DeviceRequests)" else empty end),
 (if (($c.HostConfig.Binds // []) | length) > 0 or (($c.HostConfig.Mounts // []) | length) > 0 then "FAIL: the container has bind mounts" else empty end),
 (($c.Mounts // [])[] | select(.Type != "tmpfs") | "FAIL: the container mounts \(.Source) (\(.Type))"),
 (if $c.HostConfig.NetworkMode != $n.Name then "FAIL: the network mode is \($c.HostConfig.NetworkMode), not the rehearsal network \($n.Name)" else empty end),
+((($c.NetworkSettings.Networks // {}) | keys) as $attached
+  | if $attached != [$n.Name]
+    then "FAIL: the container is attached to \(if ($attached | length) == 0 then "none" else ($attached | join(",")) end), not only the rehearsal network \($n.Name)"
+    else empty end),
 (if $n.Driver != "bridge" then "FAIL: the network \($n.Name) is not a bridge (driver \($n.Driver))" else empty end),
 (if ($n.Labels // {})["morndo-c4-rehearsal"] != "1" then "FAIL: the network \($n.Name) lacks the label morndo-c4-rehearsal=1" else empty end),
 (("PidMode", "IpcMode", "UTSMode", "UsernsMode") as $f
@@ -63,6 +71,7 @@ def joined($l): (caps($l) | join(",")) as $j | if $j == "" then "none" else $j e
   | select($v == "host" or ($v | startswith("container:")))
   | "FAIL: \($f) is \($v)"),
 (if $c.HostConfig.CgroupnsMode != "private" then "FAIL: CgroupnsMode is \($c.HostConfig.CgroupnsMode), not private" else empty end),
+(if (($c.HostConfig.CgroupParent // "") | length) > 0 then "FAIL: CgroupParent is \($c.HostConfig.CgroupParent) (a machine stays in Docker'\''s own cgroup)" else empty end),
 (if (($c.HostConfig.PortBindings // {}) | length) > 0
   or $c.HostConfig.PublishAllPorts == true
   or (($c.NetworkSettings.Ports // {}) | [.[]? | select(. != null)] | length) > 0
