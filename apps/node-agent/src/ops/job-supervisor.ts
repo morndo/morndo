@@ -16,7 +16,7 @@ import { deniedBy, denyRoots, processAlive, resolvedRoots, type ProcessStart } f
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
 import { capStep, endedBeforeStop, monotonicUsec, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
-import { MAX_TIMER_MS, UNIT_STOP_WAIT_MS } from "./job-limits.ts";
+import { MAX_TIMER_MS, UNIT_STOP_WAIT_MS, UNIT_STUCK_STOP_MS } from "./job-limits.ts";
 import { askHub, JobGrants } from "./job-grant.ts";
 import { killJobUnit, managerEnv, probeUserManager, resetJobUnit, runMs, showUnit, spawnFailed, startJobUnit, stopJobUnit, type ProbeResult, type UnitLook, type UnitState } from "./job-systemd.ts";
 import { guardOf, readProc, type MachineSample } from "./job-guard.ts";
@@ -166,6 +166,7 @@ export async function openJobSupervisor(store: JobStore, opts: {
   node?: string;
   grants?: JobGrants;
   hubBase?: string;
+  stuckStopMs?: number;
   log?: { error: (message: string, error?: unknown) => void };
 }, choice: {
   probe?: () => ProbeResult | Promise<ProbeResult>;
@@ -211,6 +212,9 @@ export class JobSupervisor {
   #capSights = new Map<string, CapSight>();
   // Jobs a cancel signalled but could not confirm: how such a unit ends is the cancel's result, not the command's.
   #signalledCancels = new Set<string>();
+  // Each unit the sweep found stopping: when it first did (monotonic ms), and whether the bound's SIGKILL went out.
+  #stoppingSights = new Map<string, { since: number; killed: boolean }>();
+  #stuckStopMs: number;
   // A closed supervisor's watches stop acting, also when they already wait for the job's lock: the agent that replaces
   // it owns the jobs. close() does not wait for them; each one sees this at its next step and returns.
   #closed = false;
@@ -229,6 +233,7 @@ export class JobSupervisor {
     systemd?: { slice: string; toolEnv?: NodeJS.ProcessEnv };
     grants?: JobGrants;
     hubBase?: string;
+    stuckStopMs?: number;
     log?: { error: (message: string, error?: unknown) => void };
   }) {
     this.#store = store;
@@ -250,6 +255,7 @@ export class JobSupervisor {
     this.#grants = opts.grants ?? null;
     this.#hubBase = opts.hubBase ?? null;
     this.#toolEnv = opts.systemd?.toolEnv;
+    this.#stuckStopMs = opts.stuckStopMs ?? UNIT_STUCK_STOP_MS;
   }
 
   listen(): Promise<void> {
@@ -289,7 +295,7 @@ export class JobSupervisor {
   // How many jobs this supervisor still holds cap or cancel state for. A job that has ended holds none, so the count is
   // bounded by the open jobs (the tests read it to show nothing outlives a job).
   trackedJobs(): number {
-    return new Set([...this.#capSights.keys(), ...this.#signalledCancels]).size;
+    return new Set([...this.#capSights.keys(), ...this.#signalledCancels, ...this.#stoppingSights.keys()]).size;
   }
 
   close(): void {
@@ -343,6 +349,7 @@ export class JobSupervisor {
       for (const job of jobs) await this.#exclusive(job.id, () => this.#sweepOne(job.id, pending, starts, watches));
     }
     await this.#promote(this.#starting(), guard);
+    this.#reconcile();
     // Design §5: a capped unit's grace runs beside the sweep, so it holds up no other job and no cancel. The sweep
     // still ends with the decisions of the watches it started (an earlier sweep's watch is that sweep's), and starts
     // what they freed.
@@ -627,6 +634,7 @@ export class JobSupervisor {
       return;
     }
     const view = look.view;
+    if (view.active !== "deactivating") this.#stoppingSights.delete(id);
     if (view.active === "activating" || (view.active === "active" && view.sub === "running")) {
       if (job.state === "starting") this.#store.started(id);
       if (this.#overCap(id)) {
@@ -635,9 +643,34 @@ export class JobSupervisor {
       }
       return;
     }
-    // A unit that is stopping has not told its result yet; the next sweep reads how it ended.
-    if (view.active === "deactivating") return;
+    if (view.active === "deactivating") { await this.#stoppingUnit(id, job); return; }
     await this.#settleUnit(id, view);
+  }
+
+  // A unit that is stopping has not told its result yet; the next sweep reads how it ended. systemd bounds a stop
+  // itself (TimeoutStopSec=10 on every job unit), but a stop that never ends must not hold the job open for ever:
+  // once the unit has been seen stopping for `stuckStopMs` it gets a SIGKILL, and after twice that the job ends as
+  // the signalled cancel or lost, the unit being one no one can confirm over.
+  async #stoppingUnit(id: string, job: Job): Promise<void> {
+    const now = performance.now();
+    const sight = this.#stoppingSights.get(id);
+    if (!sight) { this.#stoppingSights.set(id, { since: now, killed: false }); return; }
+    const age = now - sight.since;
+    if (age < this.#stuckStopMs) return;
+    if (age < 2 * this.#stuckStopMs) {
+      if (sight.killed) return;
+      sight.killed = true;
+      try { await killJobUnit(id, "SIGKILL", this.#toolEnv); }
+      catch (e) { this.#log?.error(`the SIGKILL for job ${id}, stuck stopping, failed; the next sweep gives up on it`, e); }
+      return;
+    }
+    if (job.state === "starting") {
+      const started = this.#store.started(id);
+      if (!started.ok) return;
+    }
+    try { this.#settle(id, this.#unitEnd(id, job, null)); } catch { return; }
+    try { await stopJobUnit(id, this.#toolEnv); } catch { /* the end is already recorded */ }
+    await resetJobUnit(id, this.#toolEnv);
   }
 
   // How a unit that is over ended. A cancel that signalled it owns that end (the unit's exit code is the signal's,
@@ -689,20 +722,36 @@ export class JobSupervisor {
   // Every settle drops what the supervisor keeps for the job once it is no longer open. The .cap and .cancel
   // files stay on disk for prune, like the log.
   #settle(id: string, event: FinishEvent): Result<NoticeHandoff, FinishProblem | "missing"> {
+    let decided: Result<NoticeHandoff, FinishProblem | "missing">;
     try {
-      return this.#store.settle(id, event);
-    } finally {
+      decided = this.#store.settle(id, event);
+    } catch (e) {
       this.#forget(id);
+      throw e;
     }
+    // A settle that ended the job needs no read of the store to know it is over.
+    this.#forget(id, decided.ok);
+    return decided;
   }
 
-  // What is kept per job for the cap goes once the job has ended, so it is bounded by the open jobs.
-  #forget(id: string): void {
-    let open: boolean;
-    try { open = this.#open(id) !== null; } catch { return; }
-    if (open) return;
+  // What is kept per job goes once the job has ended, so it is bounded by the open jobs. `ended`: the caller knows the
+  // job is over. Otherwise the store says; when it cannot be read nothing is dropped, and the next sweep's
+  // reconcile judges the entry again.
+  #forget(id: string, ended = false): void {
+    if (!ended) {
+      let open: boolean;
+      try { open = this.#open(id) !== null; } catch { return; }
+      if (open) return;
+    }
     this.#capSights.delete(id);
     this.#signalledCancels.delete(id);
+    this.#stoppingSights.delete(id);
+  }
+
+  // Every job the supervisor still holds state for is looked at again, so an entry whose forget could not read the
+  // store does not outlive the job.
+  #reconcile(): void {
+    for (const id of new Set([...this.#capSights.keys(), ...this.#signalledCancels, ...this.#stoppingSights.keys()])) this.#forget(id);
   }
 
   // Each look checks the log and the unit's main process; only when that process is gone does it ask systemd how the
@@ -753,12 +802,16 @@ export class JobSupervisor {
     // timeout stays its end.
     const timedOut = view !== null && view.active === "deactivating" && view.result === "timeout";
     if (live) {
+      // The mark goes first, before any signal or wait: an agent that restarts while this cancel waits, or a settle
+      // that throws after the signals, still finds a cancel in flight. A cancel that sent no signal takes it back.
+      const marked = !timedOut && !this.#signalled(id);
+      if (!timedOut) this.#markCancel(id);
       const after = await this.#endLive(id);
-      if (after === "unsignalled") return err("unavailable");
-      if (after === "signalled") {
-        if (!timedOut) this.#markCancel(id);
-        return err("signalled");
+      if (after === "unsignalled") {
+        if (marked) this.#unmarkCancel(id);
+        return err("unavailable");
       }
+      if (after === "signalled") return err("signalled");
       const current = this.#store.get(id);
       if (!current) return err("missing");
       if (current.outcome !== null) return this.#replay(current);
@@ -963,7 +1016,7 @@ export class JobSupervisor {
     return this.#live(view) || view.active === "deactivating";
   }
 
-  // The mark of a cancel that signalled the unit but could not confirm it: once in memory, once as an empty file
+  // The mark of a cancel that is signalling the unit (and may not confirm it): once in memory, once as an empty file
   // next to the log, so the next agent still knows (prune removes the file with the job).
   #markCancel(id: string): void {
     this.#signalledCancels.add(id);
@@ -971,6 +1024,15 @@ export class JobSupervisor {
     catch (e) {
       // EEXIST: already marked. Anything else leaves the mark in memory only, which an agent restart loses.
       if (errno(e) !== "EEXIST") this.#log?.error(`marking the cancel of job ${id} failed; an agent restart would lose it`, e);
+    }
+  }
+
+  // A cancel that failed before it signalled anything leaves no mark: the unit ends on its own account.
+  #unmarkCancel(id: string): void {
+    this.#signalledCancels.delete(id);
+    try { unlinkSync(join(this.#store.dir, `${id}.cancel`)); }
+    catch (e) {
+      if (errno(e) !== "ENOENT") this.#log?.error(`removing the cancel mark of job ${id} failed; its end would be recorded cancelled`, e);
     }
   }
 

@@ -3,7 +3,7 @@
 // "cancelled", not an exit code, "lost" or "exited". A fake systemctl answers each case, so no real unit is touched.
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore } from "../src/ops/job-store.ts";
 import { JobSupervisor } from "../src/ops/job-supervisor.ts";
@@ -33,7 +33,7 @@ function tools(root: string, systemctl: string, systemdRun = "#!/bin/sh\nexit 0\
 }
 
 // `script(home)` is the fake `systemctl --user <verb> ...` ($2 is the verb); its marker files live in `home`.
-function rig(script: (home: string) => string, over: { logBytes?: number; limits?: Record<string, number>; systemdRun?: (home: string) => string; log?: { error: (message: string, error?: unknown) => void } } = {}): Rig {
+function rig(script: (home: string) => string, over: { logBytes?: number; stuckStopMs?: number; limits?: Record<string, number>; systemdRun?: (home: string) => string; log?: { error: (message: string, error?: unknown) => void } } = {}): Rig {
   const h = tempHome();
   const adb = openAgentDb(join(h.home, "agent.db"));
   const dir = join(h.home, "job-logs");
@@ -43,6 +43,7 @@ function rig(script: (home: string) => string, over: { logBytes?: number; limits
   const sup = new JobSupervisor(store, {
     home: h.home, stateDir: paths.stateDir, socketPath: paths.jobSock,
     ...(over.limits ? { limits: over.limits } : {}),
+    ...(over.stuckStopMs !== undefined ? { stuckStopMs: over.stuckStopMs } : {}),
     systemd: { slice: "morndofake.slice", toolEnv: tools(h.home, script(h.home), over.systemdRun?.(h.home)) },
     log: over.log ?? { error: () => {} },
   });
@@ -307,5 +308,148 @@ describe("a cancel mark that cannot be written", () => {
     }
     expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
     expect(logged.some(m => m.includes("j1"))).toBe(true);
+  });
+});
+
+// T-86 fix round on PR 168 (review by srv01, 2026-10-27).
+describe("the cancel mark is written before any signal or wait", () => {
+  it("is on disk when the first signal goes out, so an agent restart in the wait cannot lose it", async () => {
+    const { store, sup, home, dir } = rig(h => `#!/bin/sh
+if [ "$2" = "kill" ]; then if [ -f '${join(h, "job-logs", "j1.cancel")}' ]; then touch '${join(h, "marked-at-kill")}'; fi; touch '${join(h, "killed")}'; exit 0; fi
+if [ "$2" = "show" ]; then if [ -f '${join(h, "killed")}' ]; then ${deactivating}; else ${running}; fi; fi
+exit 0
+`);
+    plant(store, "j1");
+    expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
+    expect(existsSync(join(home, "marked-at-kill"))).toBe(true);
+    expect(existsSync(join(dir, "j1.cancel"))).toBe(true);
+  });
+
+  it("is taken back when no signal went out: the unit then ends on its own, not cancelled", async () => {
+    const { store, sup, home, dir } = rig(h => `#!/bin/sh
+if [ "$2" = "kill" ]; then exit 1; fi
+if [ "$2" = "show" ]; then if [ -f '${join(h, "over")}' ]; then ${ended(1, 0)}; else ${running}; fi; fi
+exit 0
+`);
+    plant(store, "j1");
+    expect(await sup.cancel("j1")).toEqual({ ok: false, error: "unavailable" });
+    expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
+    expect(sup.trackedJobs()).toBe(0);
+    writeFileSync(join(home, "over"), "");
+    await sup.sweep();
+    expect(store.get("j1")).toMatchObject({ outcome: "exited", exitCode: 0 });
+  });
+
+  it("stays when an earlier cancel signalled and a later one cannot signal", async () => {
+    const { store, sup, home, dir } = rig(h => `#!/bin/sh
+if [ "$2" = "kill" ]; then if [ -f '${join(h, "refuse")}' ]; then exit 1; fi; touch '${join(h, "killed")}'; exit 0; fi
+if [ "$2" = "show" ]; then if [ -f '${join(h, "killed")}' ]; then ${deactivating}; else ${running}; fi; fi
+exit 0
+`);
+    plant(store, "j1");
+    expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
+    writeFileSync(join(home, "refuse"), "");
+    expect(await sup.cancel("j1")).toEqual({ ok: false, error: "unavailable" });
+    expect(existsSync(join(dir, "j1.cancel"))).toBe(true);
+  });
+});
+
+describe("a cancel whose settle throws after the signals", () => {
+  it("still ends cancelled when a sweep finds the unit over", async () => {
+    const { store, sup } = rig(signals(running, SIGTERMED, SIGTERMED));
+    plant(store, "j1");
+    const spy = vi.spyOn(store, "settle").mockImplementationOnce(() => { throw new Error("the row cannot be written"); });
+    try {
+      expect((await sup.cancel("j1")).ok).toBe(false);
+    } finally {
+      spy.mockRestore();
+    }
+    expect(store.get("j1")).toMatchObject({ outcome: null });
+    await sup.sweep();
+    expect(store.get("j1")).toMatchObject({ outcome: "cancelled", exitCode: null });
+  });
+});
+
+describe("what the supervisor keeps for a job goes even when the store cannot be read", () => {
+  it("a settle that is followed by an unreadable store leaves nothing behind", async () => {
+    const { store, sup, home } = rig(killedThenUnreadable(() => SIGTERMED));
+    plant(store, "j1");
+    expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
+    expect(sup.trackedJobs()).toBe(1);
+    allow(home);
+    const settle = store.settle.bind(store);
+    const get = store.get.bind(store);
+    let broken = false;
+    vi.spyOn(store, "settle").mockImplementation((id, event) => { const r = settle(id, event); if (id === "j1") broken = true; return r; });
+    vi.spyOn(store, "get").mockImplementation(id => { if (broken) throw new Error("the store cannot be read"); return get(id); });
+    try {
+      // The promote after the cancel reads the broken store too; what matters is what the supervisor kept.
+      await sup.cancel("j1").catch(() => undefined);
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(store.get("j1")).toMatchObject({ outcome: "cancelled" });
+    expect(sup.trackedJobs()).toBe(0);
+  });
+
+  it("an entry that could not be judged goes at the next sweep", async () => {
+    const { store, sup, home } = rig(killedThenUnreadable(() => SIGTERMED));
+    plant(store, "j1");
+    expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
+    allow(home);
+    const settle = store.settle.bind(store);
+    const get = store.get.bind(store);
+    let broken = false;
+    // The row is written, then the settle reports a failure and the store cannot be read: the job's end is not known.
+    vi.spyOn(store, "settle").mockImplementation((id, event) => { settle(id, event); if (id === "j1") broken = true; throw new Error("late failure"); });
+    vi.spyOn(store, "get").mockImplementation(id => { if (broken) throw new Error("the store cannot be read"); return get(id); });
+    try {
+      // The promote after the cancel reads the broken store too; what matters is what the supervisor kept.
+      await sup.cancel("j1").catch(() => undefined);
+    } finally {
+      vi.restoreAllMocks();
+    }
+    expect(sup.trackedJobs()).toBe(1);
+    await sup.sweep();
+    expect(sup.trackedJobs()).toBe(0);
+  });
+});
+
+describe("a unit stuck deactivating", () => {
+  it("gets a SIGKILL after the bound and its job ends once the unit is over", async () => {
+    const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), failedBy("signal", 9)), { stuckStopMs: 60 });
+    plant(store, "j1");
+    await sup.sweep();
+    expect(existsSync(join(home, "sigkill"))).toBe(false);
+    expect(store.get("j1")).toMatchObject({ state: "running", outcome: null });
+    await new Promise(r => setTimeout(r, 90));
+    await sup.sweep();
+    expect(existsSync(join(home, "sigkill"))).toBe(true);
+    await sup.sweep();
+    expect(store.get("j1")).toMatchObject({ outcome: "exited" });
+    expect(sup.trackedJobs()).toBe(0);
+  });
+
+  it("is given up on after a second bound: the job ends, it does not stay open for ever", async () => {
+    const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), stoppingFor("success")), { stuckStopMs: 60 });
+    plant(store, "j1");
+    await sup.sweep();
+    await new Promise(r => setTimeout(r, 90));
+    await sup.sweep();
+    expect(existsSync(join(home, "sigkill"))).toBe(true);
+    expect(store.get("j1")).toMatchObject({ state: "running", outcome: null });
+    await new Promise(r => setTimeout(r, 90));
+    await sup.sweep();
+    expect(store.get("j1")).toMatchObject({ outcome: "lost" });
+    expect(sup.trackedJobs()).toBe(0);
+  });
+
+  it("is left alone inside the bound", async () => {
+    const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), stoppingFor("success")), { stuckStopMs: 60_000 });
+    plant(store, "j1");
+    await sup.sweep();
+    await sup.sweep();
+    expect(existsSync(join(home, "sigkill"))).toBe(false);
+    expect(store.get("j1")).toMatchObject({ state: "running", outcome: null });
   });
 });
