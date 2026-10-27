@@ -44,7 +44,7 @@ if [ -n "${C6_NODE:-}" ]; then
 elif command -v node >/dev/null 2>&1; then
   node=$(command -v node)
 else
-  node=$(ls -d "$HOME"/.nvm/versions/node/*/bin/node 2>/dev/null | sort -V | tail -n 1 || true)
+  node=$(find "$HOME/.nvm/versions/node" -mindepth 3 -maxdepth 3 -path '*/bin/node' 2>/dev/null | sort -V | tail -n 1 || true)
   [ -n "$node" ] && [ -x "$node" ] || { echo "backup.sh: no node found (set C6_NODE)" >&2; exit 1; }
 fi
 
@@ -114,7 +114,7 @@ for f in "$bin"/morndo*; do
 done
 
 # The unit set: every loaded morndo unit in an active-like state (all types, template instances included), plus every
-# unit file we copied. An instance running now has no file of its own (only its template) but is recorded active=yes.
+# unit file we copied (services, timers, sockets and paths). An instance running now has no file of its own (only its template) but is recorded active=yes.
 active_now=$("$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do printf '%s\n' "$n"; done || true)
 : > "$dest/state.txt"
 seen=" "
@@ -125,14 +125,14 @@ record() {
   if "$sc" --user is-enabled "$1" >/dev/null 2>&1; then e=yes; else e=no; fi
   printf '%s active=%s enabled=%s\n' "$1" "$a" "$e" >> "$dest/state.txt"
 }
-for f in "$dest"/units/morndo-*.service "$dest"/units/morndo-*.timer; do
+for f in "$dest"/units/morndo-*.service "$dest"/units/morndo-*.timer "$dest"/units/morndo-*.socket "$dest"/units/morndo-*.path; do
   [ -f "$f" ] || continue
-  case ${f##*/} in *@.service|*@.timer) continue ;; esac
+  case ${f##*/} in *@.service|*@.timer|*@.socket|*@.path) continue ;; esac
   record "${f##*/}"
 done
 for u in $active_now; do
-  case $u in *.service|*.timer) ;; *) continue ;; esac
-  case $u in *@.service|*@.timer) continue ;; esac
+  case $u in *.service|*.timer|*.socket|*.path) ;; *) continue ;; esac
+  case $u in *@.service|*@.timer|*@.socket|*@.path) continue ;; esac
   record "$u"
 done
 
@@ -231,21 +231,35 @@ problems=""
 problem() { problems="$problems$NL$1"; echo "restore.sh: FAILED: $1" >&2; }
 try() { "$@" || problem "command failed: $*"; }
 
-# Units that must not be started at the end: shell patterns, one per line (a database that was not put back, a unit file
-# or wrapper that could not be copied back). apply_state leaves them stopped.
+# Units that must not be started at the end (a database that was not put back, a unit file or wrapper that could not be copied
+# back), one entry per line, never a shell pattern held in a variable: "g<prefix>/<suffix>" blocks every unit whose name starts
+# with the prefix and ends with the suffix (both empty: every unit), "e<name>" blocks that one unit. apply_state leaves them stopped.
 blocked=""
-is_blocked() {
-  _oif=$IFS; IFS=$NL
-  for _g in $blocked; do
-    IFS=$_oif
-    [ -n "$_g" ] || continue
-    case $1 in $_g) return 0 ;; esac
-    IFS=$NL
-  done
-  IFS=$_oif
+block_glob() { blocked="$blocked${NL}g$1/$2"; }
+block_exact() { blocked="$blocked${NL}e$1"; }
+unit_matches() { # unit entry
+  case $2 in
+    e*) [ "$1" = "${2#e}" ]; return ;;
+    g*)
+      _gp=${2#g}
+      _gs=${_gp#*/}
+      _gp=${_gp%%/*}
+      case $1 in "$_gp"*) ;; *) return 1 ;; esac
+      _gr=${1#"$_gp"}
+      case $_gr in *"$_gs") return 0 ;; esac
+      return 1 ;;
+  esac
   return 1
 }
-block() { blocked="$blocked$NL$1"; }
+is_blocked() {
+  while IFS= read -r _b; do
+    [ -n "$_b" ] || continue
+    if unit_matches "$1" "$_b"; then return 0; fi
+  done <<BLOCKED
+$blocked
+BLOCKED
+  return 1
+}
 
 # Which databases changed their schema since the backup (name=path lines).
 changed=""
@@ -272,8 +286,9 @@ stopfailed=no
 applied=no
 
 # ONE function puts every unit of the set (state.txt) into its recorded state, enabled or not and active or not:
-#   service  enabled=yes -> enable, enabled=no -> disable;  active=yes -> restart, active=no -> stop
+#   service, socket, path   enabled=yes -> enable, enabled=no -> disable;  active=yes -> restart, active=no -> stop
 #   timer    enabled=yes -> enable --now, then restart (a running timer takes the restored schedule); enabled=no -> disable --now
+# Order: services first, then sockets, paths and timers (the services they feed are already up).
 # A unit that fails is named and the others still go on. A blocked unit (see is_blocked) is enabled/disabled as recorded but
 # never started: a service on a database that was not put back, or whose unit file or wrapper could not be copied back.
 unit_do() { # unit, then the systemctl arguments
@@ -282,75 +297,98 @@ unit_do() { # unit, then the systemctl arguments
 }
 apply_state() {
   applied=yes
-  while read -r u a e; do
-    [ -n "$u" ] || continue
-    case $u in
-      *.service)
-        if [ "$e" = "enabled=yes" ]; then unit_do "$u" enable; else unit_do "$u" disable; fi
-        if is_blocked "$u"; then echo "restore.sh: $u is left stopped (see the FAILED lines above)" >&2
-        elif [ "$a" = "active=yes" ]; then unit_do "$u" restart; else unit_do "$u" stop; fi ;;
-      *.timer)
-        if is_blocked "$u"; then
-          echo "restore.sh: $u is left stopped (see the FAILED lines above)" >&2
+  for _pass in .service .socket .path .timer; do
+    while read -r u a e; do
+      [ -n "$u" ] || continue
+      case $u in *"$_pass") ;; *) continue ;; esac
+      case $_pass in
+        .timer)
+          if is_blocked "$u"; then
+            echo "restore.sh: $u is left stopped (see the FAILED lines above)" >&2
+            if [ "$e" = "enabled=yes" ]; then unit_do "$u" enable; else unit_do "$u" disable; fi
+          elif [ "$e" = "enabled=yes" ]; then unit_do "$u" enable --now; unit_do "$u" restart; else unit_do "$u" disable --now; fi ;;
+        *)
           if [ "$e" = "enabled=yes" ]; then unit_do "$u" enable; else unit_do "$u" disable; fi
-        elif [ "$e" = "enabled=yes" ]; then unit_do "$u" enable --now; unit_do "$u" restart; else unit_do "$u" disable --now; fi ;;
-    esac
-  done < "$bk/state.txt"
+          if is_blocked "$u"; then echo "restore.sh: $u is left stopped (see the FAILED lines above)" >&2
+          elif [ "$a" = "active=yes" ]; then unit_do "$u" restart; else unit_do "$u" stop; fi ;;
+      esac
+    done < "$bk/state.txt"
+  done
 }
 
-# Before any database is touched (the aside copy, the --with-db copy) every morndo unit that is loaded and active-like NOW
-# (active, activating, reloading, auto-restart; services, timers, sockets and paths, template instances included) is
-# stopped, whatever was recorded, and so is every service recorded active. Timers first, so none fires in the window.
-# apply_state puts the recorded state back at the end.
+# Every morndo unit that is loaded and active-like (active, activating, reloading, auto-restart; services, timers, sockets and
+# paths, template instances included), one name per line.
+list_active() {
+  "$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do
+    case $n in *.service|*.timer|*.socket|*.path) printf '%s\n' "$n" ;; esac
+  done
+}
+
+# Before any database is touched (the aside copy, the --with-db copy) every morndo unit that is active-like NOW is stopped,
+# whatever was recorded, and so is every service recorded active. Timers first, so none fires in the window. Then the units are
+# listed again and what is still (or newly) active is stopped again, up to 5 rounds: a timer can start a unit between the list
+# and the stop. A unit that is still active after that, or whose stop fails, sets stopfailed (no database is then overwritten)
+# and is named. apply_state puts the recorded state back at the end.
 stop_running() {
   stopped=yes
-  runlist=$("$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do printf '%s\n' "$n"; done) || runlist=""
-  timers=""; others=""
-  for s in $runlist; do
-    case $s in
-      *.timer) timers="$timers $s" ;;
-      *.service|*.socket|*.path) others="$others $s" ;;
-    esac
-  done
-  seen=" "
-  for s in $timers $others $start_list; do
-    case $seen in *" $s "*) continue ;; esac
-    seen="$seen$s "
-    if ! "$sc" --user stop "$s"; then stopfailed=yes; problem "unit $s would not stop before the database was touched"; fi
+  _round=0
+  while :; do
+    runlist=$(list_active) || runlist=""
+    if [ "$_round" -gt 0 ] && [ -z "$runlist" ]; then break; fi
+    if [ "$_round" -ge 5 ]; then
+      stopfailed=yes
+      problem "units that would not stay stopped after $_round rounds, so no database is overwritten:$(printf '%s' "$runlist" | tr '\n' ' ')"
+      break
+    fi
+    _round=$((_round + 1))
+    timers=""; others=""
+    for s in $runlist; do
+      case $s in
+        *.timer) timers="$timers $s" ;;
+        *) others="$others $s" ;;
+      esac
+    done
+    if [ "$_round" -eq 1 ]; then others="$others $start_list"; fi
+    _bad=no
+    seen=" "
+    for s in $timers $others; do
+      case $seen in *" $s "*) continue ;; esac
+      seen="$seen$s "
+      if ! "$sc" --user stop "$s"; then _bad=yes; stopfailed=yes; problem "unit $s would not stop before the database was touched"; fi
+    done
+    if [ "$_bad" = yes ]; then break; fi
   done
 }
 
 # Whatever goes wrong once services are stopped, they are started again before this script ends.
-finish() {
-  if [ "$stopped" = yes ] && [ "$applied" = no ]; then
-    echo "restore.sh: stopped before the end; starting the recorded units again" >&2
-    apply_state || true
-  fi
-}
-trap finish EXIT
+trap 'if [ "$stopped" = yes ] && [ "$applied" = no ]; then echo "restore.sh: stopped before the end; starting the recorded units again" >&2; apply_state || true; fi' EXIT
 
 # A database that could not be put back whole: its services stay stopped, and the line says which and what to do.
 dbfail() { # name path why
   case $1 in
-    hub|memory) _pat='morndo-hub*' ;;
-    fleet) _pat='morndo-fleet*' ;;
-    node) _pat='morndo-node*' ;;
-    *) _pat='*' ;;
+    hub|memory) _pre=morndo-hub ;;
+    fleet) _pre=morndo-fleet ;;
+    node) _pre=morndo-node ;;
+    *) _pre="" ;;
   esac
-  block "$_pat"
+  block_glob "$_pre" ""
   _svc=""
-  while IFS=" " read -r _u _a _e; do   # callers may have IFS set to a newline
-    case $_u in *.service) case $_u in $_pat) _svc="$_svc $_u" ;; esac ;; esac
+  while IFS=" " read -r _u _; do   # callers may have IFS set to a newline
+    case $_u in
+      *.service) if unit_matches "$_u" "g$_pre/"; then _svc="$_svc $_u"; fi ;;
+    esac
   done < "$bk/state.txt"
   _svc=${_svc# }
-  if [ "$_pat" = '*' ]; then _who="every morndo service stays stopped (unknown database name)"
-  elif [ -z "$_svc" ]; then _who="the services $_pat stay stopped"
+  if [ -z "$_pre" ]; then _who="every morndo service stays stopped (unknown database name)"
+  elif [ -z "$_svc" ]; then _who="the services ${_pre}* stay stopped"
   else case $_svc in *" "*) _who="the services $_svc stay stopped" ;; *) _who="the service $_svc stays stopped" ;; esac; fi
   problem "database $1 was NOT put back ($3); $_who; copy $bk/dbs/$1.db to $2 by hand and start it"
 }
 
-# One database: copy the backup beside the live file, verify it, remove the -wal/-shm only now, then rename it over the live one.
-# Returns 1 with $why set, the live file as it was before this call (or only its -wal/-shm gone, when the rename itself failed).
+# One database: copy the backup beside the live file and verify it. The live -wal/-shm are then moved aside beside the database
+# (<db>-wal.c6-aside, <db>-shm.c6-aside), never deleted first; the verified copy is renamed over the live file (mv -T); only after
+# that worked are the aside copies deleted. If the rename (or a move aside) fails they are put back where they were.
+# Returns 1 with $why set and the live file as it was before this call. Leaves no temp or aside file on success or failure.
 put_db() { # name path
   _src="$bk/dbs/$1.db"
   _tmp="$2.c6-restore.tmp"
@@ -360,13 +398,29 @@ put_db() { # name path
   if [ -f "$2" ]; then chmod --reference="$2" "$_tmp" 2>/dev/null || true; fi   # best effort: keep the live file's mode
   if ! dbtool check "$_tmp" >/dev/null 2>&1; then why="the backup copy $_src fails PRAGMA quick_check"; rm -f -- "${_tmp:?}" "${_tmp:?}-wal" "${_tmp:?}-shm"; return 1; fi
   rm -f -- "${_tmp:?}-wal" "${_tmp:?}-shm"
-  if ! rm -f -- "${2:?}-wal" "${2:?}-shm" || [ -e "$2-wal" ] || [ -e "$2-shm" ]; then why="could not remove $2-wal / -shm"; rm -f -- "${_tmp:?}"; return 1; fi
-  if ! mv -f -- "$_tmp" "$2"; then why="could not rename $_tmp over $2"; rm -f -- "${_tmp:?}"; return 1; fi
-  return 0
+  _mw=no
+  _ms=no
+  _okaside=yes
+  if [ -e "$2-wal" ] || [ -L "$2-wal" ]; then
+    if mv -f -T -- "$2-wal" "$2-wal.c6-aside"; then _mw=yes; else _okaside=no; fi
+  fi
+  if [ "$_okaside" = yes ] && { [ -e "$2-shm" ] || [ -L "$2-shm" ]; }; then
+    if mv -f -T -- "$2-shm" "$2-shm.c6-aside"; then _ms=yes; else _okaside=no; fi
+  fi
+  if [ "$_okaside" = no ]; then why="could not move $2-wal / -shm aside"
+  elif mv -f -T -- "$_tmp" "$2"; then
+    rm -f -- "${2:?}-wal.c6-aside" "${2:?}-shm.c6-aside"
+    return 0
+  else why="could not rename $_tmp over $2"; fi
+  if [ "$_mw" = yes ]; then mv -f -T -- "$2-wal.c6-aside" "$2-wal" || why="$why; and could not put $2-wal back from $2-wal.c6-aside"; fi
+  if [ "$_ms" = yes ]; then mv -f -T -- "$2-shm.c6-aside" "$2-shm" || why="$why; and could not put $2-shm back from $2-shm.c6-aside"; fi
+  rm -f -- "${_tmp:?}"
+  return 1
 }
 
-# One file, link or folder, replaced by copy-then-rename: a temp beside it, then renamed in. A folder is swapped (the new one
-# renamed in, the old one removed after). A failure removes the temp and leaves the old one whole.
+# One file, link or folder, replaced by copy-then-rename (mv -T: a destination that is a link to a folder is replaced, never
+# entered): a temp beside it, then renamed in. A folder is swapped (the new one renamed in, the old one removed after). A failure
+# removes the temp and leaves the old one whole.
 put() { # src dst
   _t="$2.c6-restore.tmp"
   _o="$2.c6-old.tmp"
@@ -374,13 +428,13 @@ put() { # src dst
   if ! cp -a -- "$1" "$_t"; then rm -rf -- "${_t:?}"; return 1; fi
   if { [ -d "$_t" ] && [ ! -L "$_t" ]; } || { [ -d "$2" ] && [ ! -L "$2" ]; }; then
     if [ -e "$2" ] || [ -L "$2" ]; then
-      if ! mv -- "$2" "$_o"; then rm -rf -- "${_t:?}"; return 1; fi
-      if ! mv -- "$_t" "$2"; then mv -- "$_o" "$2"; rm -rf -- "${_t:?}"; return 1; fi
+      if ! mv -f -T -- "$2" "$_o"; then rm -rf -- "${_t:?}"; return 1; fi
+      if ! mv -f -T -- "$_t" "$2"; then mv -f -T -- "$_o" "$2"; rm -rf -- "${_t:?}"; return 1; fi
       rm -rf -- "${_o:?}"
       return 0
     fi
   fi
-  if ! mv -f -- "$_t" "$2"; then rm -rf -- "${_t:?}"; return 1; fi
+  if ! mv -f -T -- "$_t" "$2"; then rm -rf -- "${_t:?}"; return 1; fi
   return 0
 }
 
@@ -426,7 +480,7 @@ for f in "$units"/morndo-*; do
   name=${f##*/}
   if [ -e "$bk/units/$name" ] || [ -L "$bk/units/$name" ]; then continue; fi
   case $name in
-    *.service|*.timer) "$sc" --user disable --now "$name" || problem "unit $name (added by the install) could not be disabled and stopped" ;;
+    *.service|*.timer|*.socket|*.path) "$sc" --user disable --now "$name" || problem "unit $name (added by the install) could not be disabled and stopped" ;;
   esac
   try rm -rf -- "${units:?}/${name:?}"
 done
@@ -439,7 +493,7 @@ for f in "$bk"/units/*; do
   if ! put "$f" "$units/$name"; then
     problem "unit file $name could not be copied back (the old one is kept whole); the service it belongs to is not started"
     base=${name%.d}
-    case $base in *@.service|*@.timer) block "${base%.*}*${base##*.}" ;; *) block "$base" ;; esac
+    case $base in *@.service|*@.timer|*@.socket|*@.path) block_glob "${base%.*}" ".${base##*.}" ;; *) block_exact "$base" ;; esac
   fi
 done
 try mkdir -p "$bin"
@@ -456,7 +510,7 @@ for f in "$bk"/wrappers/*; do
   name=${f##*/}
   if ! put "$f" "$bin/$name"; then
     problem "wrapper $name could not be copied back (the old one is kept whole); the services $name.service, $name@*, $name-* are not started"
-    block "$name.*"; block "$name@*"; block "$name-*"
+    block_glob "$name." ""; block_glob "$name@" ""; block_glob "$name-" ""
   fi
 done
 
