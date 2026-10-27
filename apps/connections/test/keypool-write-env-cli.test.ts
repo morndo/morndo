@@ -255,12 +255,13 @@ describe("one writer at a time, and a pair that agrees", () => {
     expect([out.code, out.stderr]).toEqual([0, ""]);
     expect(Date.now() - started).toBeLessThan(4000);
   });
-  it("a lock file of the earlier text form is removed at the first run and the write goes through", async () => {
+  it("a lock file of the earlier text form is busy and is never deleted: it is not a lock this code can take", async () => {
     const w = await world();
     writeFileSync(`${w.file}.lock`, `2147483646 1 ${NS}\n`);
     const out = await write(w);
-    expect([out.code, out.stderr]).toEqual([0, ""]);
-    expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.lock", "app.env.member"]);
+    expect([out.code, out.stdout, out.stderr.trim().split("\n")[0]]).toEqual([1, "", "busy"]);
+    expect(readFileSync(`${w.file}.lock`, "utf8")).toBe(`2147483646 1 ${NS}\n`);
+    expect(readdirSync(w.sinks).filter(name => name === "app.env" || name === "app.env.member")).toEqual([]);
   });
   it("a temp file left by a killed write is replaced, not kept", async () => {
     const w = await world();

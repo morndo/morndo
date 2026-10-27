@@ -338,15 +338,49 @@ describe("one writer at a time: a lock the kernel releases when its holder dies"
     expect(taken.ok).toBe(true);
     if (taken.ok) taken.release();
   });
-  it("a lock file of the earlier text forms (rounds 2 and 3) is removed at the first run and the lock is taken", async () => {
+  it("a second taker in the same process cannot drop the first one's lock: the file is opened once, through one SQLite handle, so another process still finds it busy", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    const first = await acquireEnvLock(path, { waitMs: 0 });
+    expect(first.ok).toBe(true);
+    for (let i = 0; i < 3; i++) expect(await acquireEnvLock(path, { waitMs: 100 })).toMatchObject({ ok: false, problem: "busy" });
+    const helper = join(import.meta.dirname, "fixtures/lock-try.mjs");
+    const answer = await new Promise<string>(resolve => {
+      const child = spawn(process.execPath, ["--experimental-strip-types", helper, path, "0"]);
+      let out = "";
+      child.stdout.on("data", chunk => { out += chunk; });
+      child.on("close", () => { resolve(out.trim()); });
+    });
+    expect(answer).toBe("busy");
+    if (first.ok) first.release();
+    const after = await acquireEnvLock(path, { waitMs: 0 });
+    expect(after.ok).toBe(true);
+    if (after.ok) after.release();
+  });
+  it("two takers of one sink in one process, started together, are served one after the other, never both", async () => {
+    const path = join(area(), ".env");
+    const both = await Promise.all([acquireEnvLock(path, { waitMs: 2000 }), acquireEnvLock(path, { waitMs: 2000 })]);
+    const ok = both.filter(row => row.ok);
+    expect(ok).toHaveLength(1);
+    expect(both.find(row => !row.ok)).toMatchObject({ problem: "busy" });
+    if (ok[0]?.ok) ok[0].release();
+  });
+  it("a path spelled another way (a link to its directory) is the same sink: the second taker is busy", async () => {
+    const dir = area();
+    mkdirSync(join(dir, "real"));
+    symlinkSync(join(dir, "real"), join(dir, "alias"));
+    const first = await acquireEnvLock(join(dir, "real", ".env"), { waitMs: 0 });
+    expect(first.ok).toBe(true);
+    expect(await acquireEnvLock(join(dir, "alias", ".env"), { waitMs: 100 })).toMatchObject({ ok: false, problem: "busy" });
+    if (first.ok) first.release();
+  });
+  it("a lock file of the earlier text forms (rounds 2 and 3) was never shipped: it is not a lock this code can take, so it is busy and is never deleted", async () => {
     for (const body of ["123 456\n", "123 456 789\n", "123\n"]) {
       const dir = area();
       const path = join(dir, ".env");
       writeFileSync(`${path}.lock`, body);
-      const taken = await acquireEnvLock(path, { waitMs: 0 });
-      expect(taken.ok, body).toBe(true);
-      if (taken.ok) taken.release();
-      expect(readdirSync(dir), body).toEqual([".env.lock"]);
+      expect(await acquireEnvLock(path, { waitMs: 0 }), body).toMatchObject({ ok: false, problem: "busy" });
+      expect(readFileSync(`${path}.lock`, "utf8"), body).toBe(body);
     }
   });
   it("anything else at the lock path is not touched: no lock can be made on it, so it is busy and left as it is", async () => {
