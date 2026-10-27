@@ -31,6 +31,7 @@ const KEY_WALK_LIMIT = 32;
 export type CheckOutcome =
   | { kind: "up_to_date"; current: string }
   | { kind: "staged"; version: string; already: boolean }
+  | { kind: "feed_verified"; channel: string; seq: number }            // feedOnly: the feed checked out; no offer was looked at
   | { kind: "skipped"; reason: string; version: string | null }        // admit's refusal: pinned, withdrawn, bad_here, …
   | { kind: "refused"; step: string; detail: string }                  // RL1/RL3: the chain's own word for what failed
   | { kind: "not_ours"; detail: string }                               // RL14: a checkout, a package, or updates disabled
@@ -74,7 +75,9 @@ export class CheckService {
     this.#p = p;
   }
 
-  async check(ask?: { to: Version }): Promise<CheckOutcome> {
+  /** `feedOnly` stops once the Feed is verified and its word recorded (§10.2 steps 2 and 3): no offer is judged, so
+   *  nothing is staged and no manifest or artifact is fetched. `morndo install` ends with it (§10.3). */
+  async check(ask?: { to: Version }, o: { feedOnly?: boolean } = {}): Promise<CheckOutcome> {
     const { feed, artifacts, verifier, installer, store, settings: settingsSource, clock, platform, switches, fleet, state } = this.#p;
     const settings = settingsSource.read();
     // What the store learns on the way (§4.5): the feed's word once accepted, the Version once offered.
@@ -169,6 +172,9 @@ export class CheckService {
       feedSeq = channelFeed.seq;
       feedExpiresAt = channelFeed.expiresAt;
       store.saveTrust({ keySet, highestFeedSeq: { ...trust.highestFeedSeq, [settings.channel]: channelFeed.seq } });
+      if (o.feedOnly === true) {
+        return finish({ kind: "feed_verified", channel: settings.channel, seq: channelFeed.seq }, `the ${settings.channel} feed (seq ${channelFeed.seq}) checks out`, null);
+      }
 
       // The offer. With no ask: the highest Version the feed lists that is not withdrawn (RL2, RL12). An unparsable
       // entry is skipped, never guessed at. A pin (RL14) narrows it: the entry the pin names — when the feed offers
