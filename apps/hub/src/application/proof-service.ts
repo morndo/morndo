@@ -40,6 +40,7 @@ export class ProofService {
   #chain = new Map<string, Promise<void>>();     // every run for a task, one after another (the timer's included)
   #whole = new Map<string, Promise<void>>();     // a whole-brief check out or waiting: what a refresh joins
   #verifyAll = new Map<string, Promise<void>>(); // the one that re-reads every reference: what a second verify joins
+  #read = new WeakMap<Promise<void>, { rev: number | null } | null>();   // a joinable run: the brief rev it read when it began, null while it waits its turn
   #running = new Set<Promise<void>>();           // every check begun, for idle()
   #requiredCache = new Map<string, { names: string[]; at: number }>();
 
@@ -148,7 +149,7 @@ export class ProofService {
   // is a row of none, never a refusal someone sees. One verify per task at a time: a second call while one runs waits
   // for that one — the move to review and the filing of a brief land together, and both would read the same refs twice.
   verify(key: string): Promise<void> {
-    const out = this.#verifyAll.get(key);
+    const out = this.#joinable(key, this.#verifyAll.get(key));
     if (out !== undefined) return out;
     return this.#serialize(key, () => this.#check(key, brief => [...brief.brief.refs]), { whole: true, all: true });
   }
@@ -157,7 +158,7 @@ export class ProofService {
   // checkedAt like any row). The Done gate's own re-read: fresh results are trusted, stale ones re-asked. A whole-brief
   // check already out re-reads at least what is stale, so it is joined rather than doubled.
   refresh(key: string, maxAgeMs = 30_000): Promise<void> {
-    const out = this.#whole.get(key);
+    const out = this.#joinable(key, this.#whole.get(key));
     if (out !== undefined) return out;
     return this.#serialize(key, () => {
       const now = this.#now();
@@ -325,13 +326,30 @@ export class ProofService {
     return { state: "unfetchable", detail: failure.detail };
   }
 
+  // A run out is joined only if it has not begun (it will read the brief that counts when its turn comes) or began on the
+  // brief that counts now. One that began on an older brief took that brief's references, so joining it would leave the
+  // new brief's rows pending until the timer pass.
+  #joinable(key: string, out: Promise<void> | undefined): Promise<void> | undefined {
+    if (out === undefined) return undefined;
+    const read = this.#read.get(out);
+    return read === null || read?.rev === this.#briefRev(key) ? out : undefined;
+  }
+
+  #briefRev(key: string): number | null {
+    return currentBrief(this.#store.taskEvents(key))?.rev ?? null;
+  }
+
   // One run per task at a time, in a chain; a run never rejects (verify never does), and every run is tracked until it
   // ends, which is what idle() waits for. `join`: the run is remembered as the task's whole-brief check (a refresh
   // joins it) and, `all`, as its full verify (a second verify joins that).
   #serialize(key: string, run: () => Promise<void>, join: { whole?: boolean; all?: boolean } = {}): Promise<void> {
     const prior = this.#chain.get(key) ?? Promise.resolve();
-    const mine = prior.then(run, run);             // the run before it ends first; its outcome never blocks the next
+    const joinable = join.whole === true || join.all === true;
+    // The brief is read in the run's first synchronous step, so the rev noted here is the one it takes its references from.
+    const turn = joinable ? () => { this.#read.set(end, { rev: this.#briefRev(key) }); return run(); } : run;
+    const mine = prior.then(turn, turn);           // the run before it ends first; its outcome never blocks the next
     const end = mine.then(() => {}, () => {});
+    if (joinable) this.#read.set(end, null);
     if (join.whole) this.#whole.set(key, end);
     if (join.all) this.#verifyAll.set(key, end);
     this.#chain.set(key, end);
