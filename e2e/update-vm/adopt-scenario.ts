@@ -275,9 +275,13 @@ async function proofs(p: string, base: Baseline): Promise<void> {
 // successfully" line may never be written. So the fired restore is judged by its effects and by the absence of a failed result.
 function deadmanJournal(machine: string): { ranOk: boolean; failedRun: boolean; text: string } {
   const text = run("journalctl", ["--user", "-u", `c6-deadman-${machine}.service`, "--no-pager", "-o", "cat"]).out;
+  // The user manager does not log a clean exit at all (only "Started"): a transient unit that ended with exit 0 is gone,
+  // one that failed stays loaded in the failed state until reset-failed. Started, not failed, no failed result = exit 0.
+  const failedList = run("systemctl", ["--user", "list-units", "--failed", "--all", "--no-legend", "--plain"]).out;
+  const failedRun = /Failed with result|status=[1-9]|code=exited, status=[1-9]/.test(text) || failedList.includes(`c6-deadman-${machine}.service`);
   return {
-    ranOk: new RegExp(`c6-deadman-${machine}\\.service: (Deactivated successfully|Succeeded)`).test(text),
-    failedRun: /Failed with result|status=[1-9]|code=exited, status=[1-9]/.test(text),   // not "Failed to open transient file": see below
+    ranOk: text.includes(`Started c6-deadman-${machine}.service`) && !failedRun,
+    failedRun,
     text: text.trim().split("\n").slice(-6).join(" | "),
   };
 }
