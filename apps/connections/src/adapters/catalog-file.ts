@@ -1,9 +1,9 @@
 // The vendor catalog is a JSON file validated by the protocol schema (design section 8). Key-pool terms are the
 // sibling file key-pools.json, and probe models are key-pool-probes.json. Missing, unreadable or invalid: there
-// are no key pools, or no probes.
+// are no key pools, or no probes. Auto's families and classes are the sibling file auto-routing.json; without it there are none.
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { parseKeyPoolCatalog, parseKeyPoolProbeCatalog, parseVendorCatalog, type KeyPoolProbe, type KeyPoolTerms, type VendorPreset } from "@morndo/protocol";
+import { parseAutoRoutingCatalog, parseKeyPoolCatalog, parseKeyPoolProbeCatalog, parseVendorCatalog, type AutoRoutingRules, type KeyPoolProbe, type KeyPoolTerms, type VendorPreset } from "@morndo/protocol";
 import type { Catalog } from "../application/ports.ts";
 
 export class CatalogRefused extends Error {
@@ -35,10 +35,23 @@ function readKeyPoolProbes(path: string): ReadonlyMap<string, KeyPoolProbe> {
   }
 }
 
+function readAutoRouting(path: string): ReadonlyMap<string, AutoRoutingRules> {
+  try {
+    const parsed = parseAutoRoutingCatalog(JSON.parse(readFileSync(path, "utf8")));
+    if (!parsed) return new Map();
+    return new Map(parsed.map(entry => [entry.vendor, {
+      families: entry.families, class: entry.class, ...(entry.ownModels ? { ownModels: entry.ownModels } : {}),
+    }]));
+  } catch {
+    return new Map();
+  }
+}
+
 export class FileCatalog implements Catalog {
   readonly #presets: readonly VendorPreset[];
   readonly #pools: ReadonlyMap<string, KeyPoolTerms>;
   readonly #probes: ReadonlyMap<string, KeyPoolProbe>;
+  readonly #auto: ReadonlyMap<string, AutoRoutingRules>;
   constructor(path: string) {
     let parsed: unknown;
     try { parsed = JSON.parse(readFileSync(path, "utf8")); }
@@ -49,8 +62,10 @@ export class FileCatalog implements Catalog {
     const dir = dirname(path);
     this.#pools = readKeyPools(join(dir, "key-pools.json"));
     this.#probes = readKeyPoolProbes(join(dir, "key-pool-probes.json"));
+    this.#auto = readAutoRouting(join(dir, "auto-routing.json"));
   }
   presets(): readonly VendorPreset[] { return this.#presets; }
   keyPool(vendor: string): KeyPoolTerms | null { return this.#pools.get(vendor) ?? null; }
   keyPoolProbe(vendor: string): KeyPoolProbe | null { return this.#probes.get(vendor) ?? null; }
+  autoRouting(vendor: string): AutoRoutingRules | null { return this.#auto.get(vendor) ?? null; }
 }

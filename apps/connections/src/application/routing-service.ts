@@ -1,7 +1,7 @@
 // The routing policy is saved whole, then written through EngineSettings. A chain changed outside is drift (R7–R15).
 import {
-  engineText, ensureRole, findConnection, observeDrift, parseEngine, planWrites, prepareWrite, project,
-  setOverride, setPicks, setPriority, setRole, withPools, type Engine, type Listed, type Mode, type Override, type Policy, type Priority,
+  engineText, ensureRole, findConnection, observeDrift, parseEngine, planWrites, prepareWrite, project, sameOrder, switchesAuto,
+  setOverride, setPicks, setPriority, setRole, withPools, type AutoAuthority, type Engine, type Listed, type Mode, type Override, type Policy, type Priority,
 } from "@morndo/domain";
 import { err, ok, type Result } from "@morndo/domain";
 import type { Deps, Failure, PoolNames } from "./ports.ts";
@@ -20,11 +20,17 @@ export class RoutingService {
   }
 
   // A page command is one check, then one persist. A refusal or a failed chain write leaves the stored policy as it was.
-  commitPriority(mode: Mode, order: readonly string[], command: string): Result<void, Failure> {
+  // The caller says the authority: only the hub has checked a fresh passkey, and nothing in the body counts.
+  commitPriority(mode: Mode, order: readonly string[], command: string, auto?: boolean, authority: AutoAuthority = "session"): Result<void, Failure> {
     const { directory, policy, version } = this.#deps.store.load();
     const sent = withPools(order, policy.priority.order, this.#poolNames(directory));
-    const next = setPriority(policy, { mode, order: sent }, this.#listed(directory), command, this.#deps.clock.now());
+    const priority = auto === undefined ? { mode, order: sent } : { mode, order: sent, auto };
+    const next = setPriority(policy, priority, this.#listed(directory), command, this.#deps.clock.now(), authority);
     if (!next.ok) return problem(next.error);
+    // R16: an auto-only switch writes no chain, pending or not; it only saves the policy.
+    if (switchesAuto(policy, priority) && sameOrder(policy.priority, mode, sent)) {
+      return this.#deps.store.save(directory, next.value, version) ? ok(undefined) : err({ problem: "conflict" });
+    }
     return this.#write(directory, next.value, version, this.#deps.engines.chains(), policy);
   }
 

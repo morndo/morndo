@@ -2,7 +2,7 @@
 // connections RoutingService, reached through the commands port, never this hub's engine CLI.
 import { mayCommand, type AccessPolicy } from "@morndo/domain";
 import {
-  commandNeedsStepUp, type CommandKind, type ConnectionsPage, type NarrowCommand, type PriorityCommand, type RevokeCommand, type RoleCommand,
+  commandNeedsStepUp, HUB_COMMAND, type CommandKind, type ConnectionsPage, type NarrowCommand, type PriorityCommand, type RevokeCommand, type RoleCommand,
 } from "@morndo/protocol";
 import type { Authenticated } from "./access-service.ts";
 
@@ -28,7 +28,7 @@ export class ConnectionsPageService {
 
   async run(a: Authenticated, kind: CommandKind, body: PriorityCommand | RoleCommand | RevokeCommand | NarrowCommand): Promise<PageResult> {
     if (commandNeedsStepUp(kind) && !mayCommand(a.session, this.#now(), this.#policy())) return { ok: false, problem: "step_up" };
-    const command = "hub";
+    const command = HUB_COMMAND;
     const result = await (kind === "priority" ? this.#commands.priority(body as PriorityCommand, command)
       : kind === "role" ? this.#commands.role(body as RoleCommand, command)
         : kind === "revoke" ? this.#commands.revoke(body as RevokeCommand, command)

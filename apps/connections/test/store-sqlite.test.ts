@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import Database from "better-sqlite3";
-import { addKey, emptyDirectory, emptyPolicy, setPriority, type Actor } from "@morndo/domain";
+import { addKey, emptyDirectory, emptyPolicy, setPriority, setTaskCeiling, type Actor } from "@morndo/domain";
 import { spawn } from "node:child_process";
 import { FileRefused } from "../src/adapters/file-mode.ts";
 import { DatabaseFromFuture, MIGRATIONS } from "../src/adapters/store-migrations.ts";
@@ -141,6 +141,59 @@ describe("store-sqlite", () => {
     open.push(store);
     expect(store.load().version).toBe(0);
     expect(readFileSync(file).subarray(0, 15).toString("utf8")).toBe("SQLite format 3");
+  });
+
+  it("loads a policy stored before auto settings", () => {
+    const file = path();
+    const store = new SqliteStore(file);
+    open.push(store);
+    const raw = new Database(file);
+    const old = {
+      priority: { mode: "custom", order: [] },
+      roles: [{
+        role: "implement-backend", override: "follow", priority: null, picks: [],
+        riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null,
+      }],
+      events: [],
+    };
+    raw.prepare("UPDATE policy SET body = ? WHERE id = 1").run(JSON.stringify(old));
+    raw.close();
+    const loaded = store.load().policy;
+    expect(loaded.priority.auto).toBe(false);
+    expect(loaded.autoSettings.taskCeiling).toBe(3);
+    expect(loaded.roles[0]?.auto).toBe(true);
+    expect(setTaskCeiling(loaded, 2, "session", "c1", T).ok).toBe(true);
+  });
+
+  it("load() returns a stored policy that parsePolicy refuses instead of throwing", () => {
+    const file = path();
+    const store = new SqliteStore(file);
+    open.push(store);
+    const raw = new Database(file);
+    // No events array: the strict parser refuses this body; the store still loads it with the Auto fields filled.
+    const stubborn = {
+      priority: { mode: "custom", order: [] },
+      roles: [{
+        role: "implement-backend", override: "follow", priority: null, picks: [],
+        riskPicks: null, written: null, writtenRisk: null, seenChain: null, seenRisk: null,
+      }],
+    };
+    raw.prepare("UPDATE policy SET body = ? WHERE id = 1").run(JSON.stringify(stubborn));
+    raw.close();
+    const loaded = store.load().policy;
+    expect(loaded.priority.auto).toBe(false);
+    expect(loaded.events).toEqual([]);
+    expect(loaded.roles[0]?.auto).toBe(true);
+  });
+
+  it("load() still throws on a body that is not a policy", () => {
+    const file = path();
+    const store = new SqliteStore(file);
+    open.push(store);
+    const raw = new Database(file);
+    raw.prepare("UPDATE policy SET body = ? WHERE id = 1").run(JSON.stringify({ nope: true }));
+    raw.close();
+    expect(() => store.load()).toThrow("policy is not valid");
   });
 
   it("refuses a file that is not a database and leaves those bytes alone", () => {

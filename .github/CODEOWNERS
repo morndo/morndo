@@ -1,3 +1,6 @@
 # One maintainer until the org has a team. Needs write access or review requests do not attach.
 # https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
 * @jacksnxly
+
+# The trust files (the release and feed signer keys). Last match wins, so this line stays below "*".
+/trust/ @jacksnxly
