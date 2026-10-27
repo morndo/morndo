@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NotificationEvent } from "@morndo/domain";
+import { DECISION_SETTLE_MS, type NotificationEvent } from "@morndo/domain";
 import { PushPayload, parseBody } from "@morndo/protocol";
 import { NotificationService, type PushStore } from "../src/application/notification-service.ts";
 import { loadOrCreateVapid, pushSender, type PushOptions, type PushSubscription } from "../src/adapters/webpush.ts";
@@ -331,3 +331,69 @@ describe("a usage notice the hub wrote (S4, plan 4.4)", () => {
   });
 });
 
+
+describe("a Decision pushes only once it has waited a minute without a break (N2 settle, 2026-10-27)", () => {
+  // 2026-10-27: a tool typed /exit into the manager's pane every 2 min 10 s; each /exit opened a
+  // background-tasks menu for a few seconds, the hub read it as a Decision and pushed: 7 times in 15 minutes.
+  let quiet: NotificationService;
+  const later = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); await quiet.settled(); };
+  beforeEach(() => {
+    quiet = new NotificationService({ store, send: async (s, payload, options) => { sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options }); return { status: 201 }; } });
+    quiet.board([]);
+  });
+  afterEach(() => quiet.stop());
+
+  it("the settle is a minute", () => {
+    expect(DECISION_SETTLE_MS).toBe(60_000);
+  });
+  it("a Decision still waiting after the minute: one push to each device, a second after the minute", async () => {
+    quiet.board([decision("ny-1")]);
+    await later(60_000);
+    expect(sent).toEqual([]);
+    await later(1_000);
+    expect(sent.map(s => s.payload)).toEqual([
+      { kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 },
+      { kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 },
+    ]);
+  });
+  it("seven menus, each open for 3 seconds and 2 min 10 s apart, raise nothing while another Decision waits", async () => {
+    quiet.board([decision("ny-611")]);
+    await later(61_000);
+    const before = sent.length;
+    expect(before).toBe(2);
+    for (let i = 0; i < 7; i++) {
+      quiet.board([decision("ny-611"), decision(`menu-${i}`)]);
+      await later(3_000);
+      quiet.board([decision("ny-611")]);
+      await later(127_000);
+    }
+    expect(sent.length).toBe(before);
+    expect(audit.filter(e => e.type === "NotificationSent")).toHaveLength(1);
+  });
+  it("a Decision that stops waiting and comes back starts its minute again", async () => {
+    quiet.board([decision("ny-2")]);
+    await later(50_000);
+    quiet.board([]);
+    await later(5_000);
+    quiet.board([decision("ny-2")]);
+    await later(59_000);
+    expect(sent).toEqual([]);
+    await later(2_000);
+    expect(sent).toHaveLength(2);
+  });
+  it("what waits at start still raises nothing, after the minute too", async () => {
+    const start = new NotificationService({ store, send: async () => ({ status: 201 }) });
+    start.board([decision("ny-1"), decision("ny-2")]);
+    await vi.advanceTimersByTimeAsync(70_000);
+    await start.settled();
+    expect(audit).toEqual([]);
+    start.stop();
+  });
+  it("stop() ends a settle in progress: nothing goes after it", async () => {
+    quiet.board([decision("ny-3")]);
+    await later(30_000);
+    quiet.stop();
+    await later(60_000);
+    expect(sent).toEqual([]);
+  });
+});
