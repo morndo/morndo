@@ -287,6 +287,17 @@ describe("one writer at a time: a lock the kernel releases when its holder dies"
     expect(second.ok).toBe(true);
     if (second.ok) second.release();
   });
+  it("a taker waits for a holder in another process to let go, and takes the lock then", async () => {
+    const path = join(area(), ".env");
+    const helper = join(import.meta.dirname, "fixtures/lock-try.mjs");
+    const child = spawn(process.execPath, ["--experimental-strip-types", helper, path, "600"]);
+    await new Promise<void>(resolve => { child.stdout.on("data", () => { resolve(); }); });
+    const started = Date.now();
+    const taken = await acquireEnvLock(path, { waitMs: 5000 });
+    expect(taken.ok).toBe(true);
+    expect(Date.now() - started).toBeGreaterThanOrEqual(200);
+    if (taken.ok) taken.release();
+  });
   it("the holder is recorded for messages only: pid, start ticks and pid namespace in <path>.lock.owner, gone with the lock", async () => {
     const dir = area();
     const path = join(dir, ".env");
