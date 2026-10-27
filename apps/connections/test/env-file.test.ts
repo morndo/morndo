@@ -6,8 +6,11 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { spawn } from "node:child_process";
+import { readlinkSync } from "node:fs";
 import { acquireEnvLock, memberLoadedAt, readEnvStamp, writeEnvFile } from "../src/adapters/env-file.ts";
 
+// The pid namespace this test runs in, as a lock records it.
+const NS = /\[(\d+)\]/.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? "0";
 const VALUE = "synthetic-value-for-the-env-file-0000";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -173,6 +176,16 @@ describe("the pair is stamped: the sidecar says which file it is about", () => {
     expect(memberLoadedAt(stamp, Date.now() + 1000)).toBe("k2");
     expect(memberLoadedAt({ ...stamp, consistent: false }, Date.now() + 1000)).toBeNull();
   });
+  it("memberLoadedAt with a start known only to the clock's resolution (a window): a write inside the window is ambiguous, so no one is blamed", () => {
+    const stamp = { consistent: true, history: [{ at: 1000, member: "k1" }, { at: 5000, member: "k2" }] };
+    expect(memberLoadedAt(stamp, { from: 4500, to: 5500 })).toBeNull();
+    expect(memberLoadedAt(stamp, { from: 900, to: 1900 })).toBeNull();
+    expect(memberLoadedAt(stamp, { from: 5001, to: 6001 })).toBe("k2");
+    expect(memberLoadedAt(stamp, { from: 2000, to: 3000 })).toBe("k1");
+    expect(memberLoadedAt(stamp, { from: 100, to: 900 })).toBeNull();
+    expect(memberLoadedAt(stamp, { from: 5000, to: 6000 })).toBe("k2");
+    expect(memberLoadedAt({ ...stamp, consistent: false }, { from: 2000, to: 3000 })).toBeNull();
+  });
   it("a sidecar of the earlier two-line form knows only the current write", () => {
     const dir = area();
     const path = join(dir, ".env");
@@ -254,12 +267,13 @@ describe("one writer at a time: <path>.lock", () => {
     expect(second.ok).toBe(true);
     if (second.ok) second.release();
   });
-  it("a lock names its owner by pid and start time, and nothing else is left in the directory", async () => {
+  it("a lock names its owner by pid, start time and pid namespace, and nothing else is left in the directory", async () => {
     const dir = area();
     const path = join(dir, ".env");
     const lock = await acquireEnvLock(path, { waitMs: 0 });
     expect(lock.ok).toBe(true);
-    expect(readFileSync(`${path}.lock`, "utf8")).toMatch(/^\d+ \d+\n$/);
+    expect(readFileSync(`${path}.lock`, "utf8")).toMatch(/^\d+ \d+ \d+\n$/);
+    expect(readFileSync(`${path}.lock`, "utf8").trim().split(" ")[2]).toBe(NS);
     expect(readFileSync(`${path}.lock`, "utf8").split(" ")[0]).toBe(String(process.pid));
     expect(readdirSync(dir)).toEqual([".env.lock"]);
     if (lock.ok) lock.release();
@@ -267,7 +281,7 @@ describe("one writer at a time: <path>.lock", () => {
   it("a lock whose owner is provably gone is taken over: the pid is dead, or the pid is alive but is not the process that took the lock (a reused pid)", async () => {
     const dir = area();
     const path = join(dir, ".env");
-    for (const body of ["2147483646 1\n", `${process.pid} 1\n`]) {
+    for (const body of [`2147483646 1 ${NS}\n`, `${process.pid} 1 ${NS}\n`]) {
       writeFileSync(`${path}.lock`, body);
       const taken = await acquireEnvLock(path, { waitMs: 0 });
       expect(taken.ok, body).toBe(true);
@@ -275,13 +289,13 @@ describe("one writer at a time: <path>.lock", () => {
     }
     expect(readdirSync(dir)).toEqual([]);
   });
-  it("a lock is not stale because it is old, or empty, or unreadable: only an owner that is provably gone counts", async () => {
+  it("a lock is not stale because it is old, or empty, or unreadable, or from another pid namespace (a pid there cannot be looked up here): only an owner that is provably gone counts", async () => {
     const dir = area();
     const path = join(dir, ".env");
     const mine = await acquireEnvLock(path, { waitMs: 0 });
     const body = readFileSync(`${path}.lock`, "utf8");
     if (mine.ok) mine.release();
-    for (const text of [body, "", "\n", "garbage", "12 ", "-5 7\n", "abc def\n"]) {
+    for (const text of [body, "", "\n", "garbage", "12 ", "-5 7\n", "abc def\n", `2147483646 1 ${Number(NS) + 1}\n`, "2147483646 1\n", `2147483646 1 \n`, `2147483646 1 x\n`]) {
       writeFileSync(`${path}.lock`, text);
       if (text === body) {
         const old = new Date(Date.now() - 3 * 3_600_000);
@@ -312,5 +326,65 @@ describe("one writer at a time: <path>.lock", () => {
     const mine = await acquireEnvLock(path, { waitMs: 0 });
     expect(await acquireEnvLock(path, { waitMs: 100 })).toEqual({ ok: false, problem: "busy" });
     if (mine.ok) mine.release();
+  });
+});
+
+describe("taking over a stale lock cannot hit a newer one", () => {
+  const live = async (path: string): Promise<string> => {
+    const mine = await acquireEnvLock(`${path}.other`, { waitMs: 0 });
+    const text = readFileSync(`${path}.other.lock`, "utf8");
+    if (mine.ok) mine.release();
+    return text;
+  };
+  it("a live lock that appears between the read and the removal is put back untouched, and the taker says busy", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    writeFileSync(`${path}.lock`, `2147483646 1 ${NS}\n`);
+    const fresh = await live(path);
+    let called = 0;
+    const out = await acquireEnvLock(path, {
+      waitMs: 0,
+      beforeTakeover: () => { called += 1; writeFileSync(`${path}.lock`, fresh); },
+    });
+    expect(out).toEqual({ ok: false, problem: "busy" });
+    expect(called).toBe(1);
+    expect(readFileSync(`${path}.lock`, "utf8")).toBe(fresh);
+    expect(readdirSync(dir).sort()).toEqual([".env.lock"]);
+  });
+  it("a stale lock is taken over exactly: the new lock names the new owner, and nothing of the old one is left behind", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    writeFileSync(`${path}.lock`, `2147483646 1 ${NS}\n`);
+    const taken = await acquireEnvLock(path, { waitMs: 0 });
+    expect(taken.ok).toBe(true);
+    expect(readFileSync(`${path}.lock`, "utf8").split(" ")[0]).toBe(String(process.pid));
+    expect(readdirSync(dir)).toEqual([".env.lock"]);
+    if (taken.ok) taken.release();
+    expect(readdirSync(dir)).toEqual([]);
+  });
+  it("release removes only the lock it took: a lock someone else made in its place stays", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    const mine = await acquireEnvLock(path, { waitMs: 0 });
+    expect(mine.ok).toBe(true);
+    writeFileSync(`${path}.lock`, `2147483646 1 ${NS}\n`);
+    if (mine.ok) mine.release();
+    expect(readFileSync(`${path}.lock`, "utf8")).toBe(`2147483646 1 ${NS}\n`);
+  });
+  it("a stale lock raced for by several processes is taken by exactly one, every time", async () => {
+    const dir = area();
+    const path = join(dir, ".env");
+    const helper = join(import.meta.dirname, "fixtures/lock-try.mjs");
+    for (let round = 0; round < 6; round++) {
+      writeFileSync(`${path}.lock`, `2147483646 1 ${NS}\n`);
+      const answers = await Promise.all(Array.from({ length: 8 }, () => new Promise<string>(resolve => {
+        const child = spawn(process.execPath, ["--experimental-strip-types", helper, path, "1200"]);
+        let out = "";
+        child.stdout.on("data", chunk => { out += chunk; });
+        child.on("close", () => { resolve(out.trim()); });
+      })));
+      expect(answers.filter(row => row === "ok"), `round ${round}: ${answers.join(",")}`).toHaveLength(1);
+      expect(readdirSync(dir)).toEqual([]);
+    }
   });
 });

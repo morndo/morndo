@@ -239,7 +239,7 @@ describe("--sink: the key the server loaded is the key of the write that was the
     const w = await world();
     w.fake.answers[KEYS[0]] = dryKey;
     expect((await writeEnv(w)).code).toBe(0);
-    await sleep(1300);
+    await sleep(1700);
     const pid = await server();
     writeFileSync(w.log, `${CREDIT}\n`);
     expect(lines(await watch(w, "--sink", w.file, "--server-pid", String(pid), "--once"))).toEqual([{ pool: "p", member: "k1", outcome: "exhausted" }]);
@@ -251,7 +251,7 @@ describe("--sink: the key the server loaded is the key of the write that was the
     w.fake.answers[KEYS[0]] = dryKey;
     w.fake.answers[KEYS[1]] = dryKey;
     expect((await writeEnv(w)).code).toBe(0);
-    await sleep(1300);
+    await sleep(1700);
     const pid = await server();
     await sleep(2300);
     expect(JSON.parse((await writeEnv(w, "--if-due", "--rotate-every", "2s")).stdout)).toMatchObject({ written: true, member: "k2" });
@@ -264,7 +264,7 @@ describe("--sink: the key the server loaded is the key of the write that was the
     const w = await world();
     expect((await writeEnv(w)).code).toBe(0);
     writeFileSync(w.log, `${CREDIT}\n`);
-    await sleep(1300);
+    await sleep(1700);
     const out = await watch(w, "--sink", w.file, "--once");
     expect([out.code, out.stdout]).toEqual([0, ""]);
     expect(w.fake.seen).toEqual([]);
@@ -272,7 +272,7 @@ describe("--sink: the key the server loaded is the key of the write that was the
   it("a pid that is not a process, or a server that started before the first write on record, blames no one", async () => {
     const w = await world();
     const early = await server();
-    await sleep(1300);
+    await sleep(1700);
     expect((await writeEnv(w)).code).toBe(0);
     writeFileSync(w.log, `${CREDIT}\n`);
     for (const pid of [String(early), "2147483646"]) {
@@ -286,7 +286,7 @@ describe("--sink: the key the server loaded is the key of the write that was the
     w.fake.answers[KEYS[0]] = dryKey;
     w.fake.answers[KEYS[1]] = dryKey;
     expect((await writeEnv(w)).code).toBe(0);
-    await sleep(1300);
+    await sleep(1700);
     const first = await server();
     const pidFile = join(w.sinks, "server.pid");
     writeFileSync(pidFile, `${first}\n`);
@@ -296,7 +296,7 @@ describe("--sink: the key the server loaded is the key of the write that was the
     appendFileSync(w.log, `${CREDIT}\n`);
     await until(async () => (await states(w))[0] === "exhausted", "k1 to be found dry");
     expect(JSON.parse((await writeEnv(w, "--if-due")).stdout)).toMatchObject({ written: true, member: "k2" });
-    await sleep(1300);
+    await sleep(1700);
     writeFileSync(pidFile, `${await server()}\n`);
     appendFileSync(w.log, `${CREDIT}\n`);
     await until(async () => (await states(w))[1] === "exhausted", "k2 to be found dry after the server restarted");
@@ -307,7 +307,7 @@ describe("--sink: the key the server loaded is the key of the write that was the
     expect((await writeEnv(w)).code).toBe(0);
     writeFileSync(`${w.file}.swap`, "ANTHROPIC_API_KEY=somebody-elses\n", { mode: 0o600 });
     renameSync(`${w.file}.swap`, w.file);
-    await sleep(1300);
+    await sleep(1700);
     const pid = await server();
     writeFileSync(w.log, `${CREDIT}\n`);
     const out = await watch(w, "--sink", w.file, "--server-pid", String(pid), "--once");
