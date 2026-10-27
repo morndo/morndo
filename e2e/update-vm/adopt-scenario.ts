@@ -2,7 +2,7 @@
 // worker user, under the unpacked A tree's own Node. It builds the state of the machines today (an old release
 // folder, three unmarked units, three real wrapper files, databases made by the old services, a lane's tmux in its
 // own scope), takes the backup, arms the dead-man's switch, runs `morndo install` over it, proves the adopted
-// machine, lets the dead-man fire and prove the restore, and installs again to prove the switch does nothing when
+// machine, lets the dead-man fire twice (a changed schema rolled back unattended with exit 0, then a failed database copy that keeps its service stopped) and proves the restore, and installs again to prove the switch does nothing when
 // the ok marker exists. Three things are only observed and written down (finding-wrappers, finding-restart,
 // finding-reinstall): their checks are always ok, the detail is the finding.
 //
@@ -489,19 +489,10 @@ async function main(): Promise<number> {
   const armedAt = Date.now();
   check("f-rearmed", disarmed.code === 0 && rearmed.code === 0, `long switch disarmed (${disarmed.code}), fresh ${FIRING_SECONDS} s switch armed (${rearmed.code}): ${firstLines(rearmed, 2)}`);
   // An extra row in a database whose schema does not change (the dead-man must leave it alone), and a migration of the
-  // node database after the install (a new column and a row): the dead-man must keep a copy of it and put the old one back.
+  // node database after the install (a new column and a row): the dead-man must keep a copy of it, put the old one back,
+  // start every service again and END WITH EXIT 0 (the clean unattended rollback; the failed-copy firing is f2, below).
   sqlite(HUB_DB, "INSERT INTO c6_marker VALUES ('after-backup')");
   sqlite(NODE_DB, "ALTER TABLE c6_marker ADD COLUMN extra TEXT; INSERT INTO c6_marker (v) VALUES ('after-migration')");
-  // A database copy that fails: the fleet database changes its schema too (so the dead-man must put it back), and the
-  // backup's copy of it is corrupted first (the good file is kept outside the backup folder and put back after the check).
-  // The dead-man must keep morndo-fleet.service stopped, say so in deadman-report.txt, exit non-zero, and leave the live
-  // fleet database alone, while the hub and the node are put back as before. A timer that fires inside the restore window is
-  // not forced here (it cannot be timed in a container): that property is covered by scripts/c6/backup.test.ts only.
-  sqlite(FLEET_DB, "ALTER TABLE c6_marker ADD COLUMN extra TEXT; INSERT INTO c6_marker (v) VALUES ('after-migration')");
-  const FLEET_BACKUP_COPY = join(BACKUP, "dbs/fleet.db");
-  const FLEET_GOOD = join(HOME, "fleet-backup-copy.good");
-  copyFileSync(FLEET_BACKUP_COPY, FLEET_GOOD);
-  writeFileSync(FLEET_BACKUP_COPY, "this is no longer a database, long enough to look like a file ".repeat(100));
   const remaining = FIRING_SECONDS - Math.round((Date.now() - armedAt) / 1000);
   check("f-armed-still-pending", remaining > 0 && run("systemctl", ["--user", "is-active", "c6-deadman-m1.timer"]).out.trim() === "active",
     `an extra row is written into the hub database and the node database gets a new column and a row after the backup; the timer has ${remaining} s left`);
@@ -510,8 +501,12 @@ async function main(): Promise<number> {
   await sleep(2000);
   const dm1 = deadmanJournal("m1");
   writeFileSync(join(EVIDENCE, "deadman-m1-journal.txt"), dm1.text);
-  // The run is expected to END with a failure now (the corrupted fleet copy, below): "fired" is the timer having run it.
-  check("f-deadman-fired", fired, `the timer fired (the run ended with a failed result, as the corrupted fleet copy makes it: ${dm1.failedRun}); last journal lines: ${dm1.text}`);
+  check("f-deadman-fired", fired, `the timer fired; last journal lines: ${dm1.text}`);
+  const result1 = run("systemctl", ["--user", "show", "-p", "Result", "--value", "c6-deadman-m1.service"]).out.trim();
+  const reportText = (() => { try { return readFileSync(join(BACKUP, "deadman-report.txt"), "utf8"); } catch { return ""; } })();
+  const failedLines = reportText.split("\n").filter(l => l.includes("FAILED"));
+  check("f-rollback-exit-0", fired && dm1.ranOk && !dm1.failedRun && result1 === "success" && reportText !== "" && failedLines.length === 0,
+    `the changed schema was rolled back unattended: the unit ended with Result=${result1 || "(none)"}, failed run: ${dm1.failedRun}; FAILED lines in deadman-report.txt: ${failedLines.length} (${failedLines.join(" | ").slice(0, 300)})`);
   run("systemctl", ["--user", "reset-failed", "c6-deadman-m1.service"]);
   const unitsBack = SERVICES.every(s => readFileSync(join(UNIT_DIR, s.unit), "utf8") === OLD_UNITS.get(s.unit));
   const morndoUnits = readdirSync(UNIT_DIR).filter(n => n.startsWith("morndo-")).sort();
@@ -526,25 +521,9 @@ async function main(): Promise<number> {
     try { return !lstatSync(join(BIN, s.wrapper)).isSymbolicLink() && readFileSync(join(BIN, s.wrapper), "utf8") === OLD_WRAPPERS.get(s.wrapper); } catch { return false; }
   });
   check("f-wrappers-restored", wrappersBack, `the three wrappers are real files with the old text again: ${wrappersBack}`);
-  // The failed database copy: the fleet service stays stopped and the report says so; the live fleet database was not touched
-  // (still the migrated one, whole), no temp file is left beside it; the hub and the node were started again.
-  const reportText = (() => { try { return readFileSync(join(BACKUP, "deadman-report.txt"), "utf8"); } catch { return ""; } })();
-  const failedLines = reportText.split("\n").filter(l => l.startsWith("FAILED:"));
-  const fleetDir = join(HOME, ".local/share/morndo-fleet");
-  const leftovers = readdirSync(fleetDir).filter(n => n.includes("c6-restore") || n.endsWith(".tmp"));
-  const fleetCols = sqlite(FLEET_DB, "SELECT name FROM pragma_table_info('c6_marker')").split("\n");
-  check("f-failed-db-copy-service-stays-stopped",
-    dm1.failedRun && !unitActive("morndo-fleet.service") && unitActive("morndo-hub.service") && unitActive("morndo-node.service")
-      && /database fleet was NOT put back/.test(reportText) && /the service morndo-fleet\.service stays stopped/.test(reportText) && failedLines.length > 0 && failedLines.every(l => l.includes("fleet"))
-      && fleetCols.includes("extra") && quickCheck(FLEET_DB) === "ok" && leftovers.length === 0,
-    `the run failed: ${dm1.failedRun}; morndo-fleet.service active: ${unitActive("morndo-fleet.service")}; hub active: ${unitActive("morndo-hub.service")}; node active: ${unitActive("morndo-node.service")}; FAILED lines in the report: ${failedLines.length} (${failedLines.join(" | ").slice(0, 300)}); live fleet database still migrated: ${fleetCols.includes("extra")}, quick_check ${quickCheck(FLEET_DB)}; temp files beside it: ${leftovers.join(",") || "none"}`);
-  // What the report tells the operator to do, done by hand: the good backup copy back into the folder and onto the live
-  // database (the service is stopped), then the service started. The later steps need the fleet again.
-  copyFileSync(FLEET_GOOD, FLEET_BACKUP_COPY);
-  copyFileSync(FLEET_GOOD, FLEET_DB);
-  rmSync(`${FLEET_DB}-wal`, { force: true });
-  rmSync(`${FLEET_DB}-shm`, { force: true });
-  run("systemctl", ["--user", "start", "morndo-fleet.service"]);
+  // Nothing was started by hand: every service the backup found running is running again as the restore left it.
+  const running = SERVICES.map(s => `${s.unit}=${unitActive(s.unit)}`);
+  check("f-rollback-all-running", SERVICES.every(s => unitActive(s.unit)), `right after the unattended rollback, with no manual start: ${running.join(" ")}`);
   const backHealthy = await servicesHealthy(OLD_VERSION, 120_000);
   const backCmd = SERVICES.map(s => cmdlineOf(s.unit));
   check("f-old-folder-running", backHealthy.ok && backCmd.every(runsOld), `${backHealthy.detail}; processes: ${backCmd.join(" || ")}`);
@@ -563,15 +542,15 @@ async function main(): Promise<number> {
     `the node database is the backup's again: columns ${nodeColumns.join(",")}, rows ${nodeRows.join(",")}`);
   check("f-changed-schema-aside-copy", asideNode !== undefined && asideRows.includes("after-migration") && asideColumns.includes("extra") && quickCheck(asideNode) === "ok",
     `copies in the backup folder: ${asideFiles.join(", ") || "(none)"}; the node copy holds the post-install row: ${asideRows.includes("after-migration")} and the new column: ${asideColumns.includes("extra")}`);
-  const report = (() => { try { return readFileSync(join(BACKUP, "deadman-report.txt"), "utf8"); } catch { return null; } })();
-  check("f-changed-schema-report", report !== null && report.includes("node") && asides.length > 0 && asides.every(a => report.includes(a)),
-    report === null ? "deadman-report.txt does not exist" : `deadman-report.txt: ${report.split("\n").filter(l => l.trim() !== "").slice(-4).join(" | ")}`);
+  check("f-changed-schema-report", reportText.includes("node") && asides.length > 0 && asides.every(a => reportText.includes(a)),
+    `deadman-report.txt: ${reportText.split("\n").filter(l => l.trim() !== "").slice(-4).join(" | ")}`);
+  const leftoversF = DBS.flatMap(([, path]) => readdirSync(join(path, "..")).filter(n => n.includes("c6-")));
+  check("f-no-temp-files", leftoversF.length === 0, `no c6-* temp or aside file beside the databases: ${leftoversF.join(",") || "none"}`);
   const spareText = (() => { try { return readFileSync(join(UNIT_DIR, SPARE_UNIT), "utf8"); } catch { return null; } })();
   const spareState = run("systemctl", ["--user", "is-active", SPARE_UNIT]).out.trim();
   check("f-spare-stays-stopped", spareState !== "active" && spareText === SPARE_TEXT,
     `${SPARE_UNIT} was started after the install; after the restore it is ${spareState}; its unit file is byte-identical: ${spareText === SPARE_TEXT}`);
-  // The restore disables a service the install enabled that was disabled at backup time. (A failing aside copy exiting
-  // non-zero with a FAILED report line is covered by scripts/c6/backup.test.ts only: it cannot be forced on the real node.)
+  // The restore disables a service the install enabled that was disabled at backup time.
   const spare2Enabled = run("systemctl", ["--user", "is-enabled", SPARE2_UNIT]).out.trim();
   check("f-spare-service-disabled", spare2Enabled === "disabled" && !unitActive(SPARE2_UNIT),
     `${SPARE2_UNIT} has an [Install] section, was disabled at backup time and enabled by hand after the install; after the restore is-enabled says "${spare2Enabled}" and it is active: ${unitActive(SPARE2_UNIT)}`);
@@ -579,6 +558,52 @@ async function main(): Promise<number> {
   check("f-lane-kept", laneF.ok, laneF.detail);
   check("f-no-ok-marker", !existsSync(join(BACKUP, "ok")), "no ok marker was in the backup folder when the switch fired");
   if (failed) { journals("f-deadman"); return finish(server); }
+
+  // ---- f2: a second firing on the same (restored) machine: a database copy that fails. A fresh short switch is armed; the
+  // fleet database changes its schema (so the dead-man must put it back) and the backup's copy of it is corrupted first (the
+  // good file is kept outside the backup folder and put back after the check). The dead-man must keep morndo-fleet.service
+  // stopped, say so in deadman-report.txt, exit non-zero and leave the live fleet database alone, while the hub and the node
+  // are started again. A timer that fires inside the restore window is not forced here (it cannot be timed in a container):
+  // that property is covered by scripts/c6/backup.test.ts only.
+  const disarmed2 = command("f2-disarm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "--disarm", "m1"]);
+  const rearmed2 = command("f2-rearm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(FIRING_SECONDS)]);
+  const armedAt2 = Date.now();
+  check("f2-rearmed", disarmed2.code === 0 && rearmed2.code === 0, `switch disarmed (${disarmed2.code}), fresh ${FIRING_SECONDS} s switch armed (${rearmed2.code}): ${firstLines(rearmed2, 2)}`);
+  sqlite(FLEET_DB, "ALTER TABLE c6_marker ADD COLUMN extra TEXT; INSERT INTO c6_marker (v) VALUES ('after-migration')");
+  const FLEET_BACKUP_COPY = join(BACKUP, "dbs/fleet.db");
+  const FLEET_GOOD = join(HOME, "fleet-backup-copy.good");
+  copyFileSync(FLEET_BACKUP_COPY, FLEET_GOOD);
+  writeFileSync(FLEET_BACKUP_COPY, "this is no longer a database, long enough to look like a file ".repeat(100));
+  const remaining2 = FIRING_SECONDS - Math.round((Date.now() - armedAt2) / 1000);
+  check("f2-armed-still-pending", remaining2 > 0 && run("systemctl", ["--user", "is-active", "c6-deadman-m1.timer"]).out.trim() === "active",
+    `the fleet database got a new column and a row, its backup copy is corrupted; the timer has ${remaining2} s left`);
+  if (failed) return finish(server);
+  const fired2 = await waitDeadmanGone("m1", (Math.max(remaining2, 0) + 150) * 1000);
+  await sleep(2000);
+  const dm1b = deadmanJournal("m1");
+  writeFileSync(join(EVIDENCE, "deadman-m1-failed-copy-journal.txt"), dm1b.text);
+  check("f2-deadman-fired", fired2, `the timer fired (the run ended with a failed result, as the corrupted fleet copy makes it: ${dm1b.failedRun}); last journal lines: ${dm1b.text}`);
+  run("systemctl", ["--user", "reset-failed", "c6-deadman-m1.service"]);
+  const reportText2 = (() => { try { return readFileSync(join(BACKUP, "deadman-report.txt"), "utf8"); } catch { return ""; } })();
+  const failedLines2 = reportText2.split("\n").filter(l => l.startsWith("FAILED:"));
+  const fleetDir = join(HOME, ".local/share/morndo-fleet");
+  const leftovers = readdirSync(fleetDir).filter(n => n.includes("c6-") || n.endsWith(".tmp"));
+  const fleetCols = sqlite(FLEET_DB, "SELECT name FROM pragma_table_info('c6_marker')").split("\n");
+  check("f2-failed-copy-service-stays-stopped",
+    dm1b.failedRun && !unitActive("morndo-fleet.service") && unitActive("morndo-hub.service") && unitActive("morndo-node.service")
+      && /database fleet was NOT put back/.test(reportText2) && /the service morndo-fleet\.service stays stopped/.test(reportText2) && failedLines2.length > 0 && failedLines2.every(l => l.includes("fleet"))
+      && fleetCols.includes("extra") && quickCheck(FLEET_DB) === "ok" && leftovers.length === 0,
+    `the run failed: ${dm1b.failedRun}; morndo-fleet.service active: ${unitActive("morndo-fleet.service")}; hub active: ${unitActive("morndo-hub.service")}; node active: ${unitActive("morndo-node.service")}; FAILED lines in the report: ${failedLines2.length} (${failedLines2.join(" | ").slice(0, 300)}); live fleet database still migrated: ${fleetCols.includes("extra")}, quick_check ${quickCheck(FLEET_DB)}; temp files beside it: ${leftovers.join(",") || "none"}`);
+  // What the report tells the operator to do, done by hand: the good backup copy back into the folder and onto the live
+  // database (the service is stopped), then the service started. The later steps need the fleet again.
+  copyFileSync(FLEET_GOOD, FLEET_BACKUP_COPY);
+  copyFileSync(FLEET_GOOD, FLEET_DB);
+  rmSync(`${FLEET_DB}-wal`, { force: true });
+  rmSync(`${FLEET_DB}-shm`, { force: true });
+  run("systemctl", ["--user", "start", "morndo-fleet.service"]);
+  const repaired = await servicesHealthy(OLD_VERSION, 120_000);
+  check("f2-repaired-by-hand", repaired.ok, `after the copy by hand and the start: ${repaired.detail}`);
+  if (failed) { journals("f2-deadman"); return finish(server); }
 
   // ---- g: the second install (rehearsal-only reset), then the dead-man that does nothing.
   const again = installOnce("g-reinstall-after-restore");
