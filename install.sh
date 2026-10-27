@@ -50,8 +50,29 @@ case "$os-$arch" in
 esac
 
 base=${MORNDO_RELEASE_BASE:-https://github.com/morndo/morndo/releases/download/v$MORNDO_RELEASE_VERSION}
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT
+
+# Unpack where a program may run from: this script runs the archive's own bin/morndo and its bundled
+# node from the unpacked tree, and $TMPDIR may be a noexec mount. ~/.local/share first; only when
+# that cannot be written (silently), mktemp's default, which honours $TMPDIR.
+share="$HOME/.local/share"
+mkdir -p "$share" 2>/dev/null || true
+work=$(mktemp -d "$share/.morndo-install.XXXXXX" 2>/dev/null) || work=$(mktemp -d)
+
+# The unpacked tree holds read-only directories (files.json names them 0555), which rm cannot
+# remove, so every directory is made writable again first. find -P does not follow links. Whatever
+# this script was exiting with, it exits with that after cleaning up.
+cleanup() {
+  status=$?
+  if [ -n "${work:-}" ]; then
+    find "$work" -type d -exec chmod u+w {} +
+    rm -rf "$work"
+    if [ -d "$work" ]; then
+      echo "install.sh: could not remove $work" >&2
+    fi
+  fi
+  exit "$status"
+}
+trap cleanup EXIT
 
 curl -fsSL -o "$work/manifest.json" "$base/manifest.json"
 curl -fsSL -o "$work/manifest.json.sig" "$base/manifest.json.sig"
@@ -105,7 +126,8 @@ fi
 # The walk below is what refuses a symlink whose target climbs or is absolute.
 set -f
 mkdir "$work/extract"
-if ! tar -xzf "$work/archive.tar.gz" -C "$work/extract"; then
+# -p: the archive's own modes, not the umask (files.json is what they are checked against).
+if ! tar -xpzf "$work/archive.tar.gz" -C "$work/extract"; then
   echo "refusing archive path" >&2
   exit 65
 fi

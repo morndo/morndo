@@ -1,5 +1,6 @@
 // A tar.gz whose bytes depend only on the file bytes, their modes and the commit time (design §9.3:
-// fixed order, owner and timestamp). gzip's header time is 0, which is what `gzip -n` writes and
+// fixed order, owner and timestamp). A directory the caller lists keeps its listed mode; one that is
+// only an implied parent is 0755. gzip's header time is 0, which is what `gzip -n` writes and
 // what Node's gzipSync emits for `mtime: 0` (nodejs.org/api/zlib.html, read 2026-10-13). Paths that
 // fit in a ustar header stay there; a longer path gets one POSIX pax record so GNU tar and bsdtar
 // both extract it. Owner and group are 0. No name, no atime.
@@ -17,7 +18,7 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
   const seen = new Map<string, { path: string; dir: boolean }>();   // every path that lands in the archive, by folded key
   const linkTargets = new Map<string, string>();   // every link's folded key -> its target
   const linkList: { path: string; target: string }[] = [];
-  const dirs = new Set<string>();
+  const dirs = new Map<string, number>();   // every directory that lands in the archive, by path with a trailing "/": its listed mode, or 0755 when only an implied parent
   // A name is claimed once; only a directory may be named twice (explicitly and as someone's parent). Two
   // spellings that fold to one key are two entries in the archive but one file on a folding file system (APFS:
   // case, NFC/NFD), so such a pair is refused here — the reader refuses it too, and no real tree holds one (no
@@ -38,12 +39,12 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
       linkTargets.set(foldKey(file.path), file.link);
       linkList.push({ path: file.path, target: file.link });
     }
-    if ("directory" in file) dirs.add(`${file.path}/`);
+    if ("directory" in file) dirs.set(`${file.path}/`, parseInt(file.mode, 8));
     const parts = file.path.split("/");
     for (let i = 1; i < parts.length; i++) {
       const parent = parts.slice(0, i).join("/");
       take(parent, true);
-      dirs.add(`${parent}/`);
+      if (!dirs.has(`${parent}/`)) dirs.set(`${parent}/`, 0o755);
     }
   }
   for (const { path, target } of linkList) {
@@ -52,9 +53,9 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
   }
   type Packed = Exclude<TreeFile, { directory: true }>;
   const isPacked = (file: TreeFile): file is Packed => !("directory" in file);
-  type Entry = { path: string; dir: true } | { path: string; dir: false; file: Packed };
+  type Entry = { path: string; dir: true; mode: number } | { path: string; dir: false; file: Packed };
   const entries: Entry[] = [
-    ...[...dirs].map(path => ({ path, dir: true as const })),
+    ...[...dirs].map(([path, mode]) => ({ path, dir: true as const, mode })),
     ...files.filter(isPacked).map(file => ({ path: file.path, dir: false as const, file })),
   ];
   entries.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
@@ -77,7 +78,7 @@ export function packTree(files: readonly TreeFile[], mtimeSec: number): Buffer {
     if (body && body.length > 0) chunks.push(pad(Buffer.from(body)));
   };
   for (const entry of entries) {
-    if (entry.dir) emit(entry.path, 0o755, "5", null);
+    if (entry.dir) emit(entry.path, entry.mode, "5", null);
     else if ("link" in entry.file) emit(entry.path, 0o755, "2", null, entry.file.link);
     else emit(entry.path, parseInt(entry.file.mode, 8), "0", Buffer.from(entry.file.bytes));
   }
