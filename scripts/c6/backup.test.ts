@@ -41,14 +41,17 @@ function machine() {
   writeFileSync(join(state, "enabled"), "");
   writeFileSync(join(state, "failrestart"), "");
   writeFileSync(join(state, "failstop"), "");
+  writeFileSync(join(state, "activating"), "");            // units systemd lists as activating / auto-restart
   writeFileSync(fake, `#!/bin/sh
 echo "$@ #$(cksum < '${dbPath}')" >> '${calls}'
 case "$2" in
-  list-units) sed -n 's/\\(.*\\.service\\)$/\\1 loaded active running x/p' '${state}/active'; exit 0 ;;
+  list-units) for a in "$@"; do last=$a; done; case "$last" in *.service) pat='[.]service ' ;; *.timer) pat='[.]timer ' ;; *) pat='.' ;; esac
+    { sed 's/$/ loaded active running x/' '${state}/active'; sed 's/$/ loaded activating auto-restart x/' '${state}/activating'; } | sed '/^ loaded/d' | grep -E "$pat"; exit 0 ;;
   is-active) grep -qx "$3" '${state}/active' && { echo active; exit 0; }; echo inactive; exit 3 ;;
   is-enabled) grep -qx "$3" '${state}/enabled' && { echo enabled; exit 0; }; echo disabled; exit 1 ;;
   restart) grep -qx "$3" '${state}/failrestart' && exit 1; exit 0 ;;
-  stop) grep -qx "$3" '${state}/failstop' && exit 1; exit 0 ;;
+  stop) grep -qx "$3" '${state}/failstop' && exit 1; sed -i "/^$3\\$/d" '${state}/active' '${state}/activating'; exit 0 ;;
+  daemon-reload) for t in $(grep '[.]timer$' '${state}/active'); do echo "TIMER-FIRED $t" >> '${calls}'; done; exit 0 ;;
 esac
 exit 0
 `, { mode: 0o755 });
@@ -407,7 +410,7 @@ describe("round 2 of the review of PR 176", () => {
     expect(calls).toContain("--user restart morndo-node.service");
   });
 
-  it("--with-db: when a copy fails after the stops, it still starts the recorded units and exits non-zero naming the failure", () => {
+  it("--with-db: when a database copy fails, the service on it stays stopped, the run exits non-zero, and stderr says which database and what to do", () => {
     const m = machine();
     expect(backup(m).status).toBe(0);
     install(m);
@@ -416,9 +419,10 @@ describe("round 2 of the review of PR 176", () => {
     const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
     expect(r.status).not.toBe(0);
     expect(r.stderr).toContain("node");
+    expect(r.stderr).toMatch(/stay[s]? stopped|left stopped/);
     const calls = readFileSync(m.calls, "utf8");
-    expect(calls.indexOf("--user stop morndo-node.service")).toBeGreaterThanOrEqual(0);
-    expect(calls.indexOf("--user restart morndo-node.service")).toBeGreaterThan(calls.indexOf("--user stop morndo-node.service"));
+    expect(calls).toContain("--user stop morndo-node.service");
+    expect(calls).not.toContain("--user restart morndo-node.service");
   });
 
   it("arm-deadman re-arming restarts the timer so the new time applies, and refuses while an ok marker exists", () => {
@@ -557,5 +561,100 @@ describe("round 3 of the review of PR 176", () => {
     expect(r.stderr).toContain("morndo-node.service");
     expect(rows(m.dbPath)).toEqual(["before-backup", "after-backup"]);          // not overwritten while the service runs
     expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(OLD_UNIT);
+  });
+});
+
+describe("round 4 of the review of PR 176", () => {
+  const backup = (m: ReturnType<typeof machine>, extra: string[] = []) => sh(BACKUP, [m.dest, "--db", `node=${m.dbPath}`, ...extra], m.env);
+  const unit = (m: ReturnType<typeof machine>, name: string, body = "[Service]\nExecStart=/bin/true\n") => writeFileSync(join(m.units, name), body);
+
+  it("a backup copy of a database that fails quick_check is never put in place: the live database stays whole and its service stays stopped", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    writeFileSync(join(m.dest, "dbs/node.db"), "garbage that is not a database, long enough to look like a file ".repeat(100));
+    rmSync(m.calls, { force: true });
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status).not.toBe(0);
+    expect(rows(m.dbPath)).toEqual(["before-backup", "after-backup"]);
+    expect(readdirSync(join(m.home)).filter(f => f.includes(".tmp") || f.includes("c6-restore"))).toEqual([]);   // no temp file left beside it
+    expect(readFileSync(m.calls, "utf8")).not.toContain("--user restart morndo-node.service");
+    expect(r.stderr).toContain("node");
+  });
+
+  it("stops the morndo timers before a database is touched (none fires in the window) and puts them back to the recorded state at the end", () => {
+    const m = machine();
+    unit(m, "morndo-sweep.timer", "[Timer]\nOnCalendar=daily\n");
+    writeFileSync(join(m.state, "enabled"), "morndo-sweep.timer\n");
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-sweep.timer\n");
+    expect(backup(m).status).toBe(0);
+    install(m);
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-sweep.timer\n");
+    rmSync(m.calls, { force: true });
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status, r.stderr).toBe(0);
+    const calls = readFileSync(m.calls, "utf8");
+    expect(calls).toContain("--user stop morndo-sweep.timer");
+    expect(calls).not.toContain("TIMER-FIRED");
+    expect(calls.lastIndexOf("--user enable --now morndo-sweep.timer")).toBeGreaterThan(calls.indexOf("--user stop morndo-sweep.timer"));
+  });
+
+  it("the unit set is every loaded morndo unit in an active-like state, template instances included: a service that is auto-restarting is stopped before the database, an instance is recorded and put back", () => {
+    const m = machine();
+    unit(m, "morndo-worker@.service");
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-worker@a.service\n");
+    expect(backup(m).status).toBe(0);
+    expect(readFileSync(join(m.dest, "state.txt"), "utf8")).toContain("morndo-worker@a.service");
+    install(m);
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-worker@a.service\n");
+    writeFileSync(join(m.state, "activating"), "morndo-flapping.service\n");
+    rmSync(m.calls, { force: true });
+    expect(sh(join(m.dest, "restore.sh"), ["--with-db"], m.env).status).toBe(0);
+    const calls = readFileSync(m.calls, "utf8");
+    expect(calls).toContain("--user stop morndo-flapping.service");
+    expect(calls).toContain("--user stop morndo-worker@a.service");
+    expect(calls.indexOf("--user restart morndo-worker@a.service")).toBeGreaterThan(calls.indexOf("--user stop morndo-worker@a.service"));
+    expect(calls).not.toContain("restart morndo-flapping.service");
+  });
+
+  it("a unit file or wrapper that cannot be copied back is not removed first: the live file stays whole, its service is not started, the run exits non-zero", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    chmodSync(join(m.dest, "units/morndo-node.service"), 0o000);
+    chmodSync(join(m.dest, "wrappers/morndo-node"), 0o000);
+    rmSync(m.calls, { force: true });
+    const r = sh(join(m.dest, "restore.sh"), [], m.env);
+    chmodSync(join(m.dest, "units/morndo-node.service"), 0o644);
+    chmodSync(join(m.dest, "wrappers/morndo-node"), 0o755);
+    expect(r.status).not.toBe(0);
+    expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(NEW_UNIT);
+    expect(lstatSync(join(m.bin, "morndo-node")).isSymbolicLink()).toBe(true);
+    expect(readFileSync(m.calls, "utf8")).not.toContain("--user restart morndo-node.service");
+    expect(r.stderr).toContain("morndo-node");
+  });
+
+  it("every dead-man exit leaves a line in a report file: a host mismatch writes it next to the folder and says where", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    const r = sh(join(m.dest, "restore.sh"), ["--deadman"], { ...m.env, C6_HOSTNAME: "host-b" });
+    expect(r.status).toBe(3);
+    const report = `${m.dest}.deadman-report.txt`;
+    expect(readFileSync(report, "utf8")).toContain("host-a");
+    expect(r.stderr).toContain(report);
+    expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(NEW_UNIT);
+  });
+
+  it("the dead-man that finds the ok marker says so in the journal and in the report, and changes nothing", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    writeFileSync(join(m.dest, "ok"), "");
+    const r = sh(join(m.dest, "restore.sh"), ["--deadman"], m.env);
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/ok marker/);
+    expect(readFileSync(join(m.dest, "deadman-report.txt"), "utf8")).toMatch(/ok marker/);
+    expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(NEW_UNIT);
   });
 });
