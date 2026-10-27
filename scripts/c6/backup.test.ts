@@ -41,6 +41,8 @@ function machine() {
   writeFileSync(join(state, "enabled"), "");
   writeFileSync(join(state, "failrestart"), "");
   writeFileSync(join(state, "failstop"), "");
+  writeFileSync(join(state, "spawnon"), "");               // "<unit stopped> <unit that then starts>": a timer firing between list and stop
+  writeFileSync(join(state, "sticky"), "");                // units that stay active however often they are stopped
   writeFileSync(join(state, "activating"), "");            // units systemd lists as activating / auto-restart
   writeFileSync(fake, `#!/bin/sh
 echo "$@ #$(cksum < '${dbPath}')" >> '${calls}'
@@ -50,7 +52,10 @@ case "$2" in
   is-active) grep -qx "$3" '${state}/active' && { echo active; exit 0; }; echo inactive; exit 3 ;;
   is-enabled) grep -qx "$3" '${state}/enabled' && { echo enabled; exit 0; }; echo disabled; exit 1 ;;
   restart) grep -qx "$3" '${state}/failrestart' && exit 1; exit 0 ;;
-  stop) grep -qx "$3" '${state}/failstop' && exit 1; sed -i "/^$3\\$/d" '${state}/active' '${state}/activating'; exit 0 ;;
+  stop) grep -qx "$3" '${state}/failstop' && exit 1
+    if [ -s '${state}/spawnon' ] && [ "$(cut -d' ' -f1 '${state}/spawnon')" = "$3" ]; then cut -d' ' -f2 '${state}/spawnon' >> '${state}/active'; : > '${state}/spawnon'; fi
+    grep -qx "$3" '${state}/sticky' && exit 0
+    sed -i "/^$3\\$/d" '${state}/active' '${state}/activating'; exit 0 ;;
   daemon-reload) for t in $(grep '[.]timer$' '${state}/active'); do echo "TIMER-FIRED $t" >> '${calls}'; done; exit 0 ;;
 esac
 exit 0
@@ -656,5 +661,124 @@ describe("round 4 of the review of PR 176", () => {
     expect(r.stderr).toMatch(/ok marker/);
     expect(readFileSync(join(m.dest, "deadman-report.txt"), "utf8")).toMatch(/ok marker/);
     expect(readFileSync(join(m.units, "morndo-node.service"), "utf8")).toBe(NEW_UNIT);
+  });
+});
+
+describe("round 5 of the review of PR 176", () => {
+  const exec = (path: string, sql: string) => { const d = new DatabaseSync(path); d.exec(sql); d.close(); };
+  const backup = (m: ReturnType<typeof machine>, extra: string[] = []) => sh(BACKUP, [m.dest, "--db", `node=${m.dbPath}`, ...extra], m.env);
+  const unit = (m: ReturnType<typeof machine>, name: string, body = "[Service]\nExecStart=/bin/true\n") => writeFileSync(join(m.units, name), body);
+  const sum = (path: string) => spawnSync("cksum", { input: readFileSync(path), encoding: "utf8" }).stdout.trim();
+
+  it("shellcheck finds nothing in backup.sh, arm-deadman.sh or the restore.sh the backup writes (no disables, no severity floor)", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    const files = [BACKUP, ARM, join(m.dest, "restore.sh")];
+    const r = spawnSync("shellcheck", ["-s", "sh", "-S", "style", ...files], { encoding: "utf8" });
+    expect(r.error, "shellcheck must be installed (ubuntu runners have it)").toBeUndefined();
+    expect(r.stdout).toBe("");
+    expect(r.status).toBe(0);
+    for (const f of files) expect(readFileSync(f, "utf8")).not.toMatch(/shellcheck\s+disable/);
+  });
+
+  it("a blocked pattern of * (an unknown database) blocks every service, whatever file names the working directory holds", () => {
+    const m = machine();
+    const extra = join(m.home, "extra.db");
+    exec(extra, "CREATE TABLE t (v TEXT);");
+    expect(sh(BACKUP, [m.dest, "--db", `node=${m.dbPath}`, "--db", `extra=${extra}`], m.env).status).toBe(0);
+    install(m);
+    rmSync(join(m.dest, "dbs/extra.db"));
+    const cwd = join(m.root, "cwd");
+    mkdirSync(cwd);
+    writeFileSync(join(cwd, "zzz-file"), "");
+    rmSync(m.calls, { force: true });
+    const r = spawnSync("sh", [join(m.dest, "restore.sh"), "--with-db"], { cwd, env: m.env, encoding: "utf8" });
+    expect(r.status).not.toBe(0);
+    expect(readFileSync(m.calls, "utf8")).not.toContain("--user restart morndo-node.service");
+  });
+
+  it("sockets and path units that the restore stops are recorded and put back", () => {
+    const m = machine();
+    unit(m, "morndo-gate.socket", "[Socket]\nListenStream=/tmp/x\n");
+    unit(m, "morndo-watch.path", "[Path]\nPathExists=/tmp/y\n");
+    unit(m, "morndo-idle.socket", "[Socket]\nListenStream=/tmp/z\n");
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-gate.socket\nmorndo-watch.path\n");
+    expect(backup(m).status).toBe(0);
+    const state = readFileSync(join(m.dest, "state.txt"), "utf8");
+    expect(state).toContain("morndo-gate.socket");
+    expect(state).toContain("morndo-watch.path");
+    install(m);
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-gate.socket\nmorndo-watch.path\nmorndo-idle.socket\n");
+    rmSync(m.calls, { force: true });
+    expect(sh(join(m.dest, "restore.sh"), ["--with-db"], m.env).status).toBe(0);
+    const calls = readFileSync(m.calls, "utf8");
+    for (const u of ["morndo-gate.socket", "morndo-watch.path", "morndo-idle.socket"]) expect(calls).toContain(`--user stop ${u}`);
+    expect(calls.indexOf("--user restart morndo-gate.socket")).toBeGreaterThan(calls.indexOf("--user stop morndo-gate.socket"));
+    expect(calls.indexOf("--user restart morndo-watch.path")).toBeGreaterThan(calls.indexOf("--user stop morndo-watch.path"));
+    expect(calls).not.toContain("restart morndo-idle.socket");
+  });
+
+  it("stops, lists again, and stops again: a unit a timer started between the list and the stop is also stopped before the database", () => {
+    const m = machine();
+    unit(m, "morndo-sweep.timer", "[Timer]\nOnCalendar=daily\n");
+    expect(backup(m).status).toBe(0);
+    install(m);
+    writeFileSync(join(m.state, "active"), "morndo-node.service\nmorndo-sweep.timer\n");
+    writeFileSync(join(m.state, "spawnon"), "morndo-sweep.timer morndo-late.service\n");
+    const migrated = sum(m.dbPath);
+    rmSync(m.calls, { force: true });
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status, r.stderr).toBe(0);
+    const line = readFileSync(m.calls, "utf8").split("\n").find(l => l.includes("--user stop morndo-late.service"));
+    expect(line).toBeDefined();
+    expect(line).toContain(`#${migrated}`);
+    expect(rows(m.dbPath)).toEqual(["before-backup"]);
+  });
+
+  it("gives up on a unit that will not stay stopped after a bounded number of rounds: no database is overwritten, non-zero, a report line", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    writeFileSync(join(m.state, "sticky"), "morndo-node.service\n");
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status).not.toBe(0);
+    expect(r.stderr).toContain("FAILED");
+    expect(r.stderr).toContain("morndo-node.service");
+    expect(rows(m.dbPath)).toEqual(["before-backup", "after-backup"]);
+  });
+
+  it("the -wal and -shm are moved aside and put back when the rename fails, and deleted only after it worked", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    writeFileSync(`${m.dbPath}-wal`, "wal-bytes");
+    writeFileSync(`${m.dbPath}-shm`, "shm-bytes");
+    const bin = join(m.root, "bad-mv-bin");
+    mkdirSync(bin);
+    writeFileSync(join(bin, "mv"), `#!/bin/sh\nfor a in "$@"; do last=$a; done\ncase "$last" in *node.db) exit 1 ;; esac\nexec /bin/mv "$@"\n`, { mode: 0o755 });
+    const failed = sh(join(m.dest, "restore.sh"), ["--with-db"], { ...m.env, PATH: `${bin}:${process.env.PATH}` });
+    expect(failed.status).not.toBe(0);
+    expect(readFileSync(`${m.dbPath}-wal`, "utf8")).toBe("wal-bytes");
+    expect(readFileSync(`${m.dbPath}-shm`, "utf8")).toBe("shm-bytes");
+    expect(rows(m.dbPath)).toEqual(["before-backup", "after-backup"]);
+    const ok = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(ok.status, ok.stderr).toBe(0);
+    expect(existsSync(`${m.dbPath}-wal`)).toBe(false);
+    expect(readdirSync(m.home).filter(f => f.includes("c6-"))).toEqual([]);
+  });
+
+  it("a destination that is a symlink to a directory is replaced, not entered", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    install(m);
+    const elsewhere = join(m.root, "elsewhere");
+    mkdirSync(elsewhere);
+    rmSync(join(m.bin, "morndo-node"));
+    symlinkSync(elsewhere, join(m.bin, "morndo-node"));
+    const r = sh(join(m.dest, "restore.sh"), [], m.env);
+    expect(r.status, r.stderr).toBe(0);
+    expect(lstatSync(join(m.bin, "morndo-node")).isSymbolicLink()).toBe(false);
+    expect(readFileSync(join(m.bin, "morndo-node"), "utf8")).toContain("exec node old");
+    expect(readdirSync(elsewhere)).toEqual([]);
   });
 });
