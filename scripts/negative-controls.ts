@@ -6,11 +6,14 @@
 //   node scripts/negative-controls.ts --only <id>      run one; repeat --only for more
 //   node scripts/negative-controls.ts --check          read-only, in this checkout: every entry's text is there exactly once
 //   node scripts/negative-controls.ts --list           the entries
+//   node scripts/negative-controls.ts --shard i/n      only shard i of n (1-based); the weekly workflow runs a matrix of them
+//                                                       (not together with --only: that is refused, exit 2)
 // It never changes the checkout it was started from. It makes one temporary worktree of HEAD (git worktree add --detach;
 // uncommitted changes are not in it), runs `npm ci --offline` there once, and for each control:
 //   1. runs the named test files unchanged: they must pass, or the control would prove nothing (cached per file set);
 //   2. applies the change: `find` must occur exactly once in `file`;
-//   3. runs them again: they must fail, and print `expect` when the entry gives one;
+//   3. runs them again, stopping at the first failed test (--bail=1; in full again when that failure lacks `expect`): they
+//      must fail, and print `expect` when the entry gives one;
 //   4. restores the file with `git checkout -- <file>` inside the temporary worktree, and checks it is as it was.
 // At the end it removes that worktree (`git worktree remove --force <its path>`) and nothing else: it never prunes.
 // A control bites only when vitest reports at least one failed test and no breakage (a failed suite, a transform or syntax
@@ -591,7 +594,7 @@ export const CONTROLS: Control[] = [
     run: ["packages/protocol/test/fleet.test.ts"], expect: "expected { code: 'internal', …(2) } to deeply equal" },
   { id: "t2-confine-case-fold", task: "2", file: "packages/node-ops/src/file-rules.ts",
     find: "const fold = (p: string) => (caseless ? p.toLowerCase() : p);", replace: "const fold = (p: string) => p;",
-    run: ["packages/node-ops/test/file-rules.test.ts"], expect: ".SSH/absent" },
+    run: ["packages/node-ops/test/file-rules.test.ts"], expect: "darwin /h/.SSH" },
   // Since B1 (V23 keeps a legacy answer's row) a retry by the same request is settled by its row; this bites through the
   // new tap after the restart (another request), which finds the answer in doubt by its key alone.
   { id: "t5-first-seen-restart", task: "5", file: "apps/hub/src/application/escalation-service.ts",
@@ -632,9 +635,10 @@ export const CONTROLS: Control[] = [
     find: "    if (!got.ok) { res.destroy(new Error(`file.get failed: ${got.error.code}`)); return; }",
     replace: "    if (!got.ok) { res.end(); return; }",
     run: ["apps/fleet/test/client-api.test.ts"] },
-  // The socket is also checked, later, where the client API listens (client-api.ts); this removes the early check only.
+  // The sockets are also checked, later, where the client API listens (client-api.ts); this removes the early checks only. Both
+  // lines go: since the worker socket (23c4c055) the second line alone also refuses a second start on the same directory.
   { id: "t12-socket-checked-before-db", task: "12", file: "apps/fleet/src/serve.ts",
-    find: "  await clearStaleSocket(config.socketPath);        // a live service owns fleet.db: refuse before touching it\n", replace: "",
+    find: "  await clearStaleSocket(config.socketPath);        // a live service owns fleet.db: refuse before touching it\n  await clearStaleSocket(worker.path);\n", replace: "",
     run: ["apps/fleet/test/socket-dir.test.ts"] },
   { id: "t14a-file-short-body", task: "14a", file: "packages/fleet-client/src/fleet-client.ts",
     find: "      if (got !== expected) throw new FleetUnavailable(", replace: "      if (false) throw new FleetUnavailable(",
@@ -744,7 +748,9 @@ export const CONTROLS: Control[] = [
   { id: "fw-m4-sweep-seen-throws", task: "M4", file: "apps/fleet/src/application/connections.ts",
     find: "      try { this.#nodes.seen(node); } catch (e) { this.#log.error(`liveness sweep: could not record node ${node} as seen (fleet.db busy or full?)`, e); }",
     replace: "      this.#nodes.seen(node);",
-    run: ["apps/fleet/test/timers.test.ts"], expect: "expected 0 to be greater than 0" },
+    run: ["apps/fleet/test/timers.test.ts"], expect: "the liveness sweep > a write lock held elsewhere (SQLITE_BUSY) is logged" },
+    // The test's own until() times out when the sweep dies at pc and never pings mac, with a message any until() has; vitest's
+    // "describe > it" path in the FAIL line is not in the test's source or its code frame, and no other test of the file fails.
   { id: "fw-m5-unavailable-frame-gone", task: "M5", file: "apps/hub/src/adapters/fleet-adapters.ts",
     find: "      if (NOT_NOW.has(r.error.code)) return \"unavailable\";", replace: "      if (NOT_NOW.has(r.error.code)) return null;",
     run: ["apps/hub/test/fleet-adapters.test.ts"] },
@@ -781,7 +787,7 @@ export const CONTROLS: Control[] = [
     find: "    const storeBehind = w.storeSeqSeen !== undefined && seq < w.storeSeqSeen;", replace: "    const storeBehind = false;",
     run: ["apps/node-agent/test/agent.test.ts"], expect: "starts a new store before it runs anything" },
   { id: "fw-welcome-store-seq-not-sent", task: "A2", file: "apps/fleet/src/adapters/agent-session.ts",
-    find: "...(seen === null ? {} : { storeSeqSeen: seen })", replace: "",
+    find: ", ...(seen === null ? {} : { storeSeqSeen: seen })", replace: "",       // with its comma: a bare ", ," does not parse
     run: ["apps/fleet/test/requests.test.ts"], expect: "storeSeqSeen" },
   { id: "fw-store-seqs-not-kept", task: "A2", file: "apps/fleet/src/application/requests.ts",
     find: "    if (res.storeSeq !== undefined) this.#seqs.saw(node, res.store, res.storeSeq);\n", replace: "",
@@ -954,7 +960,9 @@ export const CONTROLS: Control[] = [
   { id: "t17-chat-attachment-key", task: "17", file: "apps/web/src/lib/phone/Chat.svelte",
     find: "{#each m.attachments ?? [] as a, i (`${a.id ?? a.name}-${i}`)}",
     replace: "{#each m.attachments ?? [] as a (a.name + (a.id ?? \"\"))}",
-    run: ["apps/web/test/attachment-keys-web.test.ts"], expect: "each_key_duplicate" },
+    // Svelte's each_key_duplicate goes to the dev server's log, which a CI run may not carry; the test's own failure is the later
+    // message that never renders.
+    run: ["apps/web/test/attachment-keys-web.test.ts"], expect: "getByText('a later message')" },
   // ---- B2 validation (V9): a reconnect's history settles a held message's pending attachments
   { id: "t17-history-settles-pending", task: "17", file: "apps/web/src/lib/feed.svelte.ts",
     find: "return f && x.attachments?.some(a => a.pending) ? { ...x, attachments: f } : x;",
@@ -1128,9 +1136,11 @@ export const CONTROLS: Control[] = [
   { id: "fc2-capture-last-lines", task: "fc2", file: "packages/node-ops/src/tmux.ts",
     find: 'return lines.slice(-o.lines).join("\\n");', replace: 'return lines.join("\\n");',
     run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "to have a length of 50" },
+  // capture() repeats this check in front of captureScreen (3b7857aa), so removing that twin changes nothing anyone can see; the
+  // control removes the one captureScreen runs, which both paths and the frame read reach.
   { id: "fc2-capture-lines-bounded", task: "fc2", file: "packages/node-ops/src/tmux.ts",
-    find: "if (o && (!Number.isInteger(o.lines) || o.lines < 1 || o.lines > LIMITS.captureMaxLines)) return null;", replace: "",
-    run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "a count out of range" },
+    find: "    if (!Number.isInteger(o.lines) || o.lines < 1 || o.lines > LIMITS.captureMaxLines) return null;\n    try {", replace: "    try {",
+    run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "captureScreen 0: expected" },    // the assertion message as vitest formats it; the source has `captureScreen ${lines}`
   { id: "fc2-capture-attributes", task: "fc2", file: "packages/node-ops/src/tmux.ts",
     find: '...(o.attributes ? ["-e"] : [])', replace: "...([] as string[])",
     run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "keeps tmux's escapes" },
@@ -4266,6 +4276,13 @@ export const CONTROLS: Control[] = [
   { id: "t411-verified-only-the-apps-author", task: "T-411", file: "scripts/git-hooks/release-commits-verified",
     find: String.raw`--author='morndo-release' `, replace: String.raw``,
     run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "never lists a commit of another author" },
+  // ---- T-480: GitHub links a commit to its pull request a little after the push; the lister asks again before giving up.
+  { id: "t480-verified-pull-asked-once", task: "T-480", file: "scripts/git-hooks/release-commits-verified",
+    find: String.raw`    [ "$n" -lt "$tries" ] || return 1`, replace: String.raw`    return 1`,
+    run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "asks again for a pull request GitHub has not linked yet" },
+  { id: "t480-verified-pull-no-wait", task: "T-480", file: "scripts/git-hooks/release-commits-verified",
+    find: String.raw`    sleep "$wait_s"`, replace: String.raw`    :`,
+    run: ["scripts/git-hooks/commit-traces.test.ts"], expect: "by default asks 6 times and waits 10 s between asks" },
   // ---- T-411: the traces workflow uses the list.
   { id: "t411-traces-workflow-list", task: "T-411", file: ".github/workflows/commit-traces.yml",
     find: String.raw`sh scripts/git-hooks/release-commits-verified "$@" > "$verified"`, replace: String.raw`true`,
@@ -5499,6 +5516,33 @@ function malformed(controls: readonly Control[]): string[] {
   return bad;
 }
 
+// `--shard 2/6` is shard 2 of 6. A serial run of every control passed the weekly workflow's 90 minutes (T-467); the workflow
+// runs one job per shard. Null when it is not a whole i/n with 1 <= i <= n.
+export function parseShard(text: string): { index: number; count: number } | null {
+  const m = /^(\d+)\/(\d+)$/.exec(text);
+  const index = Number(m?.[1]), count = Number(m?.[2]);
+  return m && count >= 1 && index >= 1 && index <= count ? { index, count } : null;
+}
+
+// The controls of shard `index` of `count`, in registry order. Controls that run the same test files stay together (the runner
+// runs a file set's unchanged baseline once per shard), and the file sets are dealt largest first to the shard with the fewest
+// controls so far, which is deterministic: every job of one workflow run computes the same split.
+export function shardOf(controls: readonly Control[], index: number, count: number): Control[] {
+  const sets = new Map<string, Control[]>();
+  for (const c of controls) {
+    const key = [...c.run].sort().join(" ");
+    sets.set(key, [...(sets.get(key) ?? []), c]);
+  }
+  const load = Array.from({ length: count }, () => 0);
+  const owner = new Map<string, number>();
+  for (const [key, group] of [...sets].sort((a, b) => b[1].length - a[1].length)) {   // sort is stable: ties keep registry order
+    const lightest = load.indexOf(Math.min(...load));
+    owner.set(key, lightest);
+    load[lightest] = (load[lightest] ?? 0) + group.length;
+  }
+  return controls.filter(c => owner.get([...c.run].sort().join(" ")) === index - 1);
+}
+
 // Every entry, whatever its platform: its text is in its file exactly once. The number that are not.
 export function check(controls: readonly Control[]): number {
   let stale = 0;
@@ -5514,7 +5558,7 @@ export function check(controls: readonly Control[]): number {
 // How a vitest run ended. Only "failed" is a bite, and only when vitest itself reports a failed test and no breakage:
 // an import or transform error, a syntax error, a failed suite or a missing file also exits non-zero, and a timeout
 // leaves no status at all; none of them shows that a test noticed the missing guard.
-type Run = { kind: "passed" | "failed" | "broke" | "timeout"; out: string; first: string };
+export type Run = { kind: "passed" | "failed" | "broke" | "timeout"; out: string; first: string };
 // vitest's own banners, as it prints them (v5.0.3): "Failed Suites N" (a suite that did not load), "Error: Transform failed",
 // "Error: Failed to load url", and "No test files found, exiting with code 1". A test that merely asserts on a message with
 // such words in it is not matched: the markers are anchored to a line start.
@@ -5538,11 +5582,11 @@ export function classify(status: number | null, signal: string | null, out: stri
   return { kind: failedTests >= 1 && !BREAKAGE.test(out) ? "failed" : "broke", out, first };
 }
 
-function vitest(tree: string, files: string[]): Promise<Run> {
+function vitest(tree: string, files: string[], extra: string[] = []): Promise<Run> {
   const treeName = basename(dirname(tree));
   return new Promise(resolve => {
     let out = "";
-    const c = spawn(process.execPath, [join(tree, "node_modules/vitest/vitest.mjs"), "run", ...files], {
+    const c = spawn(process.execPath, [join(tree, "node_modules/vitest/vitest.mjs"), "run", ...extra, ...files], {
       cwd: tree, env: { ...process.env, FORCE_COLOR: "0", NO_COLOR: "1" }, detached: true,
     });
     child = c;
@@ -5561,6 +5605,26 @@ function vitest(tree: string, files: string[]): Promise<Run> {
     });
     c.on("error", e => { clearTimeout(timer); clearTimeout(hard); child = null; resolve({ kind: "broke", out: String(e), first: String(e) }); });
   });
+}
+// The controls a command line picks: the ids of --only, or shard i/n of --shard, or all. Both together are refused: a shard of a
+// named list is no use, and silently dropping one of the two ran something else than was asked.
+export function select(o: { only?: string[]; shard?: string }, controls: readonly Control[]): { controls: Control[] } | { error: string } {
+  if (o.only?.length && o.shard !== undefined) return { error: "--only and --shard cannot be used together: name the ids, or a shard of all of them" };
+  const unknown = (o.only ?? []).filter(id => !controls.some(c => c.id === id));
+  if (unknown.length) return { error: `no such control: ${unknown.join(", ")}` };
+  if (o.only?.length) return { controls: controls.filter(c => o.only?.includes(c.id)) };
+  if (o.shard === undefined) return { controls: [...controls] };
+  const shard = parseShard(o.shard);
+  return shard ? { controls: shardOf(controls, shard.index, shard.count) } : { error: `--shard needs i/n with 1 <= i <= n, not "${o.shard}"` };
+}
+
+// Whether a run that stopped at its first failed test (--bail=1) must be made again in full. Only a clean bite that shows the
+// entry's `expect` stands as it is: a first failure without it may be another test than the one that names it, and with
+// several files running at once a bail can cancel a worker mid-file, which reads as breakage (a failed suite) in a run that
+// bites without it. A pass and a timeout are the same with or without it.
+export function needsFullRun(run: Run, expect?: string): boolean {
+  if (run.kind === "passed" || run.kind === "timeout") return false;
+  return run.kind === "broke" || (expect !== undefined && !run.out.includes(expect));
 }
 const tail = (out: string) => out.trim().split("\n").filter(l => /FAIL|×|Error|expected|Tests /.test(l)).slice(0, 6).map(l => `      ${l.trim()}`).join("\n");
 
@@ -5637,6 +5701,7 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
   keepTree = keep;
   installSignalHandlers();
   const n: Tally = { bit: 0, passes: 0, broke: 0, timeout: 0, skipped: 0 };
+  const runStarted = Date.now();
   const broke = (line: string) => { n.broke++; say(line); };
   let setupFailed = false;
   try {
@@ -5649,6 +5714,8 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
     const baseline = new Map<string, Run>();
     for (const c of controls) {
       if (stopping) await parked();
+      const startedAt = Date.now();                           // each result line ends with what the control took (T-467)
+      const took = () => `(${((Date.now() - startedAt) / 1000).toFixed(1)} s)`;
       const path = join(tree, c.file);
       const original = readFileSync(path, "utf8");
       const found = occurrences(original, c.find);
@@ -5662,7 +5729,10 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
       if (before?.kind === "timeout") { n.timeout++; say(`TIMEDOUT ${c.id}: ${c.run.join(", ")} did not finish unchanged: ${before.first}`); continue; }
       if (before?.kind !== "passed") { broke(`BASELINE ${c.id}: ${c.run.join(", ")} fail without the change, so it proves nothing\n      ${before?.first ?? ""}\n${tail(before?.out ?? "")}`); continue; }
       writeFileSync(path, original.replace(c.find, () => c.replace));
-      const after = await vitest(tree, c.run);
+      // Stops at the first failed test: a bite needs one, and the rest of a slow file only costs time (T-467). Anything but a
+      // clean bite that shows the entry's `expect` is made again in full and judged on that run.
+      let after = await vitest(tree, c.run, ["--bail=1"]);
+      if (needsFullRun(after, c.expect)) after = await vitest(tree, c.run);
       if (stopping) await parked();
       git(tree, "checkout", "--", c.file);
       if (readFileSync(path, "utf8") !== original) { say(`setup: ${c.file} was not restored in ${tree}`); setupFailed = true; return 2; }
@@ -5671,24 +5741,24 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
       if (after.kind === "broke") { broke(`BROKE    ${c.id}: ${c.run.join(", ")} broke without a failed test: ${after.first}`); continue; }
       if (c.expect && !after.out.includes(c.expect)) { broke(`ELSEWHERE ${c.id}: the tests failed, but without "${c.expect}"\n${tail(after.out)}`); continue; }
       n.bit++;
-      say(`bit      ${c.id}`);
+      say(`bit      ${c.id} ${took()}`);
     }
   } finally {
     if (keep) { reap(basename(tmp)); say(`kept: ${tree}`); }
     else removeTree();
   }
   const v = verdict(n, controls.length);
-  say(v.line);
+  say(`${v.line} in ${((Date.now() - runStarted) / 60_000).toFixed(1)} min`);
   return v.code === 0 && !setupFailed ? 0 : 1;
 }
 
 if (import.meta.main) {
-  const { values } = parseArgs({ options: { only: { type: "string", multiple: true }, check: { type: "boolean" }, list: { type: "boolean" }, keep: { type: "boolean" } } });
+  const { values } = parseArgs({ options: { only: { type: "string", multiple: true }, check: { type: "boolean" }, list: { type: "boolean" }, keep: { type: "boolean" }, shard: { type: "string" } } });
   const bad = malformed(CONTROLS);
   if (bad.length) { for (const b of bad) say(`ENTRY    ${b}`); process.exit(1); }
-  const chosen = values.only?.length ? CONTROLS.filter(c => values.only?.includes(c.id)) : CONTROLS;
-  const unknown = (values.only ?? []).filter(id => !CONTROLS.some(c => c.id === id));
-  if (unknown.length) { say(`no such control: ${unknown.join(", ")}`); process.exit(2); }
+  const picked = select(values, CONTROLS);
+  if ("error" in picked) { say(picked.error); process.exit(2); }
+  const chosen = picked.controls;
   if (values.list) { for (const c of chosen) say(`${c.id}\tTask ${c.task}\t${c.file}\t${c.run.join(" ")}`); process.exit(0); }
   if (values.check) process.exit(check(chosen) ? 1 : 0);
   process.exit(await runAll(chosen, values.keep ?? false));

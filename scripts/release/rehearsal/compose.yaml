@@ -1,0 +1,84 @@
+# The rehearsal's control-plane machines (docs/plans/2026-10-24-c4-5-rehearsal.md, step 4, and
+# docs/plans/2026-10-27-c4-resume.md, section 3): three whole systemds — cp1 always, cp2 and cp3 behind their
+# profiles — on one bridge network of their own. Every machine is fenced the same way: CAP_SYS_ADMIN only (its
+# own cgroup tree, nothing more), AUDIT_WRITE dropped, its own namespaces (cgroup: private), tmpfs where systemd
+# writes at boot, nothing of the host mounted in, no port published out, and the rehearsal's label, which the
+# cleanup assertions list. rehearsal.test is a top-level domain the IETF reserves (RFC 6761 §6.2), so these
+# hostnames can belong to no one else. No port is published and nothing of the host is mounted in, but the
+# bridge gateway still reaches the host's own listening ports; the rehearsal probes and records that (3 s per
+# port). Each machine is capped the same way (mem_limit 2g, cpus 2, pids_limit 2048): three machines take at
+# most 6 GB and 6 CPUs of the pc's 23 GB and 16.
+name: c4-rehearsal
+services:
+  cp1:
+    image: morndo-rehearsal:c4-5
+    hostname: cp1.rehearsal.test
+    cgroup: private
+    cap_add:
+      - SYS_ADMIN
+    cap_drop:
+      - AUDIT_WRITE
+    environment:
+      container: docker
+    tmpfs:
+      - /run
+      - /run/lock
+      - /tmp
+    labels:
+      morndo-c4-rehearsal: "1"
+    networks:
+      - net
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 2048
+  cp2:
+    image: morndo-rehearsal:c4-5
+    hostname: cp2.rehearsal.test
+    cgroup: private
+    cap_add:
+      - SYS_ADMIN
+    cap_drop:
+      - AUDIT_WRITE
+    environment:
+      container: docker
+    tmpfs:
+      - /run
+      - /run/lock
+      - /tmp
+    labels:
+      morndo-c4-rehearsal: "1"
+    networks:
+      - net
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 2048
+    profiles:
+      - p7
+  cp3:
+    image: morndo-rehearsal:c4-5
+    hostname: cp3.rehearsal.test
+    cgroup: private
+    cap_add:
+      - SYS_ADMIN
+    cap_drop:
+      - AUDIT_WRITE
+    environment:
+      container: docker
+    tmpfs:
+      - /run
+      - /run/lock
+      - /tmp
+    labels:
+      morndo-c4-rehearsal: "1"
+    networks:
+      - net
+    mem_limit: 2g
+    cpus: 2
+    pids_limit: 2048
+    profiles:
+      - p8
+networks:
+  net:
+    driver: bridge
+    labels:
+      morndo-c4-rehearsal: "1"

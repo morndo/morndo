@@ -1245,12 +1245,9 @@ describe("the cap watch beside the sweep", () => {
   it("logs an error the watch could not handle, instead of dropping it", async () => {
     const errors: string[] = [];
     const { store, sup, cap } = plantedCap(() => `#!/bin/sh\nif [ "$2" = "show" ]; then ${running(1)}; fi\nexit 0\n`, errors);
-    // The store fails only for the watch's own reads (its frames are in the stack), so the sweep itself still works.
-    const get = store.get.bind(store);
-    const spy = vi.spyOn(store, "get").mockImplementation(id => {
-      if (new Error().stack?.includes("#capUnit")) throw new Error("disk I/O error");
-      return get(id);
-    });
+    // The store's log cap is read only by the watch's own looks (the sweep never reads it), so the watch fails and the
+    // sweep itself still works.
+    const spy = vi.spyOn(store, "logBytes", "get").mockImplementation(() => { throw new Error("disk I/O error"); });
     try {
       await sup.sweep();
     } finally { spy.mockRestore(); }

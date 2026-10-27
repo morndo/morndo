@@ -1,6 +1,6 @@
 {
   "name": "morndo",
-  "version": "0.0.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "workspaces": [
@@ -25,6 +25,7 @@
     "e2e:engines": "npm run build && node e2e/engines.e2e.ts",
     "e2e:update": "node e2e/update.e2e.ts",
     "e2e:update-fleet": "node e2e/update-fleet.e2e.ts",
+    "e2e:update-adopt": "node e2e/update-adopt.e2e.ts",
     "e2e:board": "npm run build && node e2e/board.e2e.ts",
     "e2e:board-proof": "npm run build && node e2e/board-proof.e2e.ts",
     "e2e:home": "npm run build && node e2e/home.e2e.ts",
