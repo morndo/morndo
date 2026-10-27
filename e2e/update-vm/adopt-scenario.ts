@@ -39,9 +39,14 @@ const VERSION_A = "0.1.0";
 const OLD_VERSION = "0.0.0";                                   // a tree with no build.json reports the root package.json's
 const NODE_NAME = "node-demo";
 const LANE = "lane-demo";
-// The dead-man's first run. The install over running legacy units may wait 90 s per service for a health answer at
-// the new version (finding-restart), so the timer must outlast that wait and the checks that follow it.
-const DEADMAN_SECONDS = 480;
+// The dead-man's first run only has to outlast the installs and the proofs (a naive install measured about 276 s; the
+// install over running legacy units may also wait 90 s per service for a health answer, finding-restart): twice that
+// and more. It is disarmed after the findings and a fresh short one is armed for the firing, so the timing margin of
+// the firing does not depend on how long the installs took.
+const DEADMAN_SECONDS = 1500;
+const FIRING_SECONDS = 120;
+const OLD_DROPIN = "[Service]\nMemoryMax=1G\n";
+const DROPIN_DIR = join(UNIT_DIR, "morndo-node.service.d");
 const SERVICES = [
   { unit: "morndo-hub.service", app: "hub", cmd: "serve", wrapper: "morndo" },
   { unit: "morndo-fleet.service", app: "fleet", cmd: "serve", wrapper: "morndo-fleet" },
@@ -280,7 +285,8 @@ function deadmanJournal(machine: string): { ranOk: boolean; failedRun: boolean; 
   // The user manager does not log a clean exit at all (only "Started"): a transient unit that ended with exit 0 is gone,
   // one that failed stays loaded in the failed state until reset-failed. Started, not failed, no failed result = exit 0.
   const failedList = run("systemctl", ["--user", "list-units", "--failed", "--all", "--no-legend", "--plain"]).out;
-  const failedRun = /Failed with result|status=[1-9]|code=exited, status=[1-9]/.test(text) || failedList.includes(`c6-deadman-${machine}.service`);
+  const result = run("systemctl", ["--user", "show", "-p", "Result", "--value", `c6-deadman-${machine}.service`]).out.trim();
+  const failedRun = (result !== "" && result !== "success") || /Failed with result|status=[1-9]|code=exited, status=[1-9]/.test(text) || failedList.includes(`c6-deadman-${machine}.service`);
   return {
     ranOk: text.includes(`Started c6-deadman-${machine}.service`) && !failedRun,
     failedRun,
@@ -408,15 +414,17 @@ async function main(): Promise<number> {
     `tmux server pid ${tmuxPid} started ${lane.started} in its own scope (${scope}); the old folder lists ${baseline.listing.split("\n").length - 1} files`);
   if (failed) return finish(server);
 
-  // ---- c: the backup and the dead-man's switch (no ok marker).
+  // ---- c: the backup and the dead-man's switch (no ok marker). The node unit has a drop-in folder, as a tuned machine does.
+  mkdirSync(DROPIN_DIR, { recursive: true });
+  writeFileSync(join(DROPIN_DIR, "limits.conf"), OLD_DROPIN);
+  run("systemctl", ["--user", "daemon-reload"]);
   const backed = command("c-backup", "sh", [join(E2E, "scripts/c6/backup.sh"), BACKUP, ...DBS.flatMap(([n, p]) => ["--db", `${n}=${p}`])]);
   const backedOk = backed.code === 0 && existsSync(join(BACKUP, "restore.sh")) && existsSync(join(BACKUP, "ROLLBACK.md"))
-    && DBS.every(([n]) => existsSync(join(BACKUP, `dbs/${n}.db`)))
-    && SERVICES.every(s => existsSync(join(BACKUP, "units", s.unit)) && existsSync(join(BACKUP, "wrappers", s.wrapper)))
-    && missingRows(sqlite(join(BACKUP, "dbs/node.db"), "SELECT v FROM c6_marker"), MARKERS).length === 0;
+    && DBS.every(([n]) => existsSync(join(BACKUP, `dbs/${n}.db`)) && missingRows(sqlite(join(BACKUP, `dbs/${n}.db`), "SELECT v FROM c6_marker"), MARKERS).length === 0)
+    && existsSync(join(BACKUP, "units/morndo-node.service.d/limits.conf"))
+    && SERVICES.every(s => existsSync(join(BACKUP, "units", s.unit)) && existsSync(join(BACKUP, "wrappers", s.wrapper)));
   check("c-backup", backedOk, `backup.sh exited ${backed.code}: ${firstLines(backed, 2)}; units: ${readdirSync(join(BACKUP, "units")).join(", ")}; wrappers: ${readdirSync(join(BACKUP, "wrappers")).join(", ")}`);
   if (failed) return finish(server);
-  const armedAt = Date.now();
   const armed = command("c-arm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(DEADMAN_SECONDS)]);
   check("c-deadman-armed", armed.code === 0 && run("systemctl", ["--user", "is-active", "c6-deadman-m1.timer"]).out.trim() === "active" && !existsSync(join(BACKUP, "ok")),
     `armed for ${DEADMAN_SECONDS} s, no ok marker: ${firstLines(armed, 3)}`);
@@ -453,9 +461,13 @@ async function main(): Promise<number> {
   await proofs("e", baseline);
   if (failed) journals("e-proofs");
 
-  // ---- f: the dead-man fires. One more row after the backup, then wait for the timer.
+  // ---- f: the dead-man fires. The long switch comes off, a fresh short one goes on, then one more row after the backup.
+  const disarmed = command("f-disarm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "--disarm", "m1"]);
+  const rearmed = command("f-rearm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(FIRING_SECONDS)]);
+  const armedAt = Date.now();
+  check("f-rearmed", disarmed.code === 0 && rearmed.code === 0, `long switch disarmed (${disarmed.code}), fresh ${FIRING_SECONDS} s switch armed (${rearmed.code}): ${firstLines(rearmed, 2)}`);
   sqlite(NODE_DB, "INSERT INTO c6_marker VALUES ('after-backup')");
-  const remaining = DEADMAN_SECONDS - Math.round((Date.now() - armedAt) / 1000);
+  const remaining = FIRING_SECONDS - Math.round((Date.now() - armedAt) / 1000);
   check("f-armed-still-pending", remaining > 0 && run("systemctl", ["--user", "is-active", "c6-deadman-m1.timer"]).out.trim() === "active",
     `an extra row is written after the backup; the timer has ${remaining} s left`);
   if (failed) return finish(server);
@@ -466,9 +478,13 @@ async function main(): Promise<number> {
   check("f-deadman-fired", fired && !dm1.failedRun, `the timer fired and no failed result was logged (clean-exit line present: ${dm1.ranOk}); last journal lines: ${dm1.text}`);
   const unitsBack = SERVICES.every(s => readFileSync(join(UNIT_DIR, s.unit), "utf8") === OLD_UNITS.get(s.unit));
   const morndoUnits = readdirSync(UNIT_DIR).filter(n => n.startsWith("morndo-")).sort();
-  const expectedUnits = SERVICES.map(s => s.unit).sort();
+  const expectedUnits = [...SERVICES.map(s => s.unit), "morndo-node.service.d"].sort();
   check("f-units-restored", unitsBack && JSON.stringify(morndoUnits) === JSON.stringify(expectedUnits),
     `the three units are the old unmarked text again: ${unitsBack}; morndo-* in the unit folder: ${morndoUnits.join(", ")}`);
+  const dropinFiles = existsSync(DROPIN_DIR) ? readdirSync(DROPIN_DIR).sort() : [];
+  const dropinText = (() => { try { return readFileSync(join(DROPIN_DIR, "limits.conf"), "utf8"); } catch { return null; } })();
+  check("f-dropin-restored", dropinText === OLD_DROPIN && JSON.stringify(dropinFiles) === JSON.stringify(["limits.conf"]) && !existsSync(join(DROPIN_DIR, "before-morndo.conf")),
+    `limits.conf is byte-identical to the old drop-in: ${dropinText === OLD_DROPIN}; the install's before-morndo.conf is gone; the folder holds: ${dropinFiles.join(", ") || "(nothing)"}`);
   const wrappersBack = SERVICES.every(s => {
     try { return !lstatSync(join(BIN, s.wrapper)).isSymbolicLink() && readFileSync(join(BIN, s.wrapper), "utf8") === OLD_WRAPPERS.get(s.wrapper); } catch { return false; }
   });
@@ -516,6 +532,10 @@ async function main(): Promise<number> {
   const dm2 = deadmanJournal("m1b");
   writeFileSync(join(EVIDENCE, "deadman-m1b-journal.txt"), dm2.text);
   check("g-deadman-noop", firedB && dm2.ranOk && !dm2.failedRun && existsSync(join(BACKUP, "ok")), `the timer unit ran and exited 0; the ok marker is still there: ${dm2.text}`);
+  // The ok step as the runbook gives it: the marker is there, then the switch is taken away.
+  const off = command("g-disarm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "--disarm", "m1b"]);
+  check("g-disarmed", off.code === 0 && !existsSync(join(UNIT_DIR, "c6-deadman-m1b.timer")) && !existsSync(join(UNIT_DIR, "c6-deadman-m1b.service")) && existsSync(join(BACKUP, "ok")),
+    `--disarm exited ${off.code}; the timer and service files are gone and the ok marker stays`);
   const unitsStill = SERVICES.every(s => readFileSync(join(UNIT_DIR, s.unit), "utf8").startsWith("# Morndo's own unit")) && existsSync(join(UNIT_DIR, "morndo-update.timer"));
   check("g-unchanged", unitsStill && SERVICES.every(s => lstatSync(join(BIN, s.wrapper)).isSymbolicLink()), "units still marked, update timer still there, launchers still links");
   await proofs("g", baseline);
@@ -535,7 +555,7 @@ function finish(server: FeedHost): number {
   const status = run(join(BIN, "morndo"), ["update", "--status"]);
   writeFileSync(join(EVIDENCE, "status.txt"), `morndo update --status:\n${status.out}\n${status.err}\n`);
   run("tmux", ["kill-server"]);
-  run("systemctl", ["--user", "stop", "c6-deadman-m1.timer", "c6-deadman-m1b.timer"]);
+  for (const m of ["m1", "m1b"]) run("sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "--disarm", m]);
   server.close();
   const passed = checks.filter(c => c.ok).length;
   process.stdout.write(`${JSON.stringify({ step: "summary", ok: passed === checks.length, detail: `${passed}/${checks.length} checks passed` })}\n`);

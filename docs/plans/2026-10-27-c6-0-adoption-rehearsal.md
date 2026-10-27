@@ -129,13 +129,27 @@ Measured by the scenario on a throwaway machine, about 10.5 minutes a run:
 
 ### 8.1 The changes to section 3 of `docs/plans/2026-10-23-c4-c6.md`, by step
 
-That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs there (or in its pull request). Four changes:
+That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs there (or in its pull request). These changes:
 
 - **Step 2 (backup):** the backup also takes the three wrappers out of `~/.local/bin` (`backup.sh` already copies them);
   after the backup they are moved away, because step 3's install refuses a real file in their place.
 - **Step 3 (install):** stop `morndo-hub`, `morndo-fleet` and `morndo-node` before `install`; run it; `install` starts them
   and waits for health. Without the stop it takes about 276 s and leaves them on the old code.
 - **Step 2 (dead-man's switch):** the timer stays longer than the worst install and its checks; the 60 minutes hold with
-  the stop in step 3 (the rehearsal needed 480 s only for the case without it).
+  the stop in step 3 (the rehearsal needed 480 s only for the case without it). The switch is now a persistent timer
+  unit (`~/.config/systemd/user/c6-deadman-<machine>.timer` and `.service`, `Persistent=true`), so a reboot or a restart
+  of the user manager keeps it; it runs `restore.sh --deadman`. The ok step is `touch <backup>/ok`, then
+  `arm-deadman.sh --disarm <machine>` (which removes both files and does not write the marker itself).
+- **Step 2 (backup):** `backup.sh` finds the hub, fleet and node databases (`morndo.db`, `fleet.db`, `agent.db`) by
+  itself, refuses any other `*.db` under `~/.local/share/morndo*` and `~/.local/state/morndo*` unless `--allow-unlisted`,
+  refuses a machine with no database unless `--no-db`, and records the host, `HOME`, the schema signature of each
+  database and which units were active or enabled. A failure after the folder exists removes the folder again.
+- **Step 6 (restore refusals):** `restore.sh` refuses another host or `HOME` (exit 3). It refuses (exit 4, before it
+  changes anything) when the schema of a live database differs from the backup's, which is the case whenever ANY
+  migration ran between the old build and the installed one; the choice is then `--with-db` (puts the old data back,
+  loses every write since the backup) or `--keep-data` (old code on the newer schema anyway). The dead-man's run refuses
+  the same way, and a failed unit is the alert. A manual run ignores a stale `ok` marker (it says so); only `--deadman`
+  honours it. Only the units that were active are restarted and the timers that were enabled are enabled again; a
+  failing restart does not stop the others, and the exit is non-zero naming them.
 - **Step 6 (rollback):** after `restore.sh`, a second install first needs `~/.local/share/morndo-releases` and the
   updater's state and config removed (`restore.sh` leaves them; it never touches data).
