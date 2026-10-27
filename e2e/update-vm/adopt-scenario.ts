@@ -345,6 +345,9 @@ const moveWrappersAside = (): string => {
 };
 
 let installShVerified = false;
+// The container's /tmp is a tmpfs Docker mounts noexec (and small): install.sh unpacks its tree under mktemp, so its
+// temporary folder is the worker's home, as it would be on a machine whose /tmp allows exec.
+const INSTALL_TMP = join(HOME, "install-tmp");
 const installOnce = (label: string) => {
   const t0 = Date.now();
   if (PUBLISHED === null) {
@@ -369,7 +372,8 @@ const installOnce = (label: string) => {
       : `downloading install.sh/install.sh.sig failed: ${got.map(g => `exit ${g.code} ${g.err.trim()}`).join("; ")}`);
   }
   if (!verified) return { code: -1, out: "", err: "install.sh was not verified: not run", seconds: Math.round((Date.now() - t0) / 1000) };
-  const r = command(label, "sh", [sh, "--role", "control-plane", "--channel", CHANNEL, "--signers", SIGNERS], { timeoutMs: 600_000 });
+  mkdirSync(INSTALL_TMP, { recursive: true });
+  const r = command(label, "env", [`TMPDIR=${INSTALL_TMP}`, "sh", sh, "--role", "control-plane", "--channel", CHANNEL, "--signers", SIGNERS], { timeoutMs: 600_000 });
   return { ...r, seconds: Math.round((Date.now() - t0) / 1000) };
 };
 
