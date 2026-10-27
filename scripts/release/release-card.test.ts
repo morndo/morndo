@@ -252,6 +252,21 @@ describe("release-card.sh", () => {
     expect(r.out.trimEnd().split("\n").at(-1)).toBe("release card: settings check ok");
   });
 
+  it("removes control characters from the settings check's output", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const r = run(dir, [base, head, ...SETTINGS_ARGS], { RELEASE_CARD_SETTINGS_CHECK: fakeCheck(0, ["check-release-settings: \u001b[31mok\u001b[0m\u0007"]) });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("  check-release-settings: [31mok[0m\n");
+    const control: number[] = [];
+    for (let i = 0; i < r.out.length; i++) {
+      const c = r.out.charCodeAt(i);
+      if (c !== 0x0a && (c < 0x20 || c === 0x7f)) control.push(c);
+    }
+    expect(control).toEqual([]);
+  });
+
   it("runs the check-release-settings.sh beside it when no other is named", () => {
     const dir = repo();
     const base = commit(dir, "chore: base", { "README.md": "a\n" });

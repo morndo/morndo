@@ -95,7 +95,7 @@ else
   printf 'settings: sh %s\n' "$check $*"
   out=$(sh "$check" "$@" 2>&1) || check_st=$?
   if [ -n "$out" ]; then
-    printf '%s\n' "$out" | while IFS= read -r line; do printf '  %s\n' "$line"; done
+    printf '%s\n' "$out" | tr -d '\000-\011\013-\037\177' | while IFS= read -r line; do printf '  %s\n' "$line"; done
   fi
 fi
 
