@@ -339,7 +339,7 @@ dbfail() { # name path why
   esac
   block "$_pat"
   _svc=""
-  while read -r _u _a _e; do
+  while IFS=" " read -r _u _a _e; do   # callers may have IFS set to a newline
     case $_u in *.service) case $_u in $_pat) _svc="$_svc $_u" ;; esac ;; esac
   done < "$bk/state.txt"
   _svc=${_svc# }

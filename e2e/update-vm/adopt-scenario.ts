@@ -535,7 +535,7 @@ async function main(): Promise<number> {
   const fleetCols = sqlite(FLEET_DB, "SELECT name FROM pragma_table_info('c6_marker')").split("\n");
   check("f-failed-db-copy-service-stays-stopped",
     dm1.failedRun && !unitActive("morndo-fleet.service") && unitActive("morndo-hub.service") && unitActive("morndo-node.service")
-      && /database fleet was NOT put back/.test(reportText) && /fleet.* stays stopped/.test(reportText) && failedLines.length > 0 && failedLines.every(l => l.includes("fleet"))
+      && /database fleet was NOT put back/.test(reportText) && /the service morndo-fleet\.service stays stopped/.test(reportText) && failedLines.length > 0 && failedLines.every(l => l.includes("fleet"))
       && fleetCols.includes("extra") && quickCheck(FLEET_DB) === "ok" && leftovers.length === 0,
     `the run failed: ${dm1.failedRun}; morndo-fleet.service active: ${unitActive("morndo-fleet.service")}; hub active: ${unitActive("morndo-hub.service")}; node active: ${unitActive("morndo-node.service")}; FAILED lines in the report: ${failedLines.length} (${failedLines.join(" | ").slice(0, 300)}); live fleet database still migrated: ${fleetCols.includes("extra")}, quick_check ${quickCheck(FLEET_DB)}; temp files beside it: ${leftovers.join(",") || "none"}`);
   // What the report tells the operator to do, done by hand: the good backup copy back into the folder and onto the live
