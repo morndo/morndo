@@ -132,6 +132,7 @@ describe("release-card.sh", () => {
     ].join("\n"));
     expect(r.out).not.toContain("readme only");
     expect(r.out).toContain(`release card: 3 file(s) changed in the release-critical paths since ${short(base)}\n`);
+    expect(r.out.split("\n")[1]).toBe("paths: .github/workflows/ .github/CODEOWNERS scripts/release/ trust/ install.sh apps/updater/ package.json package-lock.json");
   });
 
   it.each([
@@ -229,9 +230,9 @@ describe("release-card.sh", () => {
     const dir = repo();
     const base = commit(dir, "chore: base", { "README.md": "a\n", "scripts/notes.md": "a\n" });
     const head = commit(dir, "fix(install): verify first", { "install.sh": "x\n" });
-    const r = spawnSync("sh", [SCRIPT, base, head], { cwd: join(dir, "scripts"), env, encoding: "utf8" });
-    expect(r.status).toBe(0);
-    expect(r.stdout).toContain("  A install.sh\n");
+    const r = run(join(dir, "scripts"), [base, head, ...SETTINGS_ARGS], { RELEASE_CARD_SETTINGS_CHECK: fakeCheck(0, CHECK_OK) });
+    expect(r.code).toBe(0);
+    expect(r.out).toContain("  A install.sh\n");
   });
 
   it("carries the settings check's output, the command it ran, and passes when the check passes", () => {
@@ -283,6 +284,19 @@ describe("release-card.sh", () => {
     expect(r.out).toContain("  A install.sh\n");
     expect(r.out).not.toContain("check-release-settings: ok");
     expect(r.out.trimEnd().split("\n").at(-1)).toBe(
+      "release card: SETTINGS CHECK NOT RUN: no settings arguments (release-card.sh <base> <head> -- --reviewer-id <id> --app-id <id> [...]); this card is incomplete");
+  });
+
+  it("says loudly that the settings check did not run when nothing names it and no arguments are given", () => {
+    const dir = repo();
+    const base = commit(dir, "chore: base", { "README.md": "a\n" });
+    const head = commit(dir, "chore: touch", { "install.sh": "x\n" });
+    const plain: NodeJS.ProcessEnv = { ...env };
+    delete plain.RELEASE_CARD_SETTINGS_CHECK;
+    const r = spawnSync("sh", [SCRIPT, base, head], { cwd: dir, env: plain, encoding: "utf8" });
+    expect(r.status).toBe(3);
+    expect(r.stdout).toContain("settings: not run\n");
+    expect(r.stdout.trimEnd().split("\n").at(-1)).toBe(
       "release card: SETTINGS CHECK NOT RUN: no settings arguments (release-card.sh <base> <head> -- --reviewer-id <id> --app-id <id> [...]); this card is incomplete");
   });
 
@@ -346,7 +360,8 @@ describe("release-card.sh", () => {
     expect(r.out).toContain("release card: 2 file(s) changed in the release-critical paths since " + short(c1));
     const one = card(dir, "v0.1.1", "v0.1.2");
     expect(one.out.split("\n")[0]).toBe(`release card: ${short(c2)}..${short(c3)}`);
-    expect(one.out).not.toContain("install.sh");
+    expect(one.out).not.toContain("  A install.sh");
+    expect(one.out).not.toContain("fix(install): one");
     const back = card(dir, "v0.1.2", "v0.1.0");
     expect(back.code).toBe(1);
     expect(back.err).toContain(`release-card: ${short(c3)} is not an ancestor of ${short(c1)}`);

@@ -5,7 +5,7 @@
 # scripts/release/, trust/, install.sh, apps/updater/, package.json, package-lock.json — and the release-settings
 # check's own output when its arguments follow `--` (check-release-settings.sh needs an administrator token and never
 # runs inside Actions; the run book pairs the two, and RELEASE_CARD_SETTINGS_CHECK names another check). The card only
-# reads. Exit codes: 0 the card is complete and the settings check, when its arguments were given, passed; 1 the git
+# reads. Exit codes: 0 the card is complete and the settings check passed; 1 the git
 # side failed or the settings check failed (do not tap); 3 the card is incomplete — the settings check was named or
 # asked for but did not run; 64 usage.
 set -eu
@@ -62,23 +62,8 @@ commits=$(git log --format='%H %s' "$base..$head" -- .github/workflows/ .github/
 
 printf 'release card: %s..%s\n' "$base8" "$head8"
 
-# The paths line names the watched paths this range touched, in the order above; when nothing changed it names the
-# whole watch list, so the owner sees what the card kept an eye on. A change is "<status>\t<path>", and the tab in
-# front of the path keeps a longer path (apps/updater/install.sh) from answering for a file pathspec.
-tab=$(printf '\t')
-involved=''
-case $files in *"${tab}.github/workflows/"*) involved="$involved .github/workflows/" ;; esac
-case $files in *"${tab}.github/CODEOWNERS"*) involved="$involved .github/CODEOWNERS" ;; esac
-case $files in *"${tab}scripts/release/"*) involved="$involved scripts/release/" ;; esac
-case $files in *"${tab}trust/"*) involved="$involved trust/" ;; esac
-case $files in *"${tab}install.sh"*) involved="$involved install.sh" ;; esac
-case $files in *"${tab}apps/updater/"*) involved="$involved apps/updater/" ;; esac
-case $files in *"${tab}package.json"*) involved="$involved package.json" ;; esac
-case $files in *"${tab}package-lock.json"*) involved="$involved package-lock.json" ;; esac
-if [ -z "$involved" ]; then
-  involved=' .github/workflows/ .github/CODEOWNERS scripts/release/ trust/ install.sh apps/updater/ package.json package-lock.json'
-fi
-printf 'paths:%s\n' "$involved"
+# The paths line names the whole watch list, every time, so the owner sees what the card kept an eye on.
+printf 'paths: .github/workflows/ .github/CODEOWNERS scripts/release/ trust/ install.sh apps/updater/ package.json package-lock.json\n'
 
 if [ -n "$files" ]; then
   # git already lists the paths in byte order, and a rename without rename detection is the delete beside the add.
@@ -95,16 +80,13 @@ if [ -n "$files" ]; then
   done
 fi
 
-# The settings section. plain: no arguments and no check named — the card is the plain diff card and claims nothing
-# about settings. noargs: a check was named (RELEASE_CARD_SETTINGS_CHECK) but no arguments followed `--`, so the card
-# is incomplete. missing: the check file is not there, incomplete as well. ran: its exit code decides the verdict.
-check_mode=plain
+# The settings section. noargs: no arguments followed `--`, so the check did not run and the card is incomplete,
+# whether or not RELEASE_CARD_SETTINGS_CHECK names a check. missing: the check file is not there, incomplete as
+# well. ran: its exit code decides the verdict.
 check_st=0
 if [ "$have_settings" != 1 ]; then
   printf 'settings: not run\n'
-  if [ -n "${RELEASE_CARD_SETTINGS_CHECK:-}" ]; then
-    check_mode=noargs
-  fi
+  check_mode=noargs
 elif [ ! -f "$check" ]; then
   printf 'settings: not run\n'
   check_mode=missing
@@ -144,8 +126,5 @@ case $check_mode in
   missing)
     printf 'release card: SETTINGS CHECK NOT RUN: %s is not there; this card is incomplete\n' "$check"
     exit 3
-    ;;
-  plain)
-    exit 0
     ;;
 esac
