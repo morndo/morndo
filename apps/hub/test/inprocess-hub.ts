@@ -149,7 +149,7 @@ export async function startInProcessHub(o: {
   const inbox = uploadInbox({ dir: join(dir, "inbox") });
   const pushes: { endpoint: string; payload: unknown }[] = [];
   const notifications = new NotificationService({
-    store, ...(o.now ? { now: o.now } : {}),
+    decisionSettleMs: 0, store, ...(o.now ? { now: o.now } : {}),
     send: async (s, payload) => { pushes.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()) as unknown }); return { status: 201 }; },
   });
   notifications.board([]);

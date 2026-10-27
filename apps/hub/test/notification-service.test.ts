@@ -1,4 +1,4 @@
-// Notifications on the hub (ADR-0008 phase F; N1–N5): a Decision starting to wait, a worker starting to need him (not
+// Notifications on the hub (ADR-0008 phase F; N1–N5): a Decision waiting a minute without a break (N2 settle), a worker starting to need him (not
 // when muted) or a device linked raises one; per kind the latest wins after a second; nothing goes while he is attending
 // on any device; the payload is numbers only and passes the protocol's strict schema; a push service's 404 or 410
 // drops that subscription; the audit keeps when and how many, never who or what. A fake sender: no network.
@@ -7,7 +7,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { NotificationEvent } from "@morndo/domain";
+import { DECISION_SETTLE_MS, type NotificationEvent } from "@morndo/domain";
 import { PushPayload, parseBody } from "@morndo/protocol";
 import { NotificationService, type PushStore } from "../src/application/notification-service.ts";
 import { loadOrCreateVapid, pushSender, type PushOptions, type PushSubscription } from "../src/adapters/webpush.ts";
@@ -36,8 +36,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(Date.UTC(2026, 9, 2, 12));
   sent = []; audit = []; subs = [sub("phone"), sub("laptop")]; muted = new Set(); answer = () => 201; reason = () => undefined;
+  // these tests are about what raises, the debounce, attending and delivery; the settle has its own block at the end
   svc = new NotificationService({
-    store, muted: w => muted.has(w),
+    decisionSettleMs: 0, store, muted: w => muted.has(w),
     send: async (s, payload, options) => { sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options }); const why = reason(s.endpoint); return why === undefined ? { status: answer(s.endpoint) } : { status: answer(s.endpoint), reason: why }; },
   });
   svc.board([]);                                                     // what waits at start: nothing
@@ -80,7 +81,7 @@ describe("what raises a Notification (N2)", () => {
   });
   it("every kind's Topic is one a push service takes: at most 32 URL-safe Base64 characters, a length that decodes (Apple refused the 5-character \"alert\" and \"usage\" with 400 BadWebPushTopic, 2026-10-12 and 2026-10-25)", async () => {
     const topicsOf: string[] = [];
-    const all = new NotificationService({ store, alerts: () => 1, send: async (_s, _p, o) => { topicsOf.push(o.topic); return { status: 201 }; } });
+    const all = new NotificationService({ decisionSettleMs: 0, store, alerts: () => 1, send: async (_s, _p, o) => { topicsOf.push(o.topic); return { status: 201 }; } });
     all.board([]);
     all.board([decision("t-1")]);
     all.worker("%1", false, null, true);
@@ -240,7 +241,7 @@ describe("subscriptions (N4)", () => {
 describe("one bad subscription can't stop the others, or the hub (review H1)", () => {
   it("a sender that throws for one device: the others still get it, and the next round still goes", async () => {
     const throwing = new NotificationService({
-      store, send: async (s, payload) => {
+      decisionSettleMs: 0, store, send: async (s, payload) => {
         if (s.endpoint.endsWith("/phone")) throw new Error("boom");
         sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options: { ttlSeconds: 0, topic: "", urgency: "normal" } });
         return { status: 201 };
@@ -260,7 +261,7 @@ describe("one bad subscription can't stop the others, or the hub (review H1)", (
       const { p256dh, auth } = (() => { const e = createECDH("prime256v1"); e.generateKeys(); return { p256dh: e.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") }; })();
       subs = [{ endpointId: "bad", endpoint: "https://fcm.googleapis.com/fcm/send/bad", p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url"), auth },
         { endpointId: "good", endpoint: "http://127.0.0.1:9/nobody", p256dh, auth }];
-      const real = new NotificationService({ store, send: pushSender(loadOrCreateVapid(dir, "mailto:test@example.test"), Date.now, 1000) });
+      const real = new NotificationService({ decisionSettleMs: 0, store, send: pushSender(loadOrCreateVapid(dir, "mailto:test@example.test"), Date.now, 1000) });
       real.board([]);
       real.board([decision("ny-1")]);
       await vi.advanceTimersByTimeAsync(1000); await real.settled();
@@ -331,3 +332,96 @@ describe("a usage notice the hub wrote (S4, plan 4.4)", () => {
   });
 });
 
+
+describe("a Decision pushes only once it has waited a minute without a break (N2 settle, 2026-10-27)", () => {
+  // 2026-10-27: a tool typed /exit into the manager's pane every 2 min 10 s; each /exit opened a
+  // background-tasks menu for a few seconds, the hub read it as a Decision and pushed: 7 times in 15 minutes.
+  let quiet: NotificationService;
+  const later = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); await quiet.settled(); };
+  beforeEach(() => {
+    quiet = new NotificationService({ store, send: async (s, payload, options) => { sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options }); return { status: 201 }; } });
+    quiet.board([]);
+  });
+  afterEach(() => quiet.stop());
+
+  it("the settle is a minute", () => {
+    expect(DECISION_SETTLE_MS).toBe(60_000);
+  });
+  it("a Decision still waiting after the minute: one push to each device, a second after the minute", async () => {
+    quiet.board([decision("ny-1")]);
+    await later(60_000);
+    expect(sent).toEqual([]);
+    await later(1_000);
+    expect(sent.map(s => s.payload)).toEqual([
+      { kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 },
+      { kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 },
+    ]);
+  });
+  it("seven menus, each open for 3 seconds and 2 min 10 s apart, raise nothing while another Decision waits", async () => {
+    quiet.board([decision("ny-611")]);
+    await later(61_000);
+    const before = sent.length;
+    expect(before).toBe(2);
+    for (let i = 0; i < 7; i++) {
+      quiet.board([decision("ny-611"), decision(`menu-${i}`)]);
+      await later(3_000);
+      quiet.board([decision("ny-611")]);
+      await later(127_000);
+    }
+    expect(sent.length).toBe(before);
+    expect(audit.filter(e => e.type === "NotificationSent")).toHaveLength(1);
+  });
+  it("a Decision that stops waiting and comes back starts its minute again", async () => {
+    quiet.board([decision("ny-2")]);
+    await later(50_000);
+    quiet.board([]);
+    await later(5_000);
+    quiet.board([decision("ny-2")]);
+    await later(59_000);
+    expect(sent).toEqual([]);
+    await later(2_000);
+    expect(sent).toHaveLength(2);
+  });
+  it("what waits at start still raises nothing, after the minute too", async () => {
+    const start = new NotificationService({ store, send: async () => ({ status: 201 }) });
+    start.board([decision("ny-1"), decision("ny-2")]);
+    await vi.advanceTimersByTimeAsync(70_000);
+    await start.settled();
+    expect(audit).toEqual([]);
+    start.stop();
+  });
+  it("stop() ends a settle in progress: nothing goes after it", async () => {
+    quiet.board([decision("ny-3")]);
+    await later(30_000);
+    quiet.stop();
+    await later(60_000);
+    expect(sent).toEqual([]);
+  });
+});
+
+describe("the settle on a busy board, and while he attends (review of the N2 settle)", () => {
+  let quiet: NotificationService;
+  const later = async (ms: number) => { await vi.advanceTimersByTimeAsync(ms); await quiet.settled(); };
+  beforeEach(() => {
+    quiet = new NotificationService({ store, send: async (s, payload, options) => { sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options }); return { status: 201 }; } });
+    quiet.board([]);
+  });
+  afterEach(() => quiet.stop());
+
+  it("a board fed again with the same Decision keeps its minute: the hub feeds the whole board on every change", async () => {
+    quiet.board([decision("ny-4")]);
+    await later(30_000);
+    quiet.board([decision("ny-4")]);
+    await later(20_000);
+    quiet.board([decision("ny-4"), decision("ny-5", "settled")]);
+    await later(11_000);
+    expect(sent).toHaveLength(2);                                    // at the minute, not a minute after the last feed
+  });
+  it("a settle that ends while he is attending sends nothing (N3)", async () => {
+    quiet.board([decision("ny-6")]);
+    await later(59_000);
+    quiet.attending("tab-1", true);
+    await later(2_000);
+    expect(sent).toEqual([]);
+  });
+});
