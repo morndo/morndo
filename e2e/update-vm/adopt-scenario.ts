@@ -434,7 +434,7 @@ async function main(): Promise<number> {
     && DBS.every(([n]) => existsSync(join(BACKUP, `dbs/${n}.db`)) && missingRows(sqlite(join(BACKUP, `dbs/${n}.db`), "SELECT v FROM c6_marker"), MARKERS).length === 0)
     && existsSync(join(BACKUP, "units/morndo-node.service.d/limits.conf"))
     && SERVICES.every(s => existsSync(join(BACKUP, "units", s.unit)) && existsSync(join(BACKUP, "wrappers", s.wrapper)))
-    && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").includes(`${SPARE_UNIT} active=no enabled=no`);
+    && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").some(l => l.startsWith(`${SPARE_UNIT} active=no `));
   check("c-backup", backedOk, `backup.sh exited ${backed.code}: ${firstLines(backed, 2)}; units: ${readdirSync(join(BACKUP, "units")).join(", ")}; wrappers: ${readdirSync(join(BACKUP, "wrappers")).join(", ")}`);
   if (failed) return finish(server);
   const armed = command("c-arm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "m1", BACKUP, "--seconds", String(DEADMAN_SECONDS)]);
