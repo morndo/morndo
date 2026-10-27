@@ -140,16 +140,20 @@ IFS=$oldIFS
 
 cat > "$dest/restore.sh" <<'RESTORE'
 #!/bin/sh
-# Puts the machine's units, drop-ins and wrappers back as backup.sh found them.
-#   --deadman    the unattended run (the dead-man's unit): exits 0 at once when the folder holds an `ok` file
+# Puts the machine's units, drop-ins and wrappers back as backup.sh found them, and every unit to its recorded state.
+#   --deadman    the unattended run (the dead-man's unit): exits 0 at once when the folder holds an `ok` file. When the
+#                schema of a database changed since the backup it copies that database aside (aside-<time>/ in this
+#                folder, never deleted), puts the backed-up one back, and writes deadman-report.txt.
 #   --with-db    also put the databases back (loses writes since the backup); needed when the schema changed
 #   --keep-data  put the old code back on the databases as they are, even when their schema changed
-# Refuses another host (exit 3) and a changed schema (exit 4) before it touches anything.
+# Refuses another host (exit 3) and, for a manual run, a changed schema (exit 4) before it touches anything.
 set -eu
 bk=$(cd "$(dirname "$0")" && pwd)
 sc=${C6_SYSTEMCTL:-systemctl}
 units="$HOME/.config/systemd/user"
 bin="$HOME/.local/bin"
+NL='
+'
 
 deadman=no
 withdb=no
@@ -178,9 +182,9 @@ fi
 
 node=${C6_NODE:-$(cat "$bk/dbs/node-path.txt" 2>/dev/null || echo node)}
 
-# A changed schema: the old code on it may break; say so and stop, before anything is touched.
-if [ "$withdb" = no ] && [ "$keep" = no ] && [ -s "$bk/dbs/schema.txt" ]; then
-  changed=""
+# Which databases changed their schema since the backup (name=path lines).
+changed=""
+if [ -s "$bk/dbs/schema.txt" ] && { [ "$deadman" = yes ] || { [ "$withdb" = no ] && [ "$keep" = no ]; }; }; then
   while IFS= read -r line; do
     [ -n "$line" ] || continue
     name=${line%%=*}
@@ -188,28 +192,89 @@ if [ "$withdb" = no ] && [ "$keep" = no ] && [ -s "$bk/dbs/schema.txt" ]; then
     path=$(sed -n "s/^$name=//p" "$bk/dbs/paths.txt" | head -n 1)
     [ -f "$path" ] || continue
     live=$("$node" --no-warnings "$bk/db-backup.ts" signature "$path" 2>/dev/null) || live=unreadable
-    [ "$live" = "$want" ] || changed="$changed $name($path)"
+    [ "$live" = "$want" ] || changed="$changed$NL$name=$path"
   done < "$bk/dbs/schema.txt"
-  if [ -n "$changed" ]; then
-    echo "restore.sh: the schema of$changed changed since the backup; the old code may not run on it. Nothing changed." >&2
+fi
+
+# restore_dbs: the databases to put back (name=path lines), or "all".
+restore_dbs=""
+aside=""
+report=""
+if [ -n "$changed" ]; then
+  if [ "$deadman" = no ]; then
+    names=$(printf '%s\n' "$changed" | sed -n 's/^\([^=]*\)=\(.*\)$/ \1(\2)/p' | tr -d '\n')
+    echo "restore.sh: the schema of$names changed since the backup; the old code may not run on it. Nothing changed." >&2
     echo "restore.sh: --with-db puts the old data back (loses the writes made since the backup); --keep-data restores the old code on the newer schema anyway." >&2
     exit 4
   fi
+  # The dead-man: keep a consistent online copy of each changed database before anything is touched.
+  aside="$bk/aside-$(date -u +%Y%m%dT%H%M%SZ)"
+  mkdir -p "$aside"
+  oldIFS=$IFS; IFS=$NL
+  for spec in $changed; do
+    [ -n "$spec" ] || continue
+    name=${spec%%=*}
+    path=${spec#*=}
+    if "$node" --no-warnings "$bk/db-backup.ts" backup "$path" "$aside/$name.db" >/dev/null; then
+      restore_dbs="$restore_dbs$NL$spec"
+      report="$report${NL}database $name ($path) changed its schema; copied to $aside/$name.db, then the backed-up one was put back"
+    else
+      report="$report${NL}database $name ($path) changed its schema; the copy to $aside/$name.db FAILED, so the database was left as it is"
+    fi
+  done
+  IFS=$oldIFS
+elif [ "$withdb" = yes ]; then
+  restore_dbs=all
 fi
 
-# From the state recorded at backup time: services to restart, timers to enable.
-services=""
-timers=""
+# From the state recorded at backup time: every unit goes back to it.
+stop_list=""      # services recorded inactive
+start_list=""     # services recorded active
+on_list=""        # timers recorded enabled
+off_list=""       # timers recorded disabled
 while read -r u a e; do
   [ -n "$u" ] || continue
   case $u in
-    *.service) [ "$a" = "active=yes" ] && services="$services $u" ;;
-    *.timer) [ "$e" = "enabled=yes" ] && timers="$timers $u" ;;
+    *.service) if [ "$a" = "active=yes" ]; then start_list="$start_list $u"; else stop_list="$stop_list $u"; fi ;;
+    *.timer) if [ "$e" = "enabled=yes" ]; then on_list="$on_list $u"; else off_list="$off_list $u"; fi ;;
   esac
 done < "$bk/state.txt"
 
-if [ "$withdb" = yes ]; then
-  for s in $services; do "$sc" --user stop "$s" || true; done
+failed=""
+dbfailed=""
+stopped=no
+applied=no
+
+# Units to their recorded state; one that fails does not stop the others.
+apply_state() {
+  applied=yes
+  for s in $stop_list; do
+    if ! "$sc" --user stop "$s"; then failed="$failed $s"; fi
+  done
+  for s in $start_list; do
+    if ! "$sc" --user restart "$s"; then failed="$failed $s"; fi
+  done
+  for t in $off_list; do
+    if ! "$sc" --user disable --now "$t"; then failed="$failed $t"; fi
+  done
+  for t in $on_list; do
+    if ! "$sc" --user enable --now "$t"; then failed="$failed $t"; fi
+  done
+}
+
+# Whatever goes wrong once services are stopped, they are started again before this script ends.
+finish() {
+  if [ "$stopped" = yes ] && [ "$applied" = no ]; then
+    echo "restore.sh: stopped before the end; starting the recorded units again" >&2
+    apply_state || true
+    if [ -n "$failed" ]; then echo "restore.sh: these units did not start:$failed" >&2; fi
+  fi
+}
+trap finish EXIT
+
+if [ -n "$restore_dbs" ]; then
+  stopped=yes
+  for s in $start_list; do "$sc" --user stop "$s" || true; done
 fi
 
 # What the install added: units and drop-in folders of ours that the backup does not hold.
@@ -248,24 +313,28 @@ done
 
 "$sc" --user daemon-reload
 
-if [ "$withdb" = yes ]; then
-  while IFS= read -r line; do
+if [ -n "$restore_dbs" ]; then
+  if [ "$restore_dbs" = all ]; then restore_dbs=$(cat "$bk/dbs/paths.txt"); fi
+  oldIFS=$IFS; IFS=$NL
+  for line in $restore_dbs; do
     [ -n "$line" ] || continue
     name=${line%%=*}
     path=${line#*=}
+    if [ ! -f "$bk/dbs/$name.db" ]; then
+      echo "restore.sh: database $name: no backup copy at $bk/dbs/$name.db" >&2
+      dbfailed="$dbfailed $name"
+      continue
+    fi
     rm -f -- "${path:?}-wal" "${path:?}-shm"
-    cp -p "$bk/dbs/$name.db" "$path"
-  done < "$bk/dbs/paths.txt"
+    if ! cp -p "$bk/dbs/$name.db" "$path"; then
+      echo "restore.sh: database $name: could not copy $bk/dbs/$name.db to $path" >&2
+      dbfailed="$dbfailed $name"
+    fi
+  done
+  IFS=$oldIFS
 fi
 
-# Try every unit; one that fails does not stop the others.
-failed=""
-for s in $services; do
-  if ! "$sc" --user restart "$s"; then failed="$failed $s"; fi
-done
-for t in $timers; do
-  if ! "$sc" --user enable --now "$t"; then failed="$failed $t"; fi
-done
+apply_state
 
 # The dead-man's unit that ran this switches its own timer off (best effort).
 if [ "$deadman" = yes ]; then
@@ -278,10 +347,28 @@ if [ "$deadman" = yes ]; then
   done
 fi
 
-if [ -n "$failed" ]; then
-  echo "restore.sh: these units did not start:$failed" >&2
-  exit 1
+if [ -n "$aside" ]; then
+  {
+    echo "restore.sh --deadman ran on $(date -u +%Y-%m-%dT%H:%M:%SZ) for the backup in $bk."
+    echo "It put the units, drop-ins and wrappers back, and the units to their recorded state."
+    echo "The schema of at least one database changed since the backup, so it kept a copy of each changed database"
+    echo "(nothing deletes them) in $aside and then, for those databases only, stopped the services, put the"
+    echo "backed-up database back and started the units. Writes made since the backup are only in the copies."
+    printf '%s\n' "$report" | sed '/^$/d'
+    if [ -n "$dbfailed" ]; then echo "FAILED to put back:$dbfailed"; fi
+    if [ -n "$failed" ]; then echo "FAILED units:$failed"; fi
+  } > "$bk/deadman-report.txt" || true
+  echo "restore.sh: the schema changed since the backup; see $bk/deadman-report.txt (copies in $aside)" >&2
+  sed 's/^/restore.sh: deadman-report.txt: /' "$bk/deadman-report.txt" >&2 || true
 fi
+
+if [ -n "$dbfailed" ]; then
+  echo "restore.sh: these databases were not put back:$dbfailed" >&2
+fi
+if [ -n "$failed" ]; then
+  echo "restore.sh: these units did not reach their recorded state:$failed" >&2
+fi
+if [ -n "$dbfailed$failed" ]; then exit 1; fi
 RESTORE
 chmod 0755 "$dest/restore.sh"
 
@@ -304,9 +391,10 @@ Done and fine: \`touch $dest/ok\`, then take the dead-man's switch away:
 
 The dead-man's unit runs \`restore.sh --deadman\`, which exits at once when the \`ok\` file exists.
 
-When --with-db is needed: if ANY migration ran between the old build and the installed one, the schema signature
-changed and restore.sh refuses (exit 4) rather than put old code on a newer schema. Then either put the old data back
-as well (stops the services, copies $dest/dbs back, restarts; every write made since the backup is lost):
+When --with-db is needed: if ANY migration ran between the old build and the installed one (a changed table or index,
+a changed PRAGMA user_version, or a new row in a migrations table), the schema signature changed and a manual restore.sh
+refuses (exit 4) rather than put old code on a newer schema. Then either put the old data back as well (stops the
+services, copies $dest/dbs back, starts the units again; every write made since the backup is lost):
 
     sh $dest/restore.sh --with-db
 
@@ -314,11 +402,21 @@ or restore the old code on the newer schema anyway, if you know it can run there
 
     sh $dest/restore.sh --keep-data
 
-The dead-man's run (--deadman) also refuses on a changed schema, loudly: a failed unit is the alert.
+The dead-man's run (--deadman) does not refuse on a changed schema, because nobody is there to choose. For each database
+whose schema changed it first copies the live database into \`$dest/aside-<UTC time>/<name>.db\` (no script ever deletes
+that folder; the writes made since the backup live only there), then behaves like --with-db for those databases: stops
+the services, puts the backed-up database back, starts the units. It writes \`$dest/deadman-report.txt\` (what it did,
+which databases changed, the aside folder) and prints the same to the service journal. Databases whose schema did not
+change are not touched and not copied.
+
+Every unit goes back to the state recorded in state.txt: a service that was inactive is stopped, a timer that was
+disabled is disabled (\`--now\`); nothing that was not active or enabled is started.
 
 Arm the dead-man's switch (a persistent user timer, 60 minutes; survives a reboot):
 
     sh $here/arm-deadman.sh <machine> $dest
+
+Arming again moves the time (the timer is restarted). It refuses while \`$dest/ok\` exists: remove it (\`rm $dest/ok\`) first.
 ROLLBACK
 finished=yes
 echo "backup written to $dest"

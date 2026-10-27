@@ -1,7 +1,7 @@
 #!/bin/sh
 # arm-deadman.sh <machine> <backup-dir> [--seconds N]: a persistent user timer (a file under ~/.config/systemd/user, so a
 # reboot or a restart of the user manager keeps it) that runs <backup-dir>/restore.sh --deadman in 60 minutes (or N
-# seconds, for a rehearsal). arm-deadman.sh --disarm <machine> removes it. The ok step is `touch <backup-dir>/ok`, then
+# seconds, for a rehearsal), and refuses while <backup-dir>/ok exists. arm-deadman.sh --disarm <machine> removes it. The ok step is `touch <backup-dir>/ok`, then
 # --disarm (the marker makes a firing that still happens exit at once).
 set -eu
 
@@ -54,6 +54,11 @@ if [ "$rec_host" != "$cur_host" ] || [ "$rec_home" != "$HOME" ]; then
   exit 3
 fi
 
+if [ -e "$dir/ok" ]; then
+  echo "arm-deadman.sh: $dir/ok exists (the backup was signed off); nothing armed. Remove it to arm: rm $dir/ok" >&2
+  exit 1
+fi
+
 now=${C6_NOW:-$(date +%s)}
 when=$(date -d "@$((now + secs))" '+%Y-%m-%d %H:%M:%S')
 
@@ -79,4 +84,6 @@ WantedBy=timers.target
 UNIT
 "$sc" --user daemon-reload
 "$sc" --user enable --now "c6-deadman-$machine.timer"
+# A re-arm: the timer is already running with the old OnCalendar; a restart applies the new one.
+"$sc" --user restart "c6-deadman-$machine.timer"
 echo "dead-man's switch for $machine armed for $when (local time)"
