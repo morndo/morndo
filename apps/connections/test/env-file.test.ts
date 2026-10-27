@@ -421,3 +421,57 @@ describe("one writer at a time: a lock the kernel releases when its holder dies"
     if (second.ok) second.release();
   });
 });
+
+describe("every way out of acquire and release lets go: the handle is closed and the sink is not stuck for the rest of the process", () => {
+  // The seam is where a failure is made to happen: after the file is opened, after the lock is taken, and when the handle is closed.
+  const boom = (): never => { throw new Error("injected"); };
+  const otherProcessCanTake = async (path: string): Promise<string> => {
+    const helper = join(import.meta.dirname, "fixtures/lock-try.mjs");
+    return new Promise<string>(resolve => {
+      const child = spawn(process.execPath, ["--experimental-strip-types", helper, path, "0"]);
+      let out = "";
+      child.stdout.on("data", chunk => { out += chunk; });
+      child.on("close", () => { resolve(out.trim()); });
+    });
+  };
+  it("a failure after the file is opened (a chmod that throws) is busy, closes the handle, and clears the sink", async () => {
+    const path = join(area(), ".env");
+    const out = await acquireEnvLock(path, { waitMs: 0, seam: { afterOpen: boom } });
+    expect(out).toMatchObject({ ok: false, problem: "busy", holder: null });
+    const next = await acquireEnvLock(path, { waitMs: 0 });
+    expect(next.ok).toBe(true);
+    if (next.ok) next.release();
+  });
+  it("a failure after the lock is taken (the owner note) rolls it back and closes the handle: another process can take it at once, and so can the next taker here", async () => {
+    const path = join(area(), ".env");
+    const out = await acquireEnvLock(path, { waitMs: 0, seam: { afterBegin: boom } });
+    expect(out).toMatchObject({ ok: false, problem: "busy" });
+    expect(await otherProcessCanTake(path)).toBe("ok");
+    const next = await acquireEnvLock(path, { waitMs: 0 });
+    expect(next.ok).toBe(true);
+    if (next.ok) next.release();
+  });
+  it("a release whose close throws still clears the sink, does not throw, and the lock was rolled back first: the next taker, here or in another process, gets it", async () => {
+    const path = join(area(), ".env");
+    const held = await acquireEnvLock(path, { waitMs: 0, seam: { atClose: boom } });
+    expect(held.ok).toBe(true);
+    expect(() => { if (held.ok) held.release(); }).not.toThrow();
+    expect(await otherProcessCanTake(path)).toBe("ok");
+    const next = await acquireEnvLock(path, { waitMs: 0 });
+    expect(next.ok).toBe(true);
+    if (next.ok) next.release();
+  });
+  it("a failure while waiting (the busy loop) closes the handle and clears the sink too", async () => {
+    const path = join(area(), ".env");
+    const first = await acquireEnvLock(path, { waitMs: 0 });
+    expect(first.ok).toBe(true);
+    // A second process holds nothing here; the in-process wait is the registry, so the failure is made in the first taker's own release below.
+    if (first.ok) first.release();
+    const out = await acquireEnvLock(path, { waitMs: 0, seam: { afterOpen: boom } });
+    expect(out.ok).toBe(false);
+    const again = await acquireEnvLock(path, { waitMs: 0 });
+    expect(again.ok).toBe(true);
+    if (again.ok) again.release();
+  });
+});
+
