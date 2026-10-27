@@ -1,11 +1,14 @@
 #!/bin/sh
 # env.sh <feed-url> -- the rehearsal's feed step (docs/plans/2026-10-27-c4-resume.md, section 3), run as the
-# worker inside a rehearsal machine. The updater reads its feed address only from MORNDO_UPDATE_FEED
+# worker inside a rehearsal machine (it refuses to run anywhere else: the host name must be under
+# rehearsal.test, for this step writes the user manager's environment, and on the host that manager is the
+# host's own). The updater reads its feed address only from MORNDO_UPDATE_FEED
 # (apps/updater/src/cli.ts:417) and, as a systemd user unit, from the user manager's environment; without it a
 # rehearsal machine would quietly read production's feed. So the address must be an https:// URL of plain
 # characters (no space, quote, $, backslash or newline: it is written into files and commands as it stands) and
 # must not be production's, with or without the trailing slash the updater adds, and must be https://<host>/<path>/
-# in lower case, with no port, escape, empty, . or .. segment (other spellings can name production's host too); then it is written, with that
+# in lower case, with no port, escape, empty, . or .. segment (other spellings can name production's host too),
+# and must be the bench's own, https://morndo.github.io/morndo-release-test/ — no other feed is read; then it is written, with that
 # slash, to ~/.config/environment.d/morndo-rehearsal.conf (the manager reads that file at login) and handed to
 # the running manager with systemctl --user set-environment, and show-environment must carry the exact line, or
 # the step stops: a manager that lacks the address would let the updater read production's feed. Nothing but the
@@ -28,6 +31,15 @@ if [ $# -ne 1 ]; then
 fi
 
 url=$1
+
+# A rehearsal machine only: the step below writes this user's manager environment, and on any other box that
+# user is the host's own. The host name must have a label under rehearsal.test, so the bare domain and names
+# that merely end in something else fail alike.
+host=$(uname -n)
+case $host in
+  ?*.rehearsal.test) ;;
+  *) fail "this is not a rehearsal machine (its host name $host is not under rehearsal.test); run it inside one" ;;
+esac
 
 case $url in
   https://*) ;;
@@ -54,6 +66,11 @@ fi
 
 [ "$url" != "https://morndo.github.io/morndo/" ] ||
   fail "that is production's feed; a rehearsal machine never reads it"
+
+# The bench's Pages feed and nothing else: the rehearsal's results are only its own while the feed it reads is
+# the one repository the rehearsal is allowed to touch.
+[ "$url" = "https://morndo.github.io/morndo-release-test/" ] ||
+  fail "the feed address must be the bench's own, https://morndo.github.io/morndo-release-test/"
 
 conf_dir=$HOME/.config/environment.d
 mkdir -p "$conf_dir"
