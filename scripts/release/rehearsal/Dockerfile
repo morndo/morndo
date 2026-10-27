@@ -10,7 +10,7 @@ FROM ubuntu:24.04
 # systemd wants a few packages to behave like a machine: systemd itself, dbus-user-session so the user manager
 # has its bus (the agent's tmux hosting and every systemctl --user the updater runs need it), tmux for the agent,
 # sqlite3 for the scenario's database checks, ca-certificates for anything that leaves the machine; curl and
-# openssh-client because install.sh fetches the build with curl and makes the machine's key with ssh-keygen.
+# openssh-client because install.sh fetches the release with curl and verifies its signatures with ssh-keygen.
 RUN apt-get update \
   && apt-get install -y --no-install-recommends systemd systemd-sysv dbus-user-session tmux sqlite3 ca-certificates curl openssh-client \
   && rm -rf /var/lib/apt/lists/*
