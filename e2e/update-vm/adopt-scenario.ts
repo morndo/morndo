@@ -298,12 +298,11 @@ function deadmanJournal(machine: string): { ranOk: boolean; failedRun: boolean; 
 
 async function waitDeadmanGone(machine: string, timeoutMs: number): Promise<boolean> {
   const gone = await waitUntil(timeoutMs, async () => {
-    const timer = run("systemctl", ["--user", "is-active", `c6-deadman-${machine}.timer`]).out.trim();
     const service = run("systemctl", ["--user", "is-active", `c6-deadman-${machine}.service`]).out.trim();
     // A persistent timer whose calendar time has passed stays "active (elapsed)" when restore.sh did not disable it (the ok
-    // marker exits first): it has fired once its last trigger time is set.
-    const last = run("systemctl", ["--user", "show", "-p", "LastTriggerUSec", "--value", `c6-deadman-${machine}.timer`]).out.trim();
-    const fired = timer !== "active" || (last !== "" && last !== "n/a" && last !== "0");
+    // marker exits first), so "fired" is the service's own journal: it was started (and it is not running any more).
+    const log = run("journalctl", ["--user", "-u", `c6-deadman-${machine}.service`, "--no-pager", "-o", "cat"]).out;
+    const fired = log.includes(`Starting c6-deadman-${machine}.service`) || log.includes(`Started c6-deadman-${machine}.service`);
     return fired && service !== "active" && service !== "activating" ? "gone" : null;
   });
   return gone !== null;
