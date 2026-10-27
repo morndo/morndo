@@ -2,12 +2,14 @@
 // as NAME=value (0600, by rename), a sidecar naming the member and stamping the file it is about, one writer at a time (<sink>.lock), words only on stdout and stderr. `--if-due` rewrites only when the served member can no longer
 // serve (or the file is gone, or `--rotate-every` has passed). Every key is synthetic; the planted values must reach nothing but the file.
 import { spawn } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, readlinkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 vi.setConfig({ testTimeout: 60_000 });
+// The pid namespace the tests run in, as a lock records it (a lock of another namespace is never taken over).
+const NS = /\[(\d+)\]/.exec(readlinkSync("/proc/self/ns/pid"))?.[1] ?? "0";
 const KEYS: [string, string, string] = ["sk-ant-synthetic-env-key-0001", "sk-ant-synthetic-env-key-0002", "sk-ant-synthetic-env-key-0003"];
 const catalogPath = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 const main = join(import.meta.dirname, "../src/main.ts");
@@ -230,7 +232,7 @@ describe("one writer at a time, and a pair that agrees", () => {
   });
   it("a lock whose holder is gone is taken over, and the lock is gone after the write", async () => {
     const w = await world();
-    writeFileSync(`${w.file}.lock`, "2147483646 1\n");
+    writeFileSync(`${w.file}.lock`, `2147483646 1 ${NS}\n`);
     const out = await write(w);
     expect([out.code, out.stderr]).toEqual([0, ""]);
     expect(readdirSync(w.sinks).sort()).toEqual(["app.env", "app.env.member"]);
