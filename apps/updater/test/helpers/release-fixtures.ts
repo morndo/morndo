@@ -10,6 +10,7 @@ import { publishRelease } from "../../../../scripts/release/feed.ts";
 import { artifactName, buildManifest } from "../../../../scripts/release/manifest.ts";
 import type { TreeFile } from "../../../../scripts/release/archive.ts";
 import { FEED_NAMESPACE, KEYS_NAMESPACE, RELEASE_NAMESPACE } from "../../src/application/namespaces.ts";
+import { platformWord } from "../../src/cli.ts";
 import type { Signed } from "../../src/application/ports.ts";
 import { buildRelease, packWithList } from "./tar-fixtures.ts";
 import { makeSigningKey, type SigningKey } from "./sshsig.ts";
@@ -80,7 +81,10 @@ export function releaseFixture(o: {
   protocol?: { agent: [number, number]; clientApi: [number, number] };
   tamper?: (tree: TreeFile[], filesJson: string) => Buffer;
 }): ReleaseFixture {
-  const platform = o.platform ?? "linux-x64";
+  // This machine's platform by default, mapped as the CLI maps it: a test that drives the CLI stages only an
+  // Artifact for the machine it runs on (the release's linux-arm64 units job failed "no_artifact" on a linux-x64
+  // default). Elsewhere linux-x64, a name only.
+  const platform = o.platform ?? platformWord(process.platform, process.arch) ?? "linux-x64";
   const tree = TREE(o.version);
   const built = buildRelease(tree);
   const archive = o.tamper === undefined ? built.gz : o.tamper(tree, built.filesJson);

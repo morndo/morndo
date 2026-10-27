@@ -258,23 +258,34 @@ describe("release-commits-verified", () => {
   let bin: string;
   beforeEach(() => {
     bin = mkdtempSync(join(tmpdir(), "fakegh-"));
-    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_GH_LOG"\ncase "$2" in\n  */pulls) [ -f "$FAKE_GH_PULLS" ] && cat "$FAKE_GH_PULLS" || exit 1 ;;\n  *) [ -f "$FAKE_GH_COMMIT" ] && cat "$FAKE_GH_COMMIT" || exit 1 ;;\nesac\n`, { mode: 0o755 });
+    // FAKE_GH_PULLS_LATE: how many of the first pull request asks answer [] (GitHub has not linked the commit yet).
+    writeFileSync(join(bin, "gh"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_GH_LOG"\ncase "$2" in\n  */pulls) [ "$(grep -c '/pulls$' "$FAKE_GH_LOG")" -gt "\${FAKE_GH_PULLS_LATE:-0}" ] || { echo '[]'; exit 0; }\n    [ -f "$FAKE_GH_PULLS" ] && cat "$FAKE_GH_PULLS" || exit 1 ;;\n  *) [ -f "$FAKE_GH_COMMIT" ] && cat "$FAKE_GH_COMMIT" || exit 1 ;;\nesac\n`, { mode: 0o755 });
+    // A sleep that only records how long it was asked to wait, so the waits are counted and no test waits.
+    writeFileSync(join(bin, "sleep"), `#!/bin/sh\nprintf '%s\\n' "$*" >> "$FAKE_SLEEP_LOG"\n`, { mode: 0o755 });
   });
   afterEach(() => { rmSync(bin, { recursive: true, force: true }); });
 
   // The range holds one commit by the App's identity and one by Ada; the API is told `commit` and `pulls` (undefined: the call fails).
-  function list(commit: unknown, pulls: unknown, who: Who = BOT) {
+  // `late` pull request asks answer [] first. The script waits 0 s between asks here, unless `defaults` leaves its
+  // settings unset; the fake sleep records every wait either way.
+  function list(commit: unknown, pulls: unknown, who: Who = BOT, o: { late?: number; tries?: string; defaults?: boolean } = {}) {
     const base = git(["rev-parse", "HEAD"]);
     const mine = commit_(ADA, WEB, "fix: other", { "src/a.ts": "export const a = 5;\n" });
     const app = commit_(who, WEB, "chore(main): release 0.1.0", RELEASE);
-    const files = { c: join(bin, "commit.json"), p: join(bin, "pulls.json"), log: join(bin, "calls.log") };
+    const files = { c: join(bin, "commit.json"), p: join(bin, "pulls.json"), log: join(bin, "calls.log"), sleeps: join(bin, "sleeps.log") };
     rmSync(files.c, { force: true });                      // a call that "fails" has no canned answer; none is left from the last list()
     rmSync(files.p, { force: true });
     writeFileSync(files.log, "");
+    writeFileSync(files.sleeps, "");
     if (commit !== undefined) writeFileSync(files.c, JSON.stringify(commit));
     if (pulls !== undefined) writeFileSync(files.p, JSON.stringify(pulls));
-    const r = spawnSync("sh", [LISTER, `${base}..HEAD`], { cwd: repo, encoding: "utf8", env: { ...process.env, PATH: `${bin}:${process.env.PATH ?? ""}`, REPO, FAKE_GH_COMMIT: files.c, FAKE_GH_PULLS: files.p, FAKE_GH_LOG: files.log } });
-    return { listed: r.stdout.split("\n").filter(Boolean), app, mine, status: r.status, calls: readFileSync(files.log, "utf8").split("\n").filter(Boolean) };
+    const env = { ...process.env };                        // the script's own settings come only from this test
+    delete env.RELEASE_PR_TRIES;
+    delete env.RELEASE_PR_WAIT;
+    const settings = o.defaults ? {} : { RELEASE_PR_WAIT: "0", ...(o.tries === undefined ? {} : { RELEASE_PR_TRIES: o.tries }) };
+    const r = spawnSync("sh", [LISTER, `${base}..HEAD`], { cwd: repo, encoding: "utf8", env: { ...env, PATH: `${bin}:${process.env.PATH ?? ""}`, REPO, FAKE_GH_COMMIT: files.c, FAKE_GH_PULLS: files.p, FAKE_GH_LOG: files.log, FAKE_GH_PULLS_LATE: String(o.late ?? 0), FAKE_SLEEP_LOG: files.sleeps, ...settings } });
+    const lines = (f: string) => readFileSync(f, "utf8").split("\n").filter(Boolean);
+    return { listed: r.stdout.split("\n").filter(Boolean), app, mine, status: r.status, stderr: r.stderr, calls: lines(files.log), sleeps: lines(files.sleeps) };
   }
   function commit_(author: Who, committer: Who, message: string, files: Files) { write(files); return commit(author, committer, message); }
 
@@ -315,6 +326,39 @@ describe("release-commits-verified", () => {
   it("lists the commit when any one of several pull requests is the App's", () => {
     const lane = { ...GOOD_PR, number: 7, user: { login: "ada-dev", type: "User" } };
     expect(list(GOOD_COMMIT, [lane, GOOD_PR]).listed).toHaveLength(1);
+  });
+
+  it("asks again for a pull request GitHub has not linked yet, and lists the commit once it is there", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR], BOT, { late: 2 });
+    expect(r.listed).toEqual([r.app]);
+    expect(r.calls.filter((c) => c.endsWith("/pulls"))).toHaveLength(3);
+  });
+
+  it("gives up after RELEASE_PR_TRIES asks, lists nothing, and says which check the commit failed", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR], BOT, { late: 3, tries: "3" });
+    expect(r.listed).toEqual([]);
+    expect(r.calls.filter((c) => c.endsWith("/pulls"))).toHaveLength(3);
+    expect(r.stderr).toContain(`${r.app} left out: no pull request of the App's on a release-please branch after 3 asks`);
+  });
+
+  it("by default asks 6 times and waits 10 s between asks, and not after the last", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR], BOT, { late: 99, defaults: true });
+    expect(r.listed).toEqual([]);
+    expect(r.calls.filter((c) => c.endsWith("/pulls"))).toHaveLength(6);
+    expect(r.sleeps).toEqual(["10", "10", "10", "10", "10"]);
+  });
+
+  it("does not wait when the pull request is there at the first ask", () => {
+    const r = list(GOOD_COMMIT, [GOOD_PR], BOT, { defaults: true });
+    expect(r.listed).toEqual([r.app]);
+    expect(r.sleeps).toEqual([]);
+  });
+
+  it("names the failed check on stderr for a commit GitHub does not vouch for, and keeps stdout the list", () => {
+    const r = list({ commit: { verification: { verified: false } }, committer: { login: "web-flow" } }, [GOOD_PR]);
+    expect(r.listed).toEqual([]);
+    expect(r.stderr).toContain(`${r.app} left out: GitHub does not report it verified and committed by web-flow`);
+    expect(list(undefined, [GOOD_PR]).stderr).toContain("left out: the commit API call failed");
   });
 
   it("lists nothing when an API call fails, and never lists a commit of another author", () => {

@@ -3,7 +3,7 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, truncateSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS } from "@morndo/protocol";
 import { MAX_FILE_BYTES, confine, deniedBy, denyConfigWithClaudeDir, denyRoots, openConfined, openNoFollow, type DenyConfig } from "../src/file-rules.ts";
 
@@ -120,6 +120,29 @@ describe("confine on a case-insensitive volume", () => {
       expect(reason(join(home, rel)), rel).toBe(rel.endsWith("credentials.json") ? "secret" : folds ? "denied" : "missing");   // a secret by name, whatever the case
     }
     expect(reason(join(home, ".ssh", "config"))).toBe("denied");               // negative control: the exact spelling
+  });
+});
+
+// The fold is decided when the module loads (process.platform), so the test above only reaches it on darwin and win32. This one
+// loads the module as each platform would, and runs on every one: where a volume folds case a root asked for in another case is
+// denied, elsewhere it is not (negative control t2-confine-case-fold removes the fold).
+describe("deniedBy on a platform that folds case", () => {
+  const loadAs = async (platform: NodeJS.Platform) => {
+    const real = Object.getOwnPropertyDescriptor(process, "platform")!;
+    Object.defineProperty(process, "platform", { value: platform });
+    try { vi.resetModules(); return await import("../src/file-rules.ts"); }
+    finally { Object.defineProperty(process, "platform", real); vi.resetModules(); }
+  };
+  it("compares paths and roots in lower case on darwin and win32, exactly elsewhere", async () => {
+    const roots = ["/h/.ssh", "/h/.config/morndo*"];
+    for (const platform of ["darwin", "win32"] as const) {
+      const { deniedBy: folded } = await loadAs(platform);
+      for (const p of ["/h/.SSH", "/h/.Ssh/ID", "/H/.CONFIG/Morndo-Node/key"]) expect(folded(p, roots), `${platform} ${p}`).toBe(true);
+      expect(folded("/h/.sshx", roots), `${platform} /h/.sshx`).toBe(false);          // folding does not widen a root
+    }
+    const { deniedBy: exact } = await loadAs("linux");
+    for (const p of ["/h/.SSH", "/h/.Ssh/ID", "/H/.CONFIG/Morndo-Node/key"]) expect(exact(p, roots), `linux ${p}`).toBe(false);
+    expect(exact("/h/.ssh/id", roots)).toBe(true);                                        // negative control: the exact spelling
   });
 });
 

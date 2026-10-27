@@ -1,7 +1,9 @@
 # The plan's negative controls, run again (docs/design/fleet-core/README.md §12.1; scripts/negative-controls.ts): each
 # removes one guard in a temporary worktree and expects the tests it names to fail. Weekly and on demand rather than on
 # every push: a full run applies every control and runs its tests twice. CI's `ci` job checks on every push that each
-# control still applies (`--check`). "Scheduled workflows run on the latest commit on the default branch", in UTC, and
+# control still applies (`--check`). One serial run of all of them passed its 90 minutes (T-467), so the controls run as a
+# matrix of shards (`--shard i/n`, scripts/negative-controls.ts): each job installs once and runs its slice.
+# "Scheduled workflows run on the latest commit on the default branch", in UTC, and
 # workflow_dispatch "will only trigger a workflow run if the workflow file exists on the default branch"
 # (https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows, read 2026-10-06).
 # Actions pinned as in ci.yml.
@@ -17,8 +19,13 @@ permissions:
 
 jobs:
   controls:
+    name: controls (shard ${{ matrix.shard }} of 12)
     runs-on: ubuntu-24.04
     timeout-minutes: 90
+    strategy:
+      fail-fast: false      # a shard that fails does not stop the others: every control reports
+      matrix:
+        shard: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]    # the n of --shard i/n below
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -38,5 +45,5 @@ jobs:
           sudo apt-get install -y --no-install-recommends tmux
           npx playwright install --with-deps chromium
 
-      - name: Every negative control
-        run: node scripts/negative-controls.ts
+      - name: Negative controls, shard ${{ matrix.shard }} of 12
+        run: node scripts/negative-controls.ts --shard ${{ matrix.shard }}/12

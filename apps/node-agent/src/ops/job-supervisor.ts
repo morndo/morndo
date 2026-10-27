@@ -16,7 +16,7 @@ import { deniedBy, denyRoots, processAlive, resolvedRoots, type ProcessStart } f
 import { errno } from "@morndo/service-kit";
 import { psStarts, readRecorded, sameProcess, START_RECORD_GRACE_MS, writeProcessFile, type Recorded } from "./job-identity.ts";
 import { capStep, endedBeforeStop, monotonicUsec, UNIT_CAP_LOOK_MS, type CapSight } from "./job-cap.ts";
-import { MAX_TIMER_MS } from "./job-limits.ts";
+import { MAX_TIMER_MS, UNIT_STOP_WAIT_MS, UNIT_STUCK_STOP_MS } from "./job-limits.ts";
 import { askHub, JobGrants } from "./job-grant.ts";
 import { killJobUnit, managerEnv, probeUserManager, resetJobUnit, runMs, showUnit, spawnFailed, startJobUnit, stopJobUnit, type ProbeResult, type UnitLook, type UnitState } from "./job-systemd.ts";
 import { guardOf, readProc, type MachineSample } from "./job-guard.ts";
@@ -166,6 +166,7 @@ export async function openJobSupervisor(store: JobStore, opts: {
   node?: string;
   grants?: JobGrants;
   hubBase?: string;
+  stuckStopMs?: number;
   log?: { error: (message: string, error?: unknown) => void };
 }, choice: {
   probe?: () => ProbeResult | Promise<ProbeResult>;
@@ -211,6 +212,9 @@ export class JobSupervisor {
   #capSights = new Map<string, CapSight>();
   // Jobs a cancel signalled but could not confirm: how such a unit ends is the cancel's result, not the command's.
   #signalledCancels = new Set<string>();
+  // Each unit the sweep found stopping: when it first did (monotonic ms), and whether the bound's SIGKILL went out.
+  #stoppingSights = new Map<string, { since: number; killed: boolean }>();
+  #stuckStopMs: number;
   // A closed supervisor's watches stop acting, also when they already wait for the job's lock: the agent that replaces
   // it owns the jobs. close() does not wait for them; each one sees this at its next step and returns.
   #closed = false;
@@ -229,6 +233,7 @@ export class JobSupervisor {
     systemd?: { slice: string; toolEnv?: NodeJS.ProcessEnv };
     grants?: JobGrants;
     hubBase?: string;
+    stuckStopMs?: number;
     log?: { error: (message: string, error?: unknown) => void };
   }) {
     this.#store = store;
@@ -250,6 +255,7 @@ export class JobSupervisor {
     this.#grants = opts.grants ?? null;
     this.#hubBase = opts.hubBase ?? null;
     this.#toolEnv = opts.systemd?.toolEnv;
+    this.#stuckStopMs = opts.stuckStopMs ?? UNIT_STUCK_STOP_MS;
   }
 
   listen(): Promise<void> {
@@ -284,6 +290,12 @@ export class JobSupervisor {
         resolve();
       });
     });
+  }
+
+  // How many jobs this supervisor still holds cap or cancel state for. A job that has ended holds none, so the count is
+  // bounded by the open jobs (the tests read it to show nothing outlives a job).
+  trackedJobs(): number {
+    return new Set([...this.#capSights.keys(), ...this.#signalledCancels, ...this.#stoppingSights.keys()]).size;
   }
 
   close(): void {
@@ -337,6 +349,7 @@ export class JobSupervisor {
       for (const job of jobs) await this.#exclusive(job.id, () => this.#sweepOne(job.id, pending, starts, watches));
     }
     await this.#promote(this.#starting(), guard);
+    this.#reconcile();
     // Design §5: a capped unit's grace runs beside the sweep, so it holds up no other job and no cancel. The sweep
     // still ends with the decisions of the watches it started (an earlier sweep's watch is that sweep's), and starts
     // what they freed.
@@ -375,7 +388,7 @@ export class JobSupervisor {
     const job = this.#store.get(id);
     if (!job) return err("missing");
     if (job.outcome !== null) return this.#replay(job);
-    if (job.state === "queued") return this.#store.settle(id, { outcome: "cancelled", exitCode: null, durationMs: 0 });
+    if (job.state === "queued") return this.#settle(id, { outcome: "cancelled", exitCode: null, durationMs: 0 });
     let found = this.#recorded(id, "pid");
     if (found?.recorded.kind === "none") {
       await this.#waitForRecord(id);
@@ -385,7 +398,7 @@ export class JobSupervisor {
       found = this.#recorded(id, "pid");
       if (!found || found.recorded.kind === "none") {
         try {
-          const decided = this.#store.settle(id, { outcome: "lost", at: Date.now() });
+          const decided = this.#settle(id, { outcome: "lost", at: Date.now() });
           return decided.ok ? ok(decided.value) : err("missing");
         } catch { return err("missing"); }
       }
@@ -424,7 +437,7 @@ export class JobSupervisor {
     if (found?.recorded.kind === "none") {
       if (this.#recordPending(id)) return;
       if (!this.#open(id)) return;
-      try { this.#store.settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
+      try { this.#settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
       return;
     }
     const live = found ? await sameProcess(found.pid, found.recorded, starts) : false;
@@ -438,7 +451,7 @@ export class JobSupervisor {
     if (found || pending.has(id) || job.state === "running") {
       await this.#stopChild(id, starts);
       if (!this.#open(id)) return;
-      try { this.#store.settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
+      try { this.#settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
       return;
     }
     if (!this.#open(id)) return;
@@ -476,7 +489,7 @@ export class JobSupervisor {
     for (const job of this.#store.list()) {
       if (job.state !== "queued") continue;
       try {
-        const decided = this.#store.settle(job.id, { outcome: "refused" });
+        const decided = this.#settle(job.id, { outcome: "refused" });
         if (!decided.ok) continue;
       } catch (e) {
         this.#log?.error(`refusing queued job ${job.id} failed`, e);
@@ -489,9 +502,15 @@ export class JobSupervisor {
   // the unit still absent and settle the job lost while systemd-run is in flight.
   async #promote(already: Set<string>, guard: Guard | null = null): Promise<void> {
     this.#apply(guard);
+    const launched: string[] = [];
     await Promise.all(this.#store.list()
       .filter(job => job.state === "starting" && !already.has(job.id))
-      .map(job => this.#exclusive(job.id, () => this.#launch(job.id))));
+      .map(job => this.#exclusive(job.id, () => this.#launch(job.id)).then(() => { launched.push(job.id); })));
+    // A launch that failed settled its job did_not_start and freed the slot it took: pass again while a job is
+    // still queued (each pass starts at least one job, so this ends).
+    if (launched.some(id => this.#store.get(id)?.outcome != null) && this.#queued()) {
+      await this.#promote(new Set([...already, ...launched]), guard);
+    }
   }
 
   async #reply(line: string): Promise<
@@ -608,13 +627,14 @@ export class JobSupervisor {
     if (look.kind === "unknown") return;
     if (look.kind === "absent") {
       if (pending.has(id) || job.state === "running") {
-        try { this.#store.settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
+        try { this.#settle(id, this.#unitEnd(id, job, null)); } catch { /* next sweep retries */ }
         return;
       }
       await this.#launchUnit(id);
       return;
     }
     const view = look.view;
+    if (view.active !== "deactivating") this.#stoppingSights.delete(id);
     if (view.active === "activating" || (view.active === "active" && view.sub === "running")) {
       if (job.state === "starting") this.#store.started(id);
       if (this.#overCap(id)) {
@@ -623,25 +643,64 @@ export class JobSupervisor {
       }
       return;
     }
+    if (view.active === "deactivating") { await this.#stoppingUnit(id, job); return; }
     await this.#settleUnit(id, view);
+  }
+
+  // A unit that is stopping has not told its result yet; the next sweep reads how it ended. systemd bounds a stop
+  // itself (TimeoutStopSec=10 on every job unit), but a stop that never ends must not hold the job open for ever:
+  // once the unit has been seen stopping for `stuckStopMs` it gets a SIGKILL, and after twice that the job ends as
+  // the signalled cancel or lost, the unit being one no one can confirm over.
+  async #stoppingUnit(id: string, job: Job): Promise<void> {
+    const now = performance.now();
+    const sight = this.#stoppingSights.get(id);
+    if (!sight) { this.#stoppingSights.set(id, { since: now, killed: false }); return; }
+    const age = now - sight.since;
+    if (age < this.#stuckStopMs) return;
+    if (age < 2 * this.#stuckStopMs) {
+      if (sight.killed) return;
+      sight.killed = true;
+      try { await killJobUnit(id, "SIGKILL", this.#toolEnv); }
+      catch (e) { this.#log?.error(`the SIGKILL for job ${id}, stuck stopping, failed; the next sweep gives up on it`, e); }
+      return;
+    }
+    if (job.state === "starting") {
+      const started = this.#store.started(id);
+      if (!started.ok) return;
+    }
+    try { this.#settle(id, this.#unitEnd(id, job, null)); } catch { return; }
+    try { await stopJobUnit(id, this.#toolEnv); } catch { /* the end is already recorded */ }
+    await resetJobUnit(id, this.#toolEnv);
+  }
+
+  // How a unit that is over ended. A cancel that signalled it owns that end (the unit's exit code is the signal's,
+  // not the command's); a unit no one can read is lost. With a view the unit's own result decides, and may be nothing.
+  #unitEnd(id: string, job: Job, view: UnitState): FinishEvent | null;
+  #unitEnd(id: string, job: Job, view: null): FinishEvent;
+  #unitEnd(id: string, job: Job, view: UnitState | null): FinishEvent | null {
+    if (this.#signalled(id)) {
+      const durationMs = view !== null ? runMs(view, job.startedAt)
+        : job.startedAt === null ? 0 : Math.max(0, Date.now() - job.startedAt);
+      return { outcome: "cancelled", exitCode: null, durationMs };
+    }
+    if (view === null) return { outcome: "lost", at: Date.now() };
+    return exitOf(view, runMs(view, job.startedAt));
   }
 
   // A unit that is no longer running: its own result, read from systemd.
   async #settleUnit(id: string, view: UnitState): Promise<void> {
     const job = this.#open(id);
     if (!job) return;
-    const durationMs = runMs(view, job.startedAt);
-    const event = this.#signalledCancels.has(id) ? { outcome: "cancelled" as const, exitCode: null, durationMs } : exitOf(view, durationMs);
+    const event = this.#unitEnd(id, job, view);
     if (!event) return;
     if (job.state === "starting") {
       const started = this.#store.started(id);
       if (!started.ok) return;
     }
     try {
-      const decided = this.#store.settle(id, event);
+      const decided = this.#settle(id, event);
       if (!decided.ok) return;
     } catch { return; }
-    this.#signalledCancels.delete(id);
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
   }
@@ -660,13 +719,39 @@ export class JobSupervisor {
     return watch;
   }
 
-  // What is kept per job for the cap goes once the job has ended, so it is bounded by the open jobs.
-  #forget(id: string): void {
-    let open: boolean;
-    try { open = this.#open(id) !== null; } catch { return; }
-    if (open) return;
+  // Every settle drops what the supervisor keeps for the job once it is no longer open. The .cap and .cancel
+  // files stay on disk for prune, like the log.
+  #settle(id: string, event: FinishEvent): Result<NoticeHandoff, FinishProblem | "missing"> {
+    let decided: Result<NoticeHandoff, FinishProblem | "missing">;
+    try {
+      decided = this.#store.settle(id, event);
+    } catch (e) {
+      this.#forget(id);
+      throw e;
+    }
+    // A settle that ended the job needs no read of the store to know it is over.
+    this.#forget(id, decided.ok);
+    return decided;
+  }
+
+  // What is kept per job goes once the job has ended, so it is bounded by the open jobs. `ended`: the caller knows the
+  // job is over. Otherwise the store says; when it cannot be read nothing is dropped, and the next sweep's
+  // reconcile judges the entry again.
+  #forget(id: string, ended = false): void {
+    if (!ended) {
+      let open: boolean;
+      try { open = this.#open(id) !== null; } catch { return; }
+      if (open) return;
+    }
     this.#capSights.delete(id);
     this.#signalledCancels.delete(id);
+    this.#stoppingSights.delete(id);
+  }
+
+  // Every job the supervisor still holds state for is looked at again, so an entry whose forget could not read the
+  // store does not outlive the job.
+  #reconcile(): void {
+    for (const id of new Set([...this.#capSights.keys(), ...this.#signalledCancels, ...this.#stoppingSights.keys()])) this.#forget(id);
   }
 
   // Each look checks the log and the unit's main process; only when that process is gone does it ask systemd how the
@@ -689,7 +774,7 @@ export class JobSupervisor {
       const lookedAt = monotonicUsec();
       const look = await showUnit(id, this.#toolEnv);
       if (this.#closed || look.kind === "absent") return;
-      if (look.kind === "found" && !this.#live(look.view)) {
+      if (look.kind === "found" && !this.#unfinished(look.view)) {
         const ended = look.view;
         await this.#exclusive(id, () => (this.#closed ? undefined : this.#settleUnit(id, ended)));
         return;
@@ -707,21 +792,33 @@ export class JobSupervisor {
     const job = this.#store.get(id);
     if (!job) return err("missing");
     if (job.outcome !== null) return this.#replay(job);
-    if (job.state === "queued") return this.#store.settle(id, { outcome: "cancelled", exitCode: null, durationMs: 0 });
+    if (job.state === "queued") return this.#settle(id, { outcome: "cancelled", exitCode: null, durationMs: 0 });
     const look = await showUnit(id, this.#toolEnv);
     if (look.kind === "unknown") return err("unavailable");
     const view = look.kind === "found" ? look.view : null;
-    const live = view !== null && (view.active === "activating" || (view.active === "active" && view.sub === "running"));
+    // A unit that is still stopping owes its end to this cancel too, so deactivating counts as not over.
+    const live = view !== null && this.#unfinished(view);
+    // A unit systemd is stopping for its RuntimeMaxSec timed out before this cancel: the cancel ends it, and the
+    // timeout stays its end.
+    const timedOut = view !== null && view.active === "deactivating" && view.result === "timeout";
     if (live) {
+      // The mark goes first, before any signal or wait: an agent that restarts while this cancel waits, or a settle
+      // that throws after the signals, still finds a cancel in flight. A cancel that sent no signal takes it back.
+      const marked = !timedOut && !this.#signalled(id);
+      if (!timedOut) this.#markCancel(id);
       const after = await this.#endLive(id);
-      if (after === "unsignalled") return err("unavailable");
-      if (after === "signalled") { this.#signalledCancels.add(id); return err("signalled"); }
+      if (after === "unsignalled") {
+        if (marked) this.#unmarkCancel(id);
+        return err("unavailable");
+      }
+      if (after === "signalled") return err("signalled");
       const current = this.#store.get(id);
       if (!current) return err("missing");
       if (current.outcome !== null) return this.#replay(current);
       const durationMs = after.kind === "found" ? runMs(after.view, current.startedAt) : 0;
+      const event: FinishEvent = timedOut ? { outcome: "timed_out", exitCode: null, durationMs } : { outcome: "cancelled", exitCode: null, durationMs };
       try {
-        const decided = this.#store.settle(id, { outcome: "cancelled", exitCode: null, durationMs });
+        const decided = this.#settle(id, event);
         if (!decided.ok) return this.#ended(id) ?? err("signalled");
         try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
         await resetJobUnit(id, this.#toolEnv);
@@ -730,19 +827,18 @@ export class JobSupervisor {
     }
     if (!view) {
       try {
-        const decided = this.#store.settle(id, { outcome: "lost", at: Date.now() });
+        const decided = this.#settle(id, this.#unitEnd(id, job, null));
         return decided.ok ? ok(decided.value) : err("missing");
       } catch { return err("missing"); }
     }
-    const durationMs = runMs(view, job.startedAt);
-    const event = exitOf(view, durationMs);
+    const event = this.#unitEnd(id, job, view);
     if (!event) return err("missing");
     if (job.state === "starting") {
       const started = this.#store.started(id);
       if (!started.ok) return err("missing");
     }
     try {
-      const decided = this.#store.settle(id, event);
+      const decided = this.#settle(id, event);
       if (!decided.ok) return err("missing");
       try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
       await resetJobUnit(id, this.#toolEnv);
@@ -771,7 +867,7 @@ export class JobSupervisor {
       const job = this.#store.get(id);
       if (!job || job.state !== "starting") return;
       try {
-        this.#store.settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" });
+        this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" });
       } catch { /* the same event can be settled again */ }
     };
     helper.on("error", giveUp);
@@ -801,7 +897,7 @@ export class JobSupervisor {
     if (unset === null) {
       const job = this.#store.get(id);
       if (!job || job.state !== "starting") return;
-      try { this.#store.settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
+      try { this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
       return;
     }
     try {
@@ -816,7 +912,7 @@ export class JobSupervisor {
       await resetJobUnit(id, this.#toolEnv);
       const job = this.#store.get(id);
       if (!job || job.state !== "starting") return;
-      try { this.#store.settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
+      try { this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
       return;
     }
     this.#store.started(id);
@@ -859,7 +955,7 @@ export class JobSupervisor {
 
   #lost(id: string): NoticeHandoff | null {
     try {
-      const decided = this.#store.settle(id, { outcome: "lost", at: Date.now() });
+      const decided = this.#settle(id, { outcome: "lost", at: Date.now() });
       return decided.ok ? decided.value : null;
     } catch { return null; }
   }
@@ -879,7 +975,7 @@ export class JobSupervisor {
         const started = this.#store.started(id);
         if (!started.ok) return this.#lost(id);
       }
-      const decided = this.#store.settle(id, event);
+      const decided = this.#settle(id, event);
       if (decided.ok) return decided.value;
     } catch { return null; }
     return this.#lost(id);
@@ -898,8 +994,8 @@ export class JobSupervisor {
       await this.#stopChild(id);
       try {
         const decided = delivered
-          ? this.#store.settle(id, { outcome: "cancelled", exitCode: null, durationMs: 0 })
-          : this.#store.settle(id, { outcome: "lost", at: Date.now() });
+          ? this.#settle(id, { outcome: "cancelled", exitCode: null, durationMs: 0 })
+          : this.#settle(id, { outcome: "lost", at: Date.now() });
         return decided.ok ? decided.value : null;
       } catch { return null; }
     }
@@ -915,6 +1011,35 @@ export class JobSupervisor {
     return view.active === "activating" || (view.active === "active" && view.sub === "running");
   }
 
+  // A deactivating unit has not ended yet: its result is still owed, so a stop waits for it.
+  #unfinished(view: UnitState): boolean {
+    return this.#live(view) || view.active === "deactivating";
+  }
+
+  // The mark of a cancel that is signalling the unit (and may not confirm it): once in memory, once as an empty file
+  // next to the log, so the next agent still knows (prune removes the file with the job).
+  #markCancel(id: string): void {
+    this.#signalledCancels.add(id);
+    try { writeFileSync(join(this.#store.dir, `${id}.cancel`), "", { flag: "wx", mode: 0o600 }); }
+    catch (e) {
+      // EEXIST: already marked. Anything else leaves the mark in memory only, which an agent restart loses.
+      if (errno(e) !== "EEXIST") this.#log?.error(`marking the cancel of job ${id} failed; an agent restart would lose it`, e);
+    }
+  }
+
+  // A cancel that failed before it signalled anything leaves no mark: the unit ends on its own account.
+  #unmarkCancel(id: string): void {
+    this.#signalledCancels.delete(id);
+    try { unlinkSync(join(this.#store.dir, `${id}.cancel`)); }
+    catch (e) {
+      if (errno(e) !== "ENOENT") this.#log?.error(`removing the cancel mark of job ${id} failed; its end would be recorded cancelled`, e);
+    }
+  }
+
+  #signalled(id: string): boolean {
+    return this.#signalledCancels.has(id) || existsSync(join(this.#store.dir, `${id}.cancel`));
+  }
+
   // systemctl stop unloads a transient unit and forgets its timestamps. Kill leaves the unit loaded
   // so the run can be read, and a failed kill leaves the job open.
   async #endLive(id: string): Promise<UnitLook | "unsignalled" | "signalled"> {
@@ -922,11 +1047,23 @@ export class JobSupervisor {
     catch { return "unsignalled"; }
     let after = await showUnit(id, this.#toolEnv);
     if (after.kind === "unknown") return "signalled";
-    if (after.kind === "found" && this.#live(after.view)) {
+    // A unit systemd is already stopping (its timeout, a stop from outside) stays deactivating after the SIGTERM
+    // until TimeoutStopSec, so it gets the SIGKILL too.
+    if (after.kind === "found" && this.#unfinished(after.view)) {
       try { await killJobUnit(id, "SIGKILL", this.#toolEnv); }
       catch { return "signalled"; }
       after = await showUnit(id, this.#toolEnv);
       if (after.kind === "unknown") return "signalled";
+    }
+    // A unit can linger in deactivating after the signals: wait before the cancel is only "signalled".
+    if (after.kind === "found" && this.#unfinished(after.view)) {
+      let look: UnitLook = after;
+      const over = await until(async () => {
+        look = await showUnit(id, this.#toolEnv);
+        return look.kind === "absent" || (look.kind === "found" && !this.#unfinished(look.view));
+      }, UNIT_STOP_WAIT_MS);
+      if (!over) return "signalled";
+      after = look;
     }
     return after;
   }
@@ -937,6 +1074,8 @@ export class JobSupervisor {
     if (!this.#open(id)) return;
     const sentUsec = monotonicUsec();
     const after = await this.#endLive(id);
+    // The stop was in flight while this supervisor closed: the agent that replaces it owns the job now.
+    if (this.#closed) return;
     if (after === "unsignalled" || after === "signalled" || after.kind !== "found") return;
     const job = this.#open(id);
     if (!job) return;
@@ -946,9 +1085,10 @@ export class JobSupervisor {
     }
     const durationMs = runMs(after.view, job.startedAt);
     const own = endedBeforeStop(after.view.exitedUsec, sentUsec, seenUsec) ? exitOf(after.view, durationMs) : null;
-    const event = this.#signalledCancels.has(id) ? { outcome: "cancelled" as const, exitCode: null, durationMs } : own ?? { outcome: "exited" as const, exitCode: null, durationMs };
-    try { this.#store.settle(id, event); } catch { return; }
-    this.#signalledCancels.delete(id);
+    // The signalled cancel owns the end; otherwise the unit's own result from before the stop, or a plain exit.
+    const cancelled = this.#signalled(id) ? this.#unitEnd(id, job, after.view) : null;
+    const event = cancelled ?? own ?? { outcome: "exited" as const, exitCode: null, durationMs };
+    try { this.#settle(id, event); } catch { return; }
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
   }
@@ -988,6 +1128,6 @@ export class JobSupervisor {
   #replay(job: Job): Result<NoticeHandoff, SuperviseProblem> {
     const event = eventOf(job);
     if (!event) return err("missing");
-    return this.#store.settle(job.id, event);
+    return this.#settle(job.id, event);
   }
 }
