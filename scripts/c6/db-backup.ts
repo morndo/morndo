@@ -1,5 +1,7 @@
 // SQLite helpers for backup.sh and restore.sh (node:sqlite), run with node --no-warnings:
 //   db-backup.ts backup <src> <dest>   online copy, then PRAGMA quick_check on the copy; prints the copy's schema signature
+//   db-backup.ts check <path>         exits non-zero unless PRAGMA quick_check of that file says ok (restore.sh checks the copy it is
+//                                      about to rename over a live database)
 //   db-backup.ts signature <path>      prints the schema signature: sha256 of sqlite_master (type,name,sql), PRAGMA user_version
 //                                      and the rows of the table _morndo_schema
 // The signature counts exactly the migration record: the schema itself (sqlite_master), SQLite's PRAGMA user_version, and
@@ -39,9 +41,20 @@ if (mode === "backup" && a !== undefined && b !== undefined) {
     if (row.quick_check !== "ok") { process.stderr.write(`db-backup.ts: quick_check of ${b} says: ${row.quick_check}\n`); process.exit(1); }
   } finally { copy.close(); }
   process.stdout.write(`${signature(b)}\n`);
+} else if (mode === "check" && a !== undefined) {
+  try {
+    const db = new DatabaseSync(a, { readOnly: true });
+    try {
+      const row = db.prepare("PRAGMA quick_check").get() as { quick_check: string };
+      if (row.quick_check !== "ok") { process.stderr.write(`db-backup.ts: quick_check of ${a} says: ${row.quick_check}\n`); process.exit(1); }
+    } finally { db.close(); }
+  } catch (e) {
+    process.stderr.write(`db-backup.ts: ${a} is not a usable database: ${e instanceof Error ? e.message : String(e)}\n`);
+    process.exit(1);
+  }
 } else if (mode === "signature" && a !== undefined) {
   process.stdout.write(`${signature(a)}\n`);
 } else {
-  process.stderr.write("usage: db-backup.ts backup <src> <dest> | signature <path>\n");
+  process.stderr.write("usage: db-backup.ts backup <src> <dest> | check <path> | signature <path>\n");
   process.exit(2);
 }
