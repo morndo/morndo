@@ -115,7 +115,9 @@ done
 
 # The unit set: every loaded morndo unit in an active-like state (all types, template instances included), plus every
 # unit file we copied (services, timers, sockets and paths). An instance running now has no file of its own (only its template) but is recorded active=yes.
-active_now=$("$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do printf '%s\n' "$n"; done || true)
+# morndo-job-<id>.service are the node agent's own transient units (systemd-run) for work other agents are running: never ours to
+# record, stop or restart.
+active_now=$("$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do case $n in morndo-job-*) ;; *) printf '%s\n' "$n" ;; esac; done || true)
 : > "$dest/state.txt"
 seen=" "
 record() {
@@ -320,7 +322,7 @@ apply_state() {
 # paths, template instances included), one name per line.
 list_active() {
   "$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do
-    case $n in *.service|*.timer|*.socket|*.path) printf '%s\n' "$n" ;; esac
+    case $n in morndo-job-*) ;; *.service|*.timer|*.socket|*.path) printf '%s\n' "$n" ;; esac
   done
 }
 
