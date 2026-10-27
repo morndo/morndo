@@ -1,4 +1,4 @@
-// Notifications on the hub (ADR-0008 phase F; N1–N5): a Decision starting to wait, a worker starting to need him (not
+// Notifications on the hub (ADR-0008 phase F; N1–N5): a Decision waiting a minute without a break (N2 settle), a worker starting to need him (not
 // when muted) or a device linked raises one; per kind the latest wins after a second; nothing goes while he is attending
 // on any device; the payload is numbers only and passes the protocol's strict schema; a push service's 404 or 410
 // drops that subscription; the audit keeps when and how many, never who or what. A fake sender: no network.
@@ -36,8 +36,9 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(Date.UTC(2026, 9, 2, 12));
   sent = []; audit = []; subs = [sub("phone"), sub("laptop")]; muted = new Set(); answer = () => 201; reason = () => undefined;
+  // these tests are about what raises, the debounce, attending and delivery; the settle has its own block at the end
   svc = new NotificationService({
-    store, muted: w => muted.has(w),
+    decisionSettleMs: 0, store, muted: w => muted.has(w),
     send: async (s, payload, options) => { sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options }); const why = reason(s.endpoint); return why === undefined ? { status: answer(s.endpoint) } : { status: answer(s.endpoint), reason: why }; },
   });
   svc.board([]);                                                     // what waits at start: nothing
@@ -80,7 +81,7 @@ describe("what raises a Notification (N2)", () => {
   });
   it("every kind's Topic is one a push service takes: at most 32 URL-safe Base64 characters, a length that decodes (Apple refused the 5-character \"alert\" and \"usage\" with 400 BadWebPushTopic, 2026-10-12 and 2026-10-25)", async () => {
     const topicsOf: string[] = [];
-    const all = new NotificationService({ store, alerts: () => 1, send: async (_s, _p, o) => { topicsOf.push(o.topic); return { status: 201 }; } });
+    const all = new NotificationService({ decisionSettleMs: 0, store, alerts: () => 1, send: async (_s, _p, o) => { topicsOf.push(o.topic); return { status: 201 }; } });
     all.board([]);
     all.board([decision("t-1")]);
     all.worker("%1", false, null, true);
@@ -240,7 +241,7 @@ describe("subscriptions (N4)", () => {
 describe("one bad subscription can't stop the others, or the hub (review H1)", () => {
   it("a sender that throws for one device: the others still get it, and the next round still goes", async () => {
     const throwing = new NotificationService({
-      store, send: async (s, payload) => {
+      decisionSettleMs: 0, store, send: async (s, payload) => {
         if (s.endpoint.endsWith("/phone")) throw new Error("boom");
         sent.push({ endpoint: s.endpoint, payload: JSON.parse(payload.toString()), options: { ttlSeconds: 0, topic: "", urgency: "normal" } });
         return { status: 201 };
@@ -260,7 +261,7 @@ describe("one bad subscription can't stop the others, or the hub (review H1)", (
       const { p256dh, auth } = (() => { const e = createECDH("prime256v1"); e.generateKeys(); return { p256dh: e.getPublicKey().toString("base64url"), auth: randomBytes(16).toString("base64url") }; })();
       subs = [{ endpointId: "bad", endpoint: "https://fcm.googleapis.com/fcm/send/bad", p256dh: Buffer.concat([Buffer.from([4]), Buffer.alloc(64, 1)]).toString("base64url"), auth },
         { endpointId: "good", endpoint: "http://127.0.0.1:9/nobody", p256dh, auth }];
-      const real = new NotificationService({ store, send: pushSender(loadOrCreateVapid(dir, "mailto:test@example.test"), Date.now, 1000) });
+      const real = new NotificationService({ decisionSettleMs: 0, store, send: pushSender(loadOrCreateVapid(dir, "mailto:test@example.test"), Date.now, 1000) });
       real.board([]);
       real.board([decision("ny-1")]);
       await vi.advanceTimersByTimeAsync(1000); await real.settled();

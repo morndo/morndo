@@ -25,7 +25,10 @@ const service = createServer((req, res) => {
 await new Promise<void>(r => service.listen(0, "127.0.0.1", r));
 const serviceOrigin = `http://127.0.0.1:${(service.address() as AddressInfo).port}`;
 
-const office = await startOffice("push", { MORNDO_PUSH_EXTRA_ORIGINS: serviceOrigin });
+const office = await startOffice("push", {
+  MORNDO_PUSH_EXTRA_ORIGINS: serviceOrigin,
+  MORNDO_DECISION_SETTLE_MS: "0",   // the settle has unit tests; this file checks delivery
+});
 const { check, watch, finish } = checks(OUT);
 // The full Chromium in new headless mode: Playwright's default headless shell has no notification permission at all
 // (showNotification throws "No notification permission has been granted", even after grantPermissions; probed

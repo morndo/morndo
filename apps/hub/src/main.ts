@@ -307,7 +307,7 @@ switch (cmd) {
     const vapid = loadOrCreateVapid(config.dataDir, pushContact);
     const nameOf = (id: string) => observation.snapshot().workers.find(w => w.id === id)?.name;
     const notifications = new NotificationService({
-      store, send: pushSender(vapid), extraOrigins: config.pushExtraOrigins ?? [],
+      store, send: pushSender(vapid), extraOrigins: config.pushExtraOrigins ?? [], ...(config.decisionSettleMs === undefined ? {} : { decisionSettleMs: config.decisionSettleMs }),
       muted: id => { const name = nameOf(id); return name !== undefined && reading.state().muted.includes(name); },
       alerts: () => alerts?.urgentSince(reading.state().reads[SEEN_MARK] ?? 0) ?? 0,
     });

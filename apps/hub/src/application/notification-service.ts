@@ -3,7 +3,7 @@
 // wins), and then, unless he is attending on any device, sends the counts, numbers only, to every Push subscription.
 // A push service answering 404 or 410 drops that subscription (N4). It grants and starts nothing (N5): it reads the
 // board and the roster and writes only push_subscriptions and the audit's Notification rows.
-import { NotificationQueue, PUSH_TOPICS, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
+import { DECISION_SETTLE_MS, NotificationQueue, PUSH_TOPICS, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
 import { UNUSABLE_KEY, isP256Point, isPushService, type PushOptions, type PushResult, type PushSender, type PushSubscription } from "../adapters/webpush.ts";
 import { log } from "../adapters/log.ts";
 
@@ -43,10 +43,13 @@ export class NotificationService {
   #linked = 0;                                         // devices linked since the last such Notification went
   #usageNotices = 0;                                   // usage notices the hub wrote since the last such Notification went (S4)
   #timer: unknown = null;
+  #settleMs: number;                                   // N2: how long a Decision waits, unbroken, before it raises
+  #since = new Map<string, number>();                  // per Decision waiting: when its current unbroken stretch began
+  #settling = new Map<string, unknown>();              // per Decision still settling: its timer
   #sending: Promise<void> = Promise.resolve();
 
   // `extraOrigins`: push services a test runs, besides the browsers' own (never set in production).
-  constructor(d: { store: PushStore; send: PushSender; now?: () => number; timers?: Timers; muted?: (workerId: string) => boolean; extraOrigins?: readonly string[]; alerts?: () => number }) {
+  constructor(d: { store: PushStore; send: PushSender; now?: () => number; timers?: Timers; muted?: (workerId: string) => boolean; extraOrigins?: readonly string[]; alerts?: () => number; decisionSettleMs?: number }) {
     this.#store = d.store;
     this.#send = d.send;
     this.#now = d.now ?? Date.now;
@@ -54,6 +57,7 @@ export class NotificationService {
     this.#muted = d.muted ?? (() => false);
     this.#alerts = d.alerts ?? (() => 0);
     this.#extraOrigins = d.extraOrigins ?? [];
+    this.#settleMs = d.decisionSettleMs ?? DECISION_SETTLE_MS;
   }
 
   // N4: one subscription per Endpoint, replaced by a new one; only a browser vendor's push service, so a session can't
@@ -75,9 +79,32 @@ export class NotificationService {
   // what already waits (a restart raises nothing).
   board(items: readonly { id: string; status: string; need: string }[]) {
     const now = new Set(items.filter(i => i.status === "open" && i.need === "decision").map(i => i.id));
-    const fresh = this.#waiting !== null && [...now].some(id => !this.#waiting?.has(id));
+    const previous = this.#waiting;
     this.#waiting = now;
-    if (fresh && raises({ kind: "decision", waiting: now.size })) this.#raise("decision");
+    for (const id of [...this.#since.keys()]) {          // one that stopped waiting loses its stretch and its timer
+      if (now.has(id)) continue;
+      this.#since.delete(id);
+      this.#unsettle(id);
+    }
+    const fresh = previous === null ? [] : [...now].filter(id => !previous.has(id));
+    if (previous === null) for (const id of now) this.#since.set(id, this.#now());   // waiting at start: never raises
+    for (const id of fresh) {
+      const at = this.#now();
+      this.#since.set(id, at);
+      if (this.#settleMs === 0) continue;
+      this.#settling.set(id, this.#timers.setTimeout(() => {
+        this.#settling.delete(id);
+        if (this.#since.get(id) === at && this.#waiting?.has(id) && raises({ kind: "decision", waiting: this.#waiting.size })) this.#raise("decision");
+      }, this.#settleMs));
+    }
+    if (this.#settleMs === 0 && fresh.length && raises({ kind: "decision", waiting: now.size })) this.#raise("decision");
+  }
+
+  #unsettle(id: string) {
+    const t = this.#settling.get(id);
+    if (t === undefined) return;
+    this.#timers.clearTimeout(t);
+    this.#settling.delete(id);
   }
 
   // A worker's needs-you state: the roster at start (`initial`), then each change. `waitingOn`: the question or menu it
@@ -119,7 +146,12 @@ export class NotificationService {
   // Resolves once everything due has been sent (for tests and an orderly stop).
   settled(): Promise<void> { return this.#sending; }
 
-  stop() { if (this.#timer !== null) this.#timers.clearTimeout(this.#timer); this.#timer = null; }
+  stop() {
+    if (this.#timer !== null) this.#timers.clearTimeout(this.#timer);
+    this.#timer = null;
+    for (const t of this.#settling.values()) this.#timers.clearTimeout(t);
+    this.#settling.clear();
+  }
 
   #raise(kind: NotificationKind) {
     this.#queue.raise(kind, this.counts(), this.#now());

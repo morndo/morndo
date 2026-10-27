@@ -5,6 +5,9 @@
 // Design reference, not code: Signal-Desktop ts/services/notifications.preload.ts (the latest one wins, after a pause).
 
 export const NOTIFY_DEBOUNCE_MS = 1000;            // N3: per kind, the latest one wins after a 1-second pause
+// N2: a Decision raises its Notification only once it has waited this long without a break. A tool's `/exit` typed into
+// the manager's pane opened a menu for a few seconds every 2 minutes (2026-10-27), and each one pushed.
+export const DECISION_SETTLE_MS = 60_000;
 export const ATTENDING_INPUT_MS = 2 * 60_000;      // "Attending": focus, and his input in the last 2 minutes
 
 export type NotificationKind = "decision" | "worker" | "linked" | "alert" | "usage";
