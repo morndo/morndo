@@ -64,6 +64,15 @@ export function raises(r: Raise): boolean {
 // is usually the one he is attending on, and every other device must still hear of it (AC13; review M2).
 export const suppressedWhileAttending = (kind: NotificationKind) => kind !== "linked";
 
+// N7: a Decision card that closes and opens again with nothing else changed (a prompt on the manager's pane that comes
+// and goes with every guard round) starts waiting anew each time, yet the principal was told of it already. A repeat
+// Notification for it, with the same number of Decisions waiting, goes at most once an hour; a card not pushed for
+// before, or a different number waiting, goes at once. `last`: when its card was last pushed for and how many waited.
+export const DECISION_REPEAT_MS = 60 * 60_000;
+export type DecisionPush = { at: number; decisions: number };
+export const repeatsDecision = (last: DecisionPush | undefined, decisions: number, now: number) =>
+  last !== undefined && last.decisions === decisions && now - last.at < DECISION_REPEAT_MS;
+
 // N3: per kind, the latest one waits a second; a newer one of the same kind replaces it and starts the second again.
 // `due` hands out what is ready; at sending time no one may be attending, else it is dropped, not delayed.
 export type Pending = { kind: NotificationKind; counts: Counts; dueAt: number };

@@ -3,7 +3,7 @@
 // wins), and then, unless he is attending on any device, sends the counts, numbers only, to every Push subscription.
 // A push service answering 404 or 410 drops that subscription (N4). It grants and starts nothing (N5): it reads the
 // board and the roster and writes only push_subscriptions and the audit's Notification rows.
-import { NotificationQueue, PUSH_TOPICS, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
+import { NotificationQueue, PUSH_TOPICS, anyAttending, payloadOf, raises, reasonCode, repeatsDecision, DECISION_REPEAT_MS, suppressedWhileAttending, type AttendingReport, type Counts, type DecisionPush, type NotificationEvent, type NotificationKind } from "@morndo/domain";
 import { UNUSABLE_KEY, isP256Point, isPushService, type PushOptions, type PushResult, type PushSender, type PushSubscription } from "../adapters/webpush.ts";
 import { log } from "../adapters/log.ts";
 
@@ -40,6 +40,7 @@ export class NotificationService {
   #reports = new Map<string, AttendingReport>();       // per feed connection
   #waiting: Set<string> | null = null;                 // the Decisions waiting, by id; null until the first board
   #needing = new Map<string, boolean>();               // per worker: whether it needs him with something that isn't an Ask
+  #pushedFor = new Map<string, DecisionPush>();        // per Decision card: when a Notification last went for it (N7), pruned after an hour
   #linked = 0;                                         // devices linked since the last such Notification went
   #usageNotices = 0;                                   // usage notices the hub wrote since the last such Notification went (S4)
   #timer: unknown = null;
@@ -71,13 +72,21 @@ export class NotificationService {
   }
   subscribed(endpointId: string) { return this.#store.pushSubscriptions().some(s => s.endpointId === endpointId); }
 
-  // The board, whole, each time it changes. A Decision id not seen before starts waiting; the first board only tells
-  // what already waits (a restart raises nothing).
+  // The board, whole, each time it changes. A Decision id not waiting before starts waiting; the first board only tells
+  // what already waits (a restart raises nothing). One that closed and opened again unchanged, with the same number
+  // waiting, raises nothing within the hour after the last Notification for it (N7).
   board(items: readonly { id: string; status: string; need: string }[]) {
     const now = new Set(items.filter(i => i.status === "open" && i.need === "decision").map(i => i.id));
-    const fresh = this.#waiting !== null && [...now].some(id => !this.#waiting?.has(id));
+    const before = this.#waiting;
     this.#waiting = now;
-    if (fresh && raises({ kind: "decision", waiting: now.size })) this.#raise("decision");
+    const at = this.#now();
+    for (const [id, last] of this.#pushedFor) if (at - last.at >= DECISION_REPEAT_MS) this.#pushedFor.delete(id);
+    if (before === null) return;
+    const fresh = [...now].filter(id => !before.has(id));
+    if (!fresh.some(id => !repeatsDecision(this.#pushedFor.get(id), now.size, at))) return;
+    if (!raises({ kind: "decision", waiting: now.size })) return;
+    for (const id of fresh) this.#pushedFor.set(id, { at, decisions: now.size });
+    this.#raise("decision");
   }
 
   // A worker's needs-you state: the roster at start (`initial`), then each change. `waitingOn`: the question or menu it
