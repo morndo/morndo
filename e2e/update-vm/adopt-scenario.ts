@@ -29,6 +29,7 @@ const UPDATE_CONFIG_DIR = join(HOME, ".config/morndo-update");
 const HUB_DB = join(HOME, ".local/share/morndo/morndo.db");
 const FLEET_DB = join(HOME, ".local/share/morndo-fleet/fleet.db");
 const NODE_DB = join(HOME, ".local/state/morndo-node/agent.db");
+const MEMORY_DB = join(HOME, ".local/share/morndo/memory.db");   // the hub's second database: backup.sh refused the backup until it was named
 const UNIT_DIR = join(HOME, ".config/systemd/user");
 const OLD_FOLDER = join(HOME, "morndo/releases/abc1234");
 const OLD_NODE_REL = ".nvm/versions/node/v24.0.0/bin/node";
@@ -418,7 +419,7 @@ async function main(): Promise<number> {
   mkdirSync(DROPIN_DIR, { recursive: true });
   writeFileSync(join(DROPIN_DIR, "limits.conf"), OLD_DROPIN);
   run("systemctl", ["--user", "daemon-reload"]);
-  const backed = command("c-backup", "sh", [join(E2E, "scripts/c6/backup.sh"), BACKUP, ...DBS.flatMap(([n, p]) => ["--db", `${n}=${p}`])]);
+  const backed = command("c-backup", "sh", [join(E2E, "scripts/c6/backup.sh"), BACKUP, ...DBS.flatMap(([n, p]) => ["--db", `${n}=${p}`]), "--db", `memory=${MEMORY_DB}`]);
   const backedOk = backed.code === 0 && existsSync(join(BACKUP, "restore.sh")) && existsSync(join(BACKUP, "ROLLBACK.md"))
     && DBS.every(([n]) => existsSync(join(BACKUP, `dbs/${n}.db`)) && missingRows(sqlite(join(BACKUP, `dbs/${n}.db`), "SELECT v FROM c6_marker"), MARKERS).length === 0)
     && existsSync(join(BACKUP, "units/morndo-node.service.d/limits.conf"))

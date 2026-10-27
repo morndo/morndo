@@ -142,7 +142,7 @@ That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs 
   `arm-deadman.sh --disarm <machine>` (which removes both files and does not write the marker itself).
 - **Step 2 (backup):** `backup.sh` finds the hub, fleet and node databases (`morndo.db`, `fleet.db`, `agent.db`) by
   itself, refuses any other `*.db` under `~/.local/share/morndo*` and `~/.local/state/morndo*` unless `--allow-unlisted`,
-  refuses a machine with no database unless `--no-db`, and records the host, `HOME`, the schema signature of each
+  (the hub also keeps `memory.db` next to `morndo.db`: name it with `--db memory=<path>`), refuses a machine with no database unless `--no-db`, and records the host, `HOME`, the schema signature of each
   database and which units were active or enabled. A failure after the folder exists removes the folder again.
 - **Step 6 (restore refusals):** `restore.sh` refuses another host or `HOME` (exit 3). It refuses (exit 4, before it
   changes anything) when the schema of a live database differs from the backup's, which is the case whenever ANY
