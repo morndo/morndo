@@ -2,7 +2,7 @@
 // test and no breakage. The outputs are vitest 5.0.3's, as it prints them (colors off). And a control marked for one
 // platform: skipped elsewhere, a fifth outcome that is never a bite or a pass.
 import { describe, expect, it } from "vitest";
-import { CONTROLS, check, classify, needs, parseShard, shardOf, verdict, type Control } from "./negative-controls.ts";
+import { CONTROLS, check, classify, needs, needsFullRun, parseShard, shardOf, verdict, type Control } from "./negative-controls.ts";
 
 const FAILED_TEST = [
   " RUN  v5.0.3 /repo", "", " FAIL  |units| packages/protocol/test/fleet.test.ts > messages > reads a code",
@@ -125,5 +125,25 @@ describe("--shard i/n", () => {
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(CONTROLS.length);
     expect(Math.max(...sizes) - Math.min(...sizes)).toBeLessThanOrEqual(CONTROLS.length * 0.05);
     expect(shardOf(CONTROLS, 1, 1)).toEqual(CONTROLS);
+  });
+});
+
+// A control's mutated run stops at its first failed test (--bail=1); which of those runs are made again in full.
+describe("needsFullRun: when a bailed run is made again in full", () => {
+  it("a clean bite stands, with its expect text or with none asked for", () => {
+    const bite = classify(1, null, FAILED_TEST);
+    expect(needsFullRun(bite)).toBe(false);
+    expect(needsFullRun(bite, "expected 'no' to be 'maybe'")).toBe(false);
+  });
+  it("a bite without the expect text is made again: the first failure may be another test than the one that names it", () => {
+    expect(needsFullRun(classify(1, null, FAILED_TEST), "each_key_duplicate")).toBe(true);
+  });
+  it("breakage is made again: a bail can cancel a worker mid-file, which reads as a failed suite", () => {
+    expect(needsFullRun(classify(1, null, TRANSFORM), "x")).toBe(true);
+    expect(needsFullRun(classify(1, null, NO_FILES))).toBe(true);
+  });
+  it("a pass and a timeout are the same in full: not made again", () => {
+    expect(needsFullRun(classify(0, null, " Test Files  1 passed (1)\n"))).toBe(false);
+    expect(needsFullRun(classify(null, null, "", true))).toBe(false);
   });
 });

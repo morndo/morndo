@@ -747,7 +747,7 @@ export const CONTROLS: Control[] = [
   { id: "fw-m4-sweep-seen-throws", task: "M4", file: "apps/fleet/src/application/connections.ts",
     find: "      try { this.#nodes.seen(node); } catch (e) { this.#log.error(`liveness sweep: could not record node ${node} as seen (fleet.db busy or full?)`, e); }",
     replace: "      this.#nodes.seen(node);",
-    run: ["apps/fleet/test/timers.test.ts"], expect: "expected 0 to be greater than 0" },
+    run: ["apps/fleet/test/timers.test.ts"], expect: "condition not met within 5000 ms" },    // the sweep dies at pc and never pings mac
   { id: "fw-m5-unavailable-frame-gone", task: "M5", file: "apps/hub/src/adapters/fleet-adapters.ts",
     find: "      if (NOT_NOW.has(r.error.code)) return \"unavailable\";", replace: "      if (NOT_NOW.has(r.error.code)) return null;",
     run: ["apps/hub/test/fleet-adapters.test.ts"] },
@@ -957,7 +957,9 @@ export const CONTROLS: Control[] = [
   { id: "t17-chat-attachment-key", task: "17", file: "apps/web/src/lib/phone/Chat.svelte",
     find: "{#each m.attachments ?? [] as a, i (`${a.id ?? a.name}-${i}`)}",
     replace: "{#each m.attachments ?? [] as a (a.name + (a.id ?? \"\"))}",
-    run: ["apps/web/test/attachment-keys-web.test.ts"], expect: "each_key_duplicate" },
+    // Svelte's each_key_duplicate goes to the dev server's log, which a CI run may not carry; the test's own failure is the later
+    // message that never renders.
+    run: ["apps/web/test/attachment-keys-web.test.ts"], expect: "getByText('a later message')" },
   // ---- B2 validation (V9): a reconnect's history settles a held message's pending attachments
   { id: "t17-history-settles-pending", task: "17", file: "apps/web/src/lib/feed.svelte.ts",
     find: "return f && x.attachments?.some(a => a.pending) ? { ...x, attachments: f } : x;",
@@ -1131,9 +1133,11 @@ export const CONTROLS: Control[] = [
   { id: "fc2-capture-last-lines", task: "fc2", file: "packages/node-ops/src/tmux.ts",
     find: 'return lines.slice(-o.lines).join("\\n");', replace: 'return lines.join("\\n");',
     run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "to have a length of 50" },
+  // capture() repeats this check in front of captureScreen (3b7857aa), so removing that twin changes nothing anyone can see; the
+  // control removes the one captureScreen runs, which both paths and the frame read reach.
   { id: "fc2-capture-lines-bounded", task: "fc2", file: "packages/node-ops/src/tmux.ts",
-    find: "if (o && (!Number.isInteger(o.lines) || o.lines < 1 || o.lines > LIMITS.captureMaxLines)) return null;", replace: "",
-    run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "a count out of range" },
+    find: "    if (!Number.isInteger(o.lines) || o.lines < 1 || o.lines > LIMITS.captureMaxLines) return null;\n    try {", replace: "    try {",
+    run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "captureScreen " },
   { id: "fc2-capture-attributes", task: "fc2", file: "packages/node-ops/src/tmux.ts",
     find: '...(o.attributes ? ["-e"] : [])', replace: "...([] as string[])",
     run: ["packages/node-ops/test/tmux-keys-capture.test.ts"], expect: "keeps tmux's escapes" },
@@ -5229,7 +5233,7 @@ export function check(controls: readonly Control[]): number {
 // How a vitest run ended. Only "failed" is a bite, and only when vitest itself reports a failed test and no breakage:
 // an import or transform error, a syntax error, a failed suite or a missing file also exits non-zero, and a timeout
 // leaves no status at all; none of them shows that a test noticed the missing guard.
-type Run = { kind: "passed" | "failed" | "broke" | "timeout"; out: string; first: string };
+export type Run = { kind: "passed" | "failed" | "broke" | "timeout"; out: string; first: string };
 // vitest's own banners, as it prints them (v5.0.3): "Failed Suites N" (a suite that did not load), "Error: Transform failed",
 // "Error: Failed to load url", and "No test files found, exiting with code 1". A test that merely asserts on a message with
 // such words in it is not matched: the markers are anchored to a line start.
@@ -5276,6 +5280,14 @@ function vitest(tree: string, files: string[], extra: string[] = []): Promise<Ru
     });
     c.on("error", e => { clearTimeout(timer); clearTimeout(hard); child = null; resolve({ kind: "broke", out: String(e), first: String(e) }); });
   });
+}
+// Whether a run that stopped at its first failed test (--bail=1) must be made again in full. Only a clean bite that shows the
+// entry's `expect` stands as it is: a first failure without it may be another test than the one that names it, and with
+// several files running at once a bail can cancel a worker mid-file, which reads as breakage (a failed suite) in a run that
+// bites without it. A pass and a timeout are the same with or without it.
+export function needsFullRun(run: Run, expect?: string): boolean {
+  if (run.kind === "passed" || run.kind === "timeout") return false;
+  return run.kind === "broke" || (expect !== undefined && !run.out.includes(expect));
 }
 const tail = (out: string) => out.trim().split("\n").filter(l => /FAIL|×|Error|expected|Tests /.test(l)).slice(0, 6).map(l => `      ${l.trim()}`).join("\n");
 
@@ -5380,10 +5392,10 @@ async function runAll(controls: readonly Control[], keep: boolean): Promise<numb
       if (before?.kind === "timeout") { n.timeout++; say(`TIMEDOUT ${c.id}: ${c.run.join(", ")} did not finish unchanged: ${before.first}`); continue; }
       if (before?.kind !== "passed") { broke(`BASELINE ${c.id}: ${c.run.join(", ")} fail without the change, so it proves nothing\n      ${before?.first ?? ""}\n${tail(before?.out ?? "")}`); continue; }
       writeFileSync(path, original.replace(c.find, () => c.replace));
-      // Stops at the first failed test: a bite needs one, and the rest of a slow file only costs time (T-467). A first failure
-      // without the entry's `expect` text may be another test than the one that names it, so that run is made again in full.
+      // Stops at the first failed test: a bite needs one, and the rest of a slow file only costs time (T-467). Anything but a
+      // clean bite that shows the entry's `expect` is made again in full and judged on that run.
       let after = await vitest(tree, c.run, ["--bail=1"]);
-      if (after.kind === "failed" && c.expect && !after.out.includes(c.expect)) after = await vitest(tree, c.run);
+      if (needsFullRun(after, c.expect)) after = await vitest(tree, c.run);
       if (stopping) await parked();
       git(tree, "checkout", "--", c.file);
       if (readFileSync(path, "utf8") !== original) { say(`setup: ${c.file} was not restored in ${tree}`); setupFailed = true; return 2; }
