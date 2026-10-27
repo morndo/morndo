@@ -6,6 +6,11 @@ updates:
     directory: "/"
     schedule:
       interval: weekly
+    ignore:
+      # The runtime is Node 24 (engines.node, the bundled Node in scripts/release/node-pin.ts), so the types stay on 24.
+      # A new major of @types/node follows a Node major we do not run; raise it by hand with the runtime.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
