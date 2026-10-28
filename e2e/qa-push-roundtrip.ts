@@ -10,6 +10,7 @@
 // both sides, that origin's permission back to "ask", tab closed.
 // It doesn't pair the browser: in a browser whose password manager takes over passkeys, a test authenticator never sees
 // the request. The toggle and pairing are covered by the Chromium tests (push-web, e2e/signal).
+import { DECISION_SETTLE_MS } from "@morndo/domain";
 import Database from "better-sqlite3";
 import { createPublicKey } from "node:crypto";
 import { readFileSync, writeFileSync } from "node:fs";
@@ -84,7 +85,9 @@ try {
   writeFileSync(ledgerPath, JSON.stringify(ledger));
   const asked = Date.now();
   log("a Decision starts waiting");
-  await sleep(15_000);                                               // the hub's look, the second's wait, the push service, Chrome
+  // N2: the Decision must wait a minute without a break before it raises; then the hub's look, the second's wait,
+  // the push service and Chrome. The demo office runs the production settle, as a device would see it.
+  await sleep(DECISION_SETTLE_MS + 15_000);
 
   const rows = db.prepare("SELECT type, body FROM audit WHERE at >= ? AND type LIKE 'Notification%' ORDER BY seq").all(asked) as { type: string; body: string }[];
   log(`hub audit: ${JSON.stringify(rows.map(r => ({ type: r.type, ...(JSON.parse(r.body) as object) })))}`);

@@ -1,6 +1,6 @@
 import { homedir } from "node:os";
 import { isAbsolute, join } from "node:path";
-import { MORNDO_REPO, REPO_NAME, WORKER_ASK_GRACE_MS, type ProofMode } from "@morndo/domain";
+import { MORNDO_REPO, REPO_NAME, DECISION_SETTLE_MS, WORKER_ASK_GRACE_MS, type ProofMode } from "@morndo/domain";
 
 export type Config = {
   dataDir: string;
@@ -53,6 +53,9 @@ export type Config = {
   // MORNDO_WORKER_ASK_GRACE_MS: how long a worker's question or menu waits before it is the principal's Ask (N2), for
   // tests only (the e2e offices); the default is WORKER_ASK_GRACE_MS (10 minutes). Never an app setting.
   workerAskGraceMs?: number;
+  // MORNDO_DECISION_SETTLE_MS: how long a Decision waits, unbroken, before it raises its Notification (N2), for tests
+  // only (the e2e offices); the default is DECISION_SETTLE_MS (a minute). Never an app setting.
+  decisionSettleMs?: number;
   // MORNDO_USAGE_READINGS_GATE: a usage reading from a plain worker token. "warn" (default) accepts it and counts it
   // on the token; "enforce" refuses it. Unset or empty is warn.
   usageReadingsGate?: "warn" | "enforce";
@@ -74,6 +77,8 @@ const bool = (v: string | undefined) => v === "1" || v === "true";
 // MORNDO_WORKER_ASK_GRACE_MS (tests only): a string of digits only — so "0" is accepted, and the grace is off — is that
 // many milliseconds; anything else (unset, empty, negative, decimals, text) is the default, WORKER_ASK_GRACE_MS.
 const graceOf = (v: string | undefined) => (/^\d+$/.test(v ?? "") ? Number(v) : WORKER_ASK_GRACE_MS);
+// MORNDO_DECISION_SETTLE_MS (tests only): read as graceOf reads its variable; anything else is DECISION_SETTLE_MS.
+const settleOf = (v: string | undefined) => (/^\d+$/.test(v ?? "") ? Number(v) : DECISION_SETTLE_MS);
 
 // MORNDO_USAGE_READINGS_GATE: unset or empty is warn. A word that is neither warn nor enforce is refused — a typo must
 // not leave the gate open.
@@ -161,6 +166,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     pushContact: env.MORNDO_PUSH_CONTACT || DEFAULT_PUSH_CONTACT,
     pushExtraOrigins: (env.MORNDO_PUSH_EXTRA_ORIGINS ?? "").split(",").map(s => s.trim()).filter(Boolean),
     workerAskGraceMs: graceOf(env.MORNDO_WORKER_ASK_GRACE_MS),
+    decisionSettleMs: settleOf(env.MORNDO_DECISION_SETTLE_MS),
     usageReadingsGate: readingsGate(env.MORNDO_USAGE_READINGS_GATE),
     proofGate: proofGateOf(env),
     proofRepos: proofReposOf(env),
