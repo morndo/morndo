@@ -183,6 +183,34 @@ The updater's rollback after the first install is still unrehearsed on a real tr
 2. **Who runs steps 2 to 6 on each machine?** The lane on the machine itself (no one connects to a machine from outside); for the control plane, the manager is told and watches the fleet from the hub.
 3. **Time of day.** The control plane in the owner's night window, with the manager awake for the first ten minutes; the other two by day if their lanes are idle.
 
+## 8. Run kit for the control plane (the Mac session, over its ssh; the manager watches)
+
+Decided 2026-10-28: 0.2.0; the control plane goes first, in the daytime (10:00-12:00 CET); no lane runs on it, so a session on the Mac runs
+sections 3 and 4 below over ssh, one command at a time, reading each answer before the next. `pc`, then `srv01`, follow by the lane on each
+machine, one at a time, only on the manager's go after the control plane is green. This kit only fixes the order and the stops.
+
+**Stop conditions (any one: stop, run nothing further, tell the manager; do not improvise):** a preflight line not as written; the installer's
+signature check not `Good`; `backup.sh` non-zero or a folder missing; the timer not `active`; the install printing a refusal or `no answer within 90 s`;
+any check below not as written; the ssh session dropping before step 6 (reconnect, read `systemctl --user list-timers 'c6-deadman-*'`, then decide with
+the manager); `doctor` exit 1 on the tree or provenance. Never start a service on a half-restored database. Never touch `k3s`, `containerd`, `tailscaled`.
+
+1. **Preflight (read-only)**, section 3 verbatim, plus: `pgrep -a 'tmux: server'` and `systemctl --user list-units 'morndo-job-*' --no-legend` saved
+   to the notes (the same must be true after step 4); `~/.local/state/morndo-node/status.json` shows no work in flight; the manager says no lane is mid-answer.
+2. **Installer verified**: section 4 step 2 with `V=0.2.0`; `sha256sum install.sh` compared with the Mac's copy.
+3. **Backup and switch**: `BK=$HOME/.local/share/morndo-backups/$(date +%F)-c6-cp`, `sh "$D/backup.sh" "$BK" --db memory=$HOME/.local/share/morndo/memory.db`,
+   `sh "$D/arm-deadman.sh" cp "$BK"`. Check: `$BK/restore.sh` and `$BK/ROLLBACK.md` exist; `cat "$BK/ROLLBACK.md"` goes to the Mac terminal and the manager's pane
+   (it is the rollback to hand, with the real paths); `systemctl --user list-timers c6-deadman-cp.timer` shows 60 minutes. The folder stays on the control plane; nothing is copied off it.
+4. **Install**: stop `morndo-hub`, `morndo-fleet`, `morndo-node` (one command), move real launchers into `$BK`, then `sh install.sh --role control-plane --channel latest
+   --signers morndo.allowed_signers`. Expect `Morndo 0.2.0 installed (control-plane, channel latest).` and three `healthy at 0.2.0`. Time it: about 1 to 1.5 minutes down.
+5. **Checks**, all of section 4 step 5 for the control plane: `update --status`, `update --check`, `doctor` exit 0, the units' mark and `*.before-morndo`, `quick_check` and schema signature,
+   same tmux server pid and `morndo-job-*` list as step 1, `--failed` empty, old release folder unchanged, fleet row online at the new commit, `/api/health` (commit, schema), app served (not 503),
+   https ready, the manager answers through the hub, `MORNDO_ORIGIN` set in the updater unit, one long message to a scratch lane answered.
+6. **Close**: `touch "$BK/ok"`, `sh "$D/arm-deadman.sh" --disarm cp`, `morndo update window 03:30-05:00`, `morndo update --status` shows it. Then `morndo update --rollback --preview --json` and read it to the manager.
+7. **Ten minutes healthy**: `--status`, `doctor`, units, fleet row, one lane answer. Report; the manager decides on `pc`.
+
+**Rollback in the run:** before step 6 and the old units still there: `sh "$BK/restore.sh"` (exit 0 = done; 4 = schema changed, the manager chooses `--with-db` or `--keep-data`; 3 = wrong host;
+1 = a `FAILED:` line, read it). Nobody answering: the switch fires at 60 minutes by itself. After step 6: `morndo update --rollback`, only with the manager's word.
+
 ## Sources
 
 `install.sh`; `README.md` (Install, verifying first); `scripts/release/stage.ts`, `launchers.ts`; `apps/updater/src/cli.ts` (`install`, `update window`, `doctor`);
