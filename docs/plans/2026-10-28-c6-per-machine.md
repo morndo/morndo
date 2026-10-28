@@ -1,41 +1,47 @@
 # C6: the three machines onto the updater, one at a time (a plan, for review)
 
-Status: a plan. Nothing in it has been run on a real machine. Facts say where they were read (2026-10-27, this repository at
-`main`, the published release `v0.1.1` and its feed, and the throwaway-machine rehearsals of `docs/plans/2026-10-27-c6-0-adoption-rehearsal.md`).
+Status: a plan. Nothing in it has been run on a real machine. Facts say where they were read (2026-10-27 and 28, this repository at
+`main`, the published release `v0.1.1` and its feed, the tag `v0.2.0`, and the throwaway-machine rehearsals of `docs/plans/2026-10-27-c6-0-adoption-rehearsal.md`).
 It replaces section 3 (C6) and the machine steps of section 4 of `docs/plans/2026-10-23-c4-c6.md` (branch `docs/c4-c6-plan`); the
 rehearsal's findings are in section 8 of the rehearsal plan. Machines are named by role: the **control plane** (hub, fleet and a
 node agent), the **build PC** and the **third machine** (node agents). Their host names are not in this repository.
 
 ## 0. Summary
 
-**C6 goes on 0.1.2, not on 0.1.1.** Two reasons, both read:
+**C6 goes on 0.2.0, not on 0.1.1.** Two reasons, both read. As of 2026-10-28 `v0.2.0` is tagged (`2331eef9`) but its GitHub release is still a draft with no assets, so nothing below that downloads it can run yet:
 
 1. **0.1.1 cannot be installed.** Its archive stores the folders `trust/` and `units/` as 0755 while `files.json` lists 0555
    (`scripts/release/stage.ts`); `morndo install` checks the tree against its own `files.json` (`verifyTreeAt`,
    `apps/updater/src/adapters/installer-dirs.ts`) and refuses with exit 65, nothing installed. Reproduced in the published-feed
    rehearsal (`d-installed`: `the tree does not check out against its own files.json (trust: mode); nothing was installed`) and
    by unpacking the archive on the host: exactly those two mismatches. A workaround on a real node is out of the question.
-   `install.sh` also runs the unpacked tree from `mktemp -d` (`install.sh`, lines 53 and 180), so a `noexec` `/tmp` fails with exit 126;
-   the rehearsal container has one, a real machine is checked in the preflight (section 3).
-2. **The doctor fix (T-486, #185) is not in 0.1.1** (0.1.1 is `b85f25fd`; #185 merged as `794062ab`, later). On a release without it a fresh
+   0.1.1's `install.sh` also ran the unpacked tree from `mktemp -d`, so a `noexec` `/tmp` failed with exit 126 (the rehearsal container has one).
+   Both are fixed in main by #191, which 0.2.0 contains: the archive packs the listed folders 0555, and `install.sh` unpacks under
+   `~/.local/share` first and only falls back to `mktemp`'s default (which honours `$TMPDIR`) when that cannot be written. The preflight
+   (section 3) checks that `~/.local/share` is writable and not `noexec` instead of `/tmp`.
+2. **The doctor fix (T-486, #185) is not in 0.1.1** (0.1.1 is `b85f25fd`; #185 merged as `794062ab`, later; it is in 0.2.0). On a release without it a fresh
    install leaves no `files.json` in the installed tree, and `morndo doctor` exits 1 right after it (rehearsal, local build before the
    fix: `tree: files.json: unreadable`, no provenance record, no first feed check). The question was whether C6 needs the fix or can go
    on a release that has it as a known issue. **Answer: it needs it.** Doctor is the one command that tells a half-installed tree
    from a good one, and the checks of every machine (section 4, step 5) and the later ones rest on it exiting 0; with the known
    exit 1 it would be a check nobody can use on exactly the three machines where it matters, and a real finding would hide among
    the known lines. (Whether anything else reads `files.json` of the installed tree is not known; the updater's own update story
-   passed in the earlier rehearsals without it.) Because the mode fix forces a new release anyway, waiting for 0.1.2 costs no
-   extra release. **0.1.2 must carry (a) the archive modes fixed and (b) #185.** If it also changes the schema of the hub, fleet
+   passed in the earlier rehearsals without it.) Because the mode fix forces a new release anyway, waiting for the next one costs no
+   extra release. **That release is 0.2.0, which carries (a) the archive modes fixed (#191) and (b) #185** (both are ancestors of its tag). If it also changes the schema of the hub, fleet
    or node database, the rollback section says what that changes (a changed schema makes a manual `restore.sh` choose between
    `--with-db` and `--keep-data`).
 
-**Gate before any real machine (G1): the published-feed rehearsal passes on 0.1.2.** `npm run e2e:update-adopt-published -- --published 0.1.2`
-(about 12 minutes, one container) must end `PASSED` with every check ok, and its `finding-doctor-*` lines must say what the
-fix says (exit 0, `ok: the install checks out`). Until then nothing below starts. The scripts it exercises (`scripts/c6`) are the
+**Gate before any real machine (G1): the published-feed rehearsal passes on 0.2.0.** `npm run e2e:update-adopt-published -- --published 0.2.0`
+(about 12 minutes, one container; the version is never defaulted, a repeated `--published` is refused) must end `PASSED` with every check ok.
+Before it runs anything from the archive it verifies `manifest.json.sig` against the README's signer line and takes the archive's
+size and sha256 from that signed manifest, as `install.sh` does (`SHA256SUMS` is not signed and is not read). Doctor is a real check
+in this mode: `e-doctor` and `g-doctor` are ok only when `morndo doctor` exits 0 with `ok: the install checks out` right after the install.
+(In the local-build rehearsal, `npm run e2e:update-adopt`, `finding-doctor-*` stays a finding whatever the word: whether its fresh-install
+doctor is clean since #185 has not been run, so it is not claimed.) Until G1 passes nothing below starts. The scripts it exercises (`scripts/c6`) are the
 ones the machines use.
 
 **What this plan asks the owner for:** the fresh approval to move the three machines (the manager's note of 2026-10-26 asks for it
-again once 0.1.2 is published), and for 0.1.2 itself the same taps as any release. No new tap per machine.
+again once 0.2.0 is published), and for 0.2.0 itself the same taps as any release. No new tap per machine.
 
 ## 1. What is read, and what is not
 
@@ -48,7 +54,7 @@ install; `morndo update --check` against the real feed; anything on a real node.
 the first real machine will tell, and the plan stops there if it is not as written.
 
 **Assumptions about the machines, each checked by the preflight (section 3):** all three run the same release-tool build; each has a user
-manager with lingering; `curl`, `ssh-keygen` and `node` exist in a non-login shell; `/tmp` is not `noexec`; the database
+manager with lingering; `curl`, `ssh-keygen` and `node` exist in a non-login shell; `~/.local/share` is writable and not `noexec`; the database
 files are the ones the backup finds by itself (`morndo.db`, `fleet.db`, `agent.db`) plus the hub's `memory.db`; the node agent's
 jobs run as transient `morndo-job-<id>.service` units in `morndo-jobs.slice` and its lanes in `tmux-spawn-*.scope` scopes, which the
 backup and the restore leave alone (a bug found while writing this plan: the restore used to treat the job units as its own;
@@ -70,7 +76,7 @@ Run as the machine's own user. Stop at the first line that is not as written and
 
 ```sh
 hostname; id -un; loginctl show-user "$(id -un)" -p Linger            # Linger=yes
-findmnt -no OPTIONS /tmp | tr ',' '\n' | grep -x noexec && echo "noexec /tmp: stop"
+findmnt -no OPTIONS --target ~/.local/share | tr ',' '\n' | grep -x noexec && echo "noexec ~/.local/share: stop"
 command -v curl ssh-keygen node sqlite3                               # curl, ssh-keygen, node must print a path
 df -h "$HOME" | tail -1                                               # at least 5 GB free
 systemctl --user list-units 'morndo-*' --all --no-legend             # the units, and any morndo-job-* running
@@ -87,7 +93,7 @@ The ten minutes of "healthy" between machines (section 4, step 7) are measured f
 **The scripts**, from the tag, with the digests the lane recorded from its checkout (fetched once per machine into a scratch folder, not into any release folder):
 
 ```sh
-T=v0.1.2; B=https://raw.githubusercontent.com/morndo/morndo/$T/scripts/c6; D=$HOME/c6-scripts; mkdir -p "$D"
+T=v0.2.0; B=https://raw.githubusercontent.com/morndo/morndo/$T/scripts/c6; D=$HOME/c6-scripts; mkdir -p "$D"
 for f in backup.sh arm-deadman.sh db-backup.ts; do curl -fsSL -o "$D/$f" "$B/$f"; done
 sha256sum "$D"/*                                                     # compare with the digests in the card
 ```
@@ -103,9 +109,9 @@ machine (a node must never be newer than its control plane; `skew()` / `node_ahe
 **Rollback first (read it now): section 5.** The dead-man's switch is armed at step 3, before anything changes.
 
 1. **Hold.** Tell the manager the machine's name and the start time. On the control plane also: the owner's app will be unreachable for the length of the restarts (about a minute with the checks); the manager pane lives in tmux and stays.
-2. **Download and verify the installer** (the README's commands, exact Version `v0.1.2`; nothing runs before the signature check passes):
+2. **Download and verify the installer** (the README's commands, exact Version `v0.2.0`; nothing runs before the signature check passes):
    ```sh
-   V=0.1.2; W=$HOME/c6-install; mkdir -p "$W" && cd "$W"
+   V=0.2.0; W=$HOME/c6-install; mkdir -p "$W" && cd "$W"
    curl -fsSLO "https://github.com/morndo/morndo/releases/download/v$V/install.sh"
    curl -fsSLO "https://github.com/morndo/morndo/releases/download/v$V/install.sh.sig"
    echo '<the key line from README.md, "Install, verifying first">' > morndo.allowed_signers
@@ -131,13 +137,13 @@ machine (a node must never be newer than its control plane; `skew()` / `node_ahe
      if [ -e "$n" ] && [ ! -L "$n" ]; then mv -- "$n" "$BK/moved-$n"; fi; done      # they are also in $BK/wrappers
    cd "$W" && sh install.sh --role <control-plane|node> --channel latest --signers morndo.allowed_signers
    ```
-   Expected: `Morndo 0.1.2 installed (<role>, channel latest).` then `hub: healthy at 0.1.2` / `fleet: ...` / `node: ...` for the services of the role, in
+   Expected: `Morndo 0.2.0 installed (<role>, channel latest).` then `hub: healthy at 0.2.0` / `fleet: ...` / `node: ...` for the services of the role, in
    seconds. Anything else (a refusal, `no answer within 90 s`): stop; section 5.
    The lanes' tmux servers are not in the units' cgroups (`tmux-spawn-*.scope`), and the node agent's job units (`morndo-job-*`) are not stopped by this step.
 5. **Checks** (every one; copy the output to the card):
-   - `morndo update --status`: `install: updater`, `channel: latest`, `current: 0.1.2 · previous: none · good: 0.1.2`.
-   - `morndo update --check`: `Up to date: 0.1.2.` (reads the real feed; a feed that cannot be reached is printed, not a failure of the install).
-   - `morndo doctor`: exit 0, `ok: the install checks out` (the 0.1.2 contract, T-486). If it exits 1, the lines it prints decide: a finding about the *feed* only (never checked, unreachable) is recorded and the run goes on; anything about the tree or provenance stops the run.
+   - `morndo update --status`: `install: updater`, `channel: latest`, `current: 0.2.0 · previous: none · good: 0.2.0`.
+   - `morndo update --check`: `Up to date: 0.2.0.` (reads the real feed; a feed that cannot be reached is printed, not a failure of the install).
+   - `morndo doctor`: exit 0, `ok: the install checks out` (the 0.2.0 contract, T-486). If it exits 1, the lines it prints decide: a finding about the *feed* only (never checked, unreachable) is recorded and the run goes on; anything about the tree or provenance stops the run.
    - The units: `systemctl --user cat morndo-<service>.service | head -1` is Morndo's mark; the old file sits beside it as `*.before-morndo`; `morndo-<service>.service.d/before-morndo.conf` carries the old `Environment=`.
    - Databases: `sqlite3 <db> 'PRAGMA quick_check'` says `ok` for each; the schema signature (`node "$D/db-backup.ts" signature <db>` against `$BK/dbs/schema.txt`) is the same, or its change is written on the card (section 5 changes with it).
    - The lanes: the same tmux server pid as before step 4 (`pgrep -a 'tmux: server'` noted in step 1); `morndo-job-*` units unchanged (count and names); `systemctl --user --failed` empty.
@@ -156,14 +162,14 @@ machine (a node must never be newer than its control plane; `skew()` / `node_ahe
 | Situation | What to do |
 | --- | --- |
 | Anything in steps 2 to 5 is not as written, and the machine still runs the old units | `sh "$BK/restore.sh"`: units, drop-ins and launchers back, `daemon-reload`, each unit to the state recorded at backup. Exit 0 and the old folder runs again. |
-| `restore.sh` exits 4 | The schema of a database changed since the backup (the new hub migrated it). Choose: `--with-db` (puts the old data back, loses every write since the backup) or `--keep-data` (old code on the newer schema anyway; only if the notes of 0.1.2 say it is additive). Not a default. |
+| `restore.sh` exits 4 | The schema of a database changed since the backup (the new hub migrated it). Choose: `--with-db` (puts the old data back, loses every write since the backup) or `--keep-data` (old code on the newer schema anyway; only if the notes of 0.2.0 say it is additive). Not a default. |
 | `restore.sh` exits 3 | Not this machine or not this `HOME`: nothing changed. Use the folder on its own machine. |
 | `restore.sh` exits 1 | A line `FAILED:` says what (a file or database that could not be put back, a unit that would not stop). A database that could not be put back leaves its service **stopped** with the copy command in the message; run it by hand, then start the unit. Never start a service on a half-restored database. |
 | Nobody there / the hub is dead / the checks cannot run | The dead-man fires at 60 minutes: `restore.sh --deadman`. With the schema unchanged it only restores units and launchers and exits 0. With a changed schema it copies each changed database aside to `$BK/aside-<UTC time>/` (never deleted), puts the backed-up one back, starts the units, and writes `$BK/deadman-report.txt` and the same text to the journal; the writes made since the backup live only in the aside copy. Any failure ends non-zero with `FAILED:` lines. |
 | A retry after a restore | The install is refused (`already installed`). Remove `~/.local/share/morndo-releases`, `~/.local/state/morndo-update` and `~/.config/morndo-update` (deliberately), then step 4 again with a new backup folder. |
 | After the switch is closed | The updater's own `morndo update --rollback` is the way back, not `restore.sh` (the first install has no earlier Version; this one has the old folder only). One real `--rollback` is rehearsed on the control plane first (below). |
 
-The updater's rollback after the first install is still unrehearsed on a real tree: **before the control plane's window opens**, run `morndo update --rollback --preview --json` and read it; after 0.1.3 is the first update the machines take by themselves, the real rollback is run once on the control plane in the daytime (the owner's word), because that is the machine whose loss the owner would notice.
+The updater's rollback after the first install is still unrehearsed on a real tree: **before the control plane's window opens**, run `morndo update --rollback --preview --json` and read it; after the release after 0.2.0 is the first update the machines take by themselves, the real rollback is run once on the control plane in the daytime (the owner's word), because that is the machine whose loss the owner would notice.
 
 ## 6. What happens after
 
@@ -173,7 +179,7 @@ The updater's rollback after the first install is still unrehearsed on a real tr
 
 ## 7. Open decisions
 
-1. **0.1.2 or wait for more?** This plan asks for 0.1.2 as soon as it carries the mode fix and #185. (No other change is needed for C6.)
+1. **0.2.0 or wait for more?** This plan asks for 0.2.0 as soon as its GitHub release is published (it is a draft today) and G1 passes on it. (No other change is needed for C6.)
 2. **Who runs steps 2 to 6 on each machine?** The lane on the machine itself (no one connects to a machine from outside); for the control plane, the manager is told and watches the fleet from the hub.
 3. **Time of day.** The control plane in the owner's night window, with the manager awake for the first ten minutes; the other two by day if their lanes are idle.
 
