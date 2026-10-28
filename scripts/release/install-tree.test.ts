@@ -159,6 +159,17 @@ describe("the pack keeps the modes files.json names", () => {
     expect(modes.get("trust/keys.json")).toBe("-r--r--r--");
     expect(modes.get("bin/morndo")).toBe("-r-xr-xr-x");
   });
+
+  it("refuses a staged tree whose files.json lists a directory with a mode other than 0555", () => {
+    const root = temp();
+    mkdirSync(join(root, "trust"));
+    writeFileSync(join(root, "trust/keys.json"), "{}\n");
+    writeFileSync(join(root, "files.json"), JSON.stringify([
+      { path: "trust", mode: "0755", sha256: sha256(new Uint8Array(0)) },
+      { path: "trust/keys.json", mode: "0444", sha256: sha256(new TextEncoder().encode("{}\n")) },
+    ]));
+    expect(() => stagedTreeFiles(root)).toThrow(/trust: a listed directory's mode is 0755, not 0555/);
+  });
 });
 
 describe("install.sh hands `morndo install` the tree as packed", () => {
