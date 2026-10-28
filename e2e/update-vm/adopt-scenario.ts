@@ -418,9 +418,9 @@ async function main(): Promise<number> {
   } else {
     // The machine must reach the real publish points: the production feed and GitHub's release downloads.
     const net = run("curl", ["-fsS", "--max-time", "30", "https://morndo.github.io/morndo/latest.json"]);
-    const gh = run("curl", ["-fsSI", "--max-time", "30", "-o", "/dev/null", `${RELEASE_BASE}/SHA256SUMS`]);
+    const gh = run("curl", ["-fsSI", "--max-time", "30", "-o", "/dev/null", `${RELEASE_BASE}/manifest.json`]);
     check("a-network", net.code === 0 && gh.code === 0,
-      `latest.json from morndo.github.io: curl exit ${net.code} ${net.err.trim() || firstLines(net, 1)}; ${RELEASE_BASE}/SHA256SUMS: curl exit ${gh.code} ${gh.err.trim()}`);
+      `latest.json from morndo.github.io: curl exit ${net.code} ${net.err.trim() || firstLines(net, 1)}; ${RELEASE_BASE}/manifest.json: curl exit ${gh.code} ${gh.err.trim()}`);
     const managerEnv = run("systemctl", ["--user", "show-environment"]);
     check("a-environment", !managerEnv.out.includes("MORNDO_UPDATE_FEED") && !(process.env.MORNDO_UPDATE_FEED ?? ""),
       "the user manager carries no MORNDO_UPDATE_FEED: the machine uses the production default feed");

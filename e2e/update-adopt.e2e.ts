@@ -11,11 +11,12 @@
 // way out, a killed run's leftovers are swept by label and owner at the start, and the image goes at the very end.
 import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { cpSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { createHash, randomBytes } from "node:crypto";
+import { randomBytes } from "node:crypto";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { buildWorld } from "./update-vm/build.ts";
-import { allowedSignersLine, parsePublished, sha256For } from "./update-vm/adopt-checks.ts";
+import { allowedSignersLine, parsePublished } from "./update-vm/adopt-checks.ts";
+import { archiveEntry, checkArchive, verifyManifest } from "./update-vm/published-trust.ts";
 import { makeOwnedScratch, ownerOf, ownerText, sweepContainers, sweepScratch } from "./update-vm/checks.ts";
 
 const ROOT = join(import.meta.dirname, "..");
@@ -25,6 +26,7 @@ const OWNER_LABEL = `${LABEL}.owner`;
 const CONTAINER = `morndo-c6-adopt-e2e-${randomBytes(4).toString("hex")}`;
 // `--published <version>`: the machine installs the PUBLISHED release by the README's commands, from the real feed.
 const PUBLISHED = parsePublished(process.argv.slice(2));
+const SIGNER_ID = "release@morndo.github.io";                     // install.sh's own identity and namespace
 const OWNER = ownerText(ownerOf(process.pid));                    // this run, as its container's label names it
 
 function docker(args: string[], o: { timeoutMs?: number } = {}): { code: number; out: string; err: string } {
@@ -114,29 +116,32 @@ try {
     const extract = spawnSync("tar", ["-xzf", world.archiveA, "-C", treeA], { encoding: "utf8", timeout: 300_000 });
     if (extract.status !== 0) throw new Error(`unpacking the A archive failed: ${extract.stderr}`);
   } else {
-    // ---- the published release: its archive from GitHub, checked against SHA256SUMS; no feeds, no TLS, no feed server.
+    // ---- the published release, trusted the way install.sh trusts it: manifest.json's signature against the README's signer
+    // line, then the archive's size and sha256 from that manifest (SHA256SUMS is not signed and is not read). Nothing is
+    // unpacked, and so nothing from the archive runs, before both hold: the scripts/c6 files of tree-a do run.
     scratch = makeOwnedScratch(tmpdir(), ownerText(ownerOf(process.pid)), { prefix: "morndo-c6" });
     bundle = join(scratch, "bundle");
     mkdirSync(bundle, { recursive: true });
     const base = `https://github.com/morndo/morndo/releases/download/v${PUBLISHED}`;
     const archiveName = `morndo-${PUBLISHED}-linux-x64.tar.gz`;
-    process.stdout.write(`downloading ${archiveName} and SHA256SUMS from ${base}/ …\n`);
-    for (const name of ["SHA256SUMS", archiveName]) {
+    const key = allowedSignersLine(readFileSync(join(ROOT, "README.md"), "utf8"));
+    if (key === null) throw new Error("README.md has no single `echo '...' > morndo.allowed_signers` line");
+    const signers = join(bundle, "allowed_signers");
+    writeFileSync(signers, `${key}\n`);
+    process.stdout.write(`downloading manifest.json, its signature and ${archiveName} from ${base}/ …\n`);
+    for (const name of ["manifest.json", "manifest.json.sig", archiveName]) {
       const got = spawnSync("curl", ["-fsSL", "-o", join(scratch, name), `${base}/${name}`], { encoding: "utf8", timeout: 600_000 });
       if (got.status !== 0) throw new Error(`downloading ${name} failed (curl exit ${got.status}): ${got.stderr}`);
     }
-    const wanted = sha256For(readFileSync(join(scratch, "SHA256SUMS"), "utf8"), archiveName);
-    if (wanted === null) throw new Error(`SHA256SUMS has no line for ${archiveName}`);
-    const actual = createHash("sha256").update(readFileSync(join(scratch, archiveName))).digest("hex");
-    if (actual !== wanted) throw new Error(`the archive's sha256 ${actual} is not the ${wanted} that SHA256SUMS gives: refusing`);
-    process.stdout.write(`${archiveName} sha256 ${actual} matches SHA256SUMS\n`);
+    verifyManifest({ manifest: join(scratch, "manifest.json"), sig: join(scratch, "manifest.json.sig"), signers, identity: SIGNER_ID });
+    process.stdout.write(`manifest.json's signature verifies against the README's signer line\n`);
+    const entry = archiveEntry(readFileSync(join(scratch, "manifest.json"), "utf8"), PUBLISHED, "linux-x64");
+    checkArchive(join(scratch, archiveName), entry);
+    process.stdout.write(`${archiveName} is ${entry.size} bytes, sha256 ${entry.sha256}, as the signed manifest says\n`);
     treeA = join(bundle, "tree-a");
     mkdirSync(treeA, { recursive: true });
     const extract = spawnSync("tar", ["-xzf", join(scratch, archiveName), "-C", treeA], { encoding: "utf8", timeout: 300_000 });
     if (extract.status !== 0) throw new Error(`unpacking the archive failed: ${extract.stderr}`);
-    const key = allowedSignersLine(readFileSync(join(ROOT, "README.md"), "utf8"));
-    if (key === null) throw new Error("README.md has no single `echo '...' > morndo.allowed_signers` line");
-    writeFileSync(join(bundle, "allowed_signers"), `${key}\n`);
     const c6 = join(bundle, "scripts", "c6");
     mkdirSync(c6, { recursive: true });
     for (const name of readdirSync(join(ROOT, "scripts/c6")).filter(n => !n.endsWith(".test.ts"))) cpSync(join(ROOT, "scripts/c6", name), join(c6, name));

@@ -56,15 +56,6 @@ export function missingRows(answer: string, expected: readonly string[]): string
   return expected.filter(e => !have.has(e));
 }
 
-/** The hash SHA256SUMS gives a file ("<64 hex>  name" or "<64 hex> *name"); the name must match whole. */
-export function sha256For(sumsText: string, fileName: string): string | null {
-  for (const line of sumsText.split("\n")) {
-    const m = /^([0-9a-f]{64}) [ *](.+?)\s*$/.exec(line);
-    if (m !== null && m[2] === fileName) return m[1] ?? null;
-  }
-  return null;
-}
-
 /** The text of the README's single-quoted `echo '...' > morndo.allowed_signers` line; null when absent or ambiguous. */
 export function allowedSignersLine(readmeText: string): string | null {
   const found = new Set<string>();
