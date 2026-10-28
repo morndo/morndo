@@ -77,11 +77,18 @@ export function allowedSignersLine(readmeText: string): string | null {
 
 const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
 
-/** `--published <semver>` from the arguments; null when the flag is absent, a throw when its value is missing or no version. */
+/**
+ * `--published <semver>` from the arguments; null when the flag is absent, a throw when it is repeated (the first one would
+ * win silently), when its value is missing or no version, or, with `--require-published`, when it is absent.
+ */
 export function parsePublished(argv: readonly string[]): string | null {
   const at = argv.indexOf("--published");
-  if (at < 0) return null;
+  if (at < 0) {
+    if (argv.includes("--require-published")) throw new Error("this run needs --published <version> (npm run e2e:update-adopt-published -- --published 0.2.0)");
+    return null;
+  }
+  if (argv.indexOf("--published", at + 1) >= 0) throw new Error("--published may be given once");
   const value = argv[at + 1];
-  if (value === undefined || !SEMVER.test(value)) throw new Error(`--published needs a version like 0.1.1, got ${JSON.stringify(value ?? null)}`);
+  if (value === undefined || !SEMVER.test(value)) throw new Error(`--published needs a version like 0.2.0, got ${JSON.stringify(value ?? null)}`);
   return value;
 }
