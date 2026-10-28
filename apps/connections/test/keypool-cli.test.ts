@@ -166,6 +166,9 @@ describe("keypool create, list and the terms", () => {
     expect(refused.stderr).toMatch(/no_classifier/);
   });
 
+  // Twenty CLI processes, one after another: 10-12 s on a quiet machine, but past the 20 s default on a slower
+  // runner (CI run 40612138620, both attempts, 2026-10-28: the whole units suite ran 28 % slower than on main), so it
+  // gets a minute. What it checks is unchanged.
   it("add, remove, move, policy, revive and delete change the pool; delete leaves the keys as plain Connections and the name taken", async () => {
     const { env } = await world(3);
     expect((await cli(["keypool", "move", "p", "k3", "--to", "0"], env)).code).toBe(0);
@@ -183,7 +186,7 @@ describe("keypool create, list and the terms", () => {
     expect(await pools(env)).toEqual([]);
     expect((await cli(["list"], env)).stdout.trim().split("\n")).toHaveLength(3);
     expect((await cli(["keypool", "create", "p", "--vendor", "anthropic", "--runtime", "claude", "--by", "owner", "--confirm-own-account", "k1"], env)).stderr).toMatch(/taken/);
-  });
+  }, 60_000);
 
   it("an unknown subcommand is refused, and help names the commands", async () => {
     const { env } = await world(1, { pool: false });
