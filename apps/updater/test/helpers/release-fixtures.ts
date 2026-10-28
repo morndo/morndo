@@ -84,7 +84,7 @@ export function releaseFixture(o: {
   // This machine's platform by default, mapped as the CLI maps it: a test that drives the CLI stages only an
   // Artifact for the machine it runs on (the release's linux-arm64 units job failed "no_artifact" on a linux-x64
   // default). Elsewhere linux-x64, a name only.
-  const platform = o.platform ?? "linux-x64";
+  const platform = o.platform ?? platformWord(process.platform, process.arch) ?? "linux-x64";
   const tree = TREE(o.version);
   const built = buildRelease(tree);
   const archive = o.tamper === undefined ? built.gz : o.tamper(tree, built.filesJson);
