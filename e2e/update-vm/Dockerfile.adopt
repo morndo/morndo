@@ -6,9 +6,9 @@ FROM ubuntu:24.04
 
 # systemd wants a few packages to behave like a machine: systemd itself, dbus-user-session so the user manager
 # has its bus (the agent's tmux hosting and every systemctl --user the updater runs need it), tmux for the agent,
-# sqlite3 for the scenario's database checks, ca-certificates for anything that leaves the machine.
+# sqlite3 for the scenario's database checks, ca-certificates, curl and openssh-client for anything that leaves the machine (install.sh of the published rehearsal needs both).
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends systemd systemd-sysv dbus-user-session tmux sqlite3 ca-certificates \
+  && apt-get install -y --no-install-recommends systemd systemd-sysv dbus-user-session tmux sqlite3 ca-certificates curl openssh-client \
   && rm -rf /var/lib/apt/lists/*
 
 # The user everything runs as: uid 1000, a home of its own, and lingering on from the start (§5: the services

@@ -14,7 +14,7 @@ import { get as httpsGet } from "node:https";
 import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { missingRows, runsFromLauncher, sameListing, sameProcess, unitAdopted } from "./adopt-checks.ts";
+import { doctorVerdict, missingRows, runsFromLauncher, runsTree, sameListing, sameProcess, unitAdopted } from "./adopt-checks.ts";
 import { ownerOf } from "./checks.ts";
 
 const HOME = homedir();
@@ -36,8 +36,19 @@ const OLD_NODE_REL = ".nvm/versions/node/v24.0.0/bin/node";
 const OLD_NODE = join(HOME, OLD_NODE_REL);
 const BACKUP = join(HOME, "c6-backup/m1-demo");
 const ASIDE = join(HOME, "c6-wrappers-aside");
-const VERSION_A = "0.1.0";
-const OLD_VERSION = "0.0.0";                                   // a tree with no build.json reports the root package.json's
+// C6_PUBLISHED=<version>: the published-feed rehearsal. The machine installs the PUBLISHED release by the README's
+// verify-first commands and uses the production feed (no local feed, no TLS file, no MORNDO_UPDATE_FEED).
+const PUBLISHED = process.env.C6_PUBLISHED ?? null;
+const VERSION_A = PUBLISHED ?? "0.1.0";
+const CHANNEL = PUBLISHED === null ? "stable" : "latest";
+const RELEASE_BASE = `https://github.com/morndo/morndo/releases/download/v${PUBLISHED}`;
+const SIGNERS = join(E2E, "allowed_signers");
+const SIGNER_ID = "release@morndo.github.io";
+const readRootVersion = (): string => {
+  try { return (JSON.parse(readFileSync(join(E2E, "tree-a/app/package.json"), "utf8")) as { version?: string }).version ?? "0.0.0"; } catch { return "0.0.0"; }
+};
+// a tree with no build.json reports the root package.json's (published: whatever that file of the unpacked app says)
+const OLD_VERSION = readRootVersion();   // the old folder has no build.json, so its services report the root package.json version (0.0.0 until the first release commit bumped it)
 const NODE_NAME = "node-demo";
 const LANE = "lane-demo";
 // The dead-man's first run only has to outlast the installs and the proofs (a naive install measured about 276 s; the
@@ -55,13 +66,13 @@ const SERVICES = [
 ] as const;
 const SERVICE_UNITS = SERVICES.map(s => s.unit);
 
-const ENV = {
+const ENV: NodeJS.ProcessEnv = {
   ...process.env, HOME,
   PATH: `${BIN}:/usr/local/bin:/usr/bin:/bin`,
-  MORNDO_UPDATE_FEED: FEED_URL,
-  NODE_EXTRA_CA_CERTS: join(E2E, "tls/ca.pem"),
+  ...(PUBLISHED === null ? { MORNDO_UPDATE_FEED: FEED_URL, NODE_EXTRA_CA_CERTS: join(E2E, "tls/ca.pem") } : {}),
   C6_NODE: process.execPath,
 };
+if (PUBLISHED !== null) { delete ENV.MORNDO_UPDATE_FEED; delete ENV.NODE_EXTRA_CA_CERTS; }
 
 type Check = { step: string; ok: boolean; detail: string };
 const checks: Check[] = [];
@@ -146,12 +157,18 @@ async function waitHealthy(which: "hub" | "fleet" | "node", atVersion: string, t
   return (await waitUntil(timeoutMs, probe)) === atVersion;
 }
 
-// All three units active and all three answering with that version.
-async function servicesHealthy(version: string, timeoutMs = 90_000): Promise<{ ok: boolean; detail: string }> {
+// All three units active, all three answering with that version, and all three running the named tree. The tree is part of
+// the check because a version cannot tell the two apart in the published rehearsal: the old folder is the published archive's
+// own app, so it reports the same version as the installed Version (the root package.json's, as it has no build.json).
+async function servicesHealthy(tree: "old" | "new", version: string, timeoutMs = 90_000): Promise<{ ok: boolean; detail: string }> {
   const active = await waitUntil(timeoutMs, async () => (SERVICE_UNITS.every(unitActive) ? "" : null));
   if (active === null) return { ok: false, detail: `units not active: ${SERVICE_UNITS.filter(u => !unitActive(u)).join(", ")}` };
   const ok = (await waitHealthy("hub", version, timeoutMs)) && (await waitHealthy("fleet", version, timeoutMs)) && (await waitHealthy("node", version, timeoutMs));
-  return { ok, detail: ok ? `all three units active and healthy at ${version}` : `not all healthy at ${version}: ${await healthNow()}` };
+  if (!ok) return { ok, detail: `not all healthy at ${version}: ${await healthNow()}` };
+  const onTree = await waitUntil(timeoutMs, async () => (SERVICES.every(s => runsTree(tree, cmdlineOf(s.unit))) ? "" : null));
+  return onTree === null
+    ? { ok: false, detail: `healthy at ${version} but not all running the ${tree} tree: ${SERVICES.map(s => `${s.app} ${cmdlineOf(s.unit)}`).join(" || ")}` }
+    : { ok: true, detail: `all three units active and healthy at ${version}, running the ${tree} tree` };
 }
 
 function sqlite(db: string, sql: string): string {
@@ -174,8 +191,8 @@ function cmdlineOf(unit: string): string {
   if (!/^\d+$/.test(pid) || pid === "0") return "(no main process)";
   try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ").trim(); } catch { return "(gone)"; }
 }
-const runsNew = (cmdline: string) => cmdline.includes("morndo-releases");
-const runsOld = (cmdline: string) => cmdline.includes("releases/abc1234");
+const runsNew = (cmdline: string) => runsTree("new", cmdline);
+const runsOld = (cmdline: string) => runsTree("old", cmdline);
 
 // `path size` for every entry under a folder (links by their own size), sorted: the old release folder before and after.
 function listing(root: string): string {
@@ -265,7 +282,7 @@ async function proofs(p: string, base: Baseline): Promise<void> {
   check(`${p}-db-rows-kept`, lacks.every(l => l.lacking.length === 0),
     lacks.every(l => l.lacking.length === 0) ? `the marker rows (${MARKERS.join(", ")}) are in the hub, fleet and node databases`
       : lacks.filter(l => l.lacking.length > 0).map(l => `${l.n} lacks ${l.lacking.join(",")}`).join("; "));
-  const healthy = await servicesHealthy(VERSION_A);
+  const healthy = await servicesHealthy("new", VERSION_A);
   check(`${p}-services-healthy`, healthy.ok, healthy.detail);
 
   const lane = sameProcess(base.lane, ownerOf(base.lanePid));
@@ -276,12 +293,13 @@ async function proofs(p: string, base: Baseline): Promise<void> {
   check(`${p}-old-folder-unchanged`, folder.ok, folder.detail);
 
   const status = command(`${p}-update-status`, join(BIN, "morndo"), ["update", "--status"]);
-  check(`${p}-status`, status.code === 0 && status.out.includes("install: updater") && status.out.includes("channel: stable") && status.out.includes(`current: ${VERSION_A}`),
+  check(`${p}-status`, status.code === 0 && status.out.includes("install: updater") && status.out.includes(`channel: ${CHANNEL}`) && status.out.includes(`current: ${VERSION_A}`),
     `update --status exited ${status.code}: ${firstLines(status, 4)}`);
-  // Not a pass/fail of the adoption: a fresh install is not "clean" for the doctor today (see the plan, section 8), so the
-  // word is recorded as a finding and the story goes on.
+  // Published mode gates on it (the plan's G1: exit 0 after a fresh install). The local build is only observed: whether its
+  // fresh-install doctor is clean since #185 has not been run, so it stays a finding there (the plan, section 0).
   const doctor = command(`${p}-doctor`, join(BIN, "morndo"), ["doctor"]);
-  check(`finding-doctor-${p}`, true, `doctor exited ${doctor.code}: ${firstLines(doctor, 6)}`);
+  const verdict = doctorVerdict(PUBLISHED !== null, doctor.code, `${doctor.out}${doctor.err}`);
+  check(PUBLISHED !== null ? `${p}-doctor` : `finding-doctor-${p}`, verdict.ok, verdict.detail);
 }
 
 // ---- the dead-man's switch --------------------------------------------------------------------------------------------
@@ -333,9 +351,36 @@ const moveWrappersAside = (): string => {
   return moved.join(", ");
 };
 
+let installShVerified = false;
+// The container's /tmp is a tmpfs Docker mounts noexec (and small): install.sh unpacks its tree under mktemp, so its
+// temporary folder is the worker's home, as it would be on a machine whose /tmp allows exec.
+const INSTALL_TMP = join(HOME, "install-tmp");
 const installOnce = (label: string) => {
   const t0 = Date.now();
-  const r = command(label, join(E2E, "tree-a/bin/morndo"), ["install", "--role", "control-plane"], { timeoutMs: 600_000 });
+  if (PUBLISHED === null) {
+    const r = command(label, join(E2E, "tree-a/bin/morndo"), ["install", "--role", "control-plane"], { timeoutMs: 600_000 });
+    return { ...r, seconds: Math.round((Date.now() - t0) / 1000) };
+  }
+  // The README's procedure: download install.sh and its signature, verify the signature, then run the script.
+  const dir = join(HOME, `pub-${label}`);
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true });
+  const sh = join(dir, "install.sh");
+  const sig = join(dir, "install.sh.sig");
+  const got = [run("curl", ["-fsSL", "-o", sh, `${RELEASE_BASE}/install.sh`]), run("curl", ["-fsSL", "-o", sig, `${RELEASE_BASE}/install.sh.sig`])];
+  const downloaded = got.every(g => g.code === 0);
+  const verify = spawnSync("sh", ["-c", `ssh-keygen -Y verify -f "$1" -I "$2" -n "$2" -s "$3" < "$4"`, "sh", SIGNERS, SIGNER_ID, sig, sh],
+    { encoding: "utf8", env: ENV, timeout: 60_000 });
+  const verified = downloaded && verify.status === 0;
+  if (!installShVerified) {
+    installShVerified = true;
+    check("b-install-sh-verified", verified, downloaded
+      ? `ssh-keygen -Y verify exited ${verify.status}: ${firstLines({ out: verify.stdout ?? "", err: verify.stderr ?? "" }, 3)}`
+      : `downloading install.sh/install.sh.sig failed: ${got.map(g => `exit ${g.code} ${g.err.trim()}`).join("; ")}`);
+  }
+  if (!verified) return { code: -1, out: "", err: "install.sh was not verified: not run", seconds: Math.round((Date.now() - t0) / 1000) };
+  mkdirSync(INSTALL_TMP, { recursive: true });
+  const r = command(label, "env", [`TMPDIR=${INSTALL_TMP}`, "sh", sh, "--role", "control-plane", "--channel", CHANNEL, "--signers", SIGNERS], { timeoutMs: 600_000 });
   return { ...r, seconds: Math.round((Date.now() - t0) / 1000) };
 };
 
@@ -364,17 +409,29 @@ async function main(): Promise<number> {
   mkdirSync(EVIDENCE, { recursive: true });
 
   // ---- a: the manager's environment and the feed.
-  mkdirSync(join(HOME, ".config/environment.d"), { recursive: true });
-  writeFileSync(join(HOME, ".config/environment.d/morndo-e2e.conf"),
-    `MORNDO_UPDATE_FEED=${FEED_URL}\nNODE_EXTRA_CA_CERTS=${join(E2E, "tls/ca.pem")}\n`);
-  run("systemctl", ["--user", "daemon-reexec"]);
-  run("systemctl", ["--user", "set-environment", `MORNDO_UPDATE_FEED=${FEED_URL}`, `NODE_EXTRA_CA_CERTS=${join(E2E, "tls/ca.pem")}`]);
-  const managerEnv = run("systemctl", ["--user", "show-environment"]);
-  check("a-environment", managerEnv.out.includes(`MORNDO_UPDATE_FEED=${FEED_URL}`) && managerEnv.out.includes("NODE_EXTRA_CA_CERTS="),
-    "the user manager carries MORNDO_UPDATE_FEED and NODE_EXTRA_CA_CERTS");
-  const server = await serveFeed();
-  const selfProbe = await httpsStatus(`${FEED_URL}keys/1.json`, readFileSync(join(E2E, "tls/ca.pem"), "utf8"));
-  check("a-feed-server", selfProbe === 200, `the feed answers on ${FEED_URL}keys/1.json (HTTP ${selfProbe})`);
+  let server: FeedHost | null = null;
+  if (PUBLISHED === null) {
+    mkdirSync(join(HOME, ".config/environment.d"), { recursive: true });
+    writeFileSync(join(HOME, ".config/environment.d/morndo-e2e.conf"),
+      `MORNDO_UPDATE_FEED=${FEED_URL}\nNODE_EXTRA_CA_CERTS=${join(E2E, "tls/ca.pem")}\n`);
+    run("systemctl", ["--user", "daemon-reexec"]);
+    run("systemctl", ["--user", "set-environment", `MORNDO_UPDATE_FEED=${FEED_URL}`, `NODE_EXTRA_CA_CERTS=${join(E2E, "tls/ca.pem")}`]);
+    const managerEnv = run("systemctl", ["--user", "show-environment"]);
+    check("a-environment", managerEnv.out.includes(`MORNDO_UPDATE_FEED=${FEED_URL}`) && managerEnv.out.includes("NODE_EXTRA_CA_CERTS="),
+      "the user manager carries MORNDO_UPDATE_FEED and NODE_EXTRA_CA_CERTS");
+    server = await serveFeed();
+    const selfProbe = await httpsStatus(`${FEED_URL}keys/1.json`, readFileSync(join(E2E, "tls/ca.pem"), "utf8"));
+    check("a-feed-server", selfProbe === 200, `the feed answers on ${FEED_URL}keys/1.json (HTTP ${selfProbe})`);
+  } else {
+    // The machine must reach the real publish points: the production feed and GitHub's release downloads.
+    const net = run("curl", ["-fsS", "--max-time", "30", "https://morndo.github.io/morndo/latest.json"]);
+    const gh = run("curl", ["-fsSI", "--max-time", "30", "-o", "/dev/null", `${RELEASE_BASE}/manifest.json`]);
+    check("a-network", net.code === 0 && gh.code === 0,
+      `latest.json from morndo.github.io: curl exit ${net.code} ${net.err.trim() || firstLines(net, 1)}; ${RELEASE_BASE}/manifest.json: curl exit ${gh.code} ${gh.err.trim()}`);
+    const managerEnv = run("systemctl", ["--user", "show-environment"]);
+    check("a-environment", !managerEnv.out.includes("MORNDO_UPDATE_FEED") && !(process.env.MORNDO_UPDATE_FEED ?? ""),
+      "the user manager carries no MORNDO_UPDATE_FEED: the machine uses the production default feed");
+  }
   if (failed) return finish(server);
 
   // ---- b: today's state.
@@ -411,7 +468,7 @@ async function main(): Promise<number> {
   check("b-node-joined", joined.code === 0 && joined.out.includes("Joined the fleet"), `node add/join: ${firstLines(joined, 3)}`);
   if (failed) { journals("b-join"); return finish(server); }
   run("systemctl", ["--user", "enable", "--now", "morndo-node.service"]);
-  const baseHealthy = await servicesHealthy(OLD_VERSION);
+  const baseHealthy = await servicesHealthy("old", OLD_VERSION);
   check("b-baseline-healthy", baseHealthy.ok, `${baseHealthy.detail} (the old folder reports ${OLD_VERSION}: no build.json)`);
   const unmarked = SERVICES.every(s => !readFileSync(join(UNIT_DIR, s.unit), "utf8").startsWith("# Morndo's own unit"));
   const oldCmd = SERVICES.every(s => runsOld(cmdlineOf(s.unit)));
@@ -461,7 +518,7 @@ async function main(): Promise<number> {
     `install over real-file wrappers exited ${refused.code}: ${firstLines(refused, 3)}; ~/.local/share/morndo-releases/current exists: ${installedAnyway}`);
   const moved = moveWrappersAside();
   const installed = installOnce("d-install");
-  check("d-installed", installed.code === 0 && installed.out.includes(`Morndo ${VERSION_A} installed (control-plane, channel stable).`),
+  check("d-installed", installed.code === 0 && installed.out.includes(`Morndo ${VERSION_A} installed (control-plane, channel ${CHANNEL}).`),
     `wrappers moved aside (${moved}); install exited ${installed.code} after ${installed.seconds} s: ${firstLines(installed, 8)}`);
   if (failed) { journals("d-install"); return finish(server); }
 
@@ -473,10 +530,14 @@ async function main(): Promise<number> {
   const cmdAfter = SERVICES.map(s => `${s.app}: ${cmdlineOf(s.unit)}`);
   const restartObserved = `within 20 s of the install the three units ${sawNew === "new" ? "ran the NEW tree" : "did NOT all run the new tree"}; health ${await healthNow()}; install took ${installed.seconds} s and its output said: ${installed.out.split("\n").filter(l => l.includes("healthy") || l.includes("no answer")).join(" | ") || "(no health lines)"}; processes: ${cmdAfter.join(" || ")}`;
   check("finding-restart", true, restartObserved);
+  if (PUBLISHED !== null) {
+    const firstFeed = `${installed.out}${installed.err}`.split("\n").filter(l => /feed|first check|checking for/i.test(l));
+    check("finding-first-check", true, `install output lines about a feed check: ${firstFeed.length === 0 ? "(none)" : firstFeed.join(" | ")}; the whole install output: ${installed.out.split("\n").concat(installed.err.split("\n")).filter(l => l.trim() !== "").join(" | ")}`);
+  }
   if (sawNew !== "new") {
     for (const s of SERVICES) command(`d-restart-${s.app}`, "systemctl", ["--user", "restart", s.unit]);
   }
-  const afterRestart = await servicesHealthy(VERSION_A);
+  const afterRestart = await servicesHealthy("new", VERSION_A);
   check("d-services-healthy", afterRestart.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))),
     `${sawNew === "new" ? "no restart needed" : "after systemctl --user restart of the three units"}: ${afterRestart.detail}`);
   if (failed) { journals("d-restart"); return finish(server); }
@@ -488,6 +549,11 @@ async function main(): Promise<number> {
   // ---- e: the proofs on the adopted machine.
   await proofs("e", baseline);
   if (failed) journals("e-proofs");
+  if (PUBLISHED !== null) {
+    const feedCheck = command("p-update-check", join(BIN, "morndo"), ["update", "--check"], { timeoutMs: 120_000 });
+    check("p-feed-up-to-date", feedCheck.code === 0 && feedCheck.out.includes(`Up to date: ${VERSION_A}.`),
+      `update --check against the real feed exited ${feedCheck.code}: ${firstLines(feedCheck, 6)}`);
+  }
 
   // ---- f: the dead-man fires. The long switch comes off, a fresh short one goes on, then one more row after the backup.
   const disarmed = command("f-disarm", "sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "--disarm", "m1"]);
@@ -530,7 +596,7 @@ async function main(): Promise<number> {
   // Nothing was started by hand: every service the backup found running is running again as the restore left it.
   const running = SERVICES.map(s => `${s.unit}=${unitActive(s.unit)}`);
   check("f-rollback-all-running", SERVICES.every(s => unitActive(s.unit)), `right after the unattended rollback, with no manual start: ${running.join(" ")}`);
-  const backHealthy = await servicesHealthy(OLD_VERSION, 120_000);
+  const backHealthy = await servicesHealthy("old", OLD_VERSION, 120_000);
   const backCmd = SERVICES.map(s => cmdlineOf(s.unit));
   check("f-old-folder-running", backHealthy.ok && backCmd.every(runsOld), `${backHealthy.detail}; processes: ${backCmd.join(" || ")}`);
   const quicksF = DBS.map(([n, path]) => `${n}=${quickCheck(path)}`);
@@ -608,7 +674,7 @@ async function main(): Promise<number> {
   rmSync(`${FLEET_DB}-wal`, { force: true });
   rmSync(`${FLEET_DB}-shm`, { force: true });
   run("systemctl", ["--user", "start", "morndo-fleet.service"]);
-  const repaired = await servicesHealthy(OLD_VERSION, 120_000);
+  const repaired = await servicesHealthy("old", OLD_VERSION, 120_000);
   check("f2-repaired-by-hand", repaired.ok, `after the copy by hand and the start: ${repaired.detail}`);
   if (failed) { journals("f2-deadman"); return finish(server); }
 
@@ -624,13 +690,13 @@ async function main(): Promise<number> {
   // lane's tmux sits in its own scope), so the install starts them on the new tree.
   run("systemctl", ["--user", "stop", ...SERVICE_UNITS]);
   const second = installOnce("g-install");
-  check("g-installed", second.code === 0 && second.out.includes(`Morndo ${VERSION_A} installed (control-plane, channel stable).`),
+  check("g-installed", second.code === 0 && second.out.includes(`Morndo ${VERSION_A} installed (control-plane, channel ${CHANNEL}).`),
     `after the reset (releases, update state, update config removed), wrappers moved aside (${movedAgain}), services stopped: install exited ${second.code} after ${second.seconds} s: ${firstLines(second, 8)}`);
   if (failed) { journals("g-install"); return finish(server); }
-  let secondHealthy = await servicesHealthy(VERSION_A, 60_000);
+  let secondHealthy = await servicesHealthy("new", VERSION_A, 60_000);
   if (!secondHealthy.ok) {
     for (const s of SERVICES) command(`g-restart-${s.app}`, "systemctl", ["--user", "restart", s.unit]);
-    secondHealthy = await servicesHealthy(VERSION_A);
+    secondHealthy = await servicesHealthy("new", VERSION_A);
   }
   check("g-services-healthy", secondHealthy.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))), secondHealthy.detail);
   if (failed) { journals("g-restart"); return finish(server); }
@@ -663,12 +729,12 @@ async function main(): Promise<number> {
   return finish(server);
 }
 
-function finish(server: FeedHost): number {
+function finish(server: FeedHost | null): number {
   const status = run(join(BIN, "morndo"), ["update", "--status"]);
   writeFileSync(join(EVIDENCE, "status.txt"), `morndo update --status:\n${status.out}\n${status.err}\n`);
   run("tmux", ["kill-server"]);
   for (const m of ["m1", "m1b"]) run("sh", [join(E2E, "scripts/c6/arm-deadman.sh"), "--disarm", m]);
-  server.close();
+  server?.close();
   const passed = checks.filter(c => c.ok).length;
   process.stdout.write(`${JSON.stringify({ step: "summary", ok: passed === checks.length, detail: `${passed}/${checks.length} checks passed` })}\n`);
   return passed === checks.length ? 0 : 1;

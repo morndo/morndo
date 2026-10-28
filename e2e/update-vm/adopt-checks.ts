@@ -16,6 +16,21 @@ export function runsFromLauncher(unitText: string): boolean {
   return unitText.split("\n").some(line => /^ExecStart=\S*\/\.local\/bin\/morndo(-\w+)?(\s|$)/.test(line.trim()));
 }
 
+/** Which tree a main process's command line runs: the old release folder of the machines today, or an installed Version. */
+export function runsTree(tree: "old" | "new", cmdline: string): boolean {
+  return tree === "new" ? cmdline.includes("morndo-releases") : cmdline.includes("releases/abc1234") && !cmdline.includes("morndo-releases");
+}
+
+/**
+ * `morndo doctor` right after a fresh install. Published mode: exit 0 and the clean line are a check (the release carries
+ * the fresh-install doctor fix, #185). Local mode: only a finding, ok whatever the word (the plan says why).
+ */
+export function doctorVerdict(published: boolean, code: number, output: string): Verdict {
+  const lines = output.split("\n").filter(l => l.trim() !== "");
+  const detail = `doctor exited ${code}: ${lines.slice(0, published ? 200 : 6).join(" | ")}`;
+  return { ok: !published || (code === 0 && lines.includes("ok: the install checks out")), detail };
+}
+
 export interface Proc { pid: number; started: string }
 
 /** The same process: same pid and same start time (a reused pid has another start time). */
@@ -54,4 +69,32 @@ export function sameListing(before: string, after: string): Verdict {
 export function missingRows(answer: string, expected: readonly string[]): string[] {
   const have = new Set(answer.split("\n").map(l => l.trim()));
   return expected.filter(e => !have.has(e));
+}
+
+/** The text of the README's single-quoted `echo '...' > morndo.allowed_signers` line; null when absent or ambiguous. */
+export function allowedSignersLine(readmeText: string): string | null {
+  const found = new Set<string>();
+  for (const line of readmeText.split("\n")) {
+    const m = /^\s*echo '([^']*)' > morndo\.allowed_signers\s*$/.exec(line);
+    if (m !== null && m[1] !== undefined) found.add(m[1]);
+  }
+  return found.size === 1 ? [...found][0] ?? null : null;
+}
+
+const SEMVER = /^\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$/;
+
+/**
+ * `--published <semver>` from the arguments; null when the flag is absent, a throw when it is repeated (the first one would
+ * win silently), when its value is missing or no version, or, with `--require-published`, when it is absent.
+ */
+export function parsePublished(argv: readonly string[]): string | null {
+  const at = argv.indexOf("--published");
+  if (at < 0) {
+    if (argv.includes("--require-published")) throw new Error("this run needs --published <version> (npm run e2e:update-adopt-published -- --published 0.2.0)");
+    return null;
+  }
+  if (argv.indexOf("--published", at + 1) >= 0) throw new Error("--published may be given once");
+  const value = argv[at + 1];
+  if (value === undefined || !SEMVER.test(value)) throw new Error(`--published needs a version like 0.2.0, got ${JSON.stringify(value ?? null)}`);
+  return value;
 }

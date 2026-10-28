@@ -107,6 +107,7 @@ mkdir "$dest/units" "$dest/wrappers" "$dest/dbs"
 printf 'host=%s\nhome=%s\n' "${C6_HOSTNAME:-$(uname -n)}" "$HOME" > "$dest/machine.txt"
 
 for f in "$units"/morndo-*; do
+  case ${f##*/} in morndo-job-*) continue ;; esac   # the node agent's own job units (see below): not ours to keep
   if [ -e "$f" ] || [ -L "$f" ]; then cp -a "$f" "$dest/units/"; fi
 done
 for f in "$bin"/morndo*; do
@@ -115,7 +116,9 @@ done
 
 # The unit set: every loaded morndo unit in an active-like state (all types, template instances included), plus every
 # unit file we copied (services, timers, sockets and paths). An instance running now has no file of its own (only its template) but is recorded active=yes.
-active_now=$("$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do printf '%s\n' "$n"; done || true)
+# morndo-job-<id>.service are the node agent's own transient units (systemd-run) for work other agents are running: never ours to
+# record, stop or restart.
+active_now=$("$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do case $n in morndo-job-*) ;; *) printf '%s\n' "$n" ;; esac; done || true)
 : > "$dest/state.txt"
 seen=" "
 record() {
@@ -278,7 +281,7 @@ fi
 # From the state recorded at backup time (state.txt): the services recorded active (template instances included).
 start_list=""
 while read -r u a e; do
-  case $u in *.service) if [ "$a" = "active=yes" ]; then start_list="$start_list $u"; fi ;; esac
+  case $u in morndo-job-*) continue ;; *.service) if [ "$a" = "active=yes" ]; then start_list="$start_list $u"; fi ;; esac
 done < "$bk/state.txt"
 
 stopped=no
@@ -300,6 +303,7 @@ apply_state() {
   for _pass in .service .socket .path .timer; do
     while read -r u a e; do
       [ -n "$u" ] || continue
+      case $u in morndo-job-*) continue ;; esac   # the node agent's own job units: an older backup may still list them
       case $u in *"$_pass") ;; *) continue ;; esac
       case $_pass in
         .timer)
@@ -320,7 +324,7 @@ apply_state() {
 # paths, template instances included), one name per line.
 list_active() {
   "$sc" --user list-units --state=active,activating,reloading,auto-restart --plain --no-legend 'morndo-*' 2>/dev/null | while read -r n _; do
-    case $n in *.service|*.timer|*.socket|*.path) printf '%s\n' "$n" ;; esac
+    case $n in morndo-job-*) ;; *.service|*.timer|*.socket|*.path) printf '%s\n' "$n" ;; esac
   done
 }
 
@@ -375,6 +379,7 @@ dbfail() { # name path why
   _svc=""
   while IFS=" " read -r _u _; do   # callers may have IFS set to a newline
     case $_u in
+      morndo-job-*) ;;
       *.service) if unit_matches "$_u" "g$_pre/"; then _svc="$_svc $_u"; fi ;;
     esac
   done < "$bk/state.txt"
@@ -478,6 +483,7 @@ fi
 for f in "$units"/morndo-*; do
   if [ -e "$f" ] || [ -L "$f" ]; then :; else continue; fi
   name=${f##*/}
+  case $name in morndo-job-*) continue ;; esac   # the node agent's own job units: never ours to disable or remove
   if [ -e "$bk/units/$name" ] || [ -L "$bk/units/$name" ]; then continue; fi
   case $name in
     *.service|*.timer|*.socket|*.path) "$sc" --user disable --now "$name" || problem "unit $name (added by the install) could not be disabled and stopped" ;;
