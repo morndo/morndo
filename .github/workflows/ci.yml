@@ -216,3 +216,28 @@ jobs:
         env:
           FLEET_FLAP_MS: "300000"
         run: npx vitest run --project fleet
+
+  # The updater's unit tests on the arm64 runner the release already uses. Pull-request CI is x64 only, so a break that
+  # shows on arm64 alone (the 0.1.0 release failed its linux-arm64 units leg on a fixture that assumed linux-x64) surfaced
+  # at release time. No path filter: these tests read docs/, trust/ and every apps/*/ source file
+  # (apps/updater/test/architecture.test.ts, docs.test.ts), so the dependency set is most of the repository.
+  updater-arm64:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          # The downgrade-contract tests read the branch base's migrate.ts from git (scripts/previous-runner.ts),
+          # which the default shallow clone (fetch-depth: 1) does not have.
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json # engines.node
+          cache: npm
+
+      - run: npm ci
+
+      - name: Updater units on arm64
+        run: npx vitest run --project=units apps/updater/test
