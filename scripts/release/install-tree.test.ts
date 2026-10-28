@@ -6,7 +6,7 @@
 // install.sh, the launcher and the stand-in. They also pin where install.sh unpacks (never a noexec /tmp) and that
 // it cleans up a read-only tree and keeps its exit code.
 import { createHash } from "node:crypto";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -218,6 +218,65 @@ describe("install.sh hands `morndo install` the tree as packed", () => {
     mkdirSync(bin);
     // an rm that removes nothing and fails, first on PATH: the cleanup's own failure must not become the exit code
     writeFileSync(join(bin, "rm"), "#!/bin/sh\nexit 1\n", { mode: 0o755 });
+    const { dest } = stagedRelease(keepingNode({ marker: join(work, "marker"), keep: join(work, "kept") }));
+    const release = published(packTree(stagedTreeFiles(dest), MTIME));
+    const r = spawnSync("sh", ["-c", 'umask 022; exec sh "$0" --role control-plane --signers "$1"', release.script, release.signers], {
+      encoding: "utf8",
+      env: { PATH: `${bin}:${process.env.PATH ?? ""}`, HOME: home, TMPDIR: tmp, MORNDO_RELEASE_BASE: `file://${release.base}` },
+    });
+    expect(r.status).toBe(0);
+    expect(r.stderr).toMatch(/install\.sh: could not remove /);
+  });
+
+  it.each<[NodeJS.Signals, number]>([["SIGTERM", 143], ["SIGINT", 130], ["SIGHUP", 129]])("cleans up when %s stops it during the install, exiting %i", async (signal, code) => {
+    const work = temp();
+    const home = join(work, "home");
+    const tmp = join(work, "tmp");
+    mkdirSync(home);
+    mkdirSync(tmp);
+    const marker = join(work, "marker");
+    const { dest } = stagedRelease(keepingNode({ marker, keep: join(work, "kept"), then: "sleep 30; exit 0" }));
+    const release = published(packTree(stagedTreeFiles(dest), MTIME));
+    // its own process group, as a terminal gives a command: the signal reaches install.sh and the program it runs
+    const child = spawn("sh", ["-c", 'umask 022; exec sh "$0" --role control-plane --signers "$1"', release.script, release.signers], {
+      detached: true, stdio: "ignore",
+      env: { PATH: process.env.PATH, HOME: home, TMPDIR: tmp, MORNDO_RELEASE_BASE: `file://${release.base}` },
+    });
+    const exited = new Promise<number | null>(resolve => child.on("exit", status => resolve(status)));
+    for (let i = 0; i < 200 && !existsSync(marker); i++) await new Promise(r => setTimeout(r, 50));
+    expect(existsSync(marker)).toBe(true);
+    process.kill(-child.pid!, signal);
+    expect(await exited).toBe(code);
+    expect(leftovers(home, tmp)).toEqual([]);
+  }, 20_000);
+
+  it("unpacks under TMPDIR when HOME is not set, and installs", () => {
+    const work = temp();
+    const tmp = join(work, "tmp");
+    mkdirSync(tmp);
+    const marker = join(work, "marker");
+    const { dest } = stagedRelease(keepingNode({ marker, keep: join(work, "kept") }));
+    const release = published(packTree(stagedTreeFiles(dest), MTIME));
+    const r = spawnSync("sh", ["-c", 'umask 022; exec sh "$0" --role control-plane --signers "$1"', release.script, release.signers], {
+      encoding: "utf8",
+      env: { PATH: process.env.PATH, TMPDIR: tmp, MORNDO_RELEASE_BASE: `file://${release.base}` },
+    });
+    expect(r.stderr).not.toMatch(/parameter not set/);
+    expect(r.status).toBe(0);
+    expect(readFileSync(marker, "utf8").split("\n")[0]!.startsWith(tmp + "/")).toBe(true);
+    expect(readdirSync(tmp)).toEqual([]);
+  });
+
+  it("keeps a good install's exit code when making the tree writable fails", () => {
+    const work = temp();
+    const home = join(work, "home");
+    const tmp = join(work, "tmp");
+    const bin = join(work, "bin");
+    mkdirSync(home);
+    mkdirSync(tmp);
+    mkdirSync(bin);
+    // a find that fails, first on PATH (install.sh's own tree walk uses find too, so this one fails only for -exec)
+    writeFileSync(join(bin, "find"), '#!/bin/sh\nfor a in "$@"; do [ "$a" = -exec ] && exit 1; done\nexec /usr/bin/find "$@"\n', { mode: 0o755 });
     const { dest } = stagedRelease(keepingNode({ marker: join(work, "marker"), keep: join(work, "kept") }));
     const release = published(packTree(stagedTreeFiles(dest), MTIME));
     const r = spawnSync("sh", ["-c", 'umask 022; exec sh "$0" --role control-plane --signers "$1"', release.script, release.signers], {
