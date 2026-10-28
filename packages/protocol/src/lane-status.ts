@@ -45,7 +45,8 @@ export function statusLineOf(line: string): StatusLine | null {
     forMs = Math.min(WAIT_MAX_MS, n * (unit.startsWith("h") ? 3_600_000 : 60_000));
   }
   const on = (d ? rest.slice(0, d.index) + rest.slice(d.index + d[0].length) : rest)
-    .trim().replace(/^on\s+/i, "").replace(/[\s,;.:—–-]+$/u, "").trim().slice(0, WAITING_ON_MAX);
+    // The trailing decoration a bold or italic line leaves goes; a backtick stays, since it closes a code span.
+    .trim().replace(/^on\s+/i, "").replace(/[\s*_~,;.:—–-]+$/u, "").trim().slice(0, WAITING_ON_MAX);
   return { status: "waiting", ...(taskKey ? { taskKey } : {}), ...(on ? { waitingOn: on } : {}), ...(forMs ? { forMs } : {}) };
 }
 

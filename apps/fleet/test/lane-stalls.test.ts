@@ -80,7 +80,8 @@ describe("lane stalls: a wait's deadline", () => {
     const { fleet, pc } = await lane(clock);
     pc.hook(1, "/hook/stop", stop("STATUS: WAITING T-107 on wave 1 to finish, about 265 min"), { window: "api", at: T0 });
     expect(await pc.acked(1)).toBe(1);
-    expect(bodyOf(fleet, 0)).toMatchObject({ event: "finished", status: "waiting", waitingOn: "wave 1 to finish", until: T0 + 24_450_000 });
+    expect(rows(fleet)[0]?.event).toBe("finished");
+    expect(bodyOf(fleet, 0)).toMatchObject({ status: "waiting", waitingOn: "wave 1 to finish", until: T0 + 24_450_000 });
     clock.now = T0 + 31 * MIN;
     await settle();
     expect(events(fleet)).toEqual(["finished"]);

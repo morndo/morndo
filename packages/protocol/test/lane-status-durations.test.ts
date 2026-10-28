@@ -21,8 +21,10 @@ describe("a WAITING line's duration, as lanes write it", () => {
     expect(statusLineOf("STATUS: WAITING on the backfill, about 30 hours")?.forMs).toBe(WAIT_MAX_MS);
   });
 
-  it("keeps reading the plain form as before", () => {
+  it("keeps reading the plain form as before, and a bold line's decoration is no part of what it waits on", () => {
     expect(statusLineOf("STATUS: WAITING on CI for 20 min")).toEqual({ status: "waiting", waitingOn: "CI", forMs: 20 * MIN });
+    expect(statusLineOf("**STATUS: WAITING on CI for 20 min**")).toEqual({ status: "waiting", waitingOn: "CI", forMs: 20 * MIN });
+    expect(statusLineOf("**STATUS: WAITING on the review**")).toEqual({ status: "waiting", waitingOn: "the review" });
     expect(statusLineOf("STATUS: WAITING for 45 minutes on review")).toEqual({ status: "waiting", waitingOn: "review", forMs: 45 * MIN });
   });
 
