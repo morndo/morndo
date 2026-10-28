@@ -209,3 +209,25 @@ That file is on branch `docs/c4-c6-plan` and not on `main`, so the edit belongs 
   then `--disarm`.
 - **Step 6 (rollback):** after `restore.sh`, a second install first needs `~/.local/share/morndo-releases` and the
   updater's state and config removed (`restore.sh` leaves them; it never touches data).
+
+## 9. The published-feed mode (2026-10-27)
+
+`node e2e/update-adopt.e2e.ts --published <version>` (`npm run e2e:update-adopt-published -- --published <version>`) rehearses the
+README's own commands on the throwaway machine: it downloads `install.sh` and its signature from the release, verifies them
+with the key line it reads out of `README.md`, runs `sh install.sh --role control-plane --channel latest --signers ...`,
+and uses the production feed (no local feed, no `MORNDO_UPDATE_FEED`). The host downloads the archive only to get a Node and the old release folder's sources, and
+unpacks it only after `manifest.json.sig` verifies against the README's signer line and the archive's size and sha256 match
+the signed manifest (`SHA256SUMS` is unsigned and is not read). The container needs network
+(`a-network`), and `install.sh` runs under a `TMPDIR` in the worker's home because the container's `/tmp` is `noexec`.
+
+First run against the published `0.1.1`: 13 of 14 checks, stopped at `d-installed`. The install is refused, exit 65:
+`the tree does not check out against its own files.json (trust: mode); nothing was installed`. The archive stores `trust/` and
+`units/` as 0755 where `files.json` says 0555 (`scripts/release/stage.ts`); reproduced by unpacking the archive on the host,
+exactly those two. The signature check of `install.sh` itself passed (`b-install-sh-verified`). No later check ran, so the
+real feed's first check, `update --check` against the real feed and the doctor's word on the published tree are still unread.
+The per-machine plan (`docs/plans/2026-10-28-c6-per-machine.md`) therefore targets 0.2.0 and gates on this mode passing.
+
+Found while writing that plan: the node agent runs jobs as transient `morndo-job-<id>.service` units (`job-systemd.ts`), which
+the backup recorded and the restore would have stopped as if they were ours; `scripts/c6` now leaves them alone (test).
+The local mode also assumed the old folder reports version 0.0.0; the repository is at 0.1.1 now, so it reads the root
+`package.json` instead.

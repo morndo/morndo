@@ -1,6 +1,6 @@
 // The adoption rehearsal's own judgements (adopt-checks.ts), tested without a machine.
 import { describe, expect, it } from "vitest";
-import { missingRows, runsFromLauncher, sameListing, sameProcess, UNIT_MARK, unitAdopted } from "./adopt-checks.ts";
+import { doctorVerdict, missingRows, runsFromLauncher, runsTree, sameListing, sameProcess, UNIT_MARK, unitAdopted } from "./adopt-checks.ts";
 
 const LEGACY = "[Unit]\nDescription=Morndo node agent\n\n[Service]\nExecStart=%h/.nvm/versions/node/v24.0.0/bin/node --no-warnings %h/morndo/releases/abc1234/apps/node-agent/src/main.ts run\n";
 const SHIPPED = `${UNIT_MARK}\n[Unit]\nDescription=Morndo node agent\n\n[Service]\nExecStart=%h/.local/bin/morndo-node run\n`;
@@ -57,5 +57,33 @@ describe("rows kept", () => {
     expect(missingRows("lane-demo\nnode-demo\n", ["lane-demo", "node-demo"])).toEqual([]);
     expect(missingRows("lane-demo-2\n", ["lane-demo"])).toEqual(["lane-demo"]);
     expect(missingRows("", ["a", "b"])).toEqual(["a", "b"]);
+  });
+});
+
+describe("the doctor after a fresh install", () => {
+  const clean = "ok: the install checks out\n";
+  it("published mode: exit 0 and the clean line are a real check", () => {
+    expect(doctorVerdict(true, 0, clean).ok).toBe(true);
+    expect(doctorVerdict(true, 1, "tree: files.json: unreadable\n").ok).toBe(false);
+    expect(doctorVerdict(true, 0, "").ok).toBe(false);
+    expect(doctorVerdict(true, 1, clean).ok).toBe(false);
+    expect(doctorVerdict(true, 1, "tree: files.json: unreadable\n").detail).toContain("exited 1");
+  });
+  it("local mode: always a finding (ok), with the word in the detail", () => {
+    expect(doctorVerdict(false, 1, "tree: files.json: unreadable\n")).toEqual({ ok: true, detail: "doctor exited 1: tree: files.json: unreadable" });
+    expect(doctorVerdict(false, 0, clean).ok).toBe(true);
+  });
+});
+
+describe("which tree a process runs", () => {
+  const old = "/srv/worker/.nvm/versions/node/v24.0.0/bin/node --no-warnings /srv/worker/morndo/releases/abc1234/apps/hub/src/main.ts serve";
+  const fresh = "/srv/worker/.local/share/morndo-releases/versions/0.1.1/node/bin/node /srv/worker/.local/share/morndo-releases/versions/0.1.1/app/apps/hub/src/main.ts serve";
+  it("tells the old folder from the installed version, which a version string cannot when both report the same one", () => {
+    expect(runsTree("old", old)).toBe(true);
+    expect(runsTree("new", old)).toBe(false);
+    expect(runsTree("new", fresh)).toBe(true);
+    expect(runsTree("old", fresh)).toBe(false);
+    expect(runsTree("old", "(no main process)")).toBe(false);
+    expect(runsTree("new", "(gone)")).toBe(false);
   });
 });
