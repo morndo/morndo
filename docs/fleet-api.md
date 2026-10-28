@@ -681,7 +681,7 @@ The fleet builds five lane events from three sources: the hooks of each lane, th
 
 **The fields:**
 - `status` is `done`, `blocked`, `needs_decision`, `waiting` or null. It comes from the turn text's first line, its status line: `STATUS: DONE`, `STATUS: BLOCKED`, `STATUS: NEEDS DECISION` or `STATUS: WAITING <on what> [for <N> min|h]`, matched by `/^[\W_]*STATUS[\W_]*:?[\W_]*(DONE|BLOCKED|NEEDS DECISION|WAITING)\b/i`, so decoration around it is allowed (`**STATUS: DONE**`).
-- `waitingOn` is what a wait names (at most 120 characters); `until` is when it ends: its `for` (at most 24 h), else `laneWatch.waitingMin` after the turn.
+- `waitingOn` is what a wait names (at most 120 characters); `until` is when its lease ends: the duration its line names (read as lanes write it — `for about 25 min`, `for ~20 min`, `, about 265 min`, `(about 7 min)`, `for up to 60 min`, `for 20+ min`, a range's upper end, a decimal) at 1.5x plus 10 minutes and at most 24 h, else `laneWatch.waitingMin` after the turn.
 - `firstLine` is that first line.
 - `bg` and `crons` count the background tasks and the scheduled wake-ups.
 - `tasks` and `wakes` say what the turn left pending, at most 8 of each, and are left out when there is none (ADR-0032):
@@ -690,7 +690,7 @@ The fleet builds five lane events from three sources: the hooks of each lane, th
   - the owner's script's counts give one placeholder each: a task `{ "type": "task", "label": "background work" }`, a wake-up with an empty `schedule`.
 - `question` is the menu's question as the screen shows it: the last line ending in "?", else the line above the options, at most 200 characters.
 - `error` is the error's type.
-- `reason` is `waiting` (the turn said WAITING, or ended with background work or a wake-up), `no_status`, or `no_turn_end` (the session went from working to idle and no turn end reached the fleet within 5 min); `since` is the end of the turn that went stale; `stalls` counts the stale events since the lane last ended DONE, BLOCKED or NEEDS DECISION.
+- `reason` is `waiting` (the turn said WAITING, or ended with background work or a wake-up), `no_status`, or `no_turn_end` (the session went from working to idle, the watch heard a hook from that busy span, and no turn end reached the fleet within 5 min); `since` is the end of the turn that went stale; `stalls` counts the expiries since the lane last ended DONE, BLOCKED or NEEDS DECISION, the nudged ones included.
 
 **The shape:** `{ v: 1, t: "lane", seq, event, node, window, lane, sessionId?, at, … }`.
 - `seq` is the fleet's own counter, growing by one.
@@ -814,16 +814,18 @@ The fleet keeps each lane's last turn end and watches for anything after it: a h
 
 | Last turn | Deadline |
 |---|---|
-| `STATUS: WAITING` | its `until` |
-| no status, background work running or a wake-up scheduled | the turn's end + `laneWatch.waitingMin` (30 min) |
+| `STATUS: WAITING` | its `until`: the line's own duration at 1.5x plus 10 min (`waitLeaseMs`), else `laneWatch.waitingMin` |
+| no status, background work running or a wake-up scheduled | the turn's end + `laneWatch.waitingMin` (30 min); a wake-up at least until its next fire time plus 5 min, when the node's UTC offset is known |
 | no status, nothing running | the turn's end + `laneWatch.noStatusMin` (15 min) |
 | `DONE`, `BLOCKED`, `NEEDS DECISION` | none: it is the manager's to act on |
 
 - **A Stop the relay asked for its status line** (§11.1) makes no lane event, but counts as a turn without a status until the lane's next Stop: a lane that never acts on the ask still goes stale.
-- **Past the deadline with no activity,** the fleet makes one `stale` lane event for that turn. It goes where the other lane events go. One that fleet.db can't store now is tried again at the next sweep.
-- **The nudge.** With `laneWatch.nudge` (on by default), a lane that runs Claude Code (a session in the node's inventory) gets one delivery, sent to that session's pane by its worker ID, so a window of the same name on another node doesn't get in the way. Its id is `fleet:nudge:<worker ID>:<the turn's end, in ms>`. It says when the turn ended, what the lane was waiting on, and the status line to start its answer with. A nudge the fleet refuses is logged. From the third stale event since the lane last settled, it isn't nudged again: that lane is for the manager to re-plan.
+- **The lane's own work still armed is not a stall.** A turn that ended with background work is not judged while its window's session shows `shell` (the lane's own shell is running; Claude Code wakes the lane when it ends) and for 2 min (`SHELL_GRACE_MS`) after the shell stopped, never past 6 h (`BACKGROUND_LIVE_MAX_MS`) from the turn end.
+- **Past the deadline with no activity, the nudge first.** With `laneWatch.nudge` (on by default), a lane that runs Claude Code (a session in the node's inventory) gets one delivery, sent to that session's pane by its worker ID, so a window of the same name on another node doesn't get in the way. Its id is `fleet:nudge:<worker ID>:<the turn's end, in ms>`. It says when the turn ended, what the lane was waiting on, and the status line to start its answer with. A nudge the fleet refuses is logged.
+- **The `stale` lane event** for that turn is made — it goes where the other lane events go — only when the lane needs the manager: it did not answer the nudge within 10 min (`PROBE_ANSWER_MS`), it is at its third expiry since it last settled (from there it isn't nudged: that lane is for the manager to re-plan), or it cannot be nudged. One that fleet.db can't store now is tried again at the next sweep.
+- **A busy span with no hook in it is not a lost turn end:** Claude Code's idle compaction runs inside the session and fires no hook, so a session the watch saw go busy and then idle, with no hook from that window in the span and no turn end within 5 min, is left alone. With a hook heard and no turn end, it is the `no_turn_end` stale event.
 - **Not watched:** the manager's own lane, lanes matching `laneEvents.ignore`, and a lane whose window is gone. A lane whose node isn't online waits until the node is back: the node's status already says why it is quiet.
-- **Restarts.** The watch lives in the fleet's memory and is rebuilt from the last day's lane events at start, including the session state changes and failed turns after each turn end. A restart counts as activity, so each deadline runs again from it, and no lane is called stale for time the fleet didn't see. A hook a node sends on from the outage counts by its own time.
+- **Restarts.** The watch lives in the fleet's memory and is rebuilt from the last day's lane events at start, including the session state changes and failed turns after each turn end. A restart counts as activity, so each deadline runs again from it, and no lane is called stale for time the fleet didn't see. A nudge not yet answered is not stored: after a restart its deadline runs again in full. A hook a node sends on from the outage counts by its own time.
 
 `GET /v1/lane-watch` answers what the watch holds, oldest first: `{ lanes: { node, window, at, status, deadline, reason?, waitingOn?, stale, stalls }[] }`. `deadline` is null for a settled turn; `reason` is there with a deadline.
 
@@ -862,7 +864,7 @@ A turn end that leaves background work or a wake-up is never `ended`, whatever i
 
 `GET /v1/runs` answers `{ runs: { lane, node, sessionId?, phase, wait?, deadline, overdue, outcome?, line?, question?, since, source }[] }`, by lane, then node:
 - `wait`, for a `waiting` Run: `{ on: "background", tasks }` (the `tasks` of §7), `{ on: "wakeup", next }` (the next fire time, null when its node's UTC offset or its schedule can't be read), `{ on: "job", jobs: { id, name }[] }`, or `{ on: "declared", what }` (what the WAITING line names, or null): nothing will wake it.
-- `deadline` is when a wait should have shown a sign of life: the WAITING line's `for`, else the turn's end plus `laneWatch.waitingMin`; for a wake-up whose fire time is known, that time plus 5 minutes. Null for any other phase. `overdue` is true past the deadline with nothing from the lane since the turn end.
+- `deadline` is when a wait should have shown a sign of life: the WAITING line's own duration at 1.5x plus 10 minutes (`waitLeaseMs`), else the turn's end plus `laneWatch.waitingMin`; for a wake-up whose fire time is known, that time plus 5 minutes; a wait on the turn's own background work, while the session shows `shell`, at the latest 6 hours (`BACKGROUND_LIVE_MAX_MS`) after the turn end. Null for any other phase. `overdue` is true past the deadline with nothing from the lane since the turn end.
 - `line` is the last turn end's status line (its `firstLine`), `question` the open menu's.
 - `since` is when the phase began: the turn's end, the first hook of a new turn, a job's start (or, still queued, its queue time; when the turn's `outcome` is on the Run, the later of that and the turn's end), or when the window or its node changed.
 - `sessionId` is the session in the window, or for a `gone` Run the one it had.

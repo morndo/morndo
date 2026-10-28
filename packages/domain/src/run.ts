@@ -71,6 +71,10 @@ export type Run = {
 export const ACTIVE_MS = 10 * 60_000;
 // A wake-up's grace after its fire time (R3).
 export const WAKE_GRACE_MS = 5 * 60_000;
+// How long a turn that left background work running may sit on it while the session itself shows `shell` (R3): Claude
+// Code shows `shell` until the lane's own shell ends and then wakes it, so that wait is not overdue before its lease or
+// this long after the turn ended — a `tail -f` must not hold a lane for ever (lane stalls, 2026-10-28).
+export const BACKGROUND_LIVE_MAX_MS = 6 * 3_600_000;
 export const LABEL_MAX = 80;
 export const PENDING_MAX = 8;
 
@@ -115,7 +119,10 @@ export function deriveRun(f: RunFacts): Run {
   const quiet = !(f.activity && f.activity.last > t.at);
   const lease = t.until ?? t.at + f.waitMs;
   if (t.tasks.length > 0) {
-    return { ...base, phase: "waiting", wait: { on: "background", tasks: [...t.tasks] }, ...said, deadline: lease, overdue: quiet && f.now > lease, since: t.at, source: "hook", line: t.line };
+    // While the session shows `shell` the lane's own shell is still running, so the wait is held to the later of its
+    // lease and BACKGROUND_LIVE_MAX_MS after the turn ended; once the shell is gone it is the lease alone again.
+    const shellLive = f.session === "shell" ? Math.max(lease, t.at + BACKGROUND_LIVE_MAX_MS) : lease;
+    return { ...base, phase: "waiting", wait: { on: "background", tasks: [...t.tasks] }, ...said, deadline: shellLive, overdue: quiet && f.now > shellLive, since: t.at, source: "hook", line: t.line };
   }
   if (t.wakes.length > 0) {
     const fires = t.wakes.map(w => (f.tzOffsetMin === null ? null : nextFire(w.schedule, t.at, f.tzOffsetMin)));

@@ -1,12 +1,14 @@
 // The lane watch in the running fleet (reliable lanes §3.2): a Stop hook without a status makes a turn the watch holds;
-// past its deadline the fleet stores a `stale` lane event (for the manager with the others), queues one nudge to the lane
-// as a delivery, and GET /v1/lane-watch shows it. The fleet's clock is the test's.
+// past its deadline the fleet queues one nudge to the lane as a delivery and stores its `stale` lane event (for the
+// manager with the others) only once the lane has not answered, and GET /v1/lane-watch shows it. The fleet's clock is
+// the test's.
 import Database from "better-sqlite3";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { LaneEvent, LaneWatchEntry } from "@morndo/protocol";
 import { createLogger } from "../src/adapters/log.ts";
 import type { LaneEventsConfig } from "../src/config.ts";
+import { PROBE_ANSWER_MS } from "../src/application/lane-watch.ts";
 import type { Req } from "./helpers/fake-agent.ts";
 import { startTestFleet } from "./helpers/fleet.ts";
 import { client } from "./helpers/socket-client.ts";
@@ -19,7 +21,7 @@ const T0 = 1_700_000_000_000;                                                   
 const MIN = 60_000;
 
 describe("the lane watch in the fleet", () => {
-  it("a turn without a status is stale 15 min on: a stale event for the manager, a nudge to the lane, and the watch's view", async () => {
+  it("a turn without a status is stale 15 min on: a nudge to the lane, its stale event once it has not answered, and the watch's view", async () => {
     let clock = T0;
     const fleet = await startTestFleet({ now: () => clock, laneWatchSweepMs: 20, config: { laneEvents: TO_MANAGER, laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: true } } });
     const pc = await fleet.online("pc");
@@ -34,20 +36,22 @@ describe("the lane watch in the fleet", () => {
     const rows = () => fleet.db.prepare("SELECT event, lane, to_manager, body FROM lane_events ORDER BY seq").all() as { event: string; lane: string; to_manager: number | null; body: string }[];
     expect(rows().map(r => r.event)).toEqual(["finished", "finished"]);                // not before its deadline
     clock = T0 + 2 + 15 * MIN;
-    await vi.waitFor(() => expect(rows().map(r => r.event)).toEqual(["finished", "finished", "stale", "stale"]));
-    expect(rows()[2]).toMatchObject({ lane: "api", to_manager: 0 });
-    const lane = (await client(fleet.config.socketPath).get("/v1/lane-events?since=2"))?.body as { events: LaneEvent[] };
-    expect(lane.events[0]).toMatchObject({ event: "stale", node: "pc", lane: "api", reason: "no_status", stalls: 1, sessionId: SID });
-    await vi.waitFor(() => expect(pc.reqs.filter(q => q.op === "lane.deliver")).toHaveLength(1));
+    await vi.waitFor(() => expect(rows().map(r => r.event)).toEqual(["finished", "finished", "stale"]));   // sh: nothing to nudge
+    expect(rows()[2]).toMatchObject({ lane: "sh", to_manager: 0 });
+    await vi.waitFor(() => expect(pc.reqs.filter(q => q.op === "lane.deliver")).toHaveLength(1));          // api: the nudge first
     const nudge = pc.reqs.find(q => q.op === "lane.deliver")?.args as { id: string; target: unknown; text: string };
     expect(nudge).toMatchObject({ id: `fleet:nudge:pc.3fa2c1d0.1:${T0 + 1}`, target: { workerId: "pc.3fa2c1d0.1" } });
     expect(nudge.text).toContain("without a status line");
     const watch = (await client(fleet.config.socketPath).get("/v1/lane-watch"))?.body as { lanes: LaneWatchEntry[] };
     expect(watch.lanes).toEqual([
-      { node: "pc", window: "api", at: T0 + 1, status: null, deadline: T0 + 1 + 15 * MIN, reason: "no_status", stale: true, stalls: 1 },
+      { node: "pc", window: "api", at: T0 + 1, status: null, deadline: T0 + 1 + 15 * MIN, reason: "no_status", stale: false, stalls: 1 },
       { node: "pc", window: "sh", at: T0 + 2, status: null, deadline: T0 + 2 + 15 * MIN, reason: "no_status", stale: true, stalls: 1 },
     ]);
-    expect(pc.reqs.filter(q => q.op === "lane.deliver")).toHaveLength(1);              // only api, which runs the agent CLI
+    clock = T0 + 2 + 15 * MIN + PROBE_ANSWER_MS;                                       // api never answered the nudge
+    await vi.waitFor(() => expect(rows().map(r => r.event)).toEqual(["finished", "finished", "stale", "stale"]));
+    const lane = (await client(fleet.config.socketPath).get("/v1/lane-events?since=3"))?.body as { events: LaneEvent[] };
+    expect(lane.events[0]).toMatchObject({ event: "stale", node: "pc", lane: "api", reason: "no_status", stalls: 1, sessionId: SID });
+    expect(pc.reqs.filter(q => q.op === "lane.deliver")).toHaveLength(1);              // one nudge, only api, which runs the agent CLI
   });
 
   it("a Stop the relay asked for a status makes no lane event, but goes stale as a turn without one if nothing follows", async () => {
@@ -180,7 +184,9 @@ describe("the lane watch in the fleet: activity by the hook's own time, retries,
     await vi.waitFor(() => expect([delivered(pc.reqs).length, delivered(mac.reqs).length]).toEqual([1, 1]));
     expect(delivered(pc.reqs)[0]).toMatchObject({ id: `fleet:nudge:pc.3fa2c1d0.1:${T0 + 1}`, target: { workerId: "pc.3fa2c1d0.1" } });
     expect(delivered(mac.reqs)[0]).toMatchObject({ id: `fleet:nudge:mac.4ab3c2d1.1:${T0 + 1}`, target: { workerId: "mac.4ab3c2d1.1" } });
-    expect((await events(fleet.config.socketPath)).sort()).toEqual(["finished mac/api", "finished pc/api", "stale mac/api", "stale pc/api"]);
+    expect((await events(fleet.config.socketPath)).sort()).toEqual(["finished mac/api", "finished pc/api"]);   // no stale event while the answer may come
+    clock = T0 + 1 + 16 * MIN + PROBE_ANSWER_MS;
+    await vi.waitFor(async () => expect((await events(fleet.config.socketPath)).sort()).toEqual(["finished mac/api", "finished pc/api", "stale mac/api", "stale pc/api"]));
   });
 
   it("the agent CLI's idle notice is no activity", async () => {
@@ -217,8 +223,9 @@ describe("the lane watch in the fleet: activity by the hook's own time, retries,
   });
 });
 
-// A Stop that never arrived (T-422): the session goes idle after work the watch saw start, and no turn end follows.
-// The fleet's clock is the test's; each inventory is given a moment to be taken before the clock moves.
+// A Stop that never arrived (T-422): the session goes idle after work the watch saw start, it heard a hook from that
+// work (Claude Code's idle compaction fires none), and no turn end follows. The fleet's clock is the test's; each
+// inventory is given a moment to be taken before the clock moves.
 describe("a turn end the fleet never received (T-422)", () => {
   const NUDGING = { laneEvents: TO_MANAGER, laneWatch: { waitingMin: 30, noStatusMin: 15, nudge: true } };
   const api = (status: "busy" | "idle") => [{ workerId: "pc.3fa2c1d0.1", window: "api", cwd: "/w", sessionId: SID, status, pid: 1 }];
@@ -236,6 +243,9 @@ describe("a turn end the fleet never received (T-422)", () => {
     clock = T0 + MIN;
     pc.inventory(api("busy"));
     await taken();
+    clock = T0 + 2 * MIN;                                                              // the lane is working: a hook of its turn reaches the fleet
+    pc.hook(2, "/cc", { session_id: SID, hook_event_name: "PreToolUse" }, { window: "api", at: T0 + 2 * MIN });
+    expect(await pc.acked(2)).toBe(2);
     clock = T0 + 30 * MIN;
     pc.inventory(api("idle"));
     await taken();

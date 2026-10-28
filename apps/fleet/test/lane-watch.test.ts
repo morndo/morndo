@@ -1,13 +1,12 @@
-// The lane watch (reliable lanes §3.2): each lane's last turn and its deadline, one stale event per turn past it with
-// nothing since, a nudge to the lane while it is worth one, stalls counted until the lane settles, and a rebuild at
-// start that never calls a lane stale for time the fleet did not see. Driven with its own clock; the fleet wiring is in
-// lane-watch-intake.test.ts.
+// The lane watch (reliable lanes §3.2): each lane's last turn and its deadline, past it a nudge first and then, if the
+// lane stays quiet, one stale event, stalls counted until the lane settles, and a rebuild at start that never calls a
+// lane stale for time the fleet did not see. Driven with its own clock; the fleet wiring is in lane-watch-intake.test.ts.
 import { describe, expect, it, vi } from "vitest";
 import type { HookEvent, LaneEvent, LaneEventName } from "@morndo/protocol";
 import type { LaneEventDraft } from "../src/adapters/lane-events-store.ts";
 import { createLogger, type Logger } from "../src/adapters/log.ts";
 import type { DeliveryRequest } from "../src/application/deliveries.ts";
-import { LaneWatch, LOST_TURN_GRACE_MS, LOST_TURN_SKEW_MS, NUDGE_MAX_STALLS, REBUILD_WINDOW_MS, nudgeText, type LaneWatchConfig, type NudgeAnswer } from "../src/application/lane-watch.ts";
+import { LaneWatch, LOST_TURN_GRACE_MS, LOST_TURN_SKEW_MS, NUDGE_MAX_STALLS, PROBE_ANSWER_MS, REBUILD_WINDOW_MS, nudgeText, type LaneWatchConfig, type NudgeAnswer } from "../src/application/lane-watch.ts";
 import { quiet } from "./helpers/fleet.ts";
 
 const MIN = 60_000;
@@ -63,7 +62,7 @@ describe("the lane watch", () => {
     }
   });
 
-  it("past the deadline with nothing since: one stale event and one nudge for that turn; any hook since keeps it quiet", () => {
+  it("past the deadline with nothing since: the nudge at it, the stale event PROBE_ANSWER_MS later; any hook since keeps it quiet", () => {
     const r = rig();
     r.watch.turn(r.finished(T0, { status: "waiting", waitingOn: "CI", until: T0 + 10 * MIN, sessionId: "s1" }));
     r.at(T0 + 10 * MIN - 1);
@@ -71,13 +70,20 @@ describe("the lane watch", () => {
     expect(r.raised).toEqual([]);                                                       // not yet
     r.at(T0 + 10 * MIN);
     r.watch.sweep();
-    r.watch.sweep();                                                                    // once per turn
-    expect(r.raised).toEqual([{ v: 1, t: "lane", event: "stale", node: "pc", window: "api", lane: "api", at: T0 + 10 * MIN, sessionId: "s1", reason: "waiting", waitingOn: "CI", since: T0, stalls: 1 }]);
+    r.watch.sweep();                                                                    // one nudge for that turn, no stale event yet
+    expect(r.raised).toEqual([]);
     expect(r.nudged).toHaveLength(1);
     expect(r.nudged[0]).toMatchObject({ id: `fleet:nudge:${WORKER}:${T0}`, workerId: WORKER });
     expect(r.nudged[0]).not.toHaveProperty("lane");                                   // never by name: another node may use it
     expect(r.nudged[0]?.text).toContain("waiting on CI");
     expect(r.nudged[0]?.text).toContain("STATUS: DONE");
+    r.at(T0 + 10 * MIN + PROBE_ANSWER_MS - 1);
+    r.watch.sweep();
+    expect(r.raised).toEqual([]);                                                       // the lane may still answer
+    r.at(T0 + 10 * MIN + PROBE_ANSWER_MS);
+    r.watch.sweep();
+    r.watch.sweep();                                                                    // once per turn
+    expect(r.raised).toEqual([{ v: 1, t: "lane", event: "stale", node: "pc", window: "api", lane: "api", at: T0 + 10 * MIN + PROBE_ANSWER_MS, sessionId: "s1", reason: "waiting", waitingOn: "CI", since: T0, stalls: 1 }]);
     // A new turn with a hook after it: activity, so no stale event (negative control: without the hook, one more).
     // Status line refreshes are not activity: Claude Code may re-run it on a timer while the lane sits idle.
     r.watch.turn(r.finished(T0 + 20 * MIN));
@@ -86,6 +92,9 @@ describe("the lane watch", () => {
     idle.watch.turn(idle.finished(T0));
     for (let m = 1; m <= 16; m++) idle.watch.saw(idle.hook(T0 + m * MIN, "/sl"));
     idle.at(T0 + 16 * MIN);
+    idle.watch.sweep();
+    expect(idle.nudged).toHaveLength(1);
+    idle.at(T0 + 16 * MIN + PROBE_ANSWER_MS);
     idle.watch.sweep();
     expect(idle.raised).toHaveLength(1);
     r.at(T0 + 60 * MIN);
@@ -100,7 +109,9 @@ describe("the lane watch", () => {
       r.watch.turn(r.finished(t));
       t += 16 * MIN;
       r.at(t);
-      r.watch.sweep();
+      r.watch.sweep();                                                                 // the nudge, or nothing left to nudge
+      r.at(t + PROBE_ANSWER_MS);
+      r.watch.sweep();                                                                 // the stale event once the lane has not answered
       expect(r.raised.at(-1)?.stalls).toBe(i);
     }
     expect(r.raised).toHaveLength(3);
@@ -108,6 +119,8 @@ describe("the lane watch", () => {
     r.watch.turn(r.finished(t, { status: "done" }));
     r.watch.turn(r.finished(t + 1));
     r.at(t + 20 * MIN);
+    r.watch.sweep();
+    r.at(t + 20 * MIN + PROBE_ANSWER_MS);
     r.watch.sweep();
     expect(r.raised.at(-1)?.stalls).toBe(1);                                            // DONE reset the count
   });
@@ -146,6 +159,10 @@ describe("the lane watch", () => {
     expect(r.raised).toEqual([]);                                                       // negative control: no rebase, stale at once
     r.at(restart + 15 * MIN);
     r.watch.sweep();
+    expect(r.raised).toEqual([]);                                                       // the nudge; the probe is not stored, so the restart runs it again
+    expect(r.nudged).toHaveLength(1);
+    r.at(restart + 15 * MIN + PROBE_ANSWER_MS);
+    r.watch.sweep();
     expect(r.raised.map(e => e.window)).toEqual(["api"]);
   });
 
@@ -155,8 +172,10 @@ describe("the lane watch", () => {
     r.watch.turn(r.finished(T0));
     r.at(T0 + 16 * MIN);
     r.watch.sweep();
-    expect([r.raised, r.watch.view().length]).toEqual([[], 1]);                     // kept, not dropped as gone
+    expect([r.raised, r.nudged, r.watch.view().length]).toEqual([[], [], 1]);       // kept, not dropped as gone
     online = true;
+    r.watch.sweep();
+    r.at(T0 + 16 * MIN + PROBE_ANSWER_MS);
     r.watch.sweep();
     expect(r.raised).toHaveLength(1);
   });
@@ -181,6 +200,8 @@ describe("the lane watch", () => {
     before.watch.saw(before.hook(T0 - MIN));
     before.watch.turn(before.finished(T0));
     before.at(T0 + 16 * MIN);
+    before.watch.sweep();
+    before.at(T0 + 16 * MIN + PROBE_ANSWER_MS);
     before.watch.sweep();
     expect(before.raised).toHaveLength(1);
   });
@@ -207,6 +228,8 @@ describe("the lane watch", () => {
     old.watch.rebuild([old.state("needs_input", T0 - MIN), old.finished(T0)]);
     old.at(restart + 16 * MIN);
     old.watch.sweep();
+    old.at(restart + 16 * MIN + PROBE_ANSWER_MS);
+    old.watch.sweep();
     expect(old.raised).toHaveLength(1);
   });
 
@@ -218,24 +241,30 @@ describe("the lane watch", () => {
     idle.watch.saw(notice(idle, "idle_prompt"));
     idle.at(T0 + 16 * MIN);
     idle.watch.sweep();
+    expect(idle.raised).toEqual([]);
+    idle.at(T0 + 16 * MIN + PROBE_ANSWER_MS);
+    idle.watch.sweep();
     expect(idle.raised).toHaveLength(1);
     const prompt = rig();
     prompt.watch.turn(prompt.finished(T0));
     prompt.watch.saw(notice(prompt, "permission_prompt"));
-    prompt.at(T0 + 16 * MIN);
+    prompt.at(T0 + 16 * MIN + PROBE_ANSWER_MS);
     prompt.watch.sweep();
     expect(prompt.raised).toEqual([]);
   });
 
-  it("tries a stale event fleet.db refused again on the next sweep, and counts and nudges it once it is stored", () => {
+  it("tries a stale event fleet.db refused again on the next sweep, and counts it once it is stored", () => {
     let calls = 0;
     const stored: LaneEventDraft[] = [];
     const r = rig({ raise: d => { calls += 1; if (calls === 1) throw new Error("database is locked"); stored.push(d); return { ...d, seq: calls } as LaneEvent; } });
     r.watch.turn(r.finished(T0));
     r.at(T0 + 16 * MIN);
     r.watch.sweep();
-    expect([stored.length, r.nudged.length, r.watch.view()[0]?.stale, r.watch.view()[0]?.stalls]).toEqual([0, 0, false, 0]);
-    r.at(T0 + 17 * MIN);
+    expect([stored.length, r.nudged.length, r.watch.view()[0]?.stale, r.watch.view()[0]?.stalls]).toEqual([0, 1, false, 1]);
+    r.at(T0 + 16 * MIN + PROBE_ANSWER_MS);
+    r.watch.sweep();
+    expect(stored).toEqual([]);                                                          // fleet.db refused it
+    expect(r.watch.view()[0]?.stale).toBe(false);
     r.watch.sweep();
     expect(stored).toMatchObject([{ event: "stale", since: T0, stalls: 1 }]);
     expect([r.nudged.length, r.watch.view()[0]?.stale, r.watch.view()[0]?.stalls]).toEqual([1, true, 1]);
@@ -340,20 +369,24 @@ describe("the lane watch: what a Run reads (runOf)", () => {
   });
 });
 
-// A turn whose Stop never arrived (T-422): the session was seen leaving idle, then working, then idle, and no turn end
-// covers that busy start. A lane first seen already working is a restart and is not judged.
+// A turn whose Stop never arrived (T-422): the session was seen leaving idle, then working, then idle, no turn end
+// covers that busy start, and the watch heard a hook from it in that span — Claude Code's idle compaction fires none,
+// so a span with no hook in it is not a lost turn. A lane first seen already working is a restart and is not judged.
 describe("a turn end that never arrived (T-422)", () => {
   const BUSY = T0 + 10 * MIN;
   const IDLE = T0 + 40 * MIN;
   const seed = (r: ReturnType<typeof rig>) => r.watch.turn(r.finished(T0, { status: "blocked", sessionId: "s1" }));
   // Idle first, so the following busy is a start the watch saw. A first sighting already busy is not one.
   const began = (r: ReturnType<typeof rig>, busyAt = BUSY) => { r.at(busyAt - MIN); r.panes("idle"); r.at(busyAt); r.panes("busy"); };
+  // A hook the watch takes inside the busy span: the lane was working, not compacting.
+  const worked = (r: ReturnType<typeof rig>, busyAt = BUSY, at = busyAt + MIN) => { r.at(at); r.watch.saw(r.hook(at)); };
   const ended = (r: ReturnType<typeof rig>, idleAt = IDLE) => { r.at(idleAt); r.panes("idle"); };
 
   it("flags a working lane that went idle with no turn end after the grace, once", () => {
     const r = rig();
     seed(r);
     began(r);
+    worked(r);
     ended(r);
     r.at(IDLE + LOST_TURN_GRACE_MS - 1);
     r.watch.sweep();
@@ -372,6 +405,7 @@ describe("a turn end that never arrived (T-422)", () => {
     const r = rig({ config: { ...CONFIG, nudge: true } });
     seed(r);
     began(r);
+    worked(r);
     ended(r);
     r.at(IDLE + LOST_TURN_GRACE_MS + 10 * MIN);
     r.watch.sweep();
@@ -384,6 +418,7 @@ describe("a turn end that never arrived (T-422)", () => {
     for (let i = 2; i <= 3; i++) {
       const busyAt = idleAt + 10 * MIN;
       began(r, busyAt);
+      worked(r, busyAt);
       idleAt = busyAt + 30 * MIN;
       ended(r, idleAt);
       r.at(idleAt + LOST_TURN_GRACE_MS + 10 * MIN);
@@ -398,6 +433,7 @@ describe("a turn end that never arrived (T-422)", () => {
       const r = rig();
       seed(r);
       began(r);
+      worked(r);
       ended(r);
       r.at(at);                                                                         // the fleet takes it now, after the busy start
       r.watch.turn(r.finished(at, { status: "done", sessionId: "s1" }));
@@ -412,6 +448,7 @@ describe("a turn end that never arrived (T-422)", () => {
     covered.at(BUSY - LOST_TURN_SKEW_MS);
     covered.watch.turn(covered.finished(0, { status: "blocked", sessionId: "s1" }));   // the node's clock is irrelevant
     began(covered);
+    worked(covered);
     ended(covered);
     covered.at(IDLE + LOST_TURN_GRACE_MS);
     covered.watch.sweep();
@@ -420,6 +457,7 @@ describe("a turn end that never arrived (T-422)", () => {
     missed.at(BUSY - LOST_TURN_SKEW_MS - 1);
     missed.watch.turn(missed.finished(T0 + 24 * 60 * MIN, { status: "blocked", sessionId: "s1" }));
     began(missed);
+    worked(missed);
     ended(missed);
     missed.at(IDLE + LOST_TURN_GRACE_MS);
     missed.watch.sweep();
@@ -443,6 +481,7 @@ describe("a turn end that never arrived (T-422)", () => {
     lost.at(T - MIN);
     lost.watch.turn(lost.finished(T - 10 * MIN, { status: "blocked", sessionId: "s1" }));
     began(lost, T);
+    worked(lost, T, T + 10_000);
     ended(lost, T + 30_000);
     lost.at(T + 30_000 + LOST_TURN_GRACE_MS);
     lost.watch.sweep();
@@ -455,6 +494,7 @@ describe("a turn end that never arrived (T-422)", () => {
     r.at(BUSY - LOST_TURN_SKEW_MS - MIN);
     r.watch.turn(r.finished(BUSY + 60 * MIN, { status: "blocked", sessionId: "s1" }));  // taken before the busy start
     began(r);
+    worked(r);
     ended(r);
     r.at(IDLE + LOST_TURN_GRACE_MS);
     r.watch.sweep();
@@ -477,6 +517,7 @@ describe("a turn end that never arrived (T-422)", () => {
   it("does not judge a lane that never had a turn end", () => {
     const never = rig();
     began(never);
+    worked(never);
     ended(never);
     never.at(IDLE + LOST_TURN_GRACE_MS);
     never.watch.sweep();
@@ -520,6 +561,7 @@ describe("a turn end that never arrived (T-422)", () => {
     const offline = rig({ online: () => up });
     seed(offline);
     began(offline);
+    worked(offline);
     ended(offline);
     offline.at(IDLE + LOST_TURN_GRACE_MS);
     offline.watch.sweep();
@@ -548,6 +590,7 @@ describe("a turn end that never arrived (T-422)", () => {
     for (let i = 1; i <= 3; i++) {
       const busyAt = idleAt + 10 * MIN;
       began(r, busyAt);
+      worked(r, busyAt);
       idleAt = busyAt + 30 * MIN;
       ended(r, idleAt);
       r.at(idleAt + LOST_TURN_GRACE_MS);
@@ -559,6 +602,7 @@ describe("a turn end that never arrived (T-422)", () => {
     r.watch.turn(r.finished(idleAt + LOST_TURN_GRACE_MS, { status: "done", sessionId: "s1" }));
     const busyAt = idleAt + LOST_TURN_GRACE_MS + 10 * MIN;
     began(r, busyAt);
+    worked(r, busyAt);
     idleAt = busyAt + 30 * MIN;
     ended(r, idleAt);
     r.at(idleAt + LOST_TURN_GRACE_MS);
@@ -591,6 +635,7 @@ describe("a turn end that never arrived (T-422)", () => {
     });
     seed(r);
     began(r);
+    worked(r);
     ended(r);
     r.at(IDLE + LOST_TURN_GRACE_MS);
     r.watch.sweep();

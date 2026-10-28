@@ -118,7 +118,7 @@ describe("Runs in the fleet (ADR-0032)", () => {
     r.pc.inventory([{ ...ALPHA, status: "idle" }]);
     await stop(r, T0, { last_assistant_message: "STATUS: WAITING on the review for 20 min", background_tasks: [], session_crons: [] });
     await vi.waitFor(() => expect(r.run()).toMatchObject({
-      phase: "waiting", wait: { on: "declared", what: "the review" }, deadline: T0 + 20 * MIN, overdue: false, source: "status", line: "STATUS: WAITING on the review for 20 min",
+      phase: "waiting", wait: { on: "declared", what: "the review" }, deadline: T0 + 40 * MIN, overdue: false, source: "status", line: "STATUS: WAITING on the review for 20 min",
     }));
   });
 
