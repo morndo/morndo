@@ -68,7 +68,7 @@ fixed in `scripts/c6/backup.sh`, with a test).
 2. An install over **running** legacy units exits 0 after about 276 s, printing `hub: no answer within 90 s` (and so on), and leaves them on the old code. The services are stopped first; then it takes about 6 s and the three answer at the new version.
 3. After a `restore.sh`, a second install is refused (`already installed: use morndo update`, exit 78) until `~/.local/share/morndo-releases`, `~/.local/state/morndo-update` and `~/.config/morndo-update` are removed. `restore.sh` never touches data and does not remove them. A retry is a deliberate step (section 5).
 4. The dead-man's switch must be a persistent timer (it survives a reboot or a user-manager restart), must refuse another host, and must not stop the node agent's job units (all in `scripts/c6` now).
-5. Doctor after a fresh install on 0.1.1: see section 0.
+5. Doctor after a fresh install: unclean on 0.1.1, fixed in 0.2.0 (#185); see section 0.
 
 ## 3. Preflight (read-only; each machine, the evening before or the same day)
 

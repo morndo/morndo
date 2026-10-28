@@ -281,7 +281,7 @@ fi
 # From the state recorded at backup time (state.txt): the services recorded active (template instances included).
 start_list=""
 while read -r u a e; do
-  case $u in *.service) if [ "$a" = "active=yes" ]; then start_list="$start_list $u"; fi ;; esac
+  case $u in morndo-job-*) continue ;; *.service) if [ "$a" = "active=yes" ]; then start_list="$start_list $u"; fi ;; esac
 done < "$bk/state.txt"
 
 stopped=no
@@ -303,6 +303,7 @@ apply_state() {
   for _pass in .service .socket .path .timer; do
     while read -r u a e; do
       [ -n "$u" ] || continue
+      case $u in morndo-job-*) continue ;; esac   # the node agent's own job units: an older backup may still list them
       case $u in *"$_pass") ;; *) continue ;; esac
       case $_pass in
         .timer)
@@ -378,6 +379,7 @@ dbfail() { # name path why
   _svc=""
   while IFS=" " read -r _u _; do   # callers may have IFS set to a newline
     case $_u in
+      morndo-job-*) ;;
       *.service) if unit_matches "$_u" "g$_pre/"; then _svc="$_svc $_u"; fi ;;
     esac
   done < "$bk/state.txt"

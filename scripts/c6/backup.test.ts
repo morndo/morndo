@@ -1,7 +1,7 @@
 // scripts/c6/backup.sh and arm-deadman.sh, run for real against a made-up HOME with a fake systemctl and a fake
 // systemd-run, so no machine and no Docker is needed. The databases are made and read with node:sqlite.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { appendFileSync, chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -797,6 +797,16 @@ describe("the node agent's own transient job units", () => {
     expect(r.status, r.stderr).toBe(0);
     expect(readFileSync(m.calls, "utf8")).not.toContain("morndo-job-");
     expect(readFileSync(join(m.state, "active"), "utf8")).toContain("morndo-job-9a8b7c.service");
+  });
+  it("a morndo-job-<id> row in the state.txt of an older backup is never restarted, stopped, enabled or disabled by the restore", () => {
+    const m = machine();
+    expect(backup(m).status).toBe(0);
+    appendFileSync(join(m.dest, "state.txt"), "morndo-job-1f2e3d.service active=yes enabled=yes\nmorndo-job-9a8b7c.timer active=yes enabled=yes\n");
+    install(m);
+    rmSync(m.calls, { force: true });
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(m.calls, "utf8")).not.toContain("morndo-job-");
   });
   it("a morndo-job-<id> file or drop-in folder in the unit folder is not copied, recorded, disabled or removed either", () => {
     const m = machine();
