@@ -107,6 +107,7 @@ mkdir "$dest/units" "$dest/wrappers" "$dest/dbs"
 printf 'host=%s\nhome=%s\n' "${C6_HOSTNAME:-$(uname -n)}" "$HOME" > "$dest/machine.txt"
 
 for f in "$units"/morndo-*; do
+  case ${f##*/} in morndo-job-*) continue ;; esac   # the node agent's own job units (see below): not ours to keep
   if [ -e "$f" ] || [ -L "$f" ]; then cp -a "$f" "$dest/units/"; fi
 done
 for f in "$bin"/morndo*; do
@@ -480,6 +481,7 @@ fi
 for f in "$units"/morndo-*; do
   if [ -e "$f" ] || [ -L "$f" ]; then :; else continue; fi
   name=${f##*/}
+  case $name in morndo-job-*) continue ;; esac   # the node agent's own job units: never ours to disable or remove
   if [ -e "$bk/units/$name" ] || [ -L "$bk/units/$name" ]; then continue; fi
   case $name in
     *.service|*.timer|*.socket|*.path) "$sc" --user disable --now "$name" || problem "unit $name (added by the install) could not be disabled and stopped" ;;

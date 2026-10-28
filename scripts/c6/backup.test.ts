@@ -798,5 +798,21 @@ describe("the node agent's own transient job units", () => {
     expect(readFileSync(m.calls, "utf8")).not.toContain("morndo-job-");
     expect(readFileSync(join(m.state, "active"), "utf8")).toContain("morndo-job-9a8b7c.service");
   });
+  it("a morndo-job-<id> file or drop-in folder in the unit folder is not copied, recorded, disabled or removed either", () => {
+    const m = machine();
+    writeFileSync(join(m.units, "morndo-job-1f2e3d.service"), "[Service]\nExecStart=/bin/true\n");
+    mkdirSync(join(m.units, "morndo-job-1f2e3d.service.d"));
+    writeFileSync(join(m.units, "morndo-job-1f2e3d.service.d", "x.conf"), "[Service]\nMemoryMax=1G\n");
+    expect(backup(m).status).toBe(0);
+    expect(readdirSync(join(m.dest, "units")).filter(n => n.startsWith("morndo-job-"))).toEqual([]);
+    expect(readFileSync(join(m.dest, "state.txt"), "utf8")).not.toContain("morndo-job-");
+    install(m);
+    rmSync(m.calls, { force: true });
+    const r = sh(join(m.dest, "restore.sh"), ["--with-db"], m.env);
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(m.calls, "utf8")).not.toContain("morndo-job-");
+    expect(existsSync(join(m.units, "morndo-job-1f2e3d.service"))).toBe(true);
+    expect(existsSync(join(m.units, "morndo-job-1f2e3d.service.d", "x.conf"))).toBe(true);
+  });
 });
 
