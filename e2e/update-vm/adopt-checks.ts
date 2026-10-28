@@ -16,6 +16,21 @@ export function runsFromLauncher(unitText: string): boolean {
   return unitText.split("\n").some(line => /^ExecStart=\S*\/\.local\/bin\/morndo(-\w+)?(\s|$)/.test(line.trim()));
 }
 
+/** Which tree a main process's command line runs: the old release folder of the machines today, or an installed Version. */
+export function runsTree(tree: "old" | "new", cmdline: string): boolean {
+  return tree === "new" ? cmdline.includes("morndo-releases") : cmdline.includes("releases/abc1234") && !cmdline.includes("morndo-releases");
+}
+
+/**
+ * `morndo doctor` right after a fresh install. Published mode: exit 0 and the clean line are a check (the release carries
+ * the fresh-install doctor fix, #185). Local mode: only a finding, ok whatever the word (the plan says why).
+ */
+export function doctorVerdict(published: boolean, code: number, output: string): Verdict {
+  const lines = output.split("\n").filter(l => l.trim() !== "");
+  const detail = `doctor exited ${code}: ${lines.slice(0, published ? 200 : 6).join(" | ")}`;
+  return { ok: !published || (code === 0 && lines.includes("ok: the install checks out")), detail };
+}
+
 export interface Proc { pid: number; started: string }
 
 /** The same process: same pid and same start time (a reused pid has another start time). */

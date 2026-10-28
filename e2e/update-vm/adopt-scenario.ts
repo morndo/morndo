@@ -14,7 +14,7 @@ import { get as httpsGet } from "node:https";
 import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { missingRows, runsFromLauncher, sameListing, sameProcess, unitAdopted } from "./adopt-checks.ts";
+import { doctorVerdict, missingRows, runsFromLauncher, runsTree, sameListing, sameProcess, unitAdopted } from "./adopt-checks.ts";
 import { ownerOf } from "./checks.ts";
 
 const HOME = homedir();
@@ -157,12 +157,18 @@ async function waitHealthy(which: "hub" | "fleet" | "node", atVersion: string, t
   return (await waitUntil(timeoutMs, probe)) === atVersion;
 }
 
-// All three units active and all three answering with that version.
-async function servicesHealthy(version: string, timeoutMs = 90_000): Promise<{ ok: boolean; detail: string }> {
+// All three units active, all three answering with that version, and all three running the named tree. The tree is part of
+// the check because a version cannot tell the two apart in the published rehearsal: the old folder is the published archive's
+// own app, so it reports the same version as the installed Version (the root package.json's, as it has no build.json).
+async function servicesHealthy(tree: "old" | "new", version: string, timeoutMs = 90_000): Promise<{ ok: boolean; detail: string }> {
   const active = await waitUntil(timeoutMs, async () => (SERVICE_UNITS.every(unitActive) ? "" : null));
   if (active === null) return { ok: false, detail: `units not active: ${SERVICE_UNITS.filter(u => !unitActive(u)).join(", ")}` };
   const ok = (await waitHealthy("hub", version, timeoutMs)) && (await waitHealthy("fleet", version, timeoutMs)) && (await waitHealthy("node", version, timeoutMs));
-  return { ok, detail: ok ? `all three units active and healthy at ${version}` : `not all healthy at ${version}: ${await healthNow()}` };
+  if (!ok) return { ok, detail: `not all healthy at ${version}: ${await healthNow()}` };
+  const onTree = await waitUntil(timeoutMs, async () => (SERVICES.every(s => runsTree(tree, cmdlineOf(s.unit))) ? "" : null));
+  return onTree === null
+    ? { ok: false, detail: `healthy at ${version} but not all running the ${tree} tree: ${SERVICES.map(s => `${s.app} ${cmdlineOf(s.unit)}`).join(" || ")}` }
+    : { ok: true, detail: `all three units active and healthy at ${version}, running the ${tree} tree` };
 }
 
 function sqlite(db: string, sql: string): string {
@@ -185,8 +191,8 @@ function cmdlineOf(unit: string): string {
   if (!/^\d+$/.test(pid) || pid === "0") return "(no main process)";
   try { return readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0").join(" ").trim(); } catch { return "(gone)"; }
 }
-const runsNew = (cmdline: string) => cmdline.includes("morndo-releases");
-const runsOld = (cmdline: string) => cmdline.includes("releases/abc1234");
+const runsNew = (cmdline: string) => runsTree("new", cmdline);
+const runsOld = (cmdline: string) => runsTree("old", cmdline);
 
 // `path size` for every entry under a folder (links by their own size), sorted: the old release folder before and after.
 function listing(root: string): string {
@@ -276,7 +282,7 @@ async function proofs(p: string, base: Baseline): Promise<void> {
   check(`${p}-db-rows-kept`, lacks.every(l => l.lacking.length === 0),
     lacks.every(l => l.lacking.length === 0) ? `the marker rows (${MARKERS.join(", ")}) are in the hub, fleet and node databases`
       : lacks.filter(l => l.lacking.length > 0).map(l => `${l.n} lacks ${l.lacking.join(",")}`).join("; "));
-  const healthy = await servicesHealthy(VERSION_A);
+  const healthy = await servicesHealthy("new", VERSION_A);
   check(`${p}-services-healthy`, healthy.ok, healthy.detail);
 
   const lane = sameProcess(base.lane, ownerOf(base.lanePid));
@@ -289,10 +295,11 @@ async function proofs(p: string, base: Baseline): Promise<void> {
   const status = command(`${p}-update-status`, join(BIN, "morndo"), ["update", "--status"]);
   check(`${p}-status`, status.code === 0 && status.out.includes("install: updater") && status.out.includes(`channel: ${CHANNEL}`) && status.out.includes(`current: ${VERSION_A}`),
     `update --status exited ${status.code}: ${firstLines(status, 4)}`);
-  // Not a pass/fail of the adoption: a fresh install is not "clean" for the doctor today (see the plan, section 8), so the
-  // word is recorded as a finding and the story goes on.
+  // Published mode gates on it (the plan's G1: exit 0 after a fresh install). The local build is only observed: whether its
+  // fresh-install doctor is clean since #185 has not been run, so it stays a finding there (the plan, section 0).
   const doctor = command(`${p}-doctor`, join(BIN, "morndo"), ["doctor"]);
-  check(`finding-doctor-${p}`, true, `doctor exited ${doctor.code}: ${firstLines(doctor, PUBLISHED === null ? 6 : 200)}`);
+  const verdict = doctorVerdict(PUBLISHED !== null, doctor.code, `${doctor.out}${doctor.err}`);
+  check(PUBLISHED !== null ? `${p}-doctor` : `finding-doctor-${p}`, verdict.ok, verdict.detail);
 }
 
 // ---- the dead-man's switch --------------------------------------------------------------------------------------------
@@ -461,7 +468,7 @@ async function main(): Promise<number> {
   check("b-node-joined", joined.code === 0 && joined.out.includes("Joined the fleet"), `node add/join: ${firstLines(joined, 3)}`);
   if (failed) { journals("b-join"); return finish(server); }
   run("systemctl", ["--user", "enable", "--now", "morndo-node.service"]);
-  const baseHealthy = await servicesHealthy(OLD_VERSION);
+  const baseHealthy = await servicesHealthy("old", OLD_VERSION);
   check("b-baseline-healthy", baseHealthy.ok, `${baseHealthy.detail} (the old folder reports ${OLD_VERSION}: no build.json)`);
   const unmarked = SERVICES.every(s => !readFileSync(join(UNIT_DIR, s.unit), "utf8").startsWith("# Morndo's own unit"));
   const oldCmd = SERVICES.every(s => runsOld(cmdlineOf(s.unit)));
@@ -530,7 +537,7 @@ async function main(): Promise<number> {
   if (sawNew !== "new") {
     for (const s of SERVICES) command(`d-restart-${s.app}`, "systemctl", ["--user", "restart", s.unit]);
   }
-  const afterRestart = await servicesHealthy(VERSION_A);
+  const afterRestart = await servicesHealthy("new", VERSION_A);
   check("d-services-healthy", afterRestart.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))),
     `${sawNew === "new" ? "no restart needed" : "after systemctl --user restart of the three units"}: ${afterRestart.detail}`);
   if (failed) { journals("d-restart"); return finish(server); }
@@ -589,7 +596,7 @@ async function main(): Promise<number> {
   // Nothing was started by hand: every service the backup found running is running again as the restore left it.
   const running = SERVICES.map(s => `${s.unit}=${unitActive(s.unit)}`);
   check("f-rollback-all-running", SERVICES.every(s => unitActive(s.unit)), `right after the unattended rollback, with no manual start: ${running.join(" ")}`);
-  const backHealthy = await servicesHealthy(OLD_VERSION, 120_000);
+  const backHealthy = await servicesHealthy("old", OLD_VERSION, 120_000);
   const backCmd = SERVICES.map(s => cmdlineOf(s.unit));
   check("f-old-folder-running", backHealthy.ok && backCmd.every(runsOld), `${backHealthy.detail}; processes: ${backCmd.join(" || ")}`);
   const quicksF = DBS.map(([n, path]) => `${n}=${quickCheck(path)}`);
@@ -667,7 +674,7 @@ async function main(): Promise<number> {
   rmSync(`${FLEET_DB}-wal`, { force: true });
   rmSync(`${FLEET_DB}-shm`, { force: true });
   run("systemctl", ["--user", "start", "morndo-fleet.service"]);
-  const repaired = await servicesHealthy(OLD_VERSION, 120_000);
+  const repaired = await servicesHealthy("old", OLD_VERSION, 120_000);
   check("f2-repaired-by-hand", repaired.ok, `after the copy by hand and the start: ${repaired.detail}`);
   if (failed) { journals("f2-deadman"); return finish(server); }
 
@@ -686,10 +693,10 @@ async function main(): Promise<number> {
   check("g-installed", second.code === 0 && second.out.includes(`Morndo ${VERSION_A} installed (control-plane, channel ${CHANNEL}).`),
     `after the reset (releases, update state, update config removed), wrappers moved aside (${movedAgain}), services stopped: install exited ${second.code} after ${second.seconds} s: ${firstLines(second, 8)}`);
   if (failed) { journals("g-install"); return finish(server); }
-  let secondHealthy = await servicesHealthy(VERSION_A, 60_000);
+  let secondHealthy = await servicesHealthy("new", VERSION_A, 60_000);
   if (!secondHealthy.ok) {
     for (const s of SERVICES) command(`g-restart-${s.app}`, "systemctl", ["--user", "restart", s.unit]);
-    secondHealthy = await servicesHealthy(VERSION_A);
+    secondHealthy = await servicesHealthy("new", VERSION_A);
   }
   check("g-services-healthy", secondHealthy.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))), secondHealthy.detail);
   if (failed) { journals("g-restart"); return finish(server); }
