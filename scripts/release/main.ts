@@ -2,11 +2,10 @@
 // flags and files. import.meta.main: https://nodejs.org/docs/latest-v24.x/api/esm.html#importmetamain
 // (added in v24.2.0, read 2026-10-13).
 import { createHash } from "node:crypto";
-import { lstatSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from "node:fs";
-import { join, sep } from "node:path";
+import { readFileSync, writeFileSync } from "node:fs";
 import { parseArgs } from "node:util";
 import type { Channel, Platform } from "@morndo/domain";
-import { packTree, type TreeFile } from "./archive.ts";
+import { packTree } from "./archive.ts";
 import { compileWorkspaces } from "./compile.ts";
 import { sha256Sums } from "./checksums.ts";
 import { emptyFeed, publishRelease, resignFeed } from "./feed.ts";
@@ -16,7 +15,7 @@ import { commitFeeds, parseAllowEmptyChannel, prepareFeeds } from "./feed-sync.t
 import { artifactName, buildManifest, declaredSchemas, protocolRange, type ArtifactInput } from "./manifest.ts";
 import { BUNDLED_NODE, newerNode24 } from "./node-pin.ts";
 import { FEED_NAMESPACE, RELEASE_NAMESPACE, signBytes } from "./sign.ts";
-import { stageRelease } from "./stage.ts";
+import { stageRelease, stagedTreeFiles } from "./stage.ts";
 import { stampVersion } from "./stamp.ts";
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -35,29 +34,6 @@ function flag(values: Record<string, string | string[] | boolean | undefined>, n
   const value = values[name];
   if (typeof value !== "string" || value === "") throw new Error(`missing --${name}`);
   return value;
-}
-
-function treeFiles(root: string): TreeFile[] {
-  const out: TreeFile[] = [];
-  const walk = (dir: string, prefix: string) => {
-    for (const name of readdirSync(dir).sort()) {
-      const abs = join(dir, name);
-      const rel = prefix ? `${prefix}/${name}` : name;
-      const st = lstatSync(abs);
-      if (st.isSymbolicLink()) {
-        out.push({ path: rel, mode: "0555", link: readlinkSync(abs).split(sep).join("/") });
-      } else if (st.isDirectory()) {
-        if (readdirSync(abs).length === 0) out.push({ path: rel, mode: "0555", directory: true });
-        else walk(abs, rel);
-      }
-      else if (st.isFile()) {
-        const mode = rel.startsWith("bin/") || rel.startsWith("node/bin/") ? "0555" : "0444";
-        out.push({ path: rel, bytes: readFileSync(abs), mode });
-      }
-    }
-  };
-  walk(root, "");
-  return out;
 }
 
 function main(argv: string[]): void {
@@ -91,7 +67,7 @@ function main(argv: string[]): void {
       return;
     case "pack": {
       const mtime = Number(flag(values, "mtime"));
-      writeFileSync(flag(values, "out"), packTree(treeFiles(flag(values, "root")), mtime));
+      writeFileSync(flag(values, "out"), packTree(stagedTreeFiles(flag(values, "root")), mtime));
       return;
     }
     case "manifest": {

@@ -3,7 +3,7 @@
 // A symlink is judged against the tree root, not the link's parent. One that stays inside is stored
 // as a symlink (Node's bin/npm -> ../lib/...). A workspace package is the exception: Node will not
 // strip types under node_modules, so the staged copy is the compiled JavaScript when --compiled is set.
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, readlinkSync, realpathSync, symlinkSync, writeFileSync } from "node:fs";
 import { dirname, join, relative, sep } from "node:path";
 import type { TreeFile } from "./archive.ts";
 import { listFiles } from "./files.ts";
@@ -66,6 +66,42 @@ export function stageRelease(p: { repo: string; nodeDir: string; dest: string; v
     else if ("link" in file) symlinkSync(file.link, dest);
     else writeFileSync(dest, file.bytes, { mode: file.mode === "0555" ? 0o555 : 0o444 });
   }
+}
+
+// The pack step's walk of a staged tree (design §9.3): every file, link and empty directory it holds,
+// with the modes the walk knows, plus one entry for every directory files.json lists — trust/ and
+// units/ are named even when they are not empty, so the archive carries the mode files.json is checked
+// against. A listed directory whose mode is not 0555 would promise a mode the tree does not keep: refused.
+export function stagedTreeFiles(root: string): TreeFile[] {
+  const out: TreeFile[] = [];
+  const walk = (dir: string, prefix: string) => {
+    for (const name of readdirSync(dir).sort()) {
+      const abs = join(dir, name);
+      const rel = prefix ? `${prefix}/${name}` : name;
+      const st = lstatSync(abs);
+      if (st.isSymbolicLink()) {
+        out.push({ path: rel, mode: "0555", link: readlinkSync(abs).split(sep).join("/") });
+      } else if (st.isDirectory()) {
+        if (readdirSync(abs).length === 0) out.push({ path: rel, mode: "0555", directory: true });
+        else walk(abs, rel);
+      } else if (st.isFile()) {
+        const mode = rel.startsWith("bin/") || rel.startsWith("node/bin/") ? "0555" : "0444";
+        out.push({ path: rel, bytes: readFileSync(abs), mode });
+      }
+    }
+  };
+  walk(root, "");
+  const walked = new Set(out.filter(file => "directory" in file).map(file => file.path));
+  const list = JSON.parse(readFileSync(join(root, "files.json"), "utf8")) as { path: string; mode: string }[];
+  for (const entry of list) {
+    let st;
+    try { st = lstatSync(join(root, entry.path)); } catch { continue; }
+    if (!st.isDirectory()) continue;
+    if (entry.mode !== "0555") throw new Error(`${entry.path}: a listed directory's mode is ${entry.mode}, not 0555`);
+    if (walked.has(entry.path)) continue;
+    out.push({ path: entry.path, mode: "0555", directory: true });
+  }
+  return out.sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
 }
 
 // The service templates (design §5): apps/updater/units/** ships inside every Version as units/, read-only
