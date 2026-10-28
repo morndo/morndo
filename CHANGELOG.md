@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.2.0](https://github.com/morndo/morndo/compare/v0.1.1...v0.2.0) (2026-10-28)
+
+
+### Features
+
+* **key-pool:** slice 4, the failure hook's report-back, sinks and the lane deny list, write-env and watch ([285f85d](https://github.com/morndo/morndo/commit/285f85dd56e8c573013578cc200aa7be711663c8))
+* **updater:** morndo install runs the first check as its last step ([1426e70](https://github.com/morndo/morndo/commit/1426e70e86d602a7d73fbe3d40369a2f1afc311e))
+
+
+### Bug Fixes
+
+* **e2e:** the push round trip waits past the decision settle (N2) ([8a18098](https://github.com/morndo/morndo/commit/8a1809826e9d7657ee7b3f2d01ada289201e67a0))
+* **hub:** a Decision pushes only once it has waited a minute (N2) ([993f567](https://github.com/morndo/morndo/commit/993f56782823196f31c3f35b9581d1c622a92e88))
+* **hub:** a Decision pushes only once it has waited a minute (N2) ([2fcada1](https://github.com/morndo/morndo/commit/2fcada197b929aaf200dfcf1e527fd258d86bbd6))
+* **hub:** a verify or refresh joins a check only if it reads the brief that counts ([894bafd](https://github.com/morndo/morndo/commit/894bafd6cbec12acc1e997d54f112a8f37e560bd))
+* **jobs:** a signalled cancel ends cancelled on every path, survives a restart, and leaves no state ([20f15a8](https://github.com/morndo/morndo/commit/20f15a8e73c9fd1d0fddfc528abfcb61c7c3f9b1))
+* **key-pool:** every way out of acquire and release rolls back, closes the handle and clears the sink, whatever threw ([354ef67](https://github.com/morndo/morndo/commit/354ef67b9b37a96536ecabaa09691d844636b95f))
+* **key-pool:** the lock file is opened through one SQLite handle only, a second taker in a process waits or is busy and never reopens it, a text lock is busy and never deleted, and the owner note goes before the lock is let go ([22b1e30](https://github.com/morndo/morndo/commit/22b1e30974af32ac550d6daaf8d509209d172da0))
+* **release:** install the tree as packed, on any umask and any /tmp, and clean up after it ([2b628fa](https://github.com/morndo/morndo/commit/2b628fa6141b51da51cba7913b88c515868b0182))
+* **release:** install.sh cleans up when a signal stops it, and unpacks under TMPDIR when HOME is not set ([021d0d3](https://github.com/morndo/morndo/commit/021d0d34ce672018d62426ecb0a6d1b9d682b247))
+* **release:** install.sh keeps its exit code when its cleanup cannot remove the tree ([bc9dd32](https://github.com/morndo/morndo/commit/bc9dd32551283047799d6272b6aa656deb19dcd2))
+* **release:** pack listed directories with their own mode and install them as packed ([91a75f6](https://github.com/morndo/morndo/commit/91a75f608a50a43b94262dab1f33e45ef352d363))
+* **updater:** a first install keeps files.json (T-486) ([794062a](https://github.com/morndo/morndo/commit/794062abeabc280ffdc151f35fbcd79ed84cdb5b))
+* **updater:** a first install keeps files.json, and a committed first install is not an unknown Version ([f7cb65f](https://github.com/morndo/morndo/commit/f7cb65f5fd3bfd4e6c27bf523f38d64b7220e454))
+* **updater:** the install's closing check has one budget, and the trust anchor is read through the verified list ([d1bd700](https://github.com/morndo/morndo/commit/d1bd700c208da7607f3f8e23326c3ff9e8ad09d0))
+* **updater:** the install's first check only reads the feed; doctor and install verify what they trust ([a16280f](https://github.com/morndo/morndo/commit/a16280fd471341810a0c75bf9d03c6a48d6ce6b2))
+* **updater:** the install's list digest is the installer adapter's to compute ([a81a840](https://github.com/morndo/morndo/commit/a81a840b240bf6ca904015abea6474dd3daa967f))
+
 ## [0.1.1](https://github.com/morndo/morndo/compare/v0.1.0...v0.1.1) (2026-10-27)
 
 
