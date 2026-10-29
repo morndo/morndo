@@ -34,6 +34,7 @@ describe("a disk sync off the event loop (T-532)", () => {
     const { agent } = await runAgent(config, { walSync: async () => { syncs += 1; await held; } });
     stops.push(async () => { release(); await agent.stop(); });
     await fleet.waitFor(m => m.t === "ev.inventory");
+    const links = fleet.connections();                                                  // the join's socket counts too
     const from = fleet.pongs.length;
     fleet.send({ t: "req", id: "k1", op: "lane.stop", args: { name: "nothing-here" }, timeoutMs: 60_000, key: "hub:k1" });
     await wait(20_000);
@@ -43,7 +44,7 @@ describe("a disk sync off the event loop (T-532)", () => {
     expect(pongs.length).toBeGreaterThanOrEqual(60);                                    // one ping every 250 ms for 20 s
     const gaps = pongs.slice(1).map((at, i) => at - (pongs[i] ?? at));
     expect(Math.max(...gaps)).toBeLessThan(2000);                                       // the loop never stalled
-    expect(fleet.connections()).toBe(1);
+    expect(fleet.connections()).toBe(links);                                            // no drop, no dial again
     release();
     expect(await fleet.waitFor(m => m.t === "res" && m.id === "k1", 10_000))
       .toMatchObject({ ok: false, error: { code: "no_pane", executed: "no" }, storeSeq: 1 });
