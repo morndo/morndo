@@ -85,6 +85,27 @@ describe("a disk sync off the event loop (T-532)", () => {
     await fleet.waitFor(m => m.t === "ev.delivery" && (m.delivery as { id: string }).id === "hub:r1", 10_000);
   }, 60_000);
 
+  it("a replay whose sync outlasts its link sends nothing to the next link, which replays for itself (T-571)", async () => {
+    const adb = openAgentDb(config.dbPath);                                             // a cancelled delivery from an earlier run
+    const store = new DeliveryStore(adb.db, Date.now, "pc", async () => {});
+    await store.store({ id: "hub:r1", target: { lane: "later", sticky: true }, text: "for later", ttlMs: 3_600_000, boundSession: null });
+    store.update("hub:r1", { state: "given_up", why: "cancelled" });
+    adb.close();
+    let release = () => {};
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const { agent } = await runAgent(config, { walSync: () => held });
+    stops.push(async () => { release(); await agent.stop(); });
+    await fleet.waitFor(m => m.t === "ev.inventory");
+    const cut = fleet.received.length;
+    fleet.closeAgent(1011, "fleet restart");                                            // the first welcome's replay still waits
+    await fleet.whenReady(() => fleet.received.slice(cut).some(r => r.msg.t === "ev.inventory"));
+    release();                                                                          // both replays' syncs land now
+    await fleet.waitFor(m => m.t === "ev.delivery" && (m.delivery as { id: string }).id === "hub:r1", 10_000);
+    await wait(1000);
+    const sent = fleet.received.filter(r => r.msg.t === "ev.delivery" && (r.msg.delivery as { id: string }).id === "hub:r1");
+    expect(sent).toHaveLength(1);                                                       // the second welcome's own, not the first's too
+  }, 60_000);
+
   it("answers a delivery queued only once its row is synced, while the pings go on (T-532)", async () => {
     let release = () => {};
     const held = new Promise<void>(resolve => { release = resolve; });
@@ -117,7 +138,7 @@ describe("a replay sends only what its sync covers (T-532, review round 2)", () 
     const replay = replayDurable({
       read: () => [...rows.entries()],
       unchanged: ([id, state]) => rows.get(id) === state,
-      sync: d.sync, send: ([id]) => { sent.push(id); },
+      sync: d.sync, current: () => true, send: ([id]) => { sent.push(id); },
     });
     expect(d.asked()).toBe(1);
     rows.set("b", "queued");                                   // committed while the replay's sync runs; its own sync is still out
@@ -133,7 +154,7 @@ describe("a replay sends only what its sync covers (T-532, review round 2)", () 
     const replay = replayDurable({
       read: () => [...rows.entries()],
       unchanged: ([id, state]) => rows.get(id) === state,
-      sync: d.sync, send: ([id]) => { sent.push(id); },
+      sync: d.sync, current: () => true, send: ([id]) => { sent.push(id); },
     });
     rows.set("a", "running");                                  // taken back to open meanwhile
     d.letGo(0);
@@ -141,9 +162,20 @@ describe("a replay sends only what its sync covers (T-532, review round 2)", () 
     expect(sent).toEqual(["c"]);
   });
 
+  it("sends nothing when its welcome is no longer current once the sync is in (T-571)", async () => {
+    let current = true;
+    const sent: string[] = [];
+    const d = disk();
+    const replay = replayDurable({ read: () => ["a"], unchanged: () => true, sync: d.sync, current: () => current, send: id => { sent.push(id); } });
+    current = false;                                           // the link ended, or a later welcome came, while the sync ran
+    d.letGo(0);
+    await replay;
+    expect(sent).toEqual([]);                                  // the later welcome replays for itself
+  });
+
   it("sends nothing when its sync fails", async () => {
     const sent: string[] = [];
-    await expect(replayDurable({ read: () => ["a"], unchanged: () => true, sync: async () => { throw new Error("EIO"); }, send: id => { sent.push(id); } }))
+    await expect(replayDurable({ read: () => ["a"], unchanged: () => true, sync: async () => { throw new Error("EIO"); }, current: () => true, send: id => { sent.push(id); } }))
       .rejects.toThrow("EIO");
     expect(sent).toEqual([]);
   });
