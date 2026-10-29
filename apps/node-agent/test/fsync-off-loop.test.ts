@@ -2,7 +2,7 @@
 // took over 12 s on the owner's PC while the agent's only thread waited in it, so the fleet's pings went unanswered and
 // the node dropped offline. Here the sync is held for 20 s: the agent keeps answering pings, and the op's answer still
 // waits until the sync is done (a keyed op is acknowledged only once its record is durable).
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgentConfig } from "../src/config.ts";
 import { openAgentDb } from "../src/db/open.ts";
 import { DeliveryStore } from "../src/deliveries/store.ts";
@@ -106,6 +106,56 @@ describe("a disk sync off the event loop (T-532)", () => {
     expect(sent).toHaveLength(1);                                                       // the second welcome's own, not the first's too
   }, 60_000);
 
+  it("a failed sync on the second welcome is tried again, so the first welcome's rows don't wait for a third (T-581)", async () => {
+    const adb = openAgentDb(config.dbPath);                                             // a cancelled delivery from an earlier run
+    const store = new DeliveryStore(adb.db, Date.now, "pc", async () => {});
+    await store.store({ id: "hub:r1", target: { lane: "later", sticky: true }, text: "for later", ttlMs: 3_600_000, boundSession: null });
+    store.update("hub:r1", { state: "given_up", why: "cancelled" });
+    adb.close();
+    let release = () => {};
+    const held = new Promise<void>(resolve => { release = resolve; });
+    let syncs = 0;
+    // The first welcome's sync is held; the second welcome's fails; every later one lands.
+    const walSync = () => { syncs += 1; return syncs === 1 ? held : syncs === 2 ? Promise.reject(new Error("EIO")) : Promise.resolve(); };
+    const { agent } = await runAgent(config, { walSync, replayRetryMs: 200 });
+    stops.push(async () => { release(); await agent.stop(); });
+    await fleet.waitFor(m => m.t === "ev.inventory");
+    const cut = fleet.received.length;
+    fleet.closeAgent(1011, "fleet restart");
+    await fleet.whenReady(() => fleet.received.slice(cut).some(r => r.msg.t === "ev.inventory"));
+    await wait(500);                                                                    // the second welcome's sync has failed
+    release();                                                                          // the first welcome's, now stale, lands
+    const r = await fleet.waitFor(m => m.t === "ev.delivery" && (m.delivery as { id: string }).id === "hub:r1", 10_000);
+    expect(r).toBeTruthy();
+    const sent = fleet.received.filter(x => x.msg.t === "ev.delivery" && (x.msg.delivery as { id: string }).id === "hub:r1");
+    expect(sent).toHaveLength(1);
+    expect(sent[0]?.conn).toBe(fleet.received.at(-1)?.conn);                           // on the second link
+  }, 60_000);
+
+  it("a replay stops trying its failed sync once its link is down (T-581)", async () => {
+    let syncs = 0;
+    const { agent } = await runAgent(config, { walSync: async () => { syncs += 1; throw new Error("EIO"); }, replayRetryMs: 200 });
+    stops.push(() => agent.stop());
+    await fleet.waitFor(m => m.t === "ev.inventory");
+    await vi.waitFor(() => { expect(syncs).toBeGreaterThanOrEqual(3); }, { timeout: 10_000 });   // tried again while the link is up
+    fleet.script.welcome = 4409;                                                        // the next welcome is refused: the link stays down
+    fleet.closeAgent(1011, "fleet restart");
+    await vi.waitFor(() => { expect(agent.status().state).toBe("conflict"); }, { timeout: 10_000 });
+    await wait(300);
+    const at = syncs;
+    await wait(1500);
+    expect(syncs - at).toBe(0);
+  }, 60_000);
+
+  it("a replay whose sync keeps failing warns at its first try, not at every try (T-581, review)", async () => {
+    let syncs = 0;
+    const { agent, lines } = await runAgent(config, { walSync: async () => { syncs += 1; throw new Error("EIO"); }, replayRetryMs: 50 });
+    stops.push(() => agent.stop());
+    await fleet.waitFor(m => m.t === "ev.inventory");
+    await vi.waitFor(() => { expect(syncs).toBeGreaterThanOrEqual(10); }, { timeout: 10_000 });
+    expect(lines.filter(l => l.includes("the replay after this welcome waits"))).toHaveLength(1);
+  }, 60_000);
+
   it("answers a delivery queued only once its row is synced, while the pings go on (T-532)", async () => {
     let release = () => {};
     const held = new Promise<void>(resolve => { release = resolve; });
@@ -173,10 +223,45 @@ describe("a replay sends only what its sync covers (T-532, review round 2)", () 
     expect(sent).toEqual([]);                                  // the later welcome replays for itself
   });
 
-  it("sends nothing when its sync fails", async () => {
+  it("tries a failed sync again while its welcome is current, reading the rows again, and sends them once it lands (T-581)", async () => {
+    const rows = new Map<string, string>([["a", "queued"]]);
     const sent: string[] = [];
-    await expect(replayDurable({ read: () => ["a"], unchanged: () => true, sync: async () => { throw new Error("EIO"); }, current: () => true, send: id => { sent.push(id); } }))
-      .rejects.toThrow("EIO");
+    let syncs = 0;
+    await replayDurable({
+      read: () => [...rows.entries()], unchanged: ([id, state]) => rows.get(id) === state,
+      sync: async () => {
+        syncs += 1;
+        if (syncs === 1) { rows.set("b", "queued"); throw new Error("EIO"); }   // committed meanwhile, synced by the next try
+      },
+      current: () => true, retryMs: 10, send: ([id]) => { sent.push(id); },
+    });
+    expect(syncs).toBe(2);
+    expect(sent).toEqual(["a", "b"]);
+  });
+
+  it("stops trying once its welcome is no longer current, and sends nothing (T-581)", async () => {
+    let current = true;
+    let syncs = 0;
+    let retries = 0;
+    const sent: string[] = [];
+    await replayDurable({
+      read: () => ["a"], unchanged: () => true,
+      sync: async () => { syncs += 1; current = false; throw new Error("EIO"); },     // a later welcome came while it ran
+      current: () => current, retryMs: 10, onRetry: () => { retries += 1; }, send: id => { sent.push(id); },
+    });
+    expect(syncs).toBe(1);
+    expect(retries).toBe(0);                                   // no wait, and no word of one
     expect(sent).toEqual([]);
+  });
+
+  it("does not try again when its welcome ended during the wait (T-581)", async () => {
+    let current = true;
+    let syncs = 0;
+    await replayDurable({
+      read: () => ["a"], unchanged: () => true,
+      sync: async () => { syncs += 1; throw new Error("EIO"); },
+      current: () => current, retryMs: 10, onRetry: () => { current = false; }, send: () => {},
+    });
+    expect(syncs).toBe(1);
   });
 });

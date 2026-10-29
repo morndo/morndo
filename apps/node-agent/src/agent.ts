@@ -85,6 +85,7 @@ export type AgentOptions = {
   runCommand?: CommandRunner;                             // a test sees the apply unit's exact start (update.apply)
   walSync?: WalSync;                                      // a test holds the durable commits' sync (db/wal-sync.ts)
   walSyncTimeoutMs?: number;                              // a test's shorter deadline for one sync
+  replayRetryMs?: number;                                 // a test's shorter wait before a welcome's replay tries its sync again
 };
 export type RunningAgent = {
   instanceId: string;
@@ -292,7 +293,8 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     mark: (id, notice) => jobs.store.markNotice(id, notice),
   });
 
-  // Each welcome counts: a replay sends only while no later welcome has come (offline, send() sends nothing).
+  // Each welcome, and each link's end, counts: a replay sends, and tries a failed sync again, only while its welcome's
+  // link is the current one.
   let welcomes = 0;
   conn = new FleetConnection({
     url: config.fleetUrl, node: config.node, instanceId, streamId, fleetKey, nodeKey,
@@ -317,8 +319,11 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       // this welcome is the latest (conn/replay.ts).
       replayStores({
         deliveries: ops.deliveries, jobs: jobs.store, since: ops.now() - DELIVERY_REPLAY_MS, sync: walSync, current: () => welcomes === welcome,
+        ...(o.replayRetryMs !== undefined ? { retryMs: o.replayRetryMs } : {}),
+        // Said at the first failed sync, then once every 30 tries (about 5 minutes at 10 s), not at every try.
+        onRetry: (e, tries) => { if (tries % 30 === 1) log.warn(`the replay after this welcome waits: the disk did not sync (${tries} tries so far); it tries again`, e); },
         sendDelivery, sendJob: (job, at, tail) => { send(fleetRecord(job, { node: config.node, at, tail })); },
-      }).catch((e: unknown) => { log.warn("nothing replayed after this welcome (the disk did not sync, or the rows could not be read); the next welcome replays", e); });
+      }).catch((e: unknown) => { log.warn("nothing replayed after this welcome (the rows could not be read); the next welcome replays", e); });
     },
     onRequest: m => { answer(m).catch((e: unknown) => log.error("answering a request failed", e)); },
     onBadRequest: (id, op) => {
@@ -327,7 +332,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
         : { code: "unknown_op", executed: ERROR_EXECUTED.unknown_op, message: "this node has no such op" }));
     },
     onAck: a => { if (a.streamId === streamId) sender.ack(a.seq); },
-    onDown: () => { sender.offline(); events.offline(); },
+    onDown: () => { welcomes += 1; sender.offline(); events.offline(); },
     onStatus: () => saveStatus(),
     ...(o.retry ? { retry: o.retry } : {}),
     ...(o.pingTimeoutMs !== undefined ? { pingTimeoutMs: o.pingTimeoutMs } : {}),
