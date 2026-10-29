@@ -184,7 +184,7 @@ describe("restarts that fail, the deadline's end, and what counts as progress (T
     expect((tries[2] ?? 0) - (tries[1] ?? 0)).toBeGreaterThanOrEqual(790);
   }, 30_000);
 
-  it("stop() ends the progress deadline of the worker in use", async () => {
+  it("stop() ends the progress deadline of the worker in use at once, not only when the worker exits", async () => {
     const path = filled();
     const set = vi.spyOn(globalThis, "setInterval");
     const clear = vi.spyOn(globalThis, "clearInterval");
@@ -194,8 +194,10 @@ describe("restarts that fail, the deadline's end, and what counts as progress (T
       const deadlines = set.mock.results.slice(from).map(r => r.value as unknown);
       expect(deadlines).toHaveLength(1);
       await checkpointer.now();
-      await checkpointer.stop();
+      const stopped = checkpointer.stop();
+      // Before the worker has exited: one stuck in a sync may never exit, and its deadline must not outlive stop().
       expect(clear.mock.calls.map(c => c[0] as unknown)).toContain(deadlines[0]);
+      await stopped;
     } finally {
       set.mockRestore();
       clear.mockRestore();
