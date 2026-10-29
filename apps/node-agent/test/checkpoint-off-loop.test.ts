@@ -77,3 +77,79 @@ describe("checkpoints off the event loop (T-532)", () => {
     expect(failed).toBe(1);                                          // once
   });
 });
+
+// T-571 (rev-198's recheck of #198): a worker that hands back is stopped, so it never checkpoints beside the agent's
+// own connection, and after a cool-down a new worker takes the checkpoints back.
+describe("a hand-back is stopped, and taken back after a cool-down (T-571)", () => {
+  // A database whose WAL holds every page written: the agent's connection never checkpoints (db/open.ts).
+  function filled(): { path: string; adb: ReturnType<typeof openAgentDb> } {
+    const dir = mkdtempSync(join(tmpdir(), "checkpoint-"));
+    dirs.push(dir);
+    const path = join(dir, "agent.db");
+    const adb = openAgentDb(path);
+    closers.push(() => adb.close());
+    adb.db.exec("CREATE TABLE IF NOT EXISTS t (x TEXT)");
+    const insert = adb.db.prepare("INSERT INTO t VALUES (?)");
+    for (let i = 0; i < 1500; i++) insert.run("x".repeat(4000));
+    return { path, adb };
+  }
+  const logOf = (warns: string[]) => ({ warn: (m: string) => { warns.push(m); } });
+
+  it("stops a stuck worker as it hands back: once the stall is over it copies nothing", async () => {
+    const { path } = filled();
+    const before = statSync(path).size;
+    let failed = 0;
+    // The first checkpoint blocks 2 s, past the 500 ms deadline; a worker left running copies the WAL once it returns.
+    const checkpointer = startCheckpointer(path, { everyMs: 100, stuckMs: 500, restartMs: 60_000, onFail: () => { failed += 1; }, test: { stallMs: 2000 } });
+    closers.unshift(() => checkpointer.stop());
+    await vi.waitFor(() => { expect(failed).toBe(1); }, { timeout: 10_000 });
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    expect(statSync(path).size).toBe(before);                      // no checkpoint ran beside the agent's own
+    expect(failed).toBe(1);
+  });
+
+  it("starts a new worker after the cool-down, which takes the checkpoints back once it makes progress", async () => {
+    const { path } = filled();
+    let failed = 0;
+    let resumed = 0;
+    // Only the first worker stalls (30 s); the one started after the 300 ms cool-down checkpoints at once.
+    const checkpointer = startCheckpointer(path, {
+      everyMs: 100, stuckMs: 500, restartMs: 300, onFail: () => { failed += 1; }, onResume: () => { resumed += 1; }, test: { stallMs: 30_000 },
+    });
+    closers.unshift(() => checkpointer.stop());
+    await vi.waitFor(() => { expect(resumed).toBe(1); }, { timeout: 10_000 });
+    expect(failed).toBe(1);
+    expect(statSync(path).size).toBeGreaterThan(1500 * 4000);      // the new worker copied the WAL
+    const done = await checkpointer.now();
+    expect(done.checkpointed).toBe(done.log);
+  });
+
+  it("a new worker that fails before it makes progress hands back nothing more: the agent keeps checkpointing", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "checkpoint-"));
+    dirs.push(dir);
+    let failed = 0;
+    let resumed = 0;
+    const warns: string[] = [];
+    const checkpointer = startCheckpointer(join(dir, "no-such.db"), {
+      everyMs: 60_000, restartMs: 100, log: logOf(warns), onFail: () => { failed += 1; }, onResume: () => { resumed += 1; },
+    });
+    closers.push(() => checkpointer.stop());
+    await vi.waitFor(() => { expect(warns.length).toBeGreaterThanOrEqual(3); }, { timeout: 10_000 });   // it tried again
+    expect(failed).toBe(1);
+    expect(resumed).toBe(0);
+  });
+
+  it("stop() ends a cool-down: no worker starts after it", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "checkpoint-"));
+    dirs.push(dir);
+    let failed = 0;
+    const warns: string[] = [];
+    const checkpointer = startCheckpointer(join(dir, "no-such.db"), { everyMs: 60_000, restartMs: 300, log: logOf(warns), onFail: () => { failed += 1; } });
+    await vi.waitFor(() => { expect(failed).toBe(1); }, { timeout: 10_000 });
+    await checkpointer.stop();
+    const tried = warns.length;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    expect(warns.length).toBe(tried);
+    await expect(checkpointer.now()).rejects.toThrow(/stopped/);
+  });
+});
