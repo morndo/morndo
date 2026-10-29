@@ -1,5 +1,20 @@
 # Changelog
 
+## [0.2.1](https://github.com/morndo/morndo/compare/v0.2.0...v0.2.1) (2026-10-29)
+
+
+### Bug Fixes
+
+* **c6:** backup and restore leave morndo-job-* files in the unit folder alone ([07c99df](https://github.com/morndo/morndo/commit/07c99df3ca3ae0552c8d04c931de26b8e9ff23b3))
+* **c6:** the restore skips morndo-job-* rows of an older backup's state.txt; the plans name the signed manifest and 0.2.0 ([aef807b](https://github.com/morndo/morndo/commit/aef807bf7fea459b6d99a6c04d446503e1a00463))
+* **e2e:** published mode gates on doctor exit 0, and the healthy checks name the tree they expect, since old and new report the same version there ([d6b5753](https://github.com/morndo/morndo/commit/d6b5753521189c62b5a430f6d0849ad3b004812d))
+* **e2e:** the published rehearsal names its version on the command line, and a repeated --published is refused ([1262f58](https://github.com/morndo/morndo/commit/1262f585f685c8d5397c6f7581ea8b0c14a69a57))
+* **e2e:** the published rehearsal verifies manifest.json.sig and takes the archive's sha256 from that manifest before unpacking ([f53f3d8](https://github.com/morndo/morndo/commit/f53f3d849fdb6eb53bb12cf75e7e0c92efe57802))
+* **fleet:** a restart keeps a wake-up's hold; a line's own for-duration wins ([827da9a](https://github.com/morndo/morndo/commit/827da9ac086222c5151a033938362cd498196ef1))
+* **fleet:** a stale lane event means a lane that needs the manager ([929243c](https://github.com/morndo/morndo/commit/929243cbcb67422810d26da93a119c3d5d090f57))
+* **fleet:** a stale lane event means a lane that needs the orchestrator ([a941e99](https://github.com/morndo/morndo/commit/a941e9954b139c7cce7c7cdb6a19635968fbafe8))
+* **protocol:** a bold status line's trailing decoration is not part of its wait; the lane event store keeps its body as it was ([10f3936](https://github.com/morndo/morndo/commit/10f393661efb66150d5724b69733724bfc93a540))
+
 ## [0.2.0](https://github.com/morndo/morndo/compare/v0.1.1...v0.2.0) (2026-10-28)
 
 
