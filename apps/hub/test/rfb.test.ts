@@ -3,7 +3,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { connect, createServer as netServer, type AddressInfo } from "node:net";
+import { createServer as netServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
@@ -16,6 +16,7 @@ const PASSWORD = "s3cret!x";
 let vnc: ChildProcess | null = null;
 let port = 0;
 const freePort = () => new Promise<number>(r => { const s = netServer().listen(0, "127.0.0.1", () => { const p = (s.address() as AddressInfo).port; s.close(() => r(p)); }); });
+const SERVER_READY_MS = 90_000;
 const have = existsSync("/usr/bin/Xtigervnc") && existsSync("/usr/bin/vncpasswd");
 
 beforeAll(async () => {
@@ -24,13 +25,25 @@ beforeAll(async () => {
   port = await freePort();
   let display = 140 + (process.pid % 50);
   while (existsSync(`/tmp/.X11-unix/X${display}`) || existsSync(`/tmp/.X${display}-lock`)) display++;
+  let gone: string | null = null;
   vnc = spawn("Xtigervnc", [`:${display}`, "-rfbport", String(port), "-localhost=1", "-SecurityTypes", "VncAuth", "-PasswordFile", passFile, "-geometry", "320x200", "-AlwaysShared=1"], { stdio: "ignore" });
-  for (let i = 0; i < 50; i++) {
-    const up = await new Promise<boolean>(r => { const s = connect(port, "127.0.0.1"); s.once("connect", () => { s.destroy(); r(true); }); s.once("error", () => r(false)); });
-    if (up) break;
-    await new Promise(r => setTimeout(r, 100));
+  vnc.once("exit", (code, signal) => { gone = `Xtigervnc ended before it was ready (exit ${code}, signal ${signal})`; });
+  // Ready is a real login that answers, not a fixed number of tries: a cold start of the server (its files read behind busy
+  // disks, a box at load 70) took longer than the 5 s the old poll gave it, and the tests then ran against a closed port.
+  // The deadline only ends a server that never comes up, and says so.
+  const deadline = Date.now() + SERVER_READY_MS;
+  for (;;) {
+    if (gone !== null) throw new Error(gone);
+    try {
+      const { sock } = await loginToServer({ host: "127.0.0.1", port, password: PASSWORD }, 10_000);
+      sock.destroy();
+      break;
+    } catch (error) {
+      if (Date.now() > deadline) throw new Error(`Xtigervnc on port ${port} did not answer a login within ${SERVER_READY_MS / 1000} s: ${(error as Error).message}`);
+      await new Promise(r => setTimeout(r, 250));
+    }
   }
-}, 15_000);
+}, SERVER_READY_MS + 15_000);
 afterAll(() => { vnc?.kill("SIGTERM"); rmSync(dir, { recursive: true, force: true }); });
 
 describe("VNC's DES", () => {
