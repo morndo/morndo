@@ -153,3 +153,66 @@ describe("a hand-back is stopped, and taken back after a cool-down (T-571)", () 
     await expect(checkpointer.now()).rejects.toThrow(/stopped/);
   });
 });
+
+// T-581 (rev-200's review of #200): a start that throws is tried again, later each time; the progress deadline never
+// outlives its worker; and only a checkpoint that ran counts as progress.
+describe("restarts that fail, the deadline's end, and what counts as progress (T-581)", () => {
+  function filled(): string {
+    const dir = mkdtempSync(join(tmpdir(), "checkpoint-"));
+    dirs.push(dir);
+    const path = join(dir, "agent.db");
+    const adb = openAgentDb(path);
+    closers.push(() => adb.close());
+    adb.db.exec("CREATE TABLE IF NOT EXISTS t (x TEXT)");
+    adb.db.prepare("INSERT INTO t VALUES (?)").run("x");
+    return path;
+  }
+
+  it("tries a start that throws again, each cool-down twice the last, until a worker makes progress", async () => {
+    const path = filled();
+    let resumed = 0;
+    const tries: number[] = [];
+    // The first worker stalls past its deadline; then three starts throw before one comes up.
+    const checkpointer = startCheckpointer(path, {
+      everyMs: 100, stuckMs: 500, restartMs: 200, onResume: () => { resumed += 1; }, test: { stallMs: 30_000, failStarts: 3 },
+      log: { warn: (m: string) => { if (m.includes("could start")) tries.push(Date.now()); } },
+    });
+    closers.unshift(() => checkpointer.stop());
+    await vi.waitFor(() => { expect(resumed).toBe(1); }, { timeout: 20_000 });
+    expect(tries).toHaveLength(3);
+    expect((tries[1] ?? 0) - (tries[0] ?? 0)).toBeGreaterThanOrEqual(390);      // 200 ms, then 400, then 800
+    expect((tries[2] ?? 0) - (tries[1] ?? 0)).toBeGreaterThanOrEqual(790);
+  }, 30_000);
+
+  it("stop() ends the progress deadline of the worker in use", async () => {
+    const path = filled();
+    const set = vi.spyOn(globalThis, "setInterval");
+    const clear = vi.spyOn(globalThis, "clearInterval");
+    try {
+      const from = set.mock.results.length;
+      const checkpointer = startCheckpointer(path, { everyMs: 60_000 });
+      const deadlines = set.mock.results.slice(from).map(r => r.value as unknown);
+      expect(deadlines).toHaveLength(1);
+      await checkpointer.now();
+      await checkpointer.stop();
+      expect(clear.mock.calls.map(c => c[0] as unknown)).toContain(deadlines[0]);
+    } finally {
+      set.mockRestore();
+      clear.mockRestore();
+    }
+  });
+
+  it("an error reply is no progress: a new worker whose checkpoints fail never takes the checkpoints back", async () => {
+    const path = filled();
+    let failed = 0;
+    let resumed = 0;
+    // Every checkpoint of every worker throws, as on a disk that answers I/O errors.
+    const checkpointer = startCheckpointer(path, {
+      everyMs: 100, stuckMs: 500, restartMs: 100, onFail: () => { failed += 1; }, onResume: () => { resumed += 1; }, test: { failCheckpoints: true },
+    });
+    closers.unshift(() => checkpointer.stop());
+    await vi.waitFor(() => { expect(failed).toBe(1); }, { timeout: 10_000 });     // no checkpoint ran: past the deadline
+    await vi.waitFor(async () => { await expect(checkpointer.now()).rejects.toThrow(/I\/O error \(test\)/); }, { timeout: 10_000 });
+    expect(resumed).toBe(0);
+  });
+});
