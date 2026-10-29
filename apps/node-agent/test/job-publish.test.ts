@@ -1,6 +1,6 @@
 // A state change becomes the fleet's record (design §4). The command and its hash stay on this node.
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fleetRecord, type FleetJob, type FinishEvent, type StartBody } from "@morndo/domain";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore } from "../src/ops/job-store.ts";
@@ -18,7 +18,7 @@ const open: { adb: AgentDb; cleanup: () => void }[] = [];
 afterEach(() => { for (const o of open.splice(0)) { o.adb.close(); o.cleanup(); } });
 
 describe("a job the node sends", () => {
-  it("publishes state, class, lane, timings, outcome and notice, never the command", () => {
+  it("publishes state, class, lane, timings, outcome and notice, never the command", async () => {
     const h = tempHome();
     const adb = openAgentDb(join(h.home, "agent.db"));
     const seen: FleetJob[] = [];
@@ -28,10 +28,11 @@ describe("a job the node sends", () => {
     });
     open.push({ adb, cleanup: h.cleanup });
     expect(store.accept(body()).ok).toBe(true);
-    store.applySchedule({ default: 2 }, "off");
+    await store.applySchedule({ default: 2 }, "off");
     expect(store.started("job-1").ok).toBe(true);
-    expect(store.settle("job-1", EXIT).ok).toBe(true);
-    expect(seen.map(event => event.state)).toEqual(["queued", "starting", "running", "exited"]);
+    expect((await store.settle("job-1", EXIT)).ok).toBe(true);
+    // Each event leaves once its commit is synced (T-532), in order.
+    await vi.waitFor(() => { expect(seen.map(event => event.state)).toEqual(["queued", "starting", "running", "exited"]); });
     expect(seen.map(event => event.ended)).toEqual([null, null, null, AT]);
     const last = seen.at(-1);
     expect(last).toMatchObject({

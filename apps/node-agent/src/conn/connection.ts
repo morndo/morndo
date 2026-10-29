@@ -10,7 +10,7 @@
 //   live twin keeps refusing it, and once the other instance is gone (stopped, crashed, half-open) this one takes over.
 //   4426 (protocol unsupported) retries hourly; lanes and hooks keep working meanwhile. Anything else (1013, too many
 //   handshakes, included) dials again with backoff (retry.ts).
-// - Liveness: the fleet pings every 15 s; with no ping for 35 s (LIMITS.agentPingTimeoutMs: two pings and slack) the
+// - Liveness: the fleet pings every 15 s; with no ping for 50 s (LIMITS.agentPingTimeoutMs: three pings and slack) the
 //   agent terminates the socket and dials again (ws 8.22.0 README, "How to detect and close broken connections?", read
 //   2026-10-06).
 // - The URL must pass fleetUrlOk: wss://, or ws:// only to this machine. Any other is refused when the connection is
@@ -132,12 +132,21 @@ export class FleetConnection {
     this.#o.onStatus(this.status());
   }
 
+  // The watchdog that fires while this process was busy (a durable commit held the thread, T-532) decides in a
+  // setImmediate: a ping that arrived while it was busy is read in the poll phase before that, and re-arms the
+  // watchdog, so only a fleet that stayed silent through it ends the connection. A watchdog that was rearmed, or
+  // disarmed by a close, is not this timer object any more.
   #arm(ws: WebSocket): void {
     if (this.#watchdog) clearTimeout(this.#watchdog);
-    this.#watchdog = setTimeout(() => {
-      this.#o.log.warn(`no ping from the fleet for ${Math.round((this.#o.pingTimeoutMs ?? LIMITS.agentPingTimeoutMs) / 1000)} s; dialing again`);
-      ws.terminate();
-    }, this.#o.pingTimeoutMs ?? LIMITS.agentPingTimeoutMs);
+    const timeoutMs = this.#o.pingTimeoutMs ?? LIMITS.agentPingTimeoutMs;
+    const timer = setTimeout(() => {
+      setImmediate(() => {
+        if (this.#watchdog !== timer) return;            // re-armed or disarmed since it fired
+        this.#o.log.warn(`no ping from the fleet for ${Math.round(timeoutMs / 1000)} s; dialing again`);
+        ws.terminate();
+      });
+    }, timeoutMs);
+    this.#watchdog = timer;
   }
 
   #disarm(): void {

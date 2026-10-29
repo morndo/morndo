@@ -803,14 +803,14 @@ describe("child supervisor", () => {
     };
     const { store, dir, sup } = rig();
     expect(value(store.accept({ id: "job-start", ...body })).state).toBe("queued");
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.get("job-start")?.state).toBe("starting");
     writeFileSync(join(dir, "job-start.exit"), JSON.stringify({ outcome: "exited", exitCode: 3, durationMs: 40 }));
     await sup.sweep();
     expect(store.get("job-start")).toMatchObject({ state: "exited", outcome: "exited", exitCode: 3, durationMs: 40 });
 
     expect(value(store.accept({ id: "job-junk", ...body })).state).toBe("queued");
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.get("job-junk")?.state).toBe("starting");
     writeFileSync(join(dir, "job-junk.exit"), "{");
     await sup.sweep();
@@ -953,12 +953,12 @@ exit 0
       id, lane: "builder", name: "pack", jobClass: "default",
       notify: { kind: "lane", name: "builder" }, commandHash: "a".repeat(64), cwdHash: "b".repeat(64),
     }));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started(id));
     const inner = store.settle.bind(store);
-    store.settle = (jobId, event) => {
+    store.settle = async (jobId, event) => {
       if (event.outcome === "cancelled") {
-        inner(jobId, { outcome: "exited", exitCode: 0, durationMs: 40 });
+        await inner(jobId, { outcome: "exited", exitCode: 0, durationMs: 40 });
         return inner(jobId, event);
       }
       return inner(jobId, event);

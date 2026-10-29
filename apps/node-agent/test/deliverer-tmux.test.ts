@@ -69,7 +69,7 @@ describe("the deliverer through the executor, on real tmux", () => {
       { id: "hub:answer:e1:a1:ship", text: "Answer: ship it" },
       { id: "fleet:lane-events:pc:1", text: "[lane-event] Lane events (handle them as your instructions say):\n{\"lane\":\"api\",\"event\":\"finished\"}" },
     ];
-    for (const s of sent) expect(h.deliverer.enqueue({ id: s.id, target: MANAGER, text: s.text })).toMatchObject({ delivery: { state: "queued" } });
+    for (const s of sent) expect(await h.deliverer.enqueue({ id: s.id, target: MANAGER, text: s.text })).toMatchObject({ delivery: { state: "queued" } });
     expect(await kickUntil(() => sent.every(s => h.deliveries.get(s.id)?.state === "delivered"))).toBe(true);
     expect(submitted()).toEqual(sent.map(s => s.text));
     // The bytes the pane received: each bracketed paste closed before the next opened.
@@ -87,7 +87,7 @@ describe("the deliverer through the executor, on real tmux", () => {
     const multi = 'ü€"\n'.repeat(25_000);                   // exactly maxMessageText, over many lines
     const single = "ü".repeat(LIMITS.maxMessageText);
     for (const [id, text] of [["hub:long-m", multi], ["hub:long-s", single]] as const)
-      expect(h.deliverer.enqueue({ id, target: MANAGER, text })).toMatchObject({ delivery: { state: "queued" } });
+      expect(await h.deliverer.enqueue({ id, target: MANAGER, text })).toMatchObject({ delivery: { state: "queued" } });
     expect(await kickUntil(() => ["hub:long-m", "hub:long-s"].every(id => h.deliveries.get(id)?.state === "delivered"))).toBe(true);
     expect(submitted()).toEqual([multi, single]);
     // The bytes the pane received: one bracketed paste per message, each closed before the next opened.
@@ -97,7 +97,7 @@ describe("the deliverer through the executor, on real tmux", () => {
   it("waits through a draft in the box (draft_present), and types once it is cleared", async () => {
     t.tmux("send-keys", "-t", pane, "-l", "half");
     expect(await until(() => screen().includes("❯ half"))).toBe(true);
-    h.deliverer.enqueue({ id: "hub:d1", target: MANAGER, text: "the message" });
+    await h.deliverer.enqueue({ id: "hub:d1", target: MANAGER, text: "the message" });
     await h.deliverer.drain();
     expect(h.deliveries.get("hub:d1")).toMatchObject({ state: "queued", waiting: { reason: "draft_present" } });
     t.tmux("send-keys", "-t", pane, "BSpace", "BSpace", "BSpace", "BSpace");
@@ -108,8 +108,8 @@ describe("the deliverer through the executor, on real tmux", () => {
 
   it("moves a delivery whose key was started before a restart to typed, and types nothing", async () => {
     const id = "hub:answer:e2:a1:yes";
-    expect(h.doneKeys.start(id, argsHash("pane.send", { workerId: managerLane().workerId, text: "yes" }))).toBe(true);
-    expect(h.deliverer.enqueue({ id, target: MANAGER, text: "yes" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await h.doneKeys.start(id, argsHash("pane.send", { workerId: managerLane().workerId, text: "yes" }))).toBe(true);
+    expect(await h.deliverer.enqueue({ id, target: MANAGER, text: "yes" })).toMatchObject({ delivery: { state: "queued" } });
     expect(await kickUntil(() => h.deliveries.get(id)?.state === "typed")).toBe(true);
     for (let i = 0; i < 5; i++) { h.deliverer.kick("timer"); await h.deliverer.drain(); }
     await wait(500);
@@ -124,8 +124,8 @@ describe("the deliverer through the executor, on real tmux", () => {
     h = harness({ noDoneKeys: true });
     await h.inventory.refresh();
     const id = "hub:answer:e3:a1:yes";
-    h.doneKeys.start(id, argsHash("pane.send", { workerId: managerLane().workerId, text: "yes" }));   // recorded nowhere: keys are off
-    h.deliverer.enqueue({ id, target: MANAGER, text: "yes" });
+    await h.doneKeys.start(id, argsHash("pane.send", { workerId: managerLane().workerId, text: "yes" }));   // recorded nowhere: keys are off
+    await h.deliverer.enqueue({ id, target: MANAGER, text: "yes" });
     expect(await kickUntil(() => submitted().includes("yes"))).toBe(true);
   });
 });

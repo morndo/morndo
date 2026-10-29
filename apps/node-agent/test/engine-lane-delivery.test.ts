@@ -50,7 +50,7 @@ describe("an engine lane takes briefs", () => {
     expect(lane).toMatchObject({ sessionId: expect.stringMatching(/^engine-\d+-\d+$/), status: "idle" });
     expect(h.inventory.last().panes.find(p => p.window === "codex-a")).toMatchObject({ sessionId: lane?.sessionId, sessionName: "codex-a", status: "idle" });
     expect(h.registry.transcriptPath(lane!.sessionId!)).toBeNull();            // the lane writes it with its first message
-    expect(h.deliverer.enqueue({ id: "lanes:t1", target: { lane: "codex-a", sticky: false }, text: "ping" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await h.deliverer.enqueue({ id: "lanes:t1", target: { lane: "codex-a", sticky: false }, text: "ping" })).toMatchObject({ delivery: { state: "queued" } });
     expect(await kickUntil(() => h.deliveries.get("lanes:t1")?.state === "delivered")).toBe(true);
     expect(h.registry.transcriptPath(lane!.sessionId!)).toMatch(/codex-a-[0-9a-f-]+\.jsonl$/);
   });
@@ -60,8 +60,8 @@ describe("an engine lane takes briefs", () => {
     const target: DeliveryTarget = { lane: "codex-b", sticky: false };
     const brief = "Build the demo\n\nFirst: read the notes.\nThen: write the code.";
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-b")?.sessionId != null; })).toBe(true);
-    expect(h.deliverer.enqueue({ id: "lanes:e1", target, text: "ping" })).toMatchObject({ delivery: { state: "queued" } });
-    expect(h.deliverer.enqueue({ id: "lanes:e2", target, text: brief })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await h.deliverer.enqueue({ id: "lanes:e1", target, text: "ping" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await h.deliverer.enqueue({ id: "lanes:e2", target, text: brief })).toMatchObject({ delivery: { state: "queued" } });
     expect(await kickUntil(() => h.deliveries.get("lanes:e1")?.state === "delivered" && h.deliveries.get("lanes:e2")?.state === "delivered")).toBe(true);
     expect(submitted()).toEqual(["ping", brief]);
   }, 30_000);
@@ -72,7 +72,7 @@ describe("an engine lane takes briefs", () => {
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-long")?.sessionId != null; })).toBe(true);
     const brief = 'ü€"\n'.repeat(24_999) + 'ü€".';                // exactly maxMessageText, with what a paste must survive
     expect(brief).toHaveLength(LIMITS.maxMessageText);
-    expect(h.deliverer.enqueue({ id: "lanes:long", target, text: brief })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await h.deliverer.enqueue({ id: "lanes:long", target, text: brief })).toMatchObject({ delivery: { state: "queued" } });
     expect(await kickUntil(() => h.deliveries.get("lanes:long")?.state === "delivered", 30_000)).toBe(true);
     expect(submitted()).toEqual([brief]);
   }, 60_000);
@@ -82,11 +82,11 @@ describe("an engine lane takes briefs", () => {
     const target: DeliveryTarget = { lane: "codex-c", sticky: false };
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-c")?.sessionId != null; })).toBe(true);
     const id = laneOf("codex-c")!.sessionId;
-    h.deliverer.enqueue({ id: "lanes:b1", target, text: "first brief" });
+    await h.deliverer.enqueue({ id: "lanes:b1", target, text: "first brief" });
     expect(await kickUntil(() => h.deliveries.get("lanes:b1")?.state === "delivered")).toBe(true);
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-c")?.status === "busy"; })).toBe(true);
     // The second brief is bound to the session shown now; the turn ends and the lane's file names another session.
-    h.deliverer.enqueue({ id: "lanes:b2", target, text: "second brief" });
+    await h.deliverer.enqueue({ id: "lanes:b2", target, text: "second brief" });
     expect(await kickUntil(() => h.deliveries.get("lanes:b2")?.state === "delivered")).toBe(true);
     expect(submitted()).toEqual(["first brief", "second brief"]);
     expect(laneOf("codex-c")?.sessionId).toBe(id);
@@ -116,7 +116,7 @@ describe("an engine lane takes briefs", () => {
     t.tmux("send-keys", "-t", target, "C-z");
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-z")?.sessionId == null; })).toBe(true);
     // The lane's process and its file are still there; the shell prompt is the last line on screen.
-    expect(h.deliverer.enqueue({ id: "lanes:z1", target: { lane: "codex-z", sticky: false }, text: "echo MARK$((40+2))" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await h.deliverer.enqueue({ id: "lanes:z1", target: { lane: "codex-z", sticky: false }, text: "echo MARK$((40+2))" })).toMatchObject({ delivery: { state: "queued" } });
     for (let i = 0; i < 4; i++) { await h.inventory.refresh(); h.deliverer.kick("hook"); await h.deliverer.drain(); }
     expect(h.deliveries.get("lanes:z1")).toMatchObject({ state: "queued", waiting: { reason: "no_session" } });
     expect(t.tmux("capture-pane", "-p", "-t", target)).not.toContain("MARK42");

@@ -6,16 +6,18 @@
 //     or its agent hung, so it is terminated and the newcomer admitted (a crash can't lock a node out). A pong: the
 //     newcomer is refused (4409), with one alert per refused instance for as long as that live connection lasts, so two
 //     agents with one key never flap.
-//   - A different instance is accepted at once once the old connection closed or missed its pong (stale).
+//   - A different instance is accepted at once once the old connection closed or was ended for missed pongs (stale).
 //   - Every admission takes the next connEpoch from fleet.db: a fencing token that only grows.
 // Requests: control ops go out at once; bulk ops (transcript.read, file.get, file.put) one at a time per node, so a
 // control message never waits behind more than one bulk chunk (spec 5.2). At most LIMITS.bulkQueueMax wait behind the
 // one in flight (one more is `busy`, executed: no), and a waiting op's timeoutMs runs from when it was queued: it
 // answers `timeout` (executed: no) if its turn doesn't come in time, and is sent with what is left of it.
-// Liveness: a ping every LIMITS.pingMs; a connection that hasn't answered the previous ping is stale and terminated.
-// Status: online after a welcome, stale from the first missed pong until terminated, offline once closed. The same
-// sweep re-checks that each node is still registered, so a revocation made while the service runs (the console writes
-// fleet.db directly) takes effect within one interval, for a node that is offline too (its lanes go: `onRevoked`).
+// Liveness: a ping every LIMITS.pingMs; a connection that missed LIMITS.missedPongsMax pongs in a row is stale and
+// terminated. A node busy on its own disk (T-532: a durable commit's fsync held its one thread for over 12 s) may miss
+// a pong while it is up, so one miss ends nothing; its status stays online until the last one ends it.
+// Status: online after a welcome, stale in the moment the connection is ended for missed pongs, offline once closed.
+// The same sweep re-checks that each node is still registered, so a revocation made while the service runs (the console
+// writes fleet.db directly) takes effect within one interval, for a node that is offline too (its lanes go: `onRevoked`).
 import { CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE, CLOSE, LIMITS, type FleetMessage, type Health, type NodeUpdateHealth, type OpName, type Pane, type RolloutWire } from "@morndo/protocol";
 import type { Audit } from "../adapters/audit.ts";
 import type { Logger } from "../adapters/log.ts";
@@ -37,7 +39,7 @@ export type Admission = {
 };
 
 type Live = Admission & {
-  epoch: number; alive: boolean; stale: boolean; nextReq: number; pingAt: number | null; rttMs: number | null;
+  epoch: number; missed: number; stale: boolean; nextReq: number; pingAt: number | null; rttMs: number | null;
   clockAlerted: boolean; refusedAlerted: Set<string>; pongWaiters: Set<(answered: boolean) => void>;
 };
 type Latest = { inventory: { panes: Pane[]; invVersion: number } | null; health: Health | null };
@@ -166,7 +168,7 @@ export class Connections {
     }
     this.requests.admitted(a.node, a.instanceId);
     this.#live.set(a.node, {
-      ...a, epoch, alive: true, stale: false, nextReq: 0, pingAt: null, rttMs: null, clockAlerted: false, refusedAlerted: new Set(), pongWaiters: new Set(),
+      ...a, epoch, missed: 0, stale: false, nextReq: 0, pingAt: null, rttMs: null, clockAlerted: false, refusedAlerted: new Set(), pongWaiters: new Set(),
     });
     welcome(epoch);
     this.#log.info(`node ${a.node} online (instance ${a.instanceId.slice(0, 8)}, epoch ${epoch})`);
@@ -187,7 +189,7 @@ export class Connections {
   pong(node: string, peer: Peer): void {
     const c = this.#live.get(node);
     if (!c || c.peer !== peer) return;
-    c.alive = true;
+    c.missed = 0;                                            // the count starts again from this pong
     if (c.pingAt !== null) { c.rttMs = this.#mono() - c.pingAt; c.pingAt = null; }   // the sweep's ping, once
     this.#answered(c, true);
   }
@@ -200,13 +202,15 @@ export class Connections {
       let active = true;
       try { active = this.#nodes.active(node) !== null; } catch (e) { this.#log.error(`liveness sweep: could not read node ${node}'s registration (fleet.db busy?)`, e); }
       if (!active) { this.revoke(node); continue; }
-      if (!c.alive) {
+      // The pongs missed in a row, not the last one alone: a node may be merely busy (T-532, above). Its status stays
+      // online until the count ends the connection, so the events stay online → stale → offline.
+      if (c.pingAt !== null) c.missed += 1;
+      if (c.missed >= LIMITS.missedPongsMax) {
         c.stale = true;
         this.#status(node, "stale");
         c.peer.terminate();                              // its close follows and marks the node offline
         continue;
       }
-      c.alive = false;
       c.pingAt = this.#mono();
       c.peer.ping();
       try { this.#nodes.seen(node); } catch (e) { this.#log.error(`liveness sweep: could not record node ${node} as seen (fleet.db busy or full?)`, e); }

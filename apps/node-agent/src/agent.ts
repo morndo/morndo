@@ -25,7 +25,7 @@
 // - Lane state events (fleet clients spec §7): each inventory read is observed for sessions that turn `waiting` or leave
 //   it; the events go into the spool on "/lane" and to the fleet with the hooks (lane-state.ts).
 import { randomUUID } from "node:crypto";
-import { fleetRecord } from "@morndo/domain";
+import { fleetRecord, type Job } from "@morndo/domain";
 import { CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE, ERROR_EXECUTED, LIMITS, type AgentMessage, type Delivery, type OpError } from "@morndo/protocol";
 import { healthProbe, tmuxAdapter } from "@morndo/node-ops";
 import { Flight, HoldWatch, holdFile, productVersion } from "@morndo/service-kit";
@@ -35,6 +35,9 @@ import { FleetView } from "./conn/fleet-view.ts";
 import type { RetryOptions } from "./conn/retry.ts";
 import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
+import { replayDurable } from "./conn/replay.ts";
+import { startCheckpointer } from "./db/checkpointer.ts";
+import { bounded, WAL_SYNC_TIMEOUT_MS, walSyncOf, type WalSync } from "./db/wal-sync.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
 import type { Deliverer } from "./deliveries/deliverer.ts";
 import { EventLoops, utcOffsetMin } from "./events.ts";
@@ -65,6 +68,7 @@ const HOUSEKEEPING_MS = 3_600_000;
 // After every welcome: the deliveries not final, and every final the node still keeps (LIMITS.deliveryKeepMs). An outage
 // longer than an hour must still correct a mirror row the fleet is alerting on.
 const DELIVERY_REPLAY_MS = LIMITS.deliveryKeepMs;
+type Replayed = { kind: "delivery"; d: Delivery } | { kind: "job"; job: Job; at: number; tail: string };
 
 export type AgentOptions = {
   config: AgentConfig;
@@ -80,6 +84,8 @@ export type AgentOptions = {
   flight?: Flight;                                        // a test holds one item so stop's wait can be seen
   stopWaitMs?: number;                                    // how long stop waits for in-flight work; default 10s
   runCommand?: CommandRunner;                             // a test sees the apply unit's exact start (update.apply)
+  walSync?: WalSync;                                      // a test holds the durable commits' sync (db/wal-sync.ts)
+  walSyncTimeoutMs?: number;                              // a test's shorter deadline for one sync
 };
 export type RunningAgent = {
   instanceId: string;
@@ -104,6 +110,13 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   if (adb.copied) {
     log.warn(`${config.dbPath} is not the file this database was made in (copied or restored?): a new hook stream and store ${adb.streamId}; sends in doubt from before stay uncertain`);
   }
+  // One WAL sync for every durable commit (done keys, deliveries, jobs) and for a replay: one queue, one deadline, so
+  // a hung disk holds one thread, and a replay's sync covers every commit made before it (db/wal-sync.ts).
+  const walSync = bounded(o.walSync ?? walSyncOf(adb.db), o.walSyncTimeoutMs ?? WAL_SYNC_TIMEOUT_MS);
+  // The checkpoints run in a worker with a connection of its own: the agent's connection never runs one (db/open.ts).
+  const checkpointer = startCheckpointer(config.dbPath, {
+    log, onFail: () => { try { adb.db.pragma("wal_autocheckpoint = 1000"); } catch { /* the database is closing */ } },
+  });
   let streamId = hooks.fixedStreamId ?? adb.streamId;
   let rotated = false;
   const instanceId = o.instanceId ?? randomUUID();
@@ -134,6 +147,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     emitDelivery: d => { sendDelivery(d); },
     ...(hooks.dropAfterStarted !== undefined ? { afterStarted: dropOnce(hooks.dropAfterStarted, () => conn?.drop()) } : {}),
     ...(o.runCommand ? { runCommand: o.runCommand } : {}),
+    walSync,
   });
   const spool: Spool = new Spool(adb.db, streamId, { failWrites: hooks.spoolFail === true, maxBytes: budget, held: cachedFor(1000, held) });
   const open = nodeOpener({ home: config.home, stateDir: paths.stateDir, configDir: paths.configDir, ...(config.policy.fileRoots ? { fileRoots: config.policy.fileRoots } : {}) });
@@ -145,11 +159,6 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   // After every welcome: each delivery not final, and every final still kept. Latest wins at the fleet. A final the
   // mirror still shows as typed is in there, so a long outage does not leave it pending. A change made while offline is
   // in there, so none is lost by a dropped send.
-  const replayDeliveries = () => {
-    try {
-      for (const d of [...ops.deliveries.open(), ...ops.deliveries.recentFinal(ops.now() - DELIVERY_REPLAY_MS)]) sendDelivery(d);
-    } catch (e) { log.warn("could not read the deliveries to send after a welcome", e); }
-  };
   const sender = new StreamSender({ spool, node: config.node, send: m => send(m), log });
   // What the agent last heard from the fleet (updates §6.7): written on every welcome and every `rollout` frame,
   // refreshed at every health tick while online, read by this node's updater as the word it follows.
@@ -228,6 +237,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     });
   } catch (e) {
     watch.stop();
+    await checkpointer.stop();
     adb.close();
     throw e;
   }
@@ -238,6 +248,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     jobs = await openJobRuntime({
       db: adb.db, home: config.home, stateDir: paths.stateDir, socketPath: paths.jobSock, now: ops.now,
       ...(config.hub ? { hubBase: config.hub } : {}),
+      walSync,
       // The same paste pane.send uses. Pasted text is in the pane, submitted or not, and that id is never pasted again.
       node: config.node,
       limits: jobLimits(config.policy.jobs),
@@ -258,6 +269,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   } catch (e) {
     watch.stop();
     await relay.close();
+    await checkpointer.stop();
     adb.close();
     throw e;
   }
@@ -298,13 +310,22 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       fleetView.heard(w, ops.now());
       sender.online(w);
       events.online();
-      replayDeliveries();
-      // A reconnect resends jobs still inside 7 days, at the time they were observed, not at reconnect.
-      for (const job of jobs.store.list()) {
-        const at = jobs.store.replayAt(job);
-        if (at === null) continue;
-        send(fleetRecord(job, { node: config.node, at, tail: jobs.store.eventTail(job.id) }));
-      }
+      // The deliveries open or final in the last hour, and the jobs still inside 7 days (at the time they were
+      // observed, not at reconnect): read now, sent once a sync covers them, each only if still as read (conn/replay.ts).
+      replayDurable<Replayed>({
+        read: () => [
+          ...[...ops.deliveries.open(), ...ops.deliveries.recentFinal(ops.now() - DELIVERY_REPLAY_MS)].map(d => ({ kind: "delivery" as const, d })),
+          ...jobs.store.list().flatMap(job => {
+            const at = jobs.store.replayAt(job);
+            return at === null ? [] : [{ kind: "job" as const, job, at, tail: jobs.store.eventTail(job.id) }];
+          }),
+        ],
+        unchanged: r => r.kind === "delivery"
+          ? JSON.stringify(ops.deliveries.get(r.d.id)) === JSON.stringify(r.d)
+          : JSON.stringify(jobs.store.get(r.job.id)) === JSON.stringify(r.job),
+        sync: walSync,
+        send: r => { if (r.kind === "delivery") sendDelivery(r.d); else send(fleetRecord(r.job, { node: config.node, at: r.at, tail: r.tail })); },
+      }).catch((e: unknown) => { log.warn("nothing replayed after this welcome (the disk did not sync, or the rows could not be read); the next welcome replays", e); });
     },
     onRequest: m => { answer(m).catch((e: unknown) => log.error("answering a request failed", e)); },
     onBadRequest: (id, op) => {
@@ -382,6 +403,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       await relay.close();
       await ops.deliverer.drain();                         // a round in flight ends before its database closes
       saveStatus();
+      await checkpointer.stop();                           // its connection first: the last one to close checkpoints
       adb.close();
     },
   };

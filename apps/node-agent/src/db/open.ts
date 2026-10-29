@@ -4,8 +4,9 @@
 // - WAL with synchronous=NORMAL (fleet core §16.4): a commit is not synced to the disk, so no hook waits for one.
 //   "WAL mode is safe from corruption with synchronous=NORMAL"; it "might roll back following a power loss or system
 //   crash", while "Transactions are durable across application crashes regardless of the synchronous setting"
-//   (https://www.sqlite.org/pragma.html#pragma_synchronous, read 2026-10-08). The one exception is a done key's
-//   `started`, committed with FULL before its side effect (ops/done-keys.ts `synced`), with macOS's full flush: a retry
+//   (https://www.sqlite.org/pragma.html#pragma_synchronous, read 2026-10-08). The exceptions are the commits that must
+//   outlive the machine — a done key's `started`, a fresh delivery, a job's terminal row — each committed at NORMAL
+//   and then synced through the WAL file off the event loop (db/wal-sync.ts), the same durability FULL gives: a retry
 //   may go to another pane than the first attempt typed into, so no pane check can stand in for it. A hook the machine takes back came from a
 //   lane that went down with it. Only on this machine's own disk (assertLocalDisk): WAL needs it.
 // - Nothing is written before the schema version is known. The open itself (create without truncating, refuse a
@@ -82,12 +83,17 @@ export function openAgentDb(path: string): AgentDb {
     refuseNewer: (found, known) => new DatabaseFromFuture(found, known),
     migrate: database => {
       // On macOS a plain fsync() leaves the data in the drive's cache; F_FULLFSYNC flushes it ("Only Mac OS X supports
-      // F_FULLFSYNC", https://www.sqlite.org/pragma.html#pragma_fullfsync, read 2026-10-08). Under NORMAL it costs only the
-      // synced `started` and checkpoints. Elsewhere it does nothing.
+      // F_FULLFSYNC", https://www.sqlite.org/pragma.html#pragma_fullfsync, read 2026-10-08). Under NORMAL this governs
+      // SQLite's own syncs, the checkpoints'; the durable commits' WAL sync goes through Node, whose fsync does
+      // F_FULLFSYNC on macOS of itself (db/wal-sync.ts). Elsewhere it does nothing.
       database.pragma("fullfsync = ON");
       migrate(database);
     },
   });
+  // No automatic checkpoint on this connection: SQLite runs it inside the commit that crosses the WAL's limit and syncs
+  // the WAL and the database file there, even under NORMAL, which on the agent is the event loop (T-532). The agent's
+  // checkpoints run in a worker instead (db/checkpointer.ts). Not stored in the file: every connection sets its own.
+  db.pragma("wal_autocheckpoint = 0");
   try {
     const { streamId, copied } = streamOfThisFile(db, path);
     return { db, streamId, copied, close: () => db.close() };

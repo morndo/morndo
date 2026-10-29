@@ -903,7 +903,7 @@ exit 0
 }
 
 describe("systemd stop duration", () => {
-  function planted(logBytes?: number) {
+  async function planted(logBytes?: number) {
     const h = tempHome();
     const adb = openAgentDb(join(h.home, "agent.db"));
     const dir = join(h.home, "job-logs");
@@ -922,21 +922,21 @@ describe("systemd stop duration", () => {
       notify: { kind: "lane", name: "builder" }, commandHash: hash, cwdHash: hash,
     });
     if (!accepted.ok) throw new Error(accepted.error);
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     const running = store.started(id);
     if (!running.ok) throw new Error(running.error);
     return { store, sup, id, dir };
   }
 
   it("times a cancel from the unit after the stop, not from the wall clock", async () => {
-    const { store, sup, id } = planted();
+    const { store, sup, id } = await planted();
     const decided = await sup.cancel(id);
     if (!decided.ok) throw new Error(decided.error);
     expect(store.get(id)).toMatchObject({ outcome: "cancelled", durationMs: 1500 });
   });
 
   it("times a cap stop from the unit after the stop, not from the wall clock", async () => {
-    const { store, sup, id, dir } = planted(8);
+    const { store, sup, id, dir } = await planted(8);
     writeFileSync(join(dir, `${id}.log`), "12345678");
     await sup.sweep();
     expect(store.get(id)).toMatchObject({ outcome: "exited", exitCode: null, durationMs: 1500 });
@@ -1026,7 +1026,7 @@ exit 0
       notify: { kind: "lane", name: "builder" }, commandHash: hash, cwdHash: hash,
     });
     if (!accepted.ok) throw new Error(accepted.error);
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     const running = store.started(id);
     if (!running.ok) throw new Error(running.error);
     await sup.sweep();
@@ -1215,7 +1215,7 @@ describe("the cap watch beside the sweep", () => {
   const running = (pid: number) => `printf '%s\\n' LoadState=loaded ActiveState=active SubState=running Result=success ExecMainCode=0 ExecMainStatus=0 MainPID=${pid} RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=0`;
   const ended = (code: number, status: number) => `printf '%s\\n' LoadState=loaded ActiveState=inactive SubState=dead Result=exit-code ExecMainCode=${code} ExecMainStatus=${status} MainPID=0 RemainAfterExit=yes ExecMainStartTimestampMonotonic=1 ExecMainExitTimestampMonotonic=9000000000000000`;
 
-  function plantedCap(systemctl: (home: string) => string, errors: string[] = []) {
+  async function plantedCap(systemctl: (home: string) => string, errors: string[] = []) {
     const h = tempHome();
     const adb = openAgentDb(join(h.home, "agent.db"));
     const dir = join(h.home, "job-logs");
@@ -1235,7 +1235,7 @@ describe("the cap watch beside the sweep", () => {
       notify: { kind: "lane", name: "builder" }, commandHash: hash, cwdHash: hash,
     });
     if (!accepted.ok) throw new Error(accepted.error);
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     const started = store.started(id);
     if (!started.ok) throw new Error(started.error);
     writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");
@@ -1244,7 +1244,7 @@ describe("the cap watch beside the sweep", () => {
 
   it("logs an error the watch could not handle, instead of dropping it", async () => {
     const errors: string[] = [];
-    const { store, sup, cap } = plantedCap(() => `#!/bin/sh\nif [ "$2" = "show" ]; then ${running(1)}; fi\nexit 0\n`, errors);
+    const { store, sup, cap } = await plantedCap(() => `#!/bin/sh\nif [ "$2" = "show" ]; then ${running(1)}; fi\nexit 0\n`, errors);
     // The store's log cap is read only by the watch's own looks (the sweep never reads it), so the watch fails and the
     // sweep itself still works.
     const spy = vi.spyOn(store, "logBytes", "get").mockImplementation(() => { throw new Error("disk I/O error"); });
@@ -1258,7 +1258,7 @@ describe("the cap watch beside the sweep", () => {
   it("a closed supervisor's watch does not settle the job", async () => {
     const gone = spawn("true");
     await new Promise(resolve => gone.on("exit", resolve));
-    const { store, sup, id, cap, home } = plantedCap(home => `#!/bin/sh
+    const { store, sup, id, cap, home } = await plantedCap(home => `#!/bin/sh
 if [ "$2" = "show" ]; then
   if [ -f '${join(home, "shown")}' ]; then touch '${join(home, "looking")}'; sleep 0.4; ${ended(1, 0)}; else touch '${join(home, "shown")}'; ${running(gone.pid ?? 0)}; fi
 fi
@@ -1273,7 +1273,7 @@ exit 0
 
   it("a cancel that signalled the unit during the grace is not recorded as the job's own exit", async () => {
     const holder = spawn("sleep", ["30"], { stdio: "ignore" });
-    const { store, sup, id, cap } = plantedCap(home => `#!/bin/sh
+    const { store, sup, id, cap } = await plantedCap(home => `#!/bin/sh
 if [ "$2" = "kill" ]; then kill -TERM ${holder.pid}; date +%s%N > '${join(home, "killed-at")}'; exit 0; fi
 if [ "$2" = "show" ]; then
   if [ ! -f '${join(home, "killed-at")}' ]; then ${running(holder.pid ?? 0)}; exit 0; fi
@@ -1292,7 +1292,7 @@ exit 0
   });
 
   it("a sweep that finds a watch already running does not wait for it", async () => {
-    const { sup, cap } = plantedCap(home => `#!/bin/sh
+    const { sup, cap } = await plantedCap(home => `#!/bin/sh
 if [ "$2" = "kill" ]; then touch '${join(home, "killed")}'; exit 0; fi
 if [ "$2" = "show" ]; then if [ -f '${join(home, "killed")}' ]; then ${ended(2, 15)}; else ${running(1)}; fi; fi
 exit 0
@@ -1306,7 +1306,7 @@ exit 0
   });
 
   it("a watch that ended undecided leaves its sighting, so the next one does not grant a new grace", async () => {
-    const { store, sup, id, home } = plantedCap(home => `#!/bin/sh
+    const { store, sup, id, home } = await plantedCap(home => `#!/bin/sh
 if [ "$2" = "kill" ]; then
   if [ -f '${join(home, "refused")}' ]; then touch '${join(home, "killed")}'; exit 0; fi
   touch '${join(home, "refused")}'; exit 1

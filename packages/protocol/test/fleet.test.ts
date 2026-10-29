@@ -22,12 +22,12 @@ describe("limits", () => {
   it("are the spec's numbers", () => {
     expect(LIMITS).toMatchObject({
       maxMessageBytes: 512 << 10, maxPayload: 1 << 20, chunkBytes: 256 << 10, maxFileBytes: 25 << 20, maxSendText: 8000, maxMessageText: 100_000, maxKeys: 4096,
-      captureManyMax: 64, captureBytesPerPane: 6 << 10, replayWindow: 256, pingMs: 15_000, agentPingTimeoutMs: 35_000, healthMs: 30_000,
+      captureManyMax: 64, captureBytesPerPane: 6 << 10, replayWindow: 256, pingMs: 15_000, missedPongsMax: 3, agentPingTimeoutMs: 50_000, healthMs: 30_000,
       inventoryPollMs: 2000, instancePongMs: 3000, conflictRetryMs: 5 * 60_000, inventoryWaitMs: 300, bulkQueueMax: 8, eventsBufferBytes: 8 << 20,
       handshakeBurst: 10, handshakeRefillMs: 6000, joinCodeTtlMs: 10 * 60_000, doneKeyTtlMs: 7 * 86_400_000, outboxKeepMs: 86_400_000,
       deadLetterAttempts: 20, subscriberBacklog: 50_000, auditKeepMs: 90 * 86_400_000,
     });
-    expect(LIMITS.agentPingTimeoutMs).toBeGreaterThan(2 * LIMITS.pingMs);    // two pings may be late before the agent gives up
+    expect(LIMITS.agentPingTimeoutMs).toBeGreaterThan(LIMITS.missedPongsMax * LIMITS.pingMs);   // as many pings may be late as the fleet lets a node miss
     expect(CLOSE).toEqual({ badProof: 4401, forbidden: 4403, conflict: 4409, unsupported: 4426 });
   });
   it("a full captureMany and a full bulk chunk each fit one message", () => {

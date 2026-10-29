@@ -2,8 +2,8 @@
 // different one while the old is live makes the fleet ping the old one: a pong refuses the newcomer with 4409 and one
 // alert, no pong within 3 s (LIMITS.instancePongMs) lets it in and terminates the old one (a half-open socket or a hung
 // agent can't lock its node out), and the wait never holds another node. A different one is accepted at once once the
-// old closed or missed its sweep pong. The flap test (spec 9): two instances with one key for 5 minutes. The ping
-// interval runs on fake timers (setInterval only); sockets, the instance check and everything else run for real.
+// old closed or was ended for its missed pongs. The flap test (spec 9): two instances with one key for 5 minutes. The
+// ping interval runs on fake timers (setInterval only); sockets, the instance check and everything else run for real.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { CLOSE, LIMITS } from "@morndo/protocol";
 import type { FleetEvent } from "../src/application/events.ts";
@@ -106,17 +106,23 @@ describe("one live instance per node", () => {
     expect(fleet.connections.liveInstance("pc")?.instanceId).toBe(b.instanceId);
   });
 
-  it("a different instance is accepted once the old one missed its pong: online, stale, offline", async () => {
+  it("a different instance is accepted once the old one missed its pongs: online, stale, offline", async () => {
     vi.useFakeTimers({ toFake: ["setInterval", "clearInterval"] });
     const fleet = await startTestFleet();
     const seen: FleetEvent[] = [];
     fleet.events.subscribe(e => seen.push(e));
     const a = await fleet.joined("pc");
     expect((await a.connect({ autoPong: false })).ok).toBe(true);   // a frozen process: the socket stays, pongs stop
-    vi.advanceTimersByTime(LIMITS.pingMs);                          // ping
+    vi.advanceTimersByTime(LIMITS.pingMs);                          // ping 1
+    await settle();
+    expect(fleet.connections.status("pc")).toBe("online");          // an unanswered ping alone ends nothing (T-532)
+    vi.advanceTimersByTime(LIMITS.pingMs);                          // missed (1), ping 2
     await settle();
     expect(fleet.connections.status("pc")).toBe("online");
-    vi.advanceTimersByTime(LIMITS.pingMs);                          // no pong: stale, terminated
+    vi.advanceTimersByTime(LIMITS.pingMs);                          // missed (2), ping 3
+    await settle();
+    expect(fleet.connections.status("pc")).toBe("online");
+    vi.advanceTimersByTime(LIMITS.pingMs);                          // missed (3): stale, terminated
     expect((await a.closed).code).toBe(1006);
     // The agent may see its socket close before the fleet's close handler runs: wait for the fleet's view.
     await until(() => statuses(seen, "pc").length === 3);

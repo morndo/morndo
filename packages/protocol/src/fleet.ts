@@ -29,9 +29,9 @@ export const LIMITS = {
   maxMessageText: 100_000,
   // streaming: hook events unacknowledged in flight
   replayWindow: 256,
-  // timing: pings, liveness (the agent's timeout is two missed pings plus slack), health and inventory, and what an
-  // agent keeps back from a deadline
-  pingMs: 15_000, agentPingTimeoutMs: 35_000, healthMs: 30_000, inventoryPollMs: 2000, deadlineMarginMs: 250,
+  // timing: pings, how many pongs in a row a connection may miss before the fleet ends it, the agent's own timeout
+  // (three missed pings plus slack), health and inventory, and what an agent keeps back from a deadline
+  pingMs: 15_000, missedPongsMax: 3, agentPingTimeoutMs: 50_000, healthMs: 30_000, inventoryPollMs: 2000, deadlineMarginMs: 250,
   // instances (§5.2): how long the fleet waits for the live connection's pong before it admits another instance, and how
   // often a refused (4409) agent tries again (±20 % jitter); how long the hub's listing waits for one node's inventory
   instancePongMs: 3000, conflictRetryMs: 300_000, inventoryWaitMs: 300,

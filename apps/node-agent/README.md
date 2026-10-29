@@ -32,7 +32,7 @@ How it reacts to the fleet's closes:
 | 4426 (unsupported protocol) | keeps its lanes running, tries again hourly |
 | anything else (1013 too many handshakes from this address included) | backs off from 1 s up to 60 s, with full jitter |
 
-It also drops a fleet connection that sent no ping for 35 s (the fleet pings every 15 s).
+It also drops a fleet connection that sent no ping for 50 s (the fleet pings every 15 s).
 
 ## Files
 
