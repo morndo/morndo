@@ -233,13 +233,26 @@ describe("a replay sends only what its sync covers (T-532, review round 2)", () 
   it("stops trying once its welcome is no longer current, and sends nothing (T-581)", async () => {
     let current = true;
     let syncs = 0;
+    let retries = 0;
     const sent: string[] = [];
     await replayDurable({
       read: () => ["a"], unchanged: () => true,
-      sync: async () => { syncs += 1; current = false; throw new Error("EIO"); },
-      current: () => current, retryMs: 10, send: id => { sent.push(id); },
+      sync: async () => { syncs += 1; current = false; throw new Error("EIO"); },     // a later welcome came while it ran
+      current: () => current, retryMs: 10, onRetry: () => { retries += 1; }, send: id => { sent.push(id); },
     });
     expect(syncs).toBe(1);
+    expect(retries).toBe(0);                                   // no wait, and no word of one
     expect(sent).toEqual([]);
+  });
+
+  it("does not try again when its welcome ended during the wait (T-581)", async () => {
+    let current = true;
+    let syncs = 0;
+    await replayDurable({
+      read: () => ["a"], unchanged: () => true,
+      sync: async () => { syncs += 1; throw new Error("EIO"); },
+      current: () => current, retryMs: 10, onRetry: () => { current = false; }, send: () => {},
+    });
+    expect(syncs).toBe(1);
   });
 });

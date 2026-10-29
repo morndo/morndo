@@ -9,8 +9,10 @@
 // `onFail` once: the agent then checkpoints on its own connection again, slower but bounded, rather than let the WAL
 // grow without end. The worker is stopped as it hands back, so it never checkpoints beside the agent's connection
 // (T-571); `restartMs` after it has exited a new one starts, and once that one has made progress `onResume` gives the
-// checkpoints back to it. A new worker that fails before then hands back nothing more, and the next waits `restartMs`
-// again. One worker at a time: a worker stuck in a sync stops only once the sync returns (terminate() stops its
+// checkpoints back to it. Progress is a checkpoint that ran: a reply that carries an error is none (T-581). A new
+// worker that fails before then hands back nothing more, and one that cannot start at all is tried again too; each
+// cool-down until a worker makes progress is twice the last, up to `CHECKPOINT_RESTART_MAX_MS` (T-581). One worker at a
+// time: a worker stuck in a sync stops only once the sync returns (terminate() stops its
 // JavaScript, https://nodejs.org/docs/latest-v24.x/api/worker_threads.html, read 2026-10-29), and none starts beside
 // it. stop() waits `stopWaitMs` at most: a worker stuck in a sync cannot be stopped from here, and the process's exit
 // takes it.
@@ -25,6 +27,7 @@ export type Checkpointer = { now(): Promise<CheckpointResult>; stop(): Promise<v
 export const CHECKPOINT_EVERY_MS = 10_000;
 export const CHECKPOINT_STUCK_MS = 120_000;
 export const CHECKPOINT_RESTART_MS = 300_000;
+export const CHECKPOINT_RESTART_MAX_MS = 3_600_000;
 export const CHECKPOINT_STOP_WAIT_MS = 2000;
 
 // The worker's file beside this one: .ts when the agent runs from its sources, .js in the compiled release.
@@ -35,26 +38,50 @@ type Waiting = Map<number, { resolve: (r: CheckpointResult) => void; reject: (e:
 export type CheckpointerOptions = {
   everyMs?: number; stuckMs?: number; restartMs?: number; stopWaitMs?: number; log?: Pick<Logger, "warn">;
   onFail?: () => void; onResume?: () => void;
-  test?: { stallMs?: number };                             // the first worker blocks in its first checkpoint, as in a stuck disk
+  // stallMs: the first worker blocks in its first checkpoint, as in a stuck disk. failStarts: that many restarts throw
+  // before a worker is made. failCheckpoints: every checkpoint of every worker throws.
+  test?: { stallMs?: number; failStarts?: number; failCheckpoints?: boolean };
 };
 
 export function startCheckpointer(path: string, o: CheckpointerOptions = {}): Checkpointer {
   const everyMs = o.everyMs ?? CHECKPOINT_EVERY_MS;
   const stuckMs = o.stuckMs ?? CHECKPOINT_STUCK_MS;
   const restartMs = o.restartMs ?? CHECKPOINT_RESTART_MS;
+  const failing = o.test?.failCheckpoints === true;
+  let failStarts = o.test?.failStarts ?? 0;
   let worker: Worker | null = null;                         // the one in use; null while none is
+  let disarm = () => {};                                    // ends the progress deadline of the one in use
   let waiting: Waiting = new Map();
   let next = 0;
   let stopping = false;
   let inCharge = true;                                      // the agent's connection runs no checkpoint (db/open.ts)
   let restart: NodeJS.Timeout | undefined;
+  let coolDown = restartMs;                                 // the next one: twice the last until a worker makes progress
   const failAll = (w: Waiting, e: Error) => {
     for (const x of w.values()) x.reject(e);
     w.clear();
   };
 
+  // The next worker after a cool-down. A start that throws is tried again after the next, longer, cool-down.
+  const restartLater = () => {
+    if (stopping) return;
+    const ms = coolDown;
+    coolDown = Math.min(coolDown * 2, CHECKPOINT_RESTART_MAX_MS);
+    restart = setTimeout(() => {
+      if (stopping) return;
+      try {
+        if (failStarts > 0) { failStarts -= 1; throw new Error("the test's worker could not start"); }
+        start(0);
+      } catch (err) {
+        o.log?.warn(`no new checkpoint worker could start; the agent goes on checkpointing on its own connection, and tries again in ${Math.round(coolDown / 1000)} s`, err);
+        restartLater();
+      }
+    }, ms);
+    restart.unref();
+  };
+
   const start = (stallMs: number) => {
-    const w = new Worker(workerUrl, { workerData: { path, everyMs, stallMs } });
+    const w = new Worker(workerUrl, { workerData: { path, everyMs, stallMs, failing } });
     const mine: Waiting = new Map();
     worker = w;
     waiting = mine;
@@ -64,9 +91,9 @@ export function startCheckpointer(path: string, o: CheckpointerOptions = {}): Ch
     const exited = new Promise<void>(resolve => { w.once("exit", () => { resolve(); }); });
     // Hand back (once per worker), stop this worker, and start the next once it has exited and the cool-down is over.
     const fail = (why: string, e?: unknown) => {
+      clearInterval(watchdog);
       if (failed || stopping) return;
       failed = true;
-      clearInterval(watchdog);
       if (worker === w) worker = null;
       failAll(mine, new Error(`the checkpoint worker is stopped (${why})`));
       if (inCharge) {
@@ -78,29 +105,26 @@ export function startCheckpointer(path: string, o: CheckpointerOptions = {}): Ch
       }
       w.unref();                                           // a worker stuck in a sync: the process's exit takes it
       void w.terminate().catch(() => undefined);
-      void exited.then(() => {
-        if (stopping) return;
-        restart = setTimeout(() => {
-          if (stopping) return;
-          try { start(0); } catch (err) { o.log?.warn("no new checkpoint worker could start; the agent goes on checkpointing on its own connection", err); }
-        }, restartMs);
-        restart.unref();
-      });
+      void exited.then(restartLater);
     };
     // The progress deadline: checked as often as a checkpoint is due, and never keeping the process alive.
     const watchdog = setInterval(() => {
       if (Date.now() - progressAt > stuckMs) fail(`the checkpoint worker made no progress for ${Math.round(stuckMs / 1000)} s`);
     }, Math.min(everyMs, stuckMs));
     watchdog.unref();
+    disarm = () => { clearInterval(watchdog); };
     w.on("message", (m: Reply) => {
       if (failed) return;
       if ("warn" in m) { o.log?.warn(m.warn); return; }
-      progressAt = Date.now();
-      if (!inCharge) {                                     // a new worker that made progress takes the checkpoints back
-        inCharge = true;
-        o.onResume?.();
+      if ("beat" in m) {                                   // a checkpoint ran (checkpoint-worker.ts)
+        progressAt = Date.now();
+        coolDown = restartMs;
+        if (!inCharge) {                                   // a new worker that made progress takes the checkpoints back
+          inCharge = true;
+          o.onResume?.();
+        }
+        return;
       }
-      if ("beat" in m) return;
       const x = mine.get(m.id);
       if (!x) return;
       mine.delete(m.id);
@@ -130,6 +154,7 @@ export function startCheckpointer(path: string, o: CheckpointerOptions = {}): Ch
       if (stopping) return;
       stopping = true;
       clearTimeout(restart);
+      disarm();
       const w = worker;
       worker = null;
       if (!w) return;
