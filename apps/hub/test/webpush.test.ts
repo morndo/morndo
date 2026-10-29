@@ -4,7 +4,7 @@
 // the known push services are accepted; and the sender posts what RFC 8030 says. No real network: a local server.
 import { createDecipheriv, createECDH, hkdfSync } from "node:crypto";
 import { chmodSync, mkdtempSync, rmSync, statSync } from "node:fs";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -12,6 +12,25 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { isPushContact, loadConfig } from "../src/config.ts";
 import { UNUSABLE_KEY, encryptPayload, isP256Point, isPushService, loadOrCreateVapid, pushSender, verifyVapidJwt } from "../src/adapters/webpush.ts";
+
+// The hub command is waited for until it exits by itself: how long a cold start of the whole hub takes depends on the load
+// of the box (about 1 s idle, 10 to 30 s with the load average above 70), so no time is a pass criterion. The guard only ends
+// a command that never exits (a hub that began serving would not), with what it had printed.
+const HUB_EXIT_GUARD_MS = 120_000;
+function runToExit(main: string, command: string, env: NodeJS.ProcessEnv): Promise<{ status: number | null; stdout: string; stderr: string }> {
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, ["--no-warnings", main, command], { env, stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.on("data", (b: Buffer) => { stdout += b.toString(); });
+    child.stderr.on("data", (b: Buffer) => { stderr += b.toString(); });
+    const guard = setTimeout(() => {
+      stderr += `\n(the test ended it: no exit within ${HUB_EXIT_GUARD_MS / 1000} s)`;
+      child.kill("SIGKILL");
+    }, HUB_EXIT_GUARD_MS);
+    child.on("close", status => { clearTimeout(guard); resolve({ status, stdout, stderr }); });
+  });
+}
 
 const u = (s: string) => Buffer.from(s.replace(/\s+/g, ""), "base64url");
 let dir: string;
@@ -112,17 +131,17 @@ describe("RFC 8292 VAPID", () => {
       expect(isPushContact(ok), ok).toBe(true);
     }
   });
-  it("the hub won't serve with such a contact: one sentence, exit 78, and the console commands still work (review L6)", () => {
+  it("the hub won't serve with such a contact: one sentence, exit 78, and the console commands still work (review L6)", async () => {
     const main = join(import.meta.dirname, "../src/main.ts");
     const env = { ...process.env, MORNDO_HOME: dir, MORNDO_TMUX_SOCKET: "morndo-test-none", MORNDO_PUSH_CONTACT: "mailto:me@box.local" };
     expect(loadConfig(env).pushContact).toBe("mailto:me@box.local");                    // reading the settings never throws for it
-    const serve = spawnSync(process.execPath, ["--no-warnings", main, "serve"], { env, encoding: "utf8", timeout: 20_000 });
+    const serve = await runToExit(main, "serve", env);
     expect(serve.status).toBe(78);                                                       // EX_CONFIG, as for a database from a newer hub
     expect(serve.stderr).toMatch(/MORNDO_PUSH_CONTACT.*https URL or a mailto address/s);
     expect(serve.stderr).not.toMatch(/\n\s+at /);                                       // a message, not a stack trace
-    const devices = spawnSync(process.execPath, ["--no-warnings", main, "devices"], { env, encoding: "utf8", timeout: 20_000 });
-    expect(devices.status).toBe(0);
-  });
+    const devices = await runToExit(main, "devices", env);
+    expect(devices.status, devices.stderr).toBe(0);
+  }, HUB_EXIT_GUARD_MS * 2 + 30_000);
   it("a key file someone else made is read, not replaced, and made private (review L8)", () => {
     const first = loadOrCreateVapid(dir, "mailto:push@morndo.invalid");
     chmodSync(join(dir, "push-vapid.pem"), 0o644);
