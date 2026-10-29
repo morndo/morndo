@@ -477,7 +477,7 @@ export const CONTROLS: Control[] = [
   { id: "durability-synced-not-nested", task: "durability", file: "apps/node-agent/src/db/wal-sync.ts",
     find: "  if (db.inTransaction) throw new Error(\"durably() runs its own transaction; it can't be nested in another\");\n",
     replace: "",
-    run: ["apps/node-agent/test/done-keys.test.ts"], expect: "can't be nested" },
+    run: ["apps/node-agent/test/done-keys.test.ts"], expect: "instead of rejecting" },
   { id: "durability-guard-network", task: "durability", file: "packages/service-kit/src/local-disk.ts",
     find: "  if (name !== undefined) {",
     replace: "  if (name !== undefined && false) {",
