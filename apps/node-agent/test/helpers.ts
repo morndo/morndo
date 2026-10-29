@@ -28,3 +28,7 @@ export function captureLog(): { log: Logger; lines: string[] } {
   const lines: string[] = [];
   return { log: createLogger({ level: "debug", sink: line => { lines.push(line); } }), lines };
 }
+
+// Keeps writing, and stops itself at 256 KiB, under the 1 MiB per-job cap the pool tests set (their pool budget is 32).
+// argv[1] is a file it writes its pid to, so the test knows it is running.
+export const POOL_WRITER = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); let n = 0; setInterval(() => { if (n >= 262144) return; require('node:fs').writeSync(1, b); n += b.length; }, 20);";

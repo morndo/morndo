@@ -12,7 +12,7 @@ import { openJobRuntime } from "../src/ops/job-runtime.ts";
 import { JobSupervisor, openJobSupervisor, type JobStart } from "../src/ops/job-supervisor.ts";
 import { CAP_GRACE_MS } from "../src/ops/job-cap.ts";
 import { agentPaths } from "../src/paths.ts";
-import { until, tempHome, wait } from "./helpers.ts";
+import { POOL_WRITER, until, tempHome, wait } from "./helpers.ts";
 
 const jobId = (): string => `j${randomBytes(4).toString("hex")}`;
 
@@ -669,9 +669,6 @@ exit 0
 });
 
 const FILL = "require('node:fs').writeSync(1, 'KEEP'); const b = Buffer.alloc(64, 97); while (true) require('node:fs').writeSync(1, b);";
-
-// Keeps writing, and stops itself at 256 KiB, under the 1 MiB per-job cap the pool test sets. The pool budget is 32.
-const POOL_WRITER = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); let n = 0; setInterval(() => { if (n >= 262144) return; require('node:fs').writeSync(1, b); n += b.length; }, 20);";
 
 describe.skipIf(!bus.ok)("systemd log cap", () => {
   it("stops a job once its log reaches the per-job cap and keeps the bytes already written", async () => {
