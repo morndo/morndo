@@ -39,7 +39,7 @@ STATUS: DONE | STATUS: BLOCKED | STATUS: NEEDS DECISION | STATUS: WAITING <on wh
 - **The relay asks once.** When a `Stop` reaches the node's relay for a lane whose answer has no status line and no background work running, and Claude Code says this Stop was not already caused by a hook (`stop_hook_active`), the relay answers `{"decision": "block", "reason": …}`: Claude writes a status line and stops again. It never asks twice for one turn, so Claude Code's limit (it overrides a Stop hook after eight blocks in a row) is never reached. The asked Stop is not a turn end: it makes no lane event. It is still kept, marked `statusAsked`, because a subscriber that shows a lane's answers (a chat bridge) must not lose the answer it carried.
 - **Off for the orchestrator.** `statusContract.exempt` (default `["manager"]`) names lanes that are never asked. `statusContract.mode: "off"` turns it off for a node.
 - **A WAITING with nothing to wake it** is asked for a waker instead, under the same rules: W1 in [`docs/design/agent-board/README.md`](../agent-board/README.md) §5.
-- **WAITING is a lease.** `for <N> min` (at most 24 h) sets its deadline; without one, the fleet's default (30 min). A `finished` event carries `status: "waiting"`, `waitingOn` and `until`.
+- **WAITING is a lease.** The line's duration — after `for`, a comma or a parenthesis, with a qualifier (`about`, `~`, `up to`, …), a range (`5–10 min`, the upper end), a trailing `+`, a decimal (`1.5 h`) — sets its deadline at 1.5 times itself plus 10 minutes (lanes under-declare: p90 of actual/declared 1.05, p95 1.31), at most 24 h; without one, the fleet's default (30 min). A `finished` event carries `status: "waiting"`, `waitingOn` and `until`.
 
 ### 3.2 The fleet watches every lane's last turn (lane watch)
 
@@ -47,12 +47,16 @@ For each lane (node and window), the fleet keeps its last turn end: status, back
 
 | Last turn | Deadline |
 |---|---|
-| WAITING | its `until` |
-| no status, background work running or a wake-up scheduled | turn end + `laneWatch.waitingMin` (30) |
+| WAITING | its `until`: the line's own duration at 1.5x plus 10 min, else `laneWatch.waitingMin` |
+| no status, background work running or a wake-up scheduled | turn end + `laneWatch.waitingMin` (30); a wake-up at least until its next fire time + 5 min, when the node's UTC offset is known |
 | no status, nothing running | turn end + `laneWatch.noStatusMin` (15) |
 | DONE, BLOCKED, NEEDS DECISION | none: it is the orchestrator's to act on |
 
-Past the deadline with no activity, the fleet makes one lane event `stale` (`reason`: `waiting` or `no_status`, `waitingOn`, `since`, `stalls`) for that turn, delivered to the orchestrator with the others, and, with `laneWatch.nudge` (on by default), one delivery to the lane itself: what it was waiting on, since when, and the status line to end with. `stalls` counts the stale events since the lane last ended DONE, BLOCKED or NEEDS DECISION: two or three in a row is a lane to re-plan, not to nudge again (the Magentic-One rule). The orchestrator and lanes matching `laneEvents.ignore` are not watched. The watch lives in memory and is rebuilt from the stored lane events at start.
+A turn that ended with background work is not judged past its deadline while its window's session shows `shell` — the lane's own shell is running, and Claude Code wakes the lane when it ends — and for 2 min (`SHELL_GRACE_MS`) after the shell stopped, never past 6 h (`BACKGROUND_LIVE_MAX_MS`) from the turn end.
+
+Past the deadline with no activity, the fleet first nudges the lane (with `laneWatch.nudge`, on by default): one delivery to the lane itself, what it was waiting on, since when, and the status line to end with. Its `stale` lane event (`reason`: `waiting` or `no_status`, `waitingOn`, `since`, `stalls`) is made for the orchestrator only when the lane needs it: no answer to the nudge within 10 min (`PROBE_ANSWER_MS`), a third expiry since the lane last settled, or a lane that cannot be nudged. `stalls` counts the expiries since the lane last ended DONE, BLOCKED or NEEDS DECISION, the nudged ones included: two or three in a row is a lane to re-plan, not to nudge again (the Magentic-One rule). A probe is not stored: after a restart the deadline runs again in full. The orchestrator and lanes matching `laneEvents.ignore` are not watched. The watch lives in memory and is rebuilt from the stored lane events at start.
+
+A session that went busy and idle again with no turn end is a lost turn end only when the watch took a hook from that window in that busy span: Claude Code's idle compaction runs inside the session and fires no hook, so a busy span with no hook is not a turn to lose (9 of one week's 74 stale events were a compaction read as a lost turn end). A real one is flagged as `stale` with reason `no_turn_end` and never nudged.
 
 ### 3.3 Lanes start on a Role's engine (node, fleet)
 

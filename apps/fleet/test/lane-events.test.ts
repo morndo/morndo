@@ -72,9 +72,9 @@ describe("lane events from hooks", () => {
     expect(firstLineOf(`${"x".repeat(250)}\nsecond`)).toHaveLength(200);
   });
 
-  it("a WAITING line: what it waits on, and until when: its own `for`, else laneWatch.waitingMin (reliable lanes §3.1)", () => {
+  it("a WAITING line: what it waits on, and until when: its own `for`'s lease (waitLeaseMs), else laneWatch.waitingMin", () => {
     const waiting = (text: string) => laneEventOf(hook("/hook/stop", { session_id: SID, hook_event_name: "Stop", last_assistant_message: text }), RULES);
-    expect(waiting("STATUS: WAITING on CI for 20 min")).toEqual({ ...base, event: "finished", status: "waiting", firstLine: "STATUS: WAITING on CI for 20 min", bg: 0, crons: 0, waitingOn: "CI", until: AT + 20 * 60_000 });
+    expect(waiting("STATUS: WAITING on CI for 20 min")).toEqual({ ...base, event: "finished", status: "waiting", firstLine: "STATUS: WAITING on CI for 20 min", bg: 0, crons: 0, waitingOn: "CI", until: AT + 40 * 60_000 });
     expect(waiting("STATUS: WAITING")).toMatchObject({ status: "waiting", until: AT + 30 * 60_000 });
     expect(waiting("STATUS: WAITING")?.waitingOn).toBeUndefined();
     expect(statusOf("STATUS: WAITING on review")).toBe("waiting");

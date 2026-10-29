@@ -185,6 +185,8 @@ export async function startFleet(config: FleetConfig, o: FleetOptions = {}): Pro
     },
     online: node => connections.status(node) === "online",
     nudgeTarget: (node, window) => sessions.get(node)?.get(window) ?? null,
+    // A wake-up's fire time is read in the node's own clock: its latest health says the UTC offset (the source Runs read).
+    tzOffsetOf: node => connections.latest(node).health?.tzOffsetMin ?? null,
     ...(o.laneWatchSweepMs === undefined ? {} : { sweepMs: o.laneWatchSweepMs }),
   });
   events.subscribe(e => { if (e.t === "inventory") laneWatch.panes(e.node, (e.body as { panes: Pane[] }).panes); });

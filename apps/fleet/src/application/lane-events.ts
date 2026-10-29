@@ -2,7 +2,7 @@
 // node and window from the hook stream:
 //   finished      /hook/stop (not one the relay asked for a status line: statusAsked): status (the status line,
 //                 lane-status.ts, on the answer's first line), firstLine, bg, crons;
-//                 a WAITING line adds waitingOn and until (its `for`, else laneWatch.waitingMin: reliable lanes §3.1)
+//                 a WAITING line adds waitingOn and until (its duration's lease, waitLeaseMs, else laneWatch.waitingMin)
 //   stale         made by the lane watch (lane-watch.ts), not by a hook: a turn past its deadline with nothing since
 //   stop_failure  /hook/failure: error
 //   needs_input   /lane (the node saw the session's status turn `waiting`): question
@@ -28,7 +28,7 @@
 // StopFailure: error_type), read 2026-10-08; a background task's id, type, status, description (up to 1000 characters)
 // and, for a shell task, command; a cron's id, schedule, recurring and prompt (Stop input), read 2026-10-20.
 import { ACCOUNT_NAME, limitKindOfError, pendingOf } from "@morndo/domain";
-import { LIMITS, firstLineOf as firstLine, redactKeyMaterial, statusLineOf, type HookEvent, type LaneEvent, type UsageTapFailure } from "@morndo/protocol";
+import { LIMITS, firstLineOf as firstLine, redactKeyMaterial, statusLineOf, waitLeaseMs, type HookEvent, type LaneEvent, type UsageTapFailure } from "@morndo/protocol";
 import type { LaneEventsConfig } from "../config.ts";
 import type { LaneEventDraft, LaneEventsStore } from "../adapters/lane-events-store.ts";
 import type { Logger } from "../adapters/log.ts";
@@ -90,7 +90,11 @@ export function laneEventOf(e: HookEvent, rules: LaneEventRules): LaneEventDraft
     if (b.statusAsked === true) return null;
     const first = firstLineOf(textOf(b.last_assistant_message ?? b.text).trim());
     const line = statusLineOf(first);
-    const waiting = line?.status === "waiting" ? { ...(line.waitingOn ? { waitingOn: line.waitingOn } : {}), until: e.at + (line.forMs ?? rules.waitMs) } : {};
+    // A WAITING line's lease is its own duration with the protocol's grace on top (waitLeaseMs), so a lane that
+    // under-declared is not flagged before its own next turn; a line without one keeps the fleet's waitMs.
+    const waiting = line?.status === "waiting"
+      ? { ...(line.waitingOn ? { waitingOn: line.waitingOn } : {}), until: e.at + (line.forMs !== undefined ? waitLeaseMs(line.forMs) : rules.waitMs) }
+      : {};
     const tasks = b.background_tasks ?? b.background, crons = b.session_crons ?? b.crons;
     const pending = pendingOf(tasks, crons, redactKeyMaterial);
     return {
