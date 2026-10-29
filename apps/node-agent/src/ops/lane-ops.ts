@@ -61,7 +61,7 @@ export type LaneDeps = {
   stamp: (socket: string | null) => Promise<string | null>;
   tmux: Pick<Tmux, "capture" | "pasteLiteral" | "sendKeyNames">;
   send: (req: Request) => Promise<Reply>;                                          // the agent's executor (pane.send, pane.keys)
-  deliver: (a: OpArgs["lane.deliver"]) => OpResult["lane.deliver"] | OpError;    // the deliverer's enqueue
+  deliver: (a: OpArgs["lane.deliver"]) => Promise<OpResult["lane.deliver"] | OpError>;    // the deliverer's enqueue
   waits?: Partial<LaneWaits>;
   host?: (opts: { socket: string | null }) => Promise<unknown>;                   // starts the tmux server outside this service
   engines?: EngineLayer;                                                          // the engine layer's CLI (lane-engine.ts)
@@ -250,7 +250,7 @@ export function laneOps(d: LaneDeps): Pick<OpTable, "lane.start" | "lane.stop"> 
       await d.inventory.refresh();                           // so this answer's invVersion already lists the new lane
       let prompt: string | undefined;
       if (a.prompt !== undefined && firstPrompt !== undefined) {
-        const r = d.deliver({ id: firstPrompt, target: { workerId }, text: a.prompt });
+        const r = await d.deliver({ id: firstPrompt, target: { workerId }, text: a.prompt });
         if ("code" in r) return fail("internal", `the lane started, but its first prompt was not queued (${r.code}: ${r.message})`);
         prompt = r.delivery.id;
       }

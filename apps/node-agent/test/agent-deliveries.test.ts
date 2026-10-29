@@ -37,13 +37,13 @@ describe("ev.delivery (spec §4.4)", () => {
     const clock = { now: T - 2 * 3_600_000 };
     const store = new DeliveryStore(adb.db, () => clock.now, "pc");
     const api = { lane: "api", sticky: false } as const;
-    store.store({ id: "hub:old", target: api, text: "old", ttlMs: 60_000, boundSession: null });
+    await store.store({ id: "hub:old", target: api, text: "old", ttlMs: 60_000, boundSession: null });
     store.update("hub:old", { state: "given_up", why: "expired" });                 // final two hours ago
     clock.now = T - 30 * 60_000;
-    store.store({ id: "hub:recent", target: api, text: "recent", ttlMs: 60_000, boundSession: null });
+    await store.store({ id: "hub:recent", target: api, text: "recent", ttlMs: 60_000, boundSession: null });
     store.update("hub:recent", { state: "delivered", deliveredAt: clock.now });      // final half an hour ago
     clock.now = T;
-    store.store({ id: "hub:open", target: { lane: "manager", sticky: true }, text: "for the manager", ttlMs: 86_400_000, boundSession: null });
+    await store.store({ id: "hub:open", target: { lane: "manager", sticky: true }, text: "for the manager", ttlMs: 86_400_000, boundSession: null });
     adb.close();
     const { agent } = await runAgent(config);
     stops.push(() => agent.stop());

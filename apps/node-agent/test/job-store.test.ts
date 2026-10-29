@@ -1,10 +1,11 @@
-// The node store for background jobs (ADR-0017, design §3, §5, §12 step 2). The terminal row is committed
-// synced before any notice is handed off; logs stay on this node, capped, and leave with the row after 7 days.
+// The node store for background jobs (ADR-0017, design §3, §5, §12 step 2). The terminal row is committed and its
+// WAL synced before any notice is handed off; logs stay on this node, capped, and leave with the row after 7 days.
 import { chmodSync, closeSync, constants, existsSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { NOTICE_MAX, noticeIdOf, type FinishEvent, type Job, type StartBody } from "@morndo/domain";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
+import type { WalSync } from "../src/db/wal-sync.ts";
 import { jobTick } from "../src/ops/job-runtime.ts";
 import { JOB_KEEP_MS, JOB_LOG_BUDGET, JOB_LOG_BYTES, JobStore, type NoticeHandoff } from "../src/ops/job-store.ts";
 import { tempHome } from "./helpers.ts";
@@ -25,7 +26,7 @@ const EXIT = { outcome: "exited", exitCode: 0, durationMs: 1500 } satisfies Fini
 const open: { adb: AgentDb; cleanup: () => void }[] = [];
 afterEach(() => { for (const o of open.splice(0)) { o.adb.close(); o.cleanup(); } });
 
-function storeOn(now: () => number = () => AT, opts: { logBytes?: number; budget?: number; onNotice?: (n: NoticeHandoff) => void; onJob?: (job: Job, tail: string) => void } = {}) {
+function storeOn(now: () => number = () => AT, opts: { logBytes?: number; budget?: number; walSync?: WalSync; onNotice?: (n: NoticeHandoff) => void; onJob?: (job: Job, tail: string) => void } = {}) {
   const h = tempHome();
   const adb = openAgentDb(join(h.home, "agent.db"));
   const dir = join(h.home, "job-logs");
@@ -51,59 +52,59 @@ describe("jobs table", () => {
     expect(statSync(join(store.dir, "job-1.log")).mode & 0o777).toBe(0o600);
   });
 
-  it("leaves a promoted job starting until the process exists, and only then records running", () => {
+  it("leaves a promoted job starting until the process exists, and only then records running", async () => {
     const { store } = storeOn();
     value(store.accept(body()));
     value(store.accept(body({ id: "job-2" })));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.get("job-1")).toMatchObject({ state: "starting", startedAt: null });
     expect(store.get("job-2")).toMatchObject({ state: "queued", position: 1, reason: "class" });
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.get("job-2")).toMatchObject({ state: "queued", position: 1, reason: "class" });
     expect(value(store.started("job-1"))).toMatchObject({ state: "running", startedAt: AT });
     expect(store.get("job-1")?.startedAt).toBe(AT);
-    value(store.settle("job-1", EXIT));
-    store.applySchedule({ default: 1 }, "off");
+    value(await store.settle("job-1", EXIT));
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.get("job-2")).toMatchObject({ state: "starting", startedAt: null });
-    const lost = value(store.settle("job-2", { outcome: "lost", at: AT + 5_000 }));
+    const lost = value(await store.settle("job-2", { outcome: "lost", at: AT + 5_000 }));
     expect(lost.job).toMatchObject({ state: "lost", outcome: "lost", durationMs: 0, exitCode: null });
     expect(lost.text).toContain("lost");
   });
 
-  it("rejects a running job that has no start time", () => {
+  it("rejects a running job that has no start time", async () => {
     const { store, adb } = storeOn();
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     expect(() => adb.db.exec("UPDATE jobs SET started_at = NULL WHERE id = 'job-1'")).toThrow(/CHECK/);
     expect(store.get("job-1")).toMatchObject({ state: "running", startedAt: AT });
   });
 
-  it("writes a class the policy does not list as terminal refused, and notices it", () => {
+  it("writes a class the policy does not list as terminal refused, and notices it", async () => {
     const handed: NoticeHandoff[] = [];
     const { store } = storeOn(() => AT, { onNotice: n => { handed.push(n); } });
     value(store.accept(body({ id: "job-x", jobClass: "gpu" })));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.get("job-x")).toMatchObject({ state: "refused", outcome: "refused", exitCode: null, durationMs: 0, noticeId: noticeIdOf("job-x") });
     expect(store.list().map(j => j.id)).toContain("job-x");
     expect(handed.map(n => n.noticeId)).toEqual([noticeIdOf("job-x")]);
     expect(handed[0]?.text).toContain("refused");
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(handed.map(n => n.noticeId)).toEqual([noticeIdOf("job-x")]);
   });
 
-  it("records a start that never created a process, from starting, with no start time", () => {
+  it("records a start that never created a process, from starting, with no start time", async () => {
     const { store } = storeOn();
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
-    const h = value(store.settle("job-1", { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }));
+    await store.applySchedule({ default: 1 }, "off");
+    const h = value(await store.settle("job-1", { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }));
     expect(h.job).toMatchObject({ state: "exited", error: "did_not_start", exitCode: null, durationMs: 0, startedAt: null });
     expect(h.text).toContain("did_not_start");
   });
 });
 
 describe("a lane's open jobs (W1, the relay's waker ask)", () => {
-  it("counts the queued, starting and running jobs a lane started or that notify it, and no others", () => {
+  it("counts the queued, starting and running jobs a lane started or that notify it, and no others", async () => {
     const { store } = storeOn();
     expect(store.openFor("builder")).toBe(0);
     value(store.accept(body({ id: "own", notify: { kind: "fleet" } })));                       // started by builder
@@ -112,14 +113,14 @@ describe("a lane's open jobs (W1, the relay's waker ask)", () => {
     expect(store.openFor("builder")).toBe(2);
     expect(store.openFor("alpha")).toBe(2);
     expect(store.openFor("beta")).toBe(0);
-    store.applySchedule({ default: 3 }, "off");
+    await store.applySchedule({ default: 3 }, "off");
     expect(store.get("own")?.state).toBe("starting");
     expect(store.openFor("builder")).toBe(2);
     value(store.started("own"));
     expect(store.openFor("builder")).toBe(2);                                                    // running
-    value(store.settle("own", EXIT));
+    value(await store.settle("own", EXIT));
     expect(store.openFor("builder")).toBe(1);                                                    // a terminal job is no waker
-    value(store.settle("to-builder", { outcome: "lost", at: AT + 5_000 }));
+    value(await store.settle("to-builder", { outcome: "lost", at: AT + 5_000 }));
     expect(store.openFor("builder")).toBe(0);
     expect(store.openFor("alpha")).toBe(1);
   });
@@ -188,13 +189,13 @@ describe("log file", () => {
 });
 
 describe("log caps", () => {
-  it("reports a cap only when a running job has reached it", () => {
+  it("reports a cap only when a running job has reached it", async () => {
     const { store } = storeOn(() => AT, { logBytes: 8 });
     value(store.accept(body()));
     writeFileSync(join(store.dir, "job-1.log"), "12345678");
     expect(store.watch("job-1")).toBeNull();
     expect(store.get("job-1")).toMatchObject({ state: "queued", outcome: null });
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.watch("job-1")).toBeNull();
     expect(store.get("job-1")).toMatchObject({ state: "starting", outcome: null });
     value(store.started("job-1"));
@@ -206,11 +207,11 @@ describe("log caps", () => {
     expect(store.append("job-1", Buffer.from("MORE"))).toEqual({ written: 0, signal: null });
     expect(store.get("job-1")).toMatchObject({ state: "running", outcome: null });
   });
-  it("reports the per-job cap before a full pool, and a shorter log as truncated", () => {
+  it("reports the per-job cap before a full pool, and a shorter log as truncated", async () => {
     const { store, dir } = storeOn(() => AT, { logBytes: 8, budget: 8 });
     value(store.accept(body()));
     value(store.accept(body({ id: "job-2" })));
-    store.applySchedule({ default: 2 }, "off");
+    await store.applySchedule({ default: 2 }, "off");
     value(store.started("job-1"));
     value(store.started("job-2"));
     writeFileSync(join(dir, "job-1.log"), "12345678");
@@ -219,11 +220,11 @@ describe("log caps", () => {
     expect(store.watch("job-2")).toBe("truncated");
   });
 
-  it("says once when the pool drops output from a running job", () => {
+  it("says once when the pool drops output from a running job", async () => {
     const { store } = storeOn(() => AT, { logBytes: 100, budget: 8 });
     value(store.accept(body()));
     value(store.accept(body({ id: "job-2" })));
-    store.applySchedule({ default: 2 }, "off");
+    await store.applySchedule({ default: 2 }, "off");
     value(store.started("job-1"));
     value(store.started("job-2"));
     expect(store.append("job-1", Buffer.from("aaaaaaaa"))).toEqual({ written: 8, signal: null });
@@ -231,18 +232,18 @@ describe("log caps", () => {
     expect(store.append("job-2", Buffer.from("cccc"))).toEqual({ written: 0, signal: null });
     expect(store.watch("job-2")).toBeNull();
     expect(store.get("job-2")).toMatchObject({ state: "running", outcome: null });
-    expect(value(store.settle("job-2", EXIT)).text).toContain("log truncated: pool full");
-    expect(value(store.settle("job-1", EXIT)).text).not.toContain("log truncated");
+    expect(value(await store.settle("job-2", EXIT)).text).toContain("log truncated: pool full");
+    expect(value(await store.settle("job-1", EXIT)).text).not.toContain("log truncated");
   });
 
-  it("sends the capped notice, with the pool note, and not the raw log", () => {
+  it("sends the capped notice, with the pool note, and not the raw log", async () => {
     const { store, dir } = storeOn(() => AT, { logBytes: 20_000, budget: 12 });
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     writeFileSync(join(dir, "job-1.log"), `\x1b[31m${"x".repeat(9000)}`);
     expect(store.append("job-1", Buffer.from("more")).signal).toBe("truncated");
-    const text = value(store.settle("job-1", EXIT)).text;
+    const text = value(await store.settle("job-1", EXIT)).text;
     expect(text.length).toBeLessThanOrEqual(NOTICE_MAX);
     expect(text).toContain("log truncated: pool full");
     expect(text).not.toContain("\x1b");
@@ -251,11 +252,11 @@ describe("log caps", () => {
     expect(store.eventTail("job-1").length).toBeLessThanOrEqual(NOTICE_MAX);
   });
 
-  it("appends without rewriting, and a capped job stays running until the process ends", () => {
+  it("appends without rewriting, and a capped job stays running until the process ends", async () => {
     expect(JOB_LOG_BYTES).toBe(8 * 1024 * 1024);
     const { store } = storeOn(() => AT, { logBytes: 8 });
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     const path = join(store.dir, "job-1.log");
     const fd = openSync(path, constants.O_APPEND | constants.O_WRONLY);
@@ -269,9 +270,9 @@ describe("log caps", () => {
     expect(store.append("job-1", Buffer.from("NOPE"))).toEqual({ written: 0, signal: null });
     expect(readFileSync(path).subarray(0, 4).toString()).toBe("KEEP");
     value(store.accept(body({ id: "job-2" })));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     expect(store.get("job-2")).toMatchObject({ state: "queued" });
-    expect(value(store.settle("job-1", EXIT)).job).toMatchObject({ state: "exited", exitCode: 0, durationMs: 1500 });
+    expect(value(await store.settle("job-1", EXIT)).job).toMatchObject({ state: "exited", exitCode: 0, durationMs: 1500 });
   });
 
   it("refuses a start that cannot fit in the 256 MiB pool, and does not queue it", () => {
@@ -302,31 +303,21 @@ describe("log caps", () => {
   });
 });
 
-describe("synced terminal transition", () => {
-  const watch = (adb: AgentDb) => {
-    const seen: string[] = [];
-    const pragma = adb.db.pragma.bind(adb.db);
-    adb.db.pragma = ((source: string, options?: { simple?: boolean }) => {
-      if (/^synchronous\s*=/.test(source)) seen.push(source);
-      return pragma(source, options as never);
-    }) as typeof adb.db.pragma;
-    return seen;
-  };
-
-  it("a failed sync does not hand off a notice, and the job stays running", () => {
+describe("durable terminal transition", () => {
+  it("a failed commit does not hand off a notice, and the job stays running", async () => {
     const handed: NoticeHandoff[] = [];
     const { store, adb, home } = storeOn(() => AT, { onNotice: n => { handed.push(n); } });
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     store.append("job-1", Buffer.from("token=super-secret-value\n"));
     adb.db.exec("CREATE TRIGGER jobs_disk BEFORE UPDATE ON jobs BEGIN SELECT RAISE(ABORT, 'disk full'); END");
-    expect(() => value(store.settle("job-1", EXIT))).toThrow(/disk full/);
+    await expect(store.settle("job-1", EXIT)).rejects.toThrow(/disk full/);
     expect(handed).toEqual([]);
     expect(store.get("job-1")).toMatchObject({ state: "running", notice: "none", noticeId: null });
     expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
     adb.db.exec("DROP TRIGGER jobs_disk");
-    const h = value(store.settle("job-1", EXIT));
+    const h = value(await store.settle("job-1", EXIT));
     expect(handed).toEqual([h]);
     expect(h.noticeId).toBe(noticeIdOf("job-1"));
     expect(h.text).toContain("token=[redacted]");
@@ -335,64 +326,86 @@ describe("synced terminal transition", () => {
     expect(h.text).not.toContain(home);
     expect(readFileSync(join(store.dir, "job-1.log")).toString()).toContain("super-secret-value");
     expect(store.get("job-1")).toMatchObject({ state: "exited", outcome: "exited", exitCode: 0, notice: "pending", noticeId: h.noticeId });
-    const again = value(store.settle("job-1", EXIT));
+    const again = value(await store.settle("job-1", EXIT));
     expect(again.noticeId).toBe(h.noticeId);
     expect(handed.map(n => n.noticeId)).toEqual([h.noticeId, h.noticeId]);
     expect(adb.db.prepare("SELECT COUNT(*) AS n FROM jobs").get()).toEqual({ n: 1 });
-    expect(store.settle("job-1", { outcome: "lost", at: AT })).toEqual({ ok: false, error: "already_terminal" });
+    expect(await store.settle("job-1", { outcome: "lost", at: AT })).toEqual({ ok: false, error: "already_terminal" });
     expect(handed).toHaveLength(2);
     expect(store.get("job-1")?.state).toBe("exited");
   });
 
-  it("commits the terminal row under FULL, then leaves the connection at NORMAL", () => {
-    const { store, adb } = storeOn();
-    const seen = watch(adb);
+  it("a sync that fails after the commit takes the row back to open: no handoff, and the next settle retries", async () => {
+    const handed: NoticeHandoff[] = [];
+    let failing = false;
+    const { store } = storeOn(() => AT, {
+      walSync: async () => { if (failing) throw new Error("the disk went away"); },
+      onNotice: n => { handed.push(n); },
+    });
     value(store.accept(body()));
-    expect(seen).toEqual([]);
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
-    value(store.settle("job-1", { outcome: "lost", at: AT + 4_000 }));
-    expect(seen).toEqual(["synchronous = FULL", "synchronous = NORMAL"]);
-    expect(store.get("job-1")).toMatchObject({ state: "lost", exitCode: null, durationMs: 4_000, notice: "pending" });
-    expect(adb.db.prepare("SELECT ended_at FROM jobs WHERE id = 'job-1'").get()).toEqual({ ended_at: AT + 4_000 });
-    expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
+    failing = true;
+    await expect(store.settle("job-1", EXIT)).rejects.toThrow(/the disk went away/);
+    expect(handed).toEqual([]);
+    expect(store.get("job-1")).toMatchObject({ state: "running", outcome: null, exitCode: null, durationMs: null, notice: "none", noticeId: null, endedAt: null });
+    failing = false;
+    const h = value(await store.settle("job-1", EXIT));
+    expect(handed).toEqual([h]);
+    expect(store.get("job-1")).toMatchObject({ state: "exited", outcome: "exited", exitCode: 0 });
   });
 
-  it("stores a lost job's end and its duration from the moment it was found", () => {
+  it("commits the terminal row at NORMAL, syncs the WAL, and only then hands off the notice", async () => {
+    const order: string[] = [];
+    const { store, adb } = storeOn(() => AT, {
+      walSync: async () => { order.push("sync"); },
+      onNotice: () => { order.push("notice"); },
+    });
+    value(store.accept(body()));
+    await store.applySchedule({ default: 1 }, "off");
+    value(store.started("job-1"));
+    value(await store.settle("job-1", { outcome: "lost", at: AT + 4_000 }));
+    expect(order).toEqual(["sync", "notice"]);
+    expect(store.get("job-1")).toMatchObject({ state: "lost", exitCode: null, durationMs: 4_000, notice: "pending" });
+    expect(adb.db.prepare("SELECT ended_at FROM jobs WHERE id = 'job-1'").get()).toEqual({ ended_at: AT + 4_000 });
+    expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);   // the connection was never switched off NORMAL
+  });
+
+  it("stores a lost job's end and its duration from the moment it was found", async () => {
     let now = AT;
     const { store, adb } = storeOn(() => now);
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     now = AT + 30_000;
-    value(store.settle("job-1", { outcome: "lost", at: AT + 4_000 }));
+    value(await store.settle("job-1", { outcome: "lost", at: AT + 4_000 }));
     expect(store.get("job-1")).toMatchObject({ state: "lost", durationMs: 4_000 });
     expect(adb.db.prepare("SELECT ended_at FROM jobs WHERE id = 'job-1'").get()).toEqual({ ended_at: AT + 4_000 });
   });
 
-  it("rejects a lost clock that is not a whole number, and never stores an end before the start", () => {
+  it("rejects a lost clock that is not a whole number, and never stores an end before the start", async () => {
     const { store, adb } = storeOn();
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     for (const at of [Number.NaN, 1.5, Number.POSITIVE_INFINITY]) {
-      expect(store.settle("job-1", { outcome: "lost", at })).toEqual({ ok: false, error: "bad_exit" });
+      expect(await store.settle("job-1", { outcome: "lost", at })).toEqual({ ok: false, error: "bad_exit" });
     }
     expect(store.get("job-1")).toMatchObject({ state: "running" });
     expect(adb.db.prepare("SELECT ended_at FROM jobs WHERE id = 'job-1'").get()).toEqual({ ended_at: null });
-    value(store.settle("job-1", { outcome: "lost", at: AT - 1_000 }));
+    value(await store.settle("job-1", { outcome: "lost", at: AT - 1_000 }));
     expect(store.get("job-1")).toMatchObject({ state: "lost", durationMs: 0 });
     expect(adb.db.prepare("SELECT ended_at, started_at FROM jobs WHERE id = 'job-1'").get()).toEqual({ ended_at: AT, started_at: AT });
   });
 
-  it("a queued job can be cancelled, and cannot be lost, with no notice on the refusal", () => {
+  it("a queued job can be cancelled, and cannot be lost, with no notice on the refusal", async () => {
     const handed: NoticeHandoff[] = [];
     const { store } = storeOn(() => AT, { onNotice: n => { handed.push(n); } });
     value(store.accept(body()));
-    expect(store.settle("job-1", { outcome: "lost", at: AT })).toEqual({ ok: false, error: "not_running" });
+    expect(await store.settle("job-1", { outcome: "lost", at: AT })).toEqual({ ok: false, error: "not_running" });
     expect(handed).toEqual([]);
     expect(store.get("job-1")?.state).toBe("queued");
-    const h = value(store.settle("job-1", { outcome: "cancelled", exitCode: null, durationMs: 0 }));
+    const h = value(await store.settle("job-1", { outcome: "cancelled", exitCode: null, durationMs: 0 }));
     expect(h.noticeId).toBe(noticeIdOf("job-1"));
     expect(h.text).toContain("cancelled");
     expect(handed).toEqual([h]);
@@ -400,16 +413,16 @@ describe("synced terminal transition", () => {
 });
 
 describe("prune", () => {
-  it("removes a terminal job, its log and its exit file after 7 days, and keeps a queued job", () => {
+  it("removes a terminal job, its log and its exit file after 7 days, and keeps a queued job", async () => {
     expect(JOB_KEEP_MS).toBe(7 * 24 * 60 * 60 * 1000);
     let now = AT;
     const handed: NoticeHandoff[] = [];
     const { store, dir } = storeOn(() => now, { onNotice: n => { handed.push(n); } });
     value(store.accept(body()));
     value(store.accept(body({ id: "job-2" })));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
-    value(store.settle("job-1", EXIT));
+    value(await store.settle("job-1", EXIT));
     writeFileSync(join(dir, "job-1.exit"), "0\n", { mode: 0o600 });
     chmodSync(join(dir, "job-1.exit"), 0o600);
     now = AT + JOB_KEEP_MS;
@@ -426,15 +439,15 @@ describe("prune", () => {
     expect(handed.map(n => n.noticeId)).toEqual([noticeIdOf("job-1")]);
   });
 
-  it("forgets a pruned job's sent notice, and a notice change does not read the log again", () => {
+  it("forgets a pruned job's sent notice, and a notice change does not read the log again", async () => {
     let now = AT;
     const published: string[] = [];
     const { store, dir } = storeOn(() => now, { onJob: (_job, tail) => { published.push(tail); } });
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     writeFileSync(join(dir, "job-1.log"), "line from the log\n");
-    const text = value(store.settle("job-1", EXIT)).text;
+    const text = value(await store.settle("job-1", EXIT)).text;
     expect(text).toContain("line from the log");
     unlinkSync(join(dir, "job-1.log"));
     const before = published.length;
@@ -445,21 +458,21 @@ describe("prune", () => {
     expect(store.prune()).toBe(1);
     expect(store.eventTail("job-1")).toBe("");
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     writeFileSync(join(dir, "job-1.log"), "line from the log\n");
     const again = published.length;
-    value(store.settle("job-1", EXIT));
+    value(await store.settle("job-1", EXIT));
     expect(published.length).toBe(again + 1);
   });
 
-  it("keeps the notice text in the store, so a restart does not publish an empty tail", () => {
+  it("keeps the notice text in the store, so a restart does not publish an empty tail", async () => {
     const { store, dir, adb, home } = storeOn();
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     writeFileSync(join(dir, "job-1.log"), "kept line\n");
-    const text = value(store.settle("job-1", EXIT)).text;
+    const text = value(await store.settle("job-1", EXIT)).text;
     expect(text).toContain("kept line");
     unlinkSync(join(dir, "job-1.log"));
     const published: string[] = [];
@@ -469,17 +482,17 @@ describe("prune", () => {
     expect(reopened.eventTail("job-1")).toBe(text);
   });
 
-  it("prunes on the sweep tick, and a reconnect would send only jobs inside 7 days at their own time", () => {
+  it("prunes on the sweep tick, and a reconnect would send only jobs inside 7 days at their own time", async () => {
     let now = AT;
     const { store } = storeOn(() => now);
     value(store.accept(body()));
     value(store.accept(body({ id: "job-old" })));
-    store.applySchedule({ default: 2 }, "off");
+    await store.applySchedule({ default: 2 }, "off");
     value(store.started("job-1"));
     value(store.started("job-old"));
-    const fresh = value(store.settle("job-1", EXIT));
+    const fresh = value(await store.settle("job-1", EXIT));
     now = AT + JOB_KEEP_MS + 1;
-    value(store.settle("job-old", EXIT));
+    value(await store.settle("job-old", EXIT));
     value(store.accept(body({ id: "job-open" })));
     now = AT + JOB_KEEP_MS + 2;
     expect(store.replayAt(fresh.job)).toBeNull();
@@ -496,15 +509,15 @@ describe("prune", () => {
     expect(store.get("job-old")).toBeNull();
     expect(store.get("job-open")).toMatchObject({ state: "queued" });
   });
-  it("returns the pruned log's bytes to the pool, so a new job can write", () => {
+  it("returns the pruned log's bytes to the pool, so a new job can write", async () => {
     let now = AT;
     const { store } = storeOn(() => now, { logBytes: 8, budget: 8 });
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     expect(store.append("job-1", Buffer.from("aaaaaaaa"))).toEqual({ written: 8, signal: "capped" });
     expect(store.accept(body({ id: "job-full" }))).toEqual({ ok: false, error: "disk" });
-    value(store.settle("job-1", EXIT));
+    value(await store.settle("job-1", EXIT));
     now = AT + JOB_KEEP_MS + 1;
     expect(store.prune()).toBe(1);
     value(store.accept(body({ id: "job-2" })));
@@ -526,16 +539,16 @@ describe("prune", () => {
     writeFileSync(join(store.dir, "job-1.log"), "12345678");
     expect(store.accept(body({ id: "job-2" }))).toEqual({ ok: false, error: "disk" });
   });
-  it("keeps the pool reserved when a log cannot be removed", () => {
+  it("keeps the pool reserved when a log cannot be removed", async () => {
     let now = AT;
     const { store, dir } = storeOn(() => now, { logBytes: 8, budget: 8 });
     value(store.accept(body()));
     value(store.accept(body({ id: "job-2" })));
-    store.applySchedule({ default: 2 }, "off");
+    await store.applySchedule({ default: 2 }, "off");
     value(store.started("job-1"));
     value(store.started("job-2"));
     expect(store.append("job-1", Buffer.from("aaaaaaaa"))).toEqual({ written: 8, signal: "capped" });
-    value(store.settle("job-1", EXIT));
+    value(await store.settle("job-1", EXIT));
     now = AT + JOB_KEEP_MS + 1;
     chmodSync(dir, 0o500);
     try { expect(() => store.prune()).toThrow(/EACCES/); }
@@ -544,12 +557,12 @@ describe("prune", () => {
     expect(store.append("job-2", Buffer.from("bbbbbbbb"))).toEqual({ written: 0, signal: "truncated" });
   });
 
-  it("shows the notice the hub reported, and given_up follows pending", () => {
+  it("shows the notice the hub reported, and given_up follows pending", async () => {
     const { store } = storeOn();
     value(store.accept(body()));
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
-    value(store.settle("job-1", EXIT));
+    value(await store.settle("job-1", EXIT));
     expect(store.preview("job-1")).toContain("notice: pending");
     store.markNotice("job-1", "given_up");
     expect(store.get("job-1")?.notice).toBe("given_up");

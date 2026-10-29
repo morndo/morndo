@@ -82,11 +82,11 @@ describe("an engine lane takes briefs", () => {
     const target: DeliveryTarget = { lane: "codex-c", sticky: false };
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-c")?.sessionId != null; })).toBe(true);
     const id = laneOf("codex-c")!.sessionId;
-    h.deliverer.enqueue({ id: "lanes:b1", target, text: "first brief" });
+    await h.deliverer.enqueue({ id: "lanes:b1", target, text: "first brief" });
     expect(await kickUntil(() => h.deliveries.get("lanes:b1")?.state === "delivered")).toBe(true);
     expect(await until(async () => { await h.inventory.refresh(); return laneOf("codex-c")?.status === "busy"; })).toBe(true);
     // The second brief is bound to the session shown now; the turn ends and the lane's file names another session.
-    h.deliverer.enqueue({ id: "lanes:b2", target, text: "second brief" });
+    await h.deliverer.enqueue({ id: "lanes:b2", target, text: "second brief" });
     expect(await kickUntil(() => h.deliveries.get("lanes:b2")?.state === "delivered")).toBe(true);
     expect(submitted()).toEqual(["first brief", "second brief"]);
     expect(laneOf("codex-c")?.sessionId).toBe(id);

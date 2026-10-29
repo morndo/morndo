@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { fleetRecord, type Job } from "@morndo/domain";
 import type { EvJob } from "@morndo/protocol";
+import type { WalSync } from "../db/wal-sync.ts";
 import { deliverJobNotice, JobDeliveries, type TypeNotice } from "./job-delivery.ts";
 import { JobGrants } from "./job-grant.ts";
 import type { JobGuardPolicy } from "../config.ts";
@@ -43,6 +44,7 @@ export async function openJobRuntime(o: {
   node?: string;
   emit?: (event: EvJob) => void;
   log?: { error: (message: string, error?: unknown) => void };
+  walSync?: WalSync;
 }): Promise<JobRuntime> {
   const now = o.now ?? Date.now;
   const grants = new JobGrants(o.db, now);
@@ -52,6 +54,7 @@ export async function openJobRuntime(o: {
   let store!: JobStore;
   store = new JobStore(o.db, join(o.stateDir, "job-logs"), now, {
     home: o.home,
+    ...(o.walSync ? { walSync: o.walSync } : {}),
     onNotice: notice => { deliverJobNotice(store, deliveries, notice); },
     ...(nodeName !== undefined && emit !== undefined ? { onJob: (job: Job, tail: string) => { emit(fleetRecord(job, { node: nodeName, at: now(), tail })); } } : {}),
   });

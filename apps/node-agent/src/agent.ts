@@ -35,6 +35,8 @@ import { FleetView } from "./conn/fleet-view.ts";
 import type { RetryOptions } from "./conn/retry.ts";
 import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
+import { inOrder } from "./atomic-write.ts";
+import type { WalSync } from "./db/wal-sync.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
 import type { Deliverer } from "./deliveries/deliverer.ts";
 import { EventLoops, utcOffsetMin } from "./events.ts";
@@ -80,6 +82,7 @@ export type AgentOptions = {
   flight?: Flight;                                        // a test holds one item so stop's wait can be seen
   stopWaitMs?: number;                                    // how long stop waits for in-flight work; default 10s
   runCommand?: CommandRunner;                             // a test sees the apply unit's exact start (update.apply)
+  walSync?: WalSync;                                      // a test holds the durable commits' sync (db/wal-sync.ts)
 };
 export type RunningAgent = {
   instanceId: string;
@@ -134,6 +137,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     emitDelivery: d => { sendDelivery(d); },
     ...(hooks.dropAfterStarted !== undefined ? { afterStarted: dropOnce(hooks.dropAfterStarted, () => conn?.drop()) } : {}),
     ...(o.runCommand ? { runCommand: o.runCommand } : {}),
+    ...(o.walSync ? { walSync: o.walSync } : {}),
   });
   const spool: Spool = new Spool(adb.db, streamId, { failWrites: hooks.spoolFail === true, maxBytes: budget, held: cachedFor(1000, held) });
   const open = nodeOpener({ home: config.home, stateDir: paths.stateDir, configDir: paths.configDir, ...(config.policy.fileRoots ? { fileRoots: config.policy.fileRoots } : {}) });
@@ -184,9 +188,11 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     inFlight: flight.list().slice(0, 100),               // the protocol's cap; what a restart would interrupt
     ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
   });
-  const saveStatus = () => {
-    try { writeStatus(paths.statusFile, status()); } catch (e) { log.warn("could not write status.json", e); }
-  };
+  // The write is async (its fsync off the event loop, T-532) and in order (atomic-write.ts inOrder), so it never throws
+  // into the change that caused it and an older status never lands over a newer one; a failure is logged when it lands.
+  const statusWrites = inOrder(e => { log.warn("could not write status.json", e); });
+  const latestStatus = (): Promise<void> => statusWrites(() => writeStatus(paths.statusFile, status()));
+  const saveStatus = (): void => { void latestStatus(); };
   statusReady = true;
   const errorRes = (id: string, error: OpError): AgentMessage =>
     ({ v: 1, t: "res", id, invVersion: ops.inventory.invVersion, store: streamId, ok: false, error, storeSeq: ops.doneKeys.seq() });
@@ -238,6 +244,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     jobs = await openJobRuntime({
       db: adb.db, home: config.home, stateDir: paths.stateDir, socketPath: paths.jobSock, now: ops.now,
       ...(config.hub ? { hubBase: config.hub } : {}),
+      ...(o.walSync ? { walSync: o.walSync } : {}),
       // The same paste pane.send uses. Pasted text is in the pane, submitted or not, and that id is never pasted again.
       node: config.node,
       limits: jobLimits(config.policy.jobs),
@@ -381,7 +388,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       await conn?.stop();
       await relay.close();
       await ops.deliverer.drain();                         // a round in flight ends before its database closes
-      saveStatus();
+      await latestStatus();                                // the last status lands before the process may exit
       adb.close();
     },
   };

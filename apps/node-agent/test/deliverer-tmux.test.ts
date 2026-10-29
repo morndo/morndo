@@ -97,7 +97,7 @@ describe("the deliverer through the executor, on real tmux", () => {
   it("waits through a draft in the box (draft_present), and types once it is cleared", async () => {
     t.tmux("send-keys", "-t", pane, "-l", "half");
     expect(await until(() => screen().includes("❯ half"))).toBe(true);
-    h.deliverer.enqueue({ id: "hub:d1", target: MANAGER, text: "the message" });
+    await h.deliverer.enqueue({ id: "hub:d1", target: MANAGER, text: "the message" });
     await h.deliverer.drain();
     expect(h.deliveries.get("hub:d1")).toMatchObject({ state: "queued", waiting: { reason: "draft_present" } });
     t.tmux("send-keys", "-t", pane, "BSpace", "BSpace", "BSpace", "BSpace");
@@ -124,8 +124,8 @@ describe("the deliverer through the executor, on real tmux", () => {
     h = harness({ noDoneKeys: true });
     await h.inventory.refresh();
     const id = "hub:answer:e3:a1:yes";
-    h.doneKeys.start(id, argsHash("pane.send", { workerId: managerLane().workerId, text: "yes" }));   // recorded nowhere: keys are off
-    h.deliverer.enqueue({ id, target: MANAGER, text: "yes" });
+    await h.doneKeys.start(id, argsHash("pane.send", { workerId: managerLane().workerId, text: "yes" }));   // recorded nowhere: keys are off
+    await h.deliverer.enqueue({ id, target: MANAGER, text: "yes" });
     expect(await kickUntil(() => submitted().includes("yes"))).toBe(true);
   });
 });

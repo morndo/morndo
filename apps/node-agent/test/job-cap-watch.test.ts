@@ -64,7 +64,7 @@ exit 0
       notify: { kind: "lane", name: "builder" }, commandHash: hash, cwdHash: hash,
     });
     if (!accepted.ok) throw new Error(accepted.error);
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     const started = store.started(id);
     if (!started.ok) throw new Error(started.error);
     writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");

@@ -137,8 +137,10 @@ export class Deliverer {
     this.#unbound = d.hooks?.noSessionBinding === true;
   }
 
-  // Validates, binds and stores a delivery (spec §4.1, §4.3 "Storing"); the answer comes once it is stored, synced.
-  enqueue(a: OpArgs["lane.deliver"]): OpResult["lane.deliver"] | OpError {
+  // Validates, binds and stores a delivery (spec §4.1, §4.3 "Storing"); the answer comes once it is stored and its
+  // sync has made it durable (the sync runs off the event loop, db/wal-sync.ts, so a slow disk holds up only this
+  // delivery's answer, not the agent).
+  async enqueue(a: OpArgs["lane.deliver"]): Promise<OpResult["lane.deliver"] | OpError> {
     const store = this.#d.store;
     const known = store.get(a.id);
     if (known) return this.#sameContent(a) ? { delivery: known } : err("id_conflict", CONFLICT);
@@ -161,9 +163,9 @@ export class Deliverer {
         bound = takes(p) && !this.#unbound ? p.sessionId : null;   // a lane still starting binds the first session it shows
       }
     }
-    let stored: ReturnType<DeliveryStore["store"]>;
+    let stored: Awaited<ReturnType<DeliveryStore["store"]>>;
     try {
-      stored = store.store({ id: a.id, target, text: a.text, ttlMs: a.ttlMs ?? LIMITS.deliveryTtlMs, boundSession: bound });
+      stored = await store.store({ id: a.id, target, text: a.text, ttlMs: a.ttlMs ?? LIMITS.deliveryTtlMs, boundSession: bound });
     } catch (e) {
       this.#d.log.error("a delivery could not be stored; nothing was queued", e);
       return { code: "internal", executed: "no", message: "the delivery could not be stored (a full disk?); nothing was queued" };

@@ -70,9 +70,9 @@ function accept(store: JobStore, id: string): void {
   if (!accepted.ok) throw new Error(accepted.error);
 }
 // A job that is running.
-function plant(store: JobStore, id: string): void {
+async function plant(store: JobStore, id: string): Promise<void> {
   accept(store, id);
-  store.applySchedule({ default: 5 }, "off");
+  await store.applySchedule({ default: 5 }, "off");
   const started = store.started(id);
   if (!started.ok) throw new Error(started.error);
 }
@@ -93,7 +93,7 @@ const allow = (home: string) => writeFileSync(join(home, "allowed"), "");
 describe("a signalled cancel ends cancelled on every path", () => {
   it("a second cancel that finds the unit ended records cancelled, not the signal's exit code", async () => {
     const { store, sup, home } = rig(killedThenUnreadable(() => SIGTERMED));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     allow(home);
     expect((await sup.cancel("j1")).ok).toBe(true);
@@ -103,7 +103,7 @@ describe("a signalled cancel ends cancelled on every path", () => {
 
   it("a second cancel that finds the unit gone records cancelled, not lost", async () => {
     const { store, sup, home } = rig(killedThenUnreadable(() => absent));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     allow(home);
     expect((await sup.cancel("j1")).ok).toBe(true);
@@ -113,7 +113,7 @@ describe("a signalled cancel ends cancelled on every path", () => {
 
   it("a sweep that finds the unit gone records cancelled, not lost", async () => {
     const { store, sup, home } = rig(killedThenUnreadable(() => absent));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     allow(home);
     await sup.sweep();
@@ -123,7 +123,7 @@ describe("a signalled cancel ends cancelled on every path", () => {
 
   it("a sweep leaves a unit that is still deactivating open, and ends it cancelled once it is over", async () => {
     const { store, sup, home } = rig(killedThenUnreadable(h => `if [ -f '${join(h, "over")}' ]; then ${SIGTERMED}; else ${deactivating}; fi`));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     allow(home);
     await sup.sweep();
@@ -139,14 +139,14 @@ if [ "$2" = "kill" ]; then touch '${join(home, "killed")}'; exit 0; fi
 if [ "$2" = "show" ]; then if [ -f '${join(home, "killed")}' ]; then ${deactivating}; else ${running}; fi; fi
 exit 0
 `);
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     expect(store.get("j1")).toMatchObject({ state: "running", outcome: null });
   });
 
   it("a signalled cancel survives an agent restart: the next agent ends the job cancelled", async () => {
     const first = rig(killedThenUnreadable(() => SIGTERMED));
-    plant(first.store, "j1");
+    await plant(first.store, "j1");
     expect(await first.sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     expect(existsSync(join(first.dir, "j1.cancel"))).toBe(true);
     first.sup.close();
@@ -161,7 +161,7 @@ if [ "$2" = "kill" ]; then touch '${join(home, "killed")}'; exit 0; fi
 if [ "$2" = "show" ]; then if [ -f '${join(home, "killed")}' ]; then ${SIGTERMED}; else ${running}; fi; fi
 exit 0
 `, { logBytes: 8 });
-    plant(store, "j1");
+    await plant(store, "j1");
     writeFileSync(join(dir, "j1.log"), "0123456789abcdef");
     // What the agent that sent the signal left behind (the marker a signalled cancel writes next to the log).
     writeFileSync(join(dir, "j1.cancel"), "", { mode: 0o600 });
@@ -177,7 +177,7 @@ if [ "$2" = "kill" ]; then exit 1; fi
 if [ "$2" = "show" ]; then if [ -f '${join(h, "over")}' ]; then ${ended(1, 0)}; else ${running}; fi; fi
 exit 0
 `, { logBytes: 8 });
-    plant(store, "j1");
+    await plant(store, "j1");
     writeFileSync(join(dir, "j1.log"), "0123456789abcdef");
     // The watch's stop is refused, so it ends undecided and keeps its sighting for the next watch.
     await sup.sweep();
@@ -197,7 +197,7 @@ if [ "$2" = "kill" ]; then touch '${join(h, "killing")}'; sleep 0.6; touch '${jo
 if [ "$2" = "show" ]; then if [ -f '${join(h, "killed")}' ]; then ${SIGTERMED}; else ${running}; fi; fi
 exit 0
 `, { logBytes: 8 });
-    plant(store, "j1");
+    await plant(store, "j1");
     writeFileSync(join(dir, "j1.log"), "0123456789abcdef");
     const sweeping = sup.sweep();
     expect(await until(() => existsSync(join(home, "killing")), 8000)).toBe(true);
@@ -221,7 +221,7 @@ if [ "$2" = "show" ]; then
 fi
 exit 0
 `, { limits: { default: 1 }, systemdRun: () => `#!/bin/sh\ncase "$*" in *morndo-job-jB*) exit 1;; esac\nexit 0\n` });
-    plant(store, "jA");
+    await plant(store, "jA");
     for (const id of ["jB", "jC"]) {
       accept(store, id);
       writeFileSync(join(dir, `${id}.argv`), JSON.stringify({
@@ -256,7 +256,7 @@ exit 0
 describe("a unit systemd is already stopping", () => {
   it("a cancel sends SIGKILL to a unit still deactivating after its SIGTERM and ends the job cancelled", async () => {
     const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), failedBy("signal", 9)));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect((await sup.cancel("j1")).ok).toBe(true);
     expect(existsSync(join(home, "sigkill"))).toBe(true);
     expect(store.get("j1")).toMatchObject({ outcome: "cancelled", exitCode: null });
@@ -265,7 +265,7 @@ describe("a unit systemd is already stopping", () => {
 
   it("a cancel of a unit stopping for its timeout keeps timed_out", async () => {
     const { store, sup, dir } = rig(signals(stoppingFor("timeout"), failedBy("timeout", 15), failedBy("timeout", 9)));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect((await sup.cancel("j1")).ok).toBe(true);
     expect(store.get("j1")).toMatchObject({ outcome: "timed_out", exitCode: null });
     expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
@@ -277,7 +277,7 @@ describe("a unit systemd is already stopping", () => {
 if [ "$2" = "show" ]; then if [ -f '${join(h, "over")}' ]; then ${failedBy("timeout", 9)}; else ${stoppingFor("timeout")}; fi; fi
 exit 0
 `);
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
     writeFileSync(join(home, "over"), "");
@@ -287,7 +287,7 @@ exit 0
 
   it("the cap stop sends SIGKILL to a unit still deactivating after its SIGTERM and records no exit code", async () => {
     const { store, sup, dir, home } = rig(signals(runningNoPid, stoppingFor("success"), failedBy("signal", 9)), { logBytes: 8 });
-    plant(store, "j1");
+    await plant(store, "j1");
     writeFileSync(join(dir, "j1.log"), "0123456789abcdef");
     await sup.sweep();
     expect(existsSync(join(home, "sigkill"))).toBe(true);
@@ -299,7 +299,7 @@ describe("a cancel mark that cannot be written", () => {
   it("is logged, so losing it to an agent restart is not silent", async () => {
     const logged: string[] = [];
     const { store, sup, dir } = rig(killedThenUnreadable(() => SIGTERMED), { log: { error: (message: string) => { logged.push(message); } } });
-    plant(store, "j1");
+    await plant(store, "j1");
     chmodSync(dir, 0o500);
     try {
       expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
@@ -319,7 +319,7 @@ if [ "$2" = "kill" ]; then if [ -f '${join(h, "job-logs", "j1.cancel")}' ]; then
 if [ "$2" = "show" ]; then if [ -f '${join(h, "killed")}' ]; then ${deactivating}; else ${running}; fi; fi
 exit 0
 `);
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     expect(existsSync(join(home, "marked-at-kill"))).toBe(true);
     expect(existsSync(join(dir, "j1.cancel"))).toBe(true);
@@ -331,7 +331,7 @@ if [ "$2" = "kill" ]; then exit 1; fi
 if [ "$2" = "show" ]; then if [ -f '${join(h, "over")}' ]; then ${ended(1, 0)}; else ${running}; fi; fi
 exit 0
 `);
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "unavailable" });
     expect(existsSync(join(dir, "j1.cancel"))).toBe(false);
     expect(sup.trackedJobs()).toBe(0);
@@ -346,7 +346,7 @@ if [ "$2" = "kill" ]; then if [ -f '${join(h, "refuse")}' ]; then exit 1; fi; to
 if [ "$2" = "show" ]; then if [ -f '${join(h, "killed")}' ]; then ${deactivating}; else ${running}; fi; fi
 exit 0
 `);
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     writeFileSync(join(home, "refuse"), "");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "unavailable" });
@@ -357,7 +357,7 @@ exit 0
 describe("a cancel whose settle throws after the signals", () => {
   it("still ends cancelled when a sweep finds the unit over", async () => {
     const { store, sup } = rig(signals(running, SIGTERMED, SIGTERMED));
-    plant(store, "j1");
+    await plant(store, "j1");
     const spy = vi.spyOn(store, "settle").mockImplementationOnce(() => { throw new Error("the row cannot be written"); });
     try {
       expect((await sup.cancel("j1")).ok).toBe(false);
@@ -373,7 +373,7 @@ describe("a cancel whose settle throws after the signals", () => {
 describe("what the supervisor keeps for a job goes even when the store cannot be read", () => {
   it("a settle that is followed by an unreadable store leaves nothing behind", async () => {
     const { store, sup, home } = rig(killedThenUnreadable(() => SIGTERMED));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     expect(sup.trackedJobs()).toBe(1);
     allow(home);
@@ -394,14 +394,14 @@ describe("what the supervisor keeps for a job goes even when the store cannot be
 
   it("an entry that could not be judged goes at the next sweep", async () => {
     const { store, sup, home } = rig(killedThenUnreadable(() => SIGTERMED));
-    plant(store, "j1");
+    await plant(store, "j1");
     expect(await sup.cancel("j1")).toEqual({ ok: false, error: "signalled" });
     allow(home);
     const settle = store.settle.bind(store);
     const get = store.get.bind(store);
     let broken = false;
     // The row is written, then the settle reports a failure and the store cannot be read: the job's end is not known.
-    vi.spyOn(store, "settle").mockImplementation((id, event) => { settle(id, event); if (id === "j1") broken = true; throw new Error("late failure"); });
+    vi.spyOn(store, "settle").mockImplementation(async (id, event) => { await settle(id, event); if (id === "j1") broken = true; throw new Error("late failure"); });
     vi.spyOn(store, "get").mockImplementation(id => { if (broken) throw new Error("the store cannot be read"); return get(id); });
     try {
       // The promote after the cancel reads the broken store too; what matters is what the supervisor kept.
@@ -418,7 +418,7 @@ describe("what the supervisor keeps for a job goes even when the store cannot be
 describe("a unit stuck deactivating", () => {
   it("gets a SIGKILL after the bound and its job ends once the unit is over", async () => {
     const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), failedBy("signal", 9)), { stuckStopMs: 60 });
-    plant(store, "j1");
+    await plant(store, "j1");
     await sup.sweep();
     expect(existsSync(join(home, "sigkill"))).toBe(false);
     expect(store.get("j1")).toMatchObject({ state: "running", outcome: null });
@@ -432,7 +432,7 @@ describe("a unit stuck deactivating", () => {
 
   it("is given up on after a second bound: the job ends, it does not stay open for ever", async () => {
     const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), stoppingFor("success")), { stuckStopMs: 60 });
-    plant(store, "j1");
+    await plant(store, "j1");
     await sup.sweep();
     await new Promise(r => setTimeout(r, 90));
     await sup.sweep();
@@ -446,7 +446,7 @@ describe("a unit stuck deactivating", () => {
 
   it("is left alone inside the bound", async () => {
     const { store, sup, home } = rig(signals(stoppingFor("success"), stoppingFor("success"), stoppingFor("success")), { stuckStopMs: 60_000 });
-    plant(store, "j1");
+    await plant(store, "j1");
     await sup.sweep();
     await sup.sweep();
     expect(existsSync(join(home, "sigkill"))).toBe(false);

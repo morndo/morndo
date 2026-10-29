@@ -1,11 +1,11 @@
 // Background jobs on this node (ADR-0017; design §3, §5). The row holds hashes, never the command. A terminal
-// outcome is committed with synchronous=FULL (synced, the same rule as a done key's `started`) and only then is the
-// notice handed to the caller. A commit that throws leaves the row as it was, so nothing is handed off and the next
-// loop can retry. Logs are files beside the database: 8 MiB each, 256 MiB across jobs (the relay's disk budget is
-// the model, and a separate pool). The store never rewrites a log: the supervisor appends, and a running job whose
-// file reaches the cap is marked capped and stays running until the process ends. A start that cannot fit is `disk`
-// and is not queued. A terminal row, its log, its exit file and the supervisor's pid, child and argv files are
-// removed 7 days after the outcome was stored. Callers pass `now`.
+// outcome is committed at NORMAL and its WAL synced off the event loop (db/wal-sync.ts, the same rule as a done key's
+// `started`), and only then is the notice handed to the caller. A commit or sync that throws leaves the row as it
+// was, so nothing is handed off and the next loop can retry. Logs are files beside the database: 8 MiB each, 256 MiB
+// across jobs (the relay's disk budget is the model, and a separate pool). The store never rewrites a log: the
+// supervisor appends, and a running job whose file reaches the cap is marked capped and stays running until the
+// process ends. A start that cannot fit is `disk` and is not queued. A terminal row, its log, its exit file and the
+// supervisor's pid, child and argv files are removed 7 days after the outcome was stored. Callers pass `now`.
 import { chmodSync, closeSync, constants, existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
@@ -17,7 +17,7 @@ import {
 import { redactText } from "@morndo/protocol";
 import { errno } from "@morndo/service-kit";
 import { log } from "../log.ts";
-import { synced } from "./done-keys.ts";
+import { durably, walSyncOf, type WalSync } from "../db/wal-sync.ts";
 
 export const JOB_LOG_BYTES = 8 * 1024 * 1024;
 export const JOB_LOG_BUDGET = 256 * 1024 * 1024;
@@ -31,6 +31,7 @@ export type JobStoreOptions = {
   home: string;
   logBytes?: number;
   budget?: number;
+  walSync?: WalSync;                                        // a test holds the sync; the agent's own by default
   onNotice?: (notice: NoticeHandoff) => void;
   // A state the fleet is allowed to see. The tail is the redacted notice, empty until the job is terminal.
   onJob?: (job: Job, tail: string) => void;
@@ -65,6 +66,7 @@ export class JobStore {
   #logBytes: number;
   #budget: number;
   #home: string;
+  #sync: WalSync;
   #onNotice: ((notice: NoticeHandoff) => void) | undefined;
   #onJob: ((job: Job, tail: string) => void) | undefined;
   #sent = new Map<string, string>();
@@ -82,6 +84,7 @@ export class JobStore {
     this.#logBytes = opts.logBytes ?? JOB_LOG_BYTES;
     this.#budget = opts.budget ?? JOB_LOG_BUDGET;
     this.#home = opts.home;
+    this.#sync = opts.walSync ?? walSyncOf(db);
     this.#onNotice = opts.onNotice;
     this.#onJob = opts.onJob;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -169,8 +172,8 @@ export class JobStore {
   }
 
   // Writes the schedule the domain decided. `starting` has no start time; started() records running once a process
-  // exists. A class the policy does not list becomes terminal `refused`.
-  applySchedule(limits: Readonly<Record<string, number>>, guard: Guard): Job[] {
+  // exists. A class the policy does not list becomes terminal `refused` — settled, so synced, before the answer.
+  async applySchedule(limits: Readonly<Record<string, number>>, guard: Guard): Promise<Job[]> {
     const prior = new Map(this.list().map(job => [job.id, job]));
     const next = schedule([...prior.values()], limits, guard);
     const update = this.#db.prepare("UPDATE jobs SET state = ?, position = ?, reason = ?, started_at = ? WHERE id = ? AND state IN ('queued', 'starting', 'running')");
@@ -188,7 +191,7 @@ export class JobStore {
       const current = this.get(job.id);
       if (current) this.#tell(current, "");
     }
-    for (const id of next.refused) this.settle(id, { outcome: "refused" });
+    for (const id of next.refused) await this.settle(id, { outcome: "refused" });
     return next.jobs.map(job => this.get(job.id) ?? job);
   }
 
@@ -237,24 +240,40 @@ export class JobStore {
     return null;
   }
 
-  // The terminal row first, synced. The notice is handed off only after that commit returns.
-  settle(id: string, event: FinishEvent): Result<NoticeHandoff, FinishProblem | "missing"> {
+  // The terminal row first, committed at NORMAL and then synced off the event loop. The notice is handed off only
+  // after that sync: a handoff before it would promise a notice a power loss could take back. A commit or sync that
+  // throws leaves the row as it was (a failed sync writes the open state back), so nothing is handed off and the next
+  // loop can retry.
+  async settle(id: string, event: FinishEvent): Promise<Result<NoticeHandoff, FinishProblem | "missing">> {
     const job = this.get(id);
     if (!job) return err("missing");
     const decided = finish(job, event);
     if (!decided.ok) return decided;
     const next = decided.value;
     if (next !== job) {
-      synced(this.#db, () => {
-        this.#db.transaction(() => {
+      try {
+        await durably(this.#db, this.#sync, () => this.#db.transaction(() => {
           const endedAt = event.outcome === "lost" ? Math.max(event.at, job.startedAt ?? event.at) : this.#now();
           const changed = this.#db.prepare(`UPDATE jobs SET state = ?, position = NULL, reason = NULL, outcome = ?, exit_code = ?,
             duration_ms = ?, notice = ?, notice_id = ?, error = ?, ended_at = ?
             WHERE id = ? AND state IN ('queued', 'starting', 'running')`)
             .run(next.state, next.outcome, next.exitCode, next.durationMs, next.notice, next.noticeId, next.error, endedAt, next.id).changes;
           if (changed !== 1) throw new Error(`terminal row for ${id} was not written`);
-        }).immediate();
-      });
+        }).immediate());
+      } catch (e) {
+        // The row as this settle read it: still open, so the next sweep settles it again. A commit that threw rolled
+        // back to this on its own; a sync that failed had already written the terminal state over it.
+        try {
+          this.#db.prepare(`UPDATE jobs SET state = ?, position = ?, reason = ?, outcome = NULL, exit_code = NULL,
+            duration_ms = NULL, notice = ?, notice_id = ?, error = ?, ended_at = NULL WHERE id = ?`)
+            .run(job.state, job.position, job.reason, job.notice, job.noticeId, job.error, id);
+        } catch { /* the original error stands */ }
+        throw e;
+      }
+    } else if (job.outcome !== null) {
+      // A repeat of the settle that made it terminal: that one may still be waiting on its sync. One sync covers its
+      // commit too, so no notice is handed off before the row is durable.
+      await this.#sync();
     }
     const handoff = this.#handoff(next);
     this.#capped.delete(id);

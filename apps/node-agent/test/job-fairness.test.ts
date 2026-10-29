@@ -280,11 +280,11 @@ describe("class limits", () => {
     expect((await start({ id: "runner" })).state).toBe("running");
     expect((await start({ id: "waiting" })).state).toBe("queued");
     const lines: string[] = [];
-    store.settle = () => err("already_terminal");
+    store.settle = async () => err("already_terminal");
     const quiet = replace(false, { error: (message) => lines.push(message) });
     await quiet.sweep();
     expect(lines).toEqual([]);
-    store.settle = () => { throw new Error("disk full"); };
+    store.settle = async () => { throw new Error("disk full"); };
     await expect(quiet.sweep()).rejects.toThrow(/disk full/);
     expect(lines.join("\n")).toMatch(/waiting/);
   });

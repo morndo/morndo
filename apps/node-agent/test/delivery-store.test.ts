@@ -1,6 +1,6 @@
 // The delivery store (fleet clients spec §4.1–4.3; plan Contracts, "Agent internals shared by Tasks 4 to 6" and Databases:
 // agent.db migration 7) on a real agent database:
-// - storing is synced to the disk, and nothing after it is;
+// - storing is synced to the disk (its WAL, off the event loop: db/wal-sync.ts), and nothing after it is;
 // - a deadline arrives as a duration and becomes notAfter on this node's clock (plan Review Focus 3);
 // - the same id is the same delivery, or an id_conflict;
 // - a target's open deliveries come in the order stored;
@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { LIMITS, type DeliveryTarget } from "@morndo/protocol";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
+import type { WalSync } from "../src/db/wal-sync.ts";
 import { DeliveryStore } from "../src/deliveries/store.ts";
 import { tempHome } from "./helpers.ts";
 
@@ -20,18 +21,18 @@ const MANAGER: DeliveryTarget = { lane: "manager", sticky: true };
 
 const open: { adb: AgentDb; cleanup: () => void }[] = [];
 afterEach(() => { for (const o of open.splice(0)) { o.adb.close(); o.cleanup(); } });
-function storeOn(start = T0) {
+function storeOn(start = T0, walSync?: WalSync) {
   const h = tempHome();
   const adb = openAgentDb(join(h.home, "agent.db"));
   open.push({ adb, cleanup: h.cleanup });
   const clock = { now: start };
-  return { store: new DeliveryStore(adb.db, () => clock.now, "pc"), adb, clock };
+  return { store: new DeliveryStore(adb.db, () => clock.now, "pc", walSync), adb, clock };
 }
 type Put = { target?: DeliveryTarget; text?: string; ttlMs?: number; boundSession?: string | null };
-const put = (s: DeliveryStore, id: string, o: Put = {}) =>
+const put = async (s: DeliveryStore, id: string, o: Put = {}) =>
   s.store({ id, target: o.target ?? MANAGER, text: o.text ?? `text of ${id}`, ttlMs: o.ttlMs ?? LIMITS.deliveryTtlMs, boundSession: o.boundSession ?? null });
 // The answer of a fresh store; a conflict fails the test here.
-const fresh = (r: ReturnType<typeof put>) => { if ("conflict" in r) throw new Error("an id conflict"); return r; };
+const fresh = (r: Awaited<ReturnType<typeof put>>) => { if ("conflict" in r) throw new Error("an id conflict"); return r; };
 const rows = (adb: AgentDb) => (adb.db.prepare("SELECT COUNT(*) AS n FROM deliveries").get() as { n: number }).n;
 // What the store asks of the database: each change of the synchronous setting and each write, in order.
 function watch(adb: AgentDb): string[] {
@@ -50,9 +51,9 @@ function watch(adb: AgentDb): string[] {
 }
 
 describe("storing", () => {
-  it("stores a delivery queued, with notAfter on this node's clock: the time it was stored plus the duration sent (Review Focus 3)", () => {
+  it("stores a delivery queued, with notAfter on this node's clock: the time it was stored plus the duration sent (Review Focus 3)", async () => {
     const { store } = storeOn();
-    const r = fresh(put(store, "hub:a", { ttlMs: 90_000 }));
+    const r = fresh(await put(store, "hub:a", { ttlMs: 90_000 }));
     expect(r).toEqual({ fresh: true, delivery: { id: "hub:a", node: "pc", target: { lane: "manager" }, state: "queued", queuedAt: T0, notAfter: T0 + 90_000 } });
     expect(store.get("hub:a")).toEqual(r.delivery);
     expect(store.textOf("hub:a")).toBe("text of hub:a");
@@ -60,60 +61,74 @@ describe("storing", () => {
     // A node whose clock runs 1.1 s behind the sender's (the owner's PC): the deadline is the node's own time plus the
     // duration, so the delivery has all of it.
     const behind = storeOn(T0 - 1100).store;
-    expect(fresh(put(behind, "hub:b", { ttlMs: 90_000 })).delivery).toMatchObject({ queuedAt: T0 - 1100, notAfter: T0 - 1100 + 90_000 });
+    expect(fresh(await put(behind, "hub:b", { ttlMs: 90_000 })).delivery).toMatchObject({ queuedAt: T0 - 1100, notAfter: T0 - 1100 + 90_000 });
     expect(store.get("hub:none")).toBeNull();
     expect(store.textOf("hub:none")).toBeNull();
     expect(store.detail("hub:none")).toBeNull();
   });
 
-  it("answers the same id with the same target and text with that delivery as it is now, and stores nothing again", () => {
+  it("answers the same id with the same target and text with that delivery as it is now, and stores nothing again", async () => {
     const { store, adb, clock } = storeOn();
-    put(store, "hub:a", { text: "x" });
+    await put(store, "hub:a", { text: "x" });
     store.update("hub:a", { state: "typed", typedAt: T0 + 5, sessionId: S1 });
     clock.now = T0 + 60_000;
-    expect(put(store, "hub:a", { text: "x", ttlMs: 1 }))
+    expect(await put(store, "hub:a", { text: "x", ttlMs: 1 }))
       .toEqual({ fresh: false, delivery: expect.objectContaining({ state: "typed", queuedAt: T0, notAfter: T0 + LIMITS.deliveryTtlMs, sessionId: S1 }) });
     // Whether a name is sticky is the fleet's judgement when it routes, not the delivery's content.
-    expect(put(store, "hub:a", { text: "x", target: { lane: "manager", sticky: false } })).toMatchObject({ fresh: false });
+    expect(await put(store, "hub:a", { text: "x", target: { lane: "manager", sticky: false } })).toMatchObject({ fresh: false });
     expect(rows(adb)).toBe(1);
   });
 
-  it("refuses the same id with another text or target as a conflict, and keeps the first as it was (negative control: an id conflict accepted)", () => {
+  it("refuses the same id with another text or target as a conflict, and keeps the first as it was (negative control: an id conflict accepted)", async () => {
     const { store } = storeOn();
-    put(store, "hub:a", { text: "x" });
+    await put(store, "hub:a", { text: "x" });
     const others: Put[] = [{ text: "y" }, { text: "x", target: { lane: "api", sticky: false } }, { text: "x", target: { workerId: W } }];
-    for (const other of others) expect(put(store, "hub:a", other), JSON.stringify(other)).toEqual({ conflict: true });
+    for (const other of others) expect(await put(store, "hub:a", other), JSON.stringify(other)).toEqual({ conflict: true });
     expect(store.textOf("hub:a")).toBe("x");
     expect(store.get("hub:a")?.target).toEqual({ lane: "manager" });
   });
 
-  it("commits a new delivery synced to the disk (FULL for that transaction only), and a repeat or a later change without a sync", () => {
-    const { store, adb } = storeOn();
+  it("commits a new delivery at NORMAL, then syncs the WAL; a later change is an ordinary NORMAL commit", async () => {
+    let syncs = 0;
+    const { store, adb } = storeOn(T0, async () => { syncs += 1; });
     const seen = watch(adb);
-    put(store, "hub:a");
-    expect(seen.splice(0)).toEqual(["synchronous = FULL", "INSERT INTO deliveries", "synchronous = NORMAL"]);
-    put(store, "hub:a");
-    expect(seen.splice(0)).toEqual(["synchronous = FULL", "synchronous = NORMAL"]);
+    await put(store, "hub:a");
+    expect(syncs).toBe(1);
+    expect(seen.splice(0)).toEqual(["INSERT INTO deliveries"]);     // no switch of the synchronous setting, ever
+    await put(store, "hub:a");                                       // a repeat answers the stored row, through the sync
+    expect(syncs).toBe(2);
     store.update("hub:a", { waiting: { reason: "menu_open", since: T0 } });
     expect(seen.splice(0)).toEqual(["UPDATE deliveries SET"]);
-    expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);   // NORMAL again
+    expect(syncs).toBe(2);
+    expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);   // NORMAL all along
   });
 
-  it("stores nothing when the disk refuses, and throws: the sender is told, never a silent loss", () => {
+  it("stores nothing when the disk refuses, and throws: the sender is told, never a silent loss", async () => {
     const { store, adb } = storeOn();
     adb.db.exec("CREATE TRIGGER no_room BEFORE INSERT ON deliveries BEGIN SELECT RAISE(ABORT, 'disk full'); END");
-    expect(() => put(store, "hub:a")).toThrow(/disk full/);
+    await expect(await put(store, "hub:a")).rejects.toThrow(/disk full/);
     expect(store.get("hub:a")).toBeNull();
     expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
+  });
+
+  it("a sync that fails after the commit takes the fresh row back: nothing was queued, and a retry stores it again", async () => {
+    let failing = true;
+    const { store, adb } = storeOn(T0, async () => { if (failing) throw new Error("the disk went away"); });
+    await expect(await put(store, "hub:a")).rejects.toThrow(/the disk went away/);
+    expect(store.get("hub:a")).toBeNull();
+    expect(rows(adb)).toBe(0);
+    failing = false;
+    expect(fresh(await put(store, "hub:a")).fresh).toBe(true);
+    expect(rows(adb)).toBe(1);
   });
 });
 
 describe("reading", () => {
-  it("finds a target's head, the oldest open one, in the order stored even within one millisecond; open() and recentFinal() likewise", () => {
+  it("finds a target's head, the oldest open one, in the order stored even within one millisecond; open() and recentFinal() likewise", async () => {
     const { store, clock } = storeOn();
-    for (const id of ["hub:z", "hub:m", "hub:a"]) put(store, id);                       // one millisecond, ids out of order
-    put(store, "hub:w", { target: { workerId: W } });
-    put(store, "hub:b", { target: { lane: "api", sticky: false }, boundSession: S1 });
+    for (const id of ["hub:z", "hub:m", "hub:a"]) await put(store, id);                       // one millisecond, ids out of order
+    await put(store, "hub:w", { target: { workerId: W } });
+    await put(store, "hub:b", { target: { lane: "api", sticky: false }, boundSession: S1 });
     expect(store.head({ lane: "manager" })?.id).toBe("hub:z");
     store.update("hub:z", { state: "typed", typedAt: T0, sessionId: S1 });
     expect(store.head({ lane: "manager" })?.id).toBe("hub:z");                         // typed is not final: still the head
@@ -131,9 +146,9 @@ describe("reading", () => {
 });
 
 describe("changing", () => {
-  it("keeps a reason while queued and drops it once typed; sessionId binds a queued name and records where a typed one went; the retype is kept", () => {
+  it("keeps a reason while queued and drops it once typed; sessionId binds a queued name and records where a typed one went; the retype is kept", async () => {
     const { store } = storeOn();
-    put(store, "hub:a", { target: { lane: "api", sticky: false }, boundSession: S1 });
+    await put(store, "hub:a", { target: { lane: "api", sticky: false }, boundSession: S1 });
     expect(store.get("hub:a")).toMatchObject({ sessionId: S1 });
     expect(store.update("hub:a", { waiting: { reason: "menu_open", since: T0 + 1 } }).waiting).toEqual({ reason: "menu_open", since: T0 + 1 });
     const typed = store.update("hub:a", { state: "typed", typedAt: T0 + 2, sessionId: S2 });
@@ -142,23 +157,23 @@ describe("changing", () => {
     expect(store.detail("hub:a")).toMatchObject({ boundSession: S1, retyped: false });
     store.update("hub:a", { retyped: true });
     expect(store.detail("hub:a")?.retyped).toBe(true);
-    put(store, "hub:late", { target: { lane: "api", sticky: false } });                 // queued while its lane was starting
+    await put(store, "hub:late", { target: { lane: "api", sticky: false } });                 // queued while its lane was starting
     store.update("hub:late", { sessionId: S1 });
     expect(store.detail("hub:late")?.boundSession).toBe(S1);
     expect(() => store.update("hub:none", { state: "typed" })).toThrow(/no delivery hub:none/);
   });
 
-  it("never changes a final delivery", () => {
+  it("never changes a final delivery", async () => {
     const { store } = storeOn();
-    put(store, "hub:a");
+    await put(store, "hub:a");
     const done = store.update("hub:a", { state: "delivered", deliveredAt: T0 + 3 });
     expect(store.update("hub:a", { state: "typed", note: "again" })).toEqual(done);
     expect(store.get("hub:a")).toEqual(done);
   });
 
-  it("prunes final deliveries 7 days after their last change, never an open one", () => {
+  it("prunes final deliveries 7 days after their last change, never an open one", async () => {
     const { store, clock } = storeOn();
-    for (const id of ["hub:old", "hub:newer", "hub:open"]) put(store, id, { target: { lane: id, sticky: true } });
+    for (const id of ["hub:old", "hub:newer", "hub:open"]) await put(store, id, { target: { lane: id, sticky: true } });
     store.update("hub:old", { state: "delivered", deliveredAt: T0 });
     clock.now = T0 + 3_600_000;
     store.update("hub:newer", { state: "given_up", why: "expired" });
@@ -173,14 +188,14 @@ describe("changing", () => {
 // #64 (agent.db migration 8): the draft stashed so a delivery could go in is kept with it, across a reopen, and through
 // its later changes.
 describe("a stashed draft", () => {
-  it("is kept with its delivery and comes back with it", () => {
+  it("is kept with its delivery and comes back with it", async () => {
     const h = tempHome();
     const path = join(h.home, "agent.db");
     let adb = openAgentDb(path);
     const stashed = { at: T0 + 3_600_000, since: T0, chars: 9, copy: "/data/drafts/1-manager.txt" };
     try {
       const s = new DeliveryStore(adb.db, () => T0, "pc");
-      put(s, "lanes:x");
+      await put(s, "lanes:x");
       expect(s.get("lanes:x")?.stashed).toBeUndefined();
       s.update("lanes:x", { stashed });
       s.update("lanes:x", { state: "typed", typedAt: T0 + 3_600_001, sessionId: S1 });

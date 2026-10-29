@@ -111,7 +111,7 @@ export class OpExecutor {
       if (deadline.expired()) return fail("timeout", "the deadline passed before the op could start");
       if (key !== undefined) {
         let started: boolean;
-        try { started = keys.start(key, hash); }
+        try { started = await keys.start(key, hash); }   // durable before the side effect; the sync is off the loop
         catch (e) { return this.#keysFailed(op, e); }
         if (!started) return fail("uncertain", "an attempt with this key is already recorded");
       }

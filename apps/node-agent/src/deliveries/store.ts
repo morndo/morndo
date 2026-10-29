@@ -1,9 +1,10 @@
 // The delivery queue's store (fleet clients spec §4.1–4.3; plan Contracts, "Agent internals shared by Tasks 4 to 6" and
-// Databases, agent.db migration 7). One row per delivery in agent.db, with this agent as the only writer.
-// - Storing a new delivery is its own transaction, synced to the disk (synced(), fleet core §16.4): an answer of `queued`
-//   is a promise the sender may stop retrying on, so it must outlive a power loss. Every later change (a waiting reason,
-//   typed, held, delivered, expired) is an ordinary NORMAL commit. One lost to a power loss is found again: a `started`
-//   key (synced, ops/done-keys.ts) says a delivery may have been typed, and the transcript says whether it was taken.
+// Databases, agent.db migration 7). One row per delivery in agent.db, with this agent as its only writer.
+// - Storing a delivery is its own transaction, its WAL synced off the event loop before the answer goes out (db/wal-sync.ts,
+//   fleet core §16.4): an answer of `queued` is a promise the sender may stop retrying on, so it must outlive a power
+//   loss. Every later change (a waiting reason, typed, held, delivered, expired) is an ordinary NORMAL commit. One lost
+//   to a power loss is found again: a `started` key (synced, ops/done-keys.ts) says a delivery may have been typed, and
+//   the transcript says whether it was taken.
 // - A deadline arrives as a duration (ttlMs) and becomes notAfter on this node's clock when stored. A client's clock is
 //   never compared with the node's (plan Review Focus 3: the owner's PC ran 1.1 s behind the control plane).
 // - The same id with the same target and text is the same delivery: the answer is its state now, and nothing is stored
@@ -20,7 +21,7 @@
 // - The text stays on this node: the Delivery the store answers with carries none (textOf reads it for the deliverer).
 import type Database from "better-sqlite3";
 import { FINAL_DELIVERY_STATES as FINAL, LIMITS, type Delivery, type DeliveryState, type DeliveryTarget, type DraftStash, type GiveUpReason, type WaitingReason } from "@morndo/protocol";
-import { synced } from "../ops/done-keys.ts";
+import { walSyncOf, type WalSync } from "../db/wal-sync.ts";
 
 const OPEN = "('queued', 'typed', 'held')";
 
@@ -40,11 +41,13 @@ export class DeliveryStore {
   #db: Database.Database;
   #now: () => number;
   #node: string;
+  #sync: WalSync;
 
-  constructor(db: Database.Database, now: () => number, node: string) {
+  constructor(db: Database.Database, now: () => number, node: string, walSync?: WalSync) {
     this.#db = db;
     this.#now = now;
     this.#node = node;
+    this.#sync = walSync ?? walSyncOf(db);
   }
 
   #row(id: string): Row | undefined {
@@ -67,10 +70,15 @@ export class DeliveryStore {
     };
   }
 
-  store(d: { id: string; target: DeliveryTarget; text: string; ttlMs: number; boundSession: string | null }): { delivery: Delivery; fresh: boolean } | { conflict: true } {
+  // A fresh row is committed and its WAL synced before the promise resolves: `queued` goes out only once the row is
+  // durable (domain.md FL15). A sync that fails takes a fresh row back and throws, so the deliverer answers internal,
+  // executed "no" — nothing was queued. A row that was already there (the same id, target and text) was synced when it
+  // was stored, in the same per-id queue (delivery-ops.ts); it answers its state now with no sync of its own.
+  async store(d: { id: string; target: DeliveryTarget; text: string; ttlMs: number; boundSession: string | null }): Promise<{ delivery: Delivery; fresh: boolean } | { conflict: true }> {
     const lane = "lane" in d.target ? d.target.lane : null;
     const worker = "workerId" in d.target ? d.target.workerId : null;
     const sticky = "lane" in d.target && d.target.sticky ? 1 : 0;
+    let fresh = false;
     const write = () => this.#db.transaction((): { delivery: Delivery; fresh: boolean } | { conflict: true } => {
       const old = this.#row(d.id);
       if (old) {
@@ -80,9 +88,17 @@ export class DeliveryStore {
       const at = this.#now();
       this.#db.prepare(`INSERT INTO deliveries (id, target_lane, target_worker, sticky, bound_session, text, state, queued_at, not_after, retyped, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, 'queued', ?, ?, 0, ?)`).run(d.id, lane, worker, sticky, d.boundSession, d.text, at, at + d.ttlMs, at);
+      fresh = true;
       return { delivery: this.#delivery(this.#row(d.id) as Row), fresh: true };
     }).immediate();
-    return synced(this.#db, write);
+    const stored = write();
+    if (!fresh) return stored;                               // an earlier call stored it, and synced it, in the same queue
+    try { await this.#sync(); }
+    catch (e) {                                              // a row that is not durable must not stay queued
+      try { this.#db.prepare("DELETE FROM deliveries WHERE id = ?").run(d.id); } catch { /* the original error stands */ }
+      throw e;
+    }
+    return stored;
   }
 
   get(id: string): Delivery | null {

@@ -117,7 +117,7 @@ describe("a receipt must be written after the typing began", () => {
   it("two identical short briefs: an earlier line with the same text in the same second is not the receipt; the lane's own new line is", async () => {
     const r = rig();
     r.say(S1, whole("continue", T0));                                   // a person typed it just before, in the same second
-    r.deliverer.enqueue({ id: "lanes:c1", target: MANAGER, text: "continue" });
+    await r.deliverer.enqueue({ id: "lanes:c1", target: MANAGER, text: "continue" });
     await r.deliverer.drain();
     expect(state(r, "lanes:c1")).toBe("typed");
     await r.round();
@@ -132,7 +132,7 @@ describe("a receipt must be written after the typing began", () => {
   it("a transcript cut short after the typing: a same-second line of the same text is not the receipt; one from a later second is", async () => {
     const r = rig();
     r.say(S1, ...fill(40));
-    r.deliverer.enqueue({ id: "lanes:s1", target: MANAGER, text: "continue" });
+    await r.deliverer.enqueue({ id: "lanes:s1", target: MANAGER, text: "continue" });
     await r.deliverer.drain();
     expect(state(r, "lanes:s1")).toBe("typed");
     r.replace(S1, null, whole("continue", T0));                       // smaller than the offset: a new file in effect
@@ -145,7 +145,7 @@ describe("a receipt must be written after the typing began", () => {
   it("a transcript replaced by a bigger file: its old lines are no receipt either (negative control)", async () => {
     const r = rig();
     r.say(S1, ...fill(2));
-    r.deliverer.enqueue({ id: "lanes:s2", target: MANAGER, text: "continue" });
+    await r.deliverer.enqueue({ id: "lanes:s2", target: MANAGER, text: "continue" });
     await r.deliverer.drain();
     r.replace(S1, "file-2", ...fill(60), whole("continue", T0));      // longer than the offset, but another file
     await r.round();
@@ -157,7 +157,7 @@ describe("a receipt must be written after the typing began", () => {
   it("a transcript that only grows keeps its offset: a line past it counts in the second the text was typed in", async () => {
     const r = rig();
     r.say(S1, ...fill(3));
-    r.deliverer.enqueue({ id: "lanes:s3", target: MANAGER, text: "continue" });
+    await r.deliverer.enqueue({ id: "lanes:s3", target: MANAGER, text: "continue" });
     await r.deliverer.drain();
     r.say(S1, whole("continue", T0 + 100));
     await r.round();
@@ -166,7 +166,7 @@ describe("a receipt must be written after the typing began", () => {
 
   it("a first brief to a lane whose transcript does not exist yet is delivered by the line that creates it", async () => {
     const r = rig();
-    r.deliverer.enqueue({ id: "lanes:c2", target: MANAGER, text: "first brief" });
+    await r.deliverer.enqueue({ id: "lanes:c2", target: MANAGER, text: "first brief" });
     await r.deliverer.drain();
     expect(state(r, "lanes:c2")).toBe("typed");
     r.say(S1, whole("first brief", T0 + 200));
@@ -199,7 +199,7 @@ describe("trying and confirming (spec §4.3)", () => {
     const r = rig();
     const ids = ["kira:tap-1", "hub:answer:e1:a1:ship", "fleet:lane-events:pc:1"] as const;
     const texts = ["approve the deploy", "ship it", "ship it"] as const;
-    for (const [i, id] of ids.entries()) r.deliverer.enqueue({ id, target: MANAGER, text: texts[i] as string });
+    for (const [i, id] of ids.entries()) await r.deliverer.enqueue({ id, target: MANAGER, text: texts[i] as string });
     await r.deliverer.drain();
     expect(r.sends().map(c => c.key)).toEqual([ids[0]]);
     expect([ids[1], ids[2]].map(id => r.store.get(id)?.waiting?.reason)).toEqual(["earlier", "earlier"]);
@@ -227,8 +227,8 @@ describe("trying and confirming (spec §4.3)", () => {
 
   it("holds the next one back while the one before waits for its receipt, at most 60 s from that typing; then the next types (rulings 16, 42)", async () => {
     const r = rig();
-    r.deliverer.enqueue({ id: "hub:first", target: MANAGER, text: "first" });
-    r.deliverer.enqueue({ id: "hub:second", target: MANAGER, text: "second" });
+    await r.deliverer.enqueue({ id: "hub:first", target: MANAGER, text: "first" });
+    await r.deliverer.enqueue({ id: "hub:second", target: MANAGER, text: "second" });
     await r.deliverer.drain();
     expect(r.sends().map(c => c.key)).toEqual(["hub:first"]);
     expect(LIMITS.deliveryReceiptHoldMs).toBe(60_000);
@@ -247,7 +247,7 @@ describe("trying and confirming (spec §4.3)", () => {
   it("leaves it queued with the reason of a refusal that typed nothing, keeps when it began waiting, and types once the pane is ready", async () => {
     const r = rig();
     r.answer(refuse("menu_open"));
-    r.deliverer.enqueue({ id: "hub:w", target: MANAGER, text: "x" });
+    await r.deliverer.enqueue({ id: "hub:w", target: MANAGER, text: "x" });
     await r.deliverer.drain();
     expect(r.store.get("hub:w")).toMatchObject({ state: "queued", waiting: { reason: "menu_open", since: T0 } });
     const said = r.emitted.length;
@@ -273,14 +273,14 @@ describe("trying and confirming (spec §4.3)", () => {
   it("gives a definite refusal up (refused), with what the pane said", async () => {
     const r = rig();
     r.answer(refuse("too_large"));
-    r.deliverer.enqueue({ id: "hub:big", target: MANAGER, text: "x" });
+    await r.deliverer.enqueue({ id: "hub:big", target: MANAGER, text: "x" });
     await r.deliverer.drain();
     expect(r.store.get("hub:big")).toMatchObject({ state: "given_up", why: "refused", note: "too_large: refused: too_large" });
   });
 
   it("types a text starting with / once, and confirms it by the command entry Claude Code writes for it (Review Focus 1)", async () => {
     const r = rig();
-    r.deliverer.enqueue({ id: "lanes:compact-1", target: MANAGER, text: "/compact" });
+    await r.deliverer.enqueue({ id: "lanes:compact-1", target: MANAGER, text: "/compact" });
     await r.deliverer.drain();
     expect(state(r, "lanes:compact-1")).toBe("typed");
     r.say(S1, L.command("/compact", T0 + 200));
@@ -291,7 +291,7 @@ describe("trying and confirming (spec §4.3)", () => {
 
   it("confirms a command that starts a new session (/clear) by its pane's session changing after the typing (ruling 17)", async () => {
     const r = rig();
-    r.deliverer.enqueue({ id: "lanes:clear-1", target: MANAGER, text: "/clear" });
+    await r.deliverer.enqueue({ id: "lanes:clear-1", target: MANAGER, text: "/clear" });
     await r.deliverer.drain();
     expect(state(r, "lanes:clear-1")).toBe("typed");
     await r.round();
@@ -309,7 +309,7 @@ describe("Enter again (spec §4.3)", () => {
     const r = rig();
     r.answer(q => (q.op === "pane.send" ? r.typed("not_submitted")(q) : r.typed()(q)));
     r.drafts.set("%1", "ship it");                                     // Enter changes nothing: the line stays in the box
-    r.deliverer.enqueue({ id: "hub:e", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:e", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     const enter = expect.objectContaining({ op: "pane.keys", args: { workerId: W1, names: ["Enter"], expect: { server: "0a1b2c3d", window: "manager" } } });
     expect(r.keys()).toEqual([enter, enter]);
@@ -322,12 +322,12 @@ describe("Enter again (spec §4.3)", () => {
     const theirs = rig();
     theirs.answer(q => theirs.typed("not_submitted")(q));
     theirs.drafts.set("%1", "the owner's own words");
-    theirs.deliverer.enqueue({ id: "hub:e", target: MANAGER, text: "ship it" });
+    await theirs.deliverer.enqueue({ id: "hub:e", target: MANAGER, text: "ship it" });
     await theirs.deliverer.drain();
     expect(theirs.keys()).toEqual([]);
     const clear = rig();
     clear.answer(q => clear.typed("not_submitted")(q));
-    clear.deliverer.enqueue({ id: "hub:e", target: MANAGER, text: "ship it" });
+    await clear.deliverer.enqueue({ id: "hub:e", target: MANAGER, text: "ship it" });
     await clear.deliverer.drain();
     expect(clear.keys()).toEqual([]);
   });
@@ -352,7 +352,7 @@ describe("a typing from before a restart (spec §4.3, §10)", () => {
   it("moves it to typed when its key was started already (the agent restarted while typing), and never types it again", async () => {
     const r = rig();
     r.answer(refuse("uncertain"));                                     // the executor's answer for a key already started
-    r.deliverer.enqueue({ id: "hub:s", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:s", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     expect(r.store.get("hub:s")).toMatchObject({ state: "typed", typedAt: T0, sessionId: S1, note: expect.stringContaining("restart") });
     r.answer(r.typed());
@@ -369,7 +369,7 @@ describe("a typing from before a restart (spec §4.3, §10)", () => {
     const r = rig();
     r.answer(q => reply(q, { ok: true, result: q.op === "pane.send" ? { problem: "not_submitted", typedAt: T0 - 5000 } : { ok: true } }));
     r.drafts.set("%1", "ship it");
-    r.deliverer.enqueue({ id: "hub:o", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:o", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     expect(r.store.get("hub:o")).toMatchObject({ state: "typed", typedAt: T0 - 5000 });
     expect(r.keys()).toEqual([]);
@@ -379,7 +379,7 @@ describe("a typing from before a restart (spec §4.3, §10)", () => {
 describe("receipts (spec §4.3, Confirming)", () => {
   it("holds it while Claude Code queues it; a dequeue (no text) decides nothing; the prompt after it delivers it", async () => {
     const r = rig();
-    r.deliverer.enqueue({ id: "hub:h", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:h", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     r.say(S1, L.enqueue("ship it", T0 + 100));
     await r.round();
@@ -400,7 +400,7 @@ describe("receipts (spec §4.3, Confirming)", () => {
     ["remove for a reason no rule names", "held", (text: string, at: number) => [L.enqueue(text, at), L.remove(text, "moved_elsewhere", at + 1)]],
   ])("after %s it is %s, and is never typed again", async (_, after, entries) => {
     const r = rig();
-    r.deliverer.enqueue({ id: "hub:r", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:r", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     r.say(S1, ...entries("ship it", T0 + 100));
     await r.round();
@@ -411,7 +411,7 @@ describe("receipts (spec §4.3, Confirming)", () => {
 
   it("types a line Claude Code dropped (cleared_on_cancel) once more, under <id>#2, when the box is clear and the session idle; dropped again, it is uncertain: never a third typing", async () => {
     const r = rig();
-    r.deliverer.enqueue({ id: "hub:d", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:d", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     r.say(S1, L.enqueue("ship it", T0 + 100), L.remove("ship it", "cleared_on_cancel", T0 + 200));
     r.clock.now = T0 + 1000;
@@ -430,7 +430,7 @@ describe("receipts (spec §4.3, Confirming)", () => {
     ["its session is busy", (r: Rig) => { (r.panes[0] as PaneState).status = "busy"; }],
   ])("does not type a dropped line again when %s: uncertain", async (_, setup) => {
     const r = rig();
-    r.deliverer.enqueue({ id: "hub:d", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:d", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     setup(r);
     r.say(S1, L.enqueue("ship it", T0 + 100), L.remove("ship it", "cleared_on_cancel", T0 + 200));
@@ -445,7 +445,7 @@ describe("expiring and cancelling (spec §4.3)", () => {
     const r = rig({ panes: [pane("a", W1, "%1", S1), pane("b", W2, "%2", S2), pane("c", W3, "%3", S3)] });
     r.answer(q => ((q.args as { workerId: string }).workerId === W1 ? refuse("menu_open")(q) : r.typed()(q)));
     for (const [id, lane] of [["hub:q", "a"], ["hub:t", "b"], ["hub:h", "c"]] as const) {
-      r.deliverer.enqueue({ id, target: { lane, sticky: false }, text: `for ${lane}`, ttlMs: 60_000 });
+      await r.deliverer.enqueue({ id, target: { lane, sticky: false }, text: `for ${lane}`, ttlMs: 60_000 });
     }
     await r.deliverer.drain();
     r.say(S3, L.enqueue("for c", T0 + 10));
@@ -469,8 +469,8 @@ describe("expiring and cancelling (spec §4.3)", () => {
   it("cancels a queued delivery, and it stays cancelled; one typed can't be (already_typed); an id it doesn't know is bad_args", async () => {
     const r = rig({ panes: [pane("manager", W1, "%1", S1), pane("api", W2, "%2", S2)] });
     r.answer(q => ((q.args as { workerId: string }).workerId === W1 ? refuse("menu_open")(q) : r.typed()(q)));
-    r.deliverer.enqueue({ id: "hub:q", target: MANAGER, text: "later" });
-    r.deliverer.enqueue({ id: "hub:t", target: { lane: "api", sticky: false }, text: "now" });
+    await r.deliverer.enqueue({ id: "hub:q", target: MANAGER, text: "later" });
+    await r.deliverer.enqueue({ id: "hub:t", target: { lane: "api", sticky: false }, text: "now" });
     await r.deliverer.drain();
     const tried = r.sends().filter(c => c.key === "hub:q").length;      // refused tries (the second enqueue runs one more round)
     const cancelled = r.deliverer.cancel("hub:q");
@@ -489,7 +489,7 @@ describe("expiring and cancelling (spec §4.3)", () => {
     let release = () => {};
     const gate = new Promise<void>(resolve => { release = resolve; });
     r.answer(async q => { await gate; return r.typed()(q); });
-    r.deliverer.enqueue({ id: "hub:c", target: MANAGER, text: "x" });
+    await r.deliverer.enqueue({ id: "hub:c", target: MANAGER, text: "x" });
     expect(await until(() => r.calls.length === 1)).toBe(true);
     expect(r.deliverer.cancel("hub:c")).toMatchObject({ code: "busy", executed: "no" });
     release();
@@ -514,7 +514,7 @@ describe("targets (spec §4.1)", () => {
   it("gives a name bound to its session up (gone) once another session has that name, and never types there", async () => {
     const r = rig({ panes: [pane("api", W1, "%1", S1)] });
     r.answer(refuse("menu_open"));
-    r.deliverer.enqueue({ id: "hub:b", target: { lane: "api", sticky: false }, text: "for this api" });
+    await r.deliverer.enqueue({ id: "hub:b", target: { lane: "api", sticky: false }, text: "for this api" });
     await r.deliverer.drain();
     expect(r.store.get("hub:b")).toMatchObject({ state: "queued", sessionId: S1 });
     expect(r.sends()[0]?.args).toMatchObject({ expect: { sessionId: S1 } });   // the pane is asked for the session too
@@ -527,8 +527,8 @@ describe("targets (spec §4.1)", () => {
 
   it("a prompt queued by worker id and a follow-up queued by that lane's name type one at a time, prompt first", async () => {
     const r = rig({ panes: [pane("foo", W1, "%1", null, null, T0 - 1000)] });
-    r.deliverer.enqueue({ id: "prompt", target: { workerId: W1 }, text: "the prompt" });
-    r.deliverer.enqueue({ id: "send-1", target: { lane: "foo", sticky: false }, text: "the follow-up" });
+    await r.deliverer.enqueue({ id: "prompt", target: { workerId: W1 }, text: "the prompt" });
+    await r.deliverer.enqueue({ id: "send-1", target: { lane: "foo", sticky: false }, text: "the follow-up" });
     await r.deliverer.drain();
     expect(r.sends()).toHaveLength(0);
     Object.assign(r.panes[0] as PaneState, { sessionId: S1, status: "idle" });
@@ -547,7 +547,7 @@ describe("targets (spec §4.1)", () => {
 
   it("binds a name queued while its lane was starting to the first session the lane shows", async () => {
     const r = rig({ panes: [pane("api", W1, "%1", null, null, T0 - 1000)] });
-    r.deliverer.enqueue({ id: "hub:l", target: { lane: "api", sticky: false }, text: "first words" });
+    await r.deliverer.enqueue({ id: "hub:l", target: { lane: "api", sticky: false }, text: "first words" });
     await r.deliverer.drain();
     expect(r.store.get("hub:l")).toMatchObject({ state: "queued", waiting: { reason: "no_session" } });
     expect(r.store.detail("hub:l")?.boundSession).toBeNull();
@@ -561,7 +561,7 @@ describe("targets (spec §4.1)", () => {
   it("binds a worker id to its pane: given up (gone) with it", async () => {
     const r = rig();
     r.answer(refuse("draft_present"));
-    r.deliverer.enqueue({ id: "hub:p", target: { workerId: W1 }, text: "x" });
+    await r.deliverer.enqueue({ id: "hub:p", target: { workerId: W1 }, text: "x" });
     await r.deliverer.drain();
     expect(state(r, "hub:p")).toBe("queued");
     r.panes.length = 0;
@@ -597,7 +597,7 @@ describe("targets (spec §4.1)", () => {
 
   it("answers the same id again with its state now; other content under it is id_conflict; a name two windows claim is lane_conflict; a name or pane not here is no_pane", async () => {
     const r = rig({ panes: [pane("manager", W1, "%1", S1), pane("twin", W2, "%2", S2), pane("twin", W3, "%3", S3)] });
-    r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" });
+    await r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" });
     await r.deliverer.drain();
     expect(r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" })).toMatchObject({ delivery: { id: "hub:a", state: "typed" } });
     const others: { target: DeliveryTarget; text: string }[] = [{ target: MANAGER, text: "y" }, { target: { lane: "twin", sticky: false }, text: "x" }];
@@ -625,7 +625,7 @@ describe("the rest of the deliverer's promises", () => {
   it("waits as unavailable while the node can't read its panes, and tries again once it can (ruling 15)", async () => {
     const r = rig();
     r.fail.refresh = true;
-    r.deliverer.enqueue({ id: "hub:u", target: MANAGER, text: "x" });
+    await r.deliverer.enqueue({ id: "hub:u", target: MANAGER, text: "x" });
     await r.deliverer.drain();
     expect(r.store.get("hub:u")).toMatchObject({ state: "queued", waiting: { reason: "unavailable" } });
     expect(r.sends()).toEqual([]);
@@ -639,7 +639,7 @@ describe("the rest of the deliverer's promises", () => {
     try {
       const r = rig();
       r.answer(refuse("menu_open"));
-      r.deliverer.enqueue({ id: "hub:t", target: MANAGER, text: "x" });
+      await r.deliverer.enqueue({ id: "hub:t", target: MANAGER, text: "x" });
       await r.deliverer.drain();
       expect(r.sends()).toHaveLength(1);
       r.deliverer.start();
@@ -665,7 +665,7 @@ describe("the test hooks for Task 16's drills", () => {
   it("noSessionBinding (negative control for the binding): a lane name is held like a sticky one, and the text lands in the new lane", async () => {
     const r = rig({ panes: [pane("api", W1, "%1", S1)], hooks: { noSessionBinding: true } });
     r.answer(refuse("menu_open"));
-    r.deliverer.enqueue({ id: "hub:u", target: { lane: "api", sticky: false }, text: "for the first api" });
+    await r.deliverer.enqueue({ id: "hub:u", target: { lane: "api", sticky: false }, text: "for the first api" });
     await r.deliverer.drain();
     expect(r.store.detail("hub:u")?.boundSession).toBeNull();
     r.panes.length = 0;                                                // the lane stopped…
@@ -682,7 +682,7 @@ describe("the test hooks for Task 16's drills", () => {
 
   it("retypeUnderFirstKey (negative control for the retype's own key): the retype goes under the delivery's id", async () => {
     const r = rig({ hooks: { retypeUnderFirstKey: true } });
-    r.deliverer.enqueue({ id: "hub:k", target: MANAGER, text: "ship it" });
+    await r.deliverer.enqueue({ id: "hub:k", target: MANAGER, text: "ship it" });
     await r.deliverer.drain();
     r.say(S1, L.enqueue("ship it", T0 + 100), L.remove("ship it", "cleared_on_cancel", T0 + 200));
     r.clock.now = T0 + 1000;
@@ -737,7 +737,7 @@ describe("a draft in the way (#64)", () => {
   it("on the manager: the same draft for an hour is saved, stashed with Ctrl+S, and the deliveries go in, in order", async () => {
     const r = boxRig();
     r.drafts.set("%1", "half a thought about the release");
-    for (const n of [1, 2, 3]) r.deliverer.enqueue({ id: `lanes:m${n}`, target: MANAGER, text: `message ${n}` });
+    for (const n of [1, 2, 3]) await r.deliverer.enqueue({ id: `lanes:m${n}`, target: MANAGER, text: `message ${n}` });
     await r.deliverer.drain();
     expect(r.store.get("lanes:m1")?.waiting?.reason).toBe("draft_present");
     expect(r.store.get("lanes:m2")?.waiting?.reason).toBe("earlier");
@@ -763,7 +763,7 @@ describe("a draft in the way (#64)", () => {
   it("Claude Code puts the draft back after each delivery: stashed again at once for the next, saved and recorded once", async () => {
     const r = boxRig({ restores: true });
     r.drafts.set("%1", "a long plan, pasted");
-    for (const n of [1, 2, 3]) r.deliverer.enqueue({ id: `lanes:r${n}`, target: MANAGER, text: `note ${n}` });
+    for (const n of [1, 2, 3]) await r.deliverer.enqueue({ id: `lanes:r${n}`, target: MANAGER, text: `note ${n}` });
     await r.deliverer.drain();
     r.clock.now = T0 + HOUR;
     await r.round();
@@ -785,7 +785,7 @@ describe("a draft in the way (#64)", () => {
   it("a draft edited after its stash came back is someone typing: the full wait again", async () => {
     const r = boxRig({ restores: true });
     r.drafts.set("%1", "first words");
-    for (const n of [1, 2]) r.deliverer.enqueue({ id: `lanes:e${n}`, target: MANAGER, text: `note ${n}` });
+    for (const n of [1, 2]) await r.deliverer.enqueue({ id: `lanes:e${n}`, target: MANAGER, text: `note ${n}` });
     await r.deliverer.drain();
     r.clock.now = T0 + HOUR;
     await r.round();
@@ -802,7 +802,7 @@ describe("a draft in the way (#64)", () => {
   it("on any other lane: a draft still holds its deliveries, however long", async () => {
     const r = boxRig();
     r.drafts.set("%2", "my own notes");
-    r.deliverer.enqueue({ id: "lanes:w", target: W1_LANE, text: "go on" });
+    await r.deliverer.enqueue({ id: "lanes:w", target: W1_LANE, text: "go on" });
     await r.deliverer.drain();
     for (const t of [HOUR, 3 * HOUR, 20 * HOUR]) { r.clock.now = T0 + t; await r.round(); }
     expect(stashKeys(r)).toHaveLength(0);
@@ -813,7 +813,7 @@ describe("a draft in the way (#64)", () => {
   it("a draft that changes is someone typing: the hour starts again from the change", async () => {
     const r = boxRig();
     r.drafts.set("%1", "draft one");
-    r.deliverer.enqueue({ id: "lanes:c", target: MANAGER, text: "hello" });
+    await r.deliverer.enqueue({ id: "lanes:c", target: MANAGER, text: "hello" });
     await r.deliverer.drain();
     r.clock.now = T0 + 50 * 60_000;
     r.drafts.set("%1", "draft one, longer now");
@@ -830,7 +830,7 @@ describe("a draft in the way (#64)", () => {
   it("a box still full after Ctrl+S is left alone: one key, the delivery keeps waiting, and the draft has its copy", async () => {
     const r = boxRig({ stashWorks: false });
     r.drafts.set("%1", "stubborn");
-    r.deliverer.enqueue({ id: "lanes:s", target: MANAGER, text: "hello" });
+    await r.deliverer.enqueue({ id: "lanes:s", target: MANAGER, text: "hello" });
     await r.deliverer.drain();
     r.clock.now = T0 + HOUR;
     await r.round();
@@ -846,7 +846,7 @@ describe("a draft in the way (#64)", () => {
   it("a copy that can't be saved: no key is pressed", async () => {
     const r = boxRig({ save: () => { throw new Error("disk full"); } });
     r.drafts.set("%1", "keep me");
-    r.deliverer.enqueue({ id: "lanes:f", target: MANAGER, text: "hello" });
+    await r.deliverer.enqueue({ id: "lanes:f", target: MANAGER, text: "hello" });
     await r.deliverer.drain();
     r.clock.now = T0 + HOUR;
     await r.round();

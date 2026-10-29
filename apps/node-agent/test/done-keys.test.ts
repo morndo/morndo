@@ -2,7 +2,8 @@
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
-import { DoneKeys, EFFECT_FIELDS, argsHash, stableJson, synced } from "../src/ops/done-keys.ts";
+import { durably, type WalSync } from "../src/db/wal-sync.ts";
+import { DoneKeys, EFFECT_FIELDS, argsHash, stableJson } from "../src/ops/done-keys.ts";
 import { tempHome } from "./helpers.ts";
 
 const open: { adb: AgentDb; cleanup: () => void }[] = [];
@@ -10,7 +11,7 @@ afterEach(() => { for (const o of open.splice(0)) { o.adb.close(); o.cleanup(); 
 function keys(now?: () => number, o: { disabled?: boolean } = {}) {
   return keysOn(now, o).keys;
 }
-function keysOn(now?: () => number, o: { disabled?: boolean } = {}) {
+function keysOn(now?: () => number, o: { disabled?: boolean; walSync?: WalSync } = {}) {
   const h = tempHome();
   const adb = openAgentDb(join(h.home, "agent.db"));
   open.push({ adb, cleanup: h.cleanup });
@@ -35,125 +36,152 @@ describe("done keys", () => {
     expect(argsHash("file.put", { upload: "u", offset: 0 })).not.toBe(argsHash("file.put", { upload: "u", offset: 4 }));
     expect(EFFECT_FIELDS["pane.send"]).toEqual(["workerId", "text"]);
   });
-  it("go none → started → done, and a done key keeps its outcome", () => {
+  it("go none → started → done, and a done key keeps its outcome", async () => {
     const k = keys();
     const h = argsHash("pane.send", { text: "x" });
     expect(k.lookup("hub:a", h)).toEqual({ state: "none" });
     expect(k.status("hub:a")).toEqual({ state: "unknown" });
-    expect(k.start("hub:a", h)).toBe(true);
+    expect(await k.start("hub:a", h)).toBe(true);
     expect(k.lookup("hub:a", h)).toEqual({ state: "started" });
     expect(k.status("hub:a")).toEqual({ state: "started" });
     k.finish("hub:a", { problem: null, typedAt: 5 });
     expect(k.lookup("hub:a", h)).toEqual({ state: "done", outcome: { problem: null, typedAt: 5 } });
     expect(k.status("hub:a")).toEqual({ state: "done", outcome: { problem: null, typedAt: 5 } });
   });
-  it("release a started key (a refusal before the side effect) but never a done one", () => {
+  it("release a started key (a refusal before the side effect) but never a done one", async () => {
     const k = keys();
-    k.start("hub:b", "h");
+    await k.start("hub:b", "h");
     k.release("hub:b");
     expect(k.status("hub:b")).toEqual({ state: "unknown" });
-    k.start("hub:c", "h");
+    await k.start("hub:c", "h");
     k.finish("hub:c", { ok: true });
     k.release("hub:c");
     expect(k.status("hub:c")).toMatchObject({ state: "done" });
   });
-  it("tell a key reused with other arguments", () => {
+  it("tell a key reused with other arguments", async () => {
     const k = keys();
-    k.start("hub:d", "one");
+    await k.start("hub:d", "one");
     expect(k.lookup("hub:d", "two")).toEqual({ state: "mismatch" });
-    expect(k.start("hub:d", "one")).toBe(false);                     // already recorded
+    expect(await k.start("hub:d", "one")).toBe(false);                     // already recorded
   });
-  it("record and consult nothing when disabled (the noDoneKeys test hook)", () => {
+  it("record and consult nothing when disabled (the noDoneKeys test hook)", async () => {
     const k = keys(undefined, { disabled: true });
-    expect(k.start("hub:x", "h")).toBe(true);
-    expect(k.start("hub:x", "h")).toBe(true);                       // nothing was recorded: it starts again
+    expect(await k.start("hub:x", "h")).toBe(true);
+    expect(await k.start("hub:x", "h")).toBe(true);                       // nothing was recorded: it starts again
     expect(k.lookup("hub:x", "h")).toEqual({ state: "none" });
     expect(k.lookup("hub:x", "other")).toEqual({ state: "none" });   // not even a mismatch
     k.finish("hub:x", { ok: true });
     expect(k.status("hub:x")).toEqual({ state: "unknown" });
   });
-  it("count every keyed op started in the store sequence, committed with its started row, never lowered (final review I2)", () => {
+  it("count every keyed op started in the store sequence, committed with its started row, never lowered (final review I2)", async () => {
     const { keys: k, adb } = keysOn();
     expect(k.seq()).toBe(0);
-    expect(k.start("hub:a", "h")).toBe(true);
-    expect(k.start("hub:b", "h")).toBe(true);
+    expect(await k.start("hub:a", "h")).toBe(true);
+    expect(await k.start("hub:b", "h")).toBe(true);
     expect([k.seq(), storedSeq(adb)]).toEqual([2, 2]);
-    expect(k.start("hub:a", "h")).toBe(false);                       // already recorded: not started again, not counted
+    expect(await k.start("hub:a", "h")).toBe(false);                       // already recorded: not started again, not counted
     k.finish("hub:a", { ok: true });
     k.release("hub:b");                                               // a refusal after started: the count stays
     expect(k.prune()).toBe(0);
     expect([k.seq(), storedSeq(adb)]).toEqual([2, 2]);
     expect(new DoneKeys(adb.db).seq()).toBe(2);                       // read back as stored (an agent restarted)
   });
-  it("commit the started row and the store sequence together: one that can't be counted isn't written", () => {
+  it("commit the started row and the store sequence together: one that can't be counted isn't written", async () => {
     const { keys: k, adb } = keysOn();
     adb.db.exec("CREATE TRIGGER no_count BEFORE UPDATE ON store_seq BEGIN SELECT RAISE(ABORT, 'disk full'); END");
-    expect(() => k.start("hub:a", "h")).toThrow(/disk full/);
+    await expect(k.start("hub:a", "h")).rejects.toThrow(/disk full/);
     expect(k.status("hub:a")).toEqual({ state: "unknown" });          // the started row went with it
     expect([k.seq(), storedSeq(adb)]).toEqual([0, 0]);
     adb.db.exec("DROP TRIGGER no_count");
-    expect(k.start("hub:a", "h")).toBe(true);
+    expect(await k.start("hub:a", "h")).toBe(true);
     expect([k.seq(), storedSeq(adb)]).toEqual([1, 1]);
   });
-  it("count nothing when disabled (the noDoneKeys test hook)", () => {
+  it("count nothing when disabled (the noDoneKeys test hook)", async () => {
     const { keys: k, adb } = keysOn(undefined, { disabled: true });
-    k.start("hub:x", "h");
+    await k.start("hub:x", "h");
     expect([k.seq(), storedSeq(adb)]).toEqual([0, 0]);
   });
-  it("are pruned after 7 days", () => {
+  it("are pruned after 7 days", async () => {
     let now = 1_000_000_000_000;
     const k = keys(() => now);
-    k.start("hub:old", "h");
+    await k.start("hub:old", "h");
     now += 7 * 24 * 3_600_000 + 1;
-    k.start("hub:new", "h");
+    await k.start("hub:new", "h");
     expect(k.prune()).toBe(1);
     expect(k.status("hub:old")).toEqual({ state: "unknown" });
     expect(k.status("hub:new")).toEqual({ state: "started" });
   });
 });
 
-// Spec §16.4: `started` is the one commit synced to the disk (synchronous=FULL for its transaction), and the connection
-// is back to NORMAL after it, whether it committed, found the key already there, or failed. The database's own setting
-// is NORMAL (db/open.ts), so the hooks and `done` never wait for a sync.
-describe("the started commit, synced", () => {
+// Spec §16.4: `started` is the one commit made durable — an ordinary NORMAL commit, then the WAL's sync off the event
+// loop (db/wal-sync.ts), the same durability synchronous=FULL gave there. The database's own setting never moves off
+// NORMAL (db/open.ts), so the hooks and `done` never wait for a sync, and finish, release and prune never sync at all.
+describe("the started commit, made durable", () => {
+  // What the store asks of the connection: any change of the synchronous setting (there must be none), in order.
   const watch = (adb: AgentDb) => {
     const seen: string[] = [];
     const pragma = adb.db.pragma.bind(adb.db);
     adb.db.pragma = ((source: string, options?: { simple?: boolean }) => {
       if (/^synchronous\s*=/.test(source)) seen.push(source);
-      if (/^\s*synchronous\s*$/.test(source) && options?.simple) seen.push(`read ${String(pragma(source, options))}`);
       return pragma(source, options as never);
     }) as typeof adb.db.pragma;
     return seen;
   };
-  it("runs under FULL, then the connection is NORMAL again; done and release never switch it", () => {
-    const { keys, adb } = keysOn();
+  it("commits at NORMAL, then syncs the WAL; finish and release never sync, and the setting never moves", async () => {
+    const syncs: string[] = [];
+    const { keys, adb } = keysOn(undefined, { walSync: async () => { syncs.push("sync"); } });
     const seen = watch(adb);
-    expect(keys.start("hub:a", "h")).toBe(true);
-    expect(seen).toEqual(["synchronous = FULL", "synchronous = NORMAL"]);
+    expect(await keys.start("hub:a", "h")).toBe(true);
+    expect(seen).toEqual([]);                                  // the commit ran at NORMAL: no switch, ever
+    expect(syncs).toEqual(["sync"]);
     keys.finish("hub:a", { ok: true });
-    keys.start("hub:b", "h");
+    expect(await keys.start("hub:b", "h")).toBe(true);
     keys.release("hub:b");
-    expect(seen).toEqual(["synchronous = FULL", "synchronous = NORMAL", "synchronous = FULL", "synchronous = NORMAL"]);
+    expect(syncs).toEqual(["sync", "sync"]);                   // only the starts
     expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
   });
-  it("is NORMAL again after a start that found its key, and after one that failed", () => {
-    const { keys, adb } = keysOn();
-    keys.start("hub:a", "h");
-    expect(keys.start("hub:a", "h")).toBe(false);
-    expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
-    adb.db.exec("DROP TABLE store_seq");                    // the transaction now fails part way
-    expect(() => keys.start("hub:c", "h")).toThrow();
-    expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
+  it("a start that found its key still answers false through its sync; one whose commit failed never reaches one", async () => {
+    let syncs = 0;
+    const { keys, adb } = keysOn(undefined, { walSync: async () => { syncs += 1; } });
+    expect(await keys.start("hub:a", "h")).toBe(true);
+    expect(await keys.start("hub:a", "h")).toBe(false);        // already recorded: uncertain, not started again
+    expect(syncs).toBe(2);
+    adb.db.exec("DROP TABLE store_seq");                       // the transaction now fails part way
+    await expect(keys.start("hub:c", "h")).rejects.toThrow();
+    expect(syncs).toBe(2);                                     // a commit that threw never reaches the sync
     expect(adb.db.prepare("SELECT key FROM done_keys WHERE key = 'hub:c'").get()).toBeUndefined();   // rolled back
+  });
+  it("a sync that fails after the commit takes the started row back, and the count with it", async () => {
+    let failing = true;
+    const { keys, adb } = keysOn(undefined, { walSync: async () => { if (failing) throw new Error("the disk went away"); } });
+    await expect(keys.start("hub:a", "h")).rejects.toThrow(/the disk went away/);
+    expect(keys.status("hub:a")).toEqual({ state: "unknown" }); // not durable: it must not stand as started
+    expect([keys.seq(), storedSeq(adb)]).toEqual([0, 0]);
+    failing = false;
+    expect(await keys.start("hub:a", "h")).toBe(true);          // a retry starts again, and counts once
+    expect([keys.seq(), storedSeq(adb)]).toEqual([1, 1]);
+  });
+  it("two starts whose syncs finish out of order never lower the sequence", async () => {
+    const gates: (() => void)[] = [];                          // each sync lands only when its gate opens
+    const { keys, adb } = keysOn(undefined, { walSync: () => new Promise<void>(resolve => { gates.push(resolve); }) });
+    const first = keys.start("hub:a", "h");
+    const second = keys.start("hub:b", "h");
+    gates[1]?.();                                              // the second's sync lands first
+    expect(await second).toBe(true);
+    expect(keys.seq()).toBe(2);
+    gates[0]?.();                                              // the first's, committed earlier, lands now
+    expect(await first).toBe(true);
+    expect([keys.seq(), storedSeq(adb)]).toEqual([2, 2]);      // never back to 1
   });
 });
 
-describe("synced, misused", () => {
-  it("refuses to run inside another transaction, and leaves that one as it was", () => {
+describe("durably, misused", () => {
+  it("refuses to run inside another transaction, and leaves that one as it was", async () => {
     const { adb } = keysOn();
-    const outer = adb.db.transaction(() => synced(adb.db, () => 1));
-    expect(() => outer()).toThrow("can't be nested");
+    adb.db.exec("BEGIN");
+    await expect(durably(adb.db, async () => {}, () => 1)).rejects.toThrow("can't be nested");
+    expect(adb.db.inTransaction).toBe(true);                   // the outer transaction is left as it was
+    adb.db.exec("ROLLBACK");
     expect(adb.db.inTransaction).toBe(false);
     expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
   });

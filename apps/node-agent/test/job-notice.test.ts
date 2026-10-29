@@ -18,7 +18,7 @@ const body = (over: Partial<StartBody> = {}): StartBody => ({
 const open: { adb: AgentDb; cleanup: () => void }[] = [];
 afterEach(() => { for (const o of open.splice(0)) { o.adb.close(); o.cleanup(); } });
 
-function rig(notify: StartBody["notify"] = { kind: "lane", name: "builder" }) {
+async function rig(notify: StartBody["notify"] = { kind: "lane", name: "builder" }) {
   const h = tempHome();
   const adb = openAgentDb(join(h.home, "agent.db"));
   const typed: string[] = [];
@@ -34,16 +34,16 @@ function rig(notify: StartBody["notify"] = { kind: "lane", name: "builder" }) {
   });
   open.push({ adb, cleanup: h.cleanup });
   if (!store.accept(body({ notify })).ok) throw new Error("accept");
-  store.applySchedule({ default: 2 }, "off");
+  await store.applySchedule({ default: 2 }, "off");
   if (!store.started("job-1").ok) throw new Error("started");
   return { store, deliveries, typed, notices, adb };
 }
 
 describe("one lane.deliver", () => {
-  it("types the notice once and returns the same delivery the second time", () => {
-    const { store, deliveries, typed, notices, adb } = rig();
-    expect(store.settle("job-1", EXIT).ok).toBe(true);
-    expect(store.settle("job-1", EXIT).ok).toBe(true);
+  it("types the notice once and returns the same delivery the second time", async () => {
+    const { store, deliveries, typed, notices, adb } = await rig();
+    expect((await store.settle("job-1", EXIT)).ok).toBe(true);
+    expect((await store.settle("job-1", EXIT)).ok).toBe(true);
     expect(notices).toHaveLength(2);
     expect(typed).toEqual([noticeIdOf("job-1")]);
     const again = deliveries.enqueue(noticeIdOf("job-1"), "builder", notices[0]?.text ?? "");
@@ -62,9 +62,9 @@ describe("one lane.deliver", () => {
     expect(row.text).toContain("[morndo-job] pack exited");
   });
 
-  it("confirms an uncertain notice and leaves a delivered one where it is", () => {
-    const { store } = rig();
-    store.settle("job-1", EXIT);
+  it("confirms an uncertain notice and leaves a delivered one where it is", async () => {
+    const { store } = await rig();
+    await store.settle("job-1", EXIT);
     store.markNotice("job-1", "uncertain");
     expect(store.get("job-1")?.notice).toBe("uncertain");
     store.markNotice("job-1", "delivered");
@@ -72,22 +72,22 @@ describe("one lane.deliver", () => {
     store.markNotice("job-1", "uncertain");
     store.markNotice("job-1", "given_up");
     expect(store.get("job-1")?.notice).toBe("delivered");
-    const held = rig();
-    held.store.settle("job-1", EXIT);
+    const held = await rig();
+    await held.store.settle("job-1", EXIT);
     held.store.markNotice("job-1", "held");
     held.store.markNotice("job-1", "typed");
     expect(held.store.get("job-1")?.notice).toBe("typed");
   });
 
-  it("a second delivery with the same id and other text types nothing", () => {
-    const { store, deliveries, typed, notices } = rig();
-    store.settle("job-1", EXIT);
+  it("a second delivery with the same id and other text types nothing", async () => {
+    const { store, deliveries, typed, notices } = await rig();
+    await store.settle("job-1", EXIT);
     const clash = deliveries.enqueue(noticeIdOf("job-1"), "builder", `${notices[0]?.text ?? ""} more`);
     expect(clash).toEqual({ ok: false, error: "id_conflict" });
     expect(typed).toEqual([noticeIdOf("job-1")]);
   });
 
-  it("leaves the notice pending when the lane did not get the text", () => {
+  it("leaves the notice pending when the lane did not get the text", async () => {
     const h = tempHome();
     const adb = openAgentDb(join(h.home, "agent.db"));
     const deliveries = new JobDeliveries(adb.db, () => false);
@@ -98,21 +98,21 @@ describe("one lane.deliver", () => {
     });
     open.push({ adb, cleanup: h.cleanup });
     if (!store.accept(body()).ok) throw new Error("accept");
-    store.applySchedule({ default: 1 }, "off");
+    await store.applySchedule({ default: 1 }, "off");
     if (!store.started("job-1").ok) throw new Error("started");
-    expect(store.settle("job-1", EXIT).ok).toBe(true);
+    expect((await store.settle("job-1", EXIT)).ok).toBe(true);
     expect(store.get("job-1")?.notice).toBe("pending");
     expect(adb.db.prepare("SELECT typed FROM job_deliveries").get()).toEqual({ typed: 0 });
   });
 
-  it("a fleet or task target does not type a lane delivery", () => {
-    const fleet = rig({ kind: "fleet" });
-    fleet.store.settle("job-1", EXIT);
+  it("a fleet or task target does not type a lane delivery", async () => {
+    const fleet = await rig({ kind: "fleet" });
+    await fleet.store.settle("job-1", EXIT);
     expect(fleet.typed).toEqual([]);
     const key = parseTaskKey("T-1");
     if (!key) throw new Error("task");
-    const task = rig({ kind: "task", key });
-    task.store.settle("job-1", EXIT);
+    const task = await rig({ kind: "task", key });
+    await task.store.settle("job-1", EXIT);
     expect(task.typed).toEqual([]);
   });
 });

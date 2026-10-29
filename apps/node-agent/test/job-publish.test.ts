@@ -18,7 +18,7 @@ const open: { adb: AgentDb; cleanup: () => void }[] = [];
 afterEach(() => { for (const o of open.splice(0)) { o.adb.close(); o.cleanup(); } });
 
 describe("a job the node sends", () => {
-  it("publishes state, class, lane, timings, outcome and notice, never the command", () => {
+  it("publishes state, class, lane, timings, outcome and notice, never the command", async () => {
     const h = tempHome();
     const adb = openAgentDb(join(h.home, "agent.db"));
     const seen: FleetJob[] = [];
@@ -28,9 +28,9 @@ describe("a job the node sends", () => {
     });
     open.push({ adb, cleanup: h.cleanup });
     expect(store.accept(body()).ok).toBe(true);
-    store.applySchedule({ default: 2 }, "off");
+    await store.applySchedule({ default: 2 }, "off");
     expect(store.started("job-1").ok).toBe(true);
-    expect(store.settle("job-1", EXIT).ok).toBe(true);
+    expect((await store.settle("job-1", EXIT)).ok).toBe(true);
     expect(seen.map(event => event.state)).toEqual(["queued", "starting", "running", "exited"]);
     expect(seen.map(event => event.ended)).toEqual([null, null, null, AT]);
     const last = seen.at(-1);
