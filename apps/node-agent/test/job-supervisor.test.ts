@@ -16,8 +16,7 @@ import { psStarts, START_RECORD_GRACE_MS, writeProcessFile } from "../src/ops/jo
 import { JobGrants } from "../src/ops/job-grant.ts";
 import { JobSupervisor, type JobStart } from "../src/ops/job-supervisor.ts";
 import { agentPaths } from "../src/paths.ts";
-import { until } from "./helpers.ts";
-import { tempHome } from "./helpers.ts";
+import { POOL_WRITER, tempHome, until } from "./helpers.ts";
 
 const HOLD = `process.on("SIGTERM",()=>{}); setInterval(()=>{}, 1000)`;
 const GROUP = `
@@ -818,9 +817,6 @@ describe("child supervisor", () => {
     expect(store.get("job-junk")?.state).not.toBe("starting");
   });
 
-  // Keeps writing, and stops itself at 256 KiB, under the 1 MiB per-job cap this test sets. The pool budget is 32.
-  const POOL_WRITER = "require('node:fs').writeFileSync(process.argv[1], String(process.pid)); const b = Buffer.alloc(64, 97); let n = 0; setInterval(() => { if (n >= 262144) return; require('node:fs').writeSync(1, b); n += b.length; }, 20);";
-
   it("leaves a job running when the pool is full and the job is under its own cap", async () => {
     const { store, start, sup, dir, notices } = rig(undefined, undefined, 1_000_000, undefined, undefined, 32);
     const marker = join(dir, "pid");
@@ -866,6 +862,28 @@ describe("child supervisor", () => {
     expect(opened).toBe(false);
     await sup.sweep();
     expect(store.get("job-sweep-cap")).toMatchObject({ state: "exited", outcome: "exited", exitCode: null });
+  });
+
+  // The cap a job's helper holds is the one in its spec, written when the job started; the supervisor judges the log against
+  // the store's cap of the running agent. After a restart with another cap the two numbers differ, and the job still ends capped:
+  // a smaller cap now makes the supervisor note it (.cap, and the helper's grace follows), a larger one leaves the helper's own.
+  it.each([
+    { name: "an agent restarted with a smaller cap", before: 1_000_000, after: 8 },
+    { name: "an agent restarted with a larger cap", before: 8, after: 1_000_000 },
+  ])("a job started under one cap ends capped under $name", async ({ before, after }) => {
+    const first = rig(undefined, undefined, before);
+    const { dir, home, paths, adb, start, slot } = first;
+    const id = "job-recap";
+    expect((await start({ id, command: [process.execPath, "-e", HOLD] })).state).toBe("running");
+    expect(await until(() => existsSync(join(dir, `${id}.pid`)))).toBe(true);
+    expect(JSON.parse(readFileSync(join(dir, `${id}.argv`), "utf8")).logBytes).toBe(before);
+    slot.sup.close();
+    const store = new JobStore(adb.db, dir, () => Date.now(), { home, logBytes: after });
+    const sup = replace(slot, store, home, paths);
+    writeFileSync(join(dir, `${id}.log`), "0123456789abcdef");                     // over the smaller cap, under the larger
+    expect(await until(async () => { await sup.sweep(); return existsSync(join(dir, `${id}.exit`)); }, 8000)).toBe(true);
+    await sup.sweep();
+    expect(store.get(id)).toMatchObject({ state: "exited", outcome: "exited", exitCode: null });
   });
 
   it("a cancel during start-up wins over a cap requested earlier", async () => {
