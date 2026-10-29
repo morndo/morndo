@@ -154,9 +154,9 @@ describe("close codes", () => {
 });
 
 describe("ping watchdog", () => {
-  it("waits LIMITS.agentPingTimeoutMs by default: 35 s, two of the fleet's 15 s pings and slack (fake timers)", async () => {
-    expect(LIMITS.agentPingTimeoutMs).toBe(35_000);
-    expect(LIMITS.agentPingTimeoutMs).toBeGreaterThan(2 * LIMITS.pingMs);
+  it("waits LIMITS.agentPingTimeoutMs by default: 50 s, three of the fleet's 15 s pings and slack (fake timers)", async () => {
+    expect(LIMITS.agentPingTimeoutMs).toBe(50_000);
+    expect(LIMITS.agentPingTimeoutMs).toBeGreaterThan(3 * LIMITS.pingMs);
     vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "Date", "performance"] });
     const c = connect();                                                    // no pingTimeoutMs: the default
     expect(await settle(() => c.conn.status().state === "online")).toBe(true);
@@ -164,7 +164,7 @@ describe("ping watchdog", () => {
     expect(fleet.closes).toEqual([]);
     await vi.advanceTimersByTimeAsync(1);
     expect(await settle(() => fleet.closes.some(x => x.conn === 1))).toBe(true);
-    expect(c.lines.join("\n")).toMatch(/no ping from the fleet for 35 s/);
+    expect(c.lines.join("\n")).toMatch(/no ping from the fleet for 50 s/);
   });
   it("terminates a fleet that sends no pings, and dials again", async () => {
     const c = connect({ pingTimeoutMs: 300 });                               // the fake fleet pings only when told to
@@ -177,6 +177,21 @@ describe("ping watchdog", () => {
     const c = connect({ pingTimeoutMs: 300 });
     expect(await until(() => c.conn.status().state === "online")).toBe(true);
     await wait(1000);
+    expect(fleet.connections()).toBe(1);
+    expect(c.conn.status().state).toBe("online");
+  });
+});
+
+describe("the ping watchdog after this process's own stall (T-532)", () => {
+  it("a watchdog that fires late because the agent was busy reads the pings that waited before it gives up", async () => {
+    fleet.script.pingMs = 100;
+    const c = connect({ pingTimeoutMs: 300 });
+    expect(await until(() => c.conn.status().state === "online")).toBe(true);
+    await wait(250);
+    const end = Date.now() + 800;
+    while (Date.now() < end) { /* the agent's only thread is busy for 0.8 s, longer than the 0.3 s watchdog */ }
+    await wait(1000);
+    expect(c.lines.join("\n")).not.toMatch(/no ping from the fleet/);
     expect(fleet.connections()).toBe(1);
     expect(c.conn.status().state).toBe("online");
   });

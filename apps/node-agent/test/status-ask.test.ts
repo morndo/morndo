@@ -166,12 +166,12 @@ describe("the relay asks over HTTP", () => {
     expect(await (await post(wait)).json()).toEqual({ decision: "block", reason: wakerAsk("builder", "the build") });
     start("pack", "builder");                                                  // queued
     expect(await (await post(wait)).json()).toEqual({ ok: true, queued: true });
-    jobs.applySchedule({ default: 4 }, "off");                                 // starting
+    await jobs.applySchedule({ default: 4 }, "off");                           // starting
     expect(jobs.get("pack")?.state).toBe("starting");
     expect(await (await post(wait)).json()).toEqual({ ok: true, queued: true });
     expect(jobs.started("pack").ok).toBe(true);                                // running
     expect(await (await post(wait)).json()).toEqual({ ok: true, queued: true });
-    expect(jobs.settle("pack", { outcome: "exited", exitCode: 0, durationMs: 10 }).ok).toBe(true);
+    expect((await jobs.settle("pack", { outcome: "exited", exitCode: 0, durationMs: 10 })).ok).toBe(true);
     expect(await (await post(wait)).json()).toEqual({ decision: "block", reason: wakerAsk("builder", "the build") });
     start("for-builder", "alpha", "builder");                                  // another lane's job whose notice comes here
     expect(await (await post(wait)).json()).toEqual({ ok: true, queued: true });

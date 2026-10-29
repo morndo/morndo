@@ -42,6 +42,7 @@ export type FakeFleet = {
   received: Received[];
   malformed: Received[];                                      // messages that don't fit the protocol's schemas
   closes: { conn: number; code: number }[];                   // each socket's close, as the fleet saw it
+  pongs: number[];                                            // when each pong to the fleet's pings arrived (Date.now)
   connections(): number;                                      // sockets accepted so far
   trust(node: string, publicKeySpki: string): void;           // as if the node had joined
   joinString(node: string, code?: string): string;            // a join string with a fresh one-time code
@@ -64,6 +65,7 @@ export async function startFakeFleet(over: Partial<Script> = {}): Promise<FakeFl
   const received: Received[] = [];
   const malformed: Received[] = [];
   const closes: { conn: number; code: number }[] = [];
+  const pongs: number[] = [];
   const codes = new Map<string, string>();                    // code → node
   const nodeKeys = new Map<string, KeyObject>();
   const wss = new WebSocketServer({ host: "127.0.0.1", port: 0, maxPayload: LIMITS.maxPayload });
@@ -83,6 +85,7 @@ export async function startFakeFleet(over: Partial<Script> = {}): Promise<FakeFl
     let stream = "";
     let ping: NodeJS.Timeout | null = null;
     ws.on("close", code => { if (ping) clearInterval(ping); closes.push({ conn, code }); });
+    ws.on("pong", () => { pongs.push(Date.now()); });
     ws.on("message", raw => {
       const msg = JSON.parse(wsText(raw)) as Msg;
       received.push({ conn, msg });
@@ -146,6 +149,7 @@ export async function startFakeFleet(over: Partial<Script> = {}): Promise<FakeFl
     received,
     malformed,
     closes,
+    pongs,
     connections: () => count,
     trust: (node, spki) => { nodeKeys.set(node, createPublicKey({ key: Buffer.from(spki, "base64"), format: "der", type: "spki" })); },
     joinString: (node, code = randomBytes(16).toString("base64url")) => {

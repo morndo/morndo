@@ -159,9 +159,9 @@ Messages are JSON over WebSocket, validated with zod/mini on both sides. Every m
 - That avoids two agents with one key, for example a cloned VM, endlessly replacing each other.
 - Results arriving late from the same instance are still accepted.
 
-**Liveness.** The fleet service pings every 15 s and terminates a connection that missed a pong. The agent terminates when no ping arrives for 35 s: two pings may be late before it gives up (`ws` README). It reconnects with exponential backoff, 1 s up to 60 s, with full jitter.
+**Liveness.** The fleet service pings every 15 s and terminates a connection that missed three pongs in a row; a node busy on its own disk may miss one while it is up. The agent terminates when no ping arrives for 50 s: three pings may be late before it gives up (`ws` README). It reconnects with exponential backoff, 1 s up to 60 s, with full jitter.
 
-**Node status.** `online` after a welcome; `stale` from the first missed pong until the connection is terminated; `offline` once it is closed.
+**Node status.** `online` after a welcome; `stale` in the moment a connection is ended for its missed pongs; `offline` once it is closed.
 
 **Frames.**
 - Every message is at most 512 KiB, and both ends set `maxPayload` to 1 MiB.
@@ -475,7 +475,7 @@ Two independent reviews of the plan, one asking whether it can be executed as wr
 24. **Unavailable is not gone** for a transcript, and a follow keeps its place through it (section 3.1).
 25. **A full disk doesn't stop the agent;** the relay's copies and the upload inbox count toward the spool's budget (sections 5.5, 7).
 26. **Done criteria:** every negative control is runnable as data, on a schedule; every hub suite that touches a port runs in both configurations (section 12).
-27. **Smaller ones:** the agent's ping timeout is 35 s (section 5.2); `lane.start` holds its name while in flight (section 4); a restored agent database starts a new stream (sections 5.4, 7); the events socket closes a client 8 MiB behind (section 5.6); keystrokes in doubt read "may have been typed" (sections 3.1, 7); Check again shows a definite refusal as Not sent (section 3.1); a worker ID's pane number has no leading zeros (section 4); branch names may hold `/` (section 5.3); with the fleet configured the hub has no desktop (section 3.1).
+27. **Smaller ones:** the agent's ping timeout is 50 s (section 5.2); `lane.start` holds its name while in flight (section 4); a restored agent database starts a new stream (sections 5.4, 7); the events socket closes a client 8 MiB behind (section 5.6); keystrokes in doubt read "may have been typed" (sections 3.1, 7); Check again shows a definite refusal as Not sent (section 3.1); a worker ID's pane number has no leading zeros (section 4); branch names may hold `/` (section 5.3); with the fleet configured the hub has no desktop (section 3.1).
 
 ### Changes during execution (2026-10-07)
 

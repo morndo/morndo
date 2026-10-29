@@ -339,7 +339,7 @@ export class JobSupervisor {
     // while this awaits takes its own reading; it never sees this one.
     const guard = this.#queued() ? this.#measure() : null;
     const pending = this.#starting();
-    this.#apply(guard);
+    await this.#apply(guard);
     const starts = await psStarts(this.#fallbackPids());
     const jobs = this.#store.list().filter(job => job.state === "running" || job.state === "starting");
     const watches: Promise<void>[] = [];
@@ -398,7 +398,7 @@ export class JobSupervisor {
       found = this.#recorded(id, "pid");
       if (!found || found.recorded.kind === "none") {
         try {
-          const decided = this.#settle(id, { outcome: "lost", at: Date.now() });
+          const decided = await this.#settle(id, { outcome: "lost", at: Date.now() });
           return decided.ok ? ok(decided.value) : err("missing");
         } catch { return err("missing"); }
       }
@@ -414,7 +414,7 @@ export class JobSupervisor {
     }
     const handoff = await this.#awaitExit(id, found, delivered);
     if (handoff) return ok(handoff);
-    return this.#ended(id) ?? err(delivered ? "signalled" : "unavailable");
+    return (await this.#ended(id)) ?? err(delivered ? "signalled" : "unavailable");
   }
 
   #fallbackPids(): number[] {
@@ -432,12 +432,12 @@ export class JobSupervisor {
   async #sweepOne(id: string, pending: Set<string>, starts: ReadonlyMap<number, ProcessStart | null>, watches: Promise<void>[] = []): Promise<void> {
     if (this.#slice) { await this.#sweepUnit(id, pending, watches); return; }
     if (!this.#open(id)) return;
-    if (existsSync(join(this.#store.dir, `${id}.exit`))) { this.#takeExit(id); return; }
+    if (existsSync(join(this.#store.dir, `${id}.exit`))) { await this.#takeExit(id); return; }
     const found = this.#recorded(id, "pid");
     if (found?.recorded.kind === "none") {
       if (this.#recordPending(id)) return;
       if (!this.#open(id)) return;
-      try { this.#settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
+      try { await this.#settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
       return;
     }
     const live = found ? await sameProcess(found.pid, found.recorded, starts) : false;
@@ -451,7 +451,7 @@ export class JobSupervisor {
     if (found || pending.has(id) || job.state === "running") {
       await this.#stopChild(id, starts);
       if (!this.#open(id)) return;
-      try { this.#settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
+      try { await this.#settle(id, { outcome: "lost", at: Date.now() }); } catch { /* next sweep retries */ }
       return;
     }
     if (!this.#open(id)) return;
@@ -468,12 +468,12 @@ export class JobSupervisor {
   }
 
   // `guard` is the reading this caller already took. Null means take one now, and only if a job is queued.
-  #apply(guard: Guard | null): void {
+  async #apply(guard: Guard | null): Promise<void> {
     if (!this.#enabled) {
-      this.#refuseQueued();
+      await this.#refuseQueued();
       return;
     }
-    this.#store.applySchedule(this.#limits, guard ?? this.#measure());
+    await this.#store.applySchedule(this.#limits, guard ?? this.#measure());
   }
 
   #measure(): Guard {
@@ -485,11 +485,11 @@ export class JobSupervisor {
 
   // A restart with jobs off does not kill a command that is already running. A job that never started is refused,
   // once, so its notice is the one the fleet delivers.
-  #refuseQueued(): void {
+  async #refuseQueued(): Promise<void> {
     for (const job of this.#store.list()) {
       if (job.state !== "queued") continue;
       try {
-        const decided = this.#settle(job.id, { outcome: "refused" });
+        const decided = await this.#settle(job.id, { outcome: "refused" });
         if (!decided.ok) continue;
       } catch (e) {
         this.#log?.error(`refusing queued job ${job.id} failed`, e);
@@ -501,7 +501,7 @@ export class JobSupervisor {
   // The launch is async. It has to take the same per-job lock as sweep and cancel, or a sweep can see
   // the unit still absent and settle the job lost while systemd-run is in flight.
   async #promote(already: Set<string>, guard: Guard | null = null): Promise<void> {
-    this.#apply(guard);
+    await this.#apply(guard);
     const launched: string[] = [];
     await Promise.all(this.#store.list()
       .filter(job => job.state === "starting" && !already.has(job.id))
@@ -627,7 +627,7 @@ export class JobSupervisor {
     if (look.kind === "unknown") return;
     if (look.kind === "absent") {
       if (pending.has(id) || job.state === "running") {
-        try { this.#settle(id, this.#unitEnd(id, job, null)); } catch { /* next sweep retries */ }
+        try { await this.#settle(id, this.#unitEnd(id, job, null)); } catch { /* next sweep retries */ }
         return;
       }
       await this.#launchUnit(id);
@@ -668,7 +668,7 @@ export class JobSupervisor {
       const started = this.#store.started(id);
       if (!started.ok) return;
     }
-    try { this.#settle(id, this.#unitEnd(id, job, null)); } catch { return; }
+    try { await this.#settle(id, this.#unitEnd(id, job, null)); } catch { return; }
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the end is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
   }
@@ -698,7 +698,7 @@ export class JobSupervisor {
       if (!started.ok) return;
     }
     try {
-      const decided = this.#settle(id, event);
+      const decided = await this.#settle(id, event);
       if (!decided.ok) return;
     } catch { return; }
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
@@ -720,11 +720,12 @@ export class JobSupervisor {
   }
 
   // Every settle drops what the supervisor keeps for the job once it is no longer open. The .cap and .cancel
-  // files stay on disk for prune, like the log.
-  #settle(id: string, event: FinishEvent): Result<NoticeHandoff, FinishProblem | "missing"> {
+  // files stay on disk for prune, like the log. Async: the store's terminal row is synced off the event loop
+  // (job-store.ts), so a settle returns only once the outcome is durable.
+  async #settle(id: string, event: FinishEvent): Promise<Result<NoticeHandoff, FinishProblem | "missing">> {
     let decided: Result<NoticeHandoff, FinishProblem | "missing">;
     try {
-      decided = this.#store.settle(id, event);
+      decided = await this.#store.settle(id, event);
     } catch (e) {
       this.#forget(id);
       throw e;
@@ -818,16 +819,16 @@ export class JobSupervisor {
       const durationMs = after.kind === "found" ? runMs(after.view, current.startedAt) : 0;
       const event: FinishEvent = timedOut ? { outcome: "timed_out", exitCode: null, durationMs } : { outcome: "cancelled", exitCode: null, durationMs };
       try {
-        const decided = this.#settle(id, event);
-        if (!decided.ok) return this.#ended(id) ?? err("signalled");
+        const decided = await this.#settle(id, event);
+        if (!decided.ok) return (await this.#ended(id)) ?? err("signalled");
         try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
         await resetJobUnit(id, this.#toolEnv);
         return ok(decided.value);
-      } catch { return this.#ended(id) ?? err("signalled"); }
+      } catch { return (await this.#ended(id)) ?? err("signalled"); }
     }
     if (!view) {
       try {
-        const decided = this.#settle(id, this.#unitEnd(id, job, null));
+        const decided = await this.#settle(id, this.#unitEnd(id, job, null));
         return decided.ok ? ok(decided.value) : err("missing");
       } catch { return err("missing"); }
     }
@@ -838,7 +839,7 @@ export class JobSupervisor {
       if (!started.ok) return err("missing");
     }
     try {
-      const decided = this.#settle(id, event);
+      const decided = await this.#settle(id, event);
       if (!decided.ok) return err("missing");
       try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
       await resetJobUnit(id, this.#toolEnv);
@@ -866,9 +867,10 @@ export class JobSupervisor {
       helper.unref();
       const job = this.#store.get(id);
       if (!job || job.state !== "starting") return;
-      try {
-        this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" });
-      } catch { /* the same event can be settled again */ }
+      // The settle is awaited by no one (this runs from the helper's error events); its own failure is only the next
+      // sweep's to retry.
+      this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" })
+        .catch(() => { /* the same event can be settled again */ });
     };
     helper.on("error", giveUp);
     helper.stdin?.on("error", giveUp);
@@ -897,7 +899,7 @@ export class JobSupervisor {
     if (unset === null) {
       const job = this.#store.get(id);
       if (!job || job.state !== "starting") return;
-      try { this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
+      try { await this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
       return;
     }
     try {
@@ -912,7 +914,7 @@ export class JobSupervisor {
       await resetJobUnit(id, this.#toolEnv);
       const job = this.#store.get(id);
       if (!job || job.state !== "starting") return;
-      try { this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
+      try { await this.#settle(id, { outcome: "exited", exitCode: null, durationMs: 0, error: "did_not_start" }); } catch { /* retried */ }
       return;
     }
     this.#store.started(id);
@@ -953,14 +955,14 @@ export class JobSupervisor {
     return { pid, recorded: readRecorded(text) };
   }
 
-  #lost(id: string): NoticeHandoff | null {
+  async #lost(id: string): Promise<NoticeHandoff | null> {
     try {
-      const decided = this.#settle(id, { outcome: "lost", at: Date.now() });
+      const decided = await this.#settle(id, { outcome: "lost", at: Date.now() });
       return decided.ok ? decided.value : null;
     } catch { return null; }
   }
 
-  #takeExit(id: string): NoticeHandoff | null {
+  async #takeExit(id: string): Promise<NoticeHandoff | null> {
     const path = join(this.#store.dir, `${id}.exit`);
     if (!existsSync(path)) return null;
     const job = this.#store.get(id);
@@ -975,7 +977,7 @@ export class JobSupervisor {
         const started = this.#store.started(id);
         if (!started.ok) return this.#lost(id);
       }
-      const decided = this.#settle(id, event);
+      const decided = await this.#settle(id, event);
       if (decided.ok) return decided.value;
     } catch { return null; }
     return this.#lost(id);
@@ -988,14 +990,14 @@ export class JobSupervisor {
     const matched = found ? await sameProcess(found.pid, found.recorded) : false;
     const dead = () => !found || !matched || !processAlive(found.pid);
     await until(() => existsSync(path) || dead(), 5000);
-    const taken = this.#takeExit(id);
+    const taken = await this.#takeExit(id);
     if (taken) return taken;
     if (found !== null && dead() && !existsSync(path)) {
       await this.#stopChild(id);
       try {
-        const decided = delivered
+        const decided = await (delivered
           ? this.#settle(id, { outcome: "cancelled", exitCode: null, durationMs: 0 })
-          : this.#settle(id, { outcome: "lost", at: Date.now() });
+          : this.#settle(id, { outcome: "lost", at: Date.now() }));
         return decided.ok ? decided.value : null;
       } catch { return null; }
     }
@@ -1088,7 +1090,7 @@ export class JobSupervisor {
     // The signalled cancel owns the end; otherwise the unit's own result from before the stop, or a plain exit.
     const cancelled = this.#signalled(id) ? this.#unitEnd(id, job, after.view) : null;
     const event = cancelled ?? own ?? { outcome: "exited" as const, exitCode: null, durationMs };
-    try { this.#settle(id, event); } catch { return; }
+    try { await this.#settle(id, event); } catch { return; }
     try { await stopJobUnit(id, this.#toolEnv); } catch { /* the exit is already recorded */ }
     await resetJobUnit(id, this.#toolEnv);
   }
@@ -1119,13 +1121,13 @@ export class JobSupervisor {
   }
 
   // A settle that loses because the job already ended answers with that outcome, not an unknown signal.
-  #ended(id: string): Result<NoticeHandoff, SuperviseProblem> | null {
+  async #ended(id: string): Promise<Result<NoticeHandoff, SuperviseProblem> | null> {
     const stored = this.#store.get(id);
     if (!stored || stored.outcome === null) return null;
     return this.#replay(stored);
   }
 
-  #replay(job: Job): Result<NoticeHandoff, SuperviseProblem> {
+  async #replay(job: Job): Promise<Result<NoticeHandoff, SuperviseProblem>> {
     const event = eventOf(job);
     if (!event) return err("missing");
     return this.#settle(job.id, event);

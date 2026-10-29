@@ -1,7 +1,8 @@
 // RelayFiles.copy must fsync the copied data before renaming it into place (durability: the event is 202'd only once
 // the copy is on disk). A full power-cut repro needs a Linux loop device; here we assert the syscall contract by
-// recording node:fs's fsyncSync and renameSync calls (real behaviour kept) and checking an fsync comes before the rename.
-// (An ESM namespace can't be spied on, so node:fs is wrapped with vi.mock.)
+// recording the copy's FileHandle.sync() (node:fs/promises; its fsync runs off the event loop, T-532) and node:fs's
+// renameSync (real behaviour kept) and checking an fsync comes before the rename. (An ESM namespace can't be spied on,
+// so both modules are wrapped with vi.mock.)
 import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -13,9 +14,18 @@ import { RelayFiles } from "../src/relay/relay-files.ts";
 const calls = vi.hoisted(() => ({ order: [] as string[] }));
 vi.mock("node:fs", async importOriginal => {
   const real = await importOriginal<typeof import("node:fs")>();
-  const fsyncSync: typeof real.fsyncSync = fd => { calls.order.push("fsync"); real.fsyncSync(fd); };
   const renameSync: typeof real.renameSync = (a, b) => { calls.order.push("rename"); real.renameSync(a, b); };
-  return { ...real, fsyncSync, renameSync };
+  return { ...real, renameSync };
+});
+vi.mock("node:fs/promises", async importOriginal => {
+  const real = await importOriginal<typeof import("node:fs/promises")>();
+  const open: typeof real.open = async (...args) => {
+    const fh = await real.open(...args);
+    const sync = fh.sync.bind(fh);
+    fh.sync = async () => { calls.order.push("fsync"); await sync(); };
+    return fh;
+  };
+  return { ...real, open };
 });
 
 let base: string; let adb: ReturnType<typeof openAgentDb>;

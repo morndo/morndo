@@ -15,6 +15,7 @@ import { combineSessions, engineSessionRegistry, sessionRegistry, stampServer, t
 import type { Delivery } from "@morndo/protocol";
 import type { Flight } from "@morndo/service-kit";
 import type { AgentConfig } from "../config.ts";
+import type { WalSync } from "../db/wal-sync.ts";
 import { Deliverer, type PaneView } from "../deliveries/deliverer.ts";
 import { DeliveryStore } from "../deliveries/store.ts";
 import { agentPaneView, agentTranscripts, draftSaver } from "../deliveries/views.ts";
@@ -61,6 +62,7 @@ export type RuntimeOptions = {
   emitDelivery?: (d: Delivery) => void;                   // each change of a delivery (agent.ts: ev.delivery)
   laneWaits?: Partial<LaneWaits>;                         // a test's shorter lane.start and lane.stop waits
   runCommand?: CommandRunner;                             // update.apply's start, faked in tests (update-ops.ts)
+  walSync?: WalSync;                                      // a test holds the durable commits' sync (db/wal-sync.ts)
 };
 
 const acceptAny = () => true;
@@ -81,11 +83,11 @@ export function createOpsRuntime(o: RuntimeOptions): OpsRuntime {
     node: config.node, session: config.policy.session, socket: config.policy.tmuxSocket,
     sessions: panes => registry.byPane(panes), stamp: stampServer, titles: sessionId => titles.read(sessionId),
   });
-  const doneKeys = new DoneKeys(o.db, Date.now, { disabled: hooks.noDoneKeys === true });
+  const doneKeys = new DoneKeys(o.db, Date.now, { disabled: hooks.noDoneKeys === true, ...(o.walSync ? { walSync: o.walSync } : {}) });
   const inbox = new UploadInbox({ dir: paths.inboxDir, ...(o.room ? { room: o.room } : {}) });
   const guard = o.guard ?? (hooks.noExpect ? acceptAny : undefined);
   const tmux = tmuxAdapter({ socket: config.policy.tmuxSocket, session: config.policy.session });
-  const deliveries = new DeliveryStore(o.db, now, config.node);
+  const deliveries = new DeliveryStore(o.db, now, config.node, o.walSync);
   const panes = agentPaneView({ inventory, tmux });
   const ops = buildOps({
     config, paths, db: o.db, doneKeys, inventory, inbox, registry, now, tmux, panes,

@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { UpdateStateFileSchema, type NodeUpdateHealth, type OpArgs, type OpResult } from "@morndo/protocol";
-import { writeFileAtomic } from "../atomic-write.ts";
+import { writeFileAtomicAsync } from "../atomic-write.ts";
 import { effect, type EffectContext, type OpTable, type Outcome } from "./executor.ts";
 
 // Starts a program, no shell: resolves once it was started (and, where the start is the whole ask, exited 0);
@@ -98,7 +98,7 @@ export function updateOps(d: UpdateDeps): Pick<OpTable, "update.apply"> {
           // The environment file is written (or removed) before the start, so the unit never reads an attempt from
           // an earlier request: the file and the start are one ask, and a failed start leaves the freshest word.
           if (a.attempt === undefined) rmSync(applyEnvFile(d.home), { force: true });
-          else writeFileAtomic(applyEnvFile(d.home), `MORNDO_ATTEMPT=${a.attempt}\n`);
+          else await writeFileAtomicAsync(applyEnvFile(d.home), `MORNDO_ATTEMPT=${a.attempt}\n`);   // its fsync off the loop (T-532)
         }
         await run(command.file, command.args);
         const result: OpResult["update.apply"] = { accepted: true };

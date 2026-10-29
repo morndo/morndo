@@ -6,7 +6,8 @@
 // deleted 24 hours after its event was acknowledged (LIMITS.relayFileKeepMs); a copy no event ever took (a crash
 // between copy and commit) goes after 24 hours too.
 import { randomBytes } from "node:crypto";
-import { chmodSync, closeSync, createWriteStream, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { chmodSync, createWriteStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
+import { open as openAsync } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { pipeline } from "node:stream/promises";
 import type Database from "better-sqlite3";
@@ -48,9 +49,10 @@ export class RelayFiles {
           chmodSync(tmp, 0o600);
           const actual = statSync(tmp).size;
           if (actual > LIMITS.maxFileBytes) { rmSync(tmp, { force: true }); return { ok: false, status: 413 }; }
-          const tfd = openSync(tmp, "r"); try { fsyncSync(tfd); } finally { closeSync(tfd); }   // the copy's data is on disk
+          // The copy's two fsyncs run off the event loop (T-532): a busy disk slows this copy, not the agent's link.
+          const tfd = await openAsync(tmp, "r"); try { await tfd.sync(); } finally { await tfd.close(); }   // the copy's data is on disk
           renameSync(tmp, file);
-          const dfd = openSync(this.#dir, "r"); try { fsyncSync(dfd); } finally { closeSync(dfd); }   // the new dir entry is durable
+          const dfd = await openAsync(this.#dir, "r"); try { await dfd.sync(); } finally { await dfd.close(); }   // the new dir entry is durable
           return { ok: true, ref, file, name: basename(path), size: actual };
         } catch (e) { rmSync(tmp, { force: true }); throw e; }
       } finally { this.#inflight -= size; }

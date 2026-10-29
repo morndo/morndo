@@ -1,10 +1,10 @@
 // Done keys in two phases (spec §5.3, "Idempotency"; ADR-0012 decision 7). `started` is committed before a side effect
 // and `done` with its outcome after it, in the agent database. `started` is the one commit there synced to the disk
-// (synchronous=FULL for that transaction; the database otherwise runs NORMAL, db/open.ts, spec §16.4): it alone must
-// outlive a power loss, a crash of the machine or a disk that fails while the machine runs on, because a client may
-// retry to another pane than the first attempt typed into (the hub's answers to the manager go by name), where no
-// expectation check can tell. If the disk can't take it, the commit throws and nothing is typed (executor.ts). A lost
-// `done` leaves `started`, so a repeat stays uncertain. A refusal before any side effect deletes the key, so a retry acts as if the first attempt
+// (an ordinary NORMAL commit, then the WAL's sync off the event loop, db/wal-sync.ts; the database otherwise runs
+// NORMAL, db/open.ts, spec §16.4): it alone must outlive a power loss, a crash of the machine or a disk that fails
+// while the machine runs on, because a client may retry to another pane than the first attempt typed into (the hub's
+// answers to the manager go by name), where no expectation check can tell. If the disk can't take it, the sync throws
+// and nothing is typed (executor.ts). A lost `done` leaves `started`, so a repeat stays uncertain. A refusal before any side effect deletes the key, so a retry acts as if the first attempt
 // never came. A repeat of a done key gets the stored outcome; of a started key, `uncertain`; of a key whose hash differs
 // (other effect-determining arguments), `uncertain` too: that key's op may have run. The hash covers only what decides
 // the effect (EFFECT_FIELDS), never `expect`, so a retry with a refreshed expectation is the same request. Keys are kept
@@ -14,21 +14,13 @@
 // one more in the same transaction that commits each `started`, so the count can never say a `started` was written that
 // isn't there, nor miss one that is. It is never lowered here; only a database put back from an older copy goes back.
 // Every answer carries it (agent.ts), so the hub can tell such a database from the one its send went to, even when the
-// copy kept the store id (cp over the file in place, a VM snapshot).
+// copy kept the store id (cp over the file in place, a VM snapshot). `#seq` is raised only once the sync has made the
+// `started` durable, so no answer counts one that a power loss could take back; two starts may finish their syncs out
+// of order, so it takes the max.
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { LIMITS, type OpName } from "@morndo/protocol";
-
-// Runs one transaction with synchronous=FULL, then sets the connection back to NORMAL. In WAL mode FULL adds "an additional
-// sync operation of the WAL file ... after each transaction commit" (https://www.sqlite.org/pragma.html#pragma_synchronous,
-// read 2026-10-08), and a sync of the WAL file keeps every commit before it in that file too.
-// Its own transaction only: SQLite refuses to change the setting inside one. A transaction left open (a rollback that
-// failed) keeps FULL, slower but safe, rather than hiding the error behind the setting's.
-export function synced<T>(db: Database.Database, transaction: () => T): T {
-  if (db.inTransaction) throw new Error("synced() runs its own transaction; it can't be nested in another");
-  db.pragma("synchronous = FULL");
-  try { return transaction(); } finally { if (!db.inTransaction) db.pragma("synchronous = NORMAL"); }
-}
+import { durableSyncOf, type WalSync } from "../db/wal-sync.ts";
 
 export type Prior = { state: "none" } | { state: "started" } | { state: "done"; outcome: unknown } | { state: "mismatch" };
 export type KeyStatus = { state: "unknown" } | { state: "started" } | { state: "done"; outcome: unknown };
@@ -72,12 +64,14 @@ export class DoneKeys {
   #db: Database.Database;
   #now: () => number;
   #disabled: boolean;
-  #seq: number;                                             // store_seq as last committed (this agent is its only writer)
+  #sync: WalSync;
+  #seq: number;                                             // store_seq as last made durable (this agent is its only writer)
 
-  constructor(db: Database.Database, now: () => number = Date.now, o: { disabled?: boolean } = {}) {
+  constructor(db: Database.Database, now: () => number = Date.now, o: { disabled?: boolean; walSync?: WalSync } = {}) {
     this.#db = db;
     this.#now = now;
     this.#disabled = o.disabled === true;
+    this.#sync = o.walSync ?? durableSyncOf(db);
     this.#seq = (db.prepare("SELECT seq FROM store_seq WHERE one = 1").get() as { seq: number } | undefined)?.seq ?? 0;
   }
 
@@ -97,18 +91,27 @@ export class DoneKeys {
     return { state: "done", outcome: r.outcome === null ? null : JSON.parse(r.outcome) as unknown };
   }
 
-  // Phase 1, committed and synced to the disk before the side effect, with the store sequence one higher in the same
-  // transaction. False if the key appeared meanwhile (then the caller answers uncertain, and the sequence is unchanged).
-  start(key: string, hash: string): boolean {
+  // Phase 1, committed and then synced to the disk before the side effect, with the store sequence one higher in the
+  // same transaction. False if the key appeared meanwhile (then the caller answers uncertain, and the sequence is
+  // unchanged). A sync that fails takes the `started` row back and throws: the executor answers internal, executed
+  // "no", as it does when the commit itself throws, and a retry starts again.
+  async start(key: string, hash: string): Promise<boolean> {
     if (this.#disabled) return true;
-    const seq = synced(this.#db, () => this.#db.transaction((): number | null => {
+    if (this.#db.inTransaction) throw new Error("start() commits on its own; it can't be nested in another transaction");
+    const seq = this.#db.transaction((): number | null => {
       const fresh = this.#db.prepare("INSERT INTO done_keys (key, hash, state, at) VALUES (?, ?, 'started', ?) ON CONFLICT(key) DO NOTHING")
         .run(key, hash, this.#now()).changes === 1;
       if (!fresh) return null;
       return (this.#db.prepare("UPDATE store_seq SET seq = seq + 1 WHERE one = 1 RETURNING seq").get() as { seq: number }).seq;
-    })());
-    if (seq === null) return false;
-    this.#seq = seq;                                        // only once committed
+    })();
+    if (seq === null) return false;                         // another attempt's row: not this call's to sync or take back
+    try { await this.#sync(); }
+    catch (e) {
+      // This call's row is not durable, so it must not stand: a retry would read it and stay uncertain for ever.
+      try { this.release(key); } catch { /* the original error stands */ }
+      throw e;
+    }
+    this.#seq = Math.max(this.#seq, seq);                   // only once the sync has made it durable
     return true;
   }
 

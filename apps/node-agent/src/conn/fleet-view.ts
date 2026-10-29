@@ -4,9 +4,11 @@
 // (FRESH_VIEW_MS, ten minutes), so while the agent is connected and online its observedAt is refreshed at every
 // health tick: a quiet fleet still counts as a live one, and a stale file means the agent stopped talking, not that
 // the Rollout stopped. Writes are atomic (atomic-write.ts) and never throw into the welcome or the health that
-// caused them: a failing disk is logged, not traded for a dropped connection.
+// caused them: a failing disk is logged, not traded for a dropped connection. They are not synced: the agent writes
+// the file again at every health tick, a reader judges it by observedAt, and an fsync here held the agent's only
+// thread on a saturated disk (T-532).
 import type { FleetViewFile, RolloutWire } from "@morndo/protocol";
-import { writeFileAtomic } from "../atomic-write.ts";
+import { writeFileReplace } from "../atomic-write.ts";
 import type { Logger } from "../log.ts";
 
 // What a welcome may carry (updates §7): the fields optional, so a fleet from before the updates design, and the
@@ -56,7 +58,7 @@ export class FleetView {
   }
 
   #write(): void {
-    try { writeFileAtomic(this.#path, `${JSON.stringify(this.#file)}\n`); }
+    try { writeFileReplace(this.#path, `${JSON.stringify(this.#file)}\n`); }
     catch (e) { this.#log.warn("could not write fleet-view.json", e); }
   }
 }

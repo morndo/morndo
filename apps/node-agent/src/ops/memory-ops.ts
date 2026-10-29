@@ -16,7 +16,7 @@
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, type Stats } from "node:fs";
 import { join, resolve } from "node:path";
 import { LIMITS, type OpArgs } from "@morndo/protocol";
-import { writeFileAtomic } from "../atomic-write.ts";
+import { writeFileAtomic, writeFileAtomicAsync } from "../atomic-write.ts";
 import { CHECK } from "./args.ts";
 import { effect, fail, ok, type OpTable } from "./executor.ts";
 
@@ -148,7 +148,7 @@ export function memoryOps(d: MemoryDeps): Pick<OpTable, "memory.sync"> {
       }
       const late = ctx.ready();
       if (late) return { ok: false, error: late };
-      writeFileAtomic(join(dir, `part-${a.part}.json`), JSON.stringify(a));
+      await writeFileAtomicAsync(join(dir, `part-${a.part}.json`), JSON.stringify(a));   // its fsync off the loop (T-532)
       staged.set(a.part, a);
       const skillDirs = [...d.skillDirs];
       // Every part's number is below `parts` (OP_ARGS), and every staged part has the same `parts`: a full count is every

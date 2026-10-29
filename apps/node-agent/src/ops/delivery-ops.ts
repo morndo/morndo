@@ -22,7 +22,7 @@ export function deliveryOps(d: { deliverer: () => Deliverer; panes: PaneView; po
       catch { return { ok: false, error: { code: "internal", executed: "no", message: "the node's panes could not be read; nothing was queued" } }; }
       const late = ctx.ready();
       if (late) return { ok: false, error: late };
-      const r = d.deliverer().enqueue(a);
+      const r = await d.deliverer().enqueue(a);
       return "code" in r ? { ok: false, error: r } : ok<"lane.deliver">(r);
     }),
     "delivery.cancel": effect(a => `delivery:${a.id}`, async a => {
