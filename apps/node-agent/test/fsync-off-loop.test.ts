@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentConfig } from "../src/config.ts";
 import { openAgentDb } from "../src/db/open.ts";
 import { DeliveryStore } from "../src/deliveries/store.ts";
+import { replayDurable } from "../src/conn/replay.ts";
 import { startFakeFleet, type FakeFleet } from "./fake-fleet.ts";
 import { joinedConfig, runAgent } from "./agent-harness.ts";
 import { isolatedTmux, tempHome, wait, type TestTmux } from "./helpers.ts";
@@ -100,4 +101,50 @@ describe("a disk sync off the event loop (T-532)", () => {
     release();
     expect(await fleet.waitFor(m => m.t === "res" && m.id === "d1", 10_000)).toMatchObject({ ok: true, result: { delivery: { id: "hub:d1", state: "queued" } } });
   }, 60_000);
+});
+
+describe("a replay sends only what its sync covers (T-532, review round 2)", () => {
+  // The fake disk: every sync waits until the test lets that one go.
+  function disk() {
+    const waiting: (() => void)[] = [];
+    return { sync: () => new Promise<void>(resolve => { waiting.push(resolve); }), letGo: (i: number) => { waiting[i]?.(); }, asked: () => waiting.length };
+  }
+
+  it("sends the rows it read before its sync, not a row committed while that sync ran", async () => {
+    const rows = new Map<string, string>([["a", "queued"]]);
+    const sent: string[] = [];
+    const d = disk();
+    const replay = replayDurable({
+      read: () => [...rows.entries()],
+      unchanged: ([id, state]) => rows.get(id) === state,
+      sync: d.sync, send: ([id]) => { sent.push(id); },
+    });
+    expect(d.asked()).toBe(1);
+    rows.set("b", "queued");                                   // committed while the replay's sync runs; its own sync is still out
+    d.letGo(0);
+    await replay;
+    expect(sent).toEqual(["a"]);                               // "b" leaves on its own path, after its own sync
+  });
+
+  it("leaves out a row that changed while its sync ran (a settle whose sync failed took it back)", async () => {
+    const rows = new Map<string, string>([["a", "exited"], ["c", "queued"]]);
+    const sent: string[] = [];
+    const d = disk();
+    const replay = replayDurable({
+      read: () => [...rows.entries()],
+      unchanged: ([id, state]) => rows.get(id) === state,
+      sync: d.sync, send: ([id]) => { sent.push(id); },
+    });
+    rows.set("a", "running");                                  // taken back to open meanwhile
+    d.letGo(0);
+    await replay;
+    expect(sent).toEqual(["c"]);
+  });
+
+  it("sends nothing when its sync fails", async () => {
+    const sent: string[] = [];
+    await expect(replayDurable({ read: () => ["a"], unchanged: () => true, sync: async () => { throw new Error("EIO"); }, send: id => { sent.push(id); } }))
+      .rejects.toThrow("EIO");
+    expect(sent).toEqual([]);
+  });
 });

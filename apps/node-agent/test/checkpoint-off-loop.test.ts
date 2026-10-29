@@ -5,7 +5,7 @@
 import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { startCheckpointer } from "../src/db/checkpointer.ts";
 import { openAgentDb } from "../src/db/open.ts";
 
@@ -49,5 +49,31 @@ describe("checkpoints off the event loop (T-532)", () => {
     await checkpointer.now();
     await checkpointer.stop();
     await expect(checkpointer.now()).rejects.toThrow(/stopped/);
+  });
+
+  it("a worker that dies calls onFail: the agent checkpoints on its own connection again (review round 2)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "checkpoint-"));
+    dirs.push(dir);
+    let failed = 0;
+    const checkpointer = startCheckpointer(join(dir, "no-such.db"), { everyMs: 60_000, onFail: () => { failed += 1; } });
+    closers.push(() => checkpointer.stop());
+    await vi.waitFor(() => { expect(failed).toBe(1); }, { timeout: 10_000 });   // the worker could not open the file
+    await expect(checkpointer.now()).rejects.toThrow(/stopped/);
+  });
+
+  it("a worker that is alive but stuck calls onFail once its progress deadline passes, and stop() returns anyway", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "checkpoint-"));
+    dirs.push(dir);
+    const path = join(dir, "agent.db");
+    const adb = openAgentDb(path);
+    closers.push(() => adb.close());
+    let failed = 0;
+    // stallMs: the worker blocks inside its first checkpoint, as one stuck in the disk would.
+    const checkpointer = startCheckpointer(path, { everyMs: 100, stuckMs: 1000, stopWaitMs: 500, onFail: () => { failed += 1; }, test: { stallMs: 30_000 } });
+    await vi.waitFor(() => { expect(failed).toBe(1); }, { timeout: 10_000 });
+    const t0 = Date.now();
+    await checkpointer.stop();
+    expect(Date.now() - t0).toBeLessThan(3000);                    // bounded: the stuck worker is left to the process's exit
+    expect(failed).toBe(1);                                          // once
   });
 });
