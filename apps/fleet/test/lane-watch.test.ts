@@ -16,7 +16,7 @@ const WORKER = "pc.3fa2c1d0.1";                                                 
 
 function rig(o: {
   config?: LaneWatchConfig; alive?: boolean; online?: () => boolean; nudgeTarget?: (node: string, window: string) => string | null;
-  raise?: (d: LaneEventDraft) => LaneEvent | null; answer?: NudgeAnswer; log?: Logger;
+  raise?: (d: LaneEventDraft) => LaneEvent | null; answer?: NudgeAnswer; nudgeFails?: unknown; log?: Logger;
   watched?: (window: string) => boolean; lostTurnMs?: number;
 } = {}) {
   let now = T0;
@@ -28,7 +28,7 @@ function rig(o: {
     config: o.config ?? CONFIG, log: o.log ?? quiet, now: () => now, alive: () => alive.value, ...(o.online ? { online: o.online } : {}),
     nudgeTarget: o.nudgeTarget ?? (() => WORKER),
     raise: o.raise ?? (d => { raised.push(d); return { ...d, seq: ++seq } as LaneEvent; }),
-    nudge: async r => { nudged.push(r); return o.answer ?? { ok: true }; },
+    nudge: async r => { nudged.push(r); if (o.nudgeFails !== undefined) throw o.nudgeFails; return o.answer ?? { ok: true }; },
     ...(o.watched ? { watched: o.watched } : {}), ...(o.lostTurnMs === undefined ? {} : { lostTurnMs: o.lostTurnMs }),
   });
   let n = 0;
@@ -290,6 +290,37 @@ describe("the lane watch", () => {
     r.at(T0 + 16 * MIN);
     r.watch.sweep();
     await vi.waitFor(() => expect(lines.some(l => l.includes("nudging api on pc was refused (no_pane)"))).toBe(true));
+  });
+
+  it("raises the stale event at the next sweep when the nudge could not be handed to the fleet at all", async () => {
+    const r = rig({ nudgeFails: new Error("no route to the node") });
+    r.watch.turn(r.finished(T0));
+    r.at(T0 + 16 * MIN);
+    r.watch.sweep();                                                                    // the nudge goes out and is lost whole
+    expect([r.raised, r.nudged.length]).toEqual([[], 1]);
+    await new Promise(res => setImmediate(res));                                        // its failure lands
+    r.at(T0 + 17 * MIN);                                                                // far short of PROBE_ANSWER_MS
+    r.watch.sweep();
+    expect(r.raised).toMatchObject([{ event: "stale", since: T0, stalls: 1 }]);
+  });
+
+  it("a lane whose shell ends with a new turn (shell, then busy, then a Stop) is never nudged or raised", () => {
+    const r = rig();
+    r.watch.turn(r.finished(T0, { bg: 1, tasks: [{ type: "shell", label: "gh pr checks 12 --watch" }] }));
+    r.at(T0 + MIN);
+    r.panes("shell");
+    r.at(T0 + 90 * MIN);                                                                // the lease is long past; the shell still runs
+    r.watch.sweep();
+    expect([r.raised, r.nudged]).toEqual([[], []]);
+    r.at(T0 + 91 * MIN);
+    r.panes("busy");                                                                    // the shell ended and the lane took a new turn
+    r.watch.sweep();
+    expect([r.raised, r.nudged]).toEqual([[], []]);                                     // held for SHELL_GRACE_MS after the shell ended
+    r.at(T0 + 92 * MIN);                                                                // the new turn's Stop, still inside that grace
+    r.watch.turn(r.finished(T0 + 92 * MIN, { status: "done", sessionId: "s1" }));
+    r.at(T0 + 120 * MIN);
+    r.watch.sweep();
+    expect([r.raised, r.nudged]).toEqual([[], []]);                                     // settled: nothing left to judge
   });
 
   it("says in the nudge how long ago, on what, and the line to start with", () => {

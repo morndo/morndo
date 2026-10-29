@@ -2,7 +2,9 @@
 // that said WAITING has until its lease (the one its line named, waitLeaseMs, else laneWatch.waitingMin); one that ended
 // with no status line has laneWatch.noStatusMin; DONE, BLOCKED and NEEDS DECISION have no deadline (the orchestrator acts
 // on them). A wake-up the turn left scheduled holds the lane until its next fire time after the turn end plus the
-// domain's grace, when the node's UTC offset is known (tzOffsetOf); and a turn that ended with background work running
+// domain's grace, when the node's UTC offset is known (tzOffsetOf) — a restart rebuilds its turns before any node has
+// sent its health, so that hold is taken at the first sweep that knows the offset; and a turn that ended with
+// background work running
 // is left alone while its window's session shows `shell` — the lane's own shell is running, and Claude Code wakes the
 // lane when it ends — and for SHELL_GRACE_MS after the shell stopped, never past BACKGROUND_LIVE_MAX_MS from the turn
 // end (lane stalls, 2026-10-28: of 74 stale events in one week, 48 were a lane whose own background job or wake-up was
@@ -48,7 +50,7 @@
 // make no lane event: LaneEvents hands their turn ends to runTurn, in memory only, so after a restart such a window's Run
 // rests on its session state until its next Stop. A restart is not activity here: a Run's overdue is deriveRun's, from
 // the turn's own lease. A window's entry goes a day after its last sign once its window is gone.
-import { BACKGROUND_LIVE_MAX_MS, WAKE_GRACE_MS, nextFire, pendingOf, type TurnEnd } from "@morndo/domain";
+import { BACKGROUND_LIVE_MAX_MS, WAKE_GRACE_MS, nextFire, pendingOf, type PendingWake, type TurnEnd } from "@morndo/domain";
 import type { HookEvent, LaneEvent, LaneWatchEntry, Pane, TurnStatus } from "@morndo/protocol";
 import type { LaneEventDraft } from "../adapters/lane-events-store.ts";
 import type { Logger } from "../adapters/log.ts";
@@ -85,6 +87,7 @@ type Turn = {
   reported: boolean;               // its stale event is stored
   stalls: number;
   bg: number;                      // the background work it ended with: its shell holds the lane past the lease (c)
+  wakes: PendingWake[];            // the wake-ups it left scheduled and whose hold is not taken yet (b)
   nudgedAt: number | null;         // when this expiry's nudge went out; null until its deadline passes (d)
   nudgeRefused: boolean;           // the nudge never reached the fleet's queue: no answer is coming
 };
@@ -213,21 +216,16 @@ export class LaneWatch {
     let deadline = settled ? null
       : le.status === "waiting" ? (le.until ?? le.at + this.#config.waitingMin * 60_000)
       : le.at + (bg ? this.#config.waitingMin : this.#config.noStatusMin) * 60_000;
-    // A wake-up the turn left scheduled holds the lane until its next fire time plus the domain's grace (b), taken
-    // after the turn end and never after now, so a schedule that recurs every few minutes cannot push the deadline
-    // ahead of every sweep for ever.
-    if (deadline !== null && (le.wakes !== undefined || (le.crons ?? 0) > 0)) {
-      const tz = this.#tzOf(le.node);
-      if (tz !== null) {
-        const fires = turnEndOf(le).wakes.map(w => nextFire(w.schedule, le.at, tz)).filter((x): x is number => x !== null);
-        if (fires.length > 0) deadline = Math.max(deadline, Math.min(...fires) + WAKE_GRACE_MS);
-      }
-    }
+    // The wake-ups the turn left scheduled are kept with it: their hold needs the node's own clock, which a restart
+    // has not yet (the watch rebuilds before any node sends its health), so it is taken here or at the first sweep
+    // that knows the offset.
+    const wakes = deadline !== null && (le.wakes !== undefined || (le.crons ?? 0) > 0) ? [...turnEndOf(le).wakes] : [];
+    if (deadline !== null && wakes.length > 0) deadline = this.#wakeHeld(le.node, le.at, wakes, deadline);
     this.#turns.set(key, {
       node: le.node, window: le.window, ...(le.sessionId === undefined ? {} : { sessionId: le.sessionId }),
       at: le.at, status: le.status ?? null, active: Math.max(le.at, this.#seen.get(key) ?? le.at), deadline, reason: waiting ? "waiting" : "no_status",
       ...(le.waitingOn === undefined ? (bg && !le.status ? { waitingOn: (le.bg ?? 0) > 0 ? "background work" : "a scheduled wake-up" } : {}) : { waitingOn: le.waitingOn }),
-      reported: false, stalls: settled ? 0 : (before?.stalls ?? 0), bg: le.bg ?? 0, nudgedAt: null, nudgeRefused: false,
+      reported: false, stalls: settled ? 0 : (before?.stalls ?? 0), bg: le.bg ?? 0, wakes, nudgedAt: null, nudgeRefused: false,
     });
   }
 
@@ -288,6 +286,9 @@ export class LaneWatch {
     }
     for (const [key, t] of this.#turns) {
       if ((t.deadline === null || t.reported) && now - t.at > REBUILD_WINDOW_MS) { this.#turns.delete(key); continue; }
+      // A restart rebuilds before any node has sent its health, so a wake-up's hold could not be taken then: take it
+      // at the first sweep that knows the node's offset.
+      if (t.deadline !== null && t.wakes.length > 0) t.deadline = this.#wakeHeld(t.node, t.at, t.wakes, t.deadline);
       if (t.deadline === null || t.reported || t.active > t.at || now < t.deadline || !this.#online(t.node)) continue;
       if (!this.#alive(t.node, t.window)) { this.#turns.delete(key); continue; }
       if (this.#shellHolds(key, t, now)) continue;
@@ -435,6 +436,19 @@ export class LaneWatch {
       a => { if (!a.ok) this.#log.warn(`lane watch: nudging ${window} on ${node} was refused (${a.error.code})`); onSent?.(true); },
       (e: unknown) => { this.#log.warn(`lane watch: nudging ${window} on ${node} failed`, e); onSent?.(false); },
     );
+  }
+
+  // The hold a wake-up the turn left scheduled gives its deadline (b): the earliest fire time after the turn end plus
+  // the domain's grace, never below the deadline itself. Taken after the turn end and never after now, so a schedule
+  // that recurs every few minutes cannot push the deadline ahead of every sweep for ever. While the node's UTC offset
+  // is unknown the deadline stands as it is and the wakes are kept; once it is known the hold is taken and the wakes
+  // spent, so it is taken exactly once.
+  #wakeHeld(node: string, at: number, wakes: PendingWake[], deadline: number): number {
+    const tz = this.#tzOf(node);
+    if (tz === null) return deadline;
+    const fires = wakes.map(w => nextFire(w.schedule, at, tz)).filter((x): x is number => x !== null);
+    wakes.length = 0;
+    return fires.length > 0 ? Math.max(deadline, Math.min(...fires) + WAKE_GRACE_MS) : deadline;
   }
 
   // Whether a turn past its deadline is still held by the lane's own background work (c): the window's session shows

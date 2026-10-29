@@ -20,7 +20,14 @@ const KEY_AFTER_WORD = /^[\s*_`~:—–(["'“”‘’-]*(T-[1-9]\d{0,8})(?![\w
 // ("main CI for 2331eef", "PR 1121 CI, run 39841853073") reads none. Of 723 WAITING lines in nine days, 198 named one
 // the `for <N> min` rule did not read: "for about 25 min", "for ~20 min", ", about 265 min", "(about 7 min)",
 // "for up to 60 min", "for 20+ min". A range's upper end counts, and so does a trailing `+`.
-const DURATION = /(?:\bfor|,|\()\s*(?:approximately|approx\.|roughly|around|another|about|up\s+to|at\s+most|~|≈|max\b)?\s*(\d{1,6}(?:\.\d+)?)\s*(?:[–—-]\s*(\d{1,6}(?:\.\d+)?))?\s*\+?\s*(minutes|minute|mins|min|m|hours|hour|hrs|hr|h)\b\)?/i;
+// The line's own `for` duration wins (the contract's own form, "STATUS: WAITING <on what> for <N> min"): a number with
+// a unit earlier in the line describes the work ("12 shards (5 min each) for 1 h"), so a comma or parenthesis one is
+// read only when the line has no `for` one.
+const QUALIFIER = String.raw`(?:approximately|approx\.|roughly|around|another|about|up\s+to|at\s+most|~|≈|max\b)?`;
+const NUMBER = String.raw`(\d{1,6}(?:\.\d+)?)`;
+const AMOUNT = String.raw`${NUMBER}\s*(?:[–-]\s*${NUMBER})?\s*\+?\s*(minutes|minute|mins|min|m|hours|hour|hrs|hr|h)\b\)?`;
+const DURATION_FOR = new RegExp(String.raw`\bfor\b\s*${QUALIFIER}\s*${AMOUNT}`, "i");
+const DURATION_ELSEWHERE = new RegExp(String.raw`[,(]\s*${QUALIFIER}\s*${AMOUNT}`, "i");
 
 // The first non-blank line of a text, trimmed, at most 200 characters (the rule lane events have always used).
 export const firstLineOf = (text: string): string => (text.split("\n").find(l => l.trim()) ?? "").trim().slice(0, 200);
@@ -37,7 +44,7 @@ export function statusLineOf(line: string): StatusLine | null {
   if (word !== "WAITING") return { status: "needs_decision", ...(taskKey ? { taskKey } : {}) };
   // The key is not part of what the wait is on.
   const rest = (k ? (m[2] ?? "").slice(k[0].length) : (m[2] ?? "")).replace(/^[\s*_`~:—–-]+/u, "");
-  const d = DURATION.exec(rest);
+  const d = DURATION_FOR.exec(rest) ?? DURATION_ELSEWHERE.exec(rest);
   let forMs: number | undefined;
   if (d) {
     const n = Number(d[2] ?? d[1] ?? 0);                // a range ("5–10 min") waits its upper end
