@@ -16,14 +16,14 @@ export const REPLAY_RETRY_MS = 10_000;
 
 export async function replayDurable<T>(o: {
   read: () => T[]; unchanged: (item: T) => boolean; sync: WalSync; current: () => boolean; send: (item: T) => void;
-  retryMs?: number; onRetry?: (e: unknown) => void;
+  retryMs?: number; onRetry?: (e: unknown, tries: number) => void;    // tries: the failed syncs so far, 1 at the first
 }): Promise<void> {
-  for (;;) {
+  for (let tries = 1; ; tries++) {
     const items = o.read();
     try { await o.sync(); }
     catch (e) {
       if (!o.current()) return;
-      o.onRetry?.(e);
+      o.onRetry?.(e, tries);
       await new Promise<void>(resolve => { setTimeout(resolve, o.retryMs ?? REPLAY_RETRY_MS).unref(); });
       if (!o.current()) return;
       continue;
@@ -42,7 +42,7 @@ type Replayed = { kind: "delivery"; d: Delivery } | { kind: "job"; job: Job; at:
 export function replayStores(o: {
   deliveries: Pick<DeliveryStore, "open" | "recentFinal" | "get">;
   jobs: Pick<JobStore, "list" | "replayAt" | "eventTail" | "get">;
-  since: number; sync: WalSync; current: () => boolean; retryMs?: number; onRetry?: (e: unknown) => void;
+  since: number; sync: WalSync; current: () => boolean; retryMs?: number; onRetry?: (e: unknown, tries: number) => void;
   sendDelivery: (d: Delivery) => void; sendJob: (job: Job, at: number, tail: string) => void;
 }): Promise<void> {
   return replayDurable<Replayed>({

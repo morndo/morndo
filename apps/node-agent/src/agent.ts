@@ -320,7 +320,8 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       replayStores({
         deliveries: ops.deliveries, jobs: jobs.store, since: ops.now() - DELIVERY_REPLAY_MS, sync: walSync, current: () => welcomes === welcome,
         ...(o.replayRetryMs !== undefined ? { retryMs: o.replayRetryMs } : {}),
-        onRetry: e => { log.warn("the replay after this welcome waits: the disk did not sync; it tries again", e); },
+        // Said at the first failed sync, then once every 30 tries (about 5 minutes at 10 s), not at every try.
+        onRetry: (e, tries) => { if (tries % 30 === 1) log.warn(`the replay after this welcome waits: the disk did not sync (${tries} tries so far); it tries again`, e); },
         sendDelivery, sendJob: (job, at, tail) => { send(fleetRecord(job, { node: config.node, at, tail })); },
       }).catch((e: unknown) => { log.warn("nothing replayed after this welcome (the rows could not be read); the next welcome replays", e); });
     },
