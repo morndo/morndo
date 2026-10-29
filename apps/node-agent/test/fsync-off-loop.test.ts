@@ -147,6 +147,15 @@ describe("a disk sync off the event loop (T-532)", () => {
     expect(syncs - at).toBe(0);
   }, 60_000);
 
+  it("a replay whose sync keeps failing warns at its first try, not at every try (T-581, review)", async () => {
+    let syncs = 0;
+    const { agent, lines } = await runAgent(config, { walSync: async () => { syncs += 1; throw new Error("EIO"); }, replayRetryMs: 50 });
+    stops.push(() => agent.stop());
+    await fleet.waitFor(m => m.t === "ev.inventory");
+    await vi.waitFor(() => { expect(syncs).toBeGreaterThanOrEqual(10); }, { timeout: 10_000 });
+    expect(lines.filter(l => l.includes("the replay after this welcome waits"))).toHaveLength(1);
+  }, 60_000);
+
   it("answers a delivery queued only once its row is synced, while the pings go on (T-532)", async () => {
     let release = () => {};
     const held = new Promise<void>(resolve => { release = resolve; });
