@@ -25,7 +25,7 @@
 // - Lane state events (fleet clients spec §7): each inventory read is observed for sessions that turn `waiting` or leave
 //   it; the events go into the spool on "/lane" and to the fleet with the hooks (lane-state.ts).
 import { randomUUID } from "node:crypto";
-import { fleetRecord, type Job } from "@morndo/domain";
+import { fleetRecord } from "@morndo/domain";
 import { CAP_LONG_TEXT, CAP_ROLLOUT, CAP_UPDATE, ERROR_EXECUTED, LIMITS, type AgentMessage, type Delivery, type OpError } from "@morndo/protocol";
 import { healthProbe, tmuxAdapter } from "@morndo/node-ops";
 import { Flight, HoldWatch, holdFile, productVersion } from "@morndo/service-kit";
@@ -35,7 +35,7 @@ import { FleetView } from "./conn/fleet-view.ts";
 import type { RetryOptions } from "./conn/retry.ts";
 import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
-import { replayDurable } from "./conn/replay.ts";
+import { replayStores } from "./conn/replay.ts";
 import { startCheckpointer } from "./db/checkpointer.ts";
 import { bounded, WAL_SYNC_TIMEOUT_MS, walSyncOf, type WalSync } from "./db/wal-sync.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
@@ -68,7 +68,6 @@ const HOUSEKEEPING_MS = 3_600_000;
 // After every welcome: the deliveries not final, and every final the node still keeps (LIMITS.deliveryKeepMs). An outage
 // longer than an hour must still correct a mirror row the fleet is alerting on.
 const DELIVERY_REPLAY_MS = LIMITS.deliveryKeepMs;
-type Replayed = { kind: "delivery"; d: Delivery } | { kind: "job"; job: Job; at: number; tail: string };
 
 export type AgentOptions = {
   config: AgentConfig;
@@ -113,10 +112,10 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   // One WAL sync for every durable commit (done keys, deliveries, jobs) and for a replay: one queue, one deadline, so
   // a hung disk holds one thread, and a replay's sync covers every commit made before it (db/wal-sync.ts).
   const walSync = bounded(o.walSync ?? walSyncOf(adb.db), o.walSyncTimeoutMs ?? WAL_SYNC_TIMEOUT_MS);
-  // The checkpoints run in a worker with a connection of its own: the agent's connection never runs one (db/open.ts).
-  const checkpointer = startCheckpointer(config.dbPath, {
-    log, onFail: () => { try { adb.db.pragma("wal_autocheckpoint = 1000"); } catch { /* the database is closing */ } },
-  });
+  // The checkpoints run in a worker with a connection of its own: the agent's connection never runs one (db/open.ts),
+  // except while the worker has handed them back (it died or got stuck), until a new one has made progress.
+  const autocheckpoint = (pages: number) => { try { adb.db.pragma(`wal_autocheckpoint = ${pages}`); } catch { /* the database is closing */ } };
+  const checkpointer = startCheckpointer(config.dbPath, { log, onFail: () => { autocheckpoint(1000); }, onResume: () => { autocheckpoint(0); } });
   let streamId = hooks.fixedStreamId ?? adb.streamId;
   let rotated = false;
   const instanceId = o.instanceId ?? randomUUID();
@@ -293,6 +292,8 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     mark: (id, notice) => jobs.store.markNotice(id, notice),
   });
 
+  // Each welcome counts: a replay sends only while no later welcome has come (offline, send() sends nothing).
+  let welcomes = 0;
   conn = new FleetConnection({
     url: config.fleetUrl, node: config.node, instanceId, streamId, fleetKey, nodeKey,
     // CAP_LONG_TEXT beside the ops: this agent takes pane.send and lane.deliver text up to LIMITS.maxMessageText.
@@ -307,24 +308,16 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     admit: w => !restored(w),
     onRollout: (r, offer) => { fleetView.rollout(r, offer ?? null, ops.now()); },
     onWelcome: w => {
+      const welcome = ++welcomes;
       fleetView.heard(w, ops.now());
       sender.online(w);
       events.online();
       // The deliveries open or final in the last hour, and the jobs still inside 7 days (at the time they were
-      // observed, not at reconnect): read now, sent once a sync covers them, each only if still as read (conn/replay.ts).
-      replayDurable<Replayed>({
-        read: () => [
-          ...[...ops.deliveries.open(), ...ops.deliveries.recentFinal(ops.now() - DELIVERY_REPLAY_MS)].map(d => ({ kind: "delivery" as const, d })),
-          ...jobs.store.list().flatMap(job => {
-            const at = jobs.store.replayAt(job);
-            return at === null ? [] : [{ kind: "job" as const, job, at, tail: jobs.store.eventTail(job.id) }];
-          }),
-        ],
-        unchanged: r => r.kind === "delivery"
-          ? JSON.stringify(ops.deliveries.get(r.d.id)) === JSON.stringify(r.d)
-          : JSON.stringify(jobs.store.get(r.job.id)) === JSON.stringify(r.job),
-        sync: walSync,
-        send: r => { if (r.kind === "delivery") sendDelivery(r.d); else send(fleetRecord(r.job, { node: config.node, at: r.at, tail: r.tail })); },
+      // observed, not at reconnect): read now, sent once a sync covers them, each only if still as read, and only while
+      // this welcome is the latest (conn/replay.ts).
+      replayStores({
+        deliveries: ops.deliveries, jobs: jobs.store, since: ops.now() - DELIVERY_REPLAY_MS, sync: walSync, current: () => welcomes === welcome,
+        sendDelivery, sendJob: (job, at, tail) => { send(fleetRecord(job, { node: config.node, at, tail })); },
       }).catch((e: unknown) => { log.warn("nothing replayed after this welcome (the disk did not sync, or the rows could not be read); the next welcome replays", e); });
     },
     onRequest: m => { answer(m).catch((e: unknown) => log.error("answering a request failed", e)); },

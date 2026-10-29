@@ -3,7 +3,8 @@
 // the same once the replay's sync is in. The same function runs in agent.ts.
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { Delivery, Job, StartBody } from "@morndo/domain";
+import type { Job, StartBody } from "@morndo/domain";
+import type { Delivery } from "@morndo/protocol";
 import { replayStores } from "../src/conn/replay.ts";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { DeliveryStore } from "../src/deliveries/store.ts";
@@ -39,10 +40,10 @@ function disk() {
   return { sync: () => held, letGo: () => { letGo(); } };
 }
 
+// What a replay sent, and the two senders it sends through.
 function sink() {
-  const deliveries: Delivery[] = [];
-  const jobs: { job: Job; at: number; tail: string }[] = [];
-  return { deliveries, jobs, sendDelivery: (d: Delivery) => { deliveries.push(d); }, sendJob: (job: Job, at: number, tail: string) => { jobs.push({ job, at, tail }); } };
+  const sent = { deliveries: [] as Delivery[], jobs: [] as { job: Job; at: number; tail: string }[] };
+  return { sent, send: { sendDelivery: (d: Delivery) => { sent.deliveries.push(d); }, sendJob: (job: Job, at: number, tail: string) => { sent.jobs.push({ job, at, tail }); } } };
 }
 
 describe("a welcome's replay, from the real stores (T-571)", () => {
@@ -57,10 +58,10 @@ describe("a welcome's replay, from the real stores (T-571)", () => {
     s.clock.now = AT;
     s.jobs.accept(body("job-1"));
     const out = sink();
-    await replayStores({ deliveries: s.deliveries, jobs: s.jobs, since: AT - HOUR, sync: async () => {}, current: () => true, ...out });
-    expect(out.deliveries.map(d => d.id)).toEqual(["d-open", "d-final"]);
-    expect(out.deliveries).toEqual([s.deliveries.get("d-open"), s.deliveries.get("d-final")]);
-    expect(out.jobs).toEqual([{ job: s.jobs.get("job-1"), at: AT, tail: "" }]);
+    await replayStores({ deliveries: s.deliveries, jobs: s.jobs, since: AT - HOUR, sync: async () => {}, current: () => true, ...out.send });
+    expect(out.sent.deliveries.map(d => d.id)).toEqual(["d-open", "d-final"]);
+    expect(out.sent.deliveries).toEqual([s.deliveries.get("d-open"), s.deliveries.get("d-final")]);
+    expect(out.sent.jobs).toEqual([{ job: s.jobs.get("job-1"), at: AT, tail: "" }]);
   });
 
   it("leaves out a delivery and a job whose rows changed while its sync ran, and sends the rest", async () => {
@@ -72,13 +73,13 @@ describe("a welcome's replay, from the real stores (T-571)", () => {
     await s.jobs.applySchedule({ default: 2 }, "off");                             // both starting
     const d = disk();
     const out = sink();
-    const replay = replayStores({ deliveries: s.deliveries, jobs: s.jobs, since: AT - HOUR, sync: d.sync, current: () => true, ...out });
+    const replay = replayStores({ deliveries: s.deliveries, jobs: s.jobs, since: AT - HOUR, sync: d.sync, current: () => true, ...out.send });
     s.deliveries.update("d-a", { state: "given_up", why: "cancelled" });          // each change goes out on its own path
     s.jobs.started("job-1");                                                      // running now
     d.letGo();
     await replay;
-    expect(out.deliveries.map(x => x.id)).toEqual(["d-b"]);
-    expect(out.jobs.map(x => x.job.id)).toEqual(["job-2"]);
+    expect(out.sent.deliveries.map(x => x.id)).toEqual(["d-b"]);
+    expect(out.sent.jobs.map(x => x.job.id)).toEqual(["job-2"]);
   });
 
   it("sends nothing once its welcome is no longer current", async () => {
@@ -88,11 +89,11 @@ describe("a welcome's replay, from the real stores (T-571)", () => {
     let current = true;
     const d = disk();
     const out = sink();
-    const replay = replayStores({ deliveries: s.deliveries, jobs: s.jobs, since: AT - HOUR, sync: d.sync, current: () => current, ...out });
+    const replay = replayStores({ deliveries: s.deliveries, jobs: s.jobs, since: AT - HOUR, sync: d.sync, current: () => current, ...out.send });
     current = false;
     d.letGo();
     await replay;
-    expect(out.deliveries).toEqual([]);
-    expect(out.jobs).toEqual([]);
+    expect(out.sent.deliveries).toEqual([]);
+    expect(out.sent.jobs).toEqual([]);
   });
 });
