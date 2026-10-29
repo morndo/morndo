@@ -3,7 +3,7 @@
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
-import { connect, createServer as netServer, type AddressInfo } from "node:net";
+import { createServer as netServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket, WebSocketServer } from "ws";
@@ -16,7 +16,10 @@ const PASSWORD = "s3cret!x";
 let vnc: ChildProcess | null = null;
 let port = 0;
 const freePort = () => new Promise<number>(r => { const s = netServer().listen(0, "127.0.0.1", () => { const p = (s.address() as AddressInfo).port; s.close(() => r(p)); }); });
+const SERVER_READY_MS = 90_000;
 const have = existsSync("/usr/bin/Xtigervnc") && existsSync("/usr/bin/vncpasswd");
+// Without TigerVNC the tests that need the real server are skipped, and the report says so (not passed silently).
+const needs = have ? "" : " (skipped: /usr/bin/Xtigervnc or /usr/bin/vncpasswd is not installed)";
 
 beforeAll(async () => {
   if (!have) return;
@@ -24,18 +27,37 @@ beforeAll(async () => {
   port = await freePort();
   let display = 140 + (process.pid % 50);
   while (existsSync(`/tmp/.X11-unix/X${display}`) || existsSync(`/tmp/.X${display}-lock`)) display++;
-  vnc = spawn("Xtigervnc", [`:${display}`, "-rfbport", String(port), "-localhost=1", "-SecurityTypes", "VncAuth", "-PasswordFile", passFile, "-geometry", "320x200", "-AlwaysShared=1"], { stdio: "ignore" });
-  for (let i = 0; i < 50; i++) {
-    const up = await new Promise<boolean>(r => { const s = connect(port, "127.0.0.1"); s.once("connect", () => { s.destroy(); r(true); }); s.once("error", () => r(false)); });
-    if (up) break;
-    await new Promise(r => setTimeout(r, 100));
+  const gone = new Promise<never>((_, reject) => {
+    vnc = spawn("Xtigervnc", [`:${display}`, "-rfbport", String(port), "-localhost=1", "-SecurityTypes", "VncAuth", "-PasswordFile", passFile, "-geometry", "320x200", "-AlwaysShared=1"], { stdio: "ignore" });
+    vnc.once("error", error => reject(new Error(`Xtigervnc could not be started: ${error.message}`)));
+    vnc.once("exit", (code, signal) => reject(new Error(`Xtigervnc ended before it was ready (exit ${code}, signal ${signal})`)));
+  });
+  gone.catch(() => {});                                            // read below through the race; never an unhandled rejection
+  // Ready is a real login that answers, not a fixed number of tries: a cold start of the server (its files read behind busy
+  // disks, a box at load 70) took longer than the 5 s the old poll gave it, and the tests then ran against a closed port.
+  // The deadline only ends a server that never comes up, and says so; a server that ends is reported at once, not after
+  // the login try in progress.
+  const deadline = Date.now() + SERVER_READY_MS;
+  for (;;) {
+    try {
+      const login = loginToServer({ host: "127.0.0.1", port, password: PASSWORD }, 10_000);
+      login.catch(() => {});
+      const { sock } = await Promise.race([login, gone]);
+      sock.destroy();
+      break;
+    } catch (error) {
+      if (/^Xtigervnc (ended|could not)/.test((error as Error).message) || Date.now() > deadline) {
+        throw new Error(/^Xtigervnc (ended|could not)/.test((error as Error).message) ? (error as Error).message
+          : `Xtigervnc on port ${port} did not answer a login within ${SERVER_READY_MS / 1000} s: ${(error as Error).message}`);
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
   }
-}, 15_000);
+}, SERVER_READY_MS + 15_000);
 afterAll(() => { vnc?.kill("SIGTERM"); rmSync(dir, { recursive: true, force: true }); });
 
 describe("VNC's DES", () => {
-  it("reads the password back from a file vncpasswd wrote", () => {
-    if (!have) return;
+  it.skipIf(!have)("reads the password back from a file vncpasswd wrote" + needs, () => {
     expect(readVncPassword(passFile)).toBe(PASSWORD);
   });
   it("answers a challenge with mirrored-key DES (a known pair from the RFB literature's test: zero key, zero block)", () => {
@@ -44,9 +66,8 @@ describe("VNC's DES", () => {
   });
 });
 
-describe("logging in to a real TigerVNC server", () => {
+describe.skipIf(!have)("logging in to a real TigerVNC server" + needs, () => {
   it("logs in with the right password and receives ServerInit after ClientInit", async () => {
-    if (!have) return;
     const { sock, reader } = await loginToServer({ host: "127.0.0.1", port, password: PASSWORD });
     sock.write(Buffer.from([1]));
     const init = await reader.read(24);
@@ -54,7 +75,6 @@ describe("logging in to a real TigerVNC server", () => {
     sock.destroy();
   });
   it("is refused with a wrong password (negative control)", async () => {
-    if (!have) return;
     await expect(loginToServer({ host: "127.0.0.1", port, password: "wrong" })).rejects.toThrow(/refused/);
   });
 });
@@ -82,7 +102,7 @@ describe("the watching filter", () => {
   });
 });
 
-describe("the bridge, browser side", () => {
+describe.skipIf(!have)("the bridge, browser side" + needs, () => {
   // A minimal browser: RFB 3.8, security None, ClientInit; returns the socket and ServerInit's size.
   async function browser(url: string) {
     const ws = new WebSocket(url);
@@ -111,7 +131,6 @@ describe("the bridge, browser side", () => {
     return { url: `ws://127.0.0.1:${(server.address() as AddressInfo).port}`, stop: () => { wss.close(); server.close(); } };
   }
   it("a watching browser sees the desktop, and its first key press ends the connection", async () => {
-    if (!have) return;
     const h = await hub(false);
     const b = await browser(h.url);
     expect(b.size).toEqual([320, 200]);
@@ -123,7 +142,6 @@ describe("the bridge, browser side", () => {
     h.stop();
   });
   it("a control connection passes input through (negative control)", async () => {
-    if (!have) return;
     const h = await hub(true);
     const b = await browser(h.url);
     b.ws.send(Buffer.from([4, 1, 0, 0, 0, 0, 0, 0x61]));
