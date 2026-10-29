@@ -60,7 +60,11 @@ describe("release pipeline files", () => {
     // test follows the package and pins neither.
     const root = JSON.parse(readFileSync("package.json", "utf8")) as { version: string };
     expect(JSON.parse(readFileSync(".release-please-manifest.json", "utf8"))).toEqual({ ".": root.version });
-    expect(readFileSync("CHANGELOG.md", "utf8").startsWith("# Changelog\n")).toBe(true);
+    const changelog = readFileSync("CHANGELOG.md", "utf8");
+    expect(changelog.startsWith("# Changelog\n")).toBe(true);
+    // Release Please's changelog updater turns a seed file's "# Changelog" into "## Changelog" and keeps it under the
+    // first release's entry (release-please 17.11.2, src/updaters/changelog.ts adjustHeaders); that heading is stray.
+    expect(changelog.split("\n")).not.toContain("## Changelog");
     expect(release).toContain(`googleapis/release-please-action@${RELEASE_PLEASE}`);
     expect(release).toContain("config-file: release-please-config.json");
     expect(release).toContain("manifest-file: .release-please-manifest.json");
