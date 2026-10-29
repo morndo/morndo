@@ -182,6 +182,21 @@ describe("ping watchdog", () => {
   });
 });
 
+describe("the ping watchdog after this process's own stall (T-532)", () => {
+  it("a watchdog that fires late because the agent was busy reads the pings that waited before it gives up", async () => {
+    fleet.script.pingMs = 100;
+    const c = connect({ pingTimeoutMs: 300 });
+    expect(await until(() => c.conn.status().state === "online")).toBe(true);
+    await wait(250);
+    const end = Date.now() + 800;
+    while (Date.now() < end) { /* the agent's only thread is busy for 0.8 s, longer than the 0.3 s watchdog */ }
+    await wait(1000);
+    expect(c.lines.join("\n")).not.toMatch(/no ping from the fleet/);
+    expect(fleet.connections()).toBe(1);
+    expect(c.conn.status().state).toBe("online");
+  });
+});
+
 describe("the fleet's URL (plan Contracts, fleetUrlOk)", () => {
   it("refuses a plain ws:// URL to another machine and never dials it", async () => {
     // 0.0.0.0 reaches this machine's fake fleet if dialed, but its host is not a loopback name.
