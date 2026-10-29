@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.2.2](https://github.com/morndo/morndo/compare/v0.2.1...v0.2.2) (2026-10-29)
+
+
+### Bug Fixes
+
+* **fleet:** end a connection after three missed pongs ([97ee975](https://github.com/morndo/morndo/commit/97ee975d63fddb5186d206c30272ee5678767f62))
+* **node-agent:** a failing replay sync warns at its first try and then once every 30, not at every try (T-581, review) ([8de4783](https://github.com/morndo/morndo/commit/8de4783338d8209a74a271c6417a8ed12c4f7aa2))
+* **node-agent:** a replay sends only what it read before its sync; the checkpointer fails over when stuck ([2eb61ee](https://github.com/morndo/morndo/commit/2eb61ee831169a4678f4ac98c4b83c4f28cbc5a7))
+* **node-agent:** durable commits sync off the event loop; the fleet ends a link after three missed pongs ([b2c283d](https://github.com/morndo/morndo/commit/b2c283dbeba03d5e6cf3b23cbb0c370917e2937d))
+* **node-agent:** no act on a commit before its sync, and runtime files unsynced ([4628d1e](https://github.com/morndo/morndo/commit/4628d1eecdc6a344593635d6552c558b8fac8cc2))
+* **node-agent:** nothing leaves before its sync; syncs bounded; checkpoints in a worker ([54e0f54](https://github.com/morndo/morndo/commit/54e0f547b57f7079eda17221f73179c650254166))
+* **node-agent:** stop a checkpoint worker that hands back, take the checkpoints back after a cool-down, replay only for the latest welcome ([a54be93](https://github.com/morndo/morndo/commit/a54be93ab3b9c867d113dcdeb4d9102801043bcb))
+* **node-agent:** stop a checkpoint worker that hands back, take the checkpoints back after a cool-down, replay only for the latest welcome (T-571) ([feb8d10](https://github.com/morndo/morndo/commit/feb8d101f174f92bd097423d70ff99c6c8d01478))
+* **node-agent:** sync durable commits off the event loop ([e502135](https://github.com/morndo/morndo/commit/e502135fa600d9429b370a5a4fca42efca8e8b95))
+* **node-agent:** try a failed checkpoint restart and a failed replay sync again, end the deadline on stop, count only checkpoints as progress ([96cafd3](https://github.com/morndo/morndo/commit/96cafd30e290ab95b5bdb67883f7b8076505d700))
+* **node-agent:** try a failed checkpoint restart and a failed replay sync again, end the deadline on stop, count only checkpoints as progress (T-581) ([ad35844](https://github.com/morndo/morndo/commit/ad35844505e59c5bf88c58cef2147c245629c663))
+* **release:** drop the stray '## Changelog' heading from CHANGELOG.md ([2dff65a](https://github.com/morndo/morndo/commit/2dff65a9f1f5600074970087224fbb940433507b))
+
 ## [0.2.1](https://github.com/morndo/morndo/compare/v0.2.0...v0.2.1) (2026-10-29)
 
 
