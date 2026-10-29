@@ -133,8 +133,8 @@ describe("the systemd cap watch", () => {
     if (noted) writeFileSync(join(dir, `${id}.cap`), "");
     sup.close();
     const next = agent(cap);
+    const sweeping = next.sup.sweep();
     try {
-      void next.sup.sweep();
       if (stopped) {
         expect(await until(() => existsSync(killed), 6000)).toBe(true);
       } else {
@@ -144,6 +144,7 @@ describe("the systemd cap watch", () => {
       }
     } finally {
       next.sup.close();
+      await sweeping;                                                      // done before the database goes
     }
   });
 });
