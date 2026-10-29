@@ -2,7 +2,7 @@
 // WAL synced before any notice is handed off; logs stay on this node, capped, and leave with the row after 7 days.
 import { chmodSync, closeSync, constants, existsSync, openSync, readFileSync, statSync, unlinkSync, writeFileSync, writeSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { NOTICE_MAX, noticeIdOf, type FinishEvent, type Job, type StartBody } from "@morndo/domain";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import type { WalSync } from "../src/db/wal-sync.ts";
@@ -353,6 +353,43 @@ describe("durable terminal transition", () => {
     const h = value(await store.settle("job-1", EXIT));
     expect(handed).toEqual([h]);
     expect(store.get("job-1")).toMatchObject({ state: "exited", outcome: "exited", exitCode: 0 });
+  });
+
+  it("a repeat settle behind one whose sync failed settles anew: one notice, and only for a row that is on the disk (T-532)", async () => {
+    const handed: NoticeHandoff[] = [];
+    let fail = () => {};
+    let syncs = 0;
+    const { store } = storeOn(() => AT, {
+      // The first sync fails once it is let go; every later one lands.
+      walSync: () => (syncs++ === 0 ? new Promise<void>((_resolve, reject) => { fail = () => { reject(new Error("the disk went away")); }; }) : Promise.resolve()),
+      onNotice: n => { handed.push(n); },
+    });
+    value(store.accept(body()));
+    await store.applySchedule({ default: 1 }, "off");
+    value(store.started("job-1"));
+    syncs = 0;
+    const first = store.settle("job-1", EXIT);                       // commits the terminal row, waits on its sync
+    const repeat = store.settle("job-1", EXIT);                      // the same end, while the first waits
+    fail();
+    await expect(first).rejects.toThrow(/the disk went away/);       // its row went back to open
+    const h = value(await repeat);                                   // it waited for the first, then settled itself
+    expect(handed).toEqual([h]);                                     // one notice, after a sync that landed
+    expect(store.get("job-1")).toMatchObject({ state: "exited", outcome: "exited", exitCode: 0 });
+  });
+
+  it("sends a job's events only once their commit is synced (T-532)", async () => {
+    const seen: string[] = [];
+    let release = () => {};
+    let held = true;
+    const { store } = storeOn(() => AT, {
+      walSync: () => (held ? new Promise<void>(resolve => { release = () => { held = false; resolve(); }; }) : Promise.resolve()),
+      onJob: job => { seen.push(job.state); },
+    });
+    value(store.accept(body()));
+    await Promise.resolve();
+    expect(seen).toEqual([]);                                        // queued, but not yet on the disk: not sent
+    release();
+    await vi.waitFor(() => { expect(seen).toEqual(["queued"]); });
   });
 
   it("commits the terminal row at NORMAL, syncs the WAL, and only then hands off the notice", async () => {
