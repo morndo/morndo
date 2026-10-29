@@ -14,6 +14,13 @@ import { dirname } from "node:path";
 
 export type WalSync = () => Promise<void>;
 
+// How long a sync may take before its callers are failed (T-532 saw single stalls of over 12 s on a saturated disk).
+export const WAL_SYNC_TIMEOUT_MS = 30_000;
+
+export class SyncTimeout extends Error {
+  constructor(ms: number) { super(`the disk did not finish a sync within ${Math.round(ms / 1000)} s`); this.name = "SyncTimeout"; }
+}
+
 // Syncs the database's WAL file. Each sync opens its own handle: SQLite may reset or truncate the WAL between calls,
 // and a fresh open always names the live file. The first one also syncs the directory, as SQLite does for a WAL it has
 // just created (os_unix.c, the directory sync of a new journal): the agent's WAL is made anew after each clean close.
@@ -57,3 +64,28 @@ export async function durably<T>(db: Database.Database, sync: WalSync, transacti
   await sync();
   return out;
 }
+
+
+// A deadline for every sync. One the disk does not finish in `ms` fails its caller with SyncTimeout, which each store
+// treats as a failed sync (its row is taken back, the answer says executed "no"), so no queue, flight or updater waits
+// for ever. The fsync itself cannot be cancelled and keeps its libuv thread; while it is still out, every new call
+// fails at once rather than start another, so a hung disk holds one thread, not the whole pool. Once it ends, syncs
+// run again.
+export function bounded(sync: WalSync, ms: number): WalSync {
+  let stuck: Promise<void> | null = null;
+  return () => {
+    if (stuck !== null) return Promise.reject(new SyncTimeout(ms));
+    const run = sync();
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const settled: Promise<void> = run.then(() => undefined, () => undefined).then(() => { if (stuck === settled) stuck = null; });
+        stuck = settled;
+        reject(new SyncTimeout(ms));
+      }, ms);
+      run.then(() => { clearTimeout(timer); resolve(); }, (e: unknown) => { clearTimeout(timer); reject(e); });
+    });
+  };
+}
+
+// What a store uses when it is handed none: its database's WAL sync, with the deadline.
+export const durableSyncOf = (db: Database.Database): WalSync => bounded(walSyncOf(db), WAL_SYNC_TIMEOUT_MS);

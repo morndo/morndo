@@ -90,6 +90,10 @@ export function openAgentDb(path: string): AgentDb {
       migrate(database);
     },
   });
+  // No automatic checkpoint on this connection: SQLite runs it inside the commit that crosses the WAL's limit and syncs
+  // the WAL and the database file there, even under NORMAL, which on the agent is the event loop (T-532). The agent's
+  // checkpoints run in a worker instead (db/checkpointer.ts). Not stored in the file: every connection sets its own.
+  db.pragma("wal_autocheckpoint = 0");
   try {
     const { streamId, copied } = streamOfThisFile(db, path);
     return { db, streamId, copied, close: () => db.close() };

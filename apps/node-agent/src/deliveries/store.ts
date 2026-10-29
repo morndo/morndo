@@ -21,7 +21,7 @@
 // - The text stays on this node: the Delivery the store answers with carries none (textOf reads it for the deliverer).
 import type Database from "better-sqlite3";
 import { FINAL_DELIVERY_STATES as FINAL, LIMITS, type Delivery, type DeliveryState, type DeliveryTarget, type DraftStash, type GiveUpReason, type WaitingReason } from "@morndo/protocol";
-import { walSyncOf, type WalSync } from "../db/wal-sync.ts";
+import { durableSyncOf, type WalSync } from "../db/wal-sync.ts";
 
 const OPEN = "('queued', 'typed', 'held')";
 
@@ -44,13 +44,13 @@ export class DeliveryStore {
   #sync: WalSync;
   // Fresh rows whose sync has not landed yet: committed, so readable, but not yet durable. No round may type, wait
   // or expire one of them (open() leaves them out), so nothing acts on a delivery its sender was not yet told of.
-  #storing = new Set<string>();
+  #storing = new Map<string, Promise<void>>();
 
   constructor(db: Database.Database, now: () => number, node: string, walSync?: WalSync) {
     this.#db = db;
     this.#now = now;
     this.#node = node;
-    this.#sync = walSync ?? walSyncOf(db);
+    this.#sync = walSync ?? durableSyncOf(db);
   }
 
   #row(id: string): Row | undefined {
@@ -96,14 +96,19 @@ export class DeliveryStore {
     }).immediate();
     const stored = write();
     if (!fresh) return stored;                               // an earlier call stored it, and synced it, in the same queue
-    this.#storing.add(d.id);
-    try { await this.#sync(); }
+    const pending = this.#sync();
+    this.#storing.set(d.id, pending);
+    try { await pending; }
     catch (e) {                                              // a row that is not durable must not stay queued
       try { this.#db.prepare("DELETE FROM deliveries WHERE id = ?").run(d.id); } catch { /* the original error stands */ }
       throw e;
     } finally { this.#storing.delete(d.id); }
     return stored;
   }
+
+  // Settles once the row stored under this id is on the disk: at once for one stored earlier, otherwise with the sync
+  // of the call that is storing it (rejected if that sync failed and the row was taken back).
+  durable(id: string): Promise<void> { return this.#storing.get(id) ?? Promise.resolve(); }
 
   get(id: string): Delivery | null {
     const r = this.#row(id);

@@ -1,6 +1,6 @@
 // A state change becomes the fleet's record (design §4). The command and its hash stay on this node.
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { fleetRecord, type FleetJob, type FinishEvent, type StartBody } from "@morndo/domain";
 import { openAgentDb, type AgentDb } from "../src/db/open.ts";
 import { JobStore } from "../src/ops/job-store.ts";
@@ -31,7 +31,8 @@ describe("a job the node sends", () => {
     await store.applySchedule({ default: 2 }, "off");
     expect(store.started("job-1").ok).toBe(true);
     expect((await store.settle("job-1", EXIT)).ok).toBe(true);
-    expect(seen.map(event => event.state)).toEqual(["queued", "starting", "running", "exited"]);
+    // Each event leaves once its commit is synced (T-532), in order.
+    await vi.waitFor(() => { expect(seen.map(event => event.state)).toEqual(["queued", "starting", "running", "exited"]); });
     expect(seen.map(event => event.ended)).toEqual([null, null, null, AT]);
     const last = seen.at(-1);
     expect(last).toMatchObject({

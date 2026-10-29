@@ -20,7 +20,7 @@
 import { createHash } from "node:crypto";
 import type Database from "better-sqlite3";
 import { LIMITS, type OpName } from "@morndo/protocol";
-import { walSyncOf, type WalSync } from "../db/wal-sync.ts";
+import { durableSyncOf, type WalSync } from "../db/wal-sync.ts";
 
 export type Prior = { state: "none" } | { state: "started" } | { state: "done"; outcome: unknown } | { state: "mismatch" };
 export type KeyStatus = { state: "unknown" } | { state: "started" } | { state: "done"; outcome: unknown };
@@ -71,7 +71,7 @@ export class DoneKeys {
     this.#db = db;
     this.#now = now;
     this.#disabled = o.disabled === true;
-    this.#sync = o.walSync ?? walSyncOf(db);
+    this.#sync = o.walSync ?? durableSyncOf(db);
     this.#seq = (db.prepare("SELECT seq FROM store_seq WHERE one = 1").get() as { seq: number } | undefined)?.seq ?? 0;
   }
 

@@ -370,6 +370,7 @@ describe("durable terminal transition", () => {
     syncs = 0;
     const first = store.settle("job-1", EXIT);                       // commits the terminal row, waits on its sync
     const repeat = store.settle("job-1", EXIT);                      // the same end, while the first waits
+    await vi.waitFor(() => { expect(syncs).toBe(1); });              // the first has committed and asked for its sync
     fail();
     await expect(first).rejects.toThrow(/the disk went away/);       // its row went back to open
     const h = value(await repeat);                                   // it waited for the first, then settled itself
@@ -487,9 +488,10 @@ describe("prune", () => {
     const text = value(await store.settle("job-1", EXIT)).text;
     expect(text).toContain("line from the log");
     unlinkSync(join(dir, "job-1.log"));
+    await vi.waitFor(() => { expect(published.at(-1)).toBe(text); });         // events leave after their sync (T-532)
     const before = published.length;
     store.markNotice("job-1", "typed");
-    expect(published.slice(before)).toEqual([text]);
+    await vi.waitFor(() => { expect(published.slice(before)).toEqual([text]); });
     expect(store.eventTail("job-1")).toBe(text);
     now = AT + JOB_KEEP_MS + 1;
     expect(store.prune()).toBe(1);
@@ -498,9 +500,10 @@ describe("prune", () => {
     await store.applySchedule({ default: 1 }, "off");
     value(store.started("job-1"));
     writeFileSync(join(dir, "job-1.log"), "line from the log\n");
+    await vi.waitFor(() => { expect(published.length).toBe(before + 4); });   // the typed notice, then queued, starting, running
     const again = published.length;
     value(await store.settle("job-1", EXIT));
-    expect(published.length).toBe(again + 1);
+    await vi.waitFor(() => { expect(published.length).toBe(again + 1); });
   });
 
   it("keeps the notice text in the store, so a restart does not publish an empty tail", async () => {
@@ -515,7 +518,7 @@ describe("prune", () => {
     const published: string[] = [];
     const reopened = new JobStore(adb.db, dir, () => AT, { home, onJob: (_job, tail) => { published.push(tail); } });
     reopened.markNotice("job-1", "typed");
-    expect(published).toEqual([text]);
+    await vi.waitFor(() => { expect(published).toEqual([text]); });
     expect(reopened.eventTail("job-1")).toBe(text);
   });
 

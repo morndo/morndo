@@ -17,7 +17,7 @@ import {
 import { redactText } from "@morndo/protocol";
 import { errno } from "@morndo/service-kit";
 import { log } from "../log.ts";
-import { durably, walSyncOf, type WalSync } from "../db/wal-sync.ts";
+import { durably, durableSyncOf, type WalSync } from "../db/wal-sync.ts";
 
 export const JOB_LOG_BYTES = 8 * 1024 * 1024;
 export const JOB_LOG_BUDGET = 256 * 1024 * 1024;
@@ -67,6 +67,7 @@ export class JobStore {
   #budget: number;
   #home: string;
   #sync: WalSync;
+  #settling = new Map<string, Promise<unknown>>();         // the settle each job is in, which the next one waits for
   #onNotice: ((notice: NoticeHandoff) => void) | undefined;
   #onJob: ((job: Job, tail: string) => void) | undefined;
   #sent = new Map<string, string>();
@@ -84,7 +85,7 @@ export class JobStore {
     this.#logBytes = opts.logBytes ?? JOB_LOG_BYTES;
     this.#budget = opts.budget ?? JOB_LOG_BUDGET;
     this.#home = opts.home;
-    this.#sync = opts.walSync ?? walSyncOf(db);
+    this.#sync = opts.walSync ?? durableSyncOf(db);
     this.#onNotice = opts.onNotice;
     this.#onJob = opts.onJob;
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -247,7 +248,19 @@ export class JobStore {
   // after that sync: a handoff before it would promise a notice a power loss could take back. A commit or sync that
   // throws leaves the row as it was (a failed sync writes the open state back), so nothing is handed off and the next
   // loop can retry.
-  async settle(id: string, event: FinishEvent): Promise<Result<NoticeHandoff, FinishProblem | "missing">> {
+  // One settle per job at a time (T-532). Each waits on the disk, and a repeat that read the row terminal while the
+  // first one's sync was still out would hand off a notice for a row that the sync's failure then takes back to open.
+  // Behind another, a settle reads the row afresh: terminal (so synced), it hands the same notice off again, as a
+  // repeat always has; taken back to open, it settles the job itself.
+  settle(id: string, event: FinishEvent): Promise<Result<NoticeHandoff, FinishProblem | "missing">> {
+    const before = this.#settling.get(id) ?? Promise.resolve();
+    const run = before.then(() => undefined, () => undefined).then(() => this.#settleNow(id, event));
+    this.#settling.set(id, run);
+    void run.finally(() => { if (this.#settling.get(id) === run) this.#settling.delete(id); }).catch(() => undefined);
+    return run;
+  }
+
+  async #settleNow(id: string, event: FinishEvent): Promise<Result<NoticeHandoff, FinishProblem | "missing">> {
     const job = this.get(id);
     if (!job) return err("missing");
     const decided = finish(job, event);
@@ -322,8 +335,17 @@ export class JobStore {
     const key = `${job.state}\0${job.position}\0${job.reason}\0${job.outcome}\0${job.notice}\0${job.exitCode}\0${job.durationMs}\0${shown}`;
     if (this.#sent.get(job.id) === key) return;
     this.#sent.set(job.id, key);
-    try { this.#onJob(job, shown); }
-    catch (e) { log.warn("a job event could not be sent", e); }
+    // Sent once its commit is on the disk (T-532): a sync covers every commit before it, and syncs land in the order
+    // they were asked for, so a job's events still leave in order. One whose sync fails is not sent, and its key is
+    // forgotten: the job's next change, or the replay after the next welcome, sends where it stands.
+    const onJob = this.#onJob;
+    this.#sync().then(() => {
+      try { onJob(job, shown); }
+      catch (e) { log.warn("a job event could not be sent", e); }
+    }, (e: unknown) => {
+      if (this.#sent.get(job.id) === key) this.#sent.delete(job.id);
+      log.warn("a job event was not sent: the disk did not sync its commit", e);
+    });
   }
 
   #insert(job: Job): void {

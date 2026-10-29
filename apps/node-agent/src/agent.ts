@@ -35,7 +35,8 @@ import { FleetView } from "./conn/fleet-view.ts";
 import type { RetryOptions } from "./conn/retry.ts";
 import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
-import type { WalSync } from "./db/wal-sync.ts";
+import { startCheckpointer } from "./db/checkpointer.ts";
+import { bounded, WAL_SYNC_TIMEOUT_MS, walSyncOf, type WalSync } from "./db/wal-sync.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
 import type { Deliverer } from "./deliveries/deliverer.ts";
 import { EventLoops, utcOffsetMin } from "./events.ts";
@@ -82,6 +83,7 @@ export type AgentOptions = {
   stopWaitMs?: number;                                    // how long stop waits for in-flight work; default 10s
   runCommand?: CommandRunner;                             // a test sees the apply unit's exact start (update.apply)
   walSync?: WalSync;                                      // a test holds the durable commits' sync (db/wal-sync.ts)
+  walSyncTimeoutMs?: number;                              // a test's shorter deadline for one sync
 };
 export type RunningAgent = {
   instanceId: string;
@@ -106,6 +108,13 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   if (adb.copied) {
     log.warn(`${config.dbPath} is not the file this database was made in (copied or restored?): a new hook stream and store ${adb.streamId}; sends in doubt from before stay uncertain`);
   }
+  // One WAL sync for every durable commit (done keys, deliveries, jobs) and for a replay: one queue, one deadline, so
+  // a hung disk holds one thread, and a replay's sync covers every commit made before it (db/wal-sync.ts).
+  const walSync = bounded(o.walSync ?? walSyncOf(adb.db), o.walSyncTimeoutMs ?? WAL_SYNC_TIMEOUT_MS);
+  // The checkpoints run in a worker with a connection of its own: the agent's connection never runs one (db/open.ts).
+  const checkpointer = startCheckpointer(config.dbPath, {
+    log, onFail: () => { try { adb.db.pragma("wal_autocheckpoint = 1000"); } catch { /* the database is closing */ } },
+  });
   let streamId = hooks.fixedStreamId ?? adb.streamId;
   let rotated = false;
   const instanceId = o.instanceId ?? randomUUID();
@@ -136,7 +145,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     emitDelivery: d => { sendDelivery(d); },
     ...(hooks.dropAfterStarted !== undefined ? { afterStarted: dropOnce(hooks.dropAfterStarted, () => conn?.drop()) } : {}),
     ...(o.runCommand ? { runCommand: o.runCommand } : {}),
-    ...(o.walSync ? { walSync: o.walSync } : {}),
+    walSync,
   });
   const spool: Spool = new Spool(adb.db, streamId, { failWrites: hooks.spoolFail === true, maxBytes: budget, held: cachedFor(1000, held) });
   const open = nodeOpener({ home: config.home, stateDir: paths.stateDir, configDir: paths.configDir, ...(config.policy.fileRoots ? { fileRoots: config.policy.fileRoots } : {}) });
@@ -231,6 +240,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     });
   } catch (e) {
     watch.stop();
+    await checkpointer.stop();
     adb.close();
     throw e;
   }
@@ -241,7 +251,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     jobs = await openJobRuntime({
       db: adb.db, home: config.home, stateDir: paths.stateDir, socketPath: paths.jobSock, now: ops.now,
       ...(config.hub ? { hubBase: config.hub } : {}),
-      ...(o.walSync ? { walSync: o.walSync } : {}),
+      walSync,
       // The same paste pane.send uses. Pasted text is in the pane, submitted or not, and that id is never pasted again.
       node: config.node,
       limits: jobLimits(config.policy.jobs),
@@ -262,6 +272,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
   } catch (e) {
     watch.stop();
     await relay.close();
+    await checkpointer.stop();
     adb.close();
     throw e;
   }
@@ -302,13 +313,18 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       fleetView.heard(w, ops.now());
       sender.online(w);
       events.online();
-      replayDeliveries();
-      // A reconnect resends jobs still inside 7 days, at the time they were observed, not at reconnect.
-      for (const job of jobs.store.list()) {
-        const at = jobs.store.replayAt(job);
-        if (at === null) continue;
-        send(fleetRecord(job, { node: config.node, at, tail: jobs.store.eventTail(job.id) }));
-      }
+      // A replay sends what the database holds, so it waits for a sync that covers every commit made before it, and
+      // reads the rows after it: no fact leaves this node before its commit is on the disk (T-532). A sync that fails
+      // sends nothing; the next welcome replays.
+      walSync().then(() => {
+        replayDeliveries();
+        // A reconnect resends jobs still inside 7 days, at the time they were observed, not at reconnect.
+        for (const job of jobs.store.list()) {
+          const at = jobs.store.replayAt(job);
+          if (at === null) continue;
+          send(fleetRecord(job, { node: config.node, at, tail: jobs.store.eventTail(job.id) }));
+        }
+      }, (e: unknown) => { log.warn("nothing replayed after this welcome: the disk did not sync; the next welcome replays", e); });
     },
     onRequest: m => { answer(m).catch((e: unknown) => log.error("answering a request failed", e)); },
     onBadRequest: (id, op) => {
@@ -386,6 +402,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       await relay.close();
       await ops.deliverer.drain();                         // a round in flight ends before its database closes
       saveStatus();
+      await checkpointer.stop();                           // its connection first: the last one to close checkpoints
       adb.close();
     },
   };

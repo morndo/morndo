@@ -142,8 +142,15 @@ export class Deliverer {
   // delivery's answer, not the agent).
   async enqueue(a: OpArgs["lane.deliver"]): Promise<OpResult["lane.deliver"] | OpError> {
     const store = this.#d.store;
-    const known = store.get(a.id);
-    if (known) return this.#sameContent(a) ? { delivery: known } : err("id_conflict", CONFLICT);
+    if (store.get(a.id)) {
+      // Stored already, maybe by a call whose sync is still out (a lane.start's first prompt does not queue behind this
+      // op, T-532): the answer waits for that sync, and reads the row after it.
+      try { await store.durable(a.id); }
+      catch { return { code: "internal", executed: "no", message: "the delivery could not be stored (a full disk?); nothing was queued" }; }
+      const known = store.get(a.id);
+      if (!known) return { code: "internal", executed: "no", message: "the delivery could not be stored (a full disk?); nothing was queued" };
+      return this.#sameContent(a) ? { delivery: known } : err("id_conflict", CONFLICT);
+    }
     const panes = this.#d.panes.snapshot();
     const now = this.#d.now();
     const refuse = (p: PaneState) => !takes(p) && !(p.startedAt !== null && now - p.startedAt < this.#grace);
