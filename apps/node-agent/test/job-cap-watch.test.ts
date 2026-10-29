@@ -133,13 +133,18 @@ describe("the systemd cap watch", () => {
     if (noted) writeFileSync(join(dir, `${id}.cap`), "");
     sup.close();
     const next = agent(cap);
+    const looked = vi.spyOn(next.store, "watch");                          // the sweep's own judgement of this job's log
     const sweeping = next.sup.sweep();
     try {
       if (stopped) {
         expect(await until(() => existsSync(killed), 6000)).toBe(true);
       } else {
+        // Positive first: the sweep did reach the job and the new cap did not call its log capped. Only then does "not killed" mean anything.
+        expect(await until(() => looked.mock.calls.some(([asked]) => asked === id), 3000)).toBe(true);
+        expect(looked.mock.results.filter((_, i) => looked.mock.calls[i]?.[0] === id).every(r => r.type === "return" && r.value === null)).toBe(true);
         await wait(1800);                                                  // past the 1 s grace a cap would have run
         expect(existsSync(killed)).toBe(false);
+        expect(existsSync(join(dir, `${id}.cap`))).toBe(false);
         expect(store.get(id)).toMatchObject({ state: "running", outcome: null });
       }
     } finally {
