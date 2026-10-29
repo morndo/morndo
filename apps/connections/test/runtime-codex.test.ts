@@ -9,6 +9,19 @@ import { isStatusRefusal } from "../src/adapters/runtime-claude.ts";
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
 
+// The note a fake child writes with a plain writeFileSync can be seen half written: the file exists before its text is
+// whole. A parse error inside the window means "not yet"; only the window running out is a failure.
+async function awaitNote<T>(path: string, windowMs: number): Promise<T | null> {
+  const started = performance.now();
+  while (performance.now() - started < windowMs) {
+    if (existsSync(path)) {
+      try { return JSON.parse(readFileSync(path, "utf8")) as T; } catch { /* still being written */ }
+    }
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+  return null;
+}
+
 describe("codex permission profile", () => {
   it("cites the pages checked on 2026-10-10", () => {
     const source = readFileSync(join(import.meta.dirname, "../src/adapters/runtime-codex.ts"), "utf8");
@@ -203,12 +216,7 @@ else process.exit(Number(code));
     const homeAfter = async (code: string): Promise<string> => {
       rmSync(note, { force: true });
       const pending = runtime.execute(plan(), [code]);
-      const started = performance.now();
-      let recorded: { codex: string; pid: number } | null = null;
-      while (recorded === null && performance.now() - started < 2_000) {
-        if (existsSync(note)) recorded = JSON.parse(readFileSync(note, "utf8")) as { codex: string; pid: number };
-        else await new Promise(resolve => setTimeout(resolve, 10));
-      }
+      const recorded = await awaitNote<{ codex: string; pid: number }>(note, 2_000);
       if (!recorded) throw new Error("run home was not recorded");
       if (code === "kill") process.kill(recorded.pid, "SIGKILL");
       await pending;
@@ -288,5 +296,18 @@ appendFileSync(home + "/history.jsonl", "new-line\\n");
     }
     writeFileSync(join(login, "config.toml"), 'cli_auth_credentials_store = "file"\n');
     await expect(runtime.execute(plan, [])).resolves.toMatchObject({ status: 0 });
+  });
+});
+
+describe("awaitNote", () => {
+  it("waits out a note that exists but is only half written, and fails only when the window runs out", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "morndo-codex-note-"));
+    dirs.push(dir);
+    const note = join(dir, "note.json");
+    writeFileSync(note, '{"codex": "/run/home", "pi');
+    setTimeout(() => writeFileSync(note, JSON.stringify({ codex: "/run/home", pid: 7 })), 60);
+    expect(await awaitNote<{ codex: string; pid: number }>(note, 2_000)).toEqual({ codex: "/run/home", pid: 7 });
+    writeFileSync(note, '{"codex": "/run/home", "pi');
+    expect(await awaitNote(note, 100)).toBeNull();
   });
 });
