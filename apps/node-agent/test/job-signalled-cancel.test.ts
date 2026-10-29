@@ -380,7 +380,7 @@ describe("what the supervisor keeps for a job goes even when the store cannot be
     const settle = store.settle.bind(store);
     const get = store.get.bind(store);
     let broken = false;
-    vi.spyOn(store, "settle").mockImplementation((id, event) => { const r = settle(id, event); if (id === "j1") broken = true; return r; });
+    vi.spyOn(store, "settle").mockImplementation(async (id, event) => { const r = await settle(id, event); if (id === "j1") broken = true; return r; });
     vi.spyOn(store, "get").mockImplementation(id => { if (broken) throw new Error("the store cannot be read"); return get(id); });
     try {
       // The promote after the cancel reads the broken store too; what matters is what the supervisor kept.

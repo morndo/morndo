@@ -35,7 +35,6 @@ import { FleetView } from "./conn/fleet-view.ts";
 import type { RetryOptions } from "./conn/retry.ts";
 import type { Lane } from "./conn/send-queue.ts";
 import { writeStatus, type AgentStatus } from "./conn/status-file.ts";
-import { inOrder } from "./atomic-write.ts";
 import type { WalSync } from "./db/wal-sync.ts";
 import { openAgentDb, rotateStreamId } from "./db/open.ts";
 import type { Deliverer } from "./deliveries/deliverer.ts";
@@ -188,11 +187,9 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
     inFlight: flight.list().slice(0, 100),               // the protocol's cap; what a restart would interrupt
     ...(config.policy.jobsWarning ? { jobs: jobsConfigProblem(config.policy.jobsWarning) } : {}),
   });
-  // The write is async (its fsync off the event loop, T-532) and in order (atomic-write.ts inOrder), so it never throws
-  // into the change that caused it and an older status never lands over a newer one; a failure is logged when it lands.
-  const statusWrites = inOrder(e => { log.warn("could not write status.json", e); });
-  const latestStatus = (): Promise<void> => statusWrites(() => writeStatus(paths.statusFile, status()));
-  const saveStatus = (): void => { void latestStatus(); };
+  const saveStatus = () => {
+    try { writeStatus(paths.statusFile, status()); } catch (e) { log.warn("could not write status.json", e); }
+  };
   statusReady = true;
   const errorRes = (id: string, error: OpError): AgentMessage =>
     ({ v: 1, t: "res", id, invVersion: ops.inventory.invVersion, store: streamId, ok: false, error, storeSeq: ops.doneKeys.seq() });
@@ -388,7 +385,7 @@ export async function startAgent(o: AgentOptions): Promise<RunningAgent> {
       await conn?.stop();
       await relay.close();
       await ops.deliverer.drain();                         // a round in flight ends before its database closes
-      await latestStatus();                                // the last status lands before the process may exit
+      saveStatus();
       adb.close();
     },
   };

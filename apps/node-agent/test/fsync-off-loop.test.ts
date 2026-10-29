@@ -40,6 +40,7 @@ describe("a disk sync off the event loop (T-532)", () => {
     await wait(20_000);
     expect(syncs).toBeGreaterThanOrEqual(1);
     expect(fleet.received.some(r => r.msg.t === "res" && r.msg.id === "k1")).toBe(false);   // not durable yet: no answer
+    expect(agent.status().inFlight).toContainEqual({ kind: "lane.stop", id: "hub:k1" });  // a stop or an updater waits for it
     const pongs = fleet.pongs.slice(from);
     expect(pongs.length).toBeGreaterThanOrEqual(60);                                    // one ping every 250 ms for 20 s
     const gaps = pongs.slice(1).map((at, i) => at - (pongs[i] ?? at));

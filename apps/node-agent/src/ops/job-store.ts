@@ -176,6 +176,10 @@ export class JobStore {
   async applySchedule(limits: Readonly<Record<string, number>>, guard: Guard): Promise<Job[]> {
     const prior = new Map(this.list().map(job => [job.id, job]));
     const next = schedule([...prior.values()], limits, guard);
+    // The refused ones first: their settles wait on the disk (T-532), and a job written `starting` must not wait with
+    // them, or a sweep in between finds it starting, unlaunched and unlocked, and settles it lost. Once the schedule
+    // below is written, the caller takes the launch locks before anything else runs.
+    for (const id of next.refused) await this.settle(id, { outcome: "refused" });
     const update = this.#db.prepare("UPDATE jobs SET state = ?, position = ?, reason = ?, started_at = ? WHERE id = ? AND state IN ('queued', 'starting', 'running')");
     this.#db.transaction(() => {
       for (const job of next.jobs) {
@@ -191,7 +195,6 @@ export class JobStore {
       const current = this.get(job.id);
       if (current) this.#tell(current, "");
     }
-    for (const id of next.refused) await this.settle(id, { outcome: "refused" });
     return next.jobs.map(job => this.get(job.id) ?? job);
   }
 

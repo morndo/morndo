@@ -109,14 +109,16 @@ export class OpExecutor {
       }
       if (this.#d.held?.() && !ALLOWED_WHILE_HELD.has(op)) return fail("updating", "this node is not taking new work while it updates");
       if (deadline.expired()) return fail("timeout", "the deadline passed before the op could start");
-      if (key !== undefined) {
-        let started: boolean;
-        try { started = await keys.start(key, hash); }   // durable before the side effect; the sync is off the loop
-        catch (e) { return this.#keysFailed(op, e); }
-        if (!started) return fail("uncertain", "an attempt with this key is already recorded");
-      }
+      // In flight from here, in the same tick as the hold check above: the sync below is off the loop (T-532), and a
+      // stop or an updater's safe point must count the op while it waits on the disk, not only once it acts.
       const end = (this.#d.flight ?? new Flight()).begin({ kind: op, id: key ?? op });
       try {
+        if (key !== undefined) {
+          let started: boolean;
+          try { started = await keys.start(key, hash); }   // durable before the side effect
+          catch (e) { return this.#keysFailed(op, e); }
+          if (!started) return fail("uncertain", "an attempt with this key is already recorded");
+        }
         const discarded = key !== undefined && this.#d.afterStarted?.(key) === true;
         const ctx: EffectContext = {
           ready: () => (deadline.expired() ? fail("timeout", "the deadline passed before the side effect").error : null),

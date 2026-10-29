@@ -178,7 +178,7 @@ describe("a receipt must be written after the typing began", () => {
 describe("trying and confirming (spec §4.3)", () => {
   it("types the head once into its pane, under its id as the done key, and confirms it from a prompt in the session it was typed into", async () => {
     const r = rig();
-    const answer = r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "ship it" });
+    const answer = await r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "ship it" });
     expect(answer).toMatchObject({ delivery: { id: "hub:a", state: "queued" } });
     expect(answer).not.toHaveProperty("delivery.waiting");            // nothing has found the lane not ready (ruling 43)
     await r.deliverer.drain();
@@ -502,7 +502,7 @@ describe("expiring and cancelling (spec §4.3)", () => {
 describe("targets (spec §4.1)", () => {
   it("keeps a sticky lane's delivery waiting (no_pane) while its window is gone, and types it into the window that takes the name next", async () => {
     const r = rig({ panes: [] });
-    expect(r.deliverer.enqueue({ id: "hub:m", target: MANAGER, text: "hello" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await r.deliverer.enqueue({ id: "hub:m", target: MANAGER, text: "hello" })).toMatchObject({ delivery: { state: "queued" } });
     await r.deliverer.drain();
     expect(r.store.get("hub:m")).toMatchObject({ state: "queued", waiting: { reason: "no_pane" } });
     r.panes.push(pane("manager", W2, "%2", S2));
@@ -580,12 +580,12 @@ describe("targets (spec §4.1)", () => {
     ] });
     const refused: DeliveryTarget[] = [{ lane: "shell", sticky: false }, { lane: "gone", sticky: false }, { workerId: W2 }, { workerId: W5 }];
     for (const target of refused) {
-      expect(r.deliverer.enqueue({ id: "hub:n", target, text: "x" }), JSON.stringify(target)).toMatchObject({ code: "no_session", executed: "no" });
+      expect(await r.deliverer.enqueue({ id: "hub:n", target, text: "x" }), JSON.stringify(target)).toMatchObject({ code: "no_session", executed: "no" });
     }
     expect(r.store.get("hub:n")).toBeNull();
-    expect(r.deliverer.enqueue({ id: "hub:m", target: MANAGER, text: "x" })).toMatchObject({ delivery: { state: "queued" } });
-    expect(r.deliverer.enqueue({ id: "hub:f", target: { workerId: W4 }, text: "y" })).toMatchObject({ delivery: { state: "queued" } });
-    expect(r.deliverer.enqueue({ id: "hub:s", target: { lane: "running", sticky: false }, text: "z" })).toMatchObject({ delivery: { state: "queued", sessionId: S3 } });
+    expect(await r.deliverer.enqueue({ id: "hub:m", target: MANAGER, text: "x" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await r.deliverer.enqueue({ id: "hub:f", target: { workerId: W4 }, text: "y" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await r.deliverer.enqueue({ id: "hub:s", target: { lane: "running", sticky: false }, text: "z" })).toMatchObject({ delivery: { state: "queued", sessionId: S3 } });
     await r.deliverer.drain();
     expect(["hub:m", "hub:f"].map(id => r.store.get(id)?.waiting?.reason)).toEqual(["no_session", "no_session"]);
     expect(r.sends().map(c => c.key)).toEqual(["hub:s"]);              // the live session running a command took its delivery
@@ -599,14 +599,14 @@ describe("targets (spec §4.1)", () => {
     const r = rig({ panes: [pane("manager", W1, "%1", S1), pane("twin", W2, "%2", S2), pane("twin", W3, "%3", S3)] });
     await r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" });
     await r.deliverer.drain();
-    expect(r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" })).toMatchObject({ delivery: { id: "hub:a", state: "typed" } });
+    expect(await r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" })).toMatchObject({ delivery: { id: "hub:a", state: "typed" } });
     const others: { target: DeliveryTarget; text: string }[] = [{ target: MANAGER, text: "y" }, { target: { lane: "twin", sticky: false }, text: "x" }];
     for (const other of others) {
-      expect(r.deliverer.enqueue({ id: "hub:a", ...other }), JSON.stringify(other)).toMatchObject({ code: "id_conflict", executed: "no" });
+      expect(await r.deliverer.enqueue({ id: "hub:a", ...other }), JSON.stringify(other)).toMatchObject({ code: "id_conflict", executed: "no" });
     }
-    expect(r.deliverer.enqueue({ id: "hub:b", target: { lane: "twin", sticky: true }, text: "x" })).toMatchObject({ code: "lane_conflict", executed: "no" });
-    expect(r.deliverer.enqueue({ id: "hub:b", target: { lane: "nowhere", sticky: false }, text: "x" })).toMatchObject({ code: "no_pane", executed: "no" });
-    expect(r.deliverer.enqueue({ id: "hub:b", target: { workerId: "pc.0a1b2c3d.99" }, text: "x" })).toMatchObject({ code: "no_pane", executed: "no" });
+    expect(await r.deliverer.enqueue({ id: "hub:b", target: { lane: "twin", sticky: true }, text: "x" })).toMatchObject({ code: "lane_conflict", executed: "no" });
+    expect(await r.deliverer.enqueue({ id: "hub:b", target: { lane: "nowhere", sticky: false }, text: "x" })).toMatchObject({ code: "no_pane", executed: "no" });
+    expect(await r.deliverer.enqueue({ id: "hub:b", target: { workerId: "pc.0a1b2c3d.99" }, text: "x" })).toMatchObject({ code: "no_pane", executed: "no" });
     expect(r.store.get("hub:b")).toBeNull();
     expect(r.sends()).toHaveLength(1);
   });
@@ -616,7 +616,7 @@ describe("the rest of the deliverer's promises", () => {
   it("refuses a delivery the disk can't store (internal, executed no): nothing is queued, and the sender is told", async () => {
     const r = rig();
     r.db.exec("CREATE TRIGGER no_room BEFORE INSERT ON deliveries BEGIN SELECT RAISE(ABORT, 'disk full'); END");
-    expect(r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" })).toMatchObject({ code: "internal", executed: "no" });
+    expect(await r.deliverer.enqueue({ id: "hub:a", target: MANAGER, text: "x" })).toMatchObject({ code: "internal", executed: "no" });
     expect(r.store.get("hub:a")).toBeNull();
     await r.deliverer.drain();
     expect(r.sends()).toEqual([]);
@@ -693,9 +693,9 @@ describe("the test hooks for Task 16's drills", () => {
   it("deliveryStartGraceMs shortens the 2 minutes a pane just started may wait for Claude Code", async () => {
     const started = () => [pane("fresh", W1, "%1", null, null, T0 - 1000)];
     const short = rig({ panes: started(), hooks: { deliveryStartGraceMs: 500 } });
-    expect(short.deliverer.enqueue({ id: "hub:g", target: { workerId: W1 }, text: "x" })).toMatchObject({ code: "no_session" });
+    expect(await short.deliverer.enqueue({ id: "hub:g", target: { workerId: W1 }, text: "x" })).toMatchObject({ code: "no_session" });
     const usual = rig({ panes: started() });
-    expect(usual.deliverer.enqueue({ id: "hub:g", target: { workerId: W1 }, text: "x" })).toMatchObject({ delivery: { state: "queued" } });
+    expect(await usual.deliverer.enqueue({ id: "hub:g", target: { workerId: W1 }, text: "x" })).toMatchObject({ delivery: { state: "queued" } });
   });
 });
 

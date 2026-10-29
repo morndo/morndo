@@ -145,21 +145,23 @@ describe("the started commit, made durable", () => {
     const { keys, adb } = keysOn(undefined, { walSync: async () => { syncs += 1; } });
     expect(await keys.start("hub:a", "h")).toBe(true);
     expect(await keys.start("hub:a", "h")).toBe(false);        // already recorded: uncertain, not started again
-    expect(syncs).toBe(2);
+    expect(syncs).toBe(1);                                     // another attempt's row: not this call's to sync
     adb.db.exec("DROP TABLE store_seq");                       // the transaction now fails part way
     await expect(keys.start("hub:c", "h")).rejects.toThrow();
-    expect(syncs).toBe(2);                                     // a commit that threw never reaches the sync
+    expect(syncs).toBe(1);                                     // a commit that threw never reaches the sync
     expect(adb.db.prepare("SELECT key FROM done_keys WHERE key = 'hub:c'").get()).toBeUndefined();   // rolled back
   });
-  it("a sync that fails after the commit takes the started row back, and the count with it", async () => {
+  it("a sync that fails after the commit takes the started row back; the count it reports never moved", async () => {
     let failing = true;
     const { keys, adb } = keysOn(undefined, { walSync: async () => { if (failing) throw new Error("the disk went away"); } });
     await expect(keys.start("hub:a", "h")).rejects.toThrow(/the disk went away/);
     expect(keys.status("hub:a")).toEqual({ state: "unknown" }); // not durable: it must not stand as started
-    expect([keys.seq(), storedSeq(adb)]).toEqual([0, 0]);
+    // The stored count stays one up (it is never lowered: a start in flight beside this one may hold the next number);
+    // what answers carry never counted the row that was taken back.
+    expect([keys.seq(), storedSeq(adb)]).toEqual([0, 1]);
     failing = false;
-    expect(await keys.start("hub:a", "h")).toBe(true);          // a retry starts again, and counts once
-    expect([keys.seq(), storedSeq(adb)]).toEqual([1, 1]);
+    expect(await keys.start("hub:a", "h")).toBe(true);          // a retry starts again
+    expect([keys.seq(), storedSeq(adb)]).toEqual([2, 2]);
   });
   it("two starts whose syncs finish out of order never lower the sequence", async () => {
     const gates: (() => void)[] = [];                          // each sync lands only when its gate opens

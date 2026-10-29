@@ -10,16 +10,42 @@
 // 1.52.1), which matches the fullfsync = ON this database asks SQLite for (db/open.ts).
 import type Database from "better-sqlite3";
 import { open } from "node:fs/promises";
+import { dirname } from "node:path";
 
 export type WalSync = () => Promise<void>;
 
-// Syncs the database's WAL file. Each call opens its own handle: SQLite may reset or truncate the WAL between calls,
-// and a fresh open always names the live file.
+// Syncs the database's WAL file. Each sync opens its own handle: SQLite may reset or truncate the WAL between calls,
+// and a fresh open always names the live file. The first one also syncs the directory, as SQLite does for a WAL it has
+// just created (os_unix.c, the directory sync of a new journal): the agent's WAL is made anew after each clean close.
+// One sync runs at a time. A call while one runs waits for the next, which covers its commit and every other made
+// meanwhile: on a stalled disk the syncs cannot take every thread of libuv's pool (4), which the agent's other file
+// work and the DNS lookup of a reconnect also need.
 export function walSyncOf(db: Database.Database): WalSync {
   if (db.memory) return async () => {};                        // nothing on a disk: nothing to sync
-  return async () => {
-    const fh = await open(`${db.name}-wal`, "r+");
+  const wal = `${db.name}-wal`;
+  let dirSynced = false;
+  const once = async () => {
+    const fh = await open(wal, "r+");
     try { await fh.sync(); } finally { await fh.close(); }
+    if (!dirSynced) {
+      const dir = await open(dirname(wal), "r");
+      try { await dir.sync(); } finally { await dir.close(); }
+      dirSynced = true;
+    }
+  };
+  let running: Promise<void> | null = null;
+  let next: Promise<void> | null = null;
+  const run = (): Promise<void> => {
+    const p: Promise<void> = once().finally(() => { if (running === p) running = null; });
+    running = p;
+    return p;
+  };
+  return () => {
+    if (running === null) return run();
+    // The running sync may have begun before this caller's commit: it gets the next one, shared with every caller
+    // that comes while this one runs.
+    next ??= running.then(() => undefined, () => undefined).then(() => { next = null; return run(); });
+    return next;
   };
 }
 

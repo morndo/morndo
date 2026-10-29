@@ -5,7 +5,7 @@
 import { readFileSync } from "node:fs";
 import { processAlive } from "@morndo/node-ops";
 import type { InFlight } from "@morndo/service-kit";
-import { writeFileAtomicAsync } from "../atomic-write.ts";
+import { writeFileReplace } from "../atomic-write.ts";
 
 export type ConnState = "stopped" | "connecting" | "online" | "backoff" | "refused" | "conflict" | "unsupported";
 export type ConnStatus = {
@@ -21,10 +21,11 @@ export type AgentStatus = ConnStatus & {
   inFlight: InFlight[];                                  // work a restart would interrupt (updates design §6.3)
 };
 
-// Async: its fsync runs off the event loop (T-532), so the agent's only thread is never held in it. The caller owns
-// the failure (the promise rejects; the agent logs it), so a failing disk cannot disturb the change that caused the write.
-export function writeStatus(path: string, s: AgentStatus): Promise<void> {
-  return writeFileAtomicAsync(path, `${JSON.stringify(s)}\n`, 0o600);
+// Written the moment it changes (an updater looking for a safe point reads it while the work runs, updates design
+// §6.3), and not synced: it is runtime state the agent writes again when it starts, and an fsync here held the agent's
+// only thread on a saturated disk (T-532).
+export function writeStatus(path: string, s: AgentStatus): void {
+  writeFileReplace(path, `${JSON.stringify(s)}\n`, 0o600);
 }
 
 export function readStatus(path: string): AgentStatus | null {

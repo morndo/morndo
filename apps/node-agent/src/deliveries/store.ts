@@ -42,6 +42,9 @@ export class DeliveryStore {
   #now: () => number;
   #node: string;
   #sync: WalSync;
+  // Fresh rows whose sync has not landed yet: committed, so readable, but not yet durable. No round may type, wait
+  // or expire one of them (open() leaves them out), so nothing acts on a delivery its sender was not yet told of.
+  #storing = new Set<string>();
 
   constructor(db: Database.Database, now: () => number, node: string, walSync?: WalSync) {
     this.#db = db;
@@ -93,11 +96,12 @@ export class DeliveryStore {
     }).immediate();
     const stored = write();
     if (!fresh) return stored;                               // an earlier call stored it, and synced it, in the same queue
+    this.#storing.add(d.id);
     try { await this.#sync(); }
     catch (e) {                                              // a row that is not durable must not stay queued
       try { this.#db.prepare("DELETE FROM deliveries WHERE id = ?").run(d.id); } catch { /* the original error stands */ }
       throw e;
-    }
+    } finally { this.#storing.delete(d.id); }
     return stored;
   }
 
@@ -130,7 +134,8 @@ export class DeliveryStore {
   }
 
   open(): Delivery[] {
-    return (this.#db.prepare(`SELECT * FROM deliveries WHERE state IN ${OPEN} ORDER BY rowid`).all() as Row[]).map(r => this.#delivery(r));
+    return (this.#db.prepare(`SELECT * FROM deliveries WHERE state IN ${OPEN} ORDER BY rowid`).all() as Row[])
+      .filter(r => !this.#storing.has(r.id)).map(r => this.#delivery(r));
   }
 
   // Final deliveries whose last change is at or after `sinceMs`, a time on this node's clock (spec §4.4: the last hour's).

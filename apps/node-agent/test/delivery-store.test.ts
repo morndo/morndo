@@ -95,26 +95,38 @@ describe("storing", () => {
     await put(store, "hub:a");
     expect(syncs).toBe(1);
     expect(seen.splice(0)).toEqual(["INSERT INTO deliveries"]);     // no switch of the synchronous setting, ever
-    await put(store, "hub:a");                                       // a repeat answers the stored row, through the sync
-    expect(syncs).toBe(2);
+    await put(store, "hub:a");                                       // a repeat answers the stored row: an earlier call synced it
+    expect(syncs).toBe(1);
     store.update("hub:a", { waiting: { reason: "menu_open", since: T0 } });
     expect(seen.splice(0)).toEqual(["UPDATE deliveries SET"]);
-    expect(syncs).toBe(2);
+    expect(syncs).toBe(1);
     expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);   // NORMAL all along
   });
 
   it("stores nothing when the disk refuses, and throws: the sender is told, never a silent loss", async () => {
     const { store, adb } = storeOn();
     adb.db.exec("CREATE TRIGGER no_room BEFORE INSERT ON deliveries BEGIN SELECT RAISE(ABORT, 'disk full'); END");
-    await expect(await put(store, "hub:a")).rejects.toThrow(/disk full/);
+    await expect(put(store, "hub:a")).rejects.toThrow(/disk full/);
     expect(store.get("hub:a")).toBeNull();
     expect(adb.db.pragma("synchronous", { simple: true })).toBe(1);
+  });
+
+  it("leaves a fresh delivery out of open() until its sync lands: no round types one its sender was not yet told of", async () => {
+    let release = () => {};
+    const held = new Promise<void>(resolve => { release = resolve; });
+    const { store } = storeOn(T0, () => held);
+    const pending = put(store, "hub:a");
+    expect(store.get("hub:a")).toMatchObject({ state: "queued" });   // committed, readable
+    expect(store.open()).toEqual([]);                                // but no round sees it yet
+    release();
+    await pending;
+    expect(store.open().map(d => d.id)).toEqual(["hub:a"]);
   });
 
   it("a sync that fails after the commit takes the fresh row back: nothing was queued, and a retry stores it again", async () => {
     let failing = true;
     const { store, adb } = storeOn(T0, async () => { if (failing) throw new Error("the disk went away"); });
-    await expect(await put(store, "hub:a")).rejects.toThrow(/the disk went away/);
+    await expect(put(store, "hub:a")).rejects.toThrow(/the disk went away/);
     expect(store.get("hub:a")).toBeNull();
     expect(rows(adb)).toBe(0);
     failing = false;
