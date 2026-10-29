@@ -124,9 +124,13 @@ describe("the systemd cap watch", () => {
   it.each([
     { name: "a larger cap leaves a log under it running", cap: 1_000_000, stopped: false },
     { name: "a cap the log is over stops the unit", cap: 8, stopped: true },
-  ])("after a restart, $name", async ({ cap, stopped }) => {
+    // The note is the sighting: once the old agent wrote it, the log was at the cap and its bytes past it were already refused,
+    // so the new agent stops the unit although its own cap is larger (the helper path does the same with a note on disk).
+    { name: "a cap noted before the restart still stops the unit under a larger cap", cap: 1_000_000, stopped: true, noted: true },
+  ])("after a restart, $name", async ({ cap, stopped, noted }) => {
     const { dir, store, sup, agent, killed } = rig(8);
     const id = await runningJob(store, dir);
+    if (noted) writeFileSync(join(dir, `${id}.cap`), "");
     sup.close();
     const next = agent(cap);
     try {
