@@ -28,6 +28,7 @@ function runToExit(main: string, command: string, env: NodeJS.ProcessEnv): Promi
       stderr += `\n(the test ended it: no exit within ${HUB_EXIT_GUARD_MS / 1000} s)`;
       child.kill("SIGKILL");
     }, HUB_EXIT_GUARD_MS);
+    child.on("error", error => { clearTimeout(guard); resolve({ status: null, stdout, stderr: `${stderr}\n(the command could not be started: ${error.message})` }); });
     child.on("close", status => { clearTimeout(guard); resolve({ status, stdout, stderr }); });
   });
 }
@@ -136,7 +137,7 @@ describe("RFC 8292 VAPID", () => {
     const env = { ...process.env, MORNDO_HOME: dir, MORNDO_TMUX_SOCKET: "morndo-test-none", MORNDO_PUSH_CONTACT: "mailto:me@box.local" };
     expect(loadConfig(env).pushContact).toBe("mailto:me@box.local");                    // reading the settings never throws for it
     const serve = await runToExit(main, "serve", env);
-    expect(serve.status).toBe(78);                                                       // EX_CONFIG, as for a database from a newer hub
+    expect(serve.status, `serve printed: ${serve.stdout}${serve.stderr}`).toBe(78);                                                     // EX_CONFIG, as for a database from a newer hub
     expect(serve.stderr).toMatch(/MORNDO_PUSH_CONTACT.*https URL or a mailto address/s);
     expect(serve.stderr).not.toMatch(/\n\s+at /);                                       // a message, not a stack trace
     const devices = await runToExit(main, "devices", env);
