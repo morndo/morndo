@@ -288,5 +288,3 @@
 * **web:** the record line has a default for event kinds it does not know ([b608909](https://github.com/morndo/morndo/commit/b6089093bd972cc29bee1265150c98123247b3d9))
 * **web:** the Updates link follows /api/me, never a probe of /api/updates ([b3d659e](https://github.com/morndo/morndo/commit/b3d659e66b81eedafc11362e3a5c0049b3773882))
 * **web:** two small defects found in manual QA of the proof panel ([54ee2dd](https://github.com/morndo/morndo/commit/54ee2dd9247da287eda42024a9088b4e6e83395a))
-
-## Changelog
