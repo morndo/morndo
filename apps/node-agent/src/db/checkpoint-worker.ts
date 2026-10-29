@@ -5,10 +5,17 @@ import { parentPort, workerData } from "node:worker_threads";
 import Database from "better-sqlite3";
 import type { CheckpointResult } from "./checkpointer.ts";
 
-const { path, everyMs } = workerData as { path: string; everyMs: number };
+const { path, everyMs, stallMs } = workerData as { path: string; everyMs: number; stallMs: number };
 const db = new Database(path, { fileMustExist: true });
 db.pragma("wal_autocheckpoint = 0");
-const checkpoint = (): CheckpointResult => (db.pragma("wal_checkpoint(PASSIVE)") as CheckpointResult[])[0] ?? { busy: 1, log: -1, checkpointed: -1 };
+let stall = stallMs;                                       // a test's stuck disk: the first checkpoint blocks this long
+// Each checkpoint that returns tells the agent this worker still makes progress (checkpointer.ts, the deadline).
+const checkpoint = (): CheckpointResult => {
+  if (stall > 0) { Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, stall); stall = 0; }
+  const result = (db.pragma("wal_checkpoint(PASSIVE)") as CheckpointResult[])[0] ?? { busy: 1, log: -1, checkpointed: -1 };
+  parentPort?.postMessage({ beat: true });
+  return result;
+};
 
 const timer = setInterval(() => {
   try { checkpoint(); } catch (e) { parentPort?.postMessage({ warn: `a checkpoint failed; the next one tries again: ${String(e)}` }); }

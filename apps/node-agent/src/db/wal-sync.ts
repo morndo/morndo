@@ -70,7 +70,9 @@ export async function durably<T>(db: Database.Database, sync: WalSync, transacti
 // treats as a failed sync (its row is taken back, the answer says executed "no"), so no queue, flight or updater waits
 // for ever. The fsync itself cannot be cancelled and keeps its libuv thread; while it is still out, every new call
 // fails at once rather than start another, so a hung disk holds one thread, not the whole pool. Once it ends, syncs
-// run again.
+// run again. A timed-out sync that lands later made durable a row its caller had already taken back: the take-back is
+// a later commit, so the disk ends as the caller answered (executed "no"), unless a power loss falls between the two,
+// when the row stands as `started` and a retry is answered uncertain, never run twice. Accepted (review).
 export function bounded(sync: WalSync, ms: number): WalSync {
   let stuck: Promise<void> | null = null;
   return () => {

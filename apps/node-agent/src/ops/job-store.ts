@@ -337,7 +337,8 @@ export class JobStore {
     this.#sent.set(job.id, key);
     // Sent once its commit is on the disk (T-532): a sync covers every commit before it, and syncs land in the order
     // they were asked for, so a job's events still leave in order. One whose sync fails is not sent, and its key is
-    // forgotten: the job's next change, or the replay after the next welcome, sends where it stands.
+    // forgotten: the job's next change, or the replay after the next welcome, sends where it stands. Until then the
+    // fleet has seen a gap (a later event without the one before it), which that replay mends; accepted (review).
     const onJob = this.#onJob;
     this.#sync().then(() => {
       try { onJob(job, shown); }
