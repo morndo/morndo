@@ -3,7 +3,7 @@
 // as the directory's does: `UPDATE … WHERE version = ?` changes a row or it doesn't, inside one BEGIN IMMEDIATE transaction
 // (better-sqlite3, "transaction(function) -> function", `.immediate`, https://github.com/WiseLibs/better-sqlite3/blob/master/docs/api.md).
 import type Database from "better-sqlite3";
-import { emptyPool, type Pool } from "@morndo/domain";
+import { emptyPool, POOL_DEFAULTS, type Pool } from "@morndo/domain";
 import type { PoolStore } from "../application/ports.ts";
 import { openConnectionsDb } from "./store-sqlite.ts";
 
@@ -24,9 +24,12 @@ export class SqlitePoolStore implements PoolStore {
   }
 
   // A runtime with no row yet is an empty pool at version 0.
+  // A pool saved before a setting existed loads with that setting's default.
   load(runtime: string): { pool: Pool; version: number } {
     const row = this.#select.get(runtime) as Row | undefined;
-    return row ? { pool: JSON.parse(row.body) as Pool, version: row.version } : { pool: emptyPool(runtime), version: 0 };
+    if (!row) return { pool: emptyPool(runtime), version: 0 };
+    const stored = JSON.parse(row.body) as Pool;
+    return { pool: { ...stored, settings: { ...POOL_DEFAULTS, ...stored.settings } }, version: row.version };
   }
 
   save(pool: Pool, version: number): boolean {

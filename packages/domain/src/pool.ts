@@ -10,13 +10,13 @@ export type PoolOrder = "weighted" | "soonest-reset";
 export type PoolSettings = {
   mode: PoolMode; moveBy: MoveBy; order: PoolOrder; defaultMember: string | null;
   shortMinLeft: number; longMinLeft: number; pickMarginShort: number; pickMarginLong: number; nightReserveLong: number;
-  turnsPerMember: number; activeMinutes: number; defaultMarkMinutes: number; maxMarkHours: number;
+  turnsPerMember: number; activeMinutes: number; readingMaxAgeMinutes: number; defaultMarkMinutes: number; maxMarkHours: number;
   resetAdviceWaitHours: number; creditAdviceHours: number;
 };
 export const POOL_DEFAULTS: PoolSettings = {
   mode: "pinned", moveBy: "resume", order: "weighted", defaultMember: null,
   shortMinLeft: 3, longMinLeft: 1, pickMarginShort: 10, pickMarginLong: 3, nightReserveLong: 25,
-  turnsPerMember: 1, activeMinutes: 30, defaultMarkMinutes: 60, maxMarkHours: 168,
+  turnsPerMember: 1, activeMinutes: 30, readingMaxAgeMinutes: 30, defaultMarkMinutes: 60, maxMarkHours: 168,
   resetAdviceWaitHours: 4, creditAdviceHours: 72,
 };
 export type MemberSettings = { keep: boolean; expires: number | null; onlyFor: readonly string[] };   // expires in ms
@@ -139,7 +139,7 @@ export function setMode(p: Pool, mode: PoolMode, by: string | null, now: number)
 
 const NUMERIC: readonly (keyof PoolSettings)[] = [
   "shortMinLeft", "longMinLeft", "pickMarginShort", "pickMarginLong", "nightReserveLong",
-  "turnsPerMember", "activeMinutes", "defaultMarkMinutes", "maxMarkHours", "resetAdviceWaitHours", "creditAdviceHours",
+  "turnsPerMember", "activeMinutes", "readingMaxAgeMinutes", "defaultMarkMinutes", "maxMarkHours", "resetAdviceWaitHours", "creditAdviceHours",
 ];
 
 // PL13, PL14: `moveBy: "resume"` and more than one turn per member need `by`. `defaultMember` must name a member.
@@ -305,21 +305,24 @@ const under = (dir: string, entry: string): boolean => dir === entry || dir.star
 
 const leftOf = (s: Seat): number => Math.min(s.shortLeft ?? 100, s.longLeft ?? 100);
 
-// PL4 (T-250): the members whose group's freshest reading says ordinary use is not allowed. One stays a candidate, but
-// goes after every candidate that is not so marked.
-function notAllowed(p: Pool, now: number): ReadonlySet<string> {
+// PL4 (T-250, T-614): the members whose group's freshest reading says ordinary use is not allowed (barred), and those whose
+// group was last read longer ago than `readingMaxAgeMinutes`, or never (unknown). Both stay candidates: a barred seat goes
+// after every other one, an unknown seat after every seat read recently.
+function barredAndUnknown(p: Pool, now: number): { barred: ReadonlySet<string>; unknown: ReadonlySet<string> } {
   const groups = groupsOf(p, now);
-  const out = new Set<string>();
+  const barred = new Set<string>();
+  const unknown = new Set<string>();
   for (const m of p.members) {
     const group = groups.members[groups.seatOf[m.name] ?? m.name] ?? [m.name];
     const freshest = group.map(name => p.readings[name]).filter((r): r is Reading => r !== undefined).sort((a, b) => b.at - a.at)[0];
-    if (freshest?.allowed === false) out.add(m.name);
+    if (freshest?.allowed === false) barred.add(m.name);
+    if (freshest === undefined || now - freshest.at > p.settings.readingMaxAgeMinutes * MINUTE) unknown.add(m.name);
   }
-  return out;
+  return { barred, unknown };
 }
 
 // PL4: the ok seats a new or moved session may take, best first.
-function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: ReadonlySet<string>, barred: ReadonlySet<string>): Seat[] {
+function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: ReadonlySet<string>, barred: ReadonlySet<string>, unknown: ReadonlySet<string>): Seat[] {
   const settingsOf = (name: string): MemberSettings => p.members.find(m => m.name === name)?.settings ?? { keep: false, expires: null, onlyFor: [] };
   const matches = (s: Seat): boolean => {
     const only = settingsOf(s.member).onlyFor;
@@ -337,6 +340,7 @@ function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: Readonly
   const compare = (a: Seat, b: Seat): number => {
     const keys: [number, number][] = [
       [flag(!barred.has(a.member)), flag(!barred.has(b.member))],
+      [flag(!unknown.has(a.member)), flag(!unknown.has(b.member))],
       [flag(matches(a)), flag(matches(b))],
       [flag(roomy(a)), flag(roomy(b))],
       ...(p.settings.order === "weighted" ? [[(a.active + 1) / a.urgency, (b.active + 1) / b.urgency] as [number, number]] : []),
@@ -367,7 +371,7 @@ function noSeat(all: readonly Seat[]): PlaceAnswer {
 // one, and every one in pinned mode, is refused with the seat's state and when it comes back instead of moving.
 export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
   const all = seats(p, now, ask.model);
-  const barred = notAllowed(p, now);
+  const { barred, unknown } = barredAndUnknown(p, now);
   const seat = (name: string): Seat | undefined => all.find(s => s.member === name);
   const unavailable = (s: Seat, member: string): PlaceAnswer => ({ ok: false, problem: "member-unavailable", member, state: s.state, backAt: s.backAt });
   const placed = ask.session !== null ? placementOf(p, ask.session) : undefined;
@@ -378,7 +382,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
     if (p.settings.mode === "pinned" || placed.pinned) return unavailable(current, placed.member);
     const same = groupsOf(p, now);
     const leaveOut = new Set(same.members[same.seatOf[placed.member] ?? placed.member] ?? [placed.member]);
-    const best = choose(p, all, ask, leaveOut, barred)[0];
+    const best = choose(p, all, ask, leaveOut, barred, unknown)[0];
     return best ? { ok: true, member: best.member, moved: { from: placed.member, why: current.state } } : noSeat(all);
   }
   const pin = ask.pin ?? (p.settings.mode === "pinned" ? p.settings.defaultMember : null);
@@ -390,7 +394,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
     return target.state === "ok" ? { ok: true, member: target.member, moved: null } : unavailable(target, target.member);
   }
   if (p.settings.mode === "pinned") return { ok: false, problem: "no-default" };
-  const best = choose(p, all, ask, new Set(), barred)[0];
+  const best = choose(p, all, ask, new Set(), barred, unknown)[0];
   return best ? { ok: true, member: best.member, moved: null } : noSeat(all);
 }
 
