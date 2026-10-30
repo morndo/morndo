@@ -145,7 +145,11 @@ describe("morndo-keys pool exec", () => {
     expect(first.code, first.stderr).toBe(0);
     const thread = events(first.stdout).find(e => e.type === "thread.started")?.thread_id ?? "";
     t.setMode("codex-a", "slow");
-    const child = spawn(process.execPath, ["--no-warnings", MAIN, "pool", "exec", "--runtime", "codex", "--", "exec", "resume", thread, "--json", "next brief"], { env: t.env, stdio: ["ignore", "pipe", "pipe"] });
+    // The child is killed with SIGKILL, so it cannot remove the run home it makes (morndo-codex-run-*): it gets a TMPDIR
+    // inside the node's own folder, which the test removes.
+    const childTmp = join(t.dir, "tmp");
+    mkdirSync(childTmp);
+    const child = spawn(process.execPath, ["--no-warnings", MAIN, "pool", "exec", "--runtime", "codex", "--", "exec", "resume", thread, "--json", "next brief"], { env: { ...t.env, TMPDIR: childTmp }, stdio: ["ignore", "pipe", "pipe"] });
     const closed = new Promise<number | null>(resolve => child.on("close", resolve));
     try {
       await until(() => t.runs("codex-a").length === 2);
