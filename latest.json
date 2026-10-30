@@ -1,11 +1,17 @@
 {
   "schema": 1,
   "channel": "latest",
-  "seq": 3,
-  "issuedAt": "2026-10-29T12:23:55Z",
-  "expiresAt": "2026-11-12T12:23:55Z",
+  "seq": 4,
+  "issuedAt": "2026-10-30T00:43:48Z",
+  "expiresAt": "2026-11-13T00:43:48Z",
   "keySetVersion": 1,
   "releases": [
+    {
+      "version": "0.2.2",
+      "manifest": "https://github.com/morndo/morndo/releases/download/v0.2.2/manifest.json",
+      "manifestSize": 1556,
+      "manifestSha256": "658a706a7c6c502ca2693d725ccf4a6ba4a54bfdbe7e3df6b29c05ab1bde5a13"
+    },
     {
       "version": "0.2.1",
       "manifest": "https://github.com/morndo/morndo/releases/download/v0.2.1/manifest.json",
