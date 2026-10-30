@@ -305,8 +305,21 @@ const under = (dir: string, entry: string): boolean => dir === entry || dir.star
 
 const leftOf = (s: Seat): number => Math.min(s.shortLeft ?? 100, s.longLeft ?? 100);
 
+// PL4 (T-250): the members whose group's freshest reading says ordinary use is not allowed. One stays a candidate, but
+// goes after every candidate that is not so marked.
+function notAllowed(p: Pool, now: number): ReadonlySet<string> {
+  const groups = groupsOf(p, now);
+  const out = new Set<string>();
+  for (const m of p.members) {
+    const group = groups.members[groups.seatOf[m.name] ?? m.name] ?? [m.name];
+    const freshest = group.map(name => p.readings[name]).filter((r): r is Reading => r !== undefined).sort((a, b) => b.at - a.at)[0];
+    if (freshest?.allowed === false) out.add(m.name);
+  }
+  return out;
+}
+
 // PL4: the ok seats a new or moved session may take, best first.
-function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: ReadonlySet<string>): Seat[] {
+function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: ReadonlySet<string>, barred: ReadonlySet<string>): Seat[] {
   const settingsOf = (name: string): MemberSettings => p.members.find(m => m.name === name)?.settings ?? { keep: false, expires: null, onlyFor: [] };
   const matches = (s: Seat): boolean => {
     const only = settingsOf(s.member).onlyFor;
@@ -323,6 +336,7 @@ function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: Readonly
   const flag = (b: boolean): number => (b ? 0 : 1);
   const compare = (a: Seat, b: Seat): number => {
     const keys: [number, number][] = [
+      [flag(!barred.has(a.member)), flag(!barred.has(b.member))],
       [flag(matches(a)), flag(matches(b))],
       [flag(roomy(a)), flag(roomy(b))],
       ...(p.settings.order === "weighted" ? [[(a.active + 1) / a.urgency, (b.active + 1) / b.urgency] as [number, number]] : []),
@@ -353,6 +367,7 @@ function noSeat(all: readonly Seat[]): PlaceAnswer {
 // one, and every one in pinned mode, is refused with the seat's state and when it comes back instead of moving.
 export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
   const all = seats(p, now, ask.model);
+  const barred = notAllowed(p, now);
   const seat = (name: string): Seat | undefined => all.find(s => s.member === name);
   const unavailable = (s: Seat, member: string): PlaceAnswer => ({ ok: false, problem: "member-unavailable", member, state: s.state, backAt: s.backAt });
   const placed = ask.session !== null ? placementOf(p, ask.session) : undefined;
@@ -363,7 +378,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
     if (p.settings.mode === "pinned" || placed.pinned) return unavailable(current, placed.member);
     const same = groupsOf(p, now);
     const leaveOut = new Set(same.members[same.seatOf[placed.member] ?? placed.member] ?? [placed.member]);
-    const best = choose(p, all, ask, leaveOut)[0];
+    const best = choose(p, all, ask, leaveOut, barred)[0];
     return best ? { ok: true, member: best.member, moved: { from: placed.member, why: current.state } } : noSeat(all);
   }
   const pin = ask.pin ?? (p.settings.mode === "pinned" ? p.settings.defaultMember : null);
@@ -375,7 +390,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
     return target.state === "ok" ? { ok: true, member: target.member, moved: null } : unavailable(target, target.member);
   }
   if (p.settings.mode === "pinned") return { ok: false, problem: "no-default" };
-  const best = choose(p, all, ask, new Set())[0];
+  const best = choose(p, all, ask, new Set(), barred)[0];
   return best ? { ok: true, member: best.member, moved: null } : noSeat(all);
 }
 

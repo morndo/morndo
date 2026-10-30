@@ -2,11 +2,14 @@
 // goes on elsewhere. The messages are codex-cli 0.161.0's (codex-rs/protocol/src/error.rs#L693-814 at rust-v0.161.0,
 // https://github.com/openai/codex/blob/rust-v0.161.0/codex-rs/protocol/src/error.rs): a usage limit is "You’ve hit your usage
 // limit" (U+2019; a plain ' is accepted too), "for <name>" when one model's limit was hit, and "try again at <time>" in
-// local time, as `%-I:%M %p` today or `%b %-d<th>, %Y %-I:%M %p` on another day. The arguments follow `codex exec --help` and
+// local time, as `%-I:%M %p` today or `%b %-d<th>, %Y %-I:%M %p` on another day. A workspace with no credits left counts as a
+// usage limit too: "Your workspace is out of credits", "You hit your spend cap set in/by …" and "Quota exceeded. Check your
+// plan and billing details." name no time (the same error.rs at rust-v0.161.0). The arguments follow `codex exec --help` and
 // `codex exec resume --help`, codex-cli 0.161.0: resume takes no --sandbox, --add-dir, --profile or --approve-for-me.
 export type TurnFailure = { kind: "usage-limit"; model: boolean } | { kind: "auth" } | { kind: "unreadable" } | { kind: "other" };
 
 const LIMIT = /You[’']ve hit your usage limit( for [^.]+)?\./;
+const WORKSPACE_OUT = /Your workspace is out of credits\.|You hit your spend cap set (?:in|by)|Quota exceeded\. Check your plan and billing details\./;
 const AUTH = /refresh token was already used|sign in again|\b401\b|unauthorized/i;
 const UNREADABLE = /invalid_encrypted_content|encrypted content/i;
 
@@ -14,6 +17,7 @@ export function classifyFailure(messages: readonly string[]): TurnFailure {
   const text = messages.join("\n");
   const limit = LIMIT.exec(text);
   if (limit) return { kind: "usage-limit", model: limit[1] !== undefined };
+  if (WORKSPACE_OUT.test(text)) return { kind: "usage-limit", model: false };
   if (AUTH.test(text)) return { kind: "auth" };
   if (UNREADABLE.test(text)) return { kind: "unreadable" };
   return { kind: "other" };

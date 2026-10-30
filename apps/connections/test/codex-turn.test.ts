@@ -16,6 +16,18 @@ describe("codex turn: what a failure was", () => {
     expect(classifyFailure(["exceeded retry limit, last status: 429 Too Many Requests"])).toEqual({ kind: "other" });
   });
 
+  it("counts a workspace out of credits, a spend cap and an exceeded quota as a usage limit (T-250)", () => {
+    for (const message of [
+      "Your workspace is out of credits. Add credits to continue.",
+      "Your workspace is out of credits. Ask your workspace owner to refill in order to continue.",
+      "You hit your spend cap set in your workspace. Increase your spend cap to continue.",
+      "You hit your spend cap set by the owner of your workspace. Ask an owner to increase your spend cap to continue.",
+      "Quota exceeded. Check your plan and billing details.",
+    ]) expect(classifyFailure([message]), message).toEqual({ kind: "usage-limit", model: false });
+    expect(retryAt("Your workspace is out of credits. Add credits to continue.", NOON, "UTC")).toBeNull();
+    expect(classifyFailure(["the workspace has credits left"])).toEqual({ kind: "other" });
+  });
+
   it("reads the reset from the message, today or on a date, in the process's time zone", () => {
     expect(retryAt(LIMIT, NOON, "UTC")).toBe(Date.UTC(2026, 9, 15, 15, 5));
     expect(retryAt("… or try again at Oct 17th, 2026 9:00 AM.", NOON, "UTC")).toBe(Date.UTC(2026, 9, 17, 9, 0));

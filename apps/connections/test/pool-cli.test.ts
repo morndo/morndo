@@ -283,6 +283,43 @@ describe("morndo-keys pool exec", () => {
       expect(body.events.some(e => e.type === "MoveByChanged")).toBe(true);
     } finally { db.close(); }
   });
+
+  it("a workspace out of credits marks the account and the turn goes on elsewhere, so the next new lane starts on the other account (T-250)", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "credits", "codex-b": "ok" } });
+    const first = await t.cli(turn());
+    expect(first.code, first.stderr).toBe(0);
+    expect(events(first.stdout).filter(e => e.type === "turn.failed")).toEqual([]);
+    expect(events(first.stdout).at(-1)?.type).toBe("turn.completed");
+    const second = await t.cli(turn());
+    expect(second.code, second.stderr).toBe(0);
+    expect(t.runs("codex-a")).toHaveLength(1);
+    expect(t.runs("codex-b")).toHaveLength(2);
+    const list = JSON.parse((await t.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { seats: { member: string; state: string }[] };
+    expect(list.seats.find(s => s.member === "codex-a")?.state).toBe("out");
+  });
+
+  it("a new turn in rotate mode starts on the account whose reading says it can run, and a pin still runs where it points (T-250)", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "ok", "codex-b": "ok" } });
+    const limits = JSON.parse(readFileSync(join(t.home("codex-a"), "limits.json"), "utf8")) as Record<string, unknown>;
+    writeFileSync(join(t.home("codex-a"), "limits.json"), JSON.stringify({ ...limits, ordinaryUsageAllowed: false }));
+    expect((await t.cli(["pool", "read", "--runtime", "codex", "--all"])).code).toBe(0);
+    const out = await t.cli(turn());
+    expect(out.code, out.stderr).toBe(0);
+    expect([t.runs("codex-a").length, t.runs("codex-b").length]).toEqual([0, 1]);
+    const pinned = await t.cli(turn(["--account", "codex-a"]));
+    expect(pinned.code, pinned.stderr).toBe(0);
+    expect(t.runs("codex-a")).toHaveLength(1);
+  });
+
+  it("a new turn in rotate mode skips an account at or below its switch point (T-250)", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "ok", "codex-b": "ok" } });
+    const limits = JSON.parse(readFileSync(join(t.home("codex-a"), "limits.json"), "utf8")) as { rateLimits: { primary: Record<string, unknown> } } & Record<string, unknown>;
+    writeFileSync(join(t.home("codex-a"), "limits.json"), JSON.stringify({ ...limits, rateLimits: { ...limits.rateLimits, primary: { ...limits.rateLimits.primary, usedPercent: 98 } } }));
+    expect((await t.cli(["pool", "read", "--runtime", "codex", "--all"])).code).toBe(0);
+    const out = await t.cli(turn());
+    expect(out.code, out.stderr).toBe(0);
+    expect([t.runs("codex-a").length, t.runs("codex-b").length]).toEqual([0, 1]);
+  });
 });
 
 describe("morndo-keys pool exec: what a turn does when it can't simply run", () => {
