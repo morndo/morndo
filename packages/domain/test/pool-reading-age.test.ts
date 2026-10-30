@@ -1,7 +1,7 @@
 // How old a usage reading may be before its windows count as unknown in rotate placement (T-614; PL3, PL4). A reading older
 // than `readingMaxAgeMinutes`, or none at all, proves no room: the seat goes after every seat its account read recently.
 import { describe, expect, it } from "vitest";
-import { addMember, place, placeSession, POOL_DEFAULTS, seats, setSettings, type PlaceAnswer, type PlaceAsk, type Pool } from "../src/index.ts";
+import { addMember, place, placeSession, POOL_DEFAULTS, seats, setSettings, type PlaceAnswer, type PlaceAsk, type Pool, type Reading } from "../src/index.ts";
 import { H, NONE, NOW, must, poolOf, reading } from "./pool-fixtures.ts";
 
 const MIN = 60_000;
@@ -92,5 +92,40 @@ describe("pool: a reading's age after onlyFor, at its bound, and with a seat tha
   it("puts a seat that can’t run last even when its reading is old too", () => {
     const p = poolOf([reading("a", { short: 0, long: 0, allowed: false, at: NOW - 2 * H }), reading("b", { short: 6, long: 40, at: NOW - 2 * H })]);
     expect(pick(p)).toMatchObject({ ok: true, member: "b" });
+  });
+});
+
+describe("pool: an old low window with no reset time, a pool without the setting, and the setting's floor (T-614, review 2)", () => {
+  // The short window (300 minutes) names no reset time.
+  const noReset = (r: Reading): Reading => ({ ...r, windows: r.windows.map(w => (w.minutes === 300 ? { ...w, resetsAt: null } : w)) });
+
+  it("counts an old low window with no reset time as unknown once its reading is older than the window's length", () => {
+    const old = poolOf([noReset(reading("a", { short: 98, at: NOW - 301 * MIN }))]);
+    expect(seats(old, NOW)[0]?.state).toBe("ok");
+    expect(pick(old)).toMatchObject({ ok: true, member: "a" });
+  });
+
+  it("keeps it low within that length, and no seat then says when the window has turned over", () => {
+    const recent = poolOf([noReset(reading("a", { short: 98, at: NOW - 2 * H }))]);
+    expect(seats(recent, NOW)[0]).toMatchObject({ state: "low", backAt: NOW - 2 * H + 300 * MIN });
+    expect(pick(recent)).toEqual({ ok: false, problem: "no-seat", leastBad: "a", backAt: NOW - 2 * H + 300 * MIN });
+  });
+
+  it("takes 168 hours for a window that names neither a reset time nor a length", () => {
+    const one = (at: number): Pool => poolOf([{ ...reading("a"), at, windows: [{ usedPercent: 100, minutes: null, resetsAt: null }] }]);
+    expect(seats(one(NOW - 167 * H), NOW)[0]).toMatchObject({ state: "low", backAt: NOW + H });
+    expect(seats(one(NOW - 169 * H), NOW)[0]?.state).toBe("ok");
+  });
+
+  it("treats a pool whose settings lack readingMaxAgeMinutes as the default 30 minutes", () => {
+    const p = poolOf([reading("a", { short: 0, long: 0, at: NOW - 31 * MIN }), reading("b", { short: 6, long: 40 })]);
+    const { readingMaxAgeMinutes: _gone, ...older } = p.settings;
+    expect(pick({ ...p, settings: older as Pool["settings"] })).toMatchObject({ ok: true, member: "b" });
+  });
+
+  it("refuses a readingMaxAgeMinutes below one minute", () => {
+    const p = poolOf([reading("a")]);
+    expect(setSettings(p, { readingMaxAgeMinutes: 0 }, null, NOW)).toEqual({ ok: false, error: "bad-value" });
+    expect(setSettings(p, { readingMaxAgeMinutes: 1 }, null, NOW).ok).toBe(true);
   });
 });
