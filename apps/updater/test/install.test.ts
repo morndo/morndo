@@ -74,7 +74,7 @@ type World = {
 };
 // `feed` is what the install's first check finds: a stub feed that signs this Version in (`served`), or a host that
 // cannot be reached (the default — no test of the install may reach the real network).
-const world = (o: { joined?: boolean; feed?: "served" | "unreachable"; newer?: string; firstCheckMs?: number } = {}): World => {
+const world = (o: { joined?: boolean; feed?: "served" | "unreachable"; newer?: string; firstCheckMs?: number; onPath?: boolean } = {}): World => {
   const home = join(scratch, `home-${(worldCount += 1)}`);
   mkdirSync(home, { recursive: true, mode: 0o700 });
   const paths = updaterPaths(home);
@@ -106,13 +106,35 @@ const world = (o: { joined?: boolean; feed?: "served" | "unreachable"; newer?: s
     home, paths, services, tree, feed, artifacts,
     run: async argv => {
       const out: string[] = [], err: string[] = [];
-      const code = await runUpdater(argv, { HOME: home, PATH: process.env.PATH }, {
+      // `onPath` puts the home's ~/.local/bin on PATH (a login that already found it); otherwise it is not there.
+      const path = o.onPath === true ? `${join(home, ".local/bin")}:${process.env.PATH ?? ""}` : process.env.PATH;
+      const code = await runUpdater(argv, { HOME: home, PATH: path }, {
         out: s => out.push(s), err: s => err.push(s),
       }, { services, probe, tree, feed, artifacts, ...(o.firstCheckMs === undefined ? {} : { firstCheckMs: o.firstCheckMs }) });
       return { code, out: out.join(""), err: err.join("") };
     },
   };
 };
+
+describe("`morndo install`: the link folder and PATH", () => {
+  for (const joined of [false, true]) {
+    it(`says so, with the line to add, when ~/.local/bin is not on PATH (${joined ? "joined" : "not joined"}), and still exits 0`, async () => {
+      const w = world({ joined });
+      const r = await w.run(["install", "--role", "node"]);
+      expect(r.code, r.err).toBe(0);
+      const bin = join(w.home, ".local/bin");
+      expect(r.err).toContain(`${bin} is not on PATH`);
+      expect(r.err).toContain('export PATH="$HOME/.local/bin:$PATH"');
+      expect(r.err).toContain("a new login");
+    });
+  }
+  it("says nothing about PATH when ~/.local/bin is on it", async () => {
+    const w = world({ onPath: true });
+    const r = await w.run(["install", "--role", "node"]);
+    expect(r.code, r.err).toBe(0);
+    expect(r.err + r.out).not.toMatch(/PATH/);
+  });
+});
 
 describe("`morndo install --role control-plane` (§10.3)", () => {
   it("installs the tree read-only, links it, seeds the store and the settings, renders and enables the role's units, and waits for health", async () => {
