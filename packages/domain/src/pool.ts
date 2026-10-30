@@ -340,8 +340,8 @@ function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: Readonly
   const compare = (a: Seat, b: Seat): number => {
     const keys: [number, number][] = [
       [flag(!barred.has(a.member)), flag(!barred.has(b.member))],
-      [flag(!unknown.has(a.member)), flag(!unknown.has(b.member))],
       [flag(matches(a)), flag(matches(b))],
+      [flag(!unknown.has(a.member)), flag(!unknown.has(b.member))],
       [flag(roomy(a)), flag(roomy(b))],
       ...(p.settings.order === "weighted" ? [[(a.active + 1) / a.urgency, (b.active + 1) / b.urgency] as [number, number]] : []),
       [ends(a), ends(b)],
