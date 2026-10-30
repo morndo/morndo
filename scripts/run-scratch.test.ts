@@ -44,27 +44,14 @@ describe("the run-scratch teardown", () => {
     expect(message).not.toContain("other");
   });
 
-  it("lets the two known intermittent leaks pass, in the shape the product makes them, and still names any other", () => {
+  it("names a morndo-codex-run-* and a morndo-tx-* leftover too: the two once let through as intermittent are traced and fixed", () => {
     const { dir, teardown } = scratch();
     mkdirSync(join(dir, "morndo-codex-run-aB3dE9"));
     mkdirSync(join(dir, "morndo-tx-aB3dE9"));
-    mkdirSync(join(dir, "morndo-new-c3"));
     let message = "";
     try { teardown(); } catch (e) { message = String(e); }
-    expect(message).toContain("morndo-new-c3");
-    expect(message).not.toContain("codex-run");
-    expect(message).not.toContain("morndo-tx-aB3dE9");
+    for (const name of ["morndo-codex-run-aB3dE9", "morndo-tx-aB3dE9"]) expect(message).toContain(name);
     expect(existsSync(dir)).toBe(false);
-  });
-
-  it("fails on a morndo-tx-own-* leftover, a test's dir, though morndo-tx-* of the product passes", () => {
-    const { dir, teardown } = scratch();
-    mkdirSync(join(dir, "morndo-tx-own-aB3dE9"));
-    mkdirSync(join(dir, "morndo-codex-run-own"));
-    mkdirSync(join(dir, "morndo-tx-aB3dE9-more"));
-    let message = "";
-    try { teardown(); } catch (e) { message = String(e); }
-    for (const name of ["morndo-tx-own-aB3dE9", "morndo-codex-run-own", "morndo-tx-aB3dE9-more"]) expect(message).toContain(name);
   });
 
   it("removes the dir even when it cannot be listed", () => {
