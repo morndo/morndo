@@ -126,3 +126,15 @@ describe("pool: a seat its reading says can't run now goes last (T-250)", () => 
     expect(pick(later)).toMatchObject({ ok: true, member: "a" });
   });
 });
+
+describe("pool: one account behind two members goes last by its freshest reading (T-250, PL2)", () => {
+  it("goes by the freshest reading of the account, not by the reading of the member that takes the seat", () => {
+    // a1 and a2 are one account, and a1 takes its seat; a2's later reading says ordinary use is not allowed.
+    const p = poolOf([
+      reading("a1", { identity: "id-a", short: 0, long: 0, at: NOW - 120_000 }),
+      reading("a2", { identity: "id-a", short: 0, long: 0, allowed: false }),
+      reading("b", { short: 6, long: 40 }),
+    ]);
+    expect(pick(p)).toMatchObject({ ok: true, member: "b" });
+  });
+});
