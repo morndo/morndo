@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.2.3](https://github.com/morndo/morndo/compare/v0.2.2...v0.2.3) (2026-10-30)
+
+
+### Bug Fixes
+
+* **c6:** make a backup folder and its files private to the owner ([74f0117](https://github.com/morndo/morndo/commit/74f01175789e7bc43580f4d12c0d1cffd7964dbe))
+* HSTS on the hub, private backup folders ([1dfd768](https://github.com/morndo/morndo/commit/1dfd768bdddd24cb91edce9d2beb8f57465c1147))
+* **hub:** send Strict-Transport-Security for an https origin ([2041bf6](https://github.com/morndo/morndo/commit/2041bf653bde8dd73f20f8ff8f8f322b059a08de))
+* **pool:** a reading's age ranks after a member's onlyFor directories (T-614) ([98e957d](https://github.com/morndo/morndo/commit/98e957ded32a254821c15474a73d143bd1c8ecaa))
+* **pool:** a usage reading older than readingMaxAgeMinutes proves no room in rotate placement (T-614) ([1f5eb11](https://github.com/morndo/morndo/commit/1f5eb1158e9eaf293205bedae94909a49a2cdc5d))
+* **pool:** a usage reading older than readingMaxAgeMinutes proves no room in rotate placement (T-614) ([83a4197](https://github.com/morndo/morndo/commit/83a419721481e19b40e353027e688177598104a9))
+* **pool:** an old window with no reset time turns unknown after its length; the age setting defaults in the domain and is at least 1 (T-614) ([916b682](https://github.com/morndo/morndo/commit/916b682cc9b19bddc5b35a200094c4b8459fb9aa))
+* **pool:** rotate skips an exhausted account when a new lane starts (T-250) ([67da5f7](https://github.com/morndo/morndo/commit/67da5f75b6e2c5b2a849a3a882e9c85b139024b8))
+* **pool:** rotate skips an exhausted account when a new lane starts (T-250) ([976466b](https://github.com/morndo/morndo/commit/976466b2abc0fad98298d1329627a26318cc78e7))
+* **updater:** install says when ~/.local/bin is not on PATH ([3f59d18](https://github.com/morndo/morndo/commit/3f59d18144ef5e674e5135722aa383cde99c8ff0))
+* **updater:** say at the end of install when ~/.local/bin is not on PATH ([b8bab0a](https://github.com/morndo/morndo/commit/b8bab0ae05131a2d0f759ab080f104ea024411fa))
+
 ## [0.2.2](https://github.com/morndo/morndo/compare/v0.2.1...v0.2.2) (2026-10-29)
 
 
