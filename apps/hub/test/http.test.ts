@@ -24,6 +24,7 @@ let store: Store;
 let http: Awaited<ReturnType<typeof startHttp>>;
 let base: string;
 let config: Config;
+let deps: Omit<Parameters<typeof startHttp>[0], "config">;
 
 const req = (path: string, init: RequestInit & { login?: string | null } = {}) => {
   const headers = new Headers(init.headers);
@@ -50,7 +51,8 @@ beforeAll(async () => {
     ledger: null, store, managerName: "manager", send: async () => ({ problem: null, typedAt: 0 }),
   });
   const remote = new RemoteService({ store, terminal: { frame: async () => null, keys: async () => false }, panes: () => ["%1"], desktop: () => null });
-  http = startHttp({ config, identity: loadOrCreateIdentity(dir), access, store, observation, steering: new SteeringService(store, tmux), escalations, remote });
+  deps = { identity: loadOrCreateIdentity(dir), access, store, observation, steering: new SteeringService(store, tmux), escalations, remote };
+  http = startHttp({ config, ...deps });
   await http.ready;
   base = `http://127.0.0.1:${(http.server.address() as AddressInfo).port}`;
 });
@@ -113,6 +115,21 @@ describe("static shell", () => {
     expect(csp).toContain("script-src 'self' 'sha256-");
     expect(csp).toContain("frame-ancestors 'none'");
     expect(r.headers.get("x-content-type-options")).toBe("nosniff");
+  });
+  it("sends Strict-Transport-Security for a hub whose origin is https, on a page and on an API answer", async () => {
+    // RFC 6797 §6.1: max-age only. No includeSubDomains (the host's other names are not the hub's to speak for), no preload.
+    const hsts = "max-age=31536000";
+    expect((await req("/anything/deep")).headers.get("strict-transport-security")).toBe(hsts);
+    expect((await req("/api/identity")).headers.get("strict-transport-security")).toBe(hsts);
+  });
+  it("sends none for a hub on a plain http origin (RFC 6797 §7.2: a browser ignores it there)", async () => {
+    const local = startHttp({ config: { ...config, origin: "http://localhost:1" }, ...deps });
+    await local.ready;
+    try {
+      const r = await fetch(`http://127.0.0.1:${(local.server.address() as AddressInfo).port}/anything/deep`, { headers: { "tailscale-user-login": LOGIN } });
+      expect(r.status).toBe(200);
+      expect(r.headers.has("strict-transport-security")).toBe(false);
+    } finally { await local.close(); }
   });
   it("doesn't serve files outside the web directory", async () => {
     const r = await req("/..%2f..%2fmorndo.db");

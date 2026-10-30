@@ -93,6 +93,18 @@ describe("backup.sh", () => {
     expect(lstatSync(join(m.dest, "restore.sh")).mode & 0o111).not.toBe(0);
     expect(readFileSync(join(m.dest, "ROLLBACK.md"), "utf8")).toContain("restore.sh");
   });
+  it("keeps the folder and everything it writes private to the owner, whatever the caller's umask", () => {
+    const m = machine();
+    // The umask a login shell has: before, the files came out 0644 and the folders 0755.
+    const r = spawnSync("sh", ["-c", 'umask 022; exec sh "$0" "$@"', BACKUP, m.dest, "--db", `node=${m.dbPath}`], { env: m.env, encoding: "utf8" });
+    expect(r.status, r.stderr).toBe(0);
+    const modeOf = (rel: string) => (lstatSync(join(m.dest, rel)).mode & 0o777).toString(8);
+    for (const dir of [".", "units", "wrappers", "dbs"]) expect(modeOf(dir), dir).toBe("700");
+    for (const file of ["dbs/node.db", "dbs/paths.txt", "dbs/schema.txt", "state.txt", "machine.txt", "ROLLBACK.md", "db-backup.ts"]) {
+      expect(modeOf(file), file).toBe("600");
+    }
+    expect(modeOf("restore.sh")).toBe("700");
+  });
   it("refuses a backup folder that exists, and writes nothing into it", () => {
     const m = machine();
     mkdirSync(m.dest);
