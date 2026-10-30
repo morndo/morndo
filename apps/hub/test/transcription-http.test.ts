@@ -1,8 +1,8 @@
 // The hub's transcription routes (design §6, §13). With no plugin the install is unchanged. With the fixture,
 // a short upload comes back as text. A temporary data dir and a random port, never a running hub.
+import { itFfmpeg, scratchFolder } from "./ffmpeg.ts";
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
@@ -247,8 +247,8 @@ describe("transcription http", () => {
     }
   });
 
-  it("answers another request while a recording is remuxed", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-"));
+  itFfmpeg("answers another request while a recording is remuxed", async () => {
+    const folder = scratchFolder("morndo-remux-");
     const sample = join(folder, "note.m4a");
     const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
     expect(made.status, made.stderr || made.error?.message).toBe(0);

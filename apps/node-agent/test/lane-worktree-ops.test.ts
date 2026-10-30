@@ -49,6 +49,14 @@ afterEach(async () => {
   home.cleanup();
 });
 
+// A pane's cwd is read from the process tmux started in it. For the few milliseconds between the fork and the chdir the
+// snapshot lane.start answers with still shows the directory of the tmux server, so a test that means the settled
+// directory refreshes the inventory until it shows it.
+const settledCwd = async (inv: Harness["inventory"], pick: (rows: ReturnType<Harness["inventory"]["last"]>["panes"]) => { cwd: string } | undefined, cwd: string): Promise<string | undefined> => {
+  await until(async () => { await inv.refresh(); return pick(inv.last().panes)?.cwd === cwd; });
+  return pick(inv.last().panes)?.cwd;
+};
+
 const argv = (name: string) => (existsSync(join(argvDir, `${name}.argv`)) ? readFileSync(join(argvDir, `${name}.argv`), "utf8").trim().split("\n") : null);
 
 describe("lane.start", () => {
@@ -63,7 +71,8 @@ describe("lane.start", () => {
       const workerId = (r.result as { workerId: string }).workerId;
       expect(workerId).toMatch(/^pc\.[0-9a-f]{8}\.\d+$/);
       expect(owner.inventory.last().invVersion).toBe(r.invVersion);
-      expect(owner.inventory.last().panes.find(p => p.workerId === workerId)).toMatchObject({ window: name, cwd: work });
+      expect(owner.inventory.last().panes.find(p => p.workerId === workerId)).toMatchObject({ window: name });
+      expect(await settledCwd(owner.inventory, panes => panes.find(p => p.workerId === workerId), work)).toBe(work);
       expect(await until(() => argv("claude-as") !== null)).toBe(true);
       expect(argv("claude-as")).toEqual(["claude-as", "acct", "--resume", SID]);
     } finally {
@@ -137,7 +146,7 @@ describe("lane.start", () => {
         const pane = `%${(r.result as { workerId: string }).workerId.replace(/^.*\./, "")}`;
         expect(t.tmux("display-message", "-p", "-t", pane, "#{pane_start_path}").replace(/\n$/, ""), cwd).toBe(realpathSync(cwd));
         expect(t.tmux("display-message", "-p", "-t", pane, "#{window_name}").replace(/\n$/, "")).toBe(name);
-        expect(h.inventory.last().panes.find(p => p.window === name)).toMatchObject({ cwd: realpathSync(cwd) });
+        expect(await settledCwd(h.inventory, panes => panes.find(p => p.window === name), realpathSync(cwd))).toBe(realpathSync(cwd));
       }
       await wait(500);                                                        // time for a #(…) job, had one started
       for (const where of [work, ...dirs, home.home]) {
