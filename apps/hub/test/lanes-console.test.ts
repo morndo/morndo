@@ -502,6 +502,14 @@ describe("morndo lanes: keys, start, stop, status, events", () => {
     expect([both.code, both.err]).toEqual([2, expect.stringContaining("--role or --engine, not both")]);
   });
 
+  it("start on an engine on a named account: --account reaches lane.start with the engine (T-250)", async () => {
+    fleet.intercept("lane.start", async () => ({ ok: true, result: { workerId: "pc.aaaaaaaa.9", engine: { entry: "codex:model-x" } } }));
+    const r = await lanes(["start", "build", "--cwd", "/w/build", "--engine", "codex:model-x", "--reason", "codex-a is out", "--account", "codex-b"]);
+    expect(r.code, r.err).toBe(0);
+    expect(fleet.calls.filter(c => c.op === "lane.start").at(-1)?.args).toEqual({ name: "build", cwd: "/w/build", account: "codex-b", engine: "codex:model-x", reason: "codex-a is out" });
+    expect(r.out).toContain("it runs codex:model-x");
+  });
+
   it("brief: the lanes' last turns (stale first), deliveries not yet taken and the day's alerts, from the fleet", async () => {
     const now = Date.now();
     fleet.setLaneWatch([
