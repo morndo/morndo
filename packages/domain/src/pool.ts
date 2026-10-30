@@ -10,13 +10,13 @@ export type PoolOrder = "weighted" | "soonest-reset";
 export type PoolSettings = {
   mode: PoolMode; moveBy: MoveBy; order: PoolOrder; defaultMember: string | null;
   shortMinLeft: number; longMinLeft: number; pickMarginShort: number; pickMarginLong: number; nightReserveLong: number;
-  turnsPerMember: number; activeMinutes: number; defaultMarkMinutes: number; maxMarkHours: number;
+  turnsPerMember: number; activeMinutes: number; readingMaxAgeMinutes: number; defaultMarkMinutes: number; maxMarkHours: number;
   resetAdviceWaitHours: number; creditAdviceHours: number;
 };
 export const POOL_DEFAULTS: PoolSettings = {
   mode: "pinned", moveBy: "resume", order: "weighted", defaultMember: null,
   shortMinLeft: 3, longMinLeft: 1, pickMarginShort: 10, pickMarginLong: 3, nightReserveLong: 25,
-  turnsPerMember: 1, activeMinutes: 30, defaultMarkMinutes: 60, maxMarkHours: 168,
+  turnsPerMember: 1, activeMinutes: 30, readingMaxAgeMinutes: 30, defaultMarkMinutes: 60, maxMarkHours: 168,
   resetAdviceWaitHours: 4, creditAdviceHours: 72,
 };
 export type MemberSettings = { keep: boolean; expires: number | null; onlyFor: readonly string[] };   // expires in ms
@@ -139,7 +139,7 @@ export function setMode(p: Pool, mode: PoolMode, by: string | null, now: number)
 
 const NUMERIC: readonly (keyof PoolSettings)[] = [
   "shortMinLeft", "longMinLeft", "pickMarginShort", "pickMarginLong", "nightReserveLong",
-  "turnsPerMember", "activeMinutes", "defaultMarkMinutes", "maxMarkHours", "resetAdviceWaitHours", "creditAdviceHours",
+  "turnsPerMember", "activeMinutes", "readingMaxAgeMinutes", "defaultMarkMinutes", "maxMarkHours", "resetAdviceWaitHours", "creditAdviceHours",
 ];
 
 // PL13, PL14: `moveBy: "resume"` and more than one turn per member need `by`. `defaultMember` must name a member.
@@ -152,6 +152,7 @@ export function setSettings(
     if (NUMERIC.includes(key)) {
       if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return err("bad-value");
       if (key === "turnsPerMember" && (!Number.isInteger(value) || value < 1)) return err("bad-value");
+      if (key === "readingMaxAgeMinutes" && value < 1) return err("bad-value");
     } else if (key === "order" && value !== "weighted" && value !== "soonest-reset") return err("bad-value");
     else if (key === "moveBy" && value !== "resume" && value !== "handoff") return err("bad-value");
     else if (key === "defaultMember" && value !== null && typeof value !== "string") return err("bad-value");
@@ -206,14 +207,17 @@ export function markOut(p: Pool, member: string, resetAt: number | null, reason:
 
 // ---- seats
 
-type Left = { left: number | null; resets: number | null };
+type Left = { left: number | null; resets: number | null; until: number | null };
 
-// A window's headroom: 100 once its reset has passed; the short window is the one with the fewest minutes, the long
+// A window's headroom: 100 once its reset has passed; unknown once a window with no reset time was read longer ago than
+// its length (168 hours when the length is unknown too); the short window is the one with the fewest minutes, the long
 // one the most, and a single window is the long one.
-function headroom(w: QuotaWindow | undefined, now: number): Left {
-  if (!w) return { left: null, resets: null };
-  if (w.resetsAt !== null && w.resetsAt <= now) return { left: 100, resets: null };
-  return { left: Math.min(100, Math.max(0, 100 - w.usedPercent)), resets: w.resetsAt };
+function headroom(w: QuotaWindow | undefined, now: number, readAt: number): Left {
+  if (!w) return { left: null, resets: null, until: null };
+  if (w.resetsAt !== null && w.resetsAt <= now) return { left: 100, resets: null, until: null };
+  const span = (w.minutes ?? UNKNOWN_HOURS * 60) * MINUTE;
+  if (w.resetsAt === null && now - readAt > span) return { left: null, resets: null, until: null };
+  return { left: Math.min(100, Math.max(0, 100 - w.usedPercent)), resets: w.resetsAt, until: w.resetsAt ?? readAt + span };
 }
 
 function splitWindows(windows: readonly QuotaWindow[]): { short: QuotaWindow | undefined; long: QuotaWindow | undefined } {
@@ -268,8 +272,8 @@ export function seats(p: Pool, now: number, model: string | null = null): Seat[]
     const group = groups.members[seatName] ?? [m.name];
     const reading = group.map(name => p.readings[name]).filter((r): r is Reading => r !== undefined).sort((a, b) => b.at - a.at)[0];
     const { short, long } = splitWindows(reading?.windows ?? []);
-    const s = headroom(short, now);
-    const l = headroom(long, now);
+    const s = headroom(short, now, reading?.at ?? now);
+    const l = headroom(long, now, reading?.at ?? now);
     const live = group.flatMap(name => Object.entries(p.marks).filter(([key]) => key === name || (model !== null && key === `${name} ${model}`)))
       .map(([, mark]) => mark).filter(mark => mark.until > now);
     const shortLow = s.left !== null && s.left <= p.settings.shortMinLeft;
@@ -284,8 +288,8 @@ export function seats(p: Pool, now: number, model: string | null = null): Seat[]
     let backAt: number | null = null;
     if (state === "out") backAt = Math.max(...live.map(mark => mark.until));
     if (state === "low") {
-      const resets = [shortLow ? s.resets : null, longLow ? l.resets : null].filter((t): t is number => t !== null);
-      backAt = resets.length > 0 ? Math.max(...resets) : null;
+      const until = [shortLow ? s.until : null, longLow ? l.until : null].filter((t): t is number => t !== null);
+      backAt = until.length > 0 ? Math.max(...until) : null;
     }
     return {
       member: m.name, state, sameAs: seatName === m.name ? null : seatName,
@@ -305,21 +309,26 @@ const under = (dir: string, entry: string): boolean => dir === entry || dir.star
 
 const leftOf = (s: Seat): number => Math.min(s.shortLeft ?? 100, s.longLeft ?? 100);
 
-// PL4 (T-250): the members whose group's freshest reading says ordinary use is not allowed. One stays a candidate, but
-// goes after every candidate that is not so marked.
-function notAllowed(p: Pool, now: number): ReadonlySet<string> {
+// PL4 (T-250, T-614): the members whose group's freshest reading says ordinary use is not allowed (barred), and those whose
+// group was last read longer ago than `readingMaxAgeMinutes`, or never (unknown). Both stay candidates: a barred seat goes
+// after every other one, an unknown seat after every seat read recently.
+function barredAndUnknown(p: Pool, now: number): { barred: ReadonlySet<string>; unknown: ReadonlySet<string> } {
   const groups = groupsOf(p, now);
-  const out = new Set<string>();
+  const age = p.settings.readingMaxAgeMinutes;
+  const maxAge = (Number.isFinite(age) && age >= 1 ? age : POOL_DEFAULTS.readingMaxAgeMinutes) * MINUTE;
+  const barred = new Set<string>();
+  const unknown = new Set<string>();
   for (const m of p.members) {
     const group = groups.members[groups.seatOf[m.name] ?? m.name] ?? [m.name];
     const freshest = group.map(name => p.readings[name]).filter((r): r is Reading => r !== undefined).sort((a, b) => b.at - a.at)[0];
-    if (freshest?.allowed === false) out.add(m.name);
+    if (freshest?.allowed === false) barred.add(m.name);
+    if (freshest === undefined || now - freshest.at > maxAge) unknown.add(m.name);
   }
-  return out;
+  return { barred, unknown };
 }
 
 // PL4: the ok seats a new or moved session may take, best first.
-function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: ReadonlySet<string>, barred: ReadonlySet<string>): Seat[] {
+function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: ReadonlySet<string>, barred: ReadonlySet<string>, unknown: ReadonlySet<string>): Seat[] {
   const settingsOf = (name: string): MemberSettings => p.members.find(m => m.name === name)?.settings ?? { keep: false, expires: null, onlyFor: [] };
   const matches = (s: Seat): boolean => {
     const only = settingsOf(s.member).onlyFor;
@@ -338,6 +347,7 @@ function choose(p: Pool, all: readonly Seat[], ask: PlaceAsk, leaveOut: Readonly
     const keys: [number, number][] = [
       [flag(!barred.has(a.member)), flag(!barred.has(b.member))],
       [flag(matches(a)), flag(matches(b))],
+      [flag(!unknown.has(a.member)), flag(!unknown.has(b.member))],
       [flag(roomy(a)), flag(roomy(b))],
       ...(p.settings.order === "weighted" ? [[(a.active + 1) / a.urgency, (b.active + 1) / b.urgency] as [number, number]] : []),
       [ends(a), ends(b)],
@@ -367,7 +377,7 @@ function noSeat(all: readonly Seat[]): PlaceAnswer {
 // one, and every one in pinned mode, is refused with the seat's state and when it comes back instead of moving.
 export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
   const all = seats(p, now, ask.model);
-  const barred = notAllowed(p, now);
+  const { barred, unknown } = barredAndUnknown(p, now);
   const seat = (name: string): Seat | undefined => all.find(s => s.member === name);
   const unavailable = (s: Seat, member: string): PlaceAnswer => ({ ok: false, problem: "member-unavailable", member, state: s.state, backAt: s.backAt });
   const placed = ask.session !== null ? placementOf(p, ask.session) : undefined;
@@ -378,7 +388,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
     if (p.settings.mode === "pinned" || placed.pinned) return unavailable(current, placed.member);
     const same = groupsOf(p, now);
     const leaveOut = new Set(same.members[same.seatOf[placed.member] ?? placed.member] ?? [placed.member]);
-    const best = choose(p, all, ask, leaveOut, barred)[0];
+    const best = choose(p, all, ask, leaveOut, barred, unknown)[0];
     return best ? { ok: true, member: best.member, moved: { from: placed.member, why: current.state } } : noSeat(all);
   }
   const pin = ask.pin ?? (p.settings.mode === "pinned" ? p.settings.defaultMember : null);
@@ -390,7 +400,7 @@ export function place(p: Pool, ask: PlaceAsk, now: number): PlaceAnswer {
     return target.state === "ok" ? { ok: true, member: target.member, moved: null } : unavailable(target, target.member);
   }
   if (p.settings.mode === "pinned") return { ok: false, problem: "no-default" };
-  const best = choose(p, all, ask, new Set(), barred)[0];
+  const best = choose(p, all, ask, new Set(), barred, unknown)[0];
   return best ? { ok: true, member: best.member, moved: null } : noSeat(all);
 }
 

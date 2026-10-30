@@ -108,7 +108,7 @@ function add(home: Opened, name: string, parsed: Parsed, io: Io): number {
   return done(home.pool.add(row?.runtime ?? runtimeOf(parsed), name, { keep: parsed.get("keep") === "true", expires: at, onlyFor: parsed.all("only-for") }), io);
 }
 
-const NUMBERS = new Set(["shortMinLeft", "longMinLeft", "pickMarginShort", "pickMarginLong", "nightReserveLong", "turnsPerMember", "activeMinutes", "defaultMarkMinutes", "maxMarkHours", "resetAdviceWaitHours", "creditAdviceHours"]);
+const NUMBERS = new Set(["shortMinLeft", "longMinLeft", "pickMarginShort", "pickMarginLong", "nightReserveLong", "turnsPerMember", "activeMinutes", "readingMaxAgeMinutes", "defaultMarkMinutes", "maxMarkHours", "resetAdviceWaitHours", "creditAdviceHours"]);
 
 function set(home: Opened, runtime: string, parsed: Parsed, io: Io): number {
   const key = need(parsed.positionals[1]);
