@@ -269,7 +269,11 @@ export function startHttp(p: {
     return true;
   };
 
+  // HSTS (RFC 6797) only for an https origin: a browser ignores it over http (§7.2), and a localhost dev hub must not
+  // pin a name. max-age only: includeSubDomains would speak for every other name under the host's domain.
+  const hsts: Record<string, string> = config.origin.startsWith("https:") ? { "Strict-Transport-Security": "max-age=31536000" } : {};
   const secureHeaders = () => ({
+    ...hsts,
     "X-Content-Type-Options": "nosniff", "Referrer-Policy": "no-referrer", "X-Frame-Options": "DENY",
     "Cross-Origin-Opener-Policy": "same-origin", "Cross-Origin-Resource-Policy": "same-origin",
     "Permissions-Policy": `camera=(), ${microphone()}, geolocation=(), payment=()`,

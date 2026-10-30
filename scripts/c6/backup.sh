@@ -5,6 +5,8 @@
 # themselves), and writes <dest>/restore.sh and <dest>/ROLLBACK.md. Refuses a <dest> that exists; a failure after the
 # folder is made removes it again.
 set -eu
+# A backup holds databases and unit files that may carry tokens: everything this script makes is private to its owner.
+umask 077
 
 usage() { echo "usage: backup.sh <dest> [--db name=path]... [--allow-unlisted] [--no-db]" >&2; exit 2; }
 
@@ -580,7 +582,7 @@ if [ -n "$problems" ]; then
 fi
 exit 0
 RESTORE
-chmod 0755 "$dest/restore.sh"
+chmod 0700 "$dest/restore.sh"
 
 cat > "$dest/ROLLBACK.md" <<ROLLBACK
 # Rollback
