@@ -38,6 +38,14 @@ describe("the launch words", () => {
     expect(engineCommand(BETA_LAUNCH, { provider: "beta", model: "m", effort: "" }, start)).toEqual(["claude-as", "--model", "m"]);
   });
 
+  it("puts a named account into a codex launch command that takes {account}, and leaves the option out without one (T-250)", () => {
+    const CODEX = { command: ["/opt/bin/pool-lane", "--account", "{account}", "--lane", "{lane}", "--", "/opt/bin/engine-lane", "--engine", "codex", "--model", "{model}"], via: "shell" as const };
+    expect(engineCommand(CODEX, { provider: "codex", model: "model-x", effort: "" }, { ...start, account: "codex-b" }))
+      .toEqual(["/opt/bin/pool-lane", "--account", "codex-b", "--lane", "w1", "--", "/opt/bin/engine-lane", "--engine", "codex", "--model", "model-x"]);
+    expect(engineCommand(CODEX, { provider: "codex", model: "model-x", effort: "" }, start))
+      .toEqual(["/opt/bin/pool-lane", "--lane", "w1", "--", "/opt/bin/engine-lane", "--engine", "codex", "--model", "model-x"]);
+  });
+
   it("refuses an account the command can't take, a placeholder inside a word with no value, and a lane name that reads as a flag", () => {
     expect(engineCommand(ACME_LAUNCH, { provider: "acme", model: "m", effort: "" }, { ...start, account: "a1" })).toHaveProperty("refused");
     expect(engineCommand({ command: ["run", "--effort={effort}"], via: "direct" }, { provider: "acme", model: "m", effort: "" }, start)).toHaveProperty("refused");

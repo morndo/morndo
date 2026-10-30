@@ -1,7 +1,7 @@
 // Placing a session (ADR-0029: PL4 to PL6, PL11): pinned by default, weighted round robin by the quota that expires first in
 // rotate mode, and a placed session stays where it is while its seat is ok.
 import { describe, expect, it } from "vitest";
-import { markOut, place, placeSession, recordReading, setSettings, type PlaceAnswer, type PlaceAsk, type Pool } from "../src/index.ts";
+import { markOut, place, placeSession, recordReading, seats, setSettings, type PlaceAnswer, type PlaceAsk, type Pool } from "../src/index.ts";
 import { H, NOW, must, poolOf, reading } from "./pool-fixtures.ts";
 
 const pick = (p: Pool, ask: Partial<PlaceAsk> = {}): PlaceAnswer =>
@@ -98,5 +98,31 @@ describe("pool: pinned (PL6, PL11)", () => {
   it("never moves a pinned session in rotate mode either", () => {
     const p = placeSession(markOut(poolOf([reading("a"), reading("b")]), "a", NOW + H, "usage limit", NOW), "s1", "a", true, NOW - 60_000);
     expect(pick(p, { session: "s1" })).toMatchObject({ ok: false, problem: "member-unavailable", member: "a" });
+  });
+});
+
+describe("pool: a seat its reading says can't run now goes last (T-250)", () => {
+  it("rotate places a new session on another ok seat first, and on that seat when it is the only one left", () => {
+    // a has more room than b, so it would go first; its reading says ordinary use is not allowed.
+    const p = poolOf([reading("a", { short: 0, long: 0, allowed: false }), reading("b", { short: 6, long: 40 })]);
+    expect(pick(p)).toMatchObject({ ok: true, member: "b", moved: null });
+    expect(pick(p, { skip: ["b"] })).toMatchObject({ ok: true, member: "a" });
+    expect(pick(poolOf([reading("a", { allowed: false })]))).toMatchObject({ ok: true, member: "a" });
+  });
+
+  it("moves a session that must move to a seat that can run, not to one its reading says can't", () => {
+    let p = poolOf([reading("a", { short: 98 }), reading("b", { short: 0, long: 0, allowed: false }), reading("c", { short: 6, long: 40 })]);
+    p = placeSession(p, "s1", "a", false, NOW);
+    expect(pick(p, { session: "s1" })).toMatchObject({ ok: true, member: "c", moved: { from: "a", why: "low" } });
+  });
+
+  it("leaves pins, pinned mode and the seat's state as they are, and a later reading that allows it puts it back in order", () => {
+    const p = poolOf([reading("a", { short: 0, long: 0, allowed: false }), reading("b", { short: 6, long: 40 })]);
+    expect(pick(p, { pin: "a" })).toMatchObject({ ok: true, member: "a" });
+    expect(seats(p, NOW).find(s => s.member === "a")?.state).toBe("ok");
+    const pinned = must(setSettings(poolOf([reading("a", { allowed: false }), reading("b")], "pinned"), { defaultMember: "a" }, null, NOW));
+    expect(pick(pinned)).toMatchObject({ ok: true, member: "a" });
+    const later = recordReading(p, { ...reading("a", { short: 0, long: 0 }), at: NOW - 1000 }, NOW);
+    expect(pick(later)).toMatchObject({ ok: true, member: "a" });
   });
 });
