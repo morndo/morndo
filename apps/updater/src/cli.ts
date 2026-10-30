@@ -5,7 +5,7 @@
 // as in the rest of Morndo. The applies run as the machine's own units (§6.2): `morndo update` starts the apply
 // unit and reports its record; the tick, the boot and the recovery units run the same services themselves.
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, join } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import {
   compareVersions, formatVersion, parseVersion, rollbackRestores, DEFAULT_SOAK_MINUTES,
   type Channel, type Platform, type ProtocolRange, type UpdateService, type Version, type Window,
@@ -1250,6 +1250,14 @@ export async function runUpdater(
     // a host that does not answer. Best effort — an
     // unreachable or refusing feed is said and recorded by the check itself and the install stands; the doctor then
     // reports the feed as it is, never as verified.
+    // The launchers are linked into binDir, but a login shell only puts ~/.local/bin on PATH when the folder already
+    // existed at login (Ubuntu's ~/.profile), so a first install can end in "command not found". Said last, once,
+    // and never an exit code of its own.
+    const pathNote = (): void => {
+      const here = (env.PATH ?? "").split(":").some(entry => entry !== "" && resolve(entry) === binDir);
+      if (here) return;
+      io.err(`${binDir} is not on PATH, so the morndo commands are not found yet: start a new login (the shell adds it when the folder exists), or add this line to ~/.profile and open a new shell:\n  export PATH="$HOME/.local/bin:$PATH"\n`);
+    };
     const firstCheck = async (): Promise<void> => {
       try {
         const outcome = await checkOnce({ disableUpdates: env.MORNDO_DISABLE_UPDATES === "1" }, undefined, {
@@ -1267,6 +1275,7 @@ export async function runUpdater(
     if (!joined) {
       io.out("the agent waits to join: morndo-node join <code>, then systemctl --user start morndo-node\n");
       await firstCheck();
+      pathNote();
       return EXIT_OK;
     }
     // §6.4's health deadline is the install's own patience: each service gets the whole of it to answer.
@@ -1280,6 +1289,7 @@ export async function runUpdater(
       }
     }
     await firstCheck();
+    pathNote();
     return EXIT_OK;
   } finally {
     store.close();
