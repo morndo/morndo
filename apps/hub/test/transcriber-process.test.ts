@@ -1,6 +1,6 @@
 // ProcessTranscriber (design §5, §13): the contract suite from the protocol package, against the fixture plugin,
 // plus the host's own bounds. group() is passed so the timeout case checks the process group is dead.
-import { readFileSync, readlinkSync, readdirSync } from "node:fs";
+import { existsSync, readFileSync, readlinkSync, readdirSync } from "node:fs";
 import { constants, getPriority, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
@@ -13,6 +13,10 @@ const FIXTURE = fileURLToPath(new URL("../../../packages/protocol/test/fixtures/
 
 const call = (path: string, signal = new AbortController().signal) =>
   ({ path, language: "auto" as const, threads: 1, maxSeconds: 600, signal });
+
+// An abort rejects the call at once, but the run's working directory goes when the child's stdio closes, a moment
+// later. A test that aborts waits for that before it ends, or the directory is still there when the scratch check runs.
+const removed = (dir: string) => until(() => !existsSync(dir), 5000);
 
 transcriberContract(() => {
   const transcriber = processTranscriber(FIXTURE);
@@ -79,6 +83,7 @@ describe("process host", () => {
     expect(readlinkSync(`/proc/${pid}/cwd`)).toBe(tmp);
     ac.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(await removed(tmp ?? "")).toBe(true);
   });
 
   it("a setup that throws synchronously leaves no temp directory behind", async () => {
@@ -96,12 +101,14 @@ describe("process host", () => {
     expect(await until(() => host.group().length > 1, 2000)).toBe(true);   // the leader and its stubborn child
     const member = host.group()[1];
     if (member === undefined) throw new Error("the group never named the member");
+    const dir = readlinkSync(`/proc/${host.group()[0]}/cwd`);
     await new Promise(r => setTimeout(r, 500));               // let the member install its SIGTERM handler
     ac.abort();                                               // SIGTERM to the group: the leader ends, the member stays
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });   // 'close' has fired by now
     expect(alive(member)).toBe(true);                         // SIGTERM alone was not enough for it
     // The SIGKILL escalation must outlive the leader's stdio: the member dies without the hub's help.
     expect(await until(() => !alive(member), 15_000)).toBe(true);
+    expect(await removed(dir)).toBe(true);
   });
 
   it("a probe during a run neither takes the run's group nor empties it", async () => {
@@ -110,11 +117,14 @@ describe("process host", () => {
     const pending = host.transcribe(call("/audio/hang.wav", ac.signal));
     expect(await until(() => host.group().length > 0, 2000)).toBe(true);   // the run's leader is in place
     const leader = host.group()[0];
+    if (leader === undefined) throw new Error("the run started without a pid");
+    const dir = readlinkSync(`/proc/${leader}/cwd`);
     const probe = await host.probe();                         // /api/me's probe, while the run lives
     expect(probe.ready).toBe(true);
     await new Promise(r => setTimeout(r, 300));               // the probe's close has run its microtasks
     expect(host.group()).toContain(leader);                   // the run still owns its group
     ac.abort();
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(await removed(dir)).toBe(true);
   });
 });
