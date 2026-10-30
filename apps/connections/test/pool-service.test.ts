@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import Database from "better-sqlite3";
 import { afterEach, describe, expect, it } from "vitest";
-import { emptyPool, type Actor, type Holder, type Reading } from "@morndo/domain";
+import { emptyPool, type Actor, type Holder, type Pool, type Reading } from "@morndo/domain";
 import { openHome, type Opened } from "../src/compose.ts";
 import { SqlitePoolStore } from "../src/adapters/pool-store-sqlite.ts";
 import { PoolService } from "../src/application/pool-service.ts";
@@ -341,5 +341,30 @@ describe("pool service: advice that only looks", () => {
     expect(count()).toBe(1);
     expect(w.pool.adviceOnce("codex")).toBeNull();
     expect(w.pool.advice("codex")?.reason).toBe("all-blocked");
+  });
+});
+
+describe("a reading's age in rotate placement, and a pool saved before the setting existed (T-614)", () => {
+  it("loads a pool saved without readingMaxAgeMinutes with its default, and keeps the settings it has", () => {
+    const w = world();
+    const store = new SqlitePoolStore(w.home.db);
+    closers.push(() => store.close());
+    const { readingMaxAgeMinutes: _left, ...older } = { ...emptyPool("codex").settings, shortMinLeft: 7 };
+    expect(store.save({ ...emptyPool("codex"), settings: older } as unknown as Pool, 0)).toBe(true);
+    const loaded = store.load("codex").pool.settings;
+    expect(loaded.readingMaxAgeMinutes).toBe(30);
+    expect(loaded.shortMinLeft).toBe(7);
+  });
+
+  it("puts a new turn on the account read recently once the other account's reading is older than readingMaxAgeMinutes", () => {
+    const w = pooled("rotate", [reading("codex-a", { short: 0, long: 0 }), reading("codex-b", { short: 6, long: 40 })]);
+    const first = w.pool.begin(start({ claimId: "t1" }));
+    expect(first.ok && first.value.member).toBe("codex-a");
+    w.pool.release("codex", "t1");
+    // 40 minutes on, codex-b has been read again and codex-a has not (a read skips an account a turn holds, PL13).
+    w.clock.t = T0 + 40 * 60_000;
+    w.pool.record("codex", { ...reading("codex-b", { short: 6, long: 40 }), at: w.clock.t });
+    const second = w.pool.begin(start({ claimId: "t2" }));
+    expect(second.ok && second.value.member).toBe("codex-b");
   });
 });

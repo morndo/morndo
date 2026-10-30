@@ -506,3 +506,14 @@ describe("morndo-keys pool read, check, advice and reset", () => {
     expect(posts).toHaveLength(1);
   }, 30_000);
 });
+
+describe("morndo-keys pool set readingMaxAgeMinutes (T-614)", () => {
+  it("sets it like the other numbers, and refuses a value that is not a number", async () => {
+    const t = await poolNode({ mode: "rotate", members: { "codex-a": "ok" } });
+    const set = await t.cli(["pool", "set", "readingMaxAgeMinutes", "45"]);
+    expect(set.code, set.stderr).toBe(0);
+    const list = JSON.parse((await t.cli(["pool", "list", "--runtime", "codex", "--json"])).stdout) as { settings: { readingMaxAgeMinutes: number } };
+    expect(list.settings.readingMaxAgeMinutes).toBe(45);
+    expect((await t.cli(["pool", "set", "readingMaxAgeMinutes", "soon"])).code).toBe(1);
+  });
+});
