@@ -1,5 +1,6 @@
 // The upload inbox on a temporary directory: what is saved, where, how, and what a photo or a recording loses on
 // the way.
+import { itFfmpeg, scratchFolder } from "./ffmpeg.ts";
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, statSync, utimesSync, existsSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -126,8 +127,8 @@ describe("metadata a recording carries", () => {
     Buffer.concat([Buffer.from([0x12, 0x54, 0xc3, 0x67, 0x87]), Buffer.from("at home", "latin1")]),
   ]);
 
-  it("kills a remux that outlives its timeout and keeps the bytes", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "morndo-slow-"));
+  itFfmpeg("kills a remux that outlives its timeout and keeps the bytes", async () => {
+    const folder = scratchFolder("morndo-slow-");
     const sample = join(folder, "note.m4a");
     const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
     expect(made.status, made.stderr || made.error?.message).toBe(0);
@@ -147,8 +148,8 @@ describe("metadata a recording carries", () => {
     }
   });
 
-  it("runs at most two remuxes at once", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-cap-"));
+  itFfmpeg("runs at most two remuxes at once", async () => {
+    const folder = scratchFolder("morndo-remux-cap-");
     const sample = join(folder, "note.m4a");
     const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
     expect(made.status, made.stderr || made.error?.message).toBe(0);
@@ -187,8 +188,8 @@ exit 0
     }
   });
 
-  it("turns a remux away when the waiting line is full, and when a wait runs out", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-queue-"));
+  itFfmpeg("turns a remux away when the waiting line is full, and when a wait runs out", async () => {
+    const folder = scratchFolder("morndo-remux-queue-");
     const sample = join(folder, "note.m4a");
     const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
     expect(made.status, made.stderr || made.error?.message).toBe(0);
@@ -237,8 +238,8 @@ exit 0
     }
   });
 
-  it("a remux writes and reads its temp files asynchronously", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "morndo-remux-async-"));
+  itFfmpeg("a remux writes and reads its temp files asynchronously", async () => {
+    const folder = scratchFolder("morndo-remux-async-");
     const sample = join(folder, "note.m4a");
     const made = spawnFfmpeg(["-nostdin", "-v", "error", "-y", "-f", "lavfi", "-i", "sine=frequency=440:duration=0.2", "-c:a", "aac", sample]);
     expect(made.status, made.stderr || made.error?.message).toBe(0);
@@ -255,8 +256,8 @@ exit 0
     }
   });
 
-  it("a long m4a still reports its duration after the remux", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "morndo-long-"));
+  itFfmpeg("a long m4a still reports its duration after the remux", async () => {
+    const folder = scratchFolder("morndo-long-");
     try {
       const file = join(folder, "note.m4a");
       const made = spawnFfmpeg([
@@ -276,8 +277,8 @@ exit 0
     }
   });
 
-  it("an m4a loses its cover and its chapter titles", async () => {
-    const folder = mkdtempSync(join(tmpdir(), "morndo-cover-"));
+  itFfmpeg("an m4a loses its cover and its chapter titles", async () => {
+    const folder = scratchFolder("morndo-cover-");
     try {
       const meta = join(folder, "chapters.txt");
       const file = join(folder, "note.m4a");
