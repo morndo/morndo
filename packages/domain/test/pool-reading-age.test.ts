@@ -74,3 +74,23 @@ describe("pool: a reading older than readingMaxAgeMinutes proves no room (T-614)
     expect(pick(pinned)).toMatchObject({ ok: true, member: "a" });
   });
 });
+
+describe("pool: a reading's age after onlyFor, at its bound, and with a seat that can’t run (T-614, review)", () => {
+  it("keeps a member's own directories first for it though its reading is old", () => {
+    // c serves /work/client only; its last reading is 40 minutes old (a turn held it through a read round).
+    const p = poolOf([reading("a", { short: 0, long: 0 }), reading("c", { short: 0, long: 0, at: NOW - 40 * MIN })], "rotate", { c: { keep: false, expires: null, onlyFor: ["/work/client"] } });
+    expect(pick(p, { dir: "/work/client/app" })).toMatchObject({ ok: true, member: "c" });
+    expect(pick(p, { dir: "/work/repo" })).toMatchObject({ ok: true, member: "a" });
+  });
+
+  it("counts a reading exactly readingMaxAgeMinutes old as recent, and one a millisecond older as unknown", () => {
+    const aged = (age: number): Pool => poolOf([reading("a", { short: 0, long: 0, at: NOW - age }), reading("b", { short: 6, long: 40 })]);
+    expect(pick(aged(30 * MIN))).toMatchObject({ ok: true, member: "a" });
+    expect(pick(aged(30 * MIN + 1))).toMatchObject({ ok: true, member: "b" });
+  });
+
+  it("puts a seat that can’t run last even when its reading is old too", () => {
+    const p = poolOf([reading("a", { short: 0, long: 0, allowed: false, at: NOW - 2 * H }), reading("b", { short: 6, long: 40, at: NOW - 2 * H })]);
+    expect(pick(p)).toMatchObject({ ok: true, member: "b" });
+  });
+});
