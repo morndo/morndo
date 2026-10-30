@@ -152,6 +152,7 @@ export function setSettings(
     if (NUMERIC.includes(key)) {
       if (typeof value !== "number" || !Number.isFinite(value) || value < 0) return err("bad-value");
       if (key === "turnsPerMember" && (!Number.isInteger(value) || value < 1)) return err("bad-value");
+      if (key === "readingMaxAgeMinutes" && value < 1) return err("bad-value");
     } else if (key === "order" && value !== "weighted" && value !== "soonest-reset") return err("bad-value");
     else if (key === "moveBy" && value !== "resume" && value !== "handoff") return err("bad-value");
     else if (key === "defaultMember" && value !== null && typeof value !== "string") return err("bad-value");
@@ -206,14 +207,17 @@ export function markOut(p: Pool, member: string, resetAt: number | null, reason:
 
 // ---- seats
 
-type Left = { left: number | null; resets: number | null };
+type Left = { left: number | null; resets: number | null; until: number | null };
 
-// A window's headroom: 100 once its reset has passed; the short window is the one with the fewest minutes, the long
+// A window's headroom: 100 once its reset has passed; unknown once a window with no reset time was read longer ago than
+// its length (168 hours when the length is unknown too); the short window is the one with the fewest minutes, the long
 // one the most, and a single window is the long one.
-function headroom(w: QuotaWindow | undefined, now: number): Left {
-  if (!w) return { left: null, resets: null };
-  if (w.resetsAt !== null && w.resetsAt <= now) return { left: 100, resets: null };
-  return { left: Math.min(100, Math.max(0, 100 - w.usedPercent)), resets: w.resetsAt };
+function headroom(w: QuotaWindow | undefined, now: number, readAt: number): Left {
+  if (!w) return { left: null, resets: null, until: null };
+  if (w.resetsAt !== null && w.resetsAt <= now) return { left: 100, resets: null, until: null };
+  const span = (w.minutes ?? UNKNOWN_HOURS * 60) * MINUTE;
+  if (w.resetsAt === null && now - readAt > span) return { left: null, resets: null, until: null };
+  return { left: Math.min(100, Math.max(0, 100 - w.usedPercent)), resets: w.resetsAt, until: w.resetsAt ?? readAt + span };
 }
 
 function splitWindows(windows: readonly QuotaWindow[]): { short: QuotaWindow | undefined; long: QuotaWindow | undefined } {
@@ -268,8 +272,8 @@ export function seats(p: Pool, now: number, model: string | null = null): Seat[]
     const group = groups.members[seatName] ?? [m.name];
     const reading = group.map(name => p.readings[name]).filter((r): r is Reading => r !== undefined).sort((a, b) => b.at - a.at)[0];
     const { short, long } = splitWindows(reading?.windows ?? []);
-    const s = headroom(short, now);
-    const l = headroom(long, now);
+    const s = headroom(short, now, reading?.at ?? now);
+    const l = headroom(long, now, reading?.at ?? now);
     const live = group.flatMap(name => Object.entries(p.marks).filter(([key]) => key === name || (model !== null && key === `${name} ${model}`)))
       .map(([, mark]) => mark).filter(mark => mark.until > now);
     const shortLow = s.left !== null && s.left <= p.settings.shortMinLeft;
@@ -284,8 +288,8 @@ export function seats(p: Pool, now: number, model: string | null = null): Seat[]
     let backAt: number | null = null;
     if (state === "out") backAt = Math.max(...live.map(mark => mark.until));
     if (state === "low") {
-      const resets = [shortLow ? s.resets : null, longLow ? l.resets : null].filter((t): t is number => t !== null);
-      backAt = resets.length > 0 ? Math.max(...resets) : null;
+      const until = [shortLow ? s.until : null, longLow ? l.until : null].filter((t): t is number => t !== null);
+      backAt = until.length > 0 ? Math.max(...until) : null;
     }
     return {
       member: m.name, state, sameAs: seatName === m.name ? null : seatName,
@@ -310,13 +314,15 @@ const leftOf = (s: Seat): number => Math.min(s.shortLeft ?? 100, s.longLeft ?? 1
 // after every other one, an unknown seat after every seat read recently.
 function barredAndUnknown(p: Pool, now: number): { barred: ReadonlySet<string>; unknown: ReadonlySet<string> } {
   const groups = groupsOf(p, now);
+  const age = p.settings.readingMaxAgeMinutes;
+  const maxAge = (Number.isFinite(age) && age >= 1 ? age : POOL_DEFAULTS.readingMaxAgeMinutes) * MINUTE;
   const barred = new Set<string>();
   const unknown = new Set<string>();
   for (const m of p.members) {
     const group = groups.members[groups.seatOf[m.name] ?? m.name] ?? [m.name];
     const freshest = group.map(name => p.readings[name]).filter((r): r is Reading => r !== undefined).sort((a, b) => b.at - a.at)[0];
     if (freshest?.allowed === false) barred.add(m.name);
-    if (freshest === undefined || now - freshest.at > p.settings.readingMaxAgeMinutes * MINUTE) unknown.add(m.name);
+    if (freshest === undefined || now - freshest.at > maxAge) unknown.add(m.name);
   }
   return { barred, unknown };
 }
