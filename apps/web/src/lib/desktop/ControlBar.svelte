@@ -28,7 +28,7 @@
   {#if note}<span class="note" role="status">{note}</span>{/if}
   <span class="right">
     {@render extra?.()}
-    <span class="status {status}"><i></i><span class="lbl">{STATUS[status]}</span></span>
+    <span class="status {status}"><i></i><span class="st">{STATUS[status]}</span></span>
   </span>
 </div>
 
@@ -52,8 +52,9 @@
   .status.unavailable { color: var(--bad-fg); }
   /* The icons the narrow bar shows instead of the words (wide screens have no use for them). */
   .ic { display: none; }
-  /* One row on a phone: the words leave the screen but stay for screen readers and by-name lookup. The narrower gaps
-     and padding are set on the children — a container never matches its own size query. */
+  /* One row on a phone: the words leave the screen but stay for screen readers and by-name lookup, and the gaps
+     tighten on the children — a container never matches its own size query. The status is the one that stays in
+     words: a lost or connecting desktop says so; only Live is quiet (the dot says it). */
   @container (width < 600px) {
     .lbl {
       position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
@@ -61,5 +62,10 @@
     }
     .ic { display: grid; place-items: center; }
     .btn { padding: 0 7px; }
+    .right { gap: 4px; }
+    .status.live .st {
+      position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
+      clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;
+    }
   }
 </style>

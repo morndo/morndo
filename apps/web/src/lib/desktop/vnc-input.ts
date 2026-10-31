@@ -8,7 +8,7 @@
 export const KEYSYM = {
   BackSpace: 0xff08, Tab: 0xff09, Return: 0xff0d, Escape: 0xff1b,
   Home: 0xff50, Left: 0xff51, Up: 0xff52, Right: 0xff53, Down: 0xff54, PageUp: 0xff55, PageDown: 0xff56, End: 0xff57,
-  Delete: 0xffff, Control_L: 0xffe3, Alt_L: 0xffe9,
+  Delete: 0xffff, Control_L: 0xffe3, Alt_L: 0xffe9, Shift_L: 0xffe1,
 } as const;
 
 // A KeyboardEvent.key that names a key of its own (not a character): the keysym to send and the code to go with it.
@@ -46,11 +46,14 @@ export function keysymOf(ch: string): number {
 export const SENTINEL = "_".repeat(99);
 
 // What changed between two values of the hidden field: everything from the first differing character was deleted, then
-// the rest typed (vnc.html's keyInput comparison; a caret position is not part of it).
+// the rest typed (vnc.html's keyInput comparison; a caret position is not part of it). Characters, not UTF-16 units:
+// an emoji is one key press, not two halves of one.
 export function typedDiff(oldValue: string, newValue: string): { backspaces: number; text: string } {
+  const old = Array.from(oldValue);
+  const fresh = Array.from(newValue);
   let i = 0;
-  while (i < oldValue.length && i < newValue.length && oldValue[i] === newValue[i]) i++;
-  return { backspaces: oldValue.length - i, text: newValue.slice(i) };
+  while (i < old.length && i < fresh.length && old[i] === fresh[i]) i++;
+  return { backspaces: old.length - i, text: fresh.slice(i).join("") };
 }
 
 // Whatever can take a key: noVNC's RFB (sendKey(keysym, code, down?) sends both events when down is omitted).
@@ -83,12 +86,15 @@ export class KeySender {
     this.#onChange?.();
   }
 
-  press(keysym: number, code: string | null) {
+  // A physical Shift held for one press (Shift+Tab), as Ctrl and Alt are held by their buttons.
+  press(keysym: number, code: string | null, withShift = false) {
     const t = this.#target();
     if (t) {
       if (this.ctrl) t.sendKey(KEYSYM.Control_L, "ControlLeft", true);
       if (this.alt) t.sendKey(KEYSYM.Alt_L, "AltLeft", true);
+      if (withShift) t.sendKey(KEYSYM.Shift_L, "ShiftLeft", true);
       t.sendKey(keysym, code);
+      if (withShift) t.sendKey(KEYSYM.Shift_L, "ShiftLeft", false);
       if (this.alt) t.sendKey(KEYSYM.Alt_L, "AltLeft", false);
       if (this.ctrl) t.sendKey(KEYSYM.Control_L, "ControlLeft", false);
     }
@@ -96,6 +102,11 @@ export class KeySender {
     this.ctrl = false;
     this.alt = false;
     if (wasHeld) this.#onChange?.();
+  }
+
+  // Sent just as it is, whatever is held: a replacement's deleting is not what a held key was held for.
+  #plain(keysym: number, code: string | null) {
+    this.#target()?.sendKey(keysym, code);
   }
 
   // Text, one press per code point: newline and tab as their keys (vnc.html sends those from the field too).
@@ -107,10 +118,16 @@ export class KeySender {
     }
   }
 
-  // The hidden field's new value: the deletions as BackSpaces, then what was typed.
+  // The hidden field's new value: the deletions as BackSpaces, then what was typed. An edit that does both (autocorrect
+  // replacing a word) sends its BackSpaces plain — a held key lands on the first typed character, not on the deleting —
+  // while a deletion alone keeps it on its first BackSpace.
   typed(oldValue: string, newValue: string) {
     const { backspaces, text } = typedDiff(oldValue, newValue);
-    for (let i = 0; i < backspaces; i++) this.press(KEYSYM.BackSpace, "Backspace");
+    const replacement = backspaces > 0 && text.length > 0;
+    for (let i = 0; i < backspaces; i++) {
+      if (replacement) this.#plain(KEYSYM.BackSpace, "Backspace");
+      else this.press(KEYSYM.BackSpace, "Backspace");
+    }
     this.typeText(text);
   }
 }

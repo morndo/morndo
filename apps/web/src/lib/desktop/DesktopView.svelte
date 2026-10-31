@@ -96,6 +96,7 @@
       panel = null;
       keysOpen = false;
       deskClip = "";
+      sender.letGo();                                 // a held Ctrl or Alt must not outlive the connection it was held on
       if (wantControl && !wasControl) note = "The hub didn't hand over control. Try again.";
       else if (wasControl) note = "Control ended. Watching again.";
       fails++;
@@ -121,6 +122,9 @@
     saveView(v => localStorage.setItem(VIEW_KEY, v), next);
   }
 
+  // The Keyboard, Fit, 1:1 and Pan buttons never take focus, so tapping them leaves the phone's keyboard up.
+  const keepFocus = (e: MouseEvent) => e.preventDefault();
+
   async function take() {
     busy = true;
     note = null;
@@ -131,7 +135,16 @@
       note = "Face ID or Touch ID was cancelled; still watching.";
     } finally { busy = false; }
   }
-  function release() { note = null; panel = null; keysOpen = false; connect(false); }
+  // The control UI ends at once — the keys row and panels go before the watching connection even connects — and a
+  // held Ctrl or Alt goes with it.
+  function release() {
+    note = null;
+    control = false;
+    panel = null;
+    keysOpen = false;
+    sender.letGo();
+    connect(false);
+  }
 
   onMount(() => {
     canFull = document.fullscreenEnabled === true && typeof document.documentElement?.requestFullscreen === "function";
@@ -145,12 +158,12 @@
   <ControlBar what="the desktop" {control} {status} {busy} verifiedFresh={controlFresh} {note} onTake={take} onRelease={release}>
     {#snippet extra()}
       {#if control}
-        <button class="tool icon" aria-pressed={keysOpen} aria-label="Keyboard" title="Keyboard" onmousedown={e => e.preventDefault()} onclick={() => keys?.toggle()}><Keyboard size={15} /></button>
+        <button class="tool icon" aria-pressed={keysOpen} aria-label="Keyboard" title="Keyboard" onmousedown={keepFocus} onclick={() => keys?.toggle()}><Keyboard size={15} /></button>
         <button class="tool icon" aria-label="Paste text" title="Paste text" aria-pressed={panel === "paste"} onclick={() => (panel = panel === "paste" ? null : "paste")}><ClipboardPaste size={15} /></button>
         <button class="tool icon" aria-label="Copy from desktop" title="Copy from desktop" aria-pressed={panel === "copy"} onclick={() => (panel = panel === "copy" ? null : "copy")}><ClipboardCopy size={15} /></button>
-        <button class="tool" aria-pressed={prefs.mode === "fit"} onclick={() => choose({ mode: "fit", pan: false })}>Fit</button>
-        <button class="tool" aria-pressed={prefs.mode === "1:1"} onclick={() => choose({ mode: "1:1", pan: prefs.pan })}>1:1</button>
-        {#if prefs.mode === "1:1"}<button class="tool" aria-pressed={prefs.pan} onclick={() => choose({ mode: "1:1", pan: !prefs.pan })}>Pan</button>{/if}
+        <button class="tool" aria-pressed={prefs.mode === "fit"} onmousedown={keepFocus} onclick={() => choose({ mode: "fit", pan: false })}>Fit</button>
+        <button class="tool" aria-pressed={prefs.mode === "1:1"} onmousedown={keepFocus} onclick={() => choose({ mode: "1:1", pan: prefs.pan })}>1:1</button>
+        {#if prefs.mode === "1:1"}<button class="tool" aria-pressed={prefs.pan} onmousedown={keepFocus} onclick={() => choose({ mode: "1:1", pan: !prefs.pan })}>Pan</button>{/if}
       {/if}
       {#if canFull}<button class="fs" onclick={full.toggle} aria-label={full.on ? "Exit full screen" : "Full screen"} title={full.on ? "Exit full screen" : "Full screen"}>{#if full.on}<Minimize size={15} />{:else}<Maximize size={15} />{/if}</button>{/if}
     {/snippet}
@@ -166,8 +179,9 @@
   .fs:hover { background: var(--hover); }
   /* The phone's tool buttons share the bar's height; text labels only where no icon says it (Fit, 1:1, Pan). */
   .tool {
-    height: 28px; min-height: 28px; padding: 0 6px; border: 1px solid var(--outline); border-radius: 6px; background: transparent;
-    color: var(--text); font: 700 12px/1 var(--font); cursor: pointer; white-space: nowrap; display: inline-flex; align-items: center;
+    height: 28px; min-height: 28px; min-width: 28px; padding: 0 6px; border: 1px solid var(--outline); border-radius: 6px;
+    background: transparent; color: var(--text); font: 700 12px/1 var(--font); cursor: pointer; white-space: nowrap;
+    display: inline-flex; align-items: center; justify-content: center;
   }
   .tool.icon { width: 28px; padding: 0; justify-content: center; }
   .tool:hover { background: var(--hover); }

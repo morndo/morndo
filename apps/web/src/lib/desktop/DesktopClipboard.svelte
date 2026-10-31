@@ -18,6 +18,7 @@
     onClose();
   }
 
+  // Copy is off until the desktop has sent something, so it never empties this device's clipboard.
   async function copy() {
     try { await navigator.clipboard.writeText(text); return; } catch { /* no permission here: the old way below */ }
     deskField?.select();
@@ -38,7 +39,7 @@
   <div class="panel" role="dialog" aria-label="Copy from desktop">
     <textarea readonly bind:this={deskField} value={text} aria-label="The desktop's clipboard" rows="4" placeholder="Nothing copied on the desktop yet"></textarea>
     <div class="acts">
-      <button class="b" onclick={copy}>Copy</button>
+      <button class="b" disabled={!text} onclick={copy}>Copy</button>
       <button class="b" onclick={onClose}>Close</button>
     </div>
   </div>

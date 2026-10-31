@@ -182,7 +182,7 @@
   const used = (n: number, names: string[]) => `Used ${n === 1 ? "1 tool" : `${n} tools`}${names.length ? `: ${names.slice(0, 3).join(", ")}` : ""}`;
 </script>
 
-<section class="convo" bind:this={root} aria-label="Conversation with {name}">
+<section class="convo" class:on-desk={view === "desktop"} bind:this={root} aria-label="Conversation with {name}">
   <header class="bar">
     <button class="back" onclick={onBack} aria-label="Back to chats"><ChevronLeft size={26} /></button>
     <span class="avatar" class:quiet={worker.name !== "manager"} aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
@@ -398,8 +398,11 @@
     flex: 1; min-height: 0; margin: 8px; padding: 12px; border-radius: 12px; background: var(--screen-bg); color: var(--screen-fg);
     font: 11.5px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto;
   }
-  /* The office desktop, its own tokens on it, fills the height under the header. */
-  .desk { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  /* The office desktop, its own tokens on it, fills the height under the header, clear of the notch and the home
+     indicator in landscape. While the keyboard covers the page (kb-open, keyboard.ts), the header gives its height
+     to the desktop: there is nothing to type into a chat from there. */
+  .desk { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--safe-right, 0px) var(--safe-bottom, 0px) var(--safe-left, 0px); }
+  :global(.kb-open.on-desk) .bar { display: none; }
   .waitbar {
     display: flex; align-items: center; gap: 10px; padding: 8px max(12px, var(--safe-right)) 8px max(12px, var(--safe-left));
     border-top: 1px solid var(--line); background: var(--bad-soft); color: var(--bad-text); font: 400 14px/19px var(--body);
