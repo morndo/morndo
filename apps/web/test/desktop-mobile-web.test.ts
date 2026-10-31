@@ -439,3 +439,104 @@ describe("review 2 (T-670)", () => {
     await close();
   });
 });
+
+describe("review 3 (T-670)", () => {
+  type Live = { focusOnClick: boolean; listens: string[]; viewOnly: boolean; disconnected: boolean };
+  const live = (tab: Page) => tab.evaluate(() => (globalThis as unknown as { __rfb: Live[] }).__rfb.map(r => ({ focusOnClick: r.focusOnClick, clipboard: r.listens.includes("clipboard"), viewOnly: r.viewOnly, disconnected: r.disconnected })));
+  const focusOnClick = async (tab: Page) => (await live(tab)).filter(r => !r.disconnected).at(-1)!.focusOnClick;
+  const field = (tab: Page) => tab.getByRole("textbox", { name: "Type on the desktop" });
+
+  it("with the keyboard open, a tap on the screen keeps it open; with it closed, a tap gives noVNC the focus again", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await take(tab);
+    expect(await focusOnClick(tab)).toBe(true);
+    const kb = tab.getByRole("button", { name: "Keyboard", exact: true });
+    await kb.click();
+    await expect.poll(() => focusOnClick(tab)).toBe(false);
+    await tab.locator(".screen").click();
+    expect(await field(tab).evaluate(el => el === document.activeElement)).toBe(true);
+    await kb.click();
+    await expect.poll(() => focusOnClick(tab)).toBe(true);
+    await tab.locator(".screen").click();
+    expect(await tab.evaluate(() => document.activeElement?.tagName)).toBe("CANVAS");
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("only a connection in control listens for the desktop's clipboard", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    const seen = async () => (await live(tab)).map(r => ({ viewOnly: r.viewOnly, clipboard: r.clipboard }));
+    expect(await seen()).toEqual([{ viewOnly: true, clipboard: false }]);
+    await take(tab);
+    await tab.getByRole("button", { name: "Release control" }).click();
+    await tab.getByRole("button", { name: "Take control" }).waitFor();
+    expect(await seen()).toEqual([{ viewOnly: true, clipboard: false }, { viewOnly: false, clipboard: true }, { viewOnly: true, clipboard: false }]);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("Paste text forgets what was pasted: after Send, Type it, Close or the bar's button, the box is empty again", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await take(tab);
+    const open_ = tab.getByRole("button", { name: "Paste text", exact: true });
+    const dlg = tab.getByRole("dialog", { name: "Paste text" });
+    const box = dlg.getByRole("textbox", { name: "Text to paste" });
+    for (const how of ["Send to the desktop's clipboard", "Type it", "Close", "the bar's button"]) {
+      await open_.click();
+      expect(await box.inputValue(), how).toBe("");
+      await box.fill("s3cret-123");
+      if (how === "the bar's button") await open_.click();
+      else await dlg.getByRole("button", { name: how, exact: true }).click();
+      await expect.poll(() => dlg.count()).toBe(0);
+    }
+    await open_.click();
+    expect(await box.inputValue()).toBe("");
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("Copy says whether it copied, and says so when neither way could", { timeout: 30_000 }, async () => {
+    const clip = (tab: Page) => tab.evaluate(() => {
+      const l = (globalThis as unknown as { __rfb: EventTarget[] }).__rfb;
+      l[l.length - 1]!.dispatchEvent(new CustomEvent("clipboard", { detail: { text: "from the desk" } }));
+    });
+    for (const fails of [false, true]) {
+      const { tab, errors, close } = await open(PHONE, fails ? () => {
+        Object.defineProperty(navigator, "clipboard", { value: { writeText: () => Promise.reject(new Error("denied")), readText: () => Promise.reject(new Error("denied")) } });
+        Document.prototype.execCommand = () => false;
+      } : undefined);
+      await take(tab);
+      await tab.getByRole("button", { name: "Copy from desktop", exact: true }).click();
+      const dlg = tab.getByRole("dialog", { name: "Copy from desktop" });
+      await clip(tab);
+      await expect.poll(() => dlg.getByRole("button", { name: "Copy", exact: true }).isDisabled()).toBe(false);
+      await dlg.getByRole("button", { name: "Copy", exact: true }).click();
+      await expect.poll(() => dlg.getByRole("status").innerText()).toMatch(fails ? /^Couldn't copy/ : /^Copied/);
+      expect(errors).toEqual([]);
+      await close();
+    }
+  });
+
+  it("from a hardware keyboard: Cmd goes with a named key as Super; Alt+letter is a combo; composed Option and AltGr characters stay text", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await take(tab);
+    await tab.getByRole("button", { name: "Keyboard", exact: true }).click();
+    await expect.poll(() => field(tab).evaluate(el => el === document.activeElement)).toBe(true);
+    await field(tab).evaluate(el => {
+      for (const init of [
+        { key: "ArrowLeft", code: "ArrowLeft", metaKey: true },
+        { key: "f", code: "KeyF", altKey: true },
+        { key: "ƒ", code: "KeyF", altKey: true },
+        { key: "@", code: "KeyQ", ctrlKey: true, altKey: true },
+        { key: "t", code: "KeyT", ctrlKey: true, altKey: true },
+      ]) el.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }));
+    });
+    expect((await current(tab)).keys).toEqual([
+      [0xffeb, "MetaLeft", true], [XK.Left, "ArrowLeft"], [0xffeb, "MetaLeft", false],
+      [XK.Alt_L, "AltLeft", true], [0x66, null], [XK.Alt_L, "AltLeft", false],
+      [XK.Control_L, "ControlLeft", true], [XK.Alt_L, "AltLeft", true], [0x74, null], [XK.Alt_L, "AltLeft", false], [XK.Control_L, "ControlLeft", false],
+    ]);
+    expect(errors).toEqual([]);
+    await close();
+  });
+});

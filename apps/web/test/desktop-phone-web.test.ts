@@ -70,3 +70,20 @@ it("with the phone's keyboard up, the Desktop view gives the conversation's head
   expect(errors).toEqual([]);
   await context.close();
 });
+
+it("if the desktop's code doesn't load, the Desktop view says so and offers a reload instead of staying blank (review 3, T-670)", { timeout: 60_000 }, async () => {
+  const context = await web.browser.newContext({ viewport: { width: 390, height: 844 } });
+  const tab = await context.newPage();
+  const errors: string[] = [];
+  tab.on("pageerror", e => errors.push(e.message));
+  await tab.route(/DesktopView\.svelte/, route => route.abort());
+  await tab.addInitScript(fakeFeed, { workers: [{ id: "%1", name: "alpha" }] });
+  await tab.goto(`${web.url}?desktop=1`);
+  await tab.locator('[data-chat="alpha"]').click();
+  const convo = tab.getByRole("region", { name: "Conversation with alpha" });
+  await convo.getByRole("tablist", { name: "Show" }).getByRole("tab", { name: "Desktop" }).click();
+  await convo.getByText(/didn't load/).waitFor({ timeout: 10_000 });
+  expect(await convo.getByRole("button", { name: "Reload" }).count()).toBe(1);
+  expect(errors).toEqual([]);
+  await context.close();
+});
