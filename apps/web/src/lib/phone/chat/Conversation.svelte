@@ -197,9 +197,17 @@
   </header>
 
   {#if view === "desktop"}
-    <!-- The office's shared desktop fills what is left under the header, with the desktop's own tokens and no composer. -->
+    <!-- The office's shared desktop fills what is left under the header, with the desktop's own tokens and no composer.
+         If its code doesn't arrive, say so and offer the page's reload: Chromium caches a failed dynamic import, so
+         trying the import again fails the same way. -->
     <div class="desk desk-tokens">
-      {#await loadDesktop() then m}<m.default {verifiedAt} {onVerified} />{/await}
+      {#await loadDesktop() then m}<m.default {verifiedAt} {onVerified} />
+      {:catch}
+        <div class="not-loaded">
+          <p>The desktop didn't load.</p>
+          <button onclick={() => location.reload()}>Reload</button>
+        </div>
+      {/await}
     </div>
   {:else if view === "screen"}
     <pre class="screen" bind:this={screenEl} onscroll={onScreenScroll} aria-label="{name}'s screen, read-only">{feed.screen?.worker === worker.id ? feed.screen.text : "Loading the screen…"}</pre>
@@ -403,6 +411,9 @@
      to the desktop: there is nothing to type into a chat from there. */
   .desk { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--safe-right, 0px) var(--safe-bottom, 0px) var(--safe-left, 0px); }
   :global(.kb-open.on-desk) .bar { display: none; }
+  .not-loaded { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+  .not-loaded p { margin: 0; font: 400 15px/20px var(--body); color: var(--fg); }
+  .not-loaded button { min-height: 36px; padding: 0 16px; border: 0; border-radius: 18px; background: var(--ink); color: var(--ink-fg); font: 700 14px/1 var(--body); cursor: pointer; }
   .waitbar {
     display: flex; align-items: center; gap: 10px; padding: 8px max(12px, var(--safe-right)) 8px max(12px, var(--safe-left));
     border-top: 1px solid var(--line); background: var(--bad-soft); color: var(--bad-text); font: 400 14px/19px var(--body);

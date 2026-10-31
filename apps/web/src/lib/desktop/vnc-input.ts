@@ -8,7 +8,7 @@
 export const KEYSYM = {
   BackSpace: 0xff08, Tab: 0xff09, Return: 0xff0d, Escape: 0xff1b,
   Home: 0xff50, Left: 0xff51, Up: 0xff52, Right: 0xff53, Down: 0xff54, PageUp: 0xff55, PageDown: 0xff56, End: 0xff57,
-  Delete: 0xffff, Control_L: 0xffe3, Alt_L: 0xffe9, Shift_L: 0xffe1,
+  Delete: 0xffff, Control_L: 0xffe3, Alt_L: 0xffe9, Shift_L: 0xffe1, Super_L: 0xffeb,
 } as const;
 
 // A KeyboardEvent.key that names a key of its own (not a character): the keysym to send and the code to go with it.
@@ -86,15 +86,17 @@ export class KeySender {
     this.#onChange?.();
   }
 
-  // A physical Shift held for one press (Shift+Tab), as Ctrl and Alt are held by their buttons.
-  press(keysym: number, code: string | null, withShift = false) {
+  // Physical modifiers held for one press (Shift+Tab, Cmd+Left as Super), as Ctrl and Alt are held by their buttons.
+  press(keysym: number, code: string | null, held: { shift?: boolean; meta?: boolean } = {}) {
     const t = this.#target();
     if (t) {
       if (this.ctrl) t.sendKey(KEYSYM.Control_L, "ControlLeft", true);
       if (this.alt) t.sendKey(KEYSYM.Alt_L, "AltLeft", true);
-      if (withShift) t.sendKey(KEYSYM.Shift_L, "ShiftLeft", true);
+      if (held.meta) t.sendKey(KEYSYM.Super_L, "MetaLeft", true);
+      if (held.shift) t.sendKey(KEYSYM.Shift_L, "ShiftLeft", true);
       t.sendKey(keysym, code);
-      if (withShift) t.sendKey(KEYSYM.Shift_L, "ShiftLeft", false);
+      if (held.shift) t.sendKey(KEYSYM.Shift_L, "ShiftLeft", false);
+      if (held.meta) t.sendKey(KEYSYM.Super_L, "MetaLeft", false);
       if (this.alt) t.sendKey(KEYSYM.Alt_L, "AltLeft", false);
       if (this.ctrl) t.sendKey(KEYSYM.Control_L, "ControlLeft", false);
     }

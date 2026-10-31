@@ -31,11 +31,17 @@
 
   const tap = (keysym: number, code: string) => sender.press(keysym, code);
 
-  // Physical modifiers held while a key is pressed: held for that one press, as the buttons are.
+  // The character a key types with no modifier held ("KeyF" → "f", "Digit1" → "1"): what Option and AltGr compose from.
+  function baseChar(code: string): string | null {
+    const m = /^Key([A-Z])$/.exec(code) ?? /^Digit([0-9])$/.exec(code);
+    return m ? m[1]!.toLowerCase() : null;
+  }
+
+  // Physical modifiers held while a key is pressed: held for that one press, as the buttons are (Cmd goes as Super).
   function withModifiers(e: KeyboardEvent, keysym: number, code: string | null) {
     if (e.ctrlKey && !sender.ctrl) sender.toggle("ctrl");
     if (e.altKey && !sender.alt) sender.toggle("alt");
-    sender.press(keysym, code, e.shiftKey);
+    sender.press(keysym, code, { shift: e.shiftKey, meta: e.metaKey });
   }
 
   function onKeydown(e: KeyboardEvent) {
@@ -44,9 +50,13 @@
     if (e.isComposing || e.key === "Unidentified" || e.keyCode === 229) return;
     const n = namedKey(e.key);
     if (n) { e.preventDefault(); withModifiers(e, n.keysym, n.code); return; }
-    // Ctrl+k and friends: the character with the modifier held. Option (Alt) and AltGr (Ctrl+Alt) make characters:
-    // those are text, and reach the input event.
-    if (e.key.length === 1 && e.ctrlKey && !e.altKey) { e.preventDefault(); withModifiers(e, keysymOf(e.key), null); }
+    // A printable key with Ctrl and/or Alt is a combo when the modifier didn't compose a different character (Ctrl+f,
+    // Alt+f on Linux); Option's "ƒ" and AltGr's "@" differ from the key's own character, so they are text and reach
+    // the input event. Cmd stays with the browser: Cmd+V pastes into the field, and it is typed.
+    if (e.key.length === 1 && (e.ctrlKey || e.altKey) && !e.metaKey) {
+      const base = baseChar(e.code);
+      if (base !== null && e.key.toLowerCase() === base) { e.preventDefault(); withModifiers(e, keysymOf(e.key), null); }
+    }
   }
 
   function onInput() {

@@ -80,8 +80,8 @@
     r.qualityLevel = 6;
     r.compressionLevel = 2;
     r.background = neutral[950];
-    // Only a connection in control can be trusted with the desktop's clipboard; while watching, none arrives.
-    r.addEventListener("clipboard", e => { if (rfb === r && control) deskClip = (e as CustomEvent<{ text?: string }>).detail?.text ?? ""; });
+    // Only the connection in control asks for the desktop's clipboard; a watching one never listens for it.
+    if (wantControl) r.addEventListener("clipboard", e => { if (rfb === r) deskClip = (e as CustomEvent<{ text?: string }>).detail?.text ?? ""; });
     r.addEventListener("connect", () => {
       if (rfb !== r) return;
       status = "live";
@@ -113,9 +113,13 @@
     rfb.clipViewport = f.clipViewport;
     rfb.dragViewport = f.dragViewport;
   });
-  // While the hidden field holds focus, noVNC must not steal it back on a tap on the screen (vnc.html's
-  // keepVirtualKeyboard): the keyboard stays up.
-  $effect(() => { if (rfb) rfb.focusOnClick = control && !keysOpen; });
+  // While the hidden field holds focus, noVNC must not take the focus back on a tap on the screen (vnc.html's
+  // keepVirtualKeyboard): the keyboard stays up. control and keysOpen are read before the rfb check, so this follows
+  // them even though rfb itself never triggers an effect.
+  $effect(() => {
+    const want = control && !keysOpen;
+    if (rfb) rfb.focusOnClick = want;
+  });
 
   function choose(next: DesktopViewPrefs) {
     prefs = next;
@@ -170,7 +174,9 @@
   </ControlBar>
   {#if control}<DesktopKeys bind:this={keys} bind:open={keysOpen} {sender} ctrl={held.ctrl} alt={held.alt} />{/if}
   {#if control}<DesktopClipboard show={panel} {sender} paste={t => rfb?.clipboardPasteFrom(t)} text={deskClip} onClose={() => (panel = null)} />{/if}
-  <div class="screen" class:control bind:this={screen} data-theme="dark" onmousedowncapture={e => { if (keysOpen) e.preventDefault(); }}></div>
+  <!-- A tap on the screen never moves the focus by the browser's own default (it would drop it on the page); noVNC's
+       focus-on-click decides where it goes — the canvas, or nowhere while the keyboard field holds it. -->
+  <div class="screen" class:control bind:this={screen} data-theme="dark" onmousedowncapture={e => e.preventDefault()}></div>
 </section>
 
 <style>

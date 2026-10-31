@@ -10,6 +10,11 @@
 
   let toPaste = $state("");
   let deskField = $state<HTMLTextAreaElement | null>(null);
+  let copied = $state<"yes" | "no" | null>(null);
+
+  // Whatever was typed for the desktop is gone once the panel closes, whichever way it closed: a pasted password
+  // must not sit there for the next opening.
+  $effect(() => { if (show !== "paste" && toPaste !== "") toPaste = ""; });
 
   // Typed out exactly as given: a stray held Ctrl or Alt lets go first, so it cannot touch the first character.
   function typeIt() {
@@ -18,11 +23,13 @@
     onClose();
   }
 
-  // Copy is off until the desktop has sent something, so it never empties this device's clipboard.
+  // Copy is off until the desktop has sent something, so it never empties this device's clipboard. Either way of
+  // copying answers for itself; the fallback's own answer is execCommand's.
   async function copy() {
-    try { await navigator.clipboard.writeText(text); return; } catch { /* no permission here: the old way below */ }
+    copied = null;
+    try { await navigator.clipboard.writeText(text); copied = "yes"; return; } catch { /* no permission here: the old way below */ }
     deskField?.select();
-    document.execCommand("copy");
+    copied = document.execCommand("copy") ? "yes" : "no";
   }
 </script>
 
@@ -42,6 +49,7 @@
       <button class="b" disabled={!text} onclick={copy}>Copy</button>
       <button class="b" onclick={onClose}>Close</button>
     </div>
+    {#if copied}<p class="answer" role="status">{copied === "yes" ? "Copied" : "Couldn't copy: select the text and copy it."}</p>{/if}
   </div>
 {/if}
 
@@ -55,4 +63,5 @@
   .acts { display: flex; flex-wrap: wrap; gap: 6px; }
   .b { min-height: 30px; padding: 0 10px; border: 1px solid var(--outline); border-radius: 6px; background: transparent; color: var(--text); font: 700 12px/1 var(--font); cursor: pointer; }
   .b:hover { background: var(--hover); }
+  .answer { margin: 0; font: 400 12px/16px var(--font); color: var(--muted); }
 </style>
