@@ -46,8 +46,8 @@
   import { decisionKey, type DigestLine } from "@morndo/domain";
   import "./phone.css";
 
-  let { verifiedAt: initialVerifiedAt, policy, engines = false, updates = false, onSignedOut }: {
-    device: string; verifiedAt: number | null; policy: Policy; engines?: boolean; updates?: boolean; onSignedOut: () => void;
+  let { verifiedAt: initialVerifiedAt, policy, desktop = false, engines = false, updates = false, onSignedOut }: {
+    device: string; verifiedAt: number | null; policy: Policy; desktop?: boolean; engines?: boolean; updates?: boolean; onSignedOut: () => void;
   } = $props();
 
   const feed = new LiveFeed();
@@ -402,7 +402,7 @@
   <!-- Not under the digest: an open chat there would mark itself read while he reads the digest (review, 2026-10-05). -->
   {#if chatWorker && !deciding && !away.open}
     {#key chatWorker.id}
-      <Conversation {feed} worker={chatWorker} {outgoing} {pendingFiles} {now} {verifiedFresh} {verify} screen={chatScreen} onBack={closeChat} onDecide={id => decide({ decision: id })}
+      <Conversation {feed} worker={chatWorker} {outgoing} {pendingFiles} {now} {verifiedFresh} {verify} {desktop} verifiedAt={verifiedAt} onVerified={at => (verifiedAt = at)} screen={chatScreen} onBack={closeChat} onDecide={id => decide({ decision: id })}
         onQueue={queue} onRetry={id => void again(id, "retry")} onDiscard={id => void outbox?.discard(id)}
         onAgain={id => void again(id, "again")} onCancel={id => void outbox?.cancel(id)} onEchoes={echoes} />
     {/key}
