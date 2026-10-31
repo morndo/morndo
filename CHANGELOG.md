@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.2.4](https://github.com/morndo/morndo/compare/v0.2.3...v0.2.4) (2026-10-31)
+
+
+### Bug Fixes
+
+* **web:** the full screen button leaves full screen on a second click ([8e78575](https://github.com/morndo/morndo/commit/8e78575cf13ba3fd1a74d1140bf3a7f13eb0a3d2))
+* **web:** the full screen button leaves full screen on a second click ([f4a31df](https://github.com/morndo/morndo/commit/f4a31dfec8da54986fef04c4bf33b073ddd6ffbd))
+
 ## [0.2.3](https://github.com/morndo/morndo/compare/v0.2.2...v0.2.3) (2026-10-30)
 
 
