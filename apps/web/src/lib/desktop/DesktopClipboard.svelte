@@ -13,8 +13,11 @@
   let copied = $state<"yes" | "no" | null>(null);
 
   // Whatever was typed for the desktop is gone once the panel closes, whichever way it closed: a pasted password
-  // must not sit there for the next opening.
+  // must not sit there for the next opening. The Copy answer goes with the panel, and again whenever the desktop's
+  // clipboard says something new: a stale "Copied" must not answer for text it never copied.
   $effect(() => { if (show !== "paste" && toPaste !== "") toPaste = ""; });
+  $effect(() => { if (show !== "copy" && copied !== null) copied = null; });
+  $effect(() => { void text; copied = null; });
 
   // Typed out exactly as given: a stray held Ctrl or Alt lets go first, so it cannot touch the first character.
   function typeIt() {

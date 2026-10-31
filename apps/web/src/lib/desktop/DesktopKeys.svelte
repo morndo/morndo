@@ -31,12 +31,6 @@
 
   const tap = (keysym: number, code: string) => sender.press(keysym, code);
 
-  // The character a key types with no modifier held ("KeyF" → "f", "Digit1" → "1"): what Option and AltGr compose from.
-  function baseChar(code: string): string | null {
-    const m = /^Key([A-Z])$/.exec(code) ?? /^Digit([0-9])$/.exec(code);
-    return m ? m[1]!.toLowerCase() : null;
-  }
-
   // Physical modifiers held while a key is pressed: held for that one press, as the buttons are (Cmd goes as Super).
   function withModifiers(e: KeyboardEvent, keysym: number, code: string | null) {
     if (e.ctrlKey && !sender.ctrl) sender.toggle("ctrl");
@@ -50,12 +44,16 @@
     if (e.isComposing || e.key === "Unidentified" || e.keyCode === 229) return;
     const n = namedKey(e.key);
     if (n) { e.preventDefault(); withModifiers(e, n.keysym, n.code); return; }
-    // A printable key with Ctrl and/or Alt is a combo when the modifier didn't compose a different character (Ctrl+f,
-    // Alt+f on Linux); Option's "ƒ" and AltGr's "@" differ from the key's own character, so they are text and reach
-    // the input event. Cmd stays with the browser: Cmd+V pastes into the field, and it is typed.
-    if (e.key.length === 1 && (e.ctrlKey || e.altKey) && !e.metaKey) {
-      const base = baseChar(e.code);
-      if (base !== null && e.key.toLowerCase() === base) { e.preventDefault(); withModifiers(e, keysymOf(e.key), null); }
+    // A printable key with Ctrl or Alt is a combo that follows the character the layout produced (event.key), never
+    // the key's position: Ctrl is always one (Ctrl+Z on QWERTZ comes as key "z" from code KeyY), Alt only for an
+    // ASCII letter or digit — any other character under Alt was composed by the layout (Mac Option "ƒ", Windows
+    // AltGr "€") and is text, left to the input event. Cmd stays with the browser: Cmd+V pastes into the field, and
+    // it is typed. No Shift_L here: the character already carries it (Shift+7 is "/").
+    if (e.key.length === 1 && !e.metaKey && ((e.ctrlKey && !e.altKey) || (e.altKey && /^[a-z0-9]$/i.test(e.key)))) {
+      e.preventDefault();
+      if (e.ctrlKey && !sender.ctrl) sender.toggle("ctrl");
+      if (e.altKey && !sender.alt) sender.toggle("alt");
+      sender.press(keysymOf(e.key), null);
     }
   }
 
