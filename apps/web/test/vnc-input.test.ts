@@ -115,3 +115,29 @@ describe("the view kept on this device", () => {
     expect(viewFlags({ mode: "1:1", pan: true })).toEqual({ scaleViewport: false, clipViewport: true, dragViewport: true });
   });
 });
+
+describe("review 2 (T-670)", () => {
+  const recorder = () => {
+    const calls: unknown[][] = [];
+    return { calls, k: new KeySender(() => ({ sendKey: (...a: unknown[]) => void calls.push(a) })) };
+  };
+
+  it("a replacement's BackSpaces go out plain, and a held Ctrl takes the first typed character", () => {
+    const { calls, k } = recorder();
+    k.toggle("ctrl");
+    k.typed("___teh", "___the ");
+    expect(calls).toEqual([[0xff08, "Backspace"], [0xff08, "Backspace"], [0xffe3, "ControlLeft", true], [0x68, null], [0xffe3, "ControlLeft", false], [0x65, null], [0x20, null]]);
+  });
+
+  it("a deletion alone keeps the held key on its first BackSpace", () => {
+    const { calls, k } = recorder();
+    k.toggle("ctrl");
+    k.typed("___ab", "___");
+    expect(calls).toEqual([[0xffe3, "ControlLeft", true], [0xff08, "Backspace"], [0xffe3, "ControlLeft", false], [0xff08, "Backspace"]]);
+  });
+
+  it("the diff counts characters, not UTF-16 units", () => {
+    expect(typedDiff("___a😀", "___a")).toEqual({ backspaces: 1, text: "" });
+    expect(typedDiff("___😀", "___😃")).toEqual({ backspaces: 1, text: "😃" });
+  });
+});

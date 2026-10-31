@@ -49,3 +49,24 @@ it("an agent's conversation shows the office desktop as a third view, and doesn'
     await context.close();
   }
 });
+
+it("with the phone's keyboard up, the Desktop view gives the conversation's header to the desktop (review 2, T-670)", { timeout: 60_000 }, async () => {
+  const context = await web.browser.newContext({ viewport: { width: 844, height: 390 } });
+  const tab = await context.newPage();
+  const errors: string[] = [];
+  tab.on("pageerror", e => errors.push(e.message));
+  await tab.addInitScript(fakeFeed, { workers: [{ id: "%1", name: "alpha" }] });
+  await tab.goto(`${web.url}?desktop=1`);
+  await tab.locator('[data-chat="alpha"]').click();
+  const convo = tab.getByRole("region", { name: "Conversation with alpha" });
+  await convo.getByRole("tablist", { name: "Show" }).getByRole("tab", { name: "Desktop" }).click();
+  await convo.getByRole("region", { name: "Desktop" }).locator(".status.live").waitFor({ timeout: 10_000 });
+  const back = convo.getByRole("button", { name: "Back to chats" });
+  expect(await back.isVisible()).toBe(true);
+  await convo.evaluate(el => el.classList.add("kb-open"));        // what keyboard.ts sets while the keyboard covers the page
+  await expect.poll(() => back.isVisible()).toBe(false);
+  await convo.evaluate(el => el.classList.remove("kb-open"));
+  await expect.poll(() => back.isVisible()).toBe(true);
+  expect(errors).toEqual([]);
+  await context.close();
+});

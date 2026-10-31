@@ -313,3 +313,129 @@ describe("the held keys' buttons follow what was sent (review 1, T-670)", () => 
     await close();
   });
 });
+
+describe("review 2 (T-670)", () => {
+  const field = (tab: Page) => tab.getByRole("textbox", { name: "Type on the desktop" });
+  const focused = (tab: Page) => field(tab).evaluate(el => el === document.activeElement);
+  async function keyboard(tab: Page) {
+    await take(tab);
+    await tab.getByRole("button", { name: "Keyboard", exact: true }).click();
+    await expect.poll(() => focused(tab)).toBe(true);
+  }
+
+  it("the hidden field keeps its caret at the end: a moved caret or a select-all never turns into BackSpaces", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await keyboard(tab);
+    const atEnd = () => field(tab).evaluate(el => { const t = el as HTMLTextAreaElement; return t.selectionStart === t.value.length && t.selectionEnd === t.value.length; });
+    await tab.keyboard.type("ab");
+    await field(tab).evaluate(el => (el as HTMLTextAreaElement).setSelectionRange(5, 5));
+    await expect.poll(atEnd).toBe(true);
+    await tab.keyboard.type("x");
+    await field(tab).evaluate(el => (el as HTMLTextAreaElement).select());
+    await expect.poll(atEnd).toBe(true);
+    await tab.keyboard.type("y");
+    expect((await current(tab)).keys).toEqual([[0x61, null], [0x62, null], [0x78, null], [0x79, null]]);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("past twice the field's filler the field resets without a BackSpace and stays focused", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await keyboard(tab);
+    await tab.keyboard.type("a".repeat(120));
+    const keys = (await current(tab)).keys;
+    expect(keys).toHaveLength(120);
+    expect(keys.every(k => JSON.stringify(k) === JSON.stringify([0x61, null]))).toBe(true);
+    expect(await focused(tab)).toBe(true);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("a held Ctrl doesn't outlive control: after release and a new take, Esc goes out plain", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await take(tab);
+    const keys = tab.getByRole("toolbar", { name: "Keys for the desktop" });
+    await keys.getByRole("button", { name: "Ctrl", exact: true }).click();
+    await tab.getByRole("button", { name: "Release control" }).click();
+    await tab.getByRole("button", { name: "Take control" }).waitFor();
+    await take(tab);
+    expect(await keys.getByRole("button", { name: "Ctrl", exact: true }).getAttribute("aria-pressed")).toBe("false");
+    await keys.getByRole("button", { name: "Esc", exact: true }).click();
+    expect((await current(tab)).keys).toEqual([[XK.Escape, "Escape"]]);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("Fit, 1:1 and Pan keep the phone's keyboard up", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await keyboard(tab);
+    for (const name of ["1:1", "Pan", "Fit"]) {
+      await tab.getByRole("button", { name, exact: true }).click();
+      expect(await focused(tab), name).toBe(true);
+    }
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("keys typed in the field don't reach the app's own shortcuts; Shift goes with a named key; Option and AltGr characters are text", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await keyboard(tab);
+    await tab.evaluate(() => {
+      const w = globalThis as unknown as { __appKeys: string[] };
+      w.__appKeys = [];
+      addEventListener("keydown", e => w.__appKeys.push(e.key));
+    });
+    await tab.keyboard.press("Control+k");
+    expect(await tab.evaluate(() => (globalThis as unknown as { __appKeys: string[] }).__appKeys)).toEqual([]);
+    await field(tab).evaluate(el => {
+      for (const init of [{ key: "Tab", shiftKey: true }, { key: "@", altKey: true }, { key: "@", ctrlKey: true, altKey: true }])
+        el.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }));
+    });
+    expect((await current(tab)).keys).toEqual([
+      [XK.Control_L, "ControlLeft", true], [0x6b, null], [XK.Control_L, "ControlLeft", false],
+      [0xffe1, "ShiftLeft", true], [XK.Tab, "Tab"], [0xffe1, "ShiftLeft", false],
+    ]);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("Copy is off until the desktop has sent something, so it never empties this device's clipboard", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await take(tab);
+    await tab.getByRole("button", { name: "Copy from desktop", exact: true }).click();
+    const copy = tab.getByRole("dialog", { name: "Copy from desktop" }).getByRole("button", { name: "Copy", exact: true });
+    expect(await copy.isDisabled()).toBe(true);
+    await tab.evaluate(() => {
+      const l = (globalThis as unknown as { __rfb: EventTarget[] }).__rfb;
+      l[l.length - 1]!.dispatchEvent(new CustomEvent("clipboard", { detail: { text: "from the desk" } }));
+    });
+    await expect.poll(() => copy.isDisabled()).toBe(false);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("on a narrow bar a lost connection still says so in words", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await tab.evaluate(() => {
+      const l = (globalThis as unknown as { __rfb: EventTarget[] }).__rfb;
+      l[l.length - 1]!.dispatchEvent(new Event("disconnect"));
+    });
+    const words = tab.getByText("Reconnecting…");
+    await expect.poll(async () => (await words.boundingBox())?.width ?? 0).toBeGreaterThan(20);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("the bar stays one row at 360px with every tool showing (1:1 and Pan)", { timeout: 30_000 }, async () => {
+    const small = { width: 360, height: 740 };
+    const { tab, errors, close } = await open(small);
+    await take(tab);
+    await tab.getByRole("button", { name: "1:1", exact: true }).click();
+    await tab.getByRole("button", { name: "Pan", exact: true }).waitFor();
+    await oneRow(tab);
+    const row = await tab.getByRole("toolbar", { name: "Keys for the desktop" }).evaluate(el => ({ sw: el.scrollWidth, cw: el.clientWidth }));
+    expect(row.sw).toBeLessThanOrEqual(row.cw);
+    expect(errors).toEqual([]);
+    await close();
+  });
+});
