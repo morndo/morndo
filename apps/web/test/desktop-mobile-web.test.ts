@@ -277,3 +277,39 @@ describe("under control", () => {
     await close();
   });
 });
+
+describe("the held keys' buttons follow what was sent (review 1, T-670)", () => {
+  it("Ctrl lets go on screen once a key typed in the field used it; Type it types the text as given and lets go of a held Alt", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await take(tab);
+    const keys = tab.getByRole("toolbar", { name: "Keys for the desktop" });
+    const ctrl = keys.getByRole("button", { name: "Ctrl", exact: true });
+    const alt = keys.getByRole("button", { name: "Alt", exact: true });
+    await tab.getByRole("button", { name: "Keyboard", exact: true }).click();
+    await ctrl.click();
+    await tab.keyboard.type("c");
+    await expect.poll(() => ctrl.getAttribute("aria-pressed")).toBe("false");
+    await alt.click();
+    await tab.getByRole("button", { name: "Paste text", exact: true }).click();
+    const dlg = tab.getByRole("dialog", { name: "Paste text" });
+    await dlg.getByRole("textbox", { name: "Text to paste" }).fill("x");
+    await dlg.getByRole("button", { name: "Type it" }).click();
+    await expect.poll(() => alt.getAttribute("aria-pressed")).toBe("false");
+    expect((await current(tab)).keys).toEqual([[XK.Control_L, "ControlLeft", true], [0x63, null], [XK.Control_L, "ControlLeft", false], [0x78, null]]);
+    expect(errors).toEqual([]);
+    await close();
+  });
+  it("the panels' text fields are at least 16px, so iPhone Safari doesn't zoom the page into them", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await tab.addStyleTag({ content: ":root { --font: system-ui, sans-serif; }" });   // the app's font token, as its pages set it
+    await take(tab);
+    const px = (name: string) => tab.getByRole("textbox", { name }).evaluate(el => Number.parseFloat(getComputedStyle(el).fontSize));
+    expect(await px("Type on the desktop")).toBeGreaterThanOrEqual(16);
+    await tab.getByRole("button", { name: "Paste text", exact: true }).click();
+    expect(await px("Text to paste")).toBeGreaterThanOrEqual(16);
+    await tab.getByRole("button", { name: "Copy from desktop", exact: true }).click();
+    expect(await px("The desktop's clipboard")).toBeGreaterThanOrEqual(16);
+    expect(errors).toEqual([]);
+    await close();
+  });
+});
