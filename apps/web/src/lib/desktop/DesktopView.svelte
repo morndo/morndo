@@ -7,6 +7,8 @@
   import { neutral } from "@morndo/brand";
   import { stepUp } from "../stepup.ts";
   import Maximize from "@lucide/svelte/icons/maximize-2";
+  import Minimize from "@lucide/svelte/icons/minimize-2";
+  import { FullscreenToggle } from "./fullscreen.svelte.ts";
   import ControlBar from "./ControlBar.svelte";
 
   let { verifiedAt, onVerified }: { verifiedAt: number | null; onVerified: (at: number) => void } = $props();
@@ -22,8 +24,8 @@
   $effect(() => { const t = setInterval(() => (clock = Date.now()), 15_000); return () => clearInterval(t); });
   const controlFresh = $derived(verifiedAt !== null && clock - verifiedAt < CONTROL_FRESH_MS);
   let root = $state<HTMLElement | null>(null);
-  // Full screen (the Fullscreen API) for a closer look; Escape leaves it, as the browser shows.
-  const fullscreen = () => { void root?.requestFullscreen?.().catch(() => {}); };
+  // Full screen (the Fullscreen API) for a closer look: the same button leaves it again, and so does Escape.
+  const full = new FullscreenToggle(() => root);
   let note = $state<string | null>(null);
   let rfb: RFB | null = null;
   let destroyed = false;
@@ -88,7 +90,7 @@
 
 <section class="dv" aria-label="Desktop" bind:this={root}>
   <ControlBar what="the desktop" {control} {status} {busy} verifiedFresh={controlFresh} {note} onTake={take} onRelease={release}>
-    {#snippet extra()}<button class="fs" onclick={fullscreen} aria-label="Full screen" title="Full screen"><Maximize size={15} /></button>{/snippet}
+    {#snippet extra()}<button class="fs" onclick={full.toggle} aria-label={full.on ? "Exit full screen" : "Full screen"} title={full.on ? "Exit full screen" : "Full screen"}>{#if full.on}<Minimize size={15} />{:else}<Maximize size={15} />{/if}</button>{/snippet}
   </ControlBar>
   <div class="screen" class:control bind:this={screen} data-theme="dark"></div>
 </section>
