@@ -54,11 +54,13 @@
     sender.typed(last, field.value);
     last = field.value;
     if (field.value.length === 0) {
-      // Emptied: start over, out of the handler, with a blur and refocus so the caret sits after the filler
-      // (vnc.html's keyInput does the same).
+      // Emptied: back to the filler at once, so the next edit is read against it, then a blur here and the refocus
+      // out of the handler, for Android's keyboard to see the new text (vnc.html's keyInput, in that order).
       last = SENTINEL;
+      field.value = SENTINEL;
+      field.blur();
       const f = field;
-      setTimeout(() => { f.value = SENTINEL; f.blur(); f.focus(); }, 0);
+      setTimeout(() => f.focus(), 0);
     } else if (field.value.length > 2 * SENTINEL.length) {
       // Past twice the filler: the value goes back to it, nothing else; the caret follows below.
       last = SENTINEL;
