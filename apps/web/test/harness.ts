@@ -36,14 +36,14 @@ afterAll(async () => {
   live.clear();
 });
 
-export function startWeb(html = DESKTOP_PAGE): Promise<Web> {
-  const started = start(html);
+export function startWeb(html = DESKTOP_PAGE, alias: Record<string, string> = {}): Promise<Web> {
+  const started = start(html, alias);
   starting.add(started);
   void started.then(() => starting.delete(started), () => starting.delete(started));
   return started;
 }
 
-async function start(html: string): Promise<Web> {
+async function start(html: string, alias: Record<string, string>): Promise<Web> {
   const cacheDir = mkdtempSync(join(tmpdir(), "morndo-web-test-vite-"));
   live.add(cacheDir);
   let server: ViteDevServer | undefined;
@@ -74,6 +74,7 @@ async function start(html: string): Promise<Web> {
         "$app/navigation": join(WEB, "test/app-navigation.stub.ts"),
         "$app/state": join(WEB, "test/app-state.stub.svelte.ts"),
         $lib: join(WEB, "src/lib"),
+        ...alias,
       } },
       server: { host: "127.0.0.1", port: 0, hmr: false, watch: null },
       optimizeDeps: { noDiscovery: true, include: [] },

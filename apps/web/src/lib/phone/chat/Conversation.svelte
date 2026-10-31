@@ -3,7 +3,8 @@
   // tool calls folded into a quiet line, long answers shortened; his messages still on their way at the bottom with
   // where they stand (Sending, Queued, Delivered, Not sent with Retry); and a composer kept above the keyboard and the
   // home indicator. Read here, at the bottom of the list, it is read (O7, as on the desktop). "Screen" shows the lane's
-  // terminal, read-only. A lane that waits for his call says so above the composer, with the way to its card.
+  // terminal, read-only, and "Desktop" the office's shared desktop (T-670), when there is one: the full height under
+  // this header, without the composer. A lane that waits for his call says so above the composer, with the way to its card.
   import { onMount, tick, untrack } from "svelte";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
   import Paperclip from "@lucide/svelte/icons/paperclip";
@@ -29,9 +30,13 @@
   import { bindWatch, pinnedToEnd } from "./watch.ts";
   import { deviceDrafts, leftAfterSend } from "../../drafts.ts";
   import { ABSENT_MANAGER, sentTo } from "../../manager.ts";
+  // The Desktop view carries noVNC: loaded when its tab first opens, so the chat stays light.
+  const loadDesktop = () => import("../../desktop/DesktopView.svelte");
+  import "../../desktop/desk-tokens.css";
 
-  let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCancel, onEchoes, screen = false }: {
+  let { feed, worker, outgoing, pendingFiles = {}, now, verifiedFresh, verify, desktop = false, verifiedAt = null, onVerified = () => {}, onBack, onDecide, onQueue, onRetry, onDiscard, onAgain, onCancel, onEchoes, screen = false }: {
     feed: LiveFeed; worker: RosterEntry; outgoing: OutboxRecord[]; pendingFiles?: Record<string, SentFile[]>; now: number; verifiedFresh: boolean; verify: () => Promise<boolean>;
+    desktop?: boolean; verifiedAt?: number | null; onVerified?: (at: number) => void;
     onBack: () => void; onDecide: (id: string) => void;
     onQueue: (c: { worker: string; workerName: string; text: string; uploads: string[]; seen: string; files: SentFile[] }) => Promise<void>;
     onRetry: (id: string) => void; onDiscard: (id: string) => void; onAgain: (id: string) => void; onCancel: (id: string) => void;
@@ -57,7 +62,7 @@
     : worker.name === "manager"
       ? (feed.managerQueue ? "Goes to the manager's queue; it's typed in once its box is free." : "Goes straight to the manager.")
       : `Goes straight to ${name}; the manager won't see it.`);
-  let view = $state<"chat" | "screen">(screen ? "screen" : "chat");
+  let view = $state<"chat" | "screen" | "desktop">(screen ? "screen" : "chat");
   $effect(() => { if (screen) view = "screen"; });
   let expanded = $state<Record<string, boolean>>({});
   let online = $state(typeof navigator === "undefined" || navigator.onLine !== false);
@@ -177,7 +182,7 @@
   const used = (n: number, names: string[]) => `Used ${n === 1 ? "1 tool" : `${n} tools`}${names.length ? `: ${names.slice(0, 3).join(", ")}` : ""}`;
 </script>
 
-<section class="convo" bind:this={root} aria-label="Conversation with {name}">
+<section class="convo" class:on-desk={view === "desktop"} bind:this={root} aria-label="Conversation with {name}">
   <header class="bar">
     <button class="back" onclick={onBack} aria-label="Back to chats"><ChevronLeft size={26} /></button>
     <span class="avatar" class:quiet={worker.name !== "manager"} aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
@@ -186,11 +191,25 @@
       <div class="seg" role="tablist" aria-label="Show">
         <button role="tab" aria-selected={view === "chat"} class:on={view === "chat"} onclick={() => (view = "chat")}>Chat</button>
         <button role="tab" aria-selected={view === "screen"} class:on={view === "screen"} onclick={() => (view = "screen")}>Screen</button>
+        {#if desktop}<button role="tab" aria-selected={view === "desktop"} class:on={view === "desktop"} onclick={() => (view = "desktop")}>Desktop</button>{/if}
       </div>
     {/if}
   </header>
 
-  {#if view === "screen"}
+  {#if view === "desktop"}
+    <!-- The office's shared desktop fills what is left under the header, with the desktop's own tokens and no composer.
+         If its code doesn't arrive, say so and offer the page's reload: Chromium caches a failed dynamic import, so
+         trying the import again fails the same way. -->
+    <div class="desk desk-tokens">
+      {#await loadDesktop() then m}<m.default {verifiedAt} {onVerified} />
+      {:catch}
+        <div class="not-loaded">
+          <p>The desktop didn't load.</p>
+          <button onclick={() => location.reload()}>Reload</button>
+        </div>
+      {/await}
+    </div>
+  {:else if view === "screen"}
     <pre class="screen" bind:this={screenEl} onscroll={onScreenScroll} aria-label="{name}'s screen, read-only">{feed.screen?.worker === worker.id ? feed.screen.text : "Loading the screen…"}</pre>
   {:else}
     <div class="scroll" bind:this={scroller} onscroll={onScroll}>
@@ -284,37 +303,39 @@
     </div>
   {/if}
 
-  {#if asks.length}
-    <div class="waitbar">
-      <span><b>Waits for your call:</b> {asks[0]?.shortTitle ?? asks[0]?.title}</span>
-      <button class="pbtn small primary" onclick={() => asks[0] && onDecide(asks[0].id)}>Decide</button>
-    </div>
-  {/if}
-  <!-- svelte-ignore a11y_no_static_element_interactions -->
-  <div class="composer" class:dragging
-    ondragover={e => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragging = true; } }}
-    ondragleave={() => (dragging = false)}
-    ondrop={e => { dragging = false; const list = [...(e.dataTransfer?.files ?? [])]; if (!list.length) return; e.preventDefault(); void addFiles(list); }}>
-    {#if note}<p class="err">{note}</p>{/if}
-    {#if files.length}
-      <div class="pending" aria-label="Files to send">
-        {#each files as f (f.key)}
-          <span class="chip {f.status}"><span class="fn">{f.name}</span><small>{f.error ?? `${fileType(f.name, f.kind)} · ${fileSize(f.size)}`}</small><button type="button" onclick={() => (files = files.filter(x => x.key !== f.key))} aria-label="Remove {f.name}"><X size={14} /></button></span>
-        {/each}
+  {#if view !== "desktop"}
+    {#if asks.length}
+      <div class="waitbar">
+        <span><b>Waits for your call:</b> {asks[0]?.shortTitle ?? asks[0]?.title}</span>
+        <button class="pbtn small primary" onclick={() => asks[0] && onDecide(asks[0].id)}>Decide</button>
       </div>
     {/if}
-    <div class="box">
-      {#if !absent}<button class="clip" type="button" onclick={() => fileInput?.click()} aria-label="Attach a file"><Paperclip size={20} /></button>{/if}
-      <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
-        onchange={e => { void addFiles([...((e.currentTarget as HTMLInputElement).files ?? [])]); (e.currentTarget as HTMLInputElement).value = ""; }} />
-      <textarea bind:this={input} bind:value={text} rows="1" placeholder="Message {name}" aria-label="Message {name}" enterkeyhint="send" disabled={!canWrite}
-        onpaste={e => { const list = [...(e.clipboardData?.files ?? [])]; if (!list.length) return; if (!e.clipboardData?.getData("text/plain")) e.preventDefault(); void addFiles(list); }}
-        onkeydown={e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); void send(); } }}></textarea>
-      <button class="send" disabled={!canWrite || over || ((!text.trim() && readyIds.length === 0 && !failed) || busy || uploading)} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <div class="composer" class:dragging
+      ondragover={e => { if (e.dataTransfer?.types.includes("Files")) { e.preventDefault(); dragging = true; } }}
+      ondragleave={() => (dragging = false)}
+      ondrop={e => { dragging = false; const list = [...(e.dataTransfer?.files ?? [])]; if (!list.length) return; e.preventDefault(); void addFiles(list); }}>
+      {#if note}<p class="err">{note}</p>{/if}
+      {#if files.length}
+        <div class="pending" aria-label="Files to send">
+          {#each files as f (f.key)}
+            <span class="chip {f.status}"><span class="fn">{f.name}</span><small>{f.error ?? `${fileType(f.name, f.kind)} · ${fileSize(f.size)}`}</small><button type="button" onclick={() => (files = files.filter(x => x.key !== f.key))} aria-label="Remove {f.name}"><X size={14} /></button></span>
+          {/each}
+        </div>
+      {/if}
+      <div class="box">
+        {#if !absent}<button class="clip" type="button" onclick={() => fileInput?.click()} aria-label="Attach a file"><Paperclip size={20} /></button>{/if}
+        <input bind:this={fileInput} type="file" accept={UPLOAD_ACCEPT} multiple hidden
+          onchange={e => { void addFiles([...((e.currentTarget as HTMLInputElement).files ?? [])]); (e.currentTarget as HTMLInputElement).value = ""; }} />
+        <textarea bind:this={input} bind:value={text} rows="1" placeholder="Message {name}" aria-label="Message {name}" enterkeyhint="send" disabled={!canWrite}
+          onpaste={e => { const list = [...(e.clipboardData?.files ?? [])]; if (!list.length) return; if (!e.clipboardData?.getData("text/plain")) e.preventDefault(); void addFiles(list); }}
+          onkeydown={e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing && !matchMedia("(pointer: coarse)").matches) { e.preventDefault(); void send(); } }}></textarea>
+        <button class="send" disabled={!canWrite || over || ((!text.trim() && readyIds.length === 0 && !failed) || busy || uploading)} onclick={send} aria-label="Send"><SendHorizontal size={20} /></button>
+      </div>
+      {#if over}<p class="err" data-over>Too long for one message: {withSep(text.length)} of {withSep(MAX_TEXT)} characters.</p>{/if}
+      <p class="scope note">{scope}</p>
     </div>
-    {#if over}<p class="err" data-over>Too long for one message: {withSep(text.length)} of {withSep(MAX_TEXT)} characters.</p>{/if}
-    <p class="scope note">{scope}</p>
-  </div>
+  {/if}
 </section>
 
 <style>
@@ -385,6 +406,14 @@
     flex: 1; min-height: 0; margin: 8px; padding: 12px; border-radius: 12px; background: var(--screen-bg); color: var(--screen-fg);
     font: 11.5px/1.45 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; overflow-y: auto;
   }
+  /* The office desktop, its own tokens on it, fills the height under the header, clear of the notch and the home
+     indicator in landscape. While the keyboard covers the page (kb-open, keyboard.ts), the header gives its height
+     to the desktop: there is nothing to type into a chat from there. */
+  .desk { flex: 1; min-height: 0; display: flex; flex-direction: column; padding: 0 var(--safe-right, 0px) var(--safe-bottom, 0px) var(--safe-left, 0px); }
+  :global(.kb-open.on-desk) .bar { display: none; }
+  .not-loaded { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+  .not-loaded p { margin: 0; font: 400 15px/20px var(--body); color: var(--fg); }
+  .not-loaded button { min-height: 36px; padding: 0 16px; border: 0; border-radius: 18px; background: var(--ink); color: var(--ink-fg); font: 700 14px/1 var(--body); cursor: pointer; }
   .waitbar {
     display: flex; align-items: center; gap: 10px; padding: 8px max(12px, var(--safe-right)) 8px max(12px, var(--safe-left));
     border-top: 1px solid var(--line); background: var(--bad-soft); color: var(--bad-text); font: 400 14px/19px var(--body);
