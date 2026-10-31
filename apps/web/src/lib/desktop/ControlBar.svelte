@@ -22,7 +22,7 @@
     <button class="btn" onclick={onRelease} aria-label="Release control"><span class="ic"><X size={14} /></span><span class="lbl">Release control</span></button>
   {:else}
     <span class="mode"><Eye size={14} /><span class="lbl">Watching {what}</span></span>
-    <button class="btn primary" disabled={busy || status !== "live"} onclick={onTake} aria-label="Take control"><span class="ic"><Hand size={14} /></span><span class="lbl">{busy ? "Checking…" : "Take control"}</span></button>
+    <button class="btn primary" disabled={busy || status !== "live"} onclick={onTake} aria-label={busy ? "Checking…" : "Take control"}><span class="ic"><Hand size={14} /></span><span class="lbl">{busy ? "Checking…" : "Take control"}</span></button>
     {#if !verifiedFresh}<span class="hint"><ShieldAlert size={13} /><span class="lbl">Face ID or Touch ID first</span></span>{/if}
   {/if}
   {#if note}<span class="note" role="status">{note}</span>{/if}
@@ -52,9 +52,9 @@
   .status.unavailable { color: var(--bad-fg); }
   /* The icons the narrow bar shows instead of the words (wide screens have no use for them). */
   .ic { display: none; }
-  /* One row on a phone: the words leave the screen but stay for screen readers and by-name lookup. */
+  /* One row on a phone: the words leave the screen but stay for screen readers and by-name lookup. The narrower gaps
+     and padding are set on the children — a container never matches its own size query. */
   @container (width < 600px) {
-    .cb { gap: 6px; padding: 0 8px 0 10px; }
     .lbl {
       position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden;
       clip: rect(0 0 0 0); clip-path: inset(50%); white-space: nowrap;

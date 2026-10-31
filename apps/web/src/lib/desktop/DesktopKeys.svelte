@@ -7,14 +7,10 @@
   import { tick } from "svelte";
   import { KEYSYM, SENTINEL, keysymOf, namedKey, type KeySender } from "./vnc-input.ts";
 
-  let { sender, open = $bindable(false) }: { sender: KeySender; open?: boolean } = $props();
+  let { sender, ctrl, alt, open = $bindable(false) }: { sender: KeySender; ctrl: boolean; alt: boolean; open?: boolean } = $props();
 
   let field = $state<HTMLTextAreaElement | null>(null);
   let last = SENTINEL;
-  // The buttons' pressed state mirrors the sender, which clears both after the press they were held for.
-  let ctrl = $state(false);
-  let alt = $state(false);
-  const sync = () => { ctrl = sender.ctrl; alt = sender.alt; };
 
   // The Keyboard button: focus the field if it isn't focused (the keyboard comes up), blur it if it is.
   export function toggle() {
@@ -22,11 +18,10 @@
     else field?.focus();
   }
 
-  const tap = (keysym: number, code: string) => { sender.press(keysym, code); sync(); };
-  const tapMod = (m: "ctrl" | "alt") => { sender.toggle(m); sync(); };
+  const tap = (keysym: number, code: string) => sender.press(keysym, code);
 
   // A physical Ctrl or Alt held while a key is pressed: held for that one press, as the buttons are.
-  function held(e: KeyboardEvent, keysym: number, code: string | null) {
+  function withModifiers(e: KeyboardEvent, keysym: number, code: string | null) {
     if (e.ctrlKey && !sender.ctrl) sender.toggle("ctrl");
     if (e.altKey && !sender.alt) sender.toggle("alt");
     sender.press(keysym, code);
@@ -36,9 +31,9 @@
     // A soft keyboard mid-composition, or an IME's placeholder key: the text comes as an input event instead.
     if (e.isComposing || e.key === "Unidentified" || e.keyCode === 229) return;
     const n = namedKey(e.key);
-    if (n) { e.preventDefault(); held(e, n.keysym, n.code); return; }
+    if (n) { e.preventDefault(); withModifiers(e, n.keysym, n.code); return; }
     // Ctrl+c and friends: the character with the modifier held, not the browser's shortcut.
-    if (e.key.length === 1 && (e.ctrlKey || e.altKey)) { e.preventDefault(); held(e, keysymOf(e.key), null); }
+    if (e.key.length === 1 && (e.ctrlKey || e.altKey)) { e.preventDefault(); withModifiers(e, keysymOf(e.key), null); }
   }
 
   function onInput() {
@@ -59,8 +54,8 @@
 <div class="keys" role="toolbar" aria-label="Keys for the desktop" tabindex="-1" onmousedown={e => e.preventDefault()}>
   <button class="k" onclick={() => tap(KEYSYM.Escape, "Escape")}>Esc</button>
   <button class="k" onclick={() => tap(KEYSYM.Tab, "Tab")}>Tab</button>
-  <button class="k mod" aria-pressed={ctrl} onclick={() => tapMod("ctrl")}>Ctrl</button>
-  <button class="k mod" aria-pressed={alt} onclick={() => tapMod("alt")}>Alt</button>
+  <button class="k mod" aria-pressed={ctrl} onclick={() => sender.toggle("ctrl")}>Ctrl</button>
+  <button class="k mod" aria-pressed={alt} onclick={() => sender.toggle("alt")}>Alt</button>
   <button class="k" aria-label="Left" onclick={() => tap(KEYSYM.Left, "ArrowLeft")}>←</button>
   <button class="k" aria-label="Up" onclick={() => tap(KEYSYM.Up, "ArrowUp")}>↑</button>
   <button class="k" aria-label="Down" onclick={() => tap(KEYSYM.Down, "ArrowDown")}>↓</button>

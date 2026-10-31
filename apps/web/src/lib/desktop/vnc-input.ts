@@ -57,17 +57,31 @@ export function typedDiff(oldValue: string, newValue: string): { backspaces: num
 export type KeyTarget = { sendKey(keysym: number, code: string | null, down?: boolean): void };
 
 // Sends keys through the current connection, holding Ctrl and Alt for exactly the next press when their buttons (or a
-// physical key) put them down — a phone has no modifier keys to hold down and release on its own.
+// physical key) put them down — a phone has no modifier keys to hold down and release on its own. Whenever ctrl or alt
+// changes, whoever gave a callback hears of it, so the buttons can follow what was sent wherever the press came from.
 export class KeySender {
   ctrl = false;
   alt = false;
   #target: () => KeyTarget | null;
+  #onChange: (() => void) | undefined;
 
-  constructor(target: () => KeyTarget | null) {
+  constructor(target: () => KeyTarget | null, onChange?: () => void) {
     this.#target = target;
+    this.#onChange = onChange;
   }
 
-  toggle(m: "ctrl" | "alt") { this[m] = !this[m]; }
+  toggle(m: "ctrl" | "alt") {
+    this[m] = !this[m];
+    this.#onChange?.();
+  }
+
+  // Lets go of a held Ctrl or Alt without sending anything, so it cannot touch the text typed next.
+  letGo() {
+    if (!this.ctrl && !this.alt) return;
+    this.ctrl = false;
+    this.alt = false;
+    this.#onChange?.();
+  }
 
   press(keysym: number, code: string | null) {
     const t = this.#target();
@@ -78,8 +92,10 @@ export class KeySender {
       if (this.alt) t.sendKey(KEYSYM.Alt_L, "AltLeft", false);
       if (this.ctrl) t.sendKey(KEYSYM.Control_L, "ControlLeft", false);
     }
+    const wasHeld = this.ctrl || this.alt;
     this.ctrl = false;
     this.alt = false;
+    if (wasHeld) this.#onChange?.();
   }
 
   // Text, one press per code point: newline and tab as their keys (vnc.html sends those from the field too).

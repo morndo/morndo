@@ -11,6 +11,13 @@
   let toPaste = $state("");
   let deskField = $state<HTMLTextAreaElement | null>(null);
 
+  // Typed out exactly as given: a stray held Ctrl or Alt lets go first, so it cannot touch the first character.
+  function typeIt() {
+    sender.letGo();
+    sender.typeText(toPaste);
+    onClose();
+  }
+
   async function copy() {
     try { await navigator.clipboard.writeText(text); return; } catch { /* no permission here: the old way below */ }
     deskField?.select();
@@ -23,7 +30,7 @@
     <textarea bind:value={toPaste} aria-label="Text to paste" rows="4" placeholder="What goes to the desktop"></textarea>
     <div class="acts">
       <button class="b" onclick={() => { paste(toPaste); onClose(); }}>Send to the desktop's clipboard</button>
-      <button class="b" onclick={() => { sender.typeText(toPaste); onClose(); }}>Type it</button>
+      <button class="b" onclick={typeIt}>Type it</button>
       <button class="b" onclick={onClose}>Close</button>
     </div>
   </div>
@@ -43,7 +50,7 @@
     display: grid; gap: 8px; padding: 10px; border: 1px solid var(--border); border-radius: 8px;
     background: var(--menu-bg, var(--main-bg)); box-shadow: var(--shadow-menu);
   }
-  .panel textarea { resize: vertical; min-height: 64px; padding: 8px; border: 1px solid var(--outline); border-radius: 6px; background: var(--main-bg); color: var(--text); font: 400 14px/18px var(--font); }
+  .panel textarea { resize: vertical; min-height: 64px; padding: 8px; border: 1px solid var(--outline); border-radius: 6px; background: var(--main-bg); color: var(--text); font: 400 16px/20px var(--font); }   /* 16px: iPhone Safari doesn't zoom the page into it */
   .acts { display: flex; flex-wrap: wrap; gap: 6px; }
   .b { min-height: 30px; padding: 0 10px; border: 1px solid var(--outline); border-radius: 6px; background: transparent; color: var(--text); font: 700 12px/1 var(--font); cursor: pointer; }
   .b:hover { background: var(--hover); }

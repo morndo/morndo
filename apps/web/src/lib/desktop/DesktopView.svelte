@@ -38,8 +38,10 @@
   let canFull = $state(false);
   let note = $state<string | null>(null);
   let rfb: RFB | null = null;
-  // The phone's keyboard and extra keys, over whichever connection has control.
-  const sender = new KeySender(() => rfb);
+  // The phone's keyboard and extra keys, over whichever connection has control. The held-key buttons follow the sender
+  // wherever a press came from: the keys row, the hidden field, or a panel's "Type it".
+  let held = $state({ ctrl: false, alt: false });
+  const sender = new KeySender(() => rfb, () => { held = { ctrl: sender.ctrl, alt: sender.alt }; });
   let keys = $state<{ toggle: () => void } | null>(null);
   let keysOpen = $state(false);                     // the hidden field has focus: keep noVNC from taking it back
   let panel = $state<"paste" | "copy" | null>(null);
@@ -153,7 +155,7 @@
       {#if canFull}<button class="fs" onclick={full.toggle} aria-label={full.on ? "Exit full screen" : "Full screen"} title={full.on ? "Exit full screen" : "Full screen"}>{#if full.on}<Minimize size={15} />{:else}<Maximize size={15} />{/if}</button>{/if}
     {/snippet}
   </ControlBar>
-  {#if control}<DesktopKeys bind:this={keys} bind:open={keysOpen} {sender} />{/if}
+  {#if control}<DesktopKeys bind:this={keys} bind:open={keysOpen} {sender} ctrl={held.ctrl} alt={held.alt} />{/if}
   {#if control}<DesktopClipboard show={panel} {sender} paste={t => rfb?.clipboardPasteFrom(t)} text={deskClip} onClose={() => (panel = null)} />{/if}
   <div class="screen" class:control bind:this={screen} data-theme="dark" onmousedowncapture={e => { if (keysOpen) e.preventDefault(); }}></div>
 </section>
