@@ -8,8 +8,11 @@
 
 A Done is accepted on a free-text reason. On one team's board, of 101 Dones in three days, 17 named a check or a commit
 that was not green at that moment and about half named a commit or pull request without its repository (counts only,
-measured 2026-10-23). The board also moves tasks by itself now (D1 to D4): the move to review follows the lane's run,
-cannot be refused, and did not happen at all for a turn that ended DONE with a wake-up pending (T-398).
+measured 2026-10-23). **Correction, 2026-10-25:** the product memo of that date says 3 of those 17 were green but
+already superseded by a newer commit and 5 were only cancelled runs, not real failures. It does not say whether the two
+groups overlap, so no count of real failures is derived here. The board also moves tasks by itself now (D1 to D4): the
+move to review follows the lane's run, cannot be refused, and did not happen at all for a turn that ended DONE with a
+wake-up pending (T-398).
 
 ## Decision
 
