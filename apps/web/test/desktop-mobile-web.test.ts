@@ -540,3 +540,65 @@ describe("review 3 (T-670)", () => {
     await close();
   });
 });
+
+describe("review 4 (T-670)", () => {
+  const field = (tab: Page) => tab.getByRole("textbox", { name: "Type on the desktop" });
+
+  it("shortcuts follow the character the layout produces (event.key): Ctrl+Z on QWERTZ, Ctrl+A on AZERTY, Ctrl+/; Cmd and Alt+letter as before; composed characters stay text", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    await take(tab);
+    await tab.getByRole("button", { name: "Keyboard", exact: true }).click();
+    await expect.poll(() => field(tab).evaluate(el => el === document.activeElement)).toBe(true);
+    await field(tab).evaluate(el => {
+      for (const init of [
+        { key: "z", code: "KeyY", ctrlKey: true },                   // Ctrl+Z on a German QWERTZ keyboard
+        { key: "a", code: "KeyQ", ctrlKey: true },                   // Ctrl+A on a French AZERTY keyboard
+        { key: "/", code: "Slash", ctrlKey: true },                  // Ctrl+/ on US
+        { key: "/", code: "Digit7", ctrlKey: true, shiftKey: true }, // Ctrl+/ on QWERTZ (Shift+7)
+        { key: "ArrowLeft", code: "ArrowLeft", metaKey: true },      // Cmd+Left
+        { key: "f", code: "KeyF", altKey: true },                    // Alt+F (Windows, Linux)
+        { key: "z", code: "KeyY", altKey: true },                    // Alt+Z on QWERTZ
+        { key: "ƒ", code: "KeyF", altKey: true },                    // Option+F on a Mac: a character
+        { key: "@", code: "KeyL", altKey: true },                    // Option+L on a German Mac: a character
+        { key: "@", code: "KeyQ", ctrlKey: true, altKey: true },     // AltGr+Q on German Windows: a character
+        { key: "€", code: "KeyE", ctrlKey: true, altKey: true },     // AltGr+E: a character
+        { key: "t", code: "KeyT", ctrlKey: true, altKey: true },     // Ctrl+Alt+T
+      ]) el.dispatchEvent(new KeyboardEvent("keydown", { ...init, bubbles: true, cancelable: true }));
+    });
+    const ctrl = (k: number) => [[XK.Control_L, "ControlLeft", true], [k, null], [XK.Control_L, "ControlLeft", false]];
+    const alt = (k: number) => [[XK.Alt_L, "AltLeft", true], [k, null], [XK.Alt_L, "AltLeft", false]];
+    expect((await current(tab)).keys).toEqual([
+      ...ctrl(0x7a), ...ctrl(0x61), ...ctrl(0x2f), ...ctrl(0x2f),
+      [0xffeb, "MetaLeft", true], [XK.Left, "ArrowLeft"], [0xffeb, "MetaLeft", false],
+      ...alt(0x66), ...alt(0x7a),
+      [XK.Control_L, "ControlLeft", true], [XK.Alt_L, "AltLeft", true], [0x74, null], [XK.Alt_L, "AltLeft", false], [XK.Control_L, "ControlLeft", false],
+    ]);
+    expect(errors).toEqual([]);
+    await close();
+  });
+
+  it("the Copy answer goes when the panel closes and when the desktop sends new text", { timeout: 30_000 }, async () => {
+    const { tab, errors, close } = await open(PHONE);
+    const clip = (text: string) => tab.evaluate(text => {
+      const l = (globalThis as unknown as { __rfb: EventTarget[] }).__rfb;
+      l[l.length - 1]!.dispatchEvent(new CustomEvent("clipboard", { detail: { text } }));
+    }, text);
+    await take(tab);
+    const openCopy = tab.getByRole("button", { name: "Copy from desktop", exact: true });
+    const dlg = tab.getByRole("dialog", { name: "Copy from desktop" });
+    const answer = dlg.getByRole("status");
+    await openCopy.click();
+    await clip("first");
+    await dlg.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect.poll(() => answer.innerText()).toMatch(/^Copied/);
+    await dlg.getByRole("button", { name: "Close", exact: true }).click();
+    await openCopy.click();
+    expect(await answer.count()).toBe(0);
+    await dlg.getByRole("button", { name: "Copy", exact: true }).click();
+    await expect.poll(() => answer.innerText()).toMatch(/^Copied/);
+    await clip("second");
+    await expect.poll(() => answer.count()).toBe(0);
+    expect(errors).toEqual([]);
+    await close();
+  });
+});
