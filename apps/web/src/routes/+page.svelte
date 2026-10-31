@@ -75,7 +75,7 @@
 {#if view.kind === "ready" && wide}
   <Desktop device={view.device} office={view.office} verifiedAt={view.verifiedAt} policy={view.policy} desktop={view.desktop} engines={view.engines} updates={view.updates} onSignedOut={() => (view = { kind: "locked", paired: true })} />
 {:else if view.kind === "ready"}
-  <Phone device={view.device} verifiedAt={view.verifiedAt} policy={view.policy} engines={view.engines} updates={view.updates} onSignedOut={() => (view = { kind: "locked", paired: true })} />
+  <Phone device={view.device} verifiedAt={view.verifiedAt} policy={view.policy} desktop={view.desktop} engines={view.engines} updates={view.updates} onSignedOut={() => (view = { kind: "locked", paired: true })} />
 {:else}
   <main class="page">
     <div class="brand">

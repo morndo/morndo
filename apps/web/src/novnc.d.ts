@@ -5,12 +5,16 @@ declare module "@novnc/novnc" {
     viewOnly: boolean;
     scaleViewport: boolean;
     clipViewport: boolean;
+    dragViewport: boolean;
     resizeSession: boolean;
     focusOnClick: boolean;
     qualityLevel: number;
     compressionLevel: number;
     background: string;
     showDotCursor: boolean;
+    readonly clippingViewport: boolean;
+    sendKey(keysym: number, code: string | null, down?: boolean): void;
+    clipboardPasteFrom(text: string): void;
     disconnect(): void;
     focus(options?: FocusOptions): void;
     blur(): void;
