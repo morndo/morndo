@@ -30,10 +30,12 @@ async function enterThenLeaveByClick(tab: Page, section: string, view: string) {
   await button.click();                                   // the same button, again: leaves full screen (the owner's bug)
   await tab.waitForFunction(() => document.fullscreenElement === null, null, { timeout: 3000 }).catch(() => {});
   expect(await fullscreenLabel(tab), "a click on the button while in full screen should leave it").toBeNull();
-  expect(await button.getAttribute("aria-label")).toBe("Full screen");
+  // The label follows the browser's fullscreenchange, which fires after fullscreenElement changes, and then the view
+  // re-renders: wait for it rather than read it once (a single read raced on a loaded CI runner).
+  await expect.poll(() => button.getAttribute("aria-label")).toBe("Full screen");
   await button.click();                                   // and while in full screen, the button says what it does
   await tab.waitForFunction(v => document.fullscreenElement?.getAttribute("aria-label") === v, view);
-  expect(await button.getAttribute("aria-label")).toBe("Exit full screen");
+  await expect.poll(() => button.getAttribute("aria-label")).toBe("Exit full screen");
   await button.click();
   await tab.waitForFunction(() => document.fullscreenElement === null);
 }
