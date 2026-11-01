@@ -73,20 +73,22 @@ describe("tmuxLiteral", () => {
       const odd = [join(dir, "a#{session_name}b"), join(dir, "#(touch m)")];
       for (const d of odd) mkdirSync(d);
       t.tmux("new-session", "-d", "-s", "main", "-n", "base", "-c", dir, "sleep 600");
-      const startIn = (cwd: string) => {
-        const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-c", cwd, "sleep 600").trim();
+      const m = join(dir, "m");
+      // A #(…) job belongs to the tmux client whose command expanded it, and tmux sends the job SIGTERM when that
+      // client exits (job_free, from format_lost_client; tmux 3.4 job.c and format.c). A client that leaves at once
+      // races the job's own `touch`: it can kill the shell before touch has run, however long a test waits after. So
+      // the client that starts the pane stays (run-shell, in the same call) until m exists or `holdMs` is up; a job
+      // that runs always lands inside that time, and its absence afterwards means no job ran.
+      const hold = (holdMs: number) => `for i in $(seq 1 ${Math.ceil(holdMs / 50)}); do [ -e '${m}' ] && exit 0; sleep 0.05; done; exit 0`;
+      const startIn = (cwd: string, holdMs = 0) => {
+        const pane = t.tmux("new-window", "-d", "-P", "-F", "#{pane_id}", "-t", "=main:", "-c", cwd, "sleep 600", ...(holdMs > 0 ? [";", "run-shell", hold(holdMs)] : [])).trim();
         return t.tmux("display-message", "-p", "-t", pane, "#{pane_start_path}").replace(/\n$/, "");
       };
-      const m = join(dir, "m");
-      const settle = (ms: number) => {
-        for (let i = 0; i < ms / 50 && !existsSync(m); i++) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 50);
-      };
-      for (const d of odd) expect(startIn(tmuxLiteral(d)), d).toBe(d);
-      settle(500);
+      expect(startIn(tmuxLiteral(odd[0] ?? "")), odd[0]).toBe(odd[0]);
+      expect(startIn(tmuxLiteral(odd[1] ?? ""), 2000), odd[1]).toBe(odd[1]);
       expect(existsSync(m)).toBe(false);                               // escaped, no job ran, though one would land here
       expect(startIn(odd[0] ?? "")).toBe(join(dir, "amainb"));
-      expect(startIn(odd[1] ?? "")).not.toBe(odd[1]);                  // unescaped, tmux expands it
-      settle(5000);
+      expect(startIn(odd[1] ?? "", 5000)).not.toBe(odd[1]);            // unescaped, tmux expands it
       expect(existsSync(m)).toBe(true);                                // and its job really ran, in dir: the absent m above means something
     } finally {
       process.chdir(back);
