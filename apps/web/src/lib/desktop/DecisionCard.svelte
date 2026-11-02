@@ -227,7 +227,7 @@
             {#if o.key === recommended}<Star size={14} aria-hidden="true" />{/if}{o.label}
           </button>
         {/each}
-        {#if canAnswer && !session.stale}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
+        {#if canAnswer && !session.stale && !item.id.startsWith("signin-")}<button class="link" onclick={() => writeWords()}>Something else…</button>{/if}
         {#if variant === "panel" && canAnswer}<button type="button" class="link" onclick={() => onOpen?.(item)}>{readLabel}</button>{/if}
         {#if canAskCode && revealNow.kind !== "shown"}
           <button type="button" class="link" data-memory-code-ask disabled={revealNow.kind === "asking"} onclick={askCode}>

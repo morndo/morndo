@@ -44,7 +44,8 @@
   const acts = $derived(item ? actions(item, "card") : []);
   // What the card draws, once, for the loop, the "or" and which button is primary. A task (an Ask that became one while
   // its card was on top) gets Done; its Later is catch-up's own Later under the card (code review #11).
-  const drawn = $derived(acts.filter(a => a.kind !== "later" && a.kind !== "decide"));
+  const signInAsk = $derived(!!item?.id.startsWith("signin-"));
+  const drawn = $derived(acts.filter(a => a.kind !== "later" && a.kind !== "decide" && !(signInAsk && a.kind === "words")));
   // The meta line under the title, without what the kicker already says (decision, due).
   const meta = $derived((b?.meta ?? []).filter(m => m !== "Decision" && !m.startsWith("due ") && !m.startsWith("overdue ") && !/^≈\d+ min$/.test(m)));
   // With options, the recommended one is marked on its button; the reason for it waits behind More, so the options and
@@ -71,7 +72,7 @@
   // brings them back with "Answer in your own words"): review of PR #7, finding 13.
   async function sendWords() {
     const t = words.trim();
-    if (t && await pickOption({ text: t }, "your own words")) writing = false;
+    if (t && await onPick({ text: t }, "your own words")) writing = false;
   }
 
   let signInTarget = $state<SignInTarget | null>(null);
@@ -92,7 +93,7 @@
     }
   }
 
-  async function pickOption(body: Body, label: string) {
+  async function pickTap(body: Body, label: string) {
     if (item?.id.startsWith("signin-") && "key" in body && body.key === "signin") { await openSignInCard(); return; }
     await onPick(body, label);
   }
@@ -165,7 +166,7 @@
     {:else if compact}
       <div class="opts">
         {#each compact.quickAnswers as a, i (a.key)}
-          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void pickOption({ key: a.key }, a.label)}>
+          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void (item.id.startsWith("signin-") ? pickTap({ key: a.key }, a.label) : onPick({ key: a.key }, a.label))}>
             <span>{a.label}</span>{#if i === 0}<small>Recommended</small>{/if}
           </button>
         {/each}
@@ -183,13 +184,13 @@
       <div class="opts">
         {#each drawn as a (a.kind === "option" ? `o:${a.key}` : a.kind)}
           {#if a.kind === "done"}
-            <button class="pbtn opt primary" disabled={!canAnswer} onclick={() => void pickOption({ text: "Done" }, "Done")}><span>Done</span></button>
+            <button class="pbtn opt primary" disabled={!canAnswer} onclick={() => void onPick({ text: "Done" }, "Done")}><span>Done</span></button>
           {:else if a.kind === "option"}
-            <button class="pbtn opt" class:primary={a.recommended} disabled={!canAnswer} onclick={() => void pickOption({ key: a.key }, a.label)}>
+            <button class="pbtn opt" class:primary={a.recommended} disabled={!canAnswer} onclick={() => void (item.id.startsWith("signin-") ? pickTap({ key: a.key }, a.label) : onPick({ key: a.key }, a.label))}>
               <span>{a.label}</span>{#if a.recommended}<small>Recommended</small>{/if}
             </button>
           {:else if a.kind === "default"}
-            <button class="pbtn opt" disabled={!canAnswer} onclick={() => void pickOption({ text: `Go with the default: ${a.text}` }, "go with the default")}>
+            <button class="pbtn opt" disabled={!canAnswer} onclick={() => void onPick({ text: `Go with the default: ${a.text}` }, "go with the default")}>
               <span>Go with the default</span><small class="def">{a.text}</small>
             </button>
           {:else if a.kind === "words"}
