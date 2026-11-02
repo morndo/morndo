@@ -224,8 +224,7 @@ export class SignInRunner {
     try {
       ex = await this.#terminal.exit(s.id);
     } catch {
-      await this.#failFromTerminal(s, "node_lost");
-      return;
+      return;   // a busy tmux said nothing about the sign-in: ask again on the next status (the deadline still ends it)
     }
     if (!ex.dead) return;
     await this.#finish(s, ex.status);
@@ -241,8 +240,9 @@ export class SignInRunner {
   }
 
   async #finish(s: Session, exitStatus: number | null): Promise<void> {
-    const code = exitStatus ?? 1;
-    if (code !== 0) {
+    // tmux can mark a pane dead before it has the exit status: an unknown status is no verdict, the CLI's own status is.
+    const known = exitStatus !== null && Number.isFinite(exitStatus);
+    if (known && exitStatus !== 0) {
       s.phase = "failed";
       s.problem = s.sentCode ? "code_refused" : "not_signed_in";
       try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
@@ -253,7 +253,7 @@ export class SignInRunner {
     const id = await this.#loginIdentity(s);
     if (!id) {
       s.phase = "failed";
-      s.problem = "not_signed_in";
+      s.problem = s.sentCode ? "code_refused" : "not_signed_in";
       try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
       s.ageIdentity = null;
       this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "failed");
