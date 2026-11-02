@@ -1293,6 +1293,24 @@ content-type: application/json
 { "node": "n1", "op": "connections.narrow", "args": { "version": 3, "name": "codex", "action": "lower-budget", "budget": 5 } }
 ```
 
+**Sign-in** (ADR-0039). These ops sign one account of an agent CLI in on a node; the hub sends them for the principal.
+They are shown but not run here: they drive the CLI's own sign-in in a hidden tmux. `apps/node-agent/test/signin-*.test.ts`
+and `e2e/signin.e2e.ts` cover them.
+- `signin.accounts` `{ runtime }`: the node's accounts of `claude` or `cursor`, each with its sign-in state; no secret.
+- `signin.start` `{ id, runtime, account, create }`: starts the CLI's own sign-in; answers the link and, when the CLI waits
+  for a code, that sign-in's own age recipient. Keyed by the hub; a fresh passkey at the hub (`STEP_UP_OPS`).
+- `signin.code` `{ id, sealed }`: the one-time code sealed to that recipient (FL14's sealed value); not keyed, so FL7's
+  record never holds it. A fresh passkey at the hub.
+- `signin.status` `{ id }` and `signin.cancel` `{ id }`: where a sign-in is, and stopping it.
+
+```json
+{ "node": "n1", "op": "signin.accounts", "args": { "runtime": "claude" } }
+{ "node": "n1", "op": "signin.start", "args": { "id": "si-1", "runtime": "claude", "account": "a2", "create": false }, "key": "hub:signin:si-1" }
+{ "node": "n1", "op": "signin.code", "args": { "id": "si-1", "sealed": "<base64 of an age file>" } }
+{ "node": "n1", "op": "signin.status", "args": { "id": "si-1" } }
+{ "node": "n1", "op": "signin.cancel", "args": { "id": "si-1" } }
+```
+
 **Jobs, read.** `GET /v1/jobs?node=&lane=&state=` answers `{ jobs, stale }` from the fleet's table, `stale` while a named node is offline; `GET /v1/jobs/<node>/<id>` answers `{ job, stale }`, or 404. A job is the pair (node, id), its state, and a redacted tail; never its command (FL14).
 
 ## 9. Events (`WS /v1/events`)
