@@ -260,8 +260,9 @@ switch (cmd) {
     // Memory is opened below, after Decisions: its pending Notes reach the board through this holder once it exists
     // (ADR-0031 round 2); a hub without Memory never files an Ask.
     const memoryHolder: { service: MemoryService | null } = { service: null };
+    const signPrincipal = principalSigner(identity);
     const signin = fleet ? new SignInService({
-      fleet: signinFleet(fleet.client),
+      fleet: signinFleet(fleet.client, signPrincipal),
       now: Date.now,
       audit: entry => { store.record([entry as SignInAudit]); },
     }) : null;
@@ -329,7 +330,7 @@ switch (cmd) {
     // The fleet's `rollout` events keep the service's last word on where the Rollout stands, for a view the fleet
     // can't answer (its own subscription, like the runs' and the deliveries').
     const updatesService = fleet ? updatesServiceFor(config, {
-      fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
+      fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: signPrincipal, store,
       policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
       warn: line => log.warn(line),
     }) : null;
