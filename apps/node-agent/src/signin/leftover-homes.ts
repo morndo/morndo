@@ -1,11 +1,9 @@
-import { execFile } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { promisify } from "node:util";
 import { SIGNIN_ACCOUNT, type SignInRuntime } from "@morndo/domain";
 import { tmuxArgv } from "@morndo/node-ops";
 
-const run = promisify(execFile);
 
 export type CreatedHomeRecord = { runtime: SignInRuntime; account: string };
 
@@ -26,6 +24,7 @@ function readRecords(stateDir: string): CreatedHomeRecord[] {
 }
 
 function writeRecords(stateDir: string, rows: CreatedHomeRecord[]): void {
+  mkdirSync(stateDir, { recursive: true, mode: 0o700 });
   writeFileSync(filePath(stateDir), `${JSON.stringify(rows)}\n`, { mode: 0o600 });
   try { chmodSync(filePath(stateDir), 0o600); } catch { /* best effort */ }
 }
@@ -49,9 +48,14 @@ function maybeRemoveClaudeHome(agentHome: string, account: string): void {
 }
 
 export function reconcileSignInLeftovers(o: { stateDir: string; agentHome: string; tmuxSocket: string }): void {
-  try { void run("tmux", tmuxArgv(o.tmuxSocket, ["kill-server"]), { encoding: "utf8" }); } catch { /* no server */ }
-  for (const row of readRecords(o.stateDir)) {
-    if (row.runtime === "claude") maybeRemoveClaudeHome(o.agentHome, row.account);
-  }
-  writeRecords(o.stateDir, []);
+  // Synchronous, so it is over before the node takes a sign-in; no server (the usual case) is an error caught here, never
+  // an unhandled rejection (the agent exits on one).
+  try { execFileSync("tmux", tmuxArgv(o.tmuxSocket, ["kill-server"]), { stdio: "ignore", timeout: 5000 }); } catch { /* no server */ }
+  // A cleanup at start never stops the agent: whatever it cannot do now waits for the next start.
+  try {
+    for (const row of readRecords(o.stateDir)) {
+      if (row.runtime === "claude") maybeRemoveClaudeHome(o.agentHome, row.account);
+    }
+    writeRecords(o.stateDir, []);
+  } catch { /* left for the next start */ }
 }

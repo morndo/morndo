@@ -65,12 +65,17 @@ export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = pro
 const binOnPath = (name: string): string => onPath(name) ?? name;
 const claudePoolPath = (): string | null => onPath("claude-pool");
 
+// The sign-in runner's own tmux server (ADR-0039): "morndo-signin", or MORNDO_SIGNIN_SOCKET (a test node's own, so a test
+// never touches a real node's sign-ins on the same machine).
+const signinSocket = (env: NodeJS.ProcessEnv = process.env): string => env.MORNDO_SIGNIN_SOCKET || "morndo-signin";
+
 function productionSignInRunner(now: () => number, stateDir: string): SignInRunner {
   const home = homedir();
-  reconcileSignInLeftovers({ stateDir, agentHome: home, tmuxSocket: "morndo-signin" });
+  const socket = signinSocket();
+  reconcileSignInLeftovers({ stateDir, agentHome: home, tmuxSocket: socket });
   const bins = { claude: binOnPath("claude"), cursor: binOnPath("agent") };
   const runner = new SignInRunner({
-    terminal: tmuxTerminal("morndo-signin"),
+    terminal: tmuxTerminal(socket),
     homes: new AccountHomes({ home, bins, claudePool: claudePoolPath() }),
     bins,
     now,
@@ -79,6 +84,21 @@ function productionSignInRunner(now: () => number, stateDir: string): SignInRunn
   const timer = setInterval(() => { void runner.reap(); }, 60_000);
   timer.unref();
   return runner;
+}
+
+// Built on the first sign-in op, not with the op table: its start-up cleanup (kill the leftover sign-in tmux server, drop
+// homes an earlier run created and never signed in) runs once, before that first sign-in, and never in code that only
+// builds the table.
+function lazySignInRunner(make: () => SignInRunner): SignInRunner {
+  let runner: SignInRunner | null = null;
+  const get = (): SignInRunner => (runner ??= make());
+  return new Proxy({} as SignInRunner, {
+    get: (_target, prop) => {
+      const r = get();
+      const v = Reflect.get(r, prop, r) as unknown;
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(r) : v;
+    },
+  });
 }
 
 export function buildOps(d: OpsDeps): OpTable {
@@ -113,6 +133,6 @@ export function buildOps(d: OpsDeps): OpTable {
     ...deliveryOps({ deliverer: d.deliverer, panes: d.panes, policy }),
     ...memoryOps({ root: paths.memoryDir, skillDirs: skillDirsOf(policy.memory.skillDirs, config.home) }),
     ...updateOps({ home: config.home, ...(d.runCommand ? { run: d.runCommand } : {}) }),
-    ...signinOps(productionSignInRunner(d.now, paths.stateDir)),
+    ...signinOps(lazySignInRunner(() => productionSignInRunner(d.now, paths.stateDir))),
   };
 }
