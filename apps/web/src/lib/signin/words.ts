@@ -30,6 +30,6 @@ export function problemWords(problem: string | null, phase: string): string {
 }
 
 export function badAccountName(name: string): string | null {
-  if (SIGNIN_ACCOUNT.test(name)) return null;
+  if (name !== "main" && SIGNIN_ACCOUNT.test(name)) return null;
   return "Use lowercase letters, digits, dashes and underscores; 1–31 characters, not main.";
 }
