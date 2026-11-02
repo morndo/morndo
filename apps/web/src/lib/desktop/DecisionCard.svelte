@@ -31,7 +31,7 @@
   import { clock } from "./grouping.ts";
   import SignInSheet from "../signin/SignInSheet.svelte";
   import { signinApi, type SignInTarget } from "../signin/api.ts";
-  import { explain } from "$lib/api.ts";
+  import { explain } from "../api.ts";
 
   let { item, variant, now, verifiedFresh, briefOpen = false, session: given, onAnswer, onOpenScreen, onOpenChat, onOpen, onMemoryCode }: {
     item: DecisionItem; variant: "panel" | "inline"; now: number; verifiedFresh: boolean; briefOpen?: boolean;

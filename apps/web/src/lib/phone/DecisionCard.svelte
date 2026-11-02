@@ -22,7 +22,7 @@
   import { MAY_HAVE_GONE, againLabel } from "../catchup/answer.ts";
   import SignInSheet from "../signin/SignInSheet.svelte";
   import { signinApi, type SignInTarget } from "../signin/api.ts";
-  import { explain } from "$lib/api.ts";
+  import { explain } from "../api.ts";
 
   let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext, onOpenBrief }: {
     item: DecisionItem | null; primed: boolean; index: number; of: number; now: number;

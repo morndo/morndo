@@ -3,8 +3,8 @@
   // code to this sign-in's recipient before POST, poll until done or failed. The plain code never leaves sealing.
   import { onDestroy } from "svelte";
   import type { SignInView } from "@morndo/protocol";
-  import { ApiError, explain } from "$lib/api.ts";
-  import { withStepUp } from "$lib/stepup.ts";
+  import { ApiError, explain } from "../api.ts";
+  import { withStepUp } from "../stepup.ts";
   import { signinApi, type SignInTarget } from "./api.ts";
   import { sealCode } from "./seal.ts";
   import { problemWords, sheetTitle } from "./words.ts";

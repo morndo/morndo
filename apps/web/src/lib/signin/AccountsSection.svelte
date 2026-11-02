@@ -3,7 +3,7 @@
   import { onMount } from "svelte";
   import type { SignInRuntime } from "@morndo/domain";
   import type { AccountRow } from "@morndo/protocol";
-  import { ApiError, explain } from "$lib/api.ts";
+  import { ApiError, explain } from "../api.ts";
   import SignInSheet from "./SignInSheet.svelte";
   import { signinApi, type SignInTarget } from "./api.ts";
   import { accountStateWords, badAccountName } from "./words.ts";

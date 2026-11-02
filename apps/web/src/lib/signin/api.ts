@@ -1,6 +1,6 @@
 import type { AccountsView, SignInView } from "@morndo/protocol";
 import type { SignInRuntime } from "@morndo/domain";
-import { api } from "$lib/api.ts";
+import { api } from "../api.ts";
 
 export type SignInTarget = { node: string; runtime: SignInRuntime; account: string; create: boolean };
 
