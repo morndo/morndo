@@ -22,9 +22,10 @@ describe("sharedEmails", () => {
 
 describe("addsNoCapacityLine", () => {
   const rows = [
-    { name: "a1", email: "person@example.com" },
-    { name: "a2", email: "other@example.com" },
-    { name: "a3", email: "Person@Example.com" },
+    { name: "a1", email: "person@example.com", signedIn: "ok" as const },
+    { name: "a2", email: "other@example.com", signedIn: "ok" as const },
+    { name: "a3", email: "Person@Example.com", signedIn: "ok" as const },
+    { name: "a4", email: "gone@example.com", signedIn: "missing" as const },
   ];
 
   it("names every other folder already on the email the sign-in just used", () => {
@@ -38,5 +39,9 @@ describe("addsNoCapacityLine", () => {
 
   it("says nothing for a new email", () => {
     expect(addsNoCapacityLine("new@example.com", "a9", rows)).toBeNull();
+  });
+
+  it("does not count a signed-out folder that last named the email: it holds none of that account's capacity", () => {
+    expect(addsNoCapacityLine("gone@example.com", "a9", rows)).toBeNull();
   });
 });

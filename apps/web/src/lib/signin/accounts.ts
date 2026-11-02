@@ -25,9 +25,14 @@ export function sameEmailLine(otherNames: readonly string[]): string {
   return `Same email as ${otherNames.join(", ")}`;
 }
 
-/** After a Claude sign-in: the other folders already on the email it used, as the sheet says it, or null if none. */
-export function addsNoCapacityLine(email: string, account: string, rows: readonly Pick<AccountRow, "name" | "email">[]): string | null {
+/** After a Claude sign-in: the other signed-in folders already on the email it used, as the sheet says it, or null.
+ *  A signed-out folder that last named the email holds none of that account's capacity, so it does not count. */
+export function addsNoCapacityLine(
+  email: string, account: string, rows: readonly Pick<AccountRow, "name" | "email" | "signedIn">[],
+): string | null {
   const key = email.toLowerCase();
-  const others = rows.filter(r => r.name !== account && r.email?.toLowerCase() === key).map(r => r.name);
+  const others = rows
+    .filter(r => r.name !== account && r.signedIn === "ok" && r.email?.toLowerCase() === key)
+    .map(r => r.name);
   return others.length ? `${sameEmailLine(others)}: this folder adds no capacity.` : null;
 }

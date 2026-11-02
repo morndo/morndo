@@ -93,6 +93,6 @@
   .shell.wide.phoneSection { grid-template-columns: minmax(0, 1fr); }
   .panel { min-width: 0; display: grid; gap: 14px; }
   @media (min-width: 900px) {
-    .shell.wide .sections { position: sticky; top: calc(var(--safe-top) + 72px); }
+    .shell.wide :global(.sections) { position: sticky; top: calc(var(--safe-top) + 72px); }
   }
 </style>
