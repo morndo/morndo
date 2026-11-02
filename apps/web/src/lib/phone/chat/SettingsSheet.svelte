@@ -19,6 +19,7 @@
   </div>
   {#if engines}<a class="pbtn" href="/engines">Engines: which AI does what</a>{/if}
   {#if updates}<a class="pbtn" href="/updates">Updates: every machine's Version</a>{/if}
+  <a class="pbtn" href="/settings">Settings</a>
   <a class="pbtn" href="/devices">Devices and sign out</a>
   <button class="pbtn primary" onclick={onClose}>Done</button>
 </div>

@@ -6,7 +6,10 @@
   import { ApiError, explain } from "../api.ts";
   import SignInSheet from "./SignInSheet.svelte";
   import { signinApi, type SignInTarget } from "./api.ts";
+  import { sameEmailLine, sharedEmails } from "./accounts.ts";
   import { accountStateWords, badAccountName } from "./words.ts";
+
+  let { heading = 2 }: { heading?: 2 | 3 } = $props();
 
   let nodes = $state<string[]>([]);
   let node = $state("");
@@ -86,10 +89,11 @@
   }
 
   const runtimeLabel = (r: SignInRuntime) => (r === "claude" ? "Claude" : "Cursor");
+  const claudeShared = $derived(sharedEmails(claude));
 </script>
 
 <section class="accounts" id="accounts" aria-label="Accounts">
-  <h2 class="kicker">Accounts</h2>
+  {#if heading === 2}<h2 class="kicker">Accounts</h2>{:else}<h3 class="kicker">Accounts</h3>{/if}
   {#if loadProblem}<p class="err" role="alert">{loadProblem}</p>{/if}
   {#if nodes.length}
     <label for="signin-node">Node</label>
@@ -105,9 +109,13 @@
       <h3>Claude</h3>
       <ul>
         {#each claude as row (row.name)}
+          {@const peers = claudeShared.get(row.name)}
           <li>
             <span class="name">{row.name}</span>
-            <span class="state">{accountStateWords(row)}{#if row.plan && row.signedIn === "ok"} · {row.plan}{/if}</span>
+            {#if row.email}<span class="email">{row.email}</span>{/if}
+            {#if row.plan}<span class="plan">{row.plan}</span>{/if}
+            <span class="state">{accountStateWords(row)}</span>
+            {#if peers}<span class="shared">{sameEmailLine(peers)}</span>{/if}
             <button type="button" aria-label="Sign in claude {row.name}" onclick={() => signIn("claude", row.name)}>Sign in</button>
           </li>
         {/each}
@@ -119,7 +127,9 @@
         {#each cursor as row (row.name)}
           <li>
             <span class="name">{row.name}</span>
-            <span class="state">{accountStateWords(row)}{#if row.plan && row.signedIn === "ok"} · {row.plan}{/if}</span>
+            {#if row.email}<span class="email">{row.email}</span>{/if}
+            {#if row.plan}<span class="plan">{row.plan}</span>{/if}
+            <span class="state">{accountStateWords(row)}</span>
             <button type="button" aria-label="Sign in cursor {row.name}" onclick={() => signIn("cursor", row.name)}>Sign in</button>
           </li>
         {/each}
@@ -136,7 +146,7 @@
   {/if}
 </section>
 
-<SignInSheet target={sheetTarget} bind:open={sheetOpen} onClosed={onSheetClosed} />
+<SignInSheet target={sheetTarget} bind:open={sheetOpen} claudePeers={claude} onClosed={onSheetClosed} />
 
 <style>
   .accounts { display: grid; gap: 10px; margin-top: 8px; }
@@ -144,7 +154,7 @@
   .group h3 { margin: 8px 0 4px; font: 700 15px/20px var(--body, system-ui); }
   ul { list-style: none; margin: 0; padding: 0; border-radius: 14px; background: var(--surface, #f5f5f5); overflow: hidden; }
   li {
-    display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 8px; align-items: center;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
     padding: 10px 14px; border-bottom: 1px solid var(--line, #ddd); font: 400 14px/20px var(--body, system-ui);
   }
   li:last-child { border-bottom: 0; }

@@ -2,15 +2,15 @@
   // One CLI account sign-in from the app (ADR-0039): start with a passkey check, open the CLI's link, seal any one-time
   // code to this sign-in's recipient before POST, poll until done or failed. The plain code never leaves sealing.
   import { onDestroy } from "svelte";
-  import type { SignInView } from "@morndo/protocol";
+  import type { AccountRow, SignInView } from "@morndo/protocol";
   import { ApiError, explain } from "../api.ts";
   import { withStepUp } from "../stepup.ts";
   import { signinApi, type SignInTarget } from "./api.ts";
   import { sealCode } from "./seal.ts";
   import { problemWords, sheetTitle } from "./words.ts";
 
-  let { target, open = $bindable(false), onClosed }: {
-    target: SignInTarget | null; open?: boolean; onClosed?: () => void;
+  let { target, open = $bindable(false), claudePeers = [], onClosed }: {
+    target: SignInTarget | null; open?: boolean; claudePeers?: readonly AccountRow[]; onClosed?: () => void;
   } = $props();
 
   let view = $state<SignInView | null>(null);
@@ -25,6 +25,16 @@
   const title = $derived(target ? sheetTitle(target.node, target.runtime, target.account, target.create) : "Sign in");
   const done = $derived(view?.phase === "done");
   const failed = $derived(view !== null && (view.phase === "failed" || view.phase === "expired"));
+  const duplicateEmailLine = $derived.by(() => {
+    if (!view || view.phase !== "done" || !view.identity || target?.runtime !== "claude") return null;
+    const email = view.identity.email.toLowerCase();
+    const account = view.account;
+    const names = claudePeers
+      .filter(r => r.name !== account && r.email?.toLowerCase() === email)
+      .map(r => r.name);
+    if (!names.length) return null;
+    return `Same email as ${names.join(", ")}: this folder adds no capacity.`;
+  });
 
   function stopPoll() {
     if (poll !== null) { clearInterval(poll); poll = null; }
@@ -132,6 +142,7 @@
       {:else if done && view.identity}
         <p class="ok" role="status"><b>Works again</b></p>
         <p class="ok" role="status">signed in as {view.identity.email}{view.identity.plan ? ` (${view.identity.plan})` : ""}</p>
+        {#if duplicateEmailLine}<p class="note" role="status">{duplicateEmailLine}</p>{/if}
       {:else if failed}
         <p class="err" role="alert">{problemWords(view.problem, view.phase)}</p>
         <button class="btn primary" onclick={tryAgain}>Try again</button>
