@@ -143,6 +143,11 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/signin" }
         run: node e2e/signin.e2e.ts
+      # ADR-0039 §9: one Settings page (the gear, the phone's sheet), and each account's email.
+      - name: e2e settings
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/settings" }
+        run: node e2e/settings.e2e.ts
       # ADR-0015: the board, driven by the morndo-board CLI as the manager and a lane, and by the principal on the desktop.
       - name: e2e board
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
