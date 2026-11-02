@@ -1,0 +1,410 @@
+import { execFile } from "node:child_process";
+import { statSync } from "node:fs";
+import { join } from "node:path";
+import { promisify } from "node:util";
+import {
+  SIGNIN_ACCOUNT, SIGNIN_TTL_MS, linkAllowed, type SignInIdentity, type SignInPhase, type SignInRuntime,
+} from "@morndo/domain";
+import { Decrypter, generateX25519Identity, identityToRecipient } from "age-encryption";
+import type { OpArgs, OpResult } from "@morndo/protocol";
+import { fail, ok, type Outcome } from "../ops/executor.ts";
+import type { AccountHomes } from "./homes.ts";
+import { RECIPES, sessionCommand } from "./recipes.ts";
+import type { SignInTerminal } from "./terminal.ts";
+
+const run = promisify(execFile);
+const LINK_WAIT_MS = 30_000;
+const POLL_MS = 150;
+const MAX_LIVE = 4;
+const ACCOUNT_CHECK_MS = 20_000;
+const STATUS_RETRIES = 3;
+const STATUS_RETRY_MS = 300;
+const PATH_ENV = { PATH: process.env.PATH ?? "" };
+
+type AgeIdentity = Awaited<ReturnType<typeof generateX25519Identity>>;
+
+type Session = {
+  id: string;
+  runtime: SignInRuntime;
+  account: string;
+  claudeConfigDir: string | null;
+  credentialsPath: string;
+  phase: SignInPhase;
+  link: string;
+  needsCode: boolean;
+  recipient: string | null;
+  expiresAt: number;
+  identity: SignInIdentity | null;
+  problem: string | null;
+  ageIdentity: AgeIdentity | null;
+  sentCode: boolean;
+};
+
+const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
+
+const execOut = (e: unknown): string => {
+  const x = (typeof e === "object" && e !== null ? e : {}) as { stdout?: unknown };
+  return typeof x.stdout === "string" ? x.stdout : "";
+};
+
+const codeOk = (text: string): boolean => {
+  if (text.length === 0 || text.length > 512 || text.includes("\n")) return false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text.charCodeAt(i);
+    if (c < 32 || c === 127) return false;
+  }
+  return true;
+};
+
+export class SignInRunner {
+  readonly #terminal: SignInTerminal;
+  readonly #homes: AccountHomes;
+  readonly #bins: { claude: string; cursor: string };
+  readonly #now: () => number;
+  readonly #sessions = new Map<string, Session>();
+
+  constructor(o: { terminal: SignInTerminal; homes: AccountHomes; bins: { claude: string; cursor: string }; now: () => number }) {
+    this.#terminal = o.terminal;
+    this.#homes = o.homes;
+    this.#bins = o.bins;
+    this.#now = o.now;
+  }
+
+  accounts(a: OpArgs["signin.accounts"]): Promise<Outcome<"signin.accounts">> {
+    return a.runtime === "claude" ? this.#claudeAccounts() : this.#cursorAccounts();
+  }
+
+  async start(a: OpArgs["signin.start"]): Promise<Outcome<"signin.start">> {
+    if (!SIGNIN_ACCOUNT.test(a.account)) return fail("bad_args", "bad_account");
+    if (a.runtime === "cursor" && a.account !== "main") return fail("not_allowed", "cursor_main_only");
+
+    const existing = this.#sessions.get(a.id);
+    if (existing && this.#isLive(existing)) return ok<"signin.start">(this.#startView(existing));
+
+    if (this.#busyTarget(a.runtime, a.account)) return fail("busy", "a sign-in is already running for this account");
+    if (this.#liveCount() >= MAX_LIVE) return fail("busy", "too many sign-ins at once");
+
+    const resolved = await this.#homes.ensure(a.runtime, a.account, a.create);
+    if ("code" in resolved) return fail(resolved.code, resolved.message);
+
+    if (a.runtime === "claude" && a.account !== "main" && resolved.claudeConfigDir) {
+      try { statSync(resolved.claudeConfigDir); } catch { return fail("not_allowed", "no_account"); }
+    }
+
+    const recipe = RECIPES[a.runtime];
+    const argv = recipe.argv(this.#bins);
+    const cmd = sessionCommand(this.#homes.home, argv[0]!, argv.slice(1), recipe.extraEnv(this.#homes.home, resolved.claudeConfigDir));
+
+    try { await this.#terminal.open(a.id, cmd); }
+    catch { return fail("internal", "could not start sign-in terminal"); }
+
+    const linkOut = await this.#waitForLink(a.id, a.runtime, recipe.link);
+    if (!linkOut.ok) {
+      await this.#terminal.close(a.id);
+      return fail(linkOut.code, linkOut.message);
+    }
+
+    const needsCode = recipe.codePrompt !== null && recipe.codePrompt.test(linkOut.screen);
+    let recipient: string | null = null;
+    let ageIdentity: AgeIdentity | null = null;
+    if (needsCode) {
+      ageIdentity = await generateX25519Identity();
+      recipient = await identityToRecipient(ageIdentity);
+    }
+
+    const credentialsPath = a.runtime === "claude"
+      ? join(resolved.accountHome, ".credentials.json")
+      : join(this.#homes.home, ".config", "cursor", "auth.json");
+
+    const session: Session = {
+      id: a.id,
+      runtime: a.runtime,
+      account: a.account,
+      claudeConfigDir: resolved.claudeConfigDir,
+      credentialsPath,
+      phase: "waiting",
+      link: linkOut.link,
+      needsCode,
+      recipient,
+      expiresAt: this.#now() + SIGNIN_TTL_MS,
+      identity: null,
+      problem: null,
+      ageIdentity,
+      sentCode: false,
+    };
+    this.#sessions.set(a.id, session);
+    return ok<"signin.start">(this.#startView(session));
+  }
+
+  async code(a: OpArgs["signin.code"]): Promise<Outcome<"signin.code">> {
+    const s = this.#sessions.get(a.id);
+    if (!s) return fail("no_session", "no such sign-in");
+    await this.#expireIfNeeded(s);
+    if (!this.#acceptsCode(s)) return ok<"signin.code">({ accepted: false });
+
+    let plain: string;
+    try {
+      if (!s.ageIdentity) return ok<"signin.code">({ accepted: false });
+      const dec = new Decrypter();
+      dec.addIdentity(s.ageIdentity);
+      plain = await dec.decrypt(Uint8Array.from(Buffer.from(a.sealed, "base64")), "text");
+    } catch {
+      return ok<"signin.code">({ accepted: false });
+    }
+    if (!codeOk(plain)) return ok<"signin.code">({ accepted: false });
+
+    await this.#terminal.type(a.id, plain);
+    await this.#terminal.enter(a.id);
+    s.sentCode = true;
+    s.phase = "checking";
+    return ok<"signin.code">({ accepted: true });
+  }
+
+  async status(a: OpArgs["signin.status"]): Promise<Outcome<"signin.status">> {
+    const s = this.#sessions.get(a.id);
+    if (!s) return fail("no_session", "no such sign-in");
+    await this.#expireIfNeeded(s);
+    await this.#refresh(s);
+    return ok<"signin.status">(this.#statusView(s));
+  }
+
+  async cancel(a: OpArgs["signin.cancel"]): Promise<Outcome<"signin.cancel">> {
+    const s = this.#sessions.get(a.id);
+    if (!s) return fail("no_session", "no such sign-in");
+    if (this.#isFinal(s.phase)) return ok<"signin.cancel">({ cancelled: false });
+    await this.#terminal.close(a.id);
+    s.ageIdentity = null;
+    s.phase = "cancelled";
+    return ok<"signin.cancel">({ cancelled: true });
+  }
+
+  async #refresh(s: Session): Promise<void> {
+    await this.#expireIfNeeded(s);
+    if (!this.#isLive(s)) return;
+    const ex = await this.#terminal.exit(s.id);
+    if (!ex.dead) return;
+    await this.#finish(s, ex.status);
+  }
+
+  async #finish(s: Session, exitStatus: number | null): Promise<void> {
+    const code = exitStatus ?? 1;
+    if (code !== 0) {
+      s.phase = "failed";
+      s.problem = s.sentCode ? "code_refused" : "not_signed_in";
+      await this.#terminal.close(s.id);
+      s.ageIdentity = null;
+      return;
+    }
+    const id = await this.#loginIdentity(s);
+    if (!id) {
+      s.phase = "failed";
+      s.problem = "not_signed_in";
+      await this.#terminal.close(s.id);
+      s.ageIdentity = null;
+      return;
+    }
+    if (s.runtime === "claude") {
+      try {
+        if ((statSync(s.credentialsPath).mode & 0o777) !== 0o600) {
+          s.phase = "failed";
+          s.problem = "credentials_mode";
+          s.identity = null;
+          await this.#terminal.close(s.id);
+          s.ageIdentity = null;
+          return;
+        }
+      } catch {
+        s.phase = "failed";
+        s.problem = "not_signed_in";
+        await this.#terminal.close(s.id);
+        s.ageIdentity = null;
+        return;
+      }
+    }
+    s.phase = "done";
+    s.identity = id;
+    s.problem = null;
+    await this.#terminal.close(s.id);
+    s.ageIdentity = null;
+  }
+
+  async #expireIfNeeded(s: Session): Promise<void> {
+    if (this.#isFinal(s.phase)) return;
+    if (this.#now() >= s.expiresAt && (s.phase === "waiting" || s.phase === "checking")) {
+      await this.#terminal.close(s.id);
+      s.ageIdentity = null;
+      s.phase = "expired";
+    }
+  }
+
+  #isLive(s: Session): boolean {
+    return (s.phase === "waiting" || s.phase === "checking") && this.#now() < s.expiresAt;
+  }
+
+  #isFinal(phase: SignInPhase): boolean {
+    return phase === "done" || phase === "failed" || phase === "expired" || phase === "cancelled";
+  }
+
+  #acceptsCode(s: Session): boolean {
+    return s.phase === "waiting" && s.needsCode && s.recipient !== null && this.#now() < s.expiresAt;
+  }
+
+  #liveCount(): number {
+    let n = 0;
+    for (const s of this.#sessions.values()) if (this.#isLive(s)) n++;
+    return n;
+  }
+
+  #busyTarget(runtime: SignInRuntime, account: string): boolean {
+    for (const s of this.#sessions.values()) {
+      if (this.#isLive(s) && s.runtime === runtime && s.account === account) return true;
+    }
+    return false;
+  }
+
+  #startView(s: Session): OpResult["signin.start"] {
+    return { link: s.link, userCode: null, needsCode: s.needsCode, recipient: s.recipient, expiresAt: s.expiresAt };
+  }
+
+  #statusView(s: Session): OpResult["signin.status"] {
+    return { phase: s.phase, identity: s.identity, problem: s.problem };
+  }
+
+  async #waitForLink(id: string, runtime: SignInRuntime, pattern: RegExp):
+    Promise<{ ok: true; link: string; screen: string } | { ok: false; code: "timeout" | "internal"; message: string }> {
+    const end = this.#now() + LINK_WAIT_MS;
+    while (this.#now() < end) {
+      const ex = await this.#terminal.exit(id);
+      if (ex.dead) return { ok: false, code: "timeout", message: "no_link" };
+      const screen = await this.#terminal.screen(id);
+      const m = pattern.exec(screen);
+      if (m) {
+        const link = m[0]!;
+        if (!linkAllowed(runtime, link)) return { ok: false, code: "internal", message: "no_link" };
+        return { ok: true, link, screen };
+      }
+      await sleep(POLL_MS);
+    }
+    return { ok: false, code: "timeout", message: "no_link" };
+  }
+
+  async #loginIdentity(s: Session): Promise<SignInIdentity | null> {
+    return s.runtime === "claude" ? this.#claudeIdentity(s.claudeConfigDir) : this.#cursorIdentity();
+  }
+
+  async #claudeIdentity(claudeConfigDir: string | null): Promise<SignInIdentity | null> {
+    const recipe = RECIPES.claude;
+    const argv = recipe.argv(this.#bins);
+    const cmd = sessionCommand(this.#homes.home, argv[0]!, ["auth", "status", "--json"], recipe.extraEnv(this.#homes.home, claudeConfigDir));
+    try {
+      const { stdout } = await run(cmd[0]!, cmd.slice(1), { encoding: "utf8", timeout: ACCOUNT_CHECK_MS, env: PATH_ENV });
+      const j = JSON.parse(stdout) as { loggedIn?: boolean; email?: string; subscriptionType?: string };
+      if (j.loggedIn !== true || typeof j.email !== "string") return null;
+      return { email: j.email, plan: j.subscriptionType ?? null };
+    } catch { return null; }
+  }
+
+  async #cursorIdentity(): Promise<SignInIdentity | null> {
+    const recipe = RECIPES.cursor;
+    const argv = recipe.argv(this.#bins);
+    const cmd = sessionCommand(this.#homes.home, argv[0]!, ["status"], recipe.extraEnv(this.#homes.home, null));
+    try {
+      const { stdout } = await run(cmd[0]!, cmd.slice(1), { encoding: "utf8", timeout: ACCOUNT_CHECK_MS, env: PATH_ENV });
+      const m = /Logged in as\s+(\S+)/.exec(stdout);
+      if (!m) return null;
+      return { email: m[1]!, plan: null };
+    } catch { return null; }
+  }
+
+  async #claudeAccounts(): Promise<Outcome<"signin.accounts">> {
+    const retired = await this.#poolRetired();
+    const names = ["main", ...this.#homes.listClaudeAccountNames()];
+    const rows = await Promise.all(names.map(async name => {
+      const dir = name === "main" ? null : join(this.#homes.home, ".claude-accounts", name);
+      const signedIn = await this.#claudeSignedIn(dir);
+      const plan = signedIn === "ok" ? await this.#claudePlan(dir) : null;
+      return {
+        name,
+        signedIn,
+        retired: name === "main" ? false : (retired.get(name) ?? false),
+        plan,
+      };
+    }));
+    return ok<"signin.accounts">({ accounts: rows });
+  }
+
+  async #cursorAccounts(): Promise<Outcome<"signin.accounts">> {
+    const signedIn = await this.#cursorSignedIn();
+    return ok<"signin.accounts">({ accounts: [{ name: "main", signedIn, retired: false, plan: null }] });
+  }
+
+  async #claudeSignedIn(claudeConfigDir: string | null): Promise<"ok" | "missing" | "unknown"> {
+    const recipe = RECIPES.claude;
+    const argv = recipe.argv(this.#bins);
+    const cmd = sessionCommand(this.#homes.home, argv[0]!, ["auth", "status", "--json"], recipe.extraEnv(this.#homes.home, claudeConfigDir));
+    for (let i = 0; i < STATUS_RETRIES; i++) {
+      try {
+        const { stdout } = await run(cmd[0]!, cmd.slice(1), { encoding: "utf8", timeout: ACCOUNT_CHECK_MS, env: PATH_ENV });
+        const j = JSON.parse(stdout) as { loggedIn?: boolean };
+        return j.loggedIn === true ? "ok" : "missing";
+      } catch (e) {
+        const out = execOut(e);
+        if (out) {
+          try {
+            const j = JSON.parse(out) as { loggedIn?: boolean };
+            if (j.loggedIn === false) return "missing";
+            if (j.loggedIn === true) return "ok";
+          } catch { /* not json */ }
+        }
+        if (/not logged in/i.test(String(e))) return "missing";
+        if (i < STATUS_RETRIES - 1) await sleep(STATUS_RETRY_MS);
+      }
+    }
+    return "unknown";
+  }
+
+  async #claudePlan(claudeConfigDir: string | null): Promise<string | null> {
+    const recipe = RECIPES.claude;
+    const argv = recipe.argv(this.#bins);
+    const cmd = sessionCommand(this.#homes.home, argv[0]!, ["auth", "status", "--json"], recipe.extraEnv(this.#homes.home, claudeConfigDir));
+    try {
+      const { stdout } = await run(cmd[0]!, cmd.slice(1), { encoding: "utf8", timeout: ACCOUNT_CHECK_MS, env: PATH_ENV });
+      const j = JSON.parse(stdout) as { subscriptionType?: string };
+      return j.subscriptionType ?? null;
+    } catch { return null; }
+  }
+
+  async #cursorSignedIn(): Promise<"ok" | "missing" | "unknown"> {
+    const recipe = RECIPES.cursor;
+    const argv = recipe.argv(this.#bins);
+    const cmd = sessionCommand(this.#homes.home, argv[0]!, ["status"], recipe.extraEnv(this.#homes.home, null));
+    for (let i = 0; i < STATUS_RETRIES; i++) {
+      try {
+        const { stdout } = await run(cmd[0]!, cmd.slice(1), { encoding: "utf8", timeout: ACCOUNT_CHECK_MS, env: PATH_ENV });
+        if (/Logged in as/i.test(stdout)) return "ok";
+        if (/Not logged in/i.test(stdout)) return "missing";
+      } catch {
+        if (i < STATUS_RETRIES - 1) await sleep(STATUS_RETRY_MS);
+      }
+    }
+    return "unknown";
+  }
+
+  async #poolRetired(): Promise<Map<string, boolean>> {
+    const out = new Map<string, boolean>();
+    if (!this.#homes.claudePool) return out;
+    try {
+      const { stdout } = await run(this.#homes.claudePool, ["list", "--json"], { encoding: "utf8", env: PATH_ENV });
+      const today = new Date(this.#now()).toISOString().slice(0, 10);
+      for (const line of stdout.split("\n")) {
+        if (!line.trim()) continue;
+        const row = JSON.parse(line) as { name?: string; retired?: string; expires?: string | null };
+        if (typeof row.name !== "string") continue;
+        const retired = (typeof row.retired === "string" && row.retired.length > 0)
+          || (typeof row.expires === "string" && row.expires < today);
+        out.set(row.name, retired);
+      }
+    } catch { /* no pool */ }
+    return out;
+  }
+}

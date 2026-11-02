@@ -6,6 +6,8 @@
 //   queue a first prompt with the deliverer.
 // Memory (ADR-0031): memory.sync writes into the node's state directory and the policy's memory.skillDirs.
 // The deliverer and the executor are made from this table, so it reaches them late (runtime.ts), by the time an op runs.
+import { execFileSync } from "node:child_process";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { paneLock, stampServer, terminalAdapter, type PaneLock, type SessionSource, type Tmux } from "@morndo/node-ops";
@@ -25,6 +27,10 @@ import { transcriptOps } from "./transcript-ops.ts";
 import type { UploadInbox } from "./upload-inbox.ts";
 import { updateOps, type CommandRunner } from "./update-ops.ts";
 import { worktreeOps } from "./worktree-ops.ts";
+import { AccountHomes } from "../signin/homes.ts";
+import { SignInRunner } from "../signin/runner.ts";
+import { tmuxTerminal } from "../signin/terminal.ts";
+import { signinOps } from "./signin-ops.ts";
 
 export type OpsDeps = {
   config: AgentConfig;
@@ -53,6 +59,27 @@ export function enginesSessionsDir(home: string, env: NodeJS.ProcessEnv = proces
 // And their transcripts (lane.py ENGINES_TRANSCRIPTS): the only place a lane's transcript is served from.
 export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
   return env.ENGINES_TRANSCRIPTS || join(home, ".local", "share", "engines", "transcripts");
+}
+
+function binOnPath(name: string): string {
+  try { return execFileSync("command", ["-v", name], { encoding: "utf8", env: process.env }).trim(); }
+  catch { return name; }
+}
+
+function claudePoolPath(): string | null {
+  try { return execFileSync("command", ["-v", "claude-pool"], { encoding: "utf8", env: process.env }).trim(); }
+  catch { return null; }
+}
+
+function productionSignInRunner(now: () => number): SignInRunner {
+  const home = homedir();
+  const bins = { claude: binOnPath("claude"), cursor: binOnPath("agent") };
+  return new SignInRunner({
+    terminal: tmuxTerminal("morndo-signin"),
+    homes: new AccountHomes({ home, bins, claudePool: claudePoolPath() }),
+    bins,
+    now,
+  });
 }
 
 export function buildOps(d: OpsDeps): OpTable {
@@ -87,5 +114,6 @@ export function buildOps(d: OpsDeps): OpTable {
     ...deliveryOps({ deliverer: d.deliverer, panes: d.panes, policy }),
     ...memoryOps({ root: paths.memoryDir, skillDirs: skillDirsOf(policy.memory.skillDirs, config.home) }),
     ...updateOps({ home: config.home, ...(d.runCommand ? { run: d.runCommand } : {}) }),
+    ...signinOps(productionSignInRunner(d.now)),
   };
 }

@@ -68,6 +68,12 @@ export const CHECK: Checkers = {
   "connections.role": decoded("connections.role"),
   "connections.revoke": decoded("connections.revoke"),
   "connections.narrow": decoded("connections.narrow"),
+  // Sign-in from the app (ADR-0039): the protocol's schemas are the whole check; the runner refuses names and homes itself.
+  "signin.accounts": decoded("signin.accounts"),
+  "signin.start": decoded("signin.start"),
+  "signin.code": decoded("signin.code"),
+  "signin.status": decoded("signin.status"),
+  "signin.cancel": decoded("signin.cancel"),
   // Updates §5.4: the arguments as the fleet checked them (a Version). The node's handler starts the updater's
   // apply unit (update-ops.ts); without CAP_UPDATE the fleet sends the op none of this.
   "update.apply": decoded("update.apply"),
