@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { chmodSync, existsSync, lstatSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -60,6 +60,15 @@ const codeOk = (text: string): boolean => {
   }
   return true;
 };
+
+// The email an account's own settings file last named (Claude Code's oauthAccount.emailAddress); no credential is read.
+function lastEmail(settingsFile: string): string | null {
+  try {
+    const j = JSON.parse(readFileSync(settingsFile, "utf8")) as { oauthAccount?: { emailAddress?: unknown } };
+    const e = j.oauthAccount?.emailAddress;
+    return typeof e === "string" && e.length > 0 && e.length <= 320 ? e : null;
+  } catch { return null; }
+}
 
 export class SignInRunner {
   readonly #terminal: SignInTerminal;
@@ -440,12 +449,15 @@ export class SignInRunner {
     const rows = await Promise.all(names.map(async name => {
       const dir = name === "main" ? null : join(this.#homes.home, ".claude-accounts", name);
       const signedIn = await this.#claudeSignedIn(dir);
-      const plan = signedIn === "ok" ? await this.#claudePlan(dir) : null;
+      // Signed in: the CLI's own email and plan, in one status call. Otherwise the last email the account's own settings
+      // file holds (its oauthAccount), so the principal knows which account a folder was.
+      const id = signedIn === "ok" ? await this.#claudeIdentity(dir) : null;
       return {
         name,
         signedIn,
         retired: name === "main" ? false : (retired.get(name) ?? false),
-        plan,
+        plan: id?.plan ?? null,
+        email: id?.email ?? lastEmail(dir === null ? join(this.#homes.home, ".claude.json") : join(dir, ".claude.json")),
       };
     }));
     return ok<"signin.accounts">({ accounts: rows });
@@ -453,7 +465,8 @@ export class SignInRunner {
 
   async #cursorAccounts(): Promise<Outcome<"signin.accounts">> {
     const signedIn = await this.#cursorSignedIn();
-    return ok<"signin.accounts">({ accounts: [{ name: "main", signedIn, retired: false, plan: null }] });
+    const id = signedIn === "ok" ? await this.#cursorIdentity() : null;
+    return ok<"signin.accounts">({ accounts: [{ name: "main", signedIn, retired: false, plan: null, email: id?.email ?? null }] });
   }
 
   async #claudeSignedIn(claudeConfigDir: string | null): Promise<"ok" | "missing" | "unknown"> {
@@ -480,17 +493,6 @@ export class SignInRunner {
       }
     }
     return "unknown";
-  }
-
-  async #claudePlan(claudeConfigDir: string | null): Promise<string | null> {
-    const recipe = RECIPES.claude;
-    const argv = recipe.argv(this.#bins);
-    const cmd = sessionCommand(this.#homes.home, argv[0]!, ["auth", "status", "--json"], recipe.extraEnv(this.#homes.home, claudeConfigDir));
-    try {
-      const { stdout } = await run(cmd[0]!, cmd.slice(1), { encoding: "utf8", timeout: ACCOUNT_CHECK_MS, env: PATH_ENV });
-      const j = JSON.parse(stdout) as { subscriptionType?: string };
-      return j.subscriptionType ?? null;
-    } catch { return null; }
   }
 
   async #cursorSignedIn(): Promise<"ok" | "missing" | "unknown"> {

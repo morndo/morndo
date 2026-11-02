@@ -53,6 +53,10 @@ Facts that shape the decision, each checked on 2026-11-02 against the CLIs in us
    existing or a new account. An agent never starts a sign-in, sees its link or sends a code.
 8. **Where the principal does it.** The card's Sign in, the Home usage badge of a signed-out seat, and the Engines page's
    Accounts section (each node's Claude and Cursor accounts, Sign in, Add account).
+9. **Each account names its email** (amended 2026-11-02, after the owner's first live use: a list of folder names
+   alone didn't say which account to sign in where). An account row carries the signed-in email, or the last one the
+   account's own settings file named, and its plan; the app shows it to the principal and marks two folders that share
+   one. The hub passes it through in memory only: never into its audit or logs.
 
 ## Consequences
 

@@ -39,8 +39,9 @@ export const SignInViewSchema = z.strictObject({
 export type SignInView = z.output<typeof SignInViewSchema>;
 
 export const ACCOUNT_STATES = ["ok", "missing", "unknown"] as const;
+// email: the signed-in email, or the last one the account's settings named; shown to the principal, never stored (ADR-0039).
 export const AccountRowSchema = z.strictObject({
-  name: account(), signedIn: z.enum(ACCOUNT_STATES), retired: z.boolean(), plan: z.nullable(words(80)),
+  name: account(), signedIn: z.enum(ACCOUNT_STATES), retired: z.boolean(), plan: z.nullable(words(80)), email: z.nullable(words(320)),
 });
 export type AccountRow = z.output<typeof AccountRowSchema>;
 export const AccountsViewSchema = z.strictObject({ node: node(), runtime: SignInRuntimeSchema, accounts: z.array(AccountRowSchema).check(z.maxLength(64)) });

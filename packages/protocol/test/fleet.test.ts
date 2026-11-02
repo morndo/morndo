@@ -239,7 +239,7 @@ describe("op results (what a node reports: shape)", () => {
       "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
       "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },
       "update.apply": { accepted: true },
-      "signin.accounts": { accounts: [{ name: "a1", signedIn: "missing", retired: false, plan: "max" }] },
+      "signin.accounts": { accounts: [{ name: "a1", signedIn: "missing", retired: false, plan: "max", email: "person@example.com" }] },
       "signin.start": { link: "https://claude.com/cai/oauth/authorize?x=1", userCode: null, needsCode: true, recipient: "age1example", expiresAt: 2 },
       "signin.code": { accepted: true }, "signin.status": { phase: "done", identity: { email: "person@example.com", plan: "max" }, problem: null },
       "signin.cancel": { cancelled: true },
