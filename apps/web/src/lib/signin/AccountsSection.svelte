@@ -96,6 +96,8 @@
     <select id="signin-node" bind:value={node}>
       {#each nodes as n (n)}<option value={n}>{n}</option>{/each}
     </select>
+  {:else if !loadProblem}
+    <p class="note">No node is connected to this hub, so there is no account to sign in yet.</p>
   {/if}
 
   {#if node}

@@ -907,13 +907,12 @@ export function startHttp(p: {
     }
     // ADR-0039: sign an agent CLI account in from the app. Reads are looks; start, code and cancel are Commands under step-up.
     const signinStatus = (problem: string) => problem === "step_up" ? 403 : problem === "not_found" ? 404 : 409;
+    // Without a fleet there is nothing to sign in: the Engines page reads no nodes and no cards (never a 404 it would log).
     if (path === "/api/signins/nodes" && method === "GET") {
-      if (!p.signin) return json(res, 404, { error: "signin_off" });
-      return json(res, 200, { nodes: await p.signin.nodes() });
+      return json(res, 200, { nodes: p.signin ? await p.signin.nodes() : [] });
     }
     if (path === "/api/signins/cards" && method === "GET") {
-      if (!p.signin) return json(res, 404, { error: "signin_off" });
-      return json(res, 200, { cards: p.signin.cards() });
+      return json(res, 200, { cards: p.signin ? p.signin.cards() : [] });
     }
     if (path === "/api/signins/accounts" && method === "GET") {
       if (!p.signin) return json(res, 404, { error: "signin_off" });
