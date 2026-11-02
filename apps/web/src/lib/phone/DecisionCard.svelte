@@ -20,6 +20,9 @@
   import { actions, brief, due } from "./brief.ts";
   import type { Body } from "../catchup/run.ts";
   import { MAY_HAVE_GONE, againLabel } from "../catchup/answer.ts";
+  import SignInSheet from "../signin/SignInSheet.svelte";
+  import { signinApi, type SignInTarget } from "../signin/api.ts";
+  import { explain } from "$lib/api.ts";
 
   let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext, onOpenBrief }: {
     item: DecisionItem | null; primed: boolean; index: number; of: number; now: number;
@@ -68,7 +71,30 @@
   // brings them back with "Answer in your own words"): review of PR #7, finding 13.
   async function sendWords() {
     const t = words.trim();
-    if (t && await onPick({ text: t }, "your own words")) writing = false;
+    if (t && await pickOption({ text: t }, "your own words")) writing = false;
+  }
+
+  let signInTarget = $state<SignInTarget | null>(null);
+  let signInOpen = $state(false);
+  let signInProblem = $state("");
+
+  async function openSignInCard() {
+    if (!item) return;
+    signInProblem = "";
+    try {
+      const { cards } = await signinApi.cards();
+      const card = cards.find(c => c.id === item.id);
+      if (!card) { signInProblem = "This sign-in card is no longer on the hub."; return; }
+      signInTarget = { node: card.node, runtime: card.runtime, account: card.account, create: card.create };
+      signInOpen = true;
+    } catch (e) {
+      signInProblem = explain(e);
+    }
+  }
+
+  async function pickOption(body: Body, label: string) {
+    if (item?.id.startsWith("signin-") && "key" in body && body.key === "signin") { await openSignInCard(); return; }
+    await onPick(body, label);
   }
 </script>
 
@@ -128,6 +154,7 @@
       {:else if MAY_HAVE_GONE.has(refusal.code)}<button class="pbtn small" onclick={onTryAgain}>{againLabel(refusal.code)}</button>{/if}
     {/if}
     {#if note}<p class="err" role="alert">{note}</p>{/if}
+    {#if signInProblem}<p class="err" role="alert">{signInProblem}</p>{/if}
     {#if item.notice}<p class="note" role="status">{item.notice}</p>{/if}
     {#if item.answerBy === "screen"}
       {#if item.options.length}
@@ -138,7 +165,7 @@
     {:else if compact}
       <div class="opts">
         {#each compact.quickAnswers as a, i (a.key)}
-          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void onPick({ key: a.key }, a.label)}>
+          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void pickOption({ key: a.key }, a.label)}>
             <span>{a.label}</span>{#if i === 0}<small>Recommended</small>{/if}
           </button>
         {/each}
@@ -156,13 +183,13 @@
       <div class="opts">
         {#each drawn as a (a.kind === "option" ? `o:${a.key}` : a.kind)}
           {#if a.kind === "done"}
-            <button class="pbtn opt primary" disabled={!canAnswer} onclick={() => void onPick({ text: "Done" }, "Done")}><span>Done</span></button>
+            <button class="pbtn opt primary" disabled={!canAnswer} onclick={() => void pickOption({ text: "Done" }, "Done")}><span>Done</span></button>
           {:else if a.kind === "option"}
-            <button class="pbtn opt" class:primary={a.recommended} disabled={!canAnswer} onclick={() => void onPick({ key: a.key }, a.label)}>
+            <button class="pbtn opt" class:primary={a.recommended} disabled={!canAnswer} onclick={() => void pickOption({ key: a.key }, a.label)}>
               <span>{a.label}</span>{#if a.recommended}<small>Recommended</small>{/if}
             </button>
           {:else if a.kind === "default"}
-            <button class="pbtn opt" disabled={!canAnswer} onclick={() => void onPick({ text: `Go with the default: ${a.text}` }, "go with the default")}>
+            <button class="pbtn opt" disabled={!canAnswer} onclick={() => void pickOption({ text: `Go with the default: ${a.text}` }, "go with the default")}>
               <span>Go with the default</span><small class="def">{a.text}</small>
             </button>
           {:else if a.kind === "words"}
@@ -175,6 +202,8 @@
     {/if}
   {/if}
 </div>
+
+<SignInSheet target={signInTarget} bind:open={signInOpen} onClosed={() => { signInTarget = null; }} />
 
 <style>
   .card-head { padding: 16px 20px 13px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }

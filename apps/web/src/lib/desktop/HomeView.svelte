@@ -161,6 +161,9 @@
                   <span class="seatby">set by {a.seat.by} · {a.seat.owner === "pool" ? "the pool" : "a lane's failure"}</span>
                 </span>
                 <button type="button" class="clearseat" aria-label="Clear this mark for {a.account}" onclick={() => clearMark(a.account)}>Clear this mark</button>
+                {#if a.seat.state === "logged-out"}
+                  <a class="signin-link" href="/engines#accounts">Sign in</a>
+                {/if}
               {/if}
               {#if a.reportedAt > 0}<span class="when">reported {ago(a.reportedAt, now)}</span>{/if}
             </header>
@@ -318,6 +321,7 @@
   .seatfix { color: var(--text); font-weight: 700; }
   .seatby { color: var(--muted); overflow-wrap: anywhere; }
   .clearseat { border: 1px solid var(--border); border-radius: 6px; background: var(--main-bg); color: var(--text); font: 400 12px/16px var(--font); padding: 4px 8px; cursor: pointer; }
+  .signin-link { font: 700 12px/16px var(--font); color: var(--link); text-decoration: underline; white-space: nowrap; }
   .clearseat:hover { background: var(--hover); }
   /* A state the meters cannot show: unreadable or never read, in words with an icon (role=status). */
   .unreadable { display: grid; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-fg); }

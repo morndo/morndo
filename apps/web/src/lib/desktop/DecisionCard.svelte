@@ -29,6 +29,9 @@
   import { CLOSED, current, noteIdOfAsk, shownFor, validUntil, type CodeOutcome, type Reveal } from "./memory-code.ts";
   import { DELIVERED, MAY_HAVE_BEEN, QUEUED } from "../queue-words.ts";
   import { clock } from "./grouping.ts";
+  import SignInSheet from "../signin/SignInSheet.svelte";
+  import { signinApi, type SignInTarget } from "../signin/api.ts";
+  import { explain } from "$lib/api.ts";
 
   let { item, variant, now, verifiedFresh, briefOpen = false, session: given, onAnswer, onOpenScreen, onOpenChat, onOpen, onMemoryCode }: {
     item: DecisionItem; variant: "panel" | "inline"; now: number; verifiedFresh: boolean; briefOpen?: boolean;
@@ -71,7 +74,10 @@
   ].filter((part): part is string => part !== null).join(" · "));
   const readLabel = $derived(card.hasBrief ? "Read the brief ›" : "Details ›");
 
-  function choose(label: string, body: AnswerBody) { session.pick(label, body); }
+  function choose(label: string, body: AnswerBody) {
+    if (item.id.startsWith("signin-") && "key" in body && body.key === "signin") { void openSignInCard(); return; }
+    session.pick(label, body);
+  }
   function writeWords(prefill = "") {
     if (session.stale || session.sending || session.again || !open) return;
     session.words = prefill;
@@ -98,6 +104,21 @@
   }
   function closeCode() { reveal = CLOSED; }
   async function copyCommand(text: string) { try { await navigator.clipboard.writeText(text); } catch { /* clipboard refused */ } }
+
+  let signInTarget = $state<SignInTarget | null>(null);
+  let signInOpen = $state(false);
+
+  async function openSignInCard() {
+    try {
+      const { cards } = await signinApi.cards();
+      const card = cards.find(c => c.id === item.id);
+      if (!card) { session.error = "This sign-in card is no longer on the hub."; return; }
+      signInTarget = { node: card.node, runtime: card.runtime, account: card.account, create: card.create };
+      signInOpen = true;
+    } catch (e) {
+      session.error = explain(e);
+    }
+  }
 </script>
 
 <article bind:this={root} class="dc {variant} u-{u}" data-decision={item.id} aria-label="Decision: {card.topic}">
@@ -245,6 +266,8 @@
     <button type="button" class="link chat" onclick={() => onOpenChat?.(item)}>Show in chat</button>
   {/if}
 </article>
+
+<SignInSheet target={signInTarget} bind:open={signInOpen} onClosed={() => { signInTarget = null; }} />
 
 <style>
   /* A card is a surface of its own: on a tinted row (a hovered message) it keeps muted text muted, and its recessed parts

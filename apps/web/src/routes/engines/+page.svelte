@@ -11,6 +11,7 @@
   import { api, ApiError, explain } from "$lib/api.ts";
   import { withStepUp } from "$lib/stepup.ts";
   import ConnectionsBoard from "$lib/connections/ConnectionsBoard.svelte";
+  import AccountsSection from "$lib/signin/AccountsSection.svelte";
   import RoleCard from "$lib/engines/RoleCard.svelte";
   import { availabilityWords, engineWords, problemWords, providerName } from "$lib/engines/words.ts";
 
@@ -104,6 +105,7 @@
   </header>
 
   <main class="body">
+    <AccountsSection />
     {#if connectionsOn === true}
       <ConnectionsBoard />
     {:else if connectionsOn === false}
