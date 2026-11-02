@@ -27,6 +27,7 @@ import type { UploadInbox } from "./upload-inbox.ts";
 import { updateOps, type CommandRunner } from "./update-ops.ts";
 import { worktreeOps } from "./worktree-ops.ts";
 import { AccountHomes } from "../signin/homes.ts";
+import { reconcileSignInLeftovers, recordSignInCreatedHome } from "../signin/leftover-homes.ts";
 import { onPath } from "../signin/path.ts";
 import { SignInRunner } from "../signin/runner.ts";
 import { tmuxTerminal } from "../signin/terminal.ts";
@@ -64,14 +65,16 @@ export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = pro
 const binOnPath = (name: string): string => onPath(name) ?? name;
 const claudePoolPath = (): string | null => onPath("claude-pool");
 
-function productionSignInRunner(now: () => number): SignInRunner {
+function productionSignInRunner(now: () => number, stateDir: string): SignInRunner {
   const home = homedir();
+  reconcileSignInLeftovers({ stateDir, agentHome: home, tmuxSocket: "morndo-signin" });
   const bins = { claude: binOnPath("claude"), cursor: binOnPath("agent") };
   const runner = new SignInRunner({
     terminal: tmuxTerminal("morndo-signin"),
     homes: new AccountHomes({ home, bins, claudePool: claudePoolPath() }),
     bins,
     now,
+    recordCreatedHome: row => recordSignInCreatedHome(stateDir, row),
   });
   const timer = setInterval(() => { void runner.reap(); }, 60_000);
   timer.unref();
@@ -110,6 +113,6 @@ export function buildOps(d: OpsDeps): OpTable {
     ...deliveryOps({ deliverer: d.deliverer, panes: d.panes, policy }),
     ...memoryOps({ root: paths.memoryDir, skillDirs: skillDirsOf(policy.memory.skillDirs, config.home) }),
     ...updateOps({ home: config.home, ...(d.runCommand ? { run: d.runCommand } : {}) }),
-    ...signinOps(productionSignInRunner(d.now)),
+    ...signinOps(productionSignInRunner(d.now, paths.stateDir)),
   };
 }

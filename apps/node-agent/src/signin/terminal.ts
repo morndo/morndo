@@ -1,12 +1,38 @@
-import { execFile } from "node:child_process";
+import { execFile, spawn, type ExecFileOptionsWithStringEncoding } from "node:child_process";
 import { promisify } from "node:util";
-import { exactSession, tmuxArgv, tmuxLiteral } from "@morndo/node-ops";
+import { exactSession, tmuxArgv, tmuxFailure, tmuxLiteral } from "@morndo/node-ops";
+import { signInBufferName } from "./buffer-name.ts";
 
-const run = promisify(execFile);
+type ExecResult = { stdout: string; stderr: string };
+type ExecFn = (file: string, args: readonly string[], opts?: ExecFileOptionsWithStringEncoding) => Promise<ExecResult>;
 
-// send-keys -l does not expand formats; only a trailing ";" ends the tmux command (tmux-cli.ts rule for "\;").
-const sendKeysLiteral = (text: string): string =>
-  text.endsWith(";") ? `${text.slice(0, -1)}\\;` : text;
+const defaultRun: ExecFn = promisify(execFile);
+
+function execWithInput(file: string, args: readonly string[], input: string, spawnFn: typeof spawn): Promise<ExecResult> {
+  return new Promise((resolve, reject) => {
+    const child = spawnFn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { stderr += chunk; });
+    child.on("error", reject);
+    child.on("close", (code, signal) => {
+      if (code === 0) resolve({ stdout, stderr });
+      else {
+        const err = new Error(`${file} exited ${code ?? signal}`) as Error & { code?: number | null; stderr?: string; signal?: NodeJS.Signals | null; killed?: boolean };
+        err.code = code;
+        err.stderr = stderr;
+        err.signal = signal;
+        err.killed = false;
+        reject(err);
+      }
+    });
+    child.stdin.write(input);
+    child.stdin.end();
+  });
+}
 
 export type SignInTerminal = {
   open(id: string, command: readonly string[]): Promise<void>;
@@ -17,8 +43,9 @@ export type SignInTerminal = {
   close(id: string): Promise<void>;
 };
 
-export function tmuxTerminal(socket: string): SignInTerminal {
-  const tmux = (args: readonly string[]) => run("tmux", tmuxArgv(socket, args), { encoding: "utf8", maxBuffer: 4 * 1024 * 1024 });
+export function tmuxTerminal(socket: string, run: ExecFn = defaultRun, spawnFn: typeof spawn = spawn): SignInTerminal {
+  const tmux = (args: readonly string[], opts?: ExecFileOptionsWithStringEncoding) =>
+    run("tmux", tmuxArgv(socket, args), { encoding: "utf8", maxBuffer: 4 * 1024 * 1024, ...opts });
   const session = (id: string) => exactSession(id);
   const pane = (id: string) => `${exactSession(id)}:`;
 
@@ -39,12 +66,15 @@ export function tmuxTerminal(socket: string): SignInTerminal {
         const { stdout } = await tmux(["display-message", "-p", "-t", pane(id), "#{pane_dead} #{pane_dead_status}"]);
         const [deadRaw, statusRaw] = stdout.trim().split(/\s+/);
         return { dead: deadRaw === "1", status: deadRaw === "1" ? Number(statusRaw) : null };
-      } catch {
-        return { dead: true, status: null };
+      } catch (e) {
+        if (tmuxFailure(e) === "absent") return { dead: true, status: null };
+        throw e;
       }
     },
     async type(id, text) {
-      await tmux(["send-keys", "-t", pane(id), "-l", "--", sendKeysLiteral(text)]);
+      const buf = signInBufferName(id);
+      await execWithInput("tmux", tmuxArgv(socket, ["load-buffer", "-b", buf, "-"]), text, spawnFn);
+      await tmux(["paste-buffer", "-d", "-b", buf, "-t", pane(id)]);
     },
     async enter(id) {
       await tmux(["send-keys", "-t", pane(id), "Enter"]);
