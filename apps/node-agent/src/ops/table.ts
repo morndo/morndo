@@ -28,6 +28,7 @@ import type { UploadInbox } from "./upload-inbox.ts";
 import { updateOps, type CommandRunner } from "./update-ops.ts";
 import { worktreeOps } from "./worktree-ops.ts";
 import { AccountHomes } from "../signin/homes.ts";
+import { onPath } from "../signin/path.ts";
 import { SignInRunner } from "../signin/runner.ts";
 import { tmuxTerminal } from "../signin/terminal.ts";
 import { signinOps } from "./signin-ops.ts";
@@ -61,15 +62,8 @@ export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = pro
   return env.ENGINES_TRANSCRIPTS || join(home, ".local", "share", "engines", "transcripts");
 }
 
-function binOnPath(name: string): string {
-  try { return execFileSync("command", ["-v", name], { encoding: "utf8", env: process.env }).trim(); }
-  catch { return name; }
-}
-
-function claudePoolPath(): string | null {
-  try { return execFileSync("command", ["-v", "claude-pool"], { encoding: "utf8", env: process.env }).trim(); }
-  catch { return null; }
-}
+const binOnPath = (name: string): string => onPath(name) ?? name;
+const claudePoolPath = (): string | null => onPath("claude-pool");
 
 function productionSignInRunner(now: () => number): SignInRunner {
   const home = homedir();

@@ -394,7 +394,7 @@ export class SignInRunner {
     const out = new Map<string, boolean>();
     if (!this.#homes.claudePool) return out;
     try {
-      const { stdout } = await run(this.#homes.claudePool, ["list", "--json"], { encoding: "utf8", env: PATH_ENV });
+      const { stdout } = await run(this.#homes.claudePool, ["list", "--json"], { encoding: "utf8", env: { ...PATH_ENV, HOME: this.#homes.home } });
       const today = new Date(this.#now()).toISOString().slice(0, 10);
       for (const line of stdout.split("\n")) {
         if (!line.trim()) continue;
