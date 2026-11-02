@@ -43,7 +43,8 @@ export const failed = (code: ErrorCode, message: string, store: string | null = 
 // job.noticeResult.
 // signin.code and signin.cancel are not keyed (FL7's record must never hold a sealed code), but each acts: a lost answer
 // may have run (ADR-0039), so nothing resends a code on a guess.
-export const SIDE_EFFECT_OPS: ReadonlySet<OpName> = new Set<OpName>([...KEYED_OPS, "pane.keys", "lane.deliver", "delivery.cancel", "job.cancel", "job.noticeResult", "signin.code", "signin.cancel"]);
+const ACTING_OPS: OpName[] = [...KEYED_OPS, "pane.keys", "lane.deliver", "delivery.cancel", "job.cancel", "job.noticeResult"];
+export const SIDE_EFFECT_OPS: ReadonlySet<OpName> = new Set<OpName>([...ACTING_OPS, "signin.code", "signin.cancel"]);
 // The ops that move bulk data (up to LIMITS.chunkBytes each): one at a time per connection (spec 5.2). pane.capture
 // answers up to LIMITS.captureMaxBytes (256 KiB, one chunk; fleet clients spec §5).
 export const BULK_OPS: ReadonlySet<OpName> = new Set<OpName>(["transcript.read", "file.get", "file.put", "pane.capture"]);

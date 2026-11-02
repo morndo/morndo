@@ -99,16 +99,15 @@ export class OpExecutor {
     const keys = this.#d.doneKeys;
     const hash = key === undefined ? "" : argsHash(op, args);
     return this.#queue.run(entry.queue(args), async () => {
-      let replaySignInStart = false;
       if (key !== undefined) {
         let prior: Prior;
         try { prior = keys.lookup(key, hash); }
         catch (e) { return this.#keysFailed(op, e); }
-        if (prior.state === "done") {
-          if (op !== "signin.start") return { ok: true, result: prior.outcome };
-          replaySignInStart = true;
-        } else if (prior.state === "started") return fail("uncertain", "an earlier attempt with this key started, and its outcome is not known");
-        else if (prior.state === "mismatch") return fail("uncertain", "this key was used with other arguments: its op may have run");
+        // ADR-0039: signin.start's record keeps no result (no sign-in link on disk), so a replay asks the runner again, unkeyed.
+        if (prior.state === "done" && op === "signin.start") key = undefined;
+        else if (prior.state === "done") return { ok: true, result: prior.outcome };
+        if (prior.state === "started") return fail("uncertain", "an earlier attempt with this key started, and its outcome is not known");
+        if (prior.state === "mismatch") return fail("uncertain", "this key was used with other arguments: its op may have run");
       }
       if (this.#d.held?.() && !ALLOWED_WHILE_HELD.has(op)) return fail("updating", "this node is not taking new work while it updates");
       if (deadline.expired()) return fail("timeout", "the deadline passed before the op could start");
@@ -116,7 +115,7 @@ export class OpExecutor {
       // stop or an updater's safe point must count the op while it waits on the disk, not only once it acts.
       const end = (this.#d.flight ?? new Flight()).begin({ kind: op, id: key ?? op });
       try {
-        if (key !== undefined && !replaySignInStart) {
+        if (key !== undefined) {
           let started: boolean;
           try { started = await keys.start(key, hash); }   // durable before the side effect
           catch (e) { return this.#keysFailed(op, e); }
@@ -135,7 +134,7 @@ export class OpExecutor {
           out = fail("internal", "the node failed while running the op; it may have acted");    // "maybe": the key stays started
         }
         if (key !== undefined && out.ok) this.#d.afterEffect?.(key);
-        if (key !== undefined && !replaySignInStart) {
+        if (key !== undefined) {
           if (out.ok) keys.finish(key, op === "signin.start" ? null : out.result);
           else if (out.error.executed === "no") keys.release(key);
         }
