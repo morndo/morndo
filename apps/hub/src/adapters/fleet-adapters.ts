@@ -549,13 +549,20 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
 }
 
 // Sign-in from the app (ADR-0039): typed fleet ops to one node; online nodes only for the sweep and the Accounts list.
+const SIGNIN_FLEET_OFFLINE = { ok: false as const, error: { code: "node_offline" as const, executed: "no" as const, message: "fleet unreachable" } };
+
 export function signinFleet(client: FleetClient): SignInFleet {
   return {
-    nodes: async () => (await client.nodes()).filter(n => n.status === "online").map(n => n.name),
-    op: (node, op, args, opts) => {
+    nodes: async () => {
+      try { return (await client.nodes()).filter(n => n.status === "online").map(n => n.name); }
+      catch { return []; }
+    },
+    op: async (node, op, args, opts) => {
       const timeoutMs = opts?.timeoutMs ?? (op === "signin.start" ? 45_000 : 15_000);
-      // The fleet takes a key only as "<client>:<…>" (apps/fleet op-body.ts): the service's id goes out under the hub's name.
-      return client.op({ node }, op, args, { ...(opts?.key !== undefined ? { key: `hub:signin:${opts.key}` } : {}), timeoutMs });
+      try {
+        // The fleet takes a key only as "<client>:<…>" (apps/fleet op-body.ts): the service's id goes out under the hub's name.
+        return await client.op({ node }, op, args, { ...(opts?.key !== undefined ? { key: `hub:signin:${opts.key}` } : {}), timeoutMs });
+      } catch { return SIGNIN_FLEET_OFFLINE; }
     },
   };
 }

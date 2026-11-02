@@ -3,7 +3,7 @@
 import QRCode from "qrcode";
 import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, type AccessPolicy } from "@morndo/domain";
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
-import { Store } from "./adapters/store.ts";
+import { Store, type SignInAudit } from "./adapters/store.ts";
 import { GithubChecks } from "./adapters/github-checks.ts";
 import { readTokenFile } from "./adapters/token-file.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
@@ -263,10 +263,7 @@ switch (cmd) {
     const signin = fleet ? new SignInService({
       fleet: signinFleet(fleet.client),
       now: Date.now,
-      audit: entry => {
-        const e = entry as { kind: string; node: string; runtime: string; account: string; id: string; phase: string };
-        log.info(`sign-in ${e.kind}: ${e.runtime} ${e.account} on ${e.node} (${e.id}, ${e.phase})`);
-      },
+      audit: entry => { store.record([entry as SignInAudit]); },
     }) : null;
     // The manager's needs-you list: the decision cards read it, and so do a block's card waits (B18).
     const ownersList = config.ledgerPath ? ledgerReader(config.ledgerPath) : null;
