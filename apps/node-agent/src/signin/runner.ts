@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { statSync } from "node:fs";
+import { existsSync, lstatSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -27,6 +27,8 @@ type Session = {
   id: string;
   runtime: SignInRuntime;
   account: string;
+  create: boolean;
+  createdHome: boolean;
   claudeConfigDir: string | null;
   credentialsPath: string;
   phase: SignInPhase;
@@ -39,6 +41,8 @@ type Session = {
   ageIdentity: AgeIdentity | null;
   sentCode: boolean;
 };
+
+const targetSlotKey = (runtime: SignInRuntime, account: string): string => `${runtime}\0${account}`;
 
 const sleep = (ms: number) => new Promise<void>(r => setTimeout(r, ms));
 
@@ -62,6 +66,7 @@ export class SignInRunner {
   readonly #bins: { claude: string; cursor: string };
   readonly #now: () => number;
   readonly #sessions = new Map<string, Session>();
+  readonly #pendingTargets = new Set<string>();
 
   constructor(o: { terminal: SignInTerminal; homes: AccountHomes; bins: { claude: string; cursor: string }; now: () => number }) {
     this.#terminal = o.terminal;
@@ -70,11 +75,18 @@ export class SignInRunner {
     this.#now = o.now;
   }
 
-  accounts(a: OpArgs["signin.accounts"]): Promise<Outcome<"signin.accounts">> {
+  async reap(): Promise<void> {
+    await this.#reapExpired();
+    this.#reapExpiredHomes();
+  }
+
+  async accounts(a: OpArgs["signin.accounts"]): Promise<Outcome<"signin.accounts">> {
+    await this.#reapExpired();
     return a.runtime === "claude" ? this.#claudeAccounts() : this.#cursorAccounts();
   }
 
   async start(a: OpArgs["signin.start"]): Promise<Outcome<"signin.start">> {
+    await this.#reapExpired();
     if (!SIGNIN_ACCOUNT.test(a.account)) return fail("bad_args", "bad_account");
     if (a.runtime === "cursor" && a.account !== "main") return fail("not_allowed", "cursor_main_only");
 
@@ -84,59 +96,74 @@ export class SignInRunner {
     if (this.#busyTarget(a.runtime, a.account)) return fail("busy", "a sign-in is already running for this account");
     if (this.#liveCount() >= MAX_LIVE) return fail("busy", "too many sign-ins at once");
 
-    const resolved = await this.#homes.ensure(a.runtime, a.account, a.create);
-    if ("code" in resolved) return fail(resolved.code, resolved.message);
+    const slot = targetSlotKey(a.runtime, a.account);
+    this.#pendingTargets.add(slot);
+    try {
+      if (a.runtime === "cursor") {
+        const signedIn = await this.#cursorSignedIn();
+        if (signedIn === "ok") return fail("not_allowed", "already_signed_in");
+      }
 
-    if (a.runtime === "claude" && a.account !== "main" && resolved.claudeConfigDir) {
-      try { statSync(resolved.claudeConfigDir); } catch { return fail("not_allowed", "no_account"); }
+      const resolved = await this.#homes.ensure(a.runtime, a.account, a.create);
+      if ("code" in resolved) return fail(resolved.code, resolved.message);
+
+      if (a.runtime === "claude" && a.account !== "main" && resolved.claudeConfigDir) {
+        try { statSync(resolved.claudeConfigDir); } catch { return fail("not_allowed", "no_account"); }
+      }
+
+      const recipe = RECIPES[a.runtime];
+      const argv = recipe.argv(this.#bins);
+      const cmd = sessionCommand(this.#homes.home, argv[0]!, argv.slice(1), recipe.extraEnv(this.#homes.home, resolved.claudeConfigDir));
+
+      try { await this.#terminal.open(a.id, cmd); }
+      catch { return fail("internal", "could not start sign-in terminal"); }
+
+      const linkOut = await this.#waitForLink(a.id, a.runtime, recipe.link);
+      if (!linkOut.ok) {
+        await this.#terminal.close(a.id);
+        if (resolved.createdHome) this.#maybeRemoveCreatedHome(a.runtime, a.account, resolved.createdHome, "failed");
+        return fail(linkOut.code, linkOut.message);
+      }
+
+      const needsCode = recipe.codePrompt !== null && recipe.codePrompt.test(linkOut.screen);
+      let recipient: string | null = null;
+      let ageIdentity: AgeIdentity | null = null;
+      if (needsCode) {
+        ageIdentity = await generateX25519Identity();
+        recipient = await identityToRecipient(ageIdentity);
+      }
+
+      const credentialsPath = a.runtime === "claude"
+        ? join(resolved.accountHome, ".credentials.json")
+        : join(this.#homes.home, ".config", "cursor", "auth.json");
+
+      const session: Session = {
+        id: a.id,
+        runtime: a.runtime,
+        account: a.account,
+        create: a.create,
+        createdHome: resolved.createdHome,
+        claudeConfigDir: resolved.claudeConfigDir,
+        credentialsPath,
+        phase: "waiting",
+        link: linkOut.link,
+        needsCode,
+        recipient,
+        expiresAt: this.#now() + SIGNIN_TTL_MS,
+        identity: null,
+        problem: null,
+        ageIdentity,
+        sentCode: false,
+      };
+      this.#sessions.set(a.id, session);
+      return ok<"signin.start">(this.#startView(session));
+    } finally {
+      this.#pendingTargets.delete(slot);
     }
-
-    const recipe = RECIPES[a.runtime];
-    const argv = recipe.argv(this.#bins);
-    const cmd = sessionCommand(this.#homes.home, argv[0]!, argv.slice(1), recipe.extraEnv(this.#homes.home, resolved.claudeConfigDir));
-
-    try { await this.#terminal.open(a.id, cmd); }
-    catch { return fail("internal", "could not start sign-in terminal"); }
-
-    const linkOut = await this.#waitForLink(a.id, a.runtime, recipe.link);
-    if (!linkOut.ok) {
-      await this.#terminal.close(a.id);
-      return fail(linkOut.code, linkOut.message);
-    }
-
-    const needsCode = recipe.codePrompt !== null && recipe.codePrompt.test(linkOut.screen);
-    let recipient: string | null = null;
-    let ageIdentity: AgeIdentity | null = null;
-    if (needsCode) {
-      ageIdentity = await generateX25519Identity();
-      recipient = await identityToRecipient(ageIdentity);
-    }
-
-    const credentialsPath = a.runtime === "claude"
-      ? join(resolved.accountHome, ".credentials.json")
-      : join(this.#homes.home, ".config", "cursor", "auth.json");
-
-    const session: Session = {
-      id: a.id,
-      runtime: a.runtime,
-      account: a.account,
-      claudeConfigDir: resolved.claudeConfigDir,
-      credentialsPath,
-      phase: "waiting",
-      link: linkOut.link,
-      needsCode,
-      recipient,
-      expiresAt: this.#now() + SIGNIN_TTL_MS,
-      identity: null,
-      problem: null,
-      ageIdentity,
-      sentCode: false,
-    };
-    this.#sessions.set(a.id, session);
-    return ok<"signin.start">(this.#startView(session));
   }
 
   async code(a: OpArgs["signin.code"]): Promise<Outcome<"signin.code">> {
+    await this.#reapExpired();
     const s = this.#sessions.get(a.id);
     if (!s) return fail("no_session", "no such sign-in");
     await this.#expireIfNeeded(s);
@@ -153,37 +180,64 @@ export class SignInRunner {
     }
     if (!codeOk(plain)) return ok<"signin.code">({ accepted: false });
 
-    await this.#terminal.type(a.id, plain);
-    await this.#terminal.enter(a.id);
+    try {
+      await this.#terminal.type(a.id, plain);
+      await this.#terminal.enter(a.id);
+    } catch {
+      await this.#failFromTerminal(s, "node_lost");
+      return ok<"signin.code">({ accepted: false });
+    }
     s.sentCode = true;
     s.phase = "checking";
     return ok<"signin.code">({ accepted: true });
   }
 
   async status(a: OpArgs["signin.status"]): Promise<Outcome<"signin.status">> {
+    await this.#reapExpired();
     const s = this.#sessions.get(a.id);
     if (!s) return fail("no_session", "no such sign-in");
     await this.#expireIfNeeded(s);
-    await this.#refresh(s);
+    try {
+      await this.#refresh(s);
+    } catch {
+      await this.#failFromTerminal(s, "node_lost");
+    }
     return ok<"signin.status">(this.#statusView(s));
   }
 
   async cancel(a: OpArgs["signin.cancel"]): Promise<Outcome<"signin.cancel">> {
+    await this.#reapExpired();
     const s = this.#sessions.get(a.id);
     if (!s) return fail("no_session", "no such sign-in");
     if (this.#isFinal(s.phase)) return ok<"signin.cancel">({ cancelled: false });
-    await this.#terminal.close(a.id);
+    try { await this.#terminal.close(a.id); } catch { /* session may be gone */ }
     s.ageIdentity = null;
     s.phase = "cancelled";
+    this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "cancelled");
     return ok<"signin.cancel">({ cancelled: true });
   }
 
   async #refresh(s: Session): Promise<void> {
     await this.#expireIfNeeded(s);
     if (!this.#isLive(s)) return;
-    const ex = await this.#terminal.exit(s.id);
+    let ex: { dead: boolean; status: number | null };
+    try {
+      ex = await this.#terminal.exit(s.id);
+    } catch {
+      await this.#failFromTerminal(s, "node_lost");
+      return;
+    }
     if (!ex.dead) return;
     await this.#finish(s, ex.status);
+  }
+
+  async #failFromTerminal(s: Session, problem: string): Promise<void> {
+    if (this.#isFinal(s.phase)) return;
+    s.phase = "failed";
+    s.problem = problem;
+    s.ageIdentity = null;
+    try { await this.#terminal.close(s.id); } catch { /* already gone */ }
+    this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "failed");
   }
 
   async #finish(s: Session, exitStatus: number | null): Promise<void> {
@@ -191,16 +245,18 @@ export class SignInRunner {
     if (code !== 0) {
       s.phase = "failed";
       s.problem = s.sentCode ? "code_refused" : "not_signed_in";
-      await this.#terminal.close(s.id);
+      try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
       s.ageIdentity = null;
+      this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "failed");
       return;
     }
     const id = await this.#loginIdentity(s);
     if (!id) {
       s.phase = "failed";
       s.problem = "not_signed_in";
-      await this.#terminal.close(s.id);
+      try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
       s.ageIdentity = null;
+      this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "failed");
       return;
     }
     if (s.runtime === "claude") {
@@ -209,29 +265,58 @@ export class SignInRunner {
           s.phase = "failed";
           s.problem = "credentials_mode";
           s.identity = null;
-          await this.#terminal.close(s.id);
+          try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
           s.ageIdentity = null;
+          this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "failed");
           return;
         }
       } catch {
         s.phase = "failed";
         s.problem = "not_signed_in";
-        await this.#terminal.close(s.id);
+        try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
         s.ageIdentity = null;
+        this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "failed");
         return;
       }
     }
     s.phase = "done";
     s.identity = id;
     s.problem = null;
-    await this.#terminal.close(s.id);
+    try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
     s.ageIdentity = null;
+  }
+
+  async #reapExpired(): Promise<void> {
+    for (const s of this.#sessions.values()) {
+      if (this.#isFinal(s.phase)) continue;
+      if (this.#now() >= s.expiresAt) await this.#expireIfNeeded(s);
+    }
+  }
+
+  #reapExpiredHomes(): void {
+    for (const s of this.#sessions.values()) {
+      if (s.phase === "expired") this.#maybeRemoveCreatedHome(s.runtime, s.account, s.createdHome, "expired");
+    }
+  }
+
+  #maybeRemoveCreatedHome(runtime: SignInRuntime, account: string, createdHome: boolean, phase: SignInPhase): void {
+    if (!createdHome || runtime !== "claude" || account === "main") return;
+    if (phase === "done") return;
+    if (!SIGNIN_ACCOUNT.test(account)) return;
+    const root = join(this.#homes.home, ".claude-accounts");
+    const dir = join(root, account);
+    try {
+      const st = lstatSync(dir);
+      if (st.isSymbolicLink() || !st.isDirectory()) return;
+      if (existsSync(join(dir, ".credentials.json"))) return;
+      rmSync(dir, { recursive: true, force: true });
+    } catch { /* leave anything else alone */ }
   }
 
   async #expireIfNeeded(s: Session): Promise<void> {
     if (this.#isFinal(s.phase)) return;
     if (this.#now() >= s.expiresAt && (s.phase === "waiting" || s.phase === "checking")) {
-      await this.#terminal.close(s.id);
+      try { await this.#terminal.close(s.id); } catch { /* session may be gone */ }
       s.ageIdentity = null;
       s.phase = "expired";
     }
@@ -256,6 +341,7 @@ export class SignInRunner {
   }
 
   #busyTarget(runtime: SignInRuntime, account: string): boolean {
+    if (this.#pendingTargets.has(targetSlotKey(runtime, account))) return true;
     for (const s of this.#sessions.values()) {
       if (this.#isLive(s) && s.runtime === runtime && s.account === account) return true;
     }
@@ -356,7 +442,8 @@ export class SignInRunner {
             if (j.loggedIn === true) return "ok";
           } catch { /* not json */ }
         }
-        if (/not logged in/i.test(String(e))) return "missing";
+        const msg = typeof e === "object" && e !== null && "message" in e ? String((e as { message: unknown }).message) : "";
+        if (/not logged in/i.test(out) || /not logged in/i.test(msg)) return "missing";
         if (i < STATUS_RETRIES - 1) await sleep(STATUS_RETRY_MS);
       }
     }

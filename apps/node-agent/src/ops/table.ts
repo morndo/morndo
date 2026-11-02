@@ -6,7 +6,6 @@
 //   queue a first prompt with the deliverer.
 // Memory (ADR-0031): memory.sync writes into the node's state directory and the policy's memory.skillDirs.
 // The deliverer and the executor are made from this table, so it reaches them late (runtime.ts), by the time an op runs.
-import { execFileSync } from "node:child_process";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
@@ -68,12 +67,15 @@ const claudePoolPath = (): string | null => onPath("claude-pool");
 function productionSignInRunner(now: () => number): SignInRunner {
   const home = homedir();
   const bins = { claude: binOnPath("claude"), cursor: binOnPath("agent") };
-  return new SignInRunner({
+  const runner = new SignInRunner({
     terminal: tmuxTerminal("morndo-signin"),
     homes: new AccountHomes({ home, bins, claudePool: claudePoolPath() }),
     bins,
     now,
   });
+  const timer = setInterval(() => { void runner.reap(); }, 60_000);
+  timer.unref();
+  return runner;
 }
 
 export function buildOps(d: OpsDeps): OpTable {

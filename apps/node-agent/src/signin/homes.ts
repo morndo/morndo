@@ -6,7 +6,7 @@ import { SIGNIN_ACCOUNT, type SignInRuntime } from "@morndo/domain";
 
 const exec = promisify(execFile);
 
-export type ResolveOk = { claudeConfigDir: string | null; accountHome: string };
+export type ResolveOk = { claudeConfigDir: string | null; accountHome: string; createdHome: boolean };
 export type ResolveErr = { code: "not_allowed"; message: string };
 
 export class AccountHomes {
@@ -23,29 +23,31 @@ export class AccountHomes {
   resolve(runtime: SignInRuntime, account: string, create: boolean): ResolveOk | ResolveErr {
     if (runtime === "cursor") {
       if (account !== "main") return { code: "not_allowed", message: "cursor_main_only" };
-      return { claudeConfigDir: null, accountHome: this.home };
+      return { claudeConfigDir: null, accountHome: this.home, createdHome: false };
     }
-    if (account === "main") return { claudeConfigDir: null, accountHome: join(this.home, ".claude") };
+    if (account === "main") return { claudeConfigDir: null, accountHome: join(this.home, ".claude"), createdHome: false };
     const dir = join(this.home, ".claude-accounts", account);
     if (existsLink(dir)) return { code: "not_allowed", message: "bad_home" };
     const there = dirExists(dir);
     if (!there && !create) return { code: "not_allowed", message: "no_account" };
     if (there && create) return { code: "not_allowed", message: "exists" };
-    return { claudeConfigDir: dir, accountHome: dir };
+    return { claudeConfigDir: dir, accountHome: dir, createdHome: false };
   }
 
   async ensure(runtime: SignInRuntime, account: string, create: boolean): Promise<ResolveOk | ResolveErr> {
     const r = this.resolve(runtime, account, create);
     if ("code" in r) return r;
+    let createdHome = false;
     if (create && account !== "main" && runtime === "claude") {
       const dir = r.claudeConfigDir!;
       if (!dirExists(dir)) {
         if (this.claudePool) await exec(this.claudePool, ["add", account]);
         else mkdirSync(dir, { recursive: true });
+        createdHome = true;
       }
     }
     if (runtime === "claude" && account !== "main" && r.claudeConfigDir) chmodSync(r.claudeConfigDir, 0o700);
-    return r;
+    return { ...r, createdHome };
   }
 
   listClaudeAccountNames(): string[] {
