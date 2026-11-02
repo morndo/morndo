@@ -159,7 +159,9 @@
   }
   li:last-child { border-bottom: 0; }
   .name { font-weight: 700; }
-  .state { color: var(--muted, #666); text-align: right; }
+  .state { color: var(--muted, #666); }
+  .shared { padding: 0 8px; border-radius: 999px; background: var(--warn-soft, #fff3cd); color: var(--warn-text, #7a5200); }
+  li button { margin-left: auto; }
   .add { display: grid; gap: 6px; margin-top: 8px; }
   .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   .row input { flex: 1; min-width: 8rem; padding: 8px 10px; border-radius: 10px; border: 1px solid var(--edge, #ccc); }

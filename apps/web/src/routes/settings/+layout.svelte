@@ -1,7 +1,8 @@
 <script lang="ts">
-  // Settings (ADR-0039 §9): one page for Accounts, LLM connections, Devices and Updates. On a wide screen the
-  // sections sit on the left and the open one on the right; on a phone /settings is the list and each section has
-  // a Back link to it. The app renders only in the browser (ssr = false), so the width is known before first paint.
+  // Settings (ADR-0039 §8): one page for Accounts, LLM connections, Devices and Updates. On a wide screen the
+  // sections sit on the left and the open one on the right; on a phone /settings is the list, and inside a section the
+  // header's chevron is Back to it. The app renders only in the browser (ssr = false), so the width is known before
+  // first paint.
   import "$lib/phone/phone.css";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
@@ -41,8 +42,13 @@
 
 <div class="phone settings">
   <header class="top">
-    <div class="in">
-      <a class="back home" href="/" aria-label="Back to Morndo"><ChevronLeft size={24} /></a>
+    <div class="in" class:wide={wide}>
+      <!-- On a phone, inside a section, this goes back to the list of sections; elsewhere it goes home. -->
+      {#if phoneSection}
+        <a class="back" href="/settings" aria-label="Back"><ChevronLeft size={24} /></a>
+      {:else}
+        <a class="back" href="/" aria-label="Home"><ChevronLeft size={24} /></a>
+      {/if}
       <div>
         <h1>Settings</h1>
       </div>
@@ -52,10 +58,6 @@
   <div class="shell" class:wide={wide} class:phoneSection={phoneSection}>
     {#if !phoneSection}
       <SettingsNav {sections} {active} />
-    {/if}
-
-    {#if phoneSection}
-      <a class="back list" href="/settings">Back</a>
     {/if}
 
     {#if !indexOnly}
@@ -72,13 +74,11 @@
   }
   .in { max-width: calc(46rem + 52px); margin: 0 auto; display: flex; align-items: flex-start; gap: 6px; padding-right: 52px; }
   @media (max-width: 899px) { .in { padding-right: 0; } }
+  .in.wide { max-width: calc(56rem + 52px); padding-right: 0; }
   .in div { flex: 1; min-width: 0; }
   .back {
     flex: none; width: 44px; height: 44px; display: grid; place-items: center; color: var(--fg); border-radius: 12px;
     text-decoration: none;
-  }
-  .back.list {
-    width: auto; height: auto; min-height: 44px; padding: 0 8px; font: 700 15px/20px var(--body); justify-content: start;
   }
   h1 { margin: 0; font: 700 28px/34px var(--display); }
   .shell {
