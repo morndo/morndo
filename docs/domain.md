@@ -700,6 +700,29 @@ Which member account a session's next turn runs on, and the rules around it. Cod
 
 Aggregate **Pool**, one per runtime. The clock is the `now` argument; whether a holder is alive is a function argument.
 
+## Sign-in: an account signs in from the app ([ADR-0039](adr/0039-sign-in-from-the-app.md))
+
+The principal signs one account of an agent CLI in again, or adds one, from the app. The node runs the CLI's own sign-in
+for that account in a hidden terminal; the app shows its link; Claude's one-time code goes back sealed.
+
+- **Target**: one account of one runtime (`claude`, `cursor`) on one node. **Account**: `main` is the CLI's default home;
+  any other name (the pool's rule, `SIGNIN_ACCOUNT`) is a home of its own (Claude: `~/.claude-accounts/<name>`).
+- **Sign-in**: one attempt for one Target, with a Phase (`waiting`, `checking`, `done`, `failed`, `expired`,
+  `cancelled`), the CLI's link, an optional device code, and, when the CLI waits for a code, its own age recipient. The
+  node's runner owns its real state; the hub keeps a copy in memory (`packages/domain/src/signin.ts`).
+
+Rules:
+- **SI1** One live sign-in per Target: a second start gets the live one.
+- **SI2** A code is taken only while one is awaited and before the deadline (10 minutes).
+- **SI3** `done`, `failed`, `expired` and `cancelled` are final.
+- **SI4** A live sign-in past its deadline is `expired`, and the node closes its terminal.
+- **SI5** A link is https on the runtime's own hosts only; the node shows no other.
+- **SI6** No code, token or sealed value is part of a Sign-in, its view, the hub's audit or any log. The login stays the
+  CLI's own: a named home is 0700, its login file 0600, nothing copied (ADR-0018, ADR-0029).
+- **SI7** Starting and sending a code need a passkey check from the last 5 minutes, whatever the step-up policy (as SR5).
+- **SI8** Agents may ask for a card (`POST /api/agent/signins/request`); they never start a sign-in, see a link or send a
+  code.
+
 ## Key pool: which API key serves the next request ([ADR-0037](adr/0037-key-pools.md))
 
 Several API-key Connections of one provider and runtime behind one name, served in a fixed rotation, opt in. Code in `packages/domain/src/key-pool.ts`, inside the Connections context. A member is a Connection, so the lease gate (CN8) still runs on every key; the pool only decides which Connection a request goes to. It holds Connection **names** and health, never a ref, a fingerprint or a secret (CN1, CN5). The classifier that turns a provider refusal into an Outcome is an adapter; no provider name appears here.
@@ -1002,6 +1025,9 @@ Not adopted; nothing in the trial needs it. The core would be the owner's record
 - *Access supplies Secrets*: the Session and its fresh verification (SR5).
 - *Secrets supplies Catch-up, Notifications and Observation with Asks*: an open Secret request has a card (C1), raises one Notification (N2), and makes its lane wait (H3).
 - *The Fleet carries Secrets' typed operations*, keyed (FL7), and one node event, `secrets.requested`, routed to the hub only (SR9). No plaintext secret and no agent-CLI credential crosses the Fleet (FL14); a value sealed to one node's recipient may.
+- *The Fleet carries Sign-in's typed operations* (ADR-0039): the CLI's link and device code, which are not credentials,
+  and the one-time code sealed to that sign-in's own recipient on the node (FL14's sealed value), in memory for one
+  unkeyed operation. *Sign-in conforms to Connections and Pool*: it signs in the CLI's own home and never stores a token.
 - *Secrets stands beside Connections*: they share the vault, the identity and the process adapters, not a model. An LLM key is a Connection; a value a lane's tools need is a Secret.
 - *Secrets stands beside Authority*: a Use is not a Mandate (SC10).
 - *Knowledge stands beside Engines*. An SOP step names a Role and a Model class; the Role's chain and auto routing decide what runs, and nothing in Knowledge ranks or excludes an engine (K9). A Gate is answered through Escalation as a Decision; a run starts as a Job.

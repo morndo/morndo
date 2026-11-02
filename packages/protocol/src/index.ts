@@ -26,3 +26,4 @@ export * from "./uploads.ts";
 export * from "./transcription.ts";
 export * from "./secrets.ts";
 export * from "./memory.ts";
+export * from "./signin.ts";

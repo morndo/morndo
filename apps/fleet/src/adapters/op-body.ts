@@ -15,6 +15,8 @@ const OPS: Record<OpName, "client" | "agent"> = {
   "transcript.size": "client", "transcript.read": "client", "transcript.locate": "client", "file.stat": "client", "file.get": "client", "file.put": "client",
   "lane.start": "client", "lane.stop": "client", "worktree.list": "client", "worktree.add": "client", "memory.sync": "client", "job.cancel": "client", "job.notice": "agent", "job.noticeResult": "client",
   "connections.priority": "client", "connections.role": "client", "connections.revoke": "client", "connections.narrow": "client",
+  // ADR-0039: the hub relays the principal's sign-in to one node.
+  "signin.accounts": "client", "signin.start": "client", "signin.code": "client", "signin.status": "client", "signin.cancel": "client",
   // fleet clients: a delivery goes through /v1/deliveries; client-api.ts refuses lane.deliver and delivery.cancel here
   "pane.capture": "client", "lane.deliver": "client", "delivery.cancel": "client",
   // updates §5.4: the control plane asks a node to move to a Version. A client's ask (the hub's board sends it);
