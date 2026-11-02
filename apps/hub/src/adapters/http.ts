@@ -34,6 +34,7 @@ import type { UsageService } from "../application/usage-service.ts";
 import type { TranscriptionService } from "../application/transcription-service.ts";
 import type { BriefService } from "../application/brief-service.ts";
 import type { MemoryService } from "../application/memory-service.ts";
+import type { SignInService } from "../application/signin-service.ts";
 import type { UpdatesCommandOutcome, UpdatesService } from "../application/updates-service.ts";
 import { BRIEF_TEMPLATE } from "./brief-template.ts";
 import { bridgeDesktop } from "./rfb.ts";
@@ -43,7 +44,7 @@ import { MAX_UPLOAD_BYTES, unreachable } from "@morndo/domain";
 import {
   AnswerBody, BoardActionBody, BoardCreateBody, CancelBody, ClientFeedFrames, ClientTerminalFrames, EnginesSaveBody, IdentityProveBody,
   LinkDecisionBody, LIMITS as PROTO_LIMITS, MemoryInvalidateBody, MemoryRememberBody, NarrowCommand, PairCheckBody, PairOptionsBody, PasskeyVerifyBody, PolicyBody, PriorityCommand, PushSubscriptionBody,
-  RevokeCommand, RoleCommand, SendBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLeaseBody, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody,
+  RevokeCommand, RoleCommand, RequestSignInBody, SendBody, SignInCodeBody, StartSignInBody, TranscriptionCancelBody, TranscriptionCreateBody, UPLOAD_NAME_HEADER, UpdatesApplyBody, UpdatesResumeBody, UpdatesRollbackBody, UsageForgetBody, UsageLeaseBody, UsageLimitBody, UsagePoolBody, UsageReadingsBody, UsageReportBody, UsageSeatClearBody,
   decode, isWorkerOrLegacyId, parseBody, type CommandKind, type FrameOf, type Output, type Schema,
 } from "@morndo/protocol";
 import { log } from "./log.ts";
@@ -228,6 +229,7 @@ export function startHttp(p: {
   transcription?: TranscriptionService | null;                              // ADR-0021; null: the plugin is not wired
   briefs?: BriefService | null;                                             // ADR-0023: decision briefs; null: off
   memory?: { service: MemoryService; agents: AgentAccess } | null;          // ADR-0031: Memory's agent door, board or not; null: off
+  signin?: SignInService | null;                                            // ADR-0039: sign-in from the app; null: no fleet
 }) {
   const { config, identity, access, observation, steering, escalations, remote } = p;
   const files = p.files ?? null;
@@ -475,6 +477,12 @@ export function startHttp(p: {
       const r = p.usage.reading(await readBody(req, UsageReadingsBody), typeof accountHeader === "string" ? accountHeader : null, who.actor);
       if (unbound && r.ok) p.board.agents.noteUnbound(who.token.id);
       return r.ok ? json(res, 200, { ok: true }) : json(res, 400, { error: r.problem });
+    }
+    if (path === "/api/agent/signins/request" && method === "POST") {
+      if (!p.signin) return json(res, 404, { error: "signin_off" });
+      const body = await readBody(req, RequestSignInBody);
+      const by = who.actor.kind === "principal" ? "principal" : who.actor.name;
+      return json(res, 200, p.signin.request(body, by));
     }
     // A node's ask for a lease before a rationed read (S5, plan 4.4, U16): granted with an opaque id and its expiry,
     // fresh with the capture time the caller may use instead of spawning, or denied with one reason and a wait. The
@@ -894,6 +902,51 @@ export function startHttp(p: {
       const r = p.memory.service.issueApprovalCode(a, approvalCode[1] ?? "");
       if (r.ok) return json(res, 200, { code: r.code, expiresAt: r.expiresAt });
       return json(res, r.problem === "step_up" ? 403 : r.problem === "not_found" ? 404 : 409, { error: r.problem });
+    }
+    // ADR-0039: sign an agent CLI account in from the app. Reads are looks; start, code and cancel are Commands under step-up.
+    const signinStatus = (problem: string) => problem === "step_up" ? 403 : problem === "not_found" ? 404 : 409;
+    if (path === "/api/signins/nodes" && method === "GET") {
+      if (!p.signin) return json(res, 404, { error: "signin_off" });
+      return json(res, 200, { nodes: await p.signin.nodes() });
+    }
+    if (path === "/api/signins/cards" && method === "GET") {
+      if (!p.signin) return json(res, 404, { error: "signin_off" });
+      return json(res, 200, { cards: p.signin.cards() });
+    }
+    if (path === "/api/signins/accounts" && method === "GET") {
+      if (!p.signin) return json(res, 404, { error: "signin_off" });
+      const q = new URL(req.url ?? "/", "http://hub").searchParams;
+      const runtime = q.get("runtime");
+      const node = q.get("node") ?? "";
+      if (runtime !== "claude" && runtime !== "cursor") return json(res, 400, { error: "bad_runtime" });
+      const r = await p.signin.accounts(node, runtime);
+      return r.ok ? json(res, 200, r.view) : json(res, signinStatus(r.problem), { error: r.problem });
+    }
+    if (path === "/api/signins" && method === "POST") {
+      if (!p.signin) return json(res, 404, { error: "signin_off" });
+      limited(buckets.commands.take(a.endpoint.id));
+      const r = await p.signin.start(a, await readBody(req, StartSignInBody));
+      return r.ok ? json(res, 200, r.view) : json(res, signinStatus(r.problem), { error: r.problem });
+    }
+    const signinOne = /^\/api\/signins\/(si-[A-Za-z0-9_-]{1,64})(?:\/(code|cancel))?$/.exec(path);
+    if (signinOne) {
+      if (!p.signin) return json(res, 404, { error: "signin_off" });
+      const id = signinOne[1] ?? "";
+      const action = signinOne[2];
+      if (!action && method === "GET") {
+        const r = await p.signin.view(id);
+        return r.ok ? json(res, 200, r.view) : json(res, 404, { error: r.problem });
+      }
+      if (action === "code" && method === "POST") {
+        limited(buckets.commands.take(a.endpoint.id));
+        const r = await p.signin.code(a, id, await readBody(req, SignInCodeBody));
+        return r.ok ? json(res, 200, r.view) : json(res, signinStatus(r.problem), { error: r.problem });
+      }
+      if (action === "cancel" && method === "POST") {
+        limited(buckets.commands.take(a.endpoint.id));
+        const r = await p.signin.cancel(a, id);
+        return r.ok ? json(res, 200, r.view) : json(res, signinStatus(r.problem), { error: r.problem });
+      }
     }
     // ADR-0015: the board. Reading is a look; a change is a Command (AC7).
     if (path.startsWith("/api/board")) {

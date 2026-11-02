@@ -21,6 +21,7 @@ import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, typ
 import { log } from "./log.ts";
 import { stagedUploadName } from "./uploads.ts";
 import { perKeyLimit } from "./per-key-limit.ts";
+import type { SignInFleet } from "../application/signin-service.ts";
 
 export type FleetTimeouts = { listMs: number; captureMs: number; sendMs: number; keysMs: number; frameMs: number; statusMs: number; transcriptMs: number; fileMs: number };
 // What each op may take before the fleet answers `timeout` itself (spec §5.3, deadlines; counted from when the fleet
@@ -543,6 +544,18 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
       if (noticeTimer) clearInterval(noticeTimer);
       unsubscribe();
       rmSync(o.stagingDir, { recursive: true, force: true });
+    },
+  };
+}
+
+// Sign-in from the app (ADR-0039): typed fleet ops to one node; online nodes only for the sweep and the Accounts list.
+export function signinFleet(client: FleetClient): SignInFleet {
+  return {
+    nodes: async () => (await client.nodes()).filter(n => n.status === "online").map(n => n.name),
+    op: (node, op, args, opts) => {
+      const timeoutMs = opts?.timeoutMs ?? (op === "signin.start" ? 45_000 : 15_000);
+      // The fleet takes a key only as "<client>:<…>" (apps/fleet op-body.ts): the service's id goes out under the hub's name.
+      return client.op({ node }, op, args, { ...(opts?.key !== undefined ? { key: `hub:signin:${opts.key}` } : {}), timeoutMs });
     },
   };
 }
