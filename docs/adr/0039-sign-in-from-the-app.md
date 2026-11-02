@@ -48,7 +48,7 @@ Facts that shape the decision, each checked on 2026-11-02 against the CLIs in us
 6. **Cards.** The hub asks every online node for its accounts every 10 minutes (and 5 seconds after it starts). An account
    that is signed out, named and in rotation (not retired, not past its expiry) gets one hub-held Ask, "Claude a1 on n1 is
    signed out", with one option, Sign in, which opens the sign-in sheet. It never pushes (`need: time`); it goes when the
-   account reads signed in or its sign-in from the app is done. The main login gets no card: it is the principal's own.
+   account reads signed in or its sign-in from the app is done. Claude's main login gets no card: it is the principal's own. Cursor's main login does, as lanes run on it.
 7. **Agents ask, never act** (SI8). `POST /api/agent/signins/request` raises the same card, with the agent's reason, for an
    existing or a new account. An agent never starts a sign-in, sees its link or sends a code.
 8. **Where the principal does it.** The card's Sign in, the Home usage badge of a signed-out seat, and the Engines page's
@@ -57,6 +57,9 @@ Facts that shape the decision, each checked on 2026-11-02 against the CLIs in us
 ## Consequences
 
 - A lost login costs the principal a minute on the phone, with no terminal and no chat.
+- A node whose `policy.json` lists its ops must list the five `signin.*` ops, or it answers each with `denied`.
+- An abandoned `agent login` was seen to empty Cursor's stored login when it timed out, so the node refuses a Cursor
+  sign-in while Cursor reads signed in.
 - Adding an account is the same flow with a new name.
 - Known limit: the browser does not yet pin node keys (ADR-0022's pins are not built), so a hub that was taken over could
   hand the page another recipient. The code it could then open is single-use, minutes long and bound to the waiting CLI.
