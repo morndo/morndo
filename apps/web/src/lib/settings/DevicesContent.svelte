@@ -18,6 +18,7 @@
   const when = (t: number | null) => (t ? new Date(t).toLocaleString() : "never");
 
   async function load() {
+    // The three reads are independent. A failed /api/me only hides Engines; the device list and the policy still load.
     const me = api.get<{ engines?: boolean }>("/api/me").then(
       m => { engines = m.engines === true; },
       () => { engines = false; },
@@ -35,7 +36,7 @@
   }
   async function revoke(d: Device) {
     try {
-      await withStepUp(() => api.post(`/api/devices/${d.id}/revoke`), () => {});
+      await withStepUp(() => api.post(`/api/devices/${d.id}/revoke`), () => {});   // another device: a fresh passkey check
       confirming = null;
       if (d.current) { await forgetWritten(); return goto("/"); }
       await load();

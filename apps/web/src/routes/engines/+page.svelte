@@ -10,7 +10,6 @@
   import { CONNECTION_WORDS, type EnginesView } from "@morndo/protocol";
   import { api, ApiError, explain } from "$lib/api.ts";
   import { withStepUp } from "$lib/stepup.ts";
-  import ConnectionsBoard from "$lib/connections/ConnectionsBoard.svelte";
   import ConnectionsContent from "$lib/settings/ConnectionsContent.svelte";
   import AccountsSection from "$lib/signin/AccountsSection.svelte";
   import RoleCard from "$lib/engines/RoleCard.svelte";

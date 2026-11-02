@@ -1,4 +1,9 @@
 <script lang="ts">
+  // Updates (updates design §8.2 "Settings → Updates", PR 6c part 2): every machine's Version, Channel, mode and
+  // state — the control plane first ("This machine"), then the nodes — with "Update now", "Roll back" and "Resume",
+  // each a principal Command with step-up (AC7). The view is the hub's answer (GET /api/updates); the words are
+  // lib/updates.ts's, the hub's own message shows as it came when it refuses. Settings > Updates shows it embedded;
+  // /updates keeps its own page around it.
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
   import ChevronLeft from "@lucide/svelte/icons/chevron-left";
@@ -12,7 +17,9 @@
   let page = $state<Page>({ kind: "loading" });
   let view = $state<UpdatesView | null>(null);
   let busy = $state(false);
-  let confirming = $state<string | null>(null);
+  let confirming = $state<string | null>(null);        // the machine whose Roll back is asked about, as the devices page asks about a revoke
+  // §11.4's word, asked for after the hub answered needs_word (review round 1): what the restore drops, and the
+  // field the word goes in. Only the exact word enables the second Roll back.
   let wordAsk = $state<{ machine: string; restores: { db: string; at: string }[] } | null>(null);
   let typed = $state("");
   let notice = $state("");
@@ -33,6 +40,8 @@
     }
   }
 
+  // Every action goes through withStepUp: the hub answers 403 step_up until the passkey check is fresh, then the
+  // command runs once more. Whatever it answers, the view loads again after.
   async function run(sentence: string, post: () => Promise<unknown>): Promise<void> {
     busy = true; notice = ""; problem = null;
     try {
@@ -51,6 +60,9 @@
     run(`Asked ${row.machine === "control-plane" ? "this machine" : row.title} to take ${row.apply}.`,
       () => withStepUp(() => api.post("/api/updates/apply", { machine: row.machine, version: row.apply }), () => {}));
 
+  // The first press asks the plain question (§8.1's [y/N] through the hub). When the rollback would restore a
+  // database, the hub answers needs_word with what it drops (§11.4, review round 1): that answer is not a problem
+  // but the ask itself, so it becomes the typed-word ask instead of a refusal line.
   async function rollback(row: UpdatesRow): Promise<void> {
     busy = true; notice = ""; problem = null;
     try {
@@ -69,6 +81,7 @@
     } finally { busy = false; }
   }
 
+  // The second press, under the word itself: the body carries it, and the hub's updater takes it as --typed.
   async function rollbackWord(row: UpdatesRow): Promise<void> {
     busy = true; notice = ""; problem = null;
     try {
@@ -88,7 +101,9 @@
   function refusal(e: unknown): string {
     if (!(e instanceof ApiError)) return explain(e);
     const message = typeof e.data.message === "string" ? e.data.message : "";
+    // A step-up that already ran once and still refuses: this endpoint may not command.
     if (e.code === "step_up") return "A fresh passkey check wasn't enough — this device may not run commands.";
+    // The fleet's (or the updater's) own words, as they came.
     if (e.status === 409) return message || `The hub refused: ${e.code}.`;
     if (e.status === 503) return message === "" ? "The fleet or the updater could not be asked." : `The fleet or the updater could not be asked: ${message}`;
     if (e.status === 404) return "Updates aren't available on this hub.";

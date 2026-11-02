@@ -51,8 +51,11 @@ Facts that shape the decision, each checked on 2026-11-02 against the CLIs in us
    account reads signed in or its sign-in from the app is done. Claude's main login gets no card: it is the principal's own. Cursor's main login does, as lanes run on it.
 7. **Agents ask, never act** (SI8). `POST /api/agent/signins/request` raises the same card, with the agent's reason, for an
    existing or a new account. An agent never starts a sign-in, sees its link or sends a code.
-8. **Where the principal does it.** The card's Sign in, the Home usage badge of a signed-out seat, and the Engines page's
-   Accounts section (each node's Claude and Cursor accounts, Sign in, Add account).
+8. **Where the principal does it.** The card's Sign in, the Home usage badge of a signed-out seat, and the Accounts
+   section (each node's Claude and Cursor accounts, Sign in, Add account). That section lives in Settings
+   (`/settings/accounts`, amended 2026-11-02): the desktop's gear and the phone's settings sheet open one Settings page
+   with Accounts, LLM connections, Devices and Updates, each shown when the hub has it. The Engines page keeps the
+   section too.
 9. **Each account names its email** (amended 2026-11-02, after the owner's first live use: a list of folder names
    alone didn't say which account to sign in where). An account row carries the signed-in email, or the last one the
    account's own settings file named, and its plan; the app shows it to the principal and marks two folders that share

@@ -1,6 +1,5 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { goto } from "$app/navigation";
   import { CONNECTION_WORDS } from "@morndo/protocol";
   import { api } from "$lib/api.ts";
   import ConnectionsBoard from "$lib/connections/ConnectionsBoard.svelte";
@@ -9,6 +8,8 @@
   let connectionsOn = $state<boolean | null>(null);
 
   onMount(() => {
+    // A hub with no connections home answers /api/connections with 404. The browser records that as a console
+    // error, so ask /api/me first and skip the board when connections are off.
     void api.get<{ connections?: boolean }>("/api/me").then(
       me => { connectionsOn = me.connections === true; },
       () => { connectionsOn = true; },

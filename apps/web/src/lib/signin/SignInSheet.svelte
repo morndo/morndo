@@ -5,6 +5,7 @@
   import type { AccountRow, SignInView } from "@morndo/protocol";
   import { ApiError, explain } from "../api.ts";
   import { withStepUp } from "../stepup.ts";
+  import { addsNoCapacityLine } from "./accounts.ts";
   import { signinApi, type SignInTarget } from "./api.ts";
   import { sealCode } from "./seal.ts";
   import { problemWords, sheetTitle } from "./words.ts";
@@ -25,16 +26,12 @@
   const title = $derived(target ? sheetTitle(target.node, target.runtime, target.account, target.create) : "Sign in");
   const done = $derived(view?.phase === "done");
   const failed = $derived(view !== null && (view.phase === "failed" || view.phase === "expired"));
-  const duplicateEmailLine = $derived.by(() => {
-    if (!view || view.phase !== "done" || !view.identity || target?.runtime !== "claude") return null;
-    const email = view.identity.email.toLowerCase();
-    const account = view.account;
-    const names = claudePeers
-      .filter(r => r.name !== account && r.email?.toLowerCase() === email)
-      .map(r => r.name);
-    if (!names.length) return null;
-    return `Same email as ${names.join(", ")}: this folder adds no capacity.`;
-  });
+  // A second folder on an email another folder already uses shares that account's limits: say so once it is done.
+  const duplicateEmailLine = $derived(
+    view?.phase === "done" && view.identity && target?.runtime === "claude"
+      ? addsNoCapacityLine(view.identity.email, view.account, claudePeers)
+      : null,
+  );
 
   function stopPoll() {
     if (poll !== null) { clearInterval(poll); poll = null; }

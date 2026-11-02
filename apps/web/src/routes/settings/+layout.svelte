@@ -1,4 +1,7 @@
 <script lang="ts">
+  // Settings (ADR-0039 §9): one page for Accounts, LLM connections, Devices and Updates. On a wide screen the
+  // sections sit on the left and the open one on the right; on a phone /settings is the list and each section has
+  // a Back link to it. The app renders only in the browser (ssr = false), so the width is known before first paint.
   import "$lib/phone/phone.css";
   import { onMount } from "svelte";
   import { goto } from "$app/navigation";
@@ -11,18 +14,18 @@
   let { children } = $props();
   let engines = $state(false);
   let updates = $state(false);
-  let wide = $state(false);
+  const WIDE = "(min-width: 900px)";
+  let wide = $state(window.matchMedia(WIDE).matches);
 
   const pathname = $derived(page.url.pathname);
   const sections = $derived(settingsSections({ engines, updates }));
-  const active = $derived(sectionFromPath(pathname) ?? (isSettingsIndex(pathname) ? "accounts" : null));
+  const active = $derived(sectionFromPath(pathname));
   const indexOnly = $derived(!wide && isSettingsIndex(pathname));
   const phoneSection = $derived(!wide && !isSettingsIndex(pathname));
 
   onMount(() => {
-    const mq = window.matchMedia("(min-width: 900px)");
+    const mq = window.matchMedia(WIDE);
     const set = () => { wide = mq.matches; };
-    set();
     mq.addEventListener("change", set);
     void api.get<{ engines?: boolean; updates?: boolean }>("/api/me").then(
       me => { engines = me.engines === true; updates = me.updates === true; },
@@ -39,7 +42,7 @@
 <div class="phone settings">
   <header class="top">
     <div class="in">
-      <a class="back home" href="/" aria-label="Morndo"><ChevronLeft size={24} /></a>
+      <a class="back home" href="/" aria-label="Back to Morndo"><ChevronLeft size={24} /></a>
       <div>
         <h1>Settings</h1>
       </div>

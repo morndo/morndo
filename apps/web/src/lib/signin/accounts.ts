@@ -24,3 +24,10 @@ export function sharedEmails(rows: readonly Pick<AccountRow, "name" | "email">[]
 export function sameEmailLine(otherNames: readonly string[]): string {
   return `Same email as ${otherNames.join(", ")}`;
 }
+
+/** After a Claude sign-in: the other folders already on the email it used, as the sheet says it, or null if none. */
+export function addsNoCapacityLine(email: string, account: string, rows: readonly Pick<AccountRow, "name" | "email">[]): string | null {
+  const key = email.toLowerCase();
+  const others = rows.filter(r => r.name !== account && r.email?.toLowerCase() === key).map(r => r.name);
+  return others.length ? `${sameEmailLine(others)}: this folder adds no capacity.` : null;
+}
