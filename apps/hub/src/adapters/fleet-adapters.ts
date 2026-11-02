@@ -21,6 +21,7 @@ import { FleetOpFailed, FleetUnavailable, type FleetClient, type FleetEvent, typ
 import { log } from "./log.ts";
 import { stagedUploadName } from "./uploads.ts";
 import { perKeyLimit } from "./per-key-limit.ts";
+import type { PrincipalAsk } from "@morndo/protocol";
 import type { SignInFleet } from "../application/signin-service.ts";
 
 export type FleetTimeouts = { listMs: number; captureMs: number; sendMs: number; keysMs: number; frameMs: number; statusMs: number; transcriptMs: number; fileMs: number };
@@ -551,7 +552,7 @@ export function fleetPorts(client: FleetClient, o: { files: LocalFileStore | nul
 // Sign-in from the app (ADR-0039): typed fleet ops to one node; online nodes only for the sweep and the Accounts list.
 const SIGNIN_FLEET_OFFLINE = { ok: false as const, error: { code: "node_offline" as const, executed: "no" as const, message: "fleet unreachable" } };
 
-export function signinFleet(client: FleetClient): SignInFleet {
+export function signinFleet(client: FleetClient, sign: (ask: PrincipalAsk) => string): SignInFleet {
   return {
     nodes: async () => {
       try { return (await client.nodes()).filter(n => n.status === "online").map(n => n.name); }
@@ -559,9 +560,17 @@ export function signinFleet(client: FleetClient): SignInFleet {
     },
     op: async (node, op, args, opts) => {
       const timeoutMs = opts?.timeoutMs ?? (op === "signin.start" ? 45_000 : 15_000);
+      const id = typeof (args as { id?: unknown }).id === "string" ? (args as { id: string }).id : undefined;
+      const principal = (op === "signin.start" || op === "signin.code") && id !== undefined
+        ? sign({ op, node, signin: id })
+        : undefined;
       try {
         // The fleet takes a key only as "<client>:<…>" (apps/fleet op-body.ts): the service's id goes out under the hub's name.
-        return await client.op({ node }, op, args, { ...(opts?.key !== undefined ? { key: `hub:signin:${opts.key}` } : {}), timeoutMs });
+        return await client.op({ node }, op, args, {
+          ...(opts?.key !== undefined ? { key: `hub:signin:${opts.key}` } : {}),
+          ...(principal !== undefined ? { principal } : {}),
+          timeoutMs,
+        });
       } catch { return SIGNIN_FLEET_OFFLINE; }
     },
   };

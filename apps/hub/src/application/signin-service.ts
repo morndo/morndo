@@ -41,6 +41,15 @@ function opProblem(error: OpError): string {
   return error.code;
 }
 
+function refusesCreateMain(body: { create: boolean; account: string }): boolean {
+  return body.create && body.account === "main";
+}
+
+function startMayHaveRun(error: OpError): boolean {
+  if (error.executed === "maybe") return true;
+  return error.code === "timeout" || error.code === "uncertain" || error.code === "node_offline";
+}
+
 function hubExpiresAt(startedAt: number): number {
   return startedAt + SIGNIN_TTL_MS + SIGNIN_HUB_GRACE_MS;
 }
@@ -97,6 +106,7 @@ export class SignInService {
   }
 
   request(body: RequestSignInBody, by: string): { ok: true; card: string } | { ok: false; problem: string } {
+    if (refusesCreateMain(body)) return { ok: false, problem: "bad_account" };
     const checked = checkTarget(body);
     if (!checked.ok) return { ok: false, problem: checked.problem };
     const id = signinCardId(checked.target);
@@ -120,6 +130,7 @@ export class SignInService {
 
   async start(who: Authenticated, body: StartSignInBody): Promise<{ ok: true; view: SignInView } | { ok: false; problem: string }> {
     if (!fresh(who, this.#now())) return { ok: false, problem: "step_up" };
+    if (refusesCreateMain(body)) return { ok: false, problem: "bad_account" };
     const checked = checkTarget(body);
     if (!checked.ok) return { ok: false, problem: checked.problem };
     const key = targetKey(checked.target);
@@ -127,7 +138,10 @@ export class SignInService {
     if (live) return { ok: true, view: this.#viewOf(live) };
     const id = this.#newId();
     const r = await this.#fleet.op(checked.target.node, "signin.start", { id, runtime: checked.target.runtime, account: checked.target.account, create: body.create }, { key: id });
-    if (!r.ok) return { ok: false, problem: opProblem(r.error) };
+    if (!r.ok) {
+      if (startMayHaveRun(r.error)) void this.#fleet.op(checked.target.node, "signin.cancel", { id });
+      return { ok: false, problem: opProblem(r.error) };
+    }
     const now = this.#now();
     const signin: SignIn = {
       id, target: checked.target, create: body.create, phase: "waiting",

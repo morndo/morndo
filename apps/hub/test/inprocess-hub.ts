@@ -37,6 +37,7 @@ import { AgentAccess } from "../src/application/agent-access.ts";
 import { UsageService } from "../src/application/usage-service.ts";
 import { JobsService } from "../src/application/jobs-service.ts";
 import { fileOnDisk, TranscriptionService } from "../src/application/transcription-service.ts";
+import type { SignInService } from "../src/application/signin-service.ts";
 import type { LedgerRead } from "../src/adapters/ledger.ts";
 import type { ForgeChecks, SendOutcome } from "../src/application/ports.ts";
 import type { Config } from "../src/config.ts";
@@ -105,6 +106,7 @@ export async function startInProcessHub(o: {
   // the updates routes answer 404 as with no fleet and no CLI wired.
   identity?: HubIdentity;
   updates?: { fleet: FleetForUpdates; cli: UpdaterCli };
+  signin?: SignInService | null;
 } = {}): Promise<InProcessHub> {
   const dir = mkdtempSync(join(tmpdir(), "morndo-inproc-"));
   const web = join(dir, "web");
@@ -200,6 +202,7 @@ export async function startInProcessHub(o: {
       build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
     }) : null,
     transcription,
+    signin: o.signin ?? null,
     ...(o.limits ? { limits: o.limits } : {}), ...(o.heartbeatMs ? { heartbeatMs: o.heartbeatMs } : {}), ...(o.now ? { now: o.now } : {}),
   });
   await http.ready;

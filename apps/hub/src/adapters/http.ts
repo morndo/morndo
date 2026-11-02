@@ -916,6 +916,7 @@ export function startHttp(p: {
     }
     if (path === "/api/signins/accounts" && method === "GET") {
       if (!p.signin) return json(res, 404, { error: "signin_off" });
+      limited(buckets.engineReads.take(a.endpoint.id));
       const q = new URL(req.url ?? "/", "http://hub").searchParams;
       const runtime = q.get("runtime");
       const node = q.get("node") ?? "";

@@ -17,7 +17,7 @@ describe("sign-in when the fleet is unreachable", () => {
       nodes: async () => { throw new Error("down"); },
       op: async () => { throw new Error("down"); },
     } as unknown as FleetClient;
-    const service = new SignInService({ fleet: signinFleet(client), now: () => NOW, audit: () => {} });
+    const service = new SignInService({ fleet: signinFleet(client, () => "unused"), now: () => NOW, audit: () => {} });
     await expect(service.sweep()).resolves.toBeUndefined();
     expect(await service.start(who, { node: "n1", runtime: "claude", account: "a1", create: false })).toEqual({ ok: false, problem: "node_offline" });
   });
