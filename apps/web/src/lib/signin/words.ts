@@ -19,6 +19,11 @@ export function accountStateWords(row: AccountRow): string {
 
 export function problemWords(problem: string | null, phase: string): string {
   if (phase === "expired") return "This sign-in timed out.";
+  if (problem === "already_signed_in") {
+    return "Cursor is already signed in on this node. Signing in again would sign it out if it isn't finished, so it isn't started.";
+  }
+  if (problem === "node_lost") return "The node lost this sign-in (it restarted). Try again.";
+  if (problem === "node_offline") return "The node can't be reached right now.";
   if (problem === "code_refused") return "The sign-in page's code was not accepted.";
   if (problem === "credentials_mode") return "The login file's permissions are wrong on the node.";
   return "The sign-in did not finish.";

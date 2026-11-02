@@ -15,6 +15,7 @@
 
   let view = $state<SignInView | null>(null);
   let problem = $state("");
+  let folderExists = $state(false);
   let starting = $state(false);
   let sendingCode = $state(false);
   let codeDraft = $state("");
@@ -33,6 +34,7 @@
     stopPoll();
     view = null;
     problem = "";
+    folderExists = false;
     codeDraft = "";
     starting = false;
     sendingCode = false;
@@ -62,19 +64,22 @@
     }
   }
 
-  async function start() {
+  async function start(create?: boolean) {
     if (!target || starting) return;
-    starting = true; problem = "";
-    const body = { node: target.node, runtime: target.runtime, account: target.account, create: target.create };
+    starting = true; problem = ""; folderExists = false;
+    const body = { node: target.node, runtime: target.runtime, account: target.account, create: create ?? target.create };
     const run = () => signinApi.start(body);
     try {
       view = await withStepUp(run, () => {});
     } catch (e) {
+      if (e instanceof ApiError && e.code === "exists") { folderExists = true; return; }
       problem = explain(e);
     } finally {
       starting = false;
     }
   }
+
+  function signExistingIn() { void start(false); }
 
   async function sendCode() {
     if (!view?.recipient || sendingCode) return;
@@ -118,7 +123,12 @@
 
       {#if !view}
         <p class="note">The node runs this account's own CLI sign-in. You open its page and approve there.</p>
-        <button class="btn primary" disabled={starting} onclick={() => void start()}>{starting ? "Starting…" : "Start sign-in"}</button>
+        {#if folderExists}
+          <p class="note" role="status">This account's folder already exists on the node.</p>
+          <button class="btn primary" disabled={starting} onclick={signExistingIn}>{starting ? "Starting…" : "Sign it in"}</button>
+        {:else}
+          <button class="btn primary" disabled={starting} onclick={() => void start()}>{starting ? "Starting…" : "Start sign-in"}</button>
+        {/if}
       {:else if done && view.identity}
         <p class="ok" role="status"><b>Works again</b></p>
         <p class="ok" role="status">signed in as {view.identity.email}{view.identity.plan ? ` (${view.identity.plan})` : ""}</p>
