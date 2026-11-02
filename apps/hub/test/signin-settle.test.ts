@@ -2,6 +2,7 @@
 // card whose account works again is offered as settled, "Works again", for a while, and asks() no longer has it (ADR-0039).
 import { describe, expect, it } from "vitest";
 import type { Endpoint, EndpointId, Session, SessionId } from "@morndo/domain";
+import { SIGNIN_TTL_MS } from "@morndo/domain";
 import { SignInService, type SignInFleet } from "../src/application/signin-service.ts";
 
 const NOW = 1_800_000_000_000;
@@ -42,5 +43,25 @@ describe("settling a sign-in card", () => {
     await service.sweep();
     expect(service.asks()).toEqual([]);
     expect(service.settled().map(x => x.ask.id)).toEqual(["signin-n1-claude-a1"]);
+  });
+
+  it("expires on the hub deadline, not the node's expiresAt when that is already past", async () => {
+    let now = NOW;
+    const fleet: SignInFleet = {
+      nodes: async () => [],
+      op: (async (_node: string, op: string) => ({
+        ok: true,
+        result: op === "signin.start"
+          ? { link: "https://claude.com/cai/oauth/authorize?x=1", userCode: null, needsCode: false, recipient: null, expiresAt: now - 60_000 }
+          : { phase: "waiting", identity: null, problem: null },
+      })) as SignInFleet["op"],
+    };
+    const service = new SignInService({ fleet, now: () => now, audit: () => {}, newId: () => "si-hubttl" });
+    const s = await service.start(who, { node: "n1", runtime: "claude", account: "a1", create: false });
+    if (!s.ok) throw new Error(s.problem);
+    expect(s.view.expiresAt).toBe(NOW + SIGNIN_TTL_MS + 30_000);
+    expect((await service.view(s.view.id))).toMatchObject({ ok: true, view: { phase: "waiting" } });
+    now = s.view.expiresAt;
+    expect((await service.view(s.view.id))).toMatchObject({ ok: true, view: { phase: "expired" } });
   });
 });

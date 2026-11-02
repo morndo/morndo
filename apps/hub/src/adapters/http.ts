@@ -482,7 +482,9 @@ export function startHttp(p: {
       if (!p.signin) return json(res, 404, { error: "signin_off" });
       const body = await readBody(req, RequestSignInBody);
       const by = who.actor.kind === "principal" ? "principal" : who.actor.name;
-      return json(res, 200, p.signin.request(body, by));
+      const r = p.signin.request(body, by);
+      if (!r.ok) return json(res, r.problem === "too_many_cards" ? 429 : 400, { error: r.problem });
+      return json(res, 200, r);
     }
     // A node's ask for a lease before a rationed read (S5, plan 4.4, U16): granted with an opaque id and its expiry,
     // fresh with the capture time the caller may use instead of spawning, or denied with one reason and a wait. The

@@ -23,4 +23,16 @@ describe("the sign-in fleet adapter", () => {
       { node: "n1", op: "signin.code", timeoutMs: 15_000 },
     ]);
   });
+
+  it("turns a fleet throw into node_offline for op and an empty node list for nodes", async () => {
+    const client = {
+      nodes: async () => { throw new Error("socket gone"); },
+      op: async () => { throw new Error("socket gone"); },
+    } as unknown as FleetClient;
+    const fleet = signinFleet(client);
+    expect(await fleet.nodes()).toEqual([]);
+    expect(await fleet.op("n1", "signin.accounts", { runtime: "claude" })).toEqual({
+      ok: false, error: { code: "node_offline", executed: "no", message: "fleet unreachable" },
+    });
+  });
 });
