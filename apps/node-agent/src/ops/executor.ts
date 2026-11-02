@@ -103,7 +103,9 @@ export class OpExecutor {
         let prior: Prior;
         try { prior = keys.lookup(key, hash); }
         catch (e) { return this.#keysFailed(op, e); }
-        if (prior.state === "done") return { ok: true, result: prior.outcome };
+        // ADR-0039: signin.start's record keeps no result (no sign-in link on disk), so a replay asks the runner again, unkeyed.
+        if (prior.state === "done" && op === "signin.start") key = undefined;
+        else if (prior.state === "done") return { ok: true, result: prior.outcome };
         if (prior.state === "started") return fail("uncertain", "an earlier attempt with this key started, and its outcome is not known");
         if (prior.state === "mismatch") return fail("uncertain", "this key was used with other arguments: its op may have run");
       }
@@ -133,7 +135,7 @@ export class OpExecutor {
         }
         if (key !== undefined && out.ok) this.#d.afterEffect?.(key);
         if (key !== undefined) {
-          if (out.ok) keys.finish(key, out.result);
+          if (out.ok) keys.finish(key, op === "signin.start" ? null : out.result);
           else if (out.error.executed === "no") keys.release(key);
         }
         return discarded ? { ...out, discarded } : out;

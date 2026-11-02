@@ -49,6 +49,7 @@ export const EFFECT_FIELDS: { readonly [O in OpName]?: readonly string[] } = {
   "connections.role": ["version", "role", "override", "order", "picks", "action"],
   "connections.revoke": ["version", "name"],
   "connections.narrow": ["version", "name", "action", "budget", "deny"],
+  "signin.start": ["id", "runtime", "account", "create"],
 };
 
 export const argsHash = (op: string, args: unknown): string => {

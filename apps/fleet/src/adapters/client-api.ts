@@ -310,6 +310,15 @@ export async function startClientApi(socketPath: string, d: ClientApiDeps): Prom
           return json(res, 200, { ok: false, error: opError("not_allowed", "update.apply is the principal's: it carries the hub's signed assertion (x-morndo-principal, updates §5.4) for exactly this node and Version, which the fleet cannot check here: refused"), store: null, storeSeq: null });
         }
       }
+      // A sign-in's start and its code (ADR-0039) are the principal's too: the hub's signed assertion for exactly this node
+      // and sign-in id, so the owner socket alone cannot start one or send a code (the passkey is checked at the hub).
+      if (b.op === "signin.start" || b.op === "signin.code") {
+        const ask: PrincipalAsk = { op: b.op, signin: typeof b.args.id === "string" ? b.args.id : "" };
+        if ("node" in b.target) ask.node = b.target.node;
+        if (!d.rolloutAuthority.principal(req, ask)) {
+          return json(res, 200, { ok: false, error: opError("not_allowed", `${b.op} is the principal's: it carries the hub's signed assertion (x-morndo-principal, ADR-0039) for exactly this node and sign-in, which the fleet cannot check here: refused`), store: null, storeSeq: null });
+        }
+      }
       if (b.op === "lane.deliver" || b.op === "delivery.cancel") {
         return json(res, 400, { ok: false, error: opError("bad_args", `${b.op} is not sent as an op: use /v1/deliveries`), store: null, storeSeq: null });
       }

@@ -45,3 +45,4 @@ export * from "./knowledge-facts.ts";
 export * from "./pool.ts";
 export * from "./key-pool.ts";
 export * from "./memory.ts";
+export * from "./signin.ts";

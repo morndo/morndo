@@ -21,7 +21,11 @@ export type BriefAudit = {
   type: "BriefFiled" | "BriefRestated" | "BriefWithdrawn" | "BriefSettled" | "BriefForwarded" | "BriefDeclined";
   id: string; version: number; asker: { kind: "manager" | "worker"; name: string }; token: string; at: number;
 };
-export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged | BriefAudit | UpdateCommanded;
+// ADR-0039: sign-in relay steps; no link, code, sealed value or email (SI6).
+export type SignInAudit = {
+  type: "SignIn"; kind: string; node: string; runtime: string; account: string; id: string; phase: string; by: string; at: number;
+};
+export type AuditEvent = AccessEvent | NotificationEvent | (EscalationAnswered & { length?: number; digest?: string }) | EnginesChanged | BoardChanged | BriefAudit | UpdateCommanded | SignInAudit;
 
 export type BriefState = "draft" | "open" | "withdrawn" | "settled" | "expired" | "declined";
 // One version of a filed brief. A restate is the next row; the earlier JSON stays.

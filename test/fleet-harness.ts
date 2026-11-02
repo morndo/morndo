@@ -12,7 +12,7 @@
 // owns them.
 import { execFileSync, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes, randomUUID } from "node:crypto";
-import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { createServer as createHttpServer } from "node:http";
 import { createServer, type AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
@@ -369,7 +369,8 @@ function agentAt(fleet: Fleet, node: string, home: string): Agent {
     proc: () => proc,
     async run(hooks, o = {}) {
       // The agent refuses test hooks unless NODE_ENV is "test" and its HOME isn't the account's own (Task 8 of the fleet core).
-      const extra: Record<string, string> = { ...(hooks ? { MORNDO_NODE_TEST_HOOKS: JSON.stringify(hooks), NODE_ENV: "test" } : {}), ...o.env };
+      // Its sign-ins run on a tmux server of this test's own, never a real node's "morndo-signin" (ADR-0039).
+      const extra: Record<string, string> = { MORNDO_SIGNIN_SOCKET: `signin-${node}-${randomBytes(3).toString("hex")}`, ...(hooks ? { MORNDO_NODE_TEST_HOOKS: JSON.stringify(hooks), NODE_ENV: "test" } : {}), ...o.env };
       proc = startProc(`agent ${node} (${home})`, [AGENT_MAIN, "run"], cleanEnv(home, extra), join(home, "agent.log"));
     },
     async stop(signal = "SIGTERM") { await proc?.stop(signal); proc = null; },
@@ -625,6 +626,10 @@ export async function startHub(fleet: Fleet, o: { pollMs?: number; web?: "stub" 
     }, 30_000);
   };
   await serve(env);
+  // The fleet trusts this hub's signed assertions as a real control plane's fleet does (same user, the hub's identity.pub
+  // where the fleet reads it, read afresh at each check): sign-ins (ADR-0039) and updates carry them.
+  const trusted = join(fleet.home, ".local/share/morndo/identity.pub");
+  if (!existsSync(trusted)) { mkdirSync(dirname(trusted), { recursive: true }); symlinkSync(join(home, "identity.pub"), trusted); }
   const headers = { origin, "content-type": "application/json", cookie: `__Host-morndo=${secret}` };
   const post = async (path: string, body: unknown): Promise<Reply> => {
     const r = await fetch(base + path, { method: "POST", headers, body: JSON.stringify(body) });

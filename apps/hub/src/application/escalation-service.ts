@@ -57,6 +57,12 @@ export type MemoryAsks = {
   decide(a: Authenticated, id: string, decision: "approve" | "reject"): { ok: true } | { ok: false; problem: "step_up" | "not_found" | "changed" };
 };
 
+// Sign-in cards the hub holds open (ADR-0039): the principal opens the sheet in the app; nothing is answered here.
+export type SignInAsks = {
+  asks(): ReturnType<import("./signin-service.ts").SignInService["asks"]>;
+  settled(): ReturnType<import("./signin-service.ts").SignInService["settled"]>;
+};
+
 const MAX_WORDS = 4000;
 const SCREEN_LINES = 14;
 const REQUEST_TTL_MS = 10 * 60_000;
@@ -146,6 +152,8 @@ export class EscalationService {
   #paneTaps = new Map<string, PaneTap>();
   // Memory's pending Notes, when the hub has Memory (ADR-0031): their Asks ride the board like any hub-held ask.
   #memory: (() => MemoryAsks | null) | null;
+  // Sign-in cards (ADR-0039): signed-out accounts and agent requests, held until the account works again.
+  #signin: (() => SignInAsks | null) | null;
   // How long a worker's ask is held from the principal (N2): the constructor's override, else WORKER_ASK_GRACE_MS.
   #workerGraceMs: number;
 
@@ -163,6 +171,8 @@ export class EscalationService {
     // Memory's asks (ADR-0031 round 2): a pending Note files an Ask the principal answers in the app. Absent: a hub
     // without Memory files none.
     memory?: () => MemoryAsks | null;
+    // Sign-in cards (ADR-0039). Absent: no fleet, no cards.
+    signin?: () => SignInAsks | null;
     // How long a worker's ask is held from the principal (N2); default WORKER_ASK_GRACE_MS. Tests only.
     workerGraceMs?: number | undefined;
   }) {
@@ -178,6 +188,7 @@ export class EscalationService {
     this.#policy = p.policy ?? (() => DEFAULT_POLICY);
     this.#briefs = p.briefs ?? null;
     this.#memory = p.memory ?? null;
+    this.#signin = p.signin ?? null;
     this.#workerGraceMs = p.workerGraceMs ?? WORKER_ASK_GRACE_MS;
     this.#firstSeen = this.#store.askFirstSeen();
     // A row kept by the manager's inbox (PR #29, removed) may also carry its key and the words' hash: they were the
@@ -275,7 +286,7 @@ export class EscalationService {
     const ledger = this.#ledger ? this.#ledger() : null;
     this.#lastLedger = ledger;
     this.#briefOf = new Map((this.#briefs?.() ?? []).map(b => [b.id, b]));
-    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now), ...this.#hubSightings(), ...this.#memorySightings()];
+    const sightings = [...this.#managerSightings(ledger, now), ...this.#workerSightings(now), ...this.#hubSightings(), ...this.#memorySightings(), ...this.#signinSightings()];
     const changed = this.#x.reconcile(sightings, now, ledger?.ok ?? true);
     for (const id of this.#buttons.keys()) if (!this.#x.get(id)) this.#buttons.delete(id);   // kept as long as its ask
     this.#withdrawStale();
@@ -397,6 +408,7 @@ export class EscalationService {
     // "mem-" is Memory's own (ADR-0031 round 2): a button message or a list item that carries such an id must not borrow
     // a note's Ask, or a tap on its text would approve the note it names. Such an id is no manager ask at all.
     for (const id of [...ids]) if (id.startsWith("mem-")) ids.delete(id);
+    for (const id of [...ids]) if (id.startsWith("signin-")) ids.delete(id);
     const out: Sighting[] = [];
     for (const [id, b] of buttons) this.#buttons.set(id, b);
     for (const id of ids) {
@@ -499,6 +511,15 @@ export class EscalationService {
   // or the principal answers in the app. No `answered`: only this hub's own answer path records one.
   #memorySightings(): Sighting[] {
     return (this.#memory?.()?.pending() ?? []).map(note => ({ ask: memoryAsk(note), source: { kind: "open" } as const, answered: null }));
+  }
+
+  #signinSightings(): Sighting[] {
+    const port = this.#signin?.();
+    if (!port) return [];
+    return [
+      ...port.asks().map(ask => ({ ask, source: { kind: "open" } as const, answered: null })),
+      ...port.settled().map(({ ask, at }) => ({ ask, source: { kind: "settled", resolution: "Works again", at } as const, answered: null })),
+    ];
   }
 
   // The echoes of answers queued for an ask asked again since (their row's ask isn't the id's newest button message),
@@ -646,6 +667,7 @@ export class EscalationService {
       e = judged.e;
       // A Memory note's Ask (ADR-0031 round 2): answered in the app, decided by Memory itself; never typed, never queued.
       if (e.id.startsWith("mem-")) return this.#answerMemory(a, e, choice, key);
+      if (e.id.startsWith("signin-")) return { ok: false, problem: "bad_option", item: this.#view(id, a.endpoint.id) };
       if (this.#queue?.on && e.asker.kind === "manager") return await this.#queueAnswer(a, e, choice, requestId, key);
       if (!e.asker.workerId) {
         const conflict = e.asker.kind === "manager" && this.#watch.workers().some(w => w.name === this.#managerName && w.conflict);

@@ -20,6 +20,9 @@
   import { actions, brief, due } from "./brief.ts";
   import type { Body } from "../catchup/run.ts";
   import { MAY_HAVE_GONE, againLabel } from "../catchup/answer.ts";
+  import SignInSheet from "../signin/SignInSheet.svelte";
+  import { signinApi, type SignInTarget } from "../signin/api.ts";
+  import { explain } from "../api.ts";
 
   let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext, onOpenBrief }: {
     item: DecisionItem | null; primed: boolean; index: number; of: number; now: number;
@@ -41,7 +44,8 @@
   const acts = $derived(item ? actions(item, "card") : []);
   // What the card draws, once, for the loop, the "or" and which button is primary. A task (an Ask that became one while
   // its card was on top) gets Done; its Later is catch-up's own Later under the card (code review #11).
-  const drawn = $derived(acts.filter(a => a.kind !== "later" && a.kind !== "decide"));
+  const signInAsk = $derived(!!item?.id.startsWith("signin-"));
+  const drawn = $derived(acts.filter(a => a.kind !== "later" && a.kind !== "decide" && !(signInAsk && a.kind === "words")));
   // The meta line under the title, without what the kicker already says (decision, due).
   const meta = $derived((b?.meta ?? []).filter(m => m !== "Decision" && !m.startsWith("due ") && !m.startsWith("overdue ") && !/^≈\d+ min$/.test(m)));
   // With options, the recommended one is marked on its button; the reason for it waits behind More, so the options and
@@ -69,6 +73,29 @@
   async function sendWords() {
     const t = words.trim();
     if (t && await onPick({ text: t }, "your own words")) writing = false;
+  }
+
+  let signInTarget = $state<SignInTarget | null>(null);
+  let signInOpen = $state(false);
+  let signInProblem = $state("");
+
+  async function openSignInCard() {
+    if (!item) return;
+    signInProblem = "";
+    try {
+      const { cards } = await signinApi.cards();
+      const card = cards.find(c => c.id === item.id);
+      if (!card) { signInProblem = "This sign-in card is no longer on the hub."; return; }
+      signInTarget = { node: card.node, runtime: card.runtime, account: card.account, create: card.create };
+      signInOpen = true;
+    } catch (e) {
+      signInProblem = explain(e);
+    }
+  }
+
+  async function pickTap(body: Body, label: string) {
+    if (item?.id.startsWith("signin-") && "key" in body && body.key === "signin") { await openSignInCard(); return; }
+    await onPick(body, label);
   }
 </script>
 
@@ -128,6 +155,7 @@
       {:else if MAY_HAVE_GONE.has(refusal.code)}<button class="pbtn small" onclick={onTryAgain}>{againLabel(refusal.code)}</button>{/if}
     {/if}
     {#if note}<p class="err" role="alert">{note}</p>{/if}
+    {#if signInProblem}<p class="err" role="alert">{signInProblem}</p>{/if}
     {#if item.notice}<p class="note" role="status">{item.notice}</p>{/if}
     {#if item.answerBy === "screen"}
       {#if item.options.length}
@@ -138,7 +166,7 @@
     {:else if compact}
       <div class="opts">
         {#each compact.quickAnswers as a, i (a.key)}
-          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void onPick({ key: a.key }, a.label)}>
+          <button class="pbtn opt" class:primary={i === 0} disabled={!canAnswer} onclick={() => void (item.id.startsWith("signin-") ? pickTap({ key: a.key }, a.label) : onPick({ key: a.key }, a.label))}>
             <span>{a.label}</span>{#if i === 0}<small>Recommended</small>{/if}
           </button>
         {/each}
@@ -158,7 +186,7 @@
           {#if a.kind === "done"}
             <button class="pbtn opt primary" disabled={!canAnswer} onclick={() => void onPick({ text: "Done" }, "Done")}><span>Done</span></button>
           {:else if a.kind === "option"}
-            <button class="pbtn opt" class:primary={a.recommended} disabled={!canAnswer} onclick={() => void onPick({ key: a.key }, a.label)}>
+            <button class="pbtn opt" class:primary={a.recommended} disabled={!canAnswer} onclick={() => void (item.id.startsWith("signin-") ? pickTap({ key: a.key }, a.label) : onPick({ key: a.key }, a.label))}>
               <span>{a.label}</span>{#if a.recommended}<small>Recommended</small>{/if}
             </button>
           {:else if a.kind === "default"}
@@ -175,6 +203,8 @@
     {/if}
   {/if}
 </div>
+
+<SignInSheet target={signInTarget} bind:open={signInOpen} onClosed={() => { signInTarget = null; }} />
 
 <style>
   .card-head { padding: 16px 20px 13px; border-bottom: 1px solid var(--line); display: flex; align-items: center; gap: 10px; }

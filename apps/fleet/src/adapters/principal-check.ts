@@ -56,7 +56,7 @@ const authorityOf = (keyAt: () => Uint8Array | null, o: { now?: () => number } =
       if (assertion === null) return false;
       const t = now();
       if (!(assertion.exp > t && assertion.exp <= t + PRINCIPAL_MAX_AHEAD_MS)) return false;
-      if (assertion.op !== ask.op || assertion.version !== ask.version || assertion.node !== ask.node) return false;
+      if (assertion.op !== ask.op || assertion.version !== ask.version || assertion.node !== ask.node || assertion.signin !== ask.signin) return false;
       // One use: forget what expired, refuse what is known, and stop at the cap rather than forget a live one.
       for (const [nonce, exp] of spent) if (exp <= t) spent.delete(nonce);
       if (spent.has(assertion.nonce)) return false;

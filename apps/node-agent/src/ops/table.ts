@@ -6,6 +6,7 @@
 //   queue a first prompt with the deliverer.
 // Memory (ADR-0031): memory.sync writes into the node's state directory and the policy's memory.skillDirs.
 // The deliverer and the executor are made from this table, so it reaches them late (runtime.ts), by the time an op runs.
+import { homedir } from "node:os";
 import { join } from "node:path";
 import type Database from "better-sqlite3";
 import { paneLock, stampServer, terminalAdapter, type PaneLock, type SessionSource, type Tmux } from "@morndo/node-ops";
@@ -25,6 +26,12 @@ import { transcriptOps } from "./transcript-ops.ts";
 import type { UploadInbox } from "./upload-inbox.ts";
 import { updateOps, type CommandRunner } from "./update-ops.ts";
 import { worktreeOps } from "./worktree-ops.ts";
+import { AccountHomes } from "../signin/homes.ts";
+import { reconcileSignInLeftovers, recordSignInCreatedHome } from "../signin/leftover-homes.ts";
+import { onPath } from "../signin/path.ts";
+import { SignInRunner } from "../signin/runner.ts";
+import { tmuxTerminal } from "../signin/terminal.ts";
+import { signinOps } from "./signin-ops.ts";
 
 export type OpsDeps = {
   config: AgentConfig;
@@ -53,6 +60,45 @@ export function enginesSessionsDir(home: string, env: NodeJS.ProcessEnv = proces
 // And their transcripts (lane.py ENGINES_TRANSCRIPTS): the only place a lane's transcript is served from.
 export function enginesTranscriptsDir(home: string, env: NodeJS.ProcessEnv = process.env): string {
   return env.ENGINES_TRANSCRIPTS || join(home, ".local", "share", "engines", "transcripts");
+}
+
+const binOnPath = (name: string): string => onPath(name) ?? name;
+const claudePoolPath = (): string | null => onPath("claude-pool");
+
+// The sign-in runner's own tmux server (ADR-0039): "morndo-signin", or MORNDO_SIGNIN_SOCKET (a test node's own, so a test
+// never touches a real node's sign-ins on the same machine).
+const signinSocket = (env: NodeJS.ProcessEnv = process.env): string => env.MORNDO_SIGNIN_SOCKET || "morndo-signin";
+
+function productionSignInRunner(now: () => number, stateDir: string): SignInRunner {
+  const home = homedir();
+  const socket = signinSocket();
+  reconcileSignInLeftovers({ stateDir, agentHome: home, tmuxSocket: socket });
+  const bins = { claude: binOnPath("claude"), cursor: binOnPath("agent") };
+  const runner = new SignInRunner({
+    terminal: tmuxTerminal(socket),
+    homes: new AccountHomes({ home, bins, claudePool: claudePoolPath() }),
+    bins,
+    now,
+    recordCreatedHome: row => recordSignInCreatedHome(stateDir, row),
+  });
+  const timer = setInterval(() => { void runner.reap(); }, 60_000);
+  timer.unref();
+  return runner;
+}
+
+// Built on the first sign-in op, not with the op table: its start-up cleanup (kill the leftover sign-in tmux server, drop
+// homes an earlier run created and never signed in) runs once, before that first sign-in, and never in code that only
+// builds the table.
+function lazySignInRunner(make: () => SignInRunner): SignInRunner {
+  let runner: SignInRunner | null = null;
+  const get = (): SignInRunner => (runner ??= make());
+  return new Proxy({} as SignInRunner, {
+    get: (_target, prop) => {
+      const r = get();
+      const v = Reflect.get(r, prop, r) as unknown;
+      return typeof v === "function" ? (v as (...a: unknown[]) => unknown).bind(r) : v;
+    },
+  });
 }
 
 export function buildOps(d: OpsDeps): OpTable {
@@ -87,5 +133,6 @@ export function buildOps(d: OpsDeps): OpTable {
     ...deliveryOps({ deliverer: d.deliverer, panes: d.panes, policy }),
     ...memoryOps({ root: paths.memoryDir, skillDirs: skillDirsOf(policy.memory.skillDirs, config.home) }),
     ...updateOps({ home: config.home, ...(d.runCommand ? { run: d.runCommand } : {}) }),
+    ...signinOps(lazySignInRunner(() => productionSignInRunner(d.now, paths.stateDir))),
   };
 }

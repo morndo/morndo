@@ -41,7 +41,10 @@ export const failed = (code: ErrorCode, message: string, store: string | null = 
 // lane.deliver and delivery.cancel (fleet clients spec §4): a delivery's id is its idempotency, and an answer lost after
 // sending may come after the node stored or cancelled it, so it is uncertain, never node_offline. And job.cancel and
 // job.noticeResult.
-export const SIDE_EFFECT_OPS: ReadonlySet<OpName> = new Set<OpName>([...KEYED_OPS, "pane.keys", "lane.deliver", "delivery.cancel", "job.cancel", "job.noticeResult"]);
+// signin.code and signin.cancel are not keyed (FL7's record must never hold a sealed code), but each acts: a lost answer
+// may have run (ADR-0039), so nothing resends a code on a guess.
+const ACTING_OPS: OpName[] = [...KEYED_OPS, "pane.keys", "lane.deliver", "delivery.cancel", "job.cancel", "job.noticeResult"];
+export const SIDE_EFFECT_OPS: ReadonlySet<OpName> = new Set<OpName>([...ACTING_OPS, "signin.code", "signin.cancel"]);
 // The ops that move bulk data (up to LIMITS.chunkBytes each): one at a time per connection (spec 5.2). pane.capture
 // answers up to LIMITS.captureMaxBytes (256 KiB, one chunk; fleet clients spec §5).
 export const BULK_OPS: ReadonlySet<OpName> = new Set<OpName>(["transcript.read", "file.get", "file.put", "pane.capture"]);

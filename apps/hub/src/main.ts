@@ -3,7 +3,7 @@
 import QRCode from "qrcode";
 import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, type AccessPolicy } from "@morndo/domain";
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
-import { Store } from "./adapters/store.ts";
+import { Store, type SignInAudit } from "./adapters/store.ts";
 import { GithubChecks } from "./adapters/github-checks.ts";
 import { readTokenFile } from "./adapters/token-file.ts";
 import { DatabaseFromFuture } from "./adapters/migrations.ts";
@@ -31,7 +31,7 @@ import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
 import { PR_READS_PER_HOUR, PR_READS_PER_HOUR_ANONYMOUS, WAIT_PASS_MS, WaitWatch } from "./application/wait-watch.ts";
-import { EscalationService, managerOf, type MemoryAsks } from "./application/escalation-service.ts";
+import { EscalationService, managerOf, type MemoryAsks, type SignInAsks } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
 import { ManagerQueue } from "./application/manager-queue.ts";
@@ -43,7 +43,7 @@ import { noteMissingFfmpeg, uploadInbox } from "./adapters/uploads.ts";
 import { desktopTarget, legacyPorts } from "./adapters/local-ports.ts";
 import { engineLanesFor } from "./adapters/engine-registry.ts";
 import { FleetClient, checkFleet } from "@morndo/fleet-client";
-import { fleetPorts, type FleetPorts, type LocalFileStore } from "./adapters/fleet-adapters.ts";
+import { fleetPorts, signinFleet, type FleetPorts, type LocalFileStore } from "./adapters/fleet-adapters.ts";
 import { connectionsCli, connectionsEnv } from "./adapters/connections-cli.ts";
 import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
@@ -69,6 +69,7 @@ import { MemoryStore } from "./adapters/memory-store.ts";
 import { MemoryFromFuture } from "./adapters/memory-migrations.ts";
 import { MemoryService } from "./application/memory-service.ts";
 import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
+import { SignInService } from "./application/signin-service.ts";
 import { readCodeLine, runMemory } from "./console/memory.ts";
 import { runUpdaterProgram } from "./console/update.ts";
 import { AUDIT_SYNOPSIS, AUDIT_USAGE, parseAuditArgs } from "./console/audit.ts";
@@ -259,6 +260,12 @@ switch (cmd) {
     // Memory is opened below, after Decisions: its pending Notes reach the board through this holder once it exists
     // (ADR-0031 round 2); a hub without Memory never files an Ask.
     const memoryHolder: { service: MemoryService | null } = { service: null };
+    const signPrincipal = principalSigner(identity);
+    const signin = fleet ? new SignInService({
+      fleet: signinFleet(fleet.client, signPrincipal),
+      now: Date.now,
+      audit: entry => { store.record([entry as SignInAudit]); },
+    }) : null;
     // The manager's needs-you list: the decision cards read it, and so do a block's card waits (B18).
     const ownersList = config.ledgerPath ? ledgerReader(config.ledgerPath) : null;
     const escalations = new EscalationService({
@@ -279,6 +286,7 @@ switch (cmd) {
         const m = memoryHolder.service;
         return m && { pending: () => m.pendingApprovals(), decide: (a, id, d) => m.decide(a, id, d) } satisfies MemoryAsks;
       },
+      signin: () => signin && { asks: () => signin.asks(), settled: () => signin.settled() } satisfies SignInAsks,
     });
     const briefs = new BriefService({ store, escalations, managerName: config.managerWindow, managerWorkerId: managerPane, hasLedger: config.ledgerPath != null });
     filed.briefs = briefs;
@@ -322,7 +330,7 @@ switch (cmd) {
     // The fleet's `rollout` events keep the service's last word on where the Rollout stands, for a view the fleet
     // can't answer (its own subscription, like the runs' and the deliveries').
     const updatesService = fleet ? updatesServiceFor(config, {
-      fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: principalSigner(identity), store,
+      fleet: fleetForUpdates(fleet.client), cli: updaterCli(), sign: signPrincipal, store,
       policy: () => access.policy(), build: () => { const s = productStamp(); return { version: s.version, commit: s.commit ?? null }; },
       warn: line => log.warn(line),
     }) : null;
@@ -452,9 +460,17 @@ switch (cmd) {
     const http = startHttp({
       config, identity, access, observation, steering, escalations, remote, store, files, inbox, reading, presence,
       push: { publicKey: vapid.publicKey, notifications }, engines, connections, board: { service: board, agents, proof }, usage, jobs, queue, alerts,
-      transcription, briefs, memory: memory ? { service: memory, agents } : null, updates: { holdPath: holdFile(process.env.HOME || homedir()) }, updatesService,
+      transcription, briefs, memory: memory ? { service: memory, agents } : null, signin, updates: { holdPath: holdFile(process.env.HOME || homedir()) }, updatesService,
     });
     shutdown.onStop(async () => { await http.idle(); await http.close(); });
+    const signinSweepMs = Number(process.env.MORNDO_SIGNIN_SWEEP_MS) || 10 * 60_000;
+    if (signin) {
+      const firstSweep = setTimeout(() => { void signin.sweep(); }, 5000);
+      firstSweep.unref();
+      const signinTimer = setInterval(() => { void signin.sweep(); }, signinSweepMs);
+      signinTimer.unref();
+      shutdown.onStop(() => { clearTimeout(firstSweep); clearInterval(signinTimer); });
+    }
     const sweepInbox = setInterval(() => inbox.sweep(), 3_600_000);
     shutdown.onStop(() => clearInterval(sweepInbox));
     const syncMemory = memorySync ? setInterval(() => void memorySync.tick(), SYNC_EVERY_MS) : null;
