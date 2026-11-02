@@ -7,7 +7,7 @@ import { SIGNIN_ACCOUNT, type SignInRuntime } from "@morndo/domain";
 const exec = promisify(execFile);
 
 export type ResolveOk = { claudeConfigDir: string | null; accountHome: string; createdHome: boolean };
-export type ResolveErr = { code: "not_allowed"; message: string };
+export type ResolveErr = { code: "not_allowed" | "bad_args"; message: string };
 
 export class AccountHomes {
   readonly home: string;
@@ -21,6 +21,7 @@ export class AccountHomes {
   }
 
   resolve(runtime: SignInRuntime, account: string, create: boolean): ResolveOk | ResolveErr {
+    if (account === "main" && create) return { code: "bad_args", message: "bad_account" };
     if (runtime === "cursor") {
       if (account !== "main") return { code: "not_allowed", message: "cursor_main_only" };
       return { claudeConfigDir: null, accountHome: this.home, createdHome: false };

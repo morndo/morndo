@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { existsSync, lstatSync, rmSync, statSync } from "node:fs";
+import { chmodSync, existsSync, lstatSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import {
@@ -17,6 +17,7 @@ const LINK_WAIT_MS = 30_000;
 const POLL_MS = 150;
 const MAX_LIVE = 4;
 const ACCOUNT_CHECK_MS = 20_000;
+const POOL_LIST_MS = 20_000;
 const STATUS_RETRIES = 3;
 const STATUS_RETRY_MS = 300;
 const PATH_ENV = { PATH: process.env.PATH ?? "" };
@@ -65,14 +66,22 @@ export class SignInRunner {
   readonly #homes: AccountHomes;
   readonly #bins: { claude: string; cursor: string };
   readonly #now: () => number;
+  readonly #recordCreatedHome: ((row: { runtime: SignInRuntime; account: string }) => void) | null;
   readonly #sessions = new Map<string, Session>();
   readonly #pendingTargets = new Set<string>();
 
-  constructor(o: { terminal: SignInTerminal; homes: AccountHomes; bins: { claude: string; cursor: string }; now: () => number }) {
+  constructor(o: {
+    terminal: SignInTerminal;
+    homes: AccountHomes;
+    bins: { claude: string; cursor: string };
+    now: () => number;
+    recordCreatedHome?: (row: { runtime: SignInRuntime; account: string }) => void;
+  }) {
     this.#terminal = o.terminal;
     this.#homes = o.homes;
     this.#bins = o.bins;
     this.#now = o.now;
+    this.#recordCreatedHome = o.recordCreatedHome ?? null;
   }
 
   async reap(): Promise<void> {
@@ -88,6 +97,7 @@ export class SignInRunner {
   async start(a: OpArgs["signin.start"]): Promise<Outcome<"signin.start">> {
     await this.#reapExpired();
     if (!SIGNIN_ACCOUNT.test(a.account)) return fail("bad_args", "bad_account");
+    if (a.create && a.account === "main") return fail("bad_args", "bad_account");
     if (a.runtime === "cursor" && a.account !== "main") return fail("not_allowed", "cursor_main_only");
 
     const existing = this.#sessions.get(a.id);
@@ -102,6 +112,7 @@ export class SignInRunner {
       if (a.runtime === "cursor") {
         const signedIn = await this.#cursorSignedIn();
         if (signedIn === "ok") return fail("not_allowed", "already_signed_in");
+        if (signedIn !== "missing") return fail("not_allowed", "cursor_status_unknown");
       }
 
       const resolved = await this.#homes.ensure(a.runtime, a.account, a.create);
@@ -116,14 +127,23 @@ export class SignInRunner {
       const cmd = sessionCommand(this.#homes.home, argv[0]!, argv.slice(1), recipe.extraEnv(this.#homes.home, resolved.claudeConfigDir));
 
       try { await this.#terminal.open(a.id, cmd); }
-      catch { return fail("internal", "could not start sign-in terminal"); }
+      catch {
+        await this.#abortStart(a.id, a.runtime, a.account, resolved);
+        return fail("internal", "could not start sign-in terminal");
+      }
 
-      const linkOut = await this.#waitForLink(a.id, a.runtime, recipe.link);
+      let linkOut: { ok: true; link: string; screen: string } | { ok: false; code: "timeout" | "internal"; message: string };
+      try { linkOut = await this.#waitForLink(a.id, a.runtime, recipe.link); }
+      catch {
+        await this.#abortStart(a.id, a.runtime, a.account, resolved);
+        return fail("internal", "could not start sign-in terminal");
+      }
       if (!linkOut.ok) {
-        await this.#terminal.close(a.id);
-        if (resolved.createdHome) this.#maybeRemoveCreatedHome(a.runtime, a.account, resolved.createdHome, "failed");
+        await this.#abortStart(a.id, a.runtime, a.account, resolved);
         return fail(linkOut.code, linkOut.message);
       }
+
+      if (resolved.createdHome && this.#recordCreatedHome) this.#recordCreatedHome({ runtime: a.runtime, account: a.account });
 
       const needsCode = recipe.codePrompt !== null && recipe.codePrompt.test(linkOut.screen);
       let recipient: string | null = null;
@@ -261,7 +281,12 @@ export class SignInRunner {
     }
     if (s.runtime === "claude") {
       try {
-        if ((statSync(s.credentialsPath).mode & 0o777) !== 0o600) {
+        let mode = statSync(s.credentialsPath).mode & 0o777;
+        if (mode !== 0o600) {
+          chmodSync(s.credentialsPath, 0o600);
+          mode = statSync(s.credentialsPath).mode & 0o777;
+        }
+        if (mode !== 0o600) {
           s.phase = "failed";
           s.problem = "credentials_mode";
           s.identity = null;
@@ -356,11 +381,18 @@ export class SignInRunner {
     return { phase: s.phase, identity: s.identity, problem: s.problem };
   }
 
+  async #abortStart(id: string, runtime: SignInRuntime, account: string, resolved: { createdHome: boolean }): Promise<void> {
+    try { await this.#terminal.close(id); } catch { /* session may be gone */ }
+    this.#maybeRemoveCreatedHome(runtime, account, resolved.createdHome, "failed");
+  }
+
   async #waitForLink(id: string, runtime: SignInRuntime, pattern: RegExp):
     Promise<{ ok: true; link: string; screen: string } | { ok: false; code: "timeout" | "internal"; message: string }> {
     const end = this.#now() + LINK_WAIT_MS;
     while (this.#now() < end) {
-      const ex = await this.#terminal.exit(id);
+      let ex: { dead: boolean; status: number | null };
+      try { ex = await this.#terminal.exit(id); }
+      catch { await sleep(POLL_MS); continue; }
       if (ex.dead) return { ok: false, code: "timeout", message: "no_link" };
       const screen = await this.#terminal.screen(id);
       const m = pattern.exec(screen);
@@ -481,7 +513,7 @@ export class SignInRunner {
     const out = new Map<string, boolean>();
     if (!this.#homes.claudePool) return out;
     try {
-      const { stdout } = await run(this.#homes.claudePool, ["list", "--json"], { encoding: "utf8", env: { ...PATH_ENV, HOME: this.#homes.home } });
+      const { stdout } = await run(this.#homes.claudePool, ["list", "--json"], { encoding: "utf8", timeout: POOL_LIST_MS, env: { ...PATH_ENV, HOME: this.#homes.home } });
       const today = new Date(this.#now()).toISOString().slice(0, 10);
       for (const line of stdout.split("\n")) {
         if (!line.trim()) continue;
