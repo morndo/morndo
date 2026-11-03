@@ -162,7 +162,7 @@
                 </span>
                 <button type="button" class="clearseat" aria-label="Clear this mark for {a.account}" onclick={() => clearMark(a.account)}>Clear this mark</button>
                 {#if a.seat.state === "logged-out"}
-                  <a class="signin-link" href="/engines#accounts">Sign in</a>
+                  <a class="signin-link" href="/settings/accounts">Sign in</a>
                 {/if}
               {/if}
               {#if a.reportedAt > 0}<span class="when">reported {ago(a.reportedAt, now)}</span>{/if}

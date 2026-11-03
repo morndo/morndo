@@ -48,7 +48,7 @@
     <div class="acts">
       {#if engines}<a class="ib" href="/engines" aria-label="Engines" title="Engines: which AI does what"><Cpu size={18} /></a>{/if}
       {#if updates}<a class="ib" href="/updates" aria-label="Updates" title="Updates: every machine's Version"><CircleArrowUp size={18} /></a>{/if}
-      <a class="ib" href="/devices" aria-label="Devices and settings"><Settings size={18} /></a>
+      <a class="ib" href="/settings" aria-label="Settings" title="Settings"><Settings size={18} /></a>
       <button class="ib" aria-label="Message the manager" onclick={onCompose}><SquarePen size={18} /></button>
     </div>
   </div>
