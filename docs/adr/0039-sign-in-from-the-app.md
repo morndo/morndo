@@ -58,8 +58,8 @@ Facts that shape the decision, each checked on 2026-11-02 against the CLIs in us
    section too.
 9. **Each account names its email** (amended 2026-11-02, after the owner's first live use: a list of folder names
    alone didn't say which account to sign in where). An account row carries the signed-in email, or the last one the
-   account's own settings file named, and its plan; the app shows it to the principal and marks two folders that share
-   one. The hub passes it through in memory only: never into its audit or logs.
+   account's own settings file named, and its plan; the app shows it to the principal and marks two folders that are
+   the same account: the same email, with plans not known to differ (one email can hold a Max plan and a Team seat). The hub passes it through in memory only: never into its audit or logs.
 
 ## Consequences
 

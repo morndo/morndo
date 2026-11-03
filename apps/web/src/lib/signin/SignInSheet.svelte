@@ -29,7 +29,7 @@
   // A second folder on an email another folder already uses shares that account's limits: say so once it is done.
   const duplicateEmailLine = $derived(
     view?.phase === "done" && view.identity && target?.runtime === "claude"
-      ? addsNoCapacityLine(view.identity.email, view.account, claudePeers)
+      ? addsNoCapacityLine(view.identity, view.account, claudePeers)
       : null,
   );
 
