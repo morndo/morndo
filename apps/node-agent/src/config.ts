@@ -10,8 +10,8 @@
 // An op can't add a word to the command (spec §11): only `{account}` and `--resume <session>`, both of fixed formats.
 // Reliable lanes (design §3.1, §3.3):
 // - `statusContract`: whether the relay asks a lane, once per turn, for the status line its answer lacks; never the lanes in
-//   `exempt` (the orchestrator). `next` (B22): whether it also asks a BLOCKED or NEEDS DECISION answer with no `next:`
-//   for one; absent: ask.
+//   `exempt` (the orchestrator). `next` (B22): whether it also asks a BLOCKED answer with no `next:` for one; absent:
+//   ask.
 // - `engines`: the engine layer's CLI on this node (`cli`), a launch command per provider (`launch`, with `{model}`,
 //   `{effort}`, `{account}` and `{lane}` filled from the pick and the op), and the Role a new lane runs on when its start
 //   names neither a role nor an engine (`defaultRole`). Without `engines`, lane.start refuses a role or an engine.
@@ -28,7 +28,7 @@ import { MAX_TIMER_MS } from "./ops/job-limits.ts";
 import { agentPaths } from "./paths.ts";
 
 export type Launch = { command: string[]; via: "shell" | "direct" };
-// `next` (B22): whether the relay also asks a BLOCKED or NEEDS DECISION line with no `next:` for one; absent: ask.
+// `next` (B22): whether the relay also asks a BLOCKED line with no `next:` for one; absent: ask.
 export type StatusContract = { mode: "ask" | "off"; exempt: string[]; next?: "ask" | "off" };
 export type EnginesPolicy = { cli?: string; launch: Record<string, Launch>; defaultRole?: string };
 export type JobClassPolicy = { limit: number; timeoutSec?: number };

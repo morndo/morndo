@@ -74,6 +74,15 @@ describe("D2 reads the wait a next: names (B22)", () => {
     expect(task(key)).toMatchObject({ status: "blocked", blockedReason: line, waits: [{ kind: "time", at: Date.parse("2026-11-07T23:59:00Z") }] });
   });
 
+  it("a line that names no task key still blocks the task in progress with its next: as the wait", async () => {
+    const key = doing("Ship it", NOW);
+    await projector.start();
+    const line = "STATUS: BLOCKED stuck on the staging key, next: owner by 2026-11-07";
+    now = NOW + 60_000;
+    source.tell(run("ended", NOW + 30_000, { outcome: "blocked", line }));
+    expect(task(key)).toMatchObject({ status: "blocked", blockedReason: line, waits: [{ kind: "time", at: Date.parse("2026-11-07T23:59:00Z") }] });
+  });
+
   it("a NEEDS DECISION line with next: by in 3 h blocks as a decision with its 24 h deadline and NO wait: it is not moved to do when the 3 h pass", async () => {
     const key = doing("Plan it", NOW);
     await projector.start();

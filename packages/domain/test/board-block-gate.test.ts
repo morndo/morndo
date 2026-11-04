@@ -50,12 +50,13 @@ describe("a block without a watched wait, once the gate is on (B21)", () => {
     expect(task.status).toBe("blocked");
     expect("unwatched" in event.change).toBe(false);
   });
-  it("the owner's own block, from the app's console, is never gated: a person typing a reason has no wait field to fill", () => {
+  it("the owner's own block is never gated: the app acts as the principal (POST /api/board/tasks/:key), the control plane's console acts for him, and a person typing a reason has no wait field to fill", () => {
     const t = doing();
-    for (const mode of ["on", "warn"] as const) {
-      const { task, event } = ok(applyAction(t, { action: "move", to: "blocked", reason: "parked by the owner" }, { kind: "console" }, NOW + 1, [t], gate(mode)));
-      expect(task.status, mode).toBe("blocked");
-      expect("unwatched" in event.change, mode).toBe(false);
+    const owner: TaskActor[] = [{ kind: "principal", endpointId: "ep-1" as never, sessionId: "se-1" as never }, { kind: "console" }];
+    for (const actor of owner) for (const mode of ["on", "warn"] as const) {
+      const { task, event } = ok(applyAction(t, { action: "move", to: "blocked", reason: "parked by the owner" }, actor, NOW + 1, [t], gate(mode)));
+      expect(task.status, `${actor.kind} ${mode}`).toBe("blocked");
+      expect("unwatched" in event.change, `${actor.kind} ${mode}`).toBe(false);
     }
   });
   it("the manager's block is gated like a lane's", () => {
@@ -126,6 +127,14 @@ describe("D2 carries the wait a status line's next: names (B22)", () => {
     const t = doing();
     const move = derivedMove(t, run({ outcome: "needs_decision", line: "STATUS: NEEDS DECISION T-1 which db? next: manager by 3 h" }), [t], { key: t.key, status: "needs_decision", next: { who: "manager", by: T } });
     expect(move).toEqual({ to: "blocked", reason: "STATUS: NEEDS DECISION T-1 which db? next: manager by 3 h", rule: "D2", decision: true });
+  });
+  it("a line that names no task key still carries its next: D2 takes it from the fifth argument, whatever the named status says", () => {
+    const t = doing();
+    expect(derivedMove(t, run(), [t], null, { who: "manager", by: T }))
+      .toEqual({ to: "blocked", reason: "STATUS: BLOCKED T-1 stuck", rule: "D2", waits: [`until:${new Date(T).toISOString()}`] });
+    expect(derivedMove(t, run({ outcome: "needs_decision", line: "STATUS: NEEDS DECISION which db?" }), [t], null, { who: "manager", by: T }))
+      .toEqual({ to: "blocked", reason: "STATUS: NEEDS DECISION which db?", rule: "D2", decision: true });
+    expect(derivedMove(t, run(), [t], null)).toEqual({ to: "blocked", reason: "STATUS: BLOCKED T-1 stuck", rule: "D2" });
   });
   it("no next on the named status: no waits key, as before", () => {
     const t = doing();

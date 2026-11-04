@@ -91,11 +91,11 @@ describe("W1: which WAITING Stops are asked for a waker", () => {
     expect(statusAsk(waiting({ session_crons: "none" }), "builder", ASK, none)).toBeNull();
   });
 
-  it("never for a DONE; a BLOCKED or NEEDS DECISION with no next is asked for one (B22); and the status ask is as it was, whatever the jobs (it keeps priority)", () => {
-    expect(statusAsk(stop({ last_assistant_message: "STATUS: DONE\nMerged." }), "builder", ASK, none)).toBeNull();
-    for (const line of ["STATUS: BLOCKED on the key", "STATUS: NEEDS DECISION: which base?"]) {
-      expect(statusAsk(stop({ last_assistant_message: line }), "builder", ASK, none), line).toBe(NEXT_ASK);
+  it("never for a DONE or a NEEDS DECISION; a BLOCKED with no next is asked for one (B22); and the status ask is as it was, whatever the jobs (it keeps priority)", () => {
+    for (const line of ["STATUS: DONE\nMerged.", "STATUS: NEEDS DECISION: which base?"]) {
+      expect(statusAsk(stop({ last_assistant_message: line }), "builder", ASK, none), line).toBeNull();
     }
+    expect(statusAsk(stop({ last_assistant_message: "STATUS: BLOCKED on the key" }), "builder", ASK, none)).toBe(NEXT_ASK);
     const { background_tasks: _b, ...noTasks } = stop();
     for (const jobsOf of [none, () => 1, () => null]) {
       expect(statusAsk(stop(), "builder", ASK, jobsOf)).toBe(STATUS_ASK);     // no status line at all: the status ask

@@ -12,8 +12,8 @@
 // ADR-0038; board-waits.ts). A block may be a decision, carrying a deadline 24 h on while it stays blocked, and what is
 // idle too long with nothing the board watches is listed (B19, B20, ADR-0040; board-stale.ts). A block of a lane or
 // the manager that names no wait and asks no decision is warned, then refused — never the board's own moves, never
-// the owner's from the app's console (B21, ADR-0041) — and a status line may name who owes the next move and by when,
-// which the board's own block waits for (B22).
+// the owner's own block, from the app or the console (B21, ADR-0041) — and a status line may name who owes the next
+// move and by when, which the board's own block waits for (B22).
 import type { Run } from "./run.ts";
 import { DECISION_DUE_MS } from "./board-stale.ts";
 import { parseWaits, type Wait } from "./board-waits.ts";
@@ -241,8 +241,9 @@ export function mergedView(key: TaskKey, merges: readonly MergeRecord[], livenes
 // the hub read for its references, in a mode; absent: done is not held for proof either (the hub passes none yet).
 // `repos` (B18): the repositories whose pull requests the hub reads, for a block's waits; absent: morndo/morndo only.
 // `cards`: whether the hub reads the owner's list, for a card wait; absent: it does.
-// `blockGate` (B21, ADR-0041): the gate a block of a lane or the manager passes — `mode`, and `from`, the instant it
-// refuses from, shown in the warning. Absent: no gate, a board without the hub's setting blocks as it always did.
+// `blockGate` (B21, ADR-0041): the gate a block of a lane or the manager passes — `mode`, and `from`, the instant the
+// hub's date rule switches to refusing (the domain reads only the mode; the CLI names the same default date and says
+// the hub's setting may differ). Absent: no gate, a board without the hub's setting blocks as it always did.
 export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate; repos?: readonly string[]; cards?: boolean; blockGate?: { mode: "off" | "warn" | "on"; from: number } };
 
 // `board`: the tasks in progress now, for B5 when a task is filed straight into progress.
@@ -362,13 +363,14 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       }
       if (restated && reason === task.blockedReason && sameWaits(waits, task.waits ?? []) && deciding === (task.decisionDue !== undefined)) return refuse("same");
       // B21 (ADR-0041): a block of a lane or the manager names what it waits on, or asks a decision — a restatement
-      // too. The board's own moves never pass a gate (D2 blocks on the line alone), and neither does the owner's own
-      // from the app's console: a person typing a reason there has no wait field to fill, and a gate that refused it
-      // would lock the owner out of his own board. A decision is the manager's to answer (B19), and a block with a
-      // wait is watched. `on` refuses it; `warn` takes it and marks the event, so the mover is told what is coming;
+      // too. The gate applies to those two alone: the board's own moves never pass one (D2 blocks on the line alone),
+      // and neither does the owner's own block, from the app (the principal, as POST /api/board/tasks/:key builds him)
+      // or the control plane's console — a person typing a reason has no wait field to fill, and a gate that refused
+      // him would lock the owner out of his own board. A decision is the manager's to answer (B19), and a block with
+      // a wait is watched. `on` refuses it; `warn` takes it and marks the event, so the mover is told what is coming;
       // `off`, and no gate at all, change nothing.
       let unwatched = false;
-      if (action.to === "blocked" && actor.kind !== "board" && actor.kind !== "console" && waits.length === 0 && !deciding) {
+      if (action.to === "blocked" && (actor.kind === "manager" || actor.kind === "worker") && waits.length === 0 && !deciding) {
         const gateMode = gate?.blockGate?.mode;
         if (gateMode === "on") return refuse("no_wait");
         unwatched = gateMode === "warn";
@@ -536,7 +538,10 @@ export type NamedStatus = { key: TaskKey; status: "done" | "blocked" | "needs_de
 // nothing, so the board never undoes what a person or a lane did after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
 export const GONE_REASON = "its lane stopped without DONE";
 export const BACKGROUND_REASON = "background work still running";
-export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null): { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true; waits?: string[] } | null {
+// B22: `next`, the fifth parameter, is the line's next as the hub resolved it, whatever the key the line names — a
+// keyless line (one the relay asked for a next, and the prompt allows) names no task, so it cannot ride NamedStatus;
+// it defaults to `named?.next` when the caller passes none.
+export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null, next: NamedStatus["next"] = named?.next): { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true; waits?: string[] } | null {
   if (task.assignee === null || task.assignee !== run.lane || run.since <= task.stateChangedAt) return null;
   // B12: the key counts only when the line is the turn's word: a turn's end, or a wait.
   const keyed = run.phase === "ended" || run.phase === "waiting" ? named : null;
@@ -558,7 +563,7 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[], named:
     // that ended first would move the unanswered decision to do (D7), out of the manager's inbox.
     if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) {
       const deciding = run.outcome === "needs_decision";
-      return { to: "blocked", reason: said ?? run.outcome, rule: "D2", ...(deciding ? { decision: true as const } : {}), ...(!deciding && keyed?.next !== undefined ? { waits: [`until:${new Date(keyed.next.by).toISOString()}`] } : {}) };
+      return { to: "blocked", reason: said ?? run.outcome, rule: "D2", ...(deciding ? { decision: true as const } : {}), ...(!deciding && next !== undefined ? { waits: [`until:${new Date(next.by).toISOString()}`] } : {}) };
     }
     if (run.phase === "gone") return { to: "todo", reason: GONE_REASON, rule: "D3" };
     return null;

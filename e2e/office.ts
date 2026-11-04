@@ -103,6 +103,8 @@ export function buildOffice(o: { home: string; socket: string; vncPort: number }
   return {
     tmux, panes, ledger, writeLedger, line: L, claudeDir: CLAUDE, desktop,
     env: (port: number) => ({
+      // B21: the gate is on, so the board e2e's "Mark blocked" (the owner, as the principal) proves he is never refused.
+      MORNDO_BLOCK_GATE: "on",
       MORNDO_LEDGER: LEDGER, MORNDO_PANE_LOCK: LOCK, MORNDO_HOME: HOME, MORNDO_PORT: String(port), MORNDO_ORIGIN: `http://localhost:${port}`,
       MORNDO_TMUX_SOCKET: SOCKET, MORNDO_CLAUDE_DIR: CLAUDE, MORNDO_OFFICE_NAME: "Demo office", MORNDO_POLL_MS: "400",
       ...(desktop ? { MORNDO_VNC: `127.0.0.1:${desktop.port}`, MORNDO_VNC_PASSWORD_FILE: desktop.passwordFile } : {}),

@@ -417,8 +417,8 @@ describe("lane-notify-stop", () => {
       expect(statusLineOf(firstLineOf(String(body.text)))).toEqual(want);
       expect(statusLineOf(firstLineOf(String(body.last_assistant_message)))).toEqual(want);
       const asked = statusAsk(body, "lane-x", ASK);
-      // B22: a BLOCKED or NEEDS DECISION line with no next is asked for one; every other status, no ask.
-      expect(asked).toBe(want === null ? STATUS_ASK : want.status === "blocked" || want.status === "needs_decision" ? NEXT_ASK : null);
+      // B22: a BLOCKED line with no next is asked for one; every other status, a decision too, no ask.
+      expect(asked).toBe(want === null ? STATUS_ASK : want.status === "blocked" ? NEXT_ASK : null);
     }
   });
 

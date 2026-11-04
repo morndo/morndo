@@ -47,6 +47,15 @@ describe("the block gate in the CLI (B21)", () => {
     expect(r.out).not.toContain("no watched wait");
     expect(r.sent).toEqual([{ action: "move", to: "blocked", reason: "needs the API key", waits: [until] }]);
   });
+  it("the worker prompt tells a lane what refusal it can mend: --on, or --decision; next: belongs to the status line, never offered as a fix for a refused morndo-board block", async () => {
+    const out: string[] = [];
+    expect(await run(["prompt", "--role", "worker"], {}, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} })).toBe(0);
+    const text = out.join("\n").replace(/\s+/g, " ");
+    expect(text).toContain("--on");
+    expect(text).toContain("--decision");
+    expect(text).not.toMatch(/refused: end the line with/);
+    expect(text).toMatch(/status line.{0,160}next: <who> by <when>/);
+  });
   it("the prompts for both roles say a block names a wait, 31 days at most", async () => {
     for (const role of ["worker", "manager"] as const) {
       const out: string[] = [];

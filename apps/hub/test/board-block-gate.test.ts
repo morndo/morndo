@@ -85,6 +85,37 @@ describe("the gate in BoardService (B21)", () => {
     expect(board.task(key)?.events.at(-1)?.change).toMatchObject({ kind: "moved", from: "doing", to: "blocked", unwatched: true });
   });
 
+  it("on: the owner's block from the app (the principal, as POST /api/board/tasks/:key builds it) is never refused, and never marked unwatched in warn", () => {
+    const owner = { kind: "principal", endpointId: "ep-1", sessionId: "se-1" } as never;
+    open("on");
+    const key = doing();
+    const blocked = board.act(key, { action: "move", to: "blocked", reason: "parked by the owner" }, owner);
+    expect(blocked.ok, JSON.stringify(blocked)).toBe(true);
+    board.stop(); store.close();
+    open("warn");
+    const k2 = doing();
+    const warned = board.act(k2, { action: "move", to: "blocked", reason: "parked by the owner" }, owner);
+    expect(warned.ok).toBe(true);
+    if (warned.ok) expect("unwatched" in warned.event.change).toBe(false);
+  });
+
+  it("the gate is read with the service's own clock: the setting's date rule decides on the moment of the move, not on the real time", () => {
+    store = new Store(dir);
+    board = new BoardService({ store, now: () => now, policy: () => DEFAULT_POLICY, blockGate: loadConfig({}).blockGate });
+    now = FROM - 3_600_000;                                              // an hour before the switch: a block of words is taken, marked
+    const early = doing();
+    now = FROM - 1_800_000;
+    const taken = board.act(early, { action: "move", to: "blocked", reason: "needs the API key" }, BUILDER);
+    expect(taken.ok, JSON.stringify(taken)).toBe(true);
+    if (taken.ok) expect(taken.event.change).toMatchObject({ unwatched: true });
+    now = FROM + 3_600_000;                                              // an hour after: the same block is refused
+    const late = doing();
+    now = FROM + 7_200_000;
+    const refused = board.act(late, { action: "move", to: "blocked", reason: "needs the API key" }, BUILDER);
+    expect(refused.ok).toBe(false);
+    if (!refused.ok) expect(refused.problem).toBe("no_wait");
+  });
+
   it("mode off, and no gate at all: the block goes through as before, with no unwatched on the event", () => {
     open("off");
     const key = doing();

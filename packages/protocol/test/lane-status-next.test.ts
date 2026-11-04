@@ -33,6 +33,19 @@ describe("a trailing next: on a status line (B22)", () => {
       .toEqual({ status: "waiting", waitingOn: "main CI", forMs: 720_000, next: { who: "manager", by: { inMs: 10_800_000 } } });
   });
 
+  it("a duration may be written the way people write it: in 2h, in 30min, in 1 hour, in  2  h", () => {
+    for (const [when, inMs] of [["in 2h", 7_200_000], ["in 30min", 1_800_000], ["in 90 minutes", 5_400_000], ["in 1 hour", 3_600_000], ["in  2  h", 7_200_000], ["in 45m", 2_700_000]] as const) {
+      expect(statusLineOf(`STATUS: BLOCKED T-12 stuck, next: owner by ${when}`), when).toEqual({ status: "blocked", taskKey: "T-12", next: { who: "owner", by: { inMs } } });
+    }
+    expect(statusLineOf("STATUS: BLOCKED stuck, next: owner by in 0h"), "a duration of nothing").toEqual({ status: "blocked" });
+  });
+
+  it("a clause in square brackets is taken whole, and a WAITING line's on-what keeps no bracket", () => {
+    expect(statusLineOf("STATUS: WAITING T-12 on CI for 20 min [next: lane by in 1 h]"))
+      .toEqual({ status: "waiting", taskKey: "T-12", waitingOn: "CI", forMs: 1_200_000, next: { who: "lane", by: { inMs: 3_600_000 } } });
+    expect(statusLineOf("STATUS: BLOCKED stuck [next: owner by 2026-11-05]")).toEqual({ status: "blocked", next: { who: "owner", by: { at: Date.parse("2026-11-05T23:59:00Z") } } });
+  });
+
   it("a WAITING line keeps its own lease: the duration inside next: is not the wait's", () => {
     expect(statusLineOf("STATUS: WAITING main CI for 12 min, next: manager by in 3 h"))
       .toEqual({ status: "waiting", waitingOn: "main CI", forMs: 720_000, next: { who: "manager", by: { inMs: 10_800_000 } } });

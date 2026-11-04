@@ -45,12 +45,14 @@ const MOVES_PER_RUN = 8;
 // `in <N> …` resolves against the run the line rode in on (not the hub's clock, which may read the line much later),
 // and only a next still ahead and within the 31-day cap of a time wait is passed on. One already past, or too far
 // ahead, is dropped here: D2 then blocks without a wait, as it always did, rather than losing the block to the clock.
-const namedOf = (run: RunView, now: number): NamedStatus | null => {
+// The next is read whatever the key the line names: a keyless line (one the relay asked for a next, and the prompt
+// allows) names no task, so it cannot ride NamedStatus — it reaches derivedMove as its own argument.
+const namedOf = (run: RunView, now: number): { named: NamedStatus | null; next: NamedStatus["next"] } => {
   const s = statusLineOf(run.line ?? "");
   const key = s?.taskKey !== undefined ? parseTaskKey(s.taskKey) : null;
-  if (s === null || key === null) return null;
-  const n = s.next === undefined ? null : { who: s.next.who, by: "at" in s.next.by ? s.next.by.at : run.since + s.next.by.inMs };
-  return { key, status: s.status, ...(n !== null && now < n.by && n.by <= now + BLOCK_UNTIL_MAX_MS ? { next: n } : {}) };
+  const n = s?.next === undefined ? undefined : { who: s.next.who, by: "at" in s.next.by ? s.next.by.at : run.since + s.next.by.inMs };
+  const next = n !== undefined && now < n.by && n.by <= now + BLOCK_UNTIL_MAX_MS ? n : undefined;
+  return { named: s !== null && key !== null ? { key, status: s.status, ...(next !== undefined ? { next } : {}) } : null, next };
 };
 
 export class BoardProjector {
@@ -151,14 +153,14 @@ export class BoardProjector {
     try {
       // B12: a keyed line naming a task that is not the lane's open task moves nothing; one comment in the history of its
       // own task in progress says so.
-      const named = namedOf(run, this.#board.now());
+      const { named, next } = namedOf(run, this.#board.now());
       const note = keyMismatch(run, named, this.#board.openTasksOf(run.lane));
       if (note !== null) this.#note(note, run);
       for (let i = 0; i < MOVES_PER_RUN; i++) {
         const tasks = this.#board.openTasksOf(run.lane);
         let due: { task: Task; move: NonNullable<ReturnType<typeof derivedMove>>; memo: string } | null = null;
         for (const task of tasks) {
-          const move = derivedMove(task, run, tasks, named);
+          const move = derivedMove(task, run, tasks, named, next);
           if (!move) continue;
           const memo = `${task.key}@${task.rev} ${run.lane}@${run.since} ${move.rule}`;
           if (this.#refused.has(memo)) continue;
