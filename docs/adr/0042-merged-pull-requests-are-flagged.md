@@ -23,17 +23,22 @@ through one forge adapter and one rate wall, only in `MORNDO_PROOF_REPOS`.
 
 ## Decision
 
-1. **The hub reads the pull requests the open tasks' briefs name** — the references of the brief that still counts,
-   of the tasks in to do, in progress, blocked or in review — only in the repositories its settings list (B14: task
-   data never widens the list), through the forge the proof checks use, within an hourly budget of its own that
-   mirrors the waits' (60 reads an hour with a forge credential, 5 without: the anonymous wall is shared with the
-   proof checks and the waits). A merged answer is final and never asked again; an open or failed one is asked again
-   at most every quarter hour. A pass every 15 minutes, the first 90 seconds after start.
+1. **The hub reads the pull requests the open tasks' briefs name** — the references of each task's newest brief,
+   whatever round filed it (a lane back in progress keeps the pull request it named), of the tasks in to do, in
+   progress, blocked or in review — only in the repositories its settings list (B14: task data never widens the
+   list), through the forge the proof checks use, within an hourly budget of its own that mirrors the waits' (60
+   reads an hour with a forge credential, 5 without: the anonymous wall is shared with the proof checks and the
+   waits). A merged answer is final and never asked again; an open or failed one is asked again at most every
+   quarter hour. A pass every 15 minutes, the first 90 seconds after start.
 2. **A pull request that merged while its task records no merge of it is flagged** (B23): the flag names the task,
-   its status, the pull request and the commit it merged as. It rides the board view (`mergedPrs`), the CLI lists it
+   its status, the pull request and the commit it merged as. The facts are the last pass's, kept per pull request;
+   the flags are computed live, from those facts against the board as it stands — a task that left the open
+   statuses, a merge just recorded, a brief that no longer names the pull request: gone at once, before any pass
+   runs, and the status shown is the task's now. They ride the board view (`mergedPrs`), the CLI lists them
    (`morndo-board merged`, a tag in `morndo-board list`), and the manager's lane is told in one message on the stale
    sweep's rhythm (B20): at once when the list changed, at most every 12 hours while it is the same, again at the
-   next pass when a message did not go.
+   next pass when a message did not go. The sweep follows each of the watch's passes and never goes before it, so it
+   always sends the list that pass just read.
 3. **A task that already records the merge is not flagged**: a record in the same repository (either's case) of the
    same commit (either length of sha), or of any commit there when the forge gave none, stands for the merge. And the
    deadlock is gone (B14, amended): the "reference in that repository" rule now bites only on merge records in a
@@ -52,8 +57,10 @@ the console's or the lane's own act), and never assigns or edits anything (B8). 
   hourly budget) and `MORNDO_FORGE_URL` (a stand-in forge). Unset, the flag reads only `morndo/morndo`.
 - The hub's forge reads grow by the briefs' pull requests, bounded by the new budget; a repository outside the
   settings is never asked, whatever a brief names.
-- A restart forgets what was final (a merged answer is kept for the life of the process) and reads again; a flag is
-  never older than the last pass, and the sweep never names a task that left the open statuses in between.
+- A restart forgets what was final (a merged answer is kept for the life of the process) and reads again; only the
+  facts are as of the last pass — the flags are computed against the board as it stands, so a merge recorded or a
+  task that moved on is gone at once, and the sweep, following each pass, never names what the pass's list has
+  already lost.
 
 ## Alternatives considered
 

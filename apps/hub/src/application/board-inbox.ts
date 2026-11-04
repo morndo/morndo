@@ -213,8 +213,10 @@ export class StaleSweep {
 }
 
 // B23 (ADR-0042): the merged sweep — the open tasks whose pull request merged without a merge record, as the merge
-// watch's last pass flagged them, told to the manager's lane in one message. Same rhythm as the stale sweep, and a
-// list that went away and came back is news again. It moves nothing and records nothing: the message says so itself.
+// watch flags them now (live, from the last pass's facts against the board as it stands), told to the manager's lane
+// in one message after each of the watch's passes (mergedPass, merge-watch.ts: never before the pass it follows).
+// Same rhythm as the stale sweep, and a list that went away and came back is news again. It moves nothing and records
+// nothing: the message says so itself.
 export class MergedSweep {
   #flags: () => readonly MergedFlag[];
   #gate: GatedSweep;

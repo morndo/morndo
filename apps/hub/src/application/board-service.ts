@@ -24,7 +24,8 @@ import type { Authenticated } from "./access-service.ts";
 // `standIn`: set only when the hub reads its proof references from a stand-in forge, so every screen can say so (ADR-0035).
 // `waits` (B18): for each blocked task that names waits, what the wait watch last read of them; `staleBlocks`: the blocked
 // tasks of words only that nobody changed for STALE_BLOCK_MS. `mergedPrs` (B23): the open tasks whose pull request merged
-// without a merge record, as the merge watch's last pass flagged them. All absent when there are none.
+// without a merge record, as the merge watch flags them now (live, from the last pass's facts). All absent when there
+// are none.
 export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[]; standIn?: true; waits?: { key: string; readings: JudgedWait[] }[]; staleBlocks?: string[]; mergedPrs?: { key: string; prs: string[] }[] };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
@@ -128,7 +129,7 @@ export class BoardService {
       return readings === null ? [] : [{ key: t.key, readings }];
     });
     const staleBlocks = tasks.filter(t => isStaleBlock(t, now)).map(t => t.key);
-    // B23: the merge watch's last flags, one line per pull request (`repo#n merged <first 7>`, `merged` alone when the
+    // B23: the merge watch's flags as they are now (live), one line per pull request (`repo#n merged <first 7>`, `merged` alone when the
     // forge gave no commit); nothing when nothing is flagged.
     const mergedPrs = this.#mergedPrs === null ? [] : this.#mergedPrs.flags().map(f => ({ key: f.key as string, prs: f.prs.map(p => `${p.repo}#${p.n}${p.mergeSha === null ? " merged" : ` merged ${p.mergeSha.slice(0, 7)}`}`) }));
     return {

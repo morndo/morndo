@@ -95,8 +95,8 @@ export const BoardFrameSchema = z.object({
   // B18: what the wait watch last read of each block's waits, and the blocks of words only that sat too long.
   waits: z.exactOptional(z.array(z.object({ key: taskKey(), readings: z.array(JudgedWaitSchema) }))),
   staleBlocks: z.exactOptional(z.array(text())),
-  // B23 (ADR-0042): the open tasks whose pull request merged without a merge record, as the merge watch's last pass
-  // flagged them; absent from a hub that has none.
+  // B23 (ADR-0042): the open tasks whose pull request merged without a merge record, as the merge watch flags them
+  // now (live, from the last pass's facts); absent from a hub that has none.
   mergedPrs: z.exactOptional(z.array(z.object({ key: taskKey(), prs: z.array(text()) }))),
 });
 
