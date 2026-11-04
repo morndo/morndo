@@ -51,14 +51,15 @@ function nextWhen(s: string): { at: number } | { inMs: number } | null {
   const t = s.trim();
   const at = NEXT_AT.exec(t);
   if (at !== null) {
-    const [y, mo, d, h, mi, se] = [at[1], at[2], at[3], at[4], at[5], at[6]].map(Number);
-    if (!realDay(y, mo, d) || h > 23 || mi > 59 || (se ?? 0) > 59) return null;
+    const y = Number(at[1]), mo = Number(at[2]), d = Number(at[3]), h = Number(at[4]), mi = Number(at[5]);
+    const se = at[6] === undefined ? 0 : Number(at[6]);
+    if (!realDay(y, mo, d) || h > 23 || mi > 59 || se > 59) return null;
     const ms = Date.parse(t);
     return Number.isFinite(ms) ? { at: ms } : null;
   }
   const day = NEXT_DAY.exec(t);
   if (day !== null) {
-    const [y, mo, d] = [day[1], day[2], day[3]].map(Number);
+    const y = Number(day[1]), mo = Number(day[2]), d = Number(day[3]);
     return realDay(y, mo, d) ? { at: Date.parse(`${t}T23:59:00Z`) } : null;
   }
   const fromNow = NEXT_IN.exec(t);
