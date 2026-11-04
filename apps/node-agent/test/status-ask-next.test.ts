@@ -17,6 +17,15 @@ describe("a BLOCKED or NEEDS DECISION line with no next is asked for one (B22)",
     expect(statusAsk(stop({ last_assistant_message: "STATUS: BLOCKED T-12 stuck" }), "api", ASK)).toBe(NEXT_ASK);
     expect(statusAsk(stop({ last_assistant_message: "STATUS: NEEDS DECISION T-12 which db?" }), "api", ASK)).toBe(NEXT_ASK);
   });
+  it("the same when the relay can count jobs (it always passes jobsOf): a BLOCKED line is asked whatever the count, a WAITING one is not asked for a next", () => {
+    for (const jobs of [0, 1]) {
+      expect(statusAsk(stop({ last_assistant_message: "STATUS: BLOCKED T-12 stuck" }), "api", ASK, () => jobs), `${jobs} jobs`).toBe(NEXT_ASK);
+      expect(statusAsk(stop({ last_assistant_message: "STATUS: NEEDS DECISION T-12 which db?" }), "api", ASK, () => jobs), `${jobs} jobs`).toBe(NEXT_ASK);
+    }
+    expect(statusAsk(stop({ last_assistant_message: "STATUS: WAITING on CI for 5 min" }), "api", ASK, () => 1)).toBeNull();
+    // Something still running or scheduled in the session: the turn is not over, so no ask of any kind (as before).
+    expect(statusAsk(stop({ last_assistant_message: "STATUS: BLOCKED T-12 stuck", background_tasks: [{ id: "b1" }] }), "api", ASK, none)).toBeNull();
+  });
   it("never once the line carries a next", () => {
     expect(statusAsk(stop({ last_assistant_message: "STATUS: BLOCKED T-12 stuck, next: owner by 2026-11-05" }), "api", ASK)).toBeNull();
   });

@@ -50,6 +50,12 @@ describe("a block without a watched wait, once the gate is on (B21)", () => {
     expect(task.status).toBe("blocked");
     expect("unwatched" in event.change).toBe(false);
   });
+  it("restating a decision with no waits goes through, and keeps the deadline it had (B19)", () => {
+    const first = ok(block(doing(), gate("on"), { decision: true })).task;
+    const again = ok(block(first, gate("on"), { reason: "still needs an answer", decision: true }, NOW + 2));
+    expect(again.task.decisionDue).toBe(first.decisionDue);
+    expect(again.task.status).toBe("blocked");
+  });
   it("restating a blocked task with no waits is refused too; restating with an until goes through", () => {
     const first = ok(block(doing(), gate("on"), { waits: [until(3_600_000)] })).task;
     const again = block(first, gate("on"), { reason: "still needs the API key" }, NOW + 2);
