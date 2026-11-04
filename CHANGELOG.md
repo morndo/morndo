@@ -1,5 +1,86 @@
 # Changelog
 
+## [0.3.0](https://github.com/morndo/morndo/compare/v0.2.3...v0.3.0) (2026-11-04)
+
+
+### Features
+
+* **board-cli:** inbox, stale, and block --decision ([23602e4](https://github.com/morndo/morndo/commit/23602e4ebed41614c9e301c82061ad5be5186cb3))
+* **board-cli:** morndo-board merged lists the open tasks whose pull request merged (T-805, B23) ([14e973a](https://github.com/morndo/morndo/commit/14e973afbbc4d669eff073db74588f5c199d4698))
+* **board:** a block may be a decision, with a deadline 24 h on (B19) ([6383d1b](https://github.com/morndo/morndo/commit/6383d1bfd86f96fdebe18b74344aa7fd8fbc88c7))
+* **board:** a block names a watched wait, and status lines carry next: (T-805, part B) ([42f5d29](https://github.com/morndo/morndo/commit/42f5d29d95f7a3cd27929cc6e5d49cfbec652539))
+* **board:** a block needs a watched wait, warned then refused (B21, B22) ([2095221](https://github.com/morndo/morndo/commit/20952215c37943debb54fc85a39624dac30941f8))
+* **board:** a decision inbox and a stale sweep, so the board cannot go stale silently (T-805, part A) ([ec172d2](https://github.com/morndo/morndo/commit/ec172d283c3d75775db47e0383d2cd6b74581da5))
+* **board:** flag a merged pull request an open task does not record (T-805, part C) ([1396c1e](https://github.com/morndo/morndo/commit/1396c1e485276f405198ab4668b03173c6039f18))
+* **board:** the domain flags a merged pull request an open task does not record (T-805, B23) ([0256a28](https://github.com/morndo/morndo/commit/0256a282415a77d114ab6dc09d409b2d880636f2))
+* **hub:** the decision inbox and the stale sweep (B19, B20) ([1892973](https://github.com/morndo/morndo/commit/1892973b878833af2e221bfd168da81fd2467238))
+* **hub:** the merge watch reads the briefs' pull requests and flags a merged one (T-805, B23) ([3e9dfba](https://github.com/morndo/morndo/commit/3e9dfba30335b528854a7c81a0c77815bb4c0de5))
+* **node-agent:** ask a BLOCKED or NEEDS DECISION line with no next for one (B22) ([61746e3](https://github.com/morndo/morndo/commit/61746e317625981a56d847916d1125d9bc1bf703))
+* **protocol:** a status line may end with next: &lt;who&gt; by &lt;when&gt; (B22) ([3de5386](https://github.com/morndo/morndo/commit/3de5386868f93f3c8b1627ff2cc679b2ae11f4f2))
+* **settings:** add Settings hub with accounts email display ([e5f3be4](https://github.com/morndo/morndo/commit/e5f3be4176795c1a64029e36bbc5de12c6d03cf0))
+* **settings:** one Settings page, and each account names its email ([9758d6d](https://github.com/morndo/morndo/commit/9758d6df8e16a85eccef2d6e978b449db5aa3fa2))
+* **signin:** close node runner security gaps from review ([032ec00](https://github.com/morndo/morndo/commit/032ec0011d432c9bf633f0b79fb931193cbd4c52))
+* **signin:** domain rules, wire shapes and fleet ops for signing accounts in from the app (ADR-0039) ([eae950f](https://github.com/morndo/morndo/commit/eae950f2fafc93c18a0d3afaa13c54f6a739f401))
+* **signin:** each account row names its email (signed in, or the last one its settings named) and its plan ([523946c](https://github.com/morndo/morndo/commit/523946c48092706215fbebaa23e4c76fcdcaefde))
+* **signin:** harden hub relay, audit, and agent card requests ([dafb49a](https://github.com/morndo/morndo/commit/dafb49ad72d6953c60027a4eb2a171abc0a57443))
+* **signin:** reap expired sessions, harden runner lifecycle ([1921af4](https://github.com/morndo/morndo/commit/1921af4340ff93af9a17fff0c1408d2f498629a3))
+* **signin:** recover from leftover folders and tighten decision cards ([948502a](https://github.com/morndo/morndo/commit/948502a048cd4b2450ff5ba28de8fd2cc6ac7baa))
+* **signin:** sign accounts in again, or add one, from the app (ADR-0039) ([79ef3d1](https://github.com/morndo/morndo/commit/79ef3d1d09fe5f350a82b23813ffaea6b2c66e4f))
+* **signin:** sign fleet ops, cancel orphans, rate-limit accounts ([6967ccc](https://github.com/morndo/morndo/commit/6967ccc2b6bb39850fd7678b3a51e11d2518a3cc))
+* **signin:** sign-in sheet, Accounts list and card entry points in the app ([fa2dc96](https://github.com/morndo/morndo/commit/fa2dc96fafb7660b3fb7f7345b66f41866b34cea))
+* **signin:** the hub relays sign-ins to one node and holds sign-in cards ([a862d45](https://github.com/morndo/morndo/commit/a862d4556837dd3c9b13ab1f6f8af9738bebcad5))
+* **signin:** the node runs each CLI's own sign-in for one account in a hidden terminal ([cca5d43](https://github.com/morndo/morndo/commit/cca5d438e00b316250f8d1c6bfc7f4c3aca4a95f))
+* **web:** the Desktop on phones and tablets: keyboard, extra keys, paste and copy, Fit or 1:1 ([069120c](https://github.com/morndo/morndo/commit/069120c2f0aca867264df1c3b857386f3f3cd2b7))
+* **web:** the Desktop tab on phones and tablets: keys row, keyboard, paste and copy, Fit or 1:1, a Desktop view in the phone's conversation ([38d70a0](https://github.com/morndo/morndo/commit/38d70a020515c88b4156f9640d55b71b607669cb))
+
+
+### Bug Fixes
+
+* **board-cli:** morndo-board merged --json prints an empty list when nothing is flagged (T-805) ([f05ffb9](https://github.com/morndo/morndo/commit/f05ffb90602a507aa70014e2fe28dbb5b47ec7ba))
+* **board-cli:** the warned-block notice says the hub's setting may differ ([cea9e65](https://github.com/morndo/morndo/commit/cea9e6561dd62cdbc4d8626c9758eedae2b3c4d9))
+* **board:** a merge record in a repository the hub does not read needs no brief reference (T-805, B14) ([ce325d4](https://github.com/morndo/morndo/commit/ce325d4795200e012dd260fe33af0953e5118bee))
+* **board:** a reference in the repository of any merge record the hub reads satisfies B14 (T-805) ([45dd20b](https://github.com/morndo/morndo/commit/45dd20bdf749ec844ec95839c5588cbb062980aa))
+* **board:** loadConfig answers the block gate there to call, and D2's retry drops its waits ([28cc876](https://github.com/morndo/morndo/commit/28cc876333e1a5bc7276ebb3de10d80403361ff2))
+* **board:** proofOf judges the unread merge repository as checkBrief does, and the merge flag asks less, records more and reads only candidates (T-805) ([93450b3](https://github.com/morndo/morndo/commit/93450b38f2efb41b85399697ffc51f0b20d107f0))
+* **board:** the gate never touches the owner's own block, and a decision's D2 carries no wait (B21, B22) ([ed6738f](https://github.com/morndo/morndo/commit/ed6738f738f87255383c268b74b00f0dd887ad94))
+* **board:** the owner's own block is never gated, and a keyless line's next reaches D2 (B21, B22) ([6a02200](https://github.com/morndo/morndo/commit/6a02200bc9a804aa719403ce013cb5bd578198c2))
+* **hub:** retry an unsent board message under its own id ([8b0a163](https://github.com/morndo/morndo/commit/8b0a1639d6ae39fea8b5cd8777a67419c1312a9d))
+* **hub:** the block gate reads the board service's own clock ([906d1c7](https://github.com/morndo/morndo/commit/906d1c710117d6624a206aa89129fd07ef592438))
+* **hub:** the board watchers' deliveries reach the fleet and lose no task ([7bdcc89](https://github.com/morndo/morndo/commit/7bdcc89c933ff6d8260e3e6d555babf1d95efea2))
+* **hub:** the merge flag is computed live from the last pass's facts, and the sweep follows the pass (T-805) ([adac64e](https://github.com/morndo/morndo/commit/adac64e0788ef08a29fcda83d330d60a9450e8ce))
+* **node-agent:** NEXT_ASK says the relay reads 200 characters ([3270cf8](https://github.com/morndo/morndo/commit/3270cf8c4cf70bbe4c3383c17a7897bbb0be74eb))
+* **node-agent:** only a BLOCKED line is asked for a next (B22) ([680864c](https://github.com/morndo/morndo/commit/680864ca5d057e868bba80324daa82269c910899))
+* **protocol:** a next's duration takes a lane's spacing, and a bracketed clause goes whole (B22) ([d3f7249](https://github.com/morndo/morndo/commit/d3f724931fdea4635a34dffff24392dcbbcc8fd1))
+* **protocol:** read a next's date parts without the indexed undefined ([f4ff18a](https://github.com/morndo/morndo/commit/f4ff18ae9be2cc78cfa49460777357ca552e9749))
+* **protocol:** the next: clause survives the decoration around it (B22) ([3d7fc3e](https://github.com/morndo/morndo/commit/3d7fc3e526fc1d9ffd015df9f54b1537d85c6ffc))
+* **settings:** keep the moved pages' comments, read the width before first paint, test the sheet's same-email line ([97fad2b](https://github.com/morndo/morndo/commit/97fad2bc58ad9a03ca94abdfc64a866b3d95127a))
+* **settings:** one Back on the phone, the same-email mark stands out, Sign in lines up ([f2879b1](https://github.com/morndo/morndo/commit/f2879b1661a1b57705e36ef7956bbac423f2a511))
+* **settings:** two folders are the same account only on the same email and plan ([5bcf7b8](https://github.com/morndo/morndo/commit/5bcf7b8e8c8acf73a54c6c287c924784db580769))
+* **settings:** two folders are the same account only on the same email and plan ([61ad182](https://github.com/morndo/morndo/commit/61ad1826dd9096598081a4610aea9c6ba68a1ae6))
+* **signin:** a busy tmux or an exit status not yet known never fails a sign-in ([d885204](https://github.com/morndo/morndo/commit/d88520464cdca1153486d3f4d72f14b2fe2abd7e))
+* **signin:** a node from before emails still lists its accounts; the sheet counts only signed-in folders ([56c332e](https://github.com/morndo/morndo/commit/56c332e60793214b20d4832215364e7f75cb7e13))
+* **signin:** find the pool tool on PATH without a shell and read its retired accounts with HOME set ([b462435](https://github.com/morndo/morndo/commit/b4624352f92f6252fa34c0aa9589fc60da240e28))
+* **signin:** keep the lines the negative-control catalog pins; replay and side-effect behaviour unchanged ([a3dd7bc](https://github.com/morndo/morndo/commit/a3dd7bc53e8180ad4b826979854edbcb0d138d6d))
+* **signin:** the fleet takes a sign-in's start and code only with the hub's signed proof; code and cancel are side effects; main is never added ([3bc0545](https://github.com/morndo/morndo/commit/3bc0545d7e9c0ec902a7d3e5fe3b5e4621e21bec))
+* **signin:** the start-up cleanup never stops the node agent, and runs on the first sign-in, not when the op table is built ([0d05958](https://github.com/morndo/morndo/commit/0d059586543f31a66efa1f68292a11120810cf6c))
+* **signin:** without a fleet the hub answers no nodes and no cards, and the Accounts section says so ([2cda671](https://github.com/morndo/morndo/commit/2cda671aeb672116b75730b3b0b45c57a53806af))
+* **web:** a seat mark no longer squeezes the account's name on Home's usage card ([ae29ce5](https://github.com/morndo/morndo/commit/ae29ce59701203f36db318803288a3d57734c5d5))
+* **web:** a seat mark no longer squeezes the account's name on Home's usage card ([ea72abf](https://github.com/morndo/morndo/commit/ea72abf9589e68d0ee56c2159aa1446ec3e1884e))
+* **web:** keep the xterm dependency; the lockfile only adds age-encryption ([c890d9e](https://github.com/morndo/morndo/commit/c890d9e77a8e51656e44b65c518cb1b7bad6544c))
+* **web:** relative imports in the sign-in sheet and cards, so the test harness can mount the desktop ([81fe77b](https://github.com/morndo/morndo/commit/81fe77ba1a783bdb4f769c39d86260cba4780365))
+* **web:** shortcuts follow the layout's character (Ctrl always, Alt only letters and digits), and the Copy answer ends with the panel and the text ([e5457e1](https://github.com/morndo/morndo/commit/e5457e1f5e922b44c9250452b0831392c3617a93))
+* **web:** the desktop under review 3: focus follows the keyboard, clipboard heard only in control, paste forgotten, copy answers, Cmd as Super, a failed load says so ([fb840bc](https://github.com/morndo/morndo/commit/fb840bc15c635ec8cd7d0db83710b05d2be0bc71))
+* **web:** the desktop's keys and bars under review 2: caret at the end, shortcuts stopped, Shift with named keys, held keys let go, status in words, 360px bar ([95b1541](https://github.com/morndo/morndo/commit/95b1541b4736bd3c4178bf4bfe9c1e5d884a204f))
+* **web:** the emptied keyboard field goes back to its filler at once and only refocuses later, as vnc.html does ([bcc4a10](https://github.com/morndo/morndo/commit/bcc4a10edc60842bff8e0c33f519af7ea759f182))
+* **web:** the full screen button leaves full screen on a second click ([8e78575](https://github.com/morndo/morndo/commit/8e78575cf13ba3fd1a74d1140bf3a7f13eb0a3d2))
+* **web:** the full screen button leaves full screen on a second click ([f4a31df](https://github.com/morndo/morndo/commit/f4a31dfec8da54986fef04c4bf33b073ddd6ffbd))
+* **web:** the held keys' buttons follow every press, Type it lets go of them first, the panels' fields are 16px ([1abb172](https://github.com/morndo/morndo/commit/1abb172a0293bdef7e80c51bc6b05cf20a500e2c))
+
+
+### Performance Improvements
+
+* **hub:** the merge flags read no task's events while no pull request is known to have merged (T-805) ([015a904](https://github.com/morndo/morndo/commit/015a90413c24531e89cc4ce37309e0b68661b3a4))
+
 ## [0.2.3](https://github.com/morndo/morndo/compare/v0.2.2...v0.2.3) (2026-10-30)
 
 
