@@ -58,10 +58,12 @@ export const BoardTaskSchema = z.object({
   blockedReason: z.nullable(text()), createdAt: count(), updatedAt: count(), stateChangedAt: count(), createdBy: TaskActorSchema,
   rev: z.int().check(z.gte(1)), doneAt: z.nullable(count()), comments: count(),
   waits: z.exactOptional(z.array(WaitSchema)),
+  // B19 (ADR-0040): while a block is a decision, when an answer is due; absent otherwise.
+  decisionDue: z.exactOptional(count()),
 });
 export const TaskChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("created"), status: z.enum(STATUSES), assignee: z.nullable(text()) }),
-  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()), proofSeen: z.exactOptional(text()), waits: z.exactOptional(z.array(WaitSchema)) }),
+  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()), proofSeen: z.exactOptional(text()), waits: z.exactOptional(z.array(WaitSchema)), decisionDue: z.exactOptional(count()) }),
   z.object({ kind: z.literal("assigned"), from: z.nullable(text()), to: z.nullable(text()) }),
   z.object({ kind: z.literal("edited"), title: z.exactOptional(text()), description: z.exactOptional(text()), priority: z.exactOptional(z.enum(PRIORITIES)) }),
   z.object({ kind: z.literal("commented"), text: text() }),
@@ -101,7 +103,7 @@ export const BoardCreateBody = z.object({
 // One change to one task: the same body from the app and from an agent; the hub decides by who sent it.
 const ifRev = z.exactOptional(z.int().check(z.gte(1)));
 export const BoardActionBody = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), notLive: z.exactOptional(str(2000)), proofOverride: z.exactOptional(str(2000)), waits: z.exactOptional(z.array(str(300)).check(z.maxLength(10))), ifRev }),
+  z.object({ action: z.literal("move"), to: z.enum(STATUSES), reason: z.exactOptional(str(2000)), notLive: z.exactOptional(str(2000)), proofOverride: z.exactOptional(str(2000)), waits: z.exactOptional(z.array(str(300)).check(z.maxLength(10))), decision: z.exactOptional(z.boolean()), ifRev }),
   z.object({ action: z.literal("assign"), to: z.nullable(str(200)), ifRev }),
   z.object({ action: z.literal("edit"), title: z.exactOptional(str(1000)), description: z.exactOptional(str(20_000)), priority: z.exactOptional(z.enum(PRIORITIES)), ifRev }),
   z.object({ action: z.literal("comment"), text: str(20_000) }),

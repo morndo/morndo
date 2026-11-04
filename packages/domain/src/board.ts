@@ -9,8 +9,10 @@
 // fixed edges of B10 (D1 to D6, ADR-0032): never to Done, never an assignment. The lane files a brief with references
 // the board verifies itself, and Done waits for them or a recorded override (B13 to B16, ADR-0035). A block may name what
 // it waits on in a form the board checks itself, and when all of it is over the board moves the task to do (B18, D7,
-// ADR-0038; board-waits.ts).
+// ADR-0038; board-waits.ts). A block may be a decision, carrying a deadline 24 h on while it stays blocked, and what is
+// idle too long with nothing the board watches is listed (B19, B20, ADR-0040; board-stale.ts).
 import type { Run } from "./run.ts";
+import { DECISION_DUE_MS } from "./board-stale.ts";
 import { parseWaits, type Wait } from "./board-waits.ts";
 import { LIST_MAX, MERGE_SHA, REPO_NAME, checkBrief, parseItemSpec, proofOf, type BriefInput, type ProofBrief, type ProofGate } from "./proof.ts";
 import { cutText, err, ok, type EndpointId, type Result, type SessionId } from "./shared.ts";
@@ -47,6 +49,7 @@ export type Task = {
   priority: TaskPriority;
   blockedReason: string | null;           // while blocked: why, in the mover's words
   waits?: Wait[];                         // while blocked: what the board checks itself (B18); absent: words only
+  decisionDue?: number;                   // while blocked as a decision (B19): when an answer is due; absent: not one
   createdAt: number;
   updatedAt: number;
   stateChangedAt: number;                 // the last change of status, assignee or description; a comment or a title or priority edit leaves it (D6)
@@ -58,7 +61,7 @@ export type Task = {
 
 export type TaskChange =
   | { kind: "created"; status: TaskStatus; assignee: string | null }
-  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string; proofSeen?: string; waits?: Wait[] }
+  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string; proofSeen?: string; waits?: Wait[]; decisionDue?: number }
   | { kind: "assigned"; from: string | null; to: string | null }
   | { kind: "edited"; title?: string; description?: string; priority?: TaskPriority }
   | { kind: "commented"; text: string }
@@ -70,7 +73,7 @@ export type TaskEvent = { key: TaskKey; rev: number; at: number; actor: TaskActo
 
 export type NewTask = { title: string; description?: string; assignee?: string | null; priority?: TaskPriority; status?: TaskStatus };
 export type TaskAction =
-  | { action: "move"; to: TaskStatus; reason?: string; notLive?: string; proofOverride?: string; waits?: string[]; ifRev?: number }
+  | { action: "move"; to: TaskStatus; reason?: string; notLive?: string; proofOverride?: string; waits?: string[]; decision?: boolean; ifRev?: number }
   | { action: "assign"; to: string | null; ifRev?: number }
   | { action: "edit"; title?: string; description?: string; priority?: TaskPriority; ifRev?: number }
   | { action: "comment"; text: string }
@@ -280,6 +283,8 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       // B18: waits go with a block, and a blocked task may be blocked again to restate its reason or name its waits.
       const named = action.waits ?? [];
       if (named.length > 0 && action.to !== "blocked") return refuse("bad_wait", undefined, undefined, "waits go with a move to blocked");
+      // B19: so does the flag that says the block is a decision.
+      if (action.decision === true && action.to !== "blocked") return refuse("bad_wait", undefined, undefined, "a decision goes with a move to blocked");
       let waits: Wait[] = [];
       if (named.length > 0) {
         const parsed = parseWaits(named, task.key, now, gate?.repos ?? [MORNDO_REPO], gate?.cards === false ? { cards: false } : {});
@@ -287,6 +292,8 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
         waits = parsed.value;
       }
       const restated = action.to === "blocked" && task.status === "blocked";
+      // B19: whether this move says the block is a decision (the flag goes only with a block, as waits do).
+      const deciding = action.to === "blocked" && action.decision === true;
       // Only a person or the task's own lane restates a block; no rule of the board's does (D1 to D7 never take that edge).
       if (restated && actor.kind === "board") return refuse("bad_transition", undefined, task.status);
       if (action.to === task.status && !restated) return refuse("same");
@@ -347,10 +354,14 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
         else if (mode === "on") return refuse("proof_not_green", undefined, undefined, seen.line);
         else proofSeen = fit(seen.line, warnSuffix);
       }
-      if (restated && reason === task.blockedReason && sameWaits(waits, task.waits ?? [])) return refuse("same");
-      const { waits: _left, ...rest } = task;
-      const moved: Task = { ...rest, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null, ...(waits.length > 0 ? { waits } : {}) };
-      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }), ...(waits.length > 0 ? { waits } : {}) });
+      if (restated && reason === task.blockedReason && sameWaits(waits, task.waits ?? []) && deciding === (task.decisionDue !== undefined)) return refuse("same");
+      // B19: the deadline of the block that is a decision — the task's own when a restatement keeps it one (the first
+      // ask's clock stands, so restating does not buy another day), now's when a plain block becomes one, and none on
+      // any other move: leaving blocked, or restating without the flag, clears it.
+      const decisionDue = deciding ? (task.decisionDue ?? now + DECISION_DUE_MS) : undefined;
+      const { waits: _left, decisionDue: _oldDue, ...rest } = task;
+      const moved: Task = { ...rest, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null, ...(waits.length > 0 ? { waits } : {}), ...(decisionDue !== undefined ? { decisionDue } : {}) };
+      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }), ...(waits.length > 0 ? { waits } : {}), ...(decisionDue !== undefined ? { decisionDue } : {}) });
     }
     case "assign": {
       if (!runsTheBoard(actor)) return refuse("not_allowed");                // D5: never the board
@@ -505,7 +516,7 @@ export type NamedStatus = { key: TaskKey; status: "done" | "blocked" | "needs_de
 // nothing, so the board never undoes what a person or a lane did after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
 export const GONE_REASON = "its lane stopped without DONE";
 export const BACKGROUND_REASON = "background work still running";
-export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null): { to: TaskStatus; reason: string | null; rule: BoardRule } | null {
+export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null): { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true } | null {
   if (task.assignee === null || task.assignee !== run.lane || run.since <= task.stateChangedAt) return null;
   // B12: the key counts only when the line is the turn's word: a turn's end, or a wait.
   const keyed = run.phase === "ended" || run.phase === "waiting" ? named : null;
@@ -520,7 +531,8 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[], named:
     if (run.phase === "waiting" && run.wait?.on === "background" && run.outcome === "done") return { to: "review", reason: BACKGROUND_REASON, rule: "D1" };
     // The same for a wake-up scheduled or a job running: the turn ended DONE, and its line is the reason (T-398).
     if (run.phase === "waiting" && (run.wait?.on === "wakeup" || run.wait?.on === "job") && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
-    if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2" };
+    // B19: a NEEDS DECISION line is the ask itself, so the board's own block carries the decision flag with it.
+    if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2", ...(run.outcome === "needs_decision" ? { decision: true as const } : {}) };
     if (run.phase === "gone") return { to: "todo", reason: GONE_REASON, rule: "D3" };
     return null;
   }

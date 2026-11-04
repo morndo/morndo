@@ -2,7 +2,7 @@
 // merged change in the events, and the MergedView the board frame carries (decoded one by one by whoever reads it).
 // B13 to B16: the brief action's body, and the briefed change and the proofSeen a move to done may carry.
 import { describe, expect, it } from "vitest";
-import { BoardActionBody, BoardFrameSchema, MergedViewSchema, ProofViewSchema, TaskChangeSchema, TaskEventSchema, parseBody } from "../src/index.ts";
+import { BoardActionBody, BoardFrameSchema, BoardTaskSchema, MergedViewSchema, ProofViewSchema, TaskChangeSchema, TaskEventSchema, parseBody } from "../src/index.ts";
 
 describe("the board wire (B11)", () => {
   it("a merged action's body: a sha, a repo optionally; a move to done may carry notLive", () => {
@@ -161,3 +161,27 @@ describe("the board frame says when the hub reads a stand-in forge", () => {
   });
 });
 
+
+// B19 (ADR-0040): a decision's deadline rides a task and the move event that set it, and the move's body may say the
+// block is one. Absent, it is absent on the wire too, so an older reader never meets a field it cannot know.
+describe("the board wire (B19)", () => {
+  const at = 1_800_000_000_000;
+  const manager = { kind: "manager", name: "manager", token: "mat_x" } as const;
+  const base = { key: "T-1", n: 1, title: "Plan it", description: "", status: "blocked", assignee: "builder", priority: "normal", blockedReason: "checkpoint: plan", createdAt: at, updatedAt: at, stateChangedAt: at, createdBy: manager, rev: 3, doneAt: null, comments: 0 };
+  it("a task with a decision deadline parses it back, and one without it has no such field", () => {
+    const deciding = { ...base, decisionDue: at + 24 * 3_600_000 };
+    expect(parseBody(BoardTaskSchema, JSON.parse(JSON.stringify(deciding)))).toEqual(deciding);
+    const plain = JSON.parse(JSON.stringify(base)) as Record<string, unknown>;
+    expect(parseBody(BoardTaskSchema, plain)).toEqual(base);
+    expect("decisionDue" in (parseBody(BoardTaskSchema, plain) ?? {})).toBe(false);
+    expect(parseBody(BoardTaskSchema, { ...plain, decisionDue: "tomorrow" })).toBeNull();
+  });
+  it("a moved change carries the deadline; the move's body may carry the decision flag", () => {
+    const event = { key: "T-1", rev: 3, at, actor: manager, change: { kind: "moved", from: "doing", to: "blocked", reason: "checkpoint: plan", decisionDue: at + 24 * 3_600_000 } };
+    expect(parseBody(TaskEventSchema, JSON.parse(JSON.stringify(event)))).toEqual(event);
+    expect(parseBody(BoardActionBody, { action: "move", to: "blocked", reason: "checkpoint: plan", decision: true }))
+      .toEqual({ action: "move", to: "blocked", reason: "checkpoint: plan", decision: true });
+    expect(parseBody(BoardActionBody, { action: "move", to: "blocked", reason: "x", decision: "yes" })).toBeNull();
+    expect(parseBody(BoardActionBody, { action: "move", to: "review", reason: "x", decision: true })).toEqual({ action: "move", to: "review", reason: "x", decision: true });   // the hub judges; the wire carries it
+  });
+});
