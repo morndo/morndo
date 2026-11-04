@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "../../hub/test/inprocess-hub.ts";
 import { GithubChecks } from "../../hub/src/adapters/github-checks.ts";
 import { startFakeForge, type FakeForge } from "../../hub/test/fake-forge.ts";
+import { DECISION_DUE_MS } from "@morndo/domain";
 import { HELP, parseArgs, run, valuesOf } from "../src/cli.ts";
 import { PR_EVERY_MS } from "../../hub/src/application/wait-watch.ts";
 import { execFile } from "node:child_process";
@@ -780,5 +781,94 @@ describe("the proof list (B17)", () => {
     expect(held.err).toContain(`not covered: ${DATA_SPEC}`);
     await briefGreen("T-1", ["--data", "30 rows read by hand"]);
     expect((await managerSays("done", "T-1", "--why", "read the diff")).code).toBe(0);
+  });
+});
+
+// B19, B20 (ADR-0040): a block that is a decision opens the manager's inbox (`morndo-board inbox`) with its deadline,
+// an answer or a move closes it, and what nobody touched for 48 h with nothing the board watches is `morndo-board
+// stale`. The clock is the test's own, so a decision can go overdue without waiting.
+describe("the decision inbox and the stale sweep (B19, B20)", () => {
+  let bh: InProcessHub;
+  let bm: string;
+  let bw: string;
+  let clock = 1_800_000_000_000;
+  const HOUR = 3_600_000;
+  beforeEach(async () => {
+    clock = 1_800_000_000_000;
+    bh = await startInProcessHub({ now: () => clock });
+    bm = bh.agents.issue("manager", "manager").secret;
+    bw = bh.agents.issue("lanes", "worker").secret;
+  });
+  afterEach(async () => { await bh.close(); });
+  async function say(argv: string[], token: string, laneName: string | null) {
+    const out: string[] = [], err: string[] = [];
+    const code = await run(argv, { MORNDO_HUB: bh.base, MORNDO_AGENT_TOKEN: token, ...(laneName ? { MORNDO_LANE: laneName } : {}) },
+      { fetch, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+    return { code, out: out.join("\n"), err: err.join("\n") };
+  }
+  const managerSays = (...argv: string[]) => say(argv, bm, null);
+  const laneSays = (lane: string, ...argv: string[]) => say(argv, bw, lane);
+
+  it("block --decision marks a decision: the inbox lists it with its deadline, an answer closes it, and a plain block after has none", async () => {
+    await managerSays("new", "Plan it", "--assign", "builder");
+    await laneSays("builder", "start", "T-1");
+    expect((await laneSays("builder", "block", "T-1", "--why", "checkpoint: plan", "--decision")).code).toBe(0);
+    expect(bh.board.task("T-1")?.task.decisionDue).toBe(clock + DECISION_DUE_MS);
+    clock += 5 * HOUR;
+    const inbox = await managerSays("inbox");
+    expect(inbox.out.split("\n")).toHaveLength(1);
+    expect(inbox.out).toMatch(/^T-1 {2}builder +asked 5 h ago, due in 19 h: checkpoint: plan$/);
+    await laneSays("builder", "comment", "T-1", "still waiting for the manager");       // the lane's own word is not an answer
+    expect((await managerSays("inbox")).out).toMatch(/^T-1 /);
+    await managerSays("comment", "T-1", "go on with the plan");
+    expect((await managerSays("inbox")).out).toBe("no decisions wait");
+    await laneSays("builder", "resume", "T-1");
+    await laneSays("builder", "block", "T-1", "--why", "waits on the owner's keys");
+    expect(bh.board.task("T-1")?.task.decisionDue).toBeUndefined();
+    expect((await managerSays("inbox")).out).toBe("no decisions wait");
+  });
+
+  it("an overdue decision says OVERDUE with how long; a block from before the rule is listed as asked before the rule", async () => {
+    await managerSays("new", "Plan it", "--assign", "builder");
+    await laneSays("builder", "start", "T-1");
+    await laneSays("builder", "block", "T-1", "--why", "STATUS: NEEDS DECISION T-1 checkpoint: plan", "--decision");
+    await managerSays("new", "The old one", "--assign", "reviewer");
+    await laneSays("reviewer", "start", "T-2");
+    await laneSays("reviewer", "block", "T-2", "--why", "checkpoint: step 1 done, go on?");          // no --decision: from before the rule
+    clock += 26 * HOUR;
+    const lines = (await managerSays("inbox")).out.split("\n");
+    expect(lines).toHaveLength(2);
+    // the one from before the rule sorts first: the CLI reads its clock from the hub's now, not the hub's start
+    expect(lines[0]).toMatch(/^T-2 {2}reviewer +asked before the rule: checkpoint: step 1 done, go on\?$/);
+    expect(lines[1]).toMatch(/^T-1 {2}builder +asked 26 h ago, OVERDUE 2 h: STATUS: NEEDS DECISION T-1 checkpoint: plan$/);
+  });
+
+  it("stale lists what nobody touched for 48 h and the board watches nothing on; a decision, a read wait and a fresh task are not stale", async () => {
+    expect((await managerSays("stale")).out).toBe("nothing stale");
+    await managerSays("new", "Sit on it", "--assign", "builder");                       // T-1: words only, will sit
+    await managerSays("new", "Decide it", "--assign", "builder");                       // T-2: a decision
+    await managerSays("new", "Watched", "--assign", "reviewer");                        // T-3: blocked on a wait the hub reads
+    await managerSays("new", "Later", "--assign", "reviewer");                          // T-4: what T-3 waits on
+    await laneSays("builder", "start", "T-1");
+    await laneSays("builder", "block", "T-1", "--why", "needs the owner's keys");
+    await laneSays("builder", "start", "T-2");
+    await laneSays("builder", "block", "T-2", "--why", "checkpoint: plan", "--decision");
+    await laneSays("reviewer", "start", "T-3");
+    await laneSays("reviewer", "block", "T-3", "--why", "after T-4", "--on", "T-4");
+    await bh.waits.tick();                                                              // the hub has read the wait
+    clock += 49 * HOUR;
+    expect((await managerSays("stale")).out.split("\n")).toEqual([
+      "[board-stale] 1 task idle 48 h or more with no wait the board watches:",
+      "- T-1 blocked 49 h (builder): Sit on it",
+    ]);
+    await managerSays("comment", "T-1", "the owner is back tomorrow");                   // a comment is a change
+    clock += HOUR;
+    expect((await managerSays("stale")).out).toBe("nothing stale");
+  });
+
+  it("the help names inbox, stale and --decision", () => {
+    expect(HELP).toContain("inbox                                 the decisions that wait for the manager, and how long they have waited");
+    expect(HELP).toContain("stale                                 the tasks idle 48 h or more with no wait the board watches");
+    expect(HELP).toContain("block T-12 --why \"…\" [--on <wait>]… [--decision]");
   });
 });

@@ -3,7 +3,7 @@
 // given streams, so the tests drive it against an in-process hub and the entry point (main.ts) wires the real ones.
 // Exit codes: 0 done, 1 the hub refused (one line on stderr, in words an agent can act on), 2 usage, 3 the hub can't
 // be reached or didn't answer in a shape this CLI knows.
-import type { JudgedWait, MergeRecord, MergedView, Task, TaskEvent, TaskStatus, Wait } from "@morndo/domain";
+import { inboxItems, staleMessage, staleTasks, type InboxItem, type JudgedWait, type MergeRecord, type MergedView, type Task, type TaskEvent, type TaskStatus, type Wait } from "@morndo/domain";
 import { promptFor } from "./prompt.ts";
 import { lintWhy, proofBlock, whyTokens, type ProofView } from "./proof-text.ts";
 
@@ -20,14 +20,18 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
 
   list [--mine] [--status S] [--json]   the board (In progress, Blocked, In review, To do, Backlog, Done this week)
   show T-12 [--json]                    one task with its history and comments
+  inbox                                 the decisions that wait for the manager, and how long they have waited
+  stale                                 the tasks idle 48 h or more with no wait the board watches
   new "<title>" [--desc "…"] [--assign <lane>] [--proof "<kind[@owner/repo]: text>"]… [--priority high|normal|low] [--status todo|backlog|doing]
   assign T-12 <lane>|none [--proof "<kind[@owner/repo]: text>"]…   (manager only)
   proof T-12 [--add "<spec>"]… [--drop "<spec>"|<N>]…   the proof list the work must answer (manager sets it; the lane may add)
   start T-12                            in progress (one per lane at a time)
-  block T-12 --why "…" [--on <wait>]…  blocked, with the reason; each --on is one thing the board watches for you and,
+  block T-12 --why "…" [--on <wait>]… [--decision]
+                                        blocked, with the reason; each --on is one thing the board watches for you and,
                                         once all are over, moves the task back to do: T-11 (done), owner/repo#93 or '#93'
                                         (merged or closed; quote a bare #), ny-530 (the owner's card closed),
-                                        until:2026-10-28T09:00+01:00
+                                        until:2026-10-28T09:00+01:00. --decision marks a block that asks the manager
+                                        which way to go: it is due an answer in 24 h and inbox lists it
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
   brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json
@@ -119,6 +123,20 @@ function changeText(e: TaskEvent): string {
 }
 const line = (t: Task) =>
   `${t.key.padEnd(6)} ${(t.assignee ?? "-").padEnd(14)} ${t.title}${t.priority !== "normal" ? `  (${t.priority})` : ""}${t.status === "blocked" && t.blockedReason ? `  [blocked: ${t.blockedReason}]` : ""}${t.comments ? `  ${t.comments} comment${t.comments === 1 ? "" : "s"}` : ""}`;
+
+// B19, B20: the hours a decision has waited or a task has sat idle, as the inbox and the stale list show them.
+const inHours = (ms: number) => `${Math.round(ms / 3_600_000)} h`;
+// B20: what the board itself watches, as the hub names it for its sweep (board-inbox.ts watchedKeys): a blocked task
+// whose waits the hub has read something of, a review task whose merge is not live on every node yet, and every
+// decision the inbox has — a decision from before the rule too, whose clock began before this CLI could know it.
+const watchedOf = (d: Record<string, unknown>, tasks: readonly Task[], now: number): Set<string> => {
+  const keys = new Set<string>();
+  for (const w of (d.waits as { key: string; readings: { state: string }[] }[] | undefined) ?? []) if (w.readings.some(r => r.state !== "unknown")) keys.add(w.key);
+  const status = new Map(tasks.map(t => [t.key as string, t.status]));
+  for (const m of (Array.isArray(d.merged) ? d.merged as MergedView[] : [])) if (m.live === false && status.get(m.key) === "review") keys.add(m.key);
+  for (const i of inboxItems(tasks, now, { legacySince: 0 })) keys.add(i.key);
+  return keys;
+};
 
 // Flags: --name value, --name=value, or a bare --flag; the rest are positional, in order.
 export function parseArgs(argv: readonly string[]): { positional: string[]; flags: Record<string, string | true> } {
@@ -296,6 +314,33 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         return 0;
       }
       case "show": showTask(await call("GET", `/api/agent/board/tasks/${key(rest[0])}`)); return 0;
+      // B19: the decisions that wait for the manager, with how long. An answer after the ask closes one, as the hub
+      // reads one (a comment by the manager, the principal or the console); a decision from before the rule has no ask
+      // to count from and stays listed until the task moves.
+      case "inbox": {
+        const d = await call("GET", "/api/agent/board");
+        const now = (d.at as number | undefined) ?? Date.now();
+        const open: InboxItem[] = [];
+        for (const i of inboxItems(d.tasks as Task[], now, { legacySince: 0 })) {
+          if (i.legacy) { open.push(i); continue; }
+          const events = ((await call("GET", `/api/agent/board/tasks/${i.key}`)).events as TaskEvent[] | undefined) ?? [];
+          if (!events.some(e => e.at > i.openedAt && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"))) open.push(i);
+        }
+        if (open.length === 0) { io.out("no decisions wait"); return 0; }
+        for (const i of open)
+          io.out(`${i.key}  ${(i.assignee ?? "-").padEnd(14)} ${i.legacy ? "asked before the rule" : i.overdue ? `asked ${inHours(now - i.openedAt)} ago, OVERDUE ${inHours(now - i.dueAt)}` : `asked ${inHours(now - i.openedAt)} ago, due in ${inHours(i.dueAt - now)}`}: ${i.line}`);
+        return 0;
+      }
+      // B20: the tasks nobody changed for 48 h that the board watches nothing on, as the hub's sweep lists them.
+      case "stale": {
+        const d = await call("GET", "/api/agent/board");
+        const now = (d.at as number | undefined) ?? Date.now();
+        const tasks = d.tasks as Task[];
+        const items = staleTasks(tasks, now, { watched: watchedOf(d, tasks, now) });
+        if (items.length === 0) { io.out("nothing stale"); return 0; }
+        io.out(staleMessage(items));
+        return 0;
+      }
       case "new": {
         const title = rest[0];
         if (!title) throw new Usage('usage: morndo-board new "<title>" [--desc "…"] [--assign <lane>] [--priority high|normal|low] [--status todo|backlog|doing]');
@@ -382,14 +427,14 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       case "block": {
         const k = key(rest[0]);
         const why = text("why");
-        if (!why) throw new Usage('usage: morndo-board block T-12 --why "…" [--on <wait>]…');
+        if (!why) throw new Usage('usage: morndo-board block T-12 --why "…" [--on <wait>]… [--decision]');
         const on = valuesOf(argv, "on");
         // An --on that came without its wait is refused, never dropped: a shell takes an unquoted `#93` for a comment and
         // hands over a bare --on, and a block on fewer waits than named would end too early (review of #161).
         const named = argv.filter(a => a === "--on" || a.startsWith("--on=")).length;
         if (named !== on.length || on.some(v => v.trim() === ""))
           throw new Usage("--on needs a wait after it: T-12, '#93' (quote it: a shell takes an unquoted # for a comment), owner/repo#93, ny-530 or until:<time>");
-        await act(k, { action: "move", to: "blocked", reason: why, ...(on.length > 0 ? { waits: on } : {}) });
+        await act(k, { action: "move", to: "blocked", reason: why, ...(on.length > 0 ? { waits: on } : {}), ...(flags.decision === true ? { decision: true } : {}) });
         return 0;
       }
       case "review": {
