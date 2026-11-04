@@ -79,6 +79,9 @@ export class MergeWatch {
   flags(): MergedFlag[] {
     const facts = new Map<string, MergedPrFact>();
     for (const [id, asked] of this.#asked) if (asked.fact !== null) facts.set(id, asked.fact);
+    // The board view asks on every push: with no pull request known to have merged there is nothing to flag, and the
+    // tasks' events are not read at all.
+    if (![...facts.values()].some(f => f.merged)) return [];
     return mergedFlags(this.#items(), facts);
   }
 
