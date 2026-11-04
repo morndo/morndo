@@ -4317,7 +4317,7 @@ export const CONTROLS: Control[] = [
     find: `      if (!this.#writable(key, briefRev, ref)) return;               // the same guards as record(): a Done task's row is not touched\n`, replace: ``,
     run: ["apps/hub/test/proof-service.test.ts"], expect: "to deeply equal" },
   { id: "t406-proof-reapplies-merge-repo", task: "T-406", file: "packages/domain/src/proof.ts",
-    find: `if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
+    find: `if (owed.length > 0 && !brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && owed.some(m => m.repo.toLowerCase() === p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
     run: ["packages/domain/test/proof.test.ts", "packages/domain/test/board.test.ts"], expect: "no reference in that repository" },
   // ---- T-398: a DONE with a wake-up scheduled or a job running still moves the task to review, each guard removed once.
   { id: "t398-d1-wakeup-and-job", task: "T-398", file: "packages/domain/src/board.ts",
@@ -5741,7 +5741,7 @@ export const CONTROLS: Control[] = [
     run: ["packages/domain/test/proof-unread-merge.test.ts"], expect: "expected false to be true" },
   // The flag rule: with the guard gone, a pull request the task already records is flagged anyway.
   { id: "t805-flag-recorded-quiet", task: "T-805", file: "packages/domain/src/board-merged.ts",
-    find: `      if (stands(pr.repo, fact.mergeSha, merges)) continue;\n`, replace: ``,
+    find: `      if (stands(pr.repo, fact, merges)) continue;\n`, replace: ``,
     run: ["packages/domain/test/board-merged.test.ts"], expect: "to deeply equal []" },
   // The sweep gate: with the guard gone, an unchanged list is sent again at every pass, not at most every 12 hours.
   { id: "t805-sweep-unchanged-gate", task: "T-805", file: "apps/hub/src/application/board-inbox.ts",
