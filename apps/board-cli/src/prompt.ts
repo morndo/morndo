@@ -33,6 +33,9 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - When a task's PR has merged, record it: \`morndo-board merged T-12 <sha>\`. Done is then refused until the merge is on every
   node's build; the board says which node is behind. Accept it earlier only with \`--not-live "<why>"\`.
 - A wrong sha: \`morndo-board unmerged T-12 <sha>\`, then record the right one.
+- The board reads the pull requests a brief names, in the repositories its settings list, and flags one that merged
+  while the task records nothing: \`morndo-board merged\` lists them, and \`list\` tags the task. It moves nothing and
+  records nothing there; record the merge, or finish the task, when it is time.
 - Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.
 - A decision a lane asks for is yours to answer: \`morndo-board inbox\` lists what waits and how long it has waited.

@@ -22,6 +22,7 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   show T-12 [--json]                    one task with its history and comments
   inbox                                 the decisions that wait for the manager, and how long they have waited
   stale                                 the tasks idle 48 h or more with no wait the board watches
+  merged                                the open tasks whose pull request merged without a merge record
   new "<title>" [--desc "…"] [--assign <lane>] [--proof "<kind[@owner/repo]: text>"]… [--priority high|normal|low] [--status todo|backlog|doing]
   assign T-12 <lane>|none [--proof "<kind[@owner/repo]: text>"]…   (manager only)
   proof T-12 [--add "<spec>"]… [--drop "<spec>"|<N>]…   the proof list the work must answer (manager sets it; the lane may add)
@@ -294,6 +295,8 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const lanes = new Set(d.lanes as string[]);
         // B11: each task's merges by key, so a row can say where its merge stands (the hub's label, its own brackets).
         const mergedBy = new Map((Array.isArray(d.merged) ? d.merged as MergedView[] : []).map(m => [m.key, m]));
+        // B23: the pull requests that merged without a merge record, by key, as the hub's last pass flagged them.
+        const prMerged = new Map(((d.mergedPrs as { key: string; prs: string[] }[] | undefined) ?? []).map(f => [f.key, f.prs.join(" · ")]));
         if (d.standIn === true) io.out("(proof references are read from a stand-in forge, not GitHub)");
         for (const s of LIST_ORDER) {
           const rows = tasks.filter(t => t.status === s);
@@ -305,7 +308,8 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
             const merge = m !== undefined && m.merges.length > 0 ? m : undefined;   // a view with no merge says nothing
             const override = merge?.merges.find(x => x.override)?.override ?? null;
             const staleFor = stale.has(t.key) ? `  [blocked ${Math.floor((((d.at as number | undefined) ?? Date.now()) - t.stateChangedAt) / DAY_MS)} d on words only: check it, or name its waits with --on]` : "";
-            io.out(`  ${line(t)}${orphans.has(t.key) ? "  [orphan: its lane is gone; reassign it]" : t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}${merge ? `  [${merge.label}]` : ""}${override ? `  (done not live: ${override})` : ""}${staleFor}`);
+            const prFor = prMerged.has(t.key) ? `  [PR merged: ${prMerged.get(t.key)}]` : "";
+            io.out(`  ${line(t)}${orphans.has(t.key) ? "  [orphan: its lane is gone; reassign it]" : t.assignee && lanes.size && !lanes.has(t.assignee) ? "  [lane not running]" : ""}${merge ? `  [${merge.label}]` : ""}${override ? `  (done not live: ${override})` : ""}${staleFor}${prFor}`);
             // B18: under a block that names waits, what the hub last read of them.
             if (t.status === "blocked" && (t.waits ?? []).length > 0) {
               const r = readsOf.get(t.key);
@@ -506,6 +510,20 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         return 0;
       }
       case "merged": {
+        // B23 (ADR-0042): with no task named, the open tasks whose pull request merged without a merge record, as the
+        // hub's last pass flagged them. The board moves nothing and records nothing there; it lists.
+        if (rest.length === 0) {
+          const d = await call("GET", "/api/agent/board");
+          const flagged = (d.mergedPrs as { key: string; prs: string[] }[] | undefined) ?? [];
+          if (flagged.length === 0) { io.out("no merged pull requests without a merge record"); return 0; }
+          if (flags.json === true) { io.out(JSON.stringify(flagged)); return 0; }
+          const statusOf = new Map((d.tasks as Task[]).map(t => [t.key as string, t.status]));
+          for (const f of flagged) {
+            const status = statusOf.get(f.key);
+            if (status !== undefined) io.out(`${f.key} (${status}): ${f.prs.join(" · ")}`);
+          }
+          return 0;
+        }
         const k = key(rest[0]);
         const sha = rest[1];
         const repo = flags.repo;                        // --repo with no value parses as true: it must name one
