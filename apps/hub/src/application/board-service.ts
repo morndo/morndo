@@ -163,10 +163,7 @@ export class BoardService {
     return { kind: "principal", endpointId: a.endpoint.id, sessionId: a.session.id };
   }
 
-  // `actor`: who may call the agents' door or the console (B2); the board itself never files a task (D5), so its own
-  // actor is refused here rather than at the door, where the callers share one TaskActor-typed credential.
-  create(input: NewTask, actor: TaskActor): BoardResult {
-    if (actor.kind === "board") return { ok: false, problem: "not_allowed" };
+  create(input: NewTask, actor: BoardActor): BoardResult {
     // The number is taken only once the task is accepted, so a refused filing burns none (B7 is about reuse, not gaps).
     const r = this.#store.transaction(() => {
       const n = this.#store.peekTaskNumber();
