@@ -13,7 +13,8 @@ import { log as defaultLog } from "../adapters/log.ts";
 
 // The fleet's delivery port as these use it (ports.ts Deliveries, answer ok → true): one text, to one lane, under an
 // id of the caller's choosing, allowed to wait its ttlMs to be typed. A false answer and a throw are the same thing
-// here: it did not go, and the next pass tries again.
+// here: it did not go, and the next pass tries again — under the same id, which is the fleet's idempotency key, so a
+// delivery that was taken but never answered is never doubled.
 export type DeliverText = (d: { id: string; lane: string; text: string; ttlMs?: number }) => Promise<boolean>;
 // How long a message may wait on the lane to be typed: the inbox's list is stale in hours, the sweep's in half a day.
 export const INBOX_TTL_MS = 90 * 60_000;
@@ -56,6 +57,7 @@ export class BoardInbox {
   #ttlMs: number;
   #everyMs: number;
   #sentAt: number | null = null;               // the pass's now of the last message that went; null: none has yet
+  #pendingId: string | null = null;            // the id of the message that did not go: retried under it, never doubled
   #told = new Set<string>();                   // key@dueAt of the decisions the principal was told of
   #running: Promise<Tick> | null = null;
   #again = false;
@@ -93,13 +95,17 @@ export class BoardInbox {
       try { this.#push(text); } catch (e) { this.#log.warn(`board inbox: telling the principal a decision went overdue failed: ${String(e)}`); }
     }
     if (items.length === 0) return { sent: false, items: 0 };
-    // At most one message an hour after one that went; one that did not go is tried again at the next pass.
+    // At most one message an hour after one that went; one that did not go is tried again at the next pass, under the
+    // same id (the fleet answers what became of it, so a delivery that was in doubt is never doubled).
     if (this.#sentAt !== null && now - this.#sentAt < this.#everyMs) return { sent: false, items: items.length };
-    const r = await tryDeliver(this.#deliver, { id: `board-inbox:${now}`, lane: this.#lane, text: inboxMessage(items, now), ttlMs: this.#ttlMs });
+    const id = this.#pendingId ?? `board-inbox:${now}`;
+    const r = await tryDeliver(this.#deliver, { id, lane: this.#lane, text: inboxMessage(items, now), ttlMs: this.#ttlMs });
     if (!r.went) {
+      this.#pendingId = id;
       this.#log.warn(`board inbox: the message to ${this.#lane} did not go (${r.why}); the next pass tries again`);
       return { sent: false, items: items.length };
     }
+    this.#pendingId = null;
     this.#sentAt = now;
     return { sent: true, items: items.length };
   }
@@ -117,6 +123,7 @@ export class StaleSweep {
   #repeatMs: number;
   #sentAt: number | null = null;               // the pass's now of the last message that went
   #lastList: string | null = null;             // that message's list, key and status per line: what "unchanged" means
+  #pendingId: string | null = null;            // the id of the message that did not go: retried under it, never doubled
   #running: Promise<Tick> | null = null;
   #again = false;
 
@@ -145,11 +152,15 @@ export class StaleSweep {
     // An unchanged list is sent at most every repeatMs; a changed one at once. A message that did not go leaves both
     // as they were, so the next pass sends it however long the list has been the same.
     if (this.#sentAt !== null && list === this.#lastList && now - this.#sentAt < this.#repeatMs) return { sent: false, items: items.length };
-    const r = await tryDeliver(this.#deliver, { id: `board-stale:${now}`, lane: this.#lane, text: staleMessage(items), ttlMs: this.#ttlMs });
+    // A message that did not go is retried under its own id, so a delivery that was in doubt is never doubled.
+    const id = this.#pendingId ?? `board-stale:${now}`;
+    const r = await tryDeliver(this.#deliver, { id, lane: this.#lane, text: staleMessage(items), ttlMs: this.#ttlMs });
     if (!r.went) {
+      this.#pendingId = id;
       this.#log.warn(`board stale: the message to ${this.#lane} did not go (${r.why}); the next pass tries again`);
       return { sent: false, items: items.length };
     }
+    this.#pendingId = null;
     this.#sentAt = now;
     this.#lastList = list;
     return { sent: true, items: items.length };
