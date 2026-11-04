@@ -18,6 +18,7 @@ export * from "./auto-routing.ts";
 export * from "./board.ts";
 export * from "./board-waits.ts";
 export * from "./board-stale.ts";
+export * from "./board-merged.ts";
 export * from "./proof.ts";
 export * from "./run.ts";
 export * from "./verification.ts";
