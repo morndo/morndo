@@ -5737,7 +5737,7 @@ export const CONTROLS: Control[] = [
   // The deadlock fix: with the guard gone, a merge record in a repository the hub does not read demands a reference
   // there again — one no brief could ever give it, so such a task could never be briefed.
   { id: "t805-unread-merge-owed", task: "T-805", file: "packages/domain/src/proof.ts",
-    find: `const owed = ctx.merges.find(m => repos.has(m.repo.toLowerCase()));`, replace: `const owed = ctx.merges[0];`,
+    find: `const owed = ctx.merges.filter(m => repos.has(m.repo.toLowerCase()));`, replace: `const owed = ctx.merges;`,
     run: ["packages/domain/test/proof-unread-merge.test.ts"], expect: "expected false to be true" },
   // The flag rule: with the guard gone, a pull request the task already records is flagged anyway.
   { id: "t805-flag-recorded-quiet", task: "T-805", file: "packages/domain/src/board-merged.ts",
