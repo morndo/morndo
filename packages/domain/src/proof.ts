@@ -85,7 +85,8 @@ const briefText = (v: string, max: number, allowEmpty: boolean, field: string): 
 };
 
 // Two shas are of the same commit when either is a prefix of the other: the 7-character form of a full one, or the same.
-const sameCommit = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
+// The inputs must be lower case already (a stored sha is; a forge's or a record's is lowered by the caller).
+export const sameCommit = (a: string, b: string) => a.startsWith(b) || b.startsWith(a);
 
 // One brief, judged whole, in this order (the first refusal wins). A reference must be whole (B14), its repository one
 // the board checks (the hub holds a credential that may read private work; a lane must not aim it, plan §3.3), and a ci
@@ -136,9 +137,13 @@ export function checkBrief(input: BriefInput, ctx: { allowedRepos: readonly stri
   if (noCode.value !== "" && ctx.merges.length > 0)
     return err({ problem: "bad_ref", detail: "this task has a merge record; a brief with no code change cannot stand for it" });
   if (ctx.merges.length > 0) {
-    const mergeRepos = new Set(ctx.merges.map(m => m.repo.toLowerCase()));
-    if (!parsed.some(r => mergeRepos.has(r.repo.toLowerCase())))
-      return err({ problem: "ref_unrelated", detail: `the task records a merge in ${ctx.merges[0]!.repo}; a reference to that repository is needed` });
+    // B14 asks for a reference in the repository of a merge record the hub reads — any one of them: one in a
+    // repository outside its settings could never be met (the hub fetches nothing there), so the rule bites only where
+    // a reference could stand, and a record in an unread repository owes nothing. Task data still never widens the
+    // list: the records are matched against it, not added to it.
+    const owed = ctx.merges.filter(m => repos.has(m.repo.toLowerCase()));
+    if (owed.length > 0 && !parsed.some(r => owed.some(m => m.repo.toLowerCase() === r.repo.toLowerCase())))
+      return err({ problem: "ref_unrelated", detail: `the task records a merge in ${owed[0]!.repo}; a reference to that repository is needed` });
   }
   for (const ref of parsed) {
     if (ref.kind !== "ci") continue;
@@ -302,7 +307,10 @@ const overlayList = (base: ProofState, list: readonly ProofItem[], brief: ProofB
 };
 
 export const NO_BRIEF_LINE = "proof: no brief";   // proofOf's own line for no brief, for readers that skip it
-export function proofOf(brief: ProofBrief | null, results: readonly RefResult[], merges: readonly { repo: string; sha: string }[] = [], list: readonly ProofItem[] = []): ProofState {
+// `readRepos`: the repositories the hub reads, when the caller knows them — the same rule checkBrief judged the filing
+// with (B14): a merge record in a repository outside them could never be answered, so it owes no reference here
+// either, or the dead end would only move from filing the brief to finishing the task. Omitted: every record owes one.
+export function proofOf(brief: ProofBrief | null, results: readonly RefResult[], merges: readonly { repo: string; sha: string }[] = [], list: readonly ProofItem[] = [], readRepos?: readonly string[]): ProofState {
   if (brief === null) return overlayList({ kind: "no_brief", green: 0, total: 0, accepts: false, line: NO_BRIEF_LINE }, list, brief, results);
   if (brief.refs.length === 0) {
     if (brief.noCode !== "" && merges.length > 0)
@@ -315,13 +323,15 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
     return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" }, list, brief, results);
   }
   // The merge record's repository, re-applied at every reading (not only when the brief was filed): a merge recorded
-  // after the brief leaves a brief whose references sit elsewhere unverified, however green they are.
+  // after the brief leaves a brief whose references sit elsewhere unverified, however green they are. With `readRepos`
+  // only a record in a repository the hub reads owes one, and a reference in the repository of any such record
+  // satisfies it — checkBrief's own rule, so what was filed can also be finished.
   if (merges.length > 0) {
-    const mergeRepos = new Set(merges.map(m => m.repo.toLowerCase()));
-    if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {
+    const owed = readRepos === undefined ? merges : merges.filter(m => readRepos.some(r => r.toLowerCase() === m.repo.toLowerCase()));
+    if (owed.length > 0 && !brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && owed.some(m => m.repo.toLowerCase() === p.value.repo.toLowerCase()); })) {
       const rows = new Map(results.map(r => [r.ref, r] as const));
       const green = brief.refs.filter(ref => rows.get(ref)?.state === "green").length;
-      return overlayList({ kind: "unchecked", green, total: brief.refs.length, accepts: false, line: `proof: the task records a merge in ${merges[0]!.repo}; no reference in that repository` }, list, brief, results);
+      return overlayList({ kind: "unchecked", green, total: brief.refs.length, accepts: false, line: `proof: the task records a merge in ${owed[0]!.repo}; no reference in that repository` }, list, brief, results);
     }
   }
   const latest = new Map<string, RefResult>();
@@ -539,4 +549,6 @@ export function judgeCi(ref: Extract<ProofRef, { kind: "ci" }>, runs: readonly C
 // What applyAction judges a Done against (B16): the brief as filed, the results the hub read for its references, and
 // the mode the gate runs in (off: the gate is not there; warn: the Done is accepted with what was seen recorded; on:
 // not green refuses). `allowedRepos` absent: MORNDO_REPO plus the task's merge records, as checkBrief is told there.
-export type ProofGate = { mode: ProofMode; brief: ProofBrief | null; results: readonly RefResult[]; allowedRepos?: readonly string[]; list?: readonly ProofItem[] };
+// `readRepos`: the repositories the hub reads, as proofOf judges the merge records against (B14); absent, every
+// record owes a reference, as an older gate would have it.
+export type ProofGate = { mode: ProofMode; brief: ProofBrief | null; results: readonly RefResult[]; allowedRepos?: readonly string[]; readRepos?: readonly string[]; list?: readonly ProofItem[] };

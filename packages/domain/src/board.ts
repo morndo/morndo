@@ -343,7 +343,7 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
       let proofSeen: string | undefined;
       if (action.to === "done" && gate?.proof !== undefined && gate.proof.mode !== "off") {
         const mergeShas = gate.merges.map(m => ({ repo: m.repo, sha: m.sha }));
-        const seen = proofOf(gate.proof.brief, gate.proof.results, mergeShas, gate.proof.list ?? []);
+        const seen = proofOf(gate.proof.brief, gate.proof.results, mergeShas, gate.proof.list ?? [], gate.proof.readRepos);
         const mode = gate.proof.mode;
         const warnSuffix = " [mode warn: would have been refused]";
         const fit = (line: string, suffix: string) => {

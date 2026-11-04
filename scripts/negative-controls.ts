@@ -4317,7 +4317,7 @@ export const CONTROLS: Control[] = [
     find: `      if (!this.#writable(key, briefRev, ref)) return;               // the same guards as record(): a Done task's row is not touched\n`, replace: ``,
     run: ["apps/hub/test/proof-service.test.ts"], expect: "to deeply equal" },
   { id: "t406-proof-reapplies-merge-repo", task: "T-406", file: "packages/domain/src/proof.ts",
-    find: `if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
+    find: `if (owed.length > 0 && !brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && owed.some(m => m.repo.toLowerCase() === p.value.repo.toLowerCase()); })) {`, replace: `if (false) {`,
     run: ["packages/domain/test/proof.test.ts", "packages/domain/test/board.test.ts"], expect: "no reference in that repository" },
   // ---- T-398: a DONE with a wake-up scheduled or a job running still moves the task to review, each guard removed once.
   { id: "t398-d1-wakeup-and-job", task: "T-398", file: "packages/domain/src/board.ts",
@@ -5733,6 +5733,20 @@ export const CONTROLS: Control[] = [
   { id: "t614-floor-gone", task: "T-614", file: "packages/domain/src/pool.ts",
     find: `      if (key === "readingMaxAgeMinutes" && value < 1) return err("bad-value");\n`, replace: ``,
     run: ["packages/domain/test/pool-reading-age.test.ts"], expect: "refuses a readingMaxAgeMinutes below one minute" },
+  // ---- T-805 part C: the merged-pull-request flag (B23, ADR-0042) and the unread-repository merge record (B14)
+  // The deadlock fix: with the guard gone, a merge record in a repository the hub does not read demands a reference
+  // there again — one no brief could ever give it, so such a task could never be briefed.
+  { id: "t805-unread-merge-owed", task: "T-805", file: "packages/domain/src/proof.ts",
+    find: `const owed = ctx.merges.filter(m => repos.has(m.repo.toLowerCase()));`, replace: `const owed = ctx.merges;`,
+    run: ["packages/domain/test/proof-unread-merge.test.ts"], expect: "expected false to be true" },
+  // The flag rule: with the guard gone, a pull request the task already records is flagged anyway.
+  { id: "t805-flag-recorded-quiet", task: "T-805", file: "packages/domain/src/board-merged.ts",
+    find: `      if (stands(pr.repo, fact, merges)) continue;\n`, replace: ``,
+    run: ["packages/domain/test/board-merged.test.ts"], expect: "to deeply equal []" },
+  // The sweep gate: with the guard gone, an unchanged list is sent again at every pass, not at most every 12 hours.
+  { id: "t805-sweep-unchanged-gate", task: "T-805", file: "apps/hub/src/application/board-inbox.ts",
+    find: `    if (this.#sentAt !== null && list === this.#lastList && now - this.#sentAt < this.#repeatMs) return { sent: false, items: count };\n`, replace: ``,
+    run: ["apps/hub/test/merged-sweep.test.ts"], expect: "to deeply equal { sent: false, items: 1 }" },
 ];
 
 // ---- the runner

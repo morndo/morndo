@@ -582,7 +582,10 @@ describe("verifying (B14, B15)", () => {
     store.saveProofResult("T-1", 4, { ref: VAULT_REF, state: "pending", detail: null, checkedAt: NOW });
     fake.requests.length = 0;
     await proof.verify("T-1");
-    expect(fake.requests).toHaveLength(0);
+    // The brief is filed (B23: a merge record in an unread repository needs no reference there), so its own references
+    // are read; what is never read is the repository of the merge record, nor the reference smuggled in as a row.
+    expect(fake.requests.filter(r => r.path.includes(VAULT))).toEqual([]);
+    expect(fake.requests.every(r => r.path.includes("morndo/morndo"))).toBe(true);
     store.close();
   });
 
