@@ -56,6 +56,15 @@ describe("morndo-board merged (B23)", () => {
     expect(JSON.parse(r.out)).toEqual([]);
   });
 
+  it("with no task named, any flag but --json is a usage error: a recording call that lost its key must not list and exit 0", async () => {
+    for (const argv of [["merged", "--repo", "acme/shop"], ["merged", "--repo", "acme/shop", "--json"]]) {
+      const r = await say(...argv);
+      expect(r.code, argv.join(" ")).toBe(2);
+      expect(r.err, argv.join(" ")).toContain("usage: morndo-board merged T-12 <sha> [--repo owner/name]");
+    }
+    expect((await say("merged", "--json")).code).toBe(0);
+  });
+
   it("changes nothing on the board: the task keeps its status and has no merge record", async () => {
     await file("Ship the totals row");
     flags = [{ key: "T-1" as MergedFlag["key"], status: "todo", prs: [{ repo: "acme/shop", n: 42, mergeSha: SHA }] }];

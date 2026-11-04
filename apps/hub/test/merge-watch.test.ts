@@ -5,7 +5,7 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_POLICY, type BoardActor, type PrFacts } from "@morndo/domain";
 import { Store } from "../src/adapters/store.ts";
 import { BoardService } from "../src/application/board-service.ts";
@@ -26,12 +26,14 @@ const SHA = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
 class Forge implements ForgeChecks {
   prs = new Map<string, ForgeAnswer<PrFacts>>();
   asks: string[] = [];
-  set(repo: string, n: number, state: "open" | "merged" | "fail", mergeSha: string | null = null) {
+  during: (() => void) | null = null;                       // runs inside a read: the time a forge takes to answer
+  set(repo: string, n: number, state: "open" | "merged" | "closed" | "fail", mergeSha: string | null = null, headSha = "a".repeat(40)) {
     this.prs.set(`${repo}#${n}`, state === "fail" ? { ok: false, failure: { reason: "timeout", detail: "timeout" } }
-      : { ok: true, value: { state: state === "open" ? "open" : "closed", merged: state === "merged", headSha: "a".repeat(40), mergeSha: state === "merged" ? mergeSha : null, baseRef: "main" } });
+      : { ok: true, value: { state: state === "open" ? "open" : "closed", merged: state === "merged", headSha, mergeSha: state === "merged" ? mergeSha : null, baseRef: "main" } });
   }
   async pullRequest(repo: string, n: number): Promise<ForgeAnswer<PrFacts>> {
     this.asks.push(`${repo}#${n}`);
+    this.during?.();
     return this.prs.get(`${repo}#${n}`) ?? { ok: false, failure: { reason: "not_found", detail: "not found" } };
   }
   async checkRuns(): Promise<never> { throw new Error("not asked for a merge flag"); }
@@ -46,7 +48,7 @@ const made = (o: { repos?: () => readonly string[]; noForge?: boolean; prReadsPe
   // The proof service may be allowed more than the watch reads: a brief names what the proof allows, the watch asks only what the hub reads.
   const proof = new ProofService({ store, board, now: () => clock.now, allowedRepos: ["morndo/morndo", "acme/widgets", "acme/elsewhere"] });
   const forge = new Forge();
-  const watch = new MergeWatch({ board, proof, forge: o.noForge ? null : forge, repos, now: () => clock.now,
+  const watch = new MergeWatch({ board, forge: o.noForge ? null : forge, repos, now: () => clock.now,
     ...(o.prReadsPerHour !== undefined ? { prReadsPerHour: o.prReadsPerHour } : {}), ...(o.everyMs !== undefined ? { everyMs: o.everyMs } : {}) });
   board.attachMerged(watch);
   return { clock, store, board, proof, forge, watch };
@@ -115,6 +117,18 @@ describe("flags, as the last pass saw them", () => {
     rig.store.close();
   });
 
+  it("is quiet when the task recorded the pull request's head commit instead of the merge commit", async () => {
+    const rig = made();
+    const key = await inReview(rig, [W(42)]);
+    const HEAD = "c0ffee1c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+    rig.forge.set("acme/widgets", 42, "merged", SHA, HEAD);
+    await rig.watch.tick();
+    expect(rig.watch.flags()).toHaveLength(1);
+    expect(rig.board.act(key, { action: "merged", sha: HEAD.slice(0, 7), repo: "acme/widgets" }, manager).ok).toBe(true);
+    expect(rig.watch.flags()).toEqual([]);
+    rig.store.close();
+  });
+
   it("drops a task that is done: nothing is asked for it and it is no longer flagged", async () => {
     const rig = made();
     const key = await inReview(rig, [W(42)]);
@@ -135,6 +149,30 @@ describe("flags, as the last pass saw them", () => {
     expect(rig.watch.flags().map(f => f.status)).toEqual(["review"]);
     expect(rig.board.act(key, { action: "move", to: "doing" }, lane).ok).toBe(true);
     expect(rig.watch.flags().map(f => f.status)).toEqual(["doing"]);
+    rig.store.close();
+  });
+
+  it("asks the board about no task at all while no open task names a merged pull request, and about only the ones that do afterwards", async () => {
+    const rig = made();
+    const keys: string[] = [];
+    for (const n of [41, 42, 43, 44, 45]) { keys.push(await inReview(rig, [W(n)])); rig.forge.set("acme/widgets", n, "open"); }
+    await rig.watch.tick();
+    const task = vi.spyOn(rig.board, "task");
+    const tasksIn = vi.spyOn(rig.board, "tasksIn");
+    expect(rig.watch.flags()).toEqual([]);
+    expect(task).toHaveBeenCalledTimes(0);                                     // nothing merged: nothing to look at
+    rig.clock.now += 20 * MIN;
+    rig.forge.set("acme/widgets", 43, "merged", SHA);
+    await rig.watch.tick();
+    task.mockClear(); tasksIn.mockClear();
+    expect(rig.watch.flags().map(f => f.key)).toEqual([keys[2]]);
+    expect(task).toHaveBeenCalledTimes(1);                                     // the one task that names it, not the five
+    expect(tasksIn).toHaveBeenCalledTimes(0);
+    // a recorded merge ends the flag at once, still looking at that one task only
+    expect(rig.board.act(keys[2]!, { action: "merged", sha: SHA.slice(0, 7), repo: "acme/widgets" }, manager).ok).toBe(true);
+    task.mockClear();
+    expect(rig.watch.flags()).toEqual([]);
+    expect(task.mock.calls.length).toBeLessThanOrEqual(1);
     rig.store.close();
   });
 
@@ -171,19 +209,49 @@ describe("what it asks of the forge", () => {
     rig.store.close();
   });
 
-  it("asks about an open pull request again only after a quarter of an hour, and a merged one never again", async () => {
+  it("asks about an open pull request again after 14 minutes, so a pass every 15 reads it every time, and a merged one never again", async () => {
     const rig = made();
     await inReview(rig, [W(42)]);
     rig.forge.set("acme/widgets", 42, "open");
     expect((await rig.watch.tick()).read).toBe(1);
-    rig.clock.now += 14 * MIN;
+    rig.clock.now += 13 * MIN;
     expect((await rig.watch.tick()).read).toBe(0);
-    rig.clock.now += 2 * MIN;
+    rig.clock.now += 2 * MIN;                                                  // 15 minutes since the first read
     rig.forge.set("acme/widgets", 42, "merged", SHA);
     expect(await rig.watch.tick()).toEqual({ read: 1, flagged: 1 });
     rig.clock.now += 3 * 60 * MIN;
     expect(await rig.watch.tick()).toEqual({ read: 0, flagged: 1 });          // final: kept, still flagged
     expect(rig.forge.asks).toHaveLength(2);
+    rig.store.close();
+  });
+
+  it("reads an open pull request at every pass of a 15-minute cadence even when the forge takes a while to answer", async () => {
+    const rig = made();
+    await inReview(rig, [W(42)]);
+    rig.forge.set("acme/widgets", 42, "open");
+    rig.forge.during = () => { rig.clock.now += 300; };                        // the read returns 300 ms after the pass began
+    let at = NOW;
+    for (let pass = 1; pass <= 4; pass++) {
+      rig.clock.now = at;
+      expect((await rig.watch.tick()).read, `pass ${pass}`).toBe(1);
+      at += 15 * MIN;
+    }
+    expect(rig.forge.asks).toHaveLength(4);
+    rig.store.close();
+  });
+
+  it("asks about a pull request closed without merging only every 6 hours: it must not spend the budget a newly named one needs", async () => {
+    const rig = made();
+    await inReview(rig, [W(42)]);
+    rig.forge.set("acme/widgets", 42, "closed");
+    expect((await rig.watch.tick()).read).toBe(1);
+    rig.clock.now += 16 * MIN;
+    expect((await rig.watch.tick()).read).toBe(0);
+    rig.clock.now += 5 * 60 * MIN;
+    expect((await rig.watch.tick()).read).toBe(0);
+    rig.clock.now += 60 * MIN;                                                 // past 6 hours
+    rig.forge.set("acme/widgets", 42, "merged", SHA);                          // reopened and merged meanwhile: seen at the next ask
+    expect(await rig.watch.tick()).toEqual({ read: 1, flagged: 1 });
     rig.store.close();
   });
 

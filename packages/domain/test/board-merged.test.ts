@@ -2,7 +2,7 @@
 // (T-805, B23): the board flags it and lists it for the manager; it moves nothing and records nothing. Pure: what the
 // forge said is the caller's.
 import { describe, expect, it } from "vitest";
-import { createTask, mergedFlags, mergedMessage, namedPrs, prKey, type BoardActor, type MergedPrFact, type Task, type TaskStatus } from "../src/index.ts";
+import { createTask, mergedFlags, mergedMessage, namedPrs, prKey, prLine, type BoardActor, type MergedPrFact, type Task, type TaskStatus } from "../src/index.ts";
 
 const manager: BoardActor = { kind: "manager", name: "manager", token: "tok-m" };
 const FULL = "3e9d1a7c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
@@ -77,6 +77,28 @@ describe("mergedFlags: a merged pull request the task does not record", () => {
     const flags = mergedFlags([item(task(10), [SHOP42]), item(task(2), ["acme/vault#9@1111111", SHOP42])], f);
     expect(flags.map(x => x.key)).toEqual(["T-2", "T-10"]);
     expect(flags[0]?.prs.map(p => `${p.repo}#${p.n}`)).toEqual(["acme/vault#9", "acme/shop#42"]);
+  });
+});
+
+describe("prLine: one pull request as the view, the CLI and the message write it", () => {
+  it("repo#n merged <first 7 of the commit>, or merged alone when the forge gave none", () => {
+    expect(prLine({ repo: "acme/shop", n: 42, mergeSha: FULL })).toBe("acme/shop#42 merged 3e9d1a7");
+    expect(prLine({ repo: "Acme/Shop", n: 7, mergeSha: null })).toBe("Acme/Shop#7 merged");
+  });
+});
+
+describe("mergedFlags: a record of the pull request's head commit stands for its merge too", () => {
+  const HEAD = "c0ffee1c5b2f4a8e9d0c1b2a3f4e5d6c7b8a9f01";
+  const withHead: MergedPrFact = { merged: true, mergeSha: FULL, headSha: HEAD };
+  it("is quiet when the task recorded the head commit, in any length and case, in that repository", () => {
+    for (const sha of [HEAD, "c0ffee1", HEAD.toUpperCase()]) {
+      expect(mergedFlags([item(task(1), [SHOP42], [{ repo: "acme/shop", sha }])], facts(["acme/shop", 42, withHead])), sha).toEqual([]);
+    }
+  });
+  it("still flags it when the record is another commit, or the head's in another repository, or the fact has no head", () => {
+    expect(mergedFlags([item(task(1), [SHOP42], [{ repo: "acme/shop", sha: OTHER }])], facts(["acme/shop", 42, withHead]))).toHaveLength(1);
+    expect(mergedFlags([item(task(1), [SHOP42], [{ repo: "acme/vault", sha: HEAD }])], facts(["acme/shop", 42, withHead]))).toHaveLength(1);
+    expect(mergedFlags([item(task(1), [SHOP42], [{ repo: "acme/shop", sha: HEAD }])], facts(["acme/shop", 42, merged()]))).toHaveLength(1);
   });
 });
 
