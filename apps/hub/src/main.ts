@@ -397,9 +397,10 @@ switch (cmd) {
     // at once), they ride the board view (`mergedPrs`), and with a fleet the sweep below tells the manager's lane
     // after each pass, never before it (mergedPass). One pass 90 s after start and every 15 minutes; the forge budget
     // mirrors the waits' (smaller without a token, the anonymous wall being shared with the proof checks and the
-    // waits). Without a forge nothing is built and the view says nothing of them.
+    // waits). The forge is always there — the same GithubChecks the proof checks use, with a credential or without —
+    // so the watch is always built; the sweep only with a fleet.
     const merged = new MergeWatch({
-      board, proof, forge, repos: () => config.proofRepos ?? [MORNDO_REPO],
+      board, forge, repos: () => config.proofRepos ?? [MORNDO_REPO],
       prReadsPerHour: githubToken !== null ? MERGED_READS_PER_HOUR : MERGED_READS_PER_HOUR_ANONYMOUS,
     });
     board.attachMerged(merged);
@@ -441,12 +442,17 @@ switch (cmd) {
       shutdown.onStop(() => { clearTimeout(firstWatch); clearInterval(inboxTimer); clearInterval(sweepTimer); });
     }
     // B23: one timer for the flag — the watch's pass and, once it has finished, the sweep (with a fleet): the first
-    // 90 s after start, then every MERGED_PASS_MS.
-    const firstMergedPass = setTimeout(() => { void mergedPass(merged, mergedSweep).catch((e: unknown) => log.error("merged: the pass failed", e)); }, 90_000);
+    // 90 s after start, then every MERGED_PASS_MS. The pass in flight is kept and awaited on stop, after the timer is
+    // cleared, so a sweep it started cannot deliver through the fleet while it closes.
+    let mergedRunning: Promise<void> | null = null;
+    const runMergedPass = () => {
+      mergedRunning = mergedPass(merged, mergedSweep).then(() => {}, (e: unknown) => { log.error("merged: the pass failed", e); });
+    };
+    const firstMergedPass = setTimeout(runMergedPass, 90_000);
     firstMergedPass.unref();
-    const mergedTimer = setInterval(() => { void mergedPass(merged, mergedSweep).catch((e: unknown) => log.error("merged: the pass failed", e)); }, MERGED_PASS_MS);
+    const mergedTimer = setInterval(runMergedPass, MERGED_PASS_MS);
     mergedTimer.unref();
-    shutdown.onStop(async () => { clearTimeout(firstMergedPass); clearInterval(mergedTimer); await merged.idle(); });
+    shutdown.onStop(async () => { clearTimeout(firstMergedPass); clearInterval(mergedTimer); await mergedRunning; await merged.idle(); });
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);

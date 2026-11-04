@@ -58,13 +58,13 @@ export class ProofService {
   }
 
   // The gate the domain judges a Done and a brief against (B14, B16): the mode, the brief that still counts with its
-  // rows, and the repositories the board checks.
+  // rows, the repositories the board checks, and the same list as what proofOf judges the merge records against.
   gate(key: string): ProofGate {
     const events = this.#store.taskEvents(key);
     const list = currentList(events);
     const current = currentBrief(events);
-    if (current === null) return { mode: this.#mode, brief: null, results: [], allowedRepos: this.#allowedRepos, list };
-    return { mode: this.#mode, brief: current.brief, results: this.#store.proofResultsOf(key, current.rev), allowedRepos: this.#allowedRepos, list };
+    if (current === null) return { mode: this.#mode, brief: null, results: [], allowedRepos: this.#allowedRepos, readRepos: this.#allowedRepos, list };
+    return { mode: this.#mode, brief: current.brief, results: this.#store.proofResultsOf(key, current.rev), allowedRepos: this.#allowedRepos, readRepos: this.#allowedRepos, list };
   }
 
   // A brief, filed as its own board action (B13): the board judges who may file it, its words and its references, so a
@@ -108,11 +108,11 @@ export class ProofService {
     const merges = this.#mergesAsOf(key);
     if (current === null) {
       const coverage = coverageOf(list, null, []);
-      return { rev: null, brief: null, results: [], mode: this.#mode, standIn: this.#standIn, coverage, state: proofOf(null, [], merges, list) };
+      return { rev: null, brief: null, results: [], mode: this.#mode, standIn: this.#standIn, coverage, state: proofOf(null, [], merges, list, this.#allowedRepos) };
     }
     const results = this.#store.proofResultsOf(key, current.rev);
     const coverage = coverageOf(list, current.brief, results);
-    return { rev: current.rev, brief: current.brief, results, mode: this.#mode, standIn: this.#standIn, coverage, state: proofOf(current.brief, results, merges, list) };
+    return { rev: current.rev, brief: current.brief, results, mode: this.#mode, standIn: this.#standIn, coverage, state: proofOf(current.brief, results, merges, list, this.#allowedRepos) };
   }
 
   // The one line per task in review (B15), for the board view the agents read: keyed by task, `no brief` included, so

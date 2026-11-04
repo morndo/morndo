@@ -30,22 +30,31 @@ export function namedPrs(refs: readonly string[]): NamedPr[] {
 // A pull request's identity: the repository in lower case and the number, the key its fact is handed in under.
 export const prKey = (repo: string, n: number): string => `${repo.toLowerCase()}#${n}`;
 
-// What the forge said of one pull request, as the flag rule reads it: whether it merged, and as what commit (null
-// when the forge did not say).
-export type MergedPrFact = { merged: boolean; mergeSha: string | null };
+// What the forge said of one pull request, as the flag rule reads it: whether it merged, as what commit (null when
+// the forge did not say), and its head commit when it said that too (absent: only the merge commit counts).
+export type MergedPrFact = { merged: boolean; mergeSha: string | null; headSha?: string | null };
 
 // B23: one open task with at least one merged pull request it does not record. `prs` in reference order, the
 // repository as the reference wrote it; `mergeSha` the commit the forge gave, null when it gave none.
 export type MergedFlag = { key: TaskKey; status: TaskStatus; prs: { repo: string; n: number; mergeSha: string | null }[] };
 
+// One pull request as the view, the CLI and the message all write it: `repo#n merged <first 7 of the commit>`, or
+// `merged` alone when the forge gave no commit (the repository as the reference wrote it).
+export const prLine = (p: { repo: string; n: number; mergeSha: string | null }): string =>
+  `${p.repo}#${p.n}${p.mergeSha === null ? " merged" : ` merged ${p.mergeSha.slice(0, 7)}`}`;
+
 // A merge record stands for the merge of a pull request in the same repository (either's case) when it is the same
-// commit — the shorter sha a prefix of the longer, both whole hex forms — or, when the forge gave no commit, when it
-// is in that repository at all.
-const stands = (repo: string, mergeSha: string | null, merges: readonly { repo: string; sha: string }[]): boolean => {
+// commit — the shorter sha a prefix of the longer, both whole hex forms — as the merge commit the forge gave or as
+// the pull request's head (a lane may record the head it worked at, not the merge the forge made), or, when the forge
+// gave no commit, when it is in that repository at all.
+const stands = (repo: string, fact: MergedPrFact, merges: readonly { repo: string; sha: string }[]): boolean => {
   const inRepo = merges.filter(m => m.repo.toLowerCase() === repo.toLowerCase());
-  if (mergeSha === null) return inRepo.length > 0;
-  const merged = mergeSha.toLowerCase();
-  return inRepo.some(m => SHA.test(m.sha.toLowerCase()) && SHA.test(merged) && sameCommit(m.sha.toLowerCase(), merged));
+  const commits = [fact.mergeSha, fact.headSha ?? null].filter((s): s is string => s !== null).map(s => s.toLowerCase());
+  if (commits.length === 0) return inRepo.length > 0;
+  return inRepo.some(m => {
+    const sha = m.sha.toLowerCase();
+    return SHA.test(sha) && commits.some(c => SHA.test(c) && sameCommit(sha, c));
+  });
 };
 const SHA = /^[0-9a-f]{7,40}$/;
 
@@ -65,7 +74,7 @@ export function mergedFlags(items: readonly { task: Task; refs: readonly string[
     for (const pr of namedPrs(refs)) {
       const fact = facts.get(prKey(pr.repo, pr.n));
       if (fact === undefined || !fact.merged) continue;
-      if (stands(pr.repo, fact.mergeSha, merges)) continue;
+      if (stands(pr.repo, fact, merges)) continue;
       prs.push({ repo: pr.repo, n: pr.n, mergeSha: fact.mergeSha });
     }
     if (prs.length > 0) flags.push({ key: task.key, status: task.status, prs });
@@ -74,11 +83,11 @@ export function mergedFlags(items: readonly { task: Task; refs: readonly string[
 }
 
 // B23: what the manager's lane is told: a header, one line per task (`T-3 (doing): acme/shop#42 merged 3e9d1a7 ·
-// acme/vault#9 merged`, the first seven of the commit when the forge gave one, `merged` alone when it gave none), and
-// the line that says what was not done. "" when nothing is flagged: the hub sends nothing then.
+// acme/vault#9 merged`, each pull request as prLine writes it), and the line that says what was not done. "" when
+// nothing is flagged: the hub sends nothing then.
 export function mergedMessage(flags: readonly MergedFlag[]): string {
   if (flags.length === 0) return "";
-  const one = (f: MergedFlag) => `${f.key} (${f.status}): ${f.prs.map(p => `${p.repo}#${p.n}${p.mergeSha === null ? " merged" : ` merged ${p.mergeSha.slice(0, 7)}`}`).join(" · ")}`;
+  const one = (f: MergedFlag) => `${f.key} (${f.status}): ${f.prs.map(prLine).join(" · ")}`;
   return [
     `[board-merged] ${flags.length === 1 ? "1 task has a merged pull request without a merge record" : `${flags.length} tasks have a merged pull request without a merge record`}:`,
     ...flags.map(one),

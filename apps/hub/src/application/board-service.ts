@@ -13,7 +13,7 @@
 // the wait watch last read for each (wait-watch.ts), and a block of words only that sat too long is flagged.
 // B19, B20 (ADR-0040): a block that is a decision keeps its deadline while it stays blocked, and the watchers that read
 // it (board-inbox.ts) reach the board through the readers above.
-import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, isStaleBlock, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type JudgedWait, type Liveness, type MergedFlag, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, isStaleBlock, mayCommand, mergedView, prLine, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type JudgedWait, type Liveness, type MergedFlag, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
@@ -131,9 +131,9 @@ export class BoardService {
       return readings === null ? [] : [{ key: t.key, readings }];
     });
     const staleBlocks = tasks.filter(t => isStaleBlock(t, now)).map(t => t.key);
-    // B23: the merge watch's flags as they are now (live), one line per pull request (`repo#n merged <first 7>`, `merged` alone when the
-    // forge gave no commit); nothing when nothing is flagged.
-    const mergedPrs = this.#mergedPrs === null ? [] : this.#mergedPrs.flags().map(f => ({ key: f.key as string, prs: f.prs.map(p => `${p.repo}#${p.n}${p.mergeSha === null ? " merged" : ` merged ${p.mergeSha.slice(0, 7)}`}`) }));
+    // B23: the merge watch's flags as they are now (live), one line per pull request (prLine: `repo#n merged <first
+    // 7>`, `merged` alone when the forge gave no commit); nothing when nothing is flagged.
+    const mergedPrs = this.#mergedPrs === null ? [] : this.#mergedPrs.flags().map(f => ({ key: f.key as string, prs: f.prs.map(prLine) }));
     return {
       tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks),
       ...(this.#standIn ? { standIn: true as const } : {}), ...(waits.length > 0 ? { waits } : {}), ...(staleBlocks.length > 0 ? { staleBlocks } : {}),

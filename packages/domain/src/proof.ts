@@ -307,7 +307,10 @@ const overlayList = (base: ProofState, list: readonly ProofItem[], brief: ProofB
 };
 
 export const NO_BRIEF_LINE = "proof: no brief";   // proofOf's own line for no brief, for readers that skip it
-export function proofOf(brief: ProofBrief | null, results: readonly RefResult[], merges: readonly { repo: string; sha: string }[] = [], list: readonly ProofItem[] = []): ProofState {
+// `readRepos`: the repositories the hub reads, when the caller knows them — the same rule checkBrief judged the filing
+// with (B14): a merge record in a repository outside them could never be answered, so it owes no reference here
+// either, or the dead end would only move from filing the brief to finishing the task. Omitted: every record owes one.
+export function proofOf(brief: ProofBrief | null, results: readonly RefResult[], merges: readonly { repo: string; sha: string }[] = [], list: readonly ProofItem[] = [], readRepos?: readonly string[]): ProofState {
   if (brief === null) return overlayList({ kind: "no_brief", green: 0, total: 0, accepts: false, line: NO_BRIEF_LINE }, list, brief, results);
   if (brief.refs.length === 0) {
     if (brief.noCode !== "" && merges.length > 0)
@@ -320,13 +323,15 @@ export function proofOf(brief: ProofBrief | null, results: readonly RefResult[],
     return overlayList({ kind: "unchecked", green: 0, total: 0, accepts: false, line: "proof: unchecked (no reference to verify)" }, list, brief, results);
   }
   // The merge record's repository, re-applied at every reading (not only when the brief was filed): a merge recorded
-  // after the brief leaves a brief whose references sit elsewhere unverified, however green they are.
+  // after the brief leaves a brief whose references sit elsewhere unverified, however green they are. With `readRepos`
+  // only a record in a repository the hub reads owes one, and a reference in the repository of any such record
+  // satisfies it — checkBrief's own rule, so what was filed can also be finished.
   if (merges.length > 0) {
-    const mergeRepos = new Set(merges.map(m => m.repo.toLowerCase()));
-    if (!brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && mergeRepos.has(p.value.repo.toLowerCase()); })) {
+    const owed = readRepos === undefined ? merges : merges.filter(m => readRepos.some(r => r.toLowerCase() === m.repo.toLowerCase()));
+    if (owed.length > 0 && !brief.refs.some(ref => { const p = parseProofRef(ref); return p.ok && owed.some(m => m.repo.toLowerCase() === p.value.repo.toLowerCase()); })) {
       const rows = new Map(results.map(r => [r.ref, r] as const));
       const green = brief.refs.filter(ref => rows.get(ref)?.state === "green").length;
-      return overlayList({ kind: "unchecked", green, total: brief.refs.length, accepts: false, line: `proof: the task records a merge in ${merges[0]!.repo}; no reference in that repository` }, list, brief, results);
+      return overlayList({ kind: "unchecked", green, total: brief.refs.length, accepts: false, line: `proof: the task records a merge in ${owed[0]!.repo}; no reference in that repository` }, list, brief, results);
     }
   }
   const latest = new Map<string, RefResult>();
@@ -544,4 +549,6 @@ export function judgeCi(ref: Extract<ProofRef, { kind: "ci" }>, runs: readonly C
 // What applyAction judges a Done against (B16): the brief as filed, the results the hub read for its references, and
 // the mode the gate runs in (off: the gate is not there; warn: the Done is accepted with what was seen recorded; on:
 // not green refuses). `allowedRepos` absent: MORNDO_REPO plus the task's merge records, as checkBrief is told there.
-export type ProofGate = { mode: ProofMode; brief: ProofBrief | null; results: readonly RefResult[]; allowedRepos?: readonly string[]; list?: readonly ProofItem[] };
+// `readRepos`: the repositories the hub reads, as proofOf judges the merge records against (B14); absent, every
+// record owes a reference, as an older gate would have it.
+export type ProofGate = { mode: ProofMode; brief: ProofBrief | null; results: readonly RefResult[]; allowedRepos?: readonly string[]; readRepos?: readonly string[]; list?: readonly ProofItem[] };

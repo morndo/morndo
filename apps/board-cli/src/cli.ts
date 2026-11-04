@@ -511,8 +511,11 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       }
       case "merged": {
         // B23 (ADR-0042): with no task named, the open tasks whose pull request merged without a merge record, as the
-        // hub flags them now (live). The board moves nothing and records nothing there; it lists.
+        // hub flags them now (live). The board moves nothing and records nothing there; it lists. Any flag but --json
+        // is a usage error: a recording call that lost its key must not quietly list and exit 0.
         if (rest.length === 0) {
+          const stray = Object.keys(flags).filter(f => f !== "json");
+          if (stray.length > 0) throw new Usage("usage: morndo-board merged T-12 <sha> [--repo owner/name]");
           const d = await call("GET", "/api/agent/board");
           const flagged = (d.mergedPrs as { key: string; prs: string[] }[] | undefined) ?? [];
           if (flags.json === true) { io.out(JSON.stringify(flagged)); return 0; }   // [] when nothing is flagged; the sentence is the plain form's

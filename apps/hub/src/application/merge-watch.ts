@@ -4,22 +4,29 @@
 // (board-inbox.ts MergedSweep). The domain judges what a flag is (board-merged.ts); this service only reads and asks.
 // The facts are the last pass's, kept per pull request (a merged answer final for the life of the process); the flags
 // are computed live, from those facts against the board as it stands — a task that left the open statuses, a merge
-// just recorded, a brief that no longer names the pull request: gone at once, before any pass runs. What it may ask
-// is bounded as the wait watch's (wait-watch.ts, review of #161): a pull request in a repository the hub does not
-// read is never asked, whatever a brief names (B14 — task data never widens the list); an open or failed answer is
-// asked again no sooner than MERGED_EVERY_MS after its last ask; and all reads together spend at most
+// just recorded, a brief that no longer names the pull request: gone at once, before any pass runs. So a board push
+// never reads a task the last pass did not find naming a merged pull request (the candidates below): with none known
+// to have merged, flags() reads nothing at all. What it may ask is bounded as the wait watch's (wait-watch.ts, review
+// of #161): a pull request in a repository the hub does not read is never asked, whatever a brief names (B14 — task
+// data never widens the list); an open one is asked again no sooner than MERGED_EVERY_MS after its last ask (a
+// minute short of the pass, so a pass every MERGED_PASS_MS re-reads it even when the forge took a moment to answer);
+// one the forge reported closed without merging only every MERGED_CLOSED_MS (it will not change on its own, and it
+// must not spend the budget a newly named pull request needs); and all reads together spend at most
 // `prReadsPerHour` in a rolling hour, a bucket that refills over the hour, so the proof checks and the waits behind
 // the same forge wall keep theirs. A pass never overlaps another, and the sweep that tells the manager follows the
 // pass, never goes before it (mergedPass).
 import { mergedFlags, namedPrs, prKey, type MergedFlag, type MergedPrFact, type Task, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { log as defaultLog } from "../adapters/log.ts";
-import type { ProofService } from "./proof-service.ts";
 import type { ForgeChecks } from "./ports.ts";
 
-// An open or failed pull request is asked again no sooner than this after its last ask.
-export const MERGED_EVERY_MS = 15 * 60_000;
+// An open pull request is asked again no sooner than this after its last ask — a minute less than the pass, so a
+// pass every MERGED_PASS_MS finds it due however long the forge took to answer the last one.
+export const MERGED_EVERY_MS = 14 * 60_000;
 // How often main.ts runs a pass (the sweep with it).
 export const MERGED_PASS_MS = 15 * 60_000;
+// A pull request the forge reported closed without merging is asked again no sooner than this: it eats the budget
+// for nothing until half a day has made the answer worth checking again.
+export const MERGED_CLOSED_MS = 6 * 3_600_000;
 // The forge reads the flag may spend in an hour, with and without a token (the anonymous wall is shared with the
 // proof checks and the waits).
 export const MERGED_READS_PER_HOUR = 60;
@@ -33,8 +40,9 @@ export type MergedBoard = {
 };
 
 // One pull request's last ask: when it was made (`at`), what it answered (`fact`, null when it failed or was never
-// made), and whether the answer is final (a merge never unmerges).
-type Asked = { at: number; fact: MergedPrFact | null; final: boolean };
+// made), whether the answer is final (a merge never unmerges), and whether it said closed without merging (such an
+// answer will not change on its own, so it waits the long stretch before being checked again).
+type Asked = { at: number; fact: MergedPrFact | null; final: boolean; closed: boolean };
 
 // The references of the task's newest brief, whatever round filed it (the newest `briefed` event; none: empty). The
 // flag watches a pull request, not a round of work, so it does not follow the proof gate's staling rule (B13): a
@@ -57,15 +65,15 @@ export class MergeWatch {
   #filledAt: number;
   #asked = new Map<string, Asked>();
   #firstSeen = new Map<string, number>();                 // when a pull request was first named: the order of the unread
+  #candidates = new Set<string>();                        // the open tasks the last pass found naming a merged pull request
   #running: Promise<{ read: number; flagged: number }> | null = null;
   #again = false;
 
-  // `forge`: null when the hub reads no forge; nothing is read and nothing is flagged. `proof`: kept for the shape
-  // the wiring gives every watcher over the board; the briefs are read from the board's own events (lastBriefRefs),
-  // so the flag survives a round of work ending. `repos`: the repositories the hub reads now (MORNDO_PROOF_REPOS).
-  // `prReadsPerHour`: the forge budget (MERGED_READS_PER_HOUR). `everyMs`: MERGED_EVERY_MS.
+  // `forge`: null when the hub reads no forge; nothing is read and nothing is flagged. `repos`: the repositories the
+  // hub reads now (MORNDO_PROOF_REPOS). `prReadsPerHour`: the forge budget (MERGED_READS_PER_HOUR). `everyMs`:
+  // MERGED_EVERY_MS.
   constructor(p: {
-    board: MergedBoard; proof: Pick<ProofService, "view">; forge: ForgeChecks | null; repos: () => readonly string[];
+    board: MergedBoard; forge: ForgeChecks | null; repos: () => readonly string[];
     now?: () => number; prReadsPerHour?: number; everyMs?: number; log?: { warn(m: string): void };
   }) {
     this.#board = p.board; this.#forge = p.forge; this.#repos = p.repos; this.#now = p.now ?? Date.now;
@@ -73,16 +81,21 @@ export class MergeWatch {
     this.#tokens = this.#perHour; this.#filledAt = this.#now();
   }
 
-  // The flags as they stand now: the facts the last pass read, judged against the board as it is at this call — the
-  // tasks in the open statuses with the brief that still counts and the merge records they hold, each task's status
-  // as it is now. No forge call. Empty before any pass read a fact.
+  // The flags as they stand now: the facts the last pass read, judged against the board as it is at this call. Only
+  // the tasks the last pass found naming a merged pull request are looked at, one board read each (the task's status
+  // now, its newest brief, its merge records) — a task that names a merged pull request only after that pass is seen
+  // at the next one. With no fact saying merged there is nothing to flag, and nothing is read at all.
   flags(): MergedFlag[] {
     const facts = new Map<string, MergedPrFact>();
-    for (const [id, asked] of this.#asked) if (asked.fact !== null) facts.set(id, asked.fact);
-    // The board view asks on every push: with no pull request known to have merged there is nothing to flag, and the
-    // tasks' events are not read at all.
-    if (![...facts.values()].some(f => f.merged)) return [];
-    return mergedFlags(this.#items(), facts);
+    for (const [id, asked] of this.#asked) if (asked.fact?.merged) facts.set(id, asked.fact);
+    if (facts.size === 0) return [];
+    const items: { task: Task; refs: readonly string[]; merges: readonly { repo: string; sha: string }[] }[] = [];
+    for (const key of this.#candidates) {
+      const one = this.#board.task(key);
+      if (one === null) continue;                          // the task is gone from the board
+      items.push({ task: one.task, refs: lastBriefRefs(one.events), merges: one.merged?.merges.map(m => ({ repo: m.repo, sha: m.sha })) ?? [] });
+    }
+    return mergedFlags(items, facts);
   }
 
   // One pass. A pass asked for while one runs is run once more after it, so a brief filed meanwhile is not left out.
@@ -118,8 +131,9 @@ export class MergeWatch {
   async #pass(): Promise<{ read: number; flagged: number }> {
     // The pull requests the open tasks' briefs name. A merged answer is kept for the life of the process; the rest is
     // kept only while some brief names it.
+    const items = this.#items();
     const prs = new Map<string, { repo: string; n: number }>();
-    for (const i of this.#items()) for (const pr of namedPrs(i.refs)) prs.set(prKey(pr.repo, pr.n), pr);
+    for (const i of items) for (const pr of namedPrs(i.refs)) prs.set(prKey(pr.repo, pr.n), pr);
     for (const id of [...this.#asked.keys()]) if (!prs.has(id) && !this.#asked.get(id)?.final) this.#asked.delete(id);
     for (const id of [...this.#firstSeen.keys()]) if (!prs.has(id)) this.#firstSeen.delete(id);
     for (const id of prs.keys()) if (!this.#firstSeen.has(id)) this.#firstSeen.set(id, this.#now());
@@ -130,12 +144,18 @@ export class MergeWatch {
     const order = [...prs.entries()].sort(([a], [b]) => (lastAsk(a) - lastAsk(b)) || ((this.#firstSeen.get(a) ?? 0) - (this.#firstSeen.get(b) ?? 0)));
     let read = 0;
     for (const [, pr] of order) read += await this.#pr(pr);
+    // The tasks flags() may look at: the ones this pass found in an open status naming a pull request the facts say
+    // merged. Everything else needs no board read until a pass sees it.
+    this.#candidates = new Set(items
+      .filter(i => namedPrs(i.refs).some(pr => this.#asked.get(prKey(pr.repo, pr.n))?.fact?.merged))
+      .map(i => i.task.key as string));
     return { read, flagged: this.flags().length };
   }
 
   // One pull request, asked within the rules: only in a repository the hub reads, only with a forge, never again once
-  // merged, again no sooner than `everyMs` after its last ask, and only while the hour's budget lasts — over budget,
-  // its last word stands. Returns whether the forge was asked (one call).
+  // merged, again no sooner than its last answer allows (an open one `everyMs`, one the forge reported closed without
+  // merging MERGED_CLOSED_MS), and only while the hour's budget lasts — over budget, its last word stands. Returns
+  // whether the forge was asked (one call).
   async #pr(pr: { repo: string; n: number }): Promise<0 | 1> {
     if (!this.#repos().some(r => r.toLowerCase() === pr.repo.toLowerCase())) return 0;
     const forge = this.#forge;
@@ -143,7 +163,7 @@ export class MergeWatch {
     const id = prKey(pr.repo, pr.n);
     const now = this.#now();
     const kept = this.#asked.get(id);
-    if (kept !== undefined && (kept.final || now - kept.at < this.#everyMs)) return 0;
+    if (kept !== undefined && (kept.final || now - kept.at < (kept.closed ? MERGED_CLOSED_MS : this.#everyMs))) return 0;
     this.#tokens = Math.min(this.#perHour, this.#tokens + ((now - this.#filledAt) / HOUR_MS) * this.#perHour);
     this.#filledAt = now;
     if (this.#tokens < 1) return 0;                       // over budget: its last word stands, asked again when it allows
@@ -151,14 +171,17 @@ export class MergeWatch {
     const a = await forge.pullRequest(pr.repo, pr.n);
     let fact: MergedPrFact | null;
     let final = false;
+    let closed = false;
     if (a.ok) {
-      fact = { merged: a.value.merged, mergeSha: a.value.mergeSha };
+      fact = { merged: a.value.merged, mergeSha: a.value.mergeSha, ...(a.value.headSha !== null ? { headSha: a.value.headSha } : {}) };
       final = a.value.merged;                             // a merge never unmerges: never asked again
+      closed = a.value.state === "closed";                // closed without merging: the long stretch before the next ask
     } else {
       fact = kept?.fact ?? null;                          // a failed ask keeps the last word it had
+      closed = kept?.closed ?? false;
       this.#log.warn(`merged: reading ${pr.repo}#${pr.n} failed (${a.failure.reason}); the next pass tries again`);
     }
-    this.#asked.set(id, { at: this.#now(), fact, final });
+    this.#asked.set(id, { at: this.#now(), fact, final, closed });
     return 1;
   }
 }
