@@ -125,7 +125,11 @@ export function isPushContact(v: string): boolean {
 // open the hub's database without its other settings (`morndo lanes start --task`) find it here too.
 export const dataDirOf = (env: NodeJS.ProcessEnv = process.env): string => env.MORNDO_HOME ?? join(homedir(), ".local/share/morndo");
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+// What loadConfig answers: the config, with the block gate there to call — loadConfig always sets it (a Config built by
+// hand, as the tests' hubs are, simply leaves it out and gates nothing).
+export type LoadedConfig = Config & { blockGate: (now: number) => { mode: "off" | "warn" | "on"; from: number } };
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
   const port = Number(env.MORNDO_PORT ?? 8790);
   const origin = (env.MORNDO_ORIGIN ?? `http://localhost:${port}`).replace(/\/+$/, "");
   const url = new URL(origin);
@@ -191,7 +195,7 @@ function blockGateOf(env: NodeJS.ProcessEnv): NonNullable<Config["blockGate"]> {
   if (v !== undefined && v !== "") {
     if (v !== "off" && v !== "warn" && v !== "on")
       throw new Error(`MORNDO_BLOCK_GATE must be off, warn or on: ${v}`);
-    return now => ({ mode: v, from: BLOCK_GATE_FROM });
+    return _now => ({ mode: v, from: BLOCK_GATE_FROM });
   }
   return now => ({ mode: now < BLOCK_GATE_FROM ? "warn" : "on", from: BLOCK_GATE_FROM });
 }

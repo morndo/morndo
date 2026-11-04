@@ -237,7 +237,8 @@ export class BoardService {
     const action: TaskAction = { action: "move", to: move.to, ...(move.reason === null ? {} : { reason: move.reason }), ...(move.decision === true ? { decision: true } : {}), ...(move.waits !== undefined && move.waits.length > 0 ? { waits: move.waits } : {}), ifRev: rev };
     const r = this.act(key, action, actor);
     if (r.ok || r.problem !== "bad_wait" || move.waits === undefined || move.waits.length === 0) return r;
-    return this.act(key, { ...action, waits: undefined }, actor);
+    const { waits: _dropped, ...withoutWaits } = action;
+    return this.act(key, withoutWaits, actor);
   }
 
   #write(task: Task, event: TaskEvent) {
