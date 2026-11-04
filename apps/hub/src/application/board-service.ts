@@ -13,7 +13,7 @@
 // the wait watch last read for each (wait-watch.ts), and a block of words only that sat too long is flagged.
 // B19, B20 (ADR-0040): a block that is a decision keeps its deadline while it stays blocked, and the watchers that read
 // it (board-inbox.ts) reach the board through the readers above.
-import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, isStaleBlock, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type JudgedWait, type Liveness, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
+import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, isStaleBlock, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type JudgedWait, type Liveness, type MergedFlag, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
 import type { Authenticated } from "./access-service.ts";
@@ -23,8 +23,9 @@ import type { Authenticated } from "./access-service.ts";
 // shown task that has merges.
 // `standIn`: set only when the hub reads its proof references from a stand-in forge, so every screen can say so (ADR-0035).
 // `waits` (B18): for each blocked task that names waits, what the wait watch last read of them; `staleBlocks`: the blocked
-// tasks of words only that nobody changed for STALE_BLOCK_MS. Both absent when there are none.
-export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[]; standIn?: true; waits?: { key: string; readings: JudgedWait[] }[]; staleBlocks?: string[] };
+// tasks of words only that nobody changed for STALE_BLOCK_MS. `mergedPrs` (B23): the open tasks whose pull request merged
+// without a merge record, as the merge watch's last pass flagged them. All absent when there are none.
+export type BoardView = { tasks: Task[]; lanes: string[]; at: number; runs: RunView[]; orphans: string[]; merged: MergedView[]; standIn?: true; waits?: { key: string; readings: JudgedWait[] }[]; staleBlocks?: string[]; mergedPrs?: { key: string; prs: string[] }[] };
 // A change of runs alone is pushed at most this often: runs change with every hook, a board frame is the whole board.
 export const RUNS_EVERY_MS = 1000;
 export type BoardResult = { ok: true; task: Task; event: TaskEvent } | { ok: false; problem: BoardRefusal["problem"] | "unknown" | "step_up"; other?: string; from?: TaskStatus; detail?: string };
@@ -57,6 +58,8 @@ export class BoardService {
   #repos: () => readonly string[];
   #cards: boolean;
   #waits: { readings(key: string, rev?: number): JudgedWait[] | null } | null = null;
+  // B23 (ADR-0042): the merge watch's flags, shown in the view. null: none attached, the view says nothing of them.
+  #mergedPrs: { flags(): MergedFlag[] } | null = null;
   // B21 (ADR-0041): the block gate, read per change with the service's own clock, so the mode it answers is the mode
   // of that moment; absent, no gate, a board without the hub's setting blocks as it always did.
   #blockGate: (() => { mode: "off" | "warn" | "on"; from: number }) | null;
@@ -94,6 +97,8 @@ export class BoardService {
   attachProof(p: { gate(key: string): ProofGate | undefined; refresh(key: string): Promise<void> } | null): void { this.#proof = p; }
   // The wait watch's readings (B18, wait-watch.ts), shown in the view. null: none attached, the view says nothing of them.
   attachWaits(w: { readings(key: string, rev?: number): JudgedWait[] | null } | null): void { this.#waits = w; }
+  // The merge watch's flags (B23, merge-watch.ts), shown in the view. null: none attached, the view says nothing of them.
+  attachMerged(source: { flags(): MergedFlag[] } | null): void { this.#mergedPrs = source; }
   #said(e: TaskEvent) { for (const l of this.#eventListeners) l(e); }
   // Every push carries the runs as they are then, so one due for the runs alone is dropped.
   #tell() {
@@ -123,9 +128,13 @@ export class BoardService {
       return readings === null ? [] : [{ key: t.key, readings }];
     });
     const staleBlocks = tasks.filter(t => isStaleBlock(t, now)).map(t => t.key);
+    // B23: the merge watch's last flags, one line per pull request (`repo#n merged <first 7>`, `merged` alone when the
+    // forge gave no commit); nothing when nothing is flagged.
+    const mergedPrs = this.#mergedPrs === null ? [] : this.#mergedPrs.flags().map(f => ({ key: f.key as string, prs: f.prs.map(p => `${p.repo}#${p.n}${p.mergeSha === null ? " merged" : ` merged ${p.mergeSha.slice(0, 7)}`}`) }));
     return {
       tasks, lanes: [...new Set(this.#lanes())].sort(), at: now, runs: this.#runs(), orphans: this.#orphans(tasks, now), merged: this.#merged(tasks),
       ...(this.#standIn ? { standIn: true as const } : {}), ...(waits.length > 0 ? { waits } : {}), ...(staleBlocks.length > 0 ? { staleBlocks } : {}),
+      ...(mergedPrs.length > 0 ? { mergedPrs } : {}),
     };
   }
   // `waitsRead` (B18): for a blocked task that names waits, what the wait watch last read of them.
@@ -154,7 +163,10 @@ export class BoardService {
     return { kind: "principal", endpointId: a.endpoint.id, sessionId: a.session.id };
   }
 
-  create(input: NewTask, actor: BoardActor): BoardResult {
+  // `actor`: who may call the agents' door or the console (B2); the board itself never files a task (D5), so its own
+  // actor is refused here rather than at the door, where the callers share one TaskActor-typed credential.
+  create(input: NewTask, actor: TaskActor): BoardResult {
+    if (actor.kind === "board") return { ok: false, problem: "not_allowed" };
     // The number is taken only once the task is accepted, so a refused filing burns none (B7 is about reuse, not gaps).
     const r = this.#store.transaction(() => {
       const n = this.#store.peekTaskNumber();

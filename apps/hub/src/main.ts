@@ -31,6 +31,7 @@ import { ObservationService } from "./application/observation-service.ts";
 import { SteeringService } from "./application/steering-service.ts";
 import { ledgerReader } from "./adapters/ledger.ts";
 import { PR_READS_PER_HOUR, PR_READS_PER_HOUR_ANONYMOUS, WAIT_PASS_MS, WaitWatch } from "./application/wait-watch.ts";
+import { MERGED_PASS_MS, MERGED_READS_PER_HOUR, MERGED_READS_PER_HOUR_ANONYMOUS, MergeWatch } from "./application/merge-watch.ts";
 import { EscalationService, managerOf, type MemoryAsks, type SignInAsks } from "./application/escalation-service.ts";
 import { BriefService } from "./application/brief-service.ts";
 import { RemoteService } from "./application/remote-service.ts";
@@ -49,7 +50,7 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
-import { BoardInbox, StaleSweep, fleetDeliverText, watchedKeys } from "./application/board-inbox.ts";
+import { BoardInbox, MergedSweep, StaleSweep, fleetDeliverText, watchedKeys } from "./application/board-inbox.ts";
 import { ProofService } from "./application/proof-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
@@ -390,6 +391,21 @@ switch (cmd) {
     const waitTimer = setInterval(() => { void waits.tick().catch((e: unknown) => log.error("waits: the pass failed", e)); }, WAIT_PASS_MS);
     waitTimer.unref();
     shutdown.onStop(async () => { clearInterval(waitTimer); waits.stop(); await waits.idle(); });
+    // B23 (ADR-0042): the hub reads the pull requests the open tasks' briefs name — the same forge, the same
+    // repositories (MORNDO_PROOF_REPOS), never a wider list — and flags one that merged with no merge record on its
+    // task. It moves nothing and records nothing: the flags ride the board view (`mergedPrs`), and with a fleet the
+    // sweep below tells the manager's lane. A pass 90 s after start and every 15 minutes; its forge budget mirrors the
+    // waits' (smaller without a token, the anonymous wall being shared with the proof checks and the waits).
+    const merged = new MergeWatch({
+      board, proof, forge, repos: () => config.proofRepos ?? [MORNDO_REPO],
+      prReadsPerHour: githubToken !== null ? MERGED_READS_PER_HOUR : MERGED_READS_PER_HOUR_ANONYMOUS,
+    });
+    board.attachMerged(merged);
+    const firstMergedPass = setTimeout(() => { void merged.tick().catch((e: unknown) => log.error("merged: the pass failed", e)); }, 90_000);
+    firstMergedPass.unref();
+    const mergedTimer = setInterval(() => { void merged.tick().catch((e: unknown) => log.error("merged: the pass failed", e)); }, MERGED_PASS_MS);
+    mergedTimer.unref();
+    shutdown.onStop(async () => { clearTimeout(firstMergedPass); clearInterval(mergedTimer); await merged.idle(); });
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
@@ -411,6 +427,16 @@ switch (cmd) {
         watched: () => watchedKeys(board.view(), Date.now(), legacySince, answered),
         answered, deliver, lane: config.managerWindow,
       });
+      // B23: the merged sweep, over the merge watch's last flags, two minutes after each of its passes — late enough
+      // that a pass just begun has landed, and never naming a task that left the open statuses in between (its flags
+      // are read against the board as it stands at the send).
+      const mergedSweep = new MergedSweep({
+        flags: () => {
+          const open = new Set((["todo", "doing", "blocked", "review"] as const).flatMap(s => board.tasksIn(s).map(t => t.key as string)));
+          return merged.flags().filter(f => open.has(f.key));
+        },
+        deliver, lane: config.managerWindow,
+      });
       const firstWatch = setTimeout(() => {
         void boardInbox.tick().catch((e: unknown) => log.error("board inbox: the pass failed", e));
         void staleSweep.tick().catch((e: unknown) => log.error("board stale: the pass failed", e));
@@ -420,7 +446,11 @@ switch (cmd) {
       inboxTimer.unref();
       const sweepTimer = setInterval(() => { void staleSweep.tick().catch((e: unknown) => log.error("board stale: the pass failed", e)); }, 3_600_000);
       sweepTimer.unref();
-      shutdown.onStop(() => { clearTimeout(firstWatch); clearInterval(inboxTimer); clearInterval(sweepTimer); });
+      const mergedSweepTimer = setInterval(() => { void mergedSweep.tick().catch((e: unknown) => log.error("board merged: the pass failed", e)); }, MERGED_PASS_MS);
+      const firstMergedSweep = setTimeout(() => { void mergedSweep.tick().catch((e: unknown) => log.error("board merged: the pass failed", e)); }, 90_000 + 120_000);
+      firstMergedSweep.unref();
+      mergedSweepTimer.unref();
+      shutdown.onStop(() => { clearTimeout(firstWatch); clearInterval(inboxTimer); clearInterval(sweepTimer); clearTimeout(firstMergedSweep); clearInterval(mergedSweepTimer); });
     }
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
