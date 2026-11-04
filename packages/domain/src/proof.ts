@@ -137,12 +137,13 @@ export function checkBrief(input: BriefInput, ctx: { allowedRepos: readonly stri
   if (noCode.value !== "" && ctx.merges.length > 0)
     return err({ problem: "bad_ref", detail: "this task has a merge record; a brief with no code change cannot stand for it" });
   if (ctx.merges.length > 0) {
-    // B14 asks for a reference in the repository of a merge record the hub reads: one in a repository outside its
-    // settings could never be met (the hub fetches nothing there), so the rule bites only where a reference could
-    // stand. Task data still never widens the list: the record is matched against it, not added to it.
-    const owed = ctx.merges.find(m => repos.has(m.repo.toLowerCase()));
-    if (owed !== undefined && !parsed.some(r => r.repo.toLowerCase() === owed.repo.toLowerCase()))
-      return err({ problem: "ref_unrelated", detail: `the task records a merge in ${owed.repo}; a reference to that repository is needed` });
+    // B14 asks for a reference in the repository of a merge record the hub reads — any one of them: one in a
+    // repository outside its settings could never be met (the hub fetches nothing there), so the rule bites only where
+    // a reference could stand, and a record in an unread repository owes nothing. Task data still never widens the
+    // list: the records are matched against it, not added to it.
+    const owed = ctx.merges.filter(m => repos.has(m.repo.toLowerCase()));
+    if (owed.length > 0 && !parsed.some(r => owed.some(m => m.repo.toLowerCase() === r.repo.toLowerCase())))
+      return err({ problem: "ref_unrelated", detail: `the task records a merge in ${owed[0]!.repo}; a reference to that repository is needed` });
   }
   for (const ref of parsed) {
     if (ref.kind !== "ci") continue;
