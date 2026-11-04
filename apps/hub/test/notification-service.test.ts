@@ -425,3 +425,26 @@ describe("the settle on a busy board, and while he attends (review of the N2 set
     expect(sent).toEqual([]);
   });
 });
+
+// B19 (ADR-0040): a board decision gone overdue is one push of the decision kind — counts only, as every push is (the
+// payload's schema refuses text) — straight away, with no debounce to lose, and nothing while he is attending. The line
+// naming the task goes to the manager's lane; the push says only that a decision waits.
+describe("a board decision gone overdue (B19)", () => {
+  it("pushes the decision kind at once, numbers only, to every device, and records it", async () => {
+    svc.boardOverdue();
+    await svc.settled();
+    expect(sent.map(s => s.payload)).toEqual([
+      { kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 },
+      { kind: 0, decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 },
+    ]);
+    expect(sent[0]?.options).toEqual({ ttlSeconds: 12 * 3600, topic: "decision", urgency: "high" });
+    expect(audit).toEqual([{ type: "NotificationSent", kind: "decision", counts: { decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 }, devices: 2, at: Date.now() }]);
+  });
+  it("says nothing while he is attending; the manager's lane still gets the line", async () => {
+    svc.attending("conn-1", true);
+    svc.boardOverdue();
+    await svc.settled();
+    expect(sent).toEqual([]);
+    expect(audit).toEqual([]);
+  });
+});

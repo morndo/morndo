@@ -582,15 +582,17 @@ export class Store {
     const r = this.db.prepare("SELECT * FROM board_tasks WHERE key = ?").get(key) as Row | undefined;
     return r ? this.#withWaits(taskFrom(r)) : null;
   }
-  // B18 (ADR-0038): a blocked task's waits are the ones its latest move named, read from that event. The record is the
-  // one place they live, so no column can keep waits an older hub's later block knew nothing of (an older hub's block
-  // writes a move without waits, and that move is then the latest).
+  // B18 (ADR-0038), B19 (ADR-0040): a blocked task's waits and decision deadline are the ones its latest move named,
+  // read from that event. The record is the one place they live, so no column can keep what an older hub's later block
+  // knew nothing of (an older hub's block writes a move without them, and that move is then the latest).
   #withWaits(t: Task): Task {
     if (t.status !== "blocked") return t;
     const r = this.db.prepare("SELECT change FROM board_events WHERE key = ? AND json_extract(change, '$.kind') = 'moved' ORDER BY rev DESC LIMIT 1").get(t.key) as Row | undefined;
     if (!r) return t;
-    const change = JSON.parse(r.change as string) as { to?: string; waits?: unknown };
-    return change.to === "blocked" && Array.isArray(change.waits) && change.waits.length > 0 ? { ...t, waits: change.waits as NonNullable<Task["waits"]> } : t;
+    const change = JSON.parse(r.change as string) as { to?: string; waits?: unknown; decisionDue?: unknown };
+    const waits = change.to === "blocked" && Array.isArray(change.waits) && change.waits.length > 0 ? change.waits as NonNullable<Task["waits"]> : undefined;
+    const decisionDue = change.to === "blocked" && typeof change.decisionDue === "number" ? change.decisionDue : undefined;
+    return { ...t, ...(waits !== undefined ? { waits } : {}), ...(decisionDue !== undefined ? { decisionDue } : {}) };
   }
   // The next task number, and taking it: the counter only grows, and is written in the same transaction as the task,
   // only once the task is accepted (a refused filing burns no number).
@@ -922,8 +924,8 @@ export class Store {
   close() { this.db.close(); }
 }
 
-// A task's waits are not a column (they live in its latest move, #withWaits), so they are never bound as one.
-const withoutWaits = ({ waits: _waits, ...row }: Task) => row;
+// A task's waits and decision deadline are not columns (they live in its latest move, #withWaits), so they are never bound as one.
+const withoutWaits = ({ waits: _waits, decisionDue: _decisionDue, ...row }: Task) => row;
 const taskFrom = (r: Row): Task => ({
   key: r.key as Task["key"], n: r.n as number, title: r.title as string, description: r.description as string, status: r.status as Task["status"],
   assignee: (r.assignee as string | null) ?? null, priority: r.priority as Task["priority"], blockedReason: (r.blocked_reason as string | null) ?? null,

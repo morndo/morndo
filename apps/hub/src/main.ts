@@ -49,6 +49,7 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
+import { BoardInbox, StaleSweep, fleetDeliverText, watchedKeys } from "./application/board-inbox.ts";
 import { ProofService } from "./application/proof-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
@@ -389,6 +390,35 @@ switch (cmd) {
     held.board = board;
     following.projector = fleet ? new BoardProjector({ source: fleetRuns(fleet.client), board }) : null;
     shutdown.onStop(() => { following.projector?.stop(); liveness.stop(); board.stop(); builds?.stop(); });
+    // B19, B20 (ADR-0040): with a fleet, two watchers keep the board from going stale silently. The decision inbox
+    // sends the manager's lane every open decision with its deadline, hourly while any wait, and tells the principal
+    // once per decision that goes overdue; the stale sweep sends the tasks nobody changed for 48 h with nothing the
+    // board watches, at once when the list changed, at most every 12 h while it is unchanged. Both ride the fleet's
+    // delivery queue; a message that did not go is tried again at the next pass. A blocked task from before the rule
+    // is a decision from the hub's start, and an answer is a comment by the manager, the principal or the console.
+    if (fleet) {
+      // The fleet's delivery ids are `<client>:<rest>` with a lowercase client (fleetDeliverText adds the hub's own).
+      const deliver = fleetDeliverText(fleetDeliveries(fleet.client));
+      const legacySince = Date.now();
+      const answered = (key: string, since: number) =>
+        (board.task(key)?.events ?? []).some(e => e.at > since && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"));
+      const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });
+      const staleSweep = new StaleSweep({
+        tasks: () => [...board.tasksIn("blocked"), ...board.tasksIn("review")],
+        watched: () => watchedKeys(board.view(), Date.now(), legacySince, answered),
+        answered, deliver, lane: config.managerWindow,
+      });
+      const firstWatch = setTimeout(() => {
+        void boardInbox.tick().catch((e: unknown) => log.error("board inbox: the pass failed", e));
+        void staleSweep.tick().catch((e: unknown) => log.error("board stale: the pass failed", e));
+      }, 60_000);
+      firstWatch.unref();
+      const inboxTimer = setInterval(() => { void boardInbox.tick().catch((e: unknown) => log.error("board inbox: the pass failed", e)); }, 5 * 60_000);
+      inboxTimer.unref();
+      const sweepTimer = setInterval(() => { void staleSweep.tick().catch((e: unknown) => log.error("board stale: the pass failed", e)); }, 3_600_000);
+      sweepTimer.unref();
+      shutdown.onStop(() => { clearTimeout(firstWatch); clearInterval(inboxTimer); clearInterval(sweepTimer); });
+    }
     // ADR-0031: Memory, in its own file beside morndo.db, through the same agent tokens; its skills go to every node
     // through the fleet. A memory.db this hub can't open turns Memory off, never the hub.
     const memoryStore = openMemory(config.dataDir);

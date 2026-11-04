@@ -35,6 +35,9 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
 - A wrong sha: \`morndo-board unmerged T-12 <sha>\`, then record the right one.
 - Never mark a task done on a lane's word alone, and never move a task that the board or its lane will move.
 - Blocked tasks are yours to unblock. Read \`morndo-board list --status blocked\` and act, or ask the principal.
+- A decision a lane asks for is yours to answer: \`morndo-board inbox\` lists what waits and how long it has waited.
+  Ask one yourself with \`morndo-board block T-12 --why "…" --decision\`; a decision with no answer for a day is told to the
+  principal.
 - When a block waits on something the board can see, name it, so nobody has to remember to look:
   \`morndo-board block T-12 --why "…" --on T-11 --on morndo/morndo#93 --on ny-530 --on until:2026-10-28T09:00+01:00\` (a task
   done, a pull request merged or closed, the principal's card closed, a time reached; a bare #93 needs quotes in a shell:

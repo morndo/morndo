@@ -11,6 +11,8 @@
 // against them, and the view says for each task with merges where they stand ("merged, not live: pc on abc1234").
 // B18 (ADR-0038): a block's waits are judged against the repositories the hub reads (`repos`), the view carries what
 // the wait watch last read for each (wait-watch.ts), and a block of words only that sat too long is flagged.
+// B19, B20 (ADR-0040): a block that is a decision keeps its deadline while it stays blocked, and the watchers that read
+// it (board-inbox.ts) reach the board through the readers above.
 import { DONE_SHOWN_MS, MORNDO_REPO, applyAction, boardChanged, boardOrder, createTask, isMorndoRepo, isStaleBlock, mayCommand, mergedView, type AccessPolicy, type BoardActor, type BoardRefusal, type BoardRule, type JudgedWait, type Liveness, type MergedView, type NewTask, type ProofGate, type Task, type TaskAction, type TaskActor, type TaskEvent, type TaskStatus } from "@morndo/domain";
 import { redactKeyMaterial, type RunView } from "@morndo/protocol";
 import type { Store } from "../adapters/store.ts";
@@ -131,8 +133,11 @@ export class BoardService {
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
   openTasksOf(lane: string): Task[] { return this.#store.openTasksOf(lane); }
   tasksInProgress(): Task[] { return this.#store.tasksInProgress(); }
-  // The blocked tasks, each with the waits its block named (B18): what the wait watch reads.
+  // The blocked tasks, each with the waits its block named and the deadline of its decision (B18, B19): what the wait
+  // watch and the decision inbox read.
   blockedTasks(): Task[] { return this.#store.tasksIn("blocked"); }
+  // Every task in one status, in the board's own number order: the stale sweep reads blocked and review (B20).
+  tasksIn(status: TaskStatus): Task[] { return this.#store.tasksIn(status); }
 
   // The principal's own changes are Commands (AC7): past the step-up window they are refused until he verifies again.
   principal(a: Authenticated): BoardActor | { problem: "step_up" } {
@@ -215,9 +220,9 @@ export class BoardService {
 
   // B10: the board's own move of `key`, following `lane`'s Run (derivedMove's answer: D1 to D4), as that rule. `rev`: the
   // task's revision the move was judged on, so a task changed meanwhile is refused (`changed`), never moved on a stale
-  // reading (B6).
-  follow(key: string, move: { to: TaskStatus; reason: string | null; rule: BoardRule }, lane: string, rev: number): BoardResult {
-    const action: TaskAction = { action: "move", to: move.to, ...(move.reason === null ? {} : { reason: move.reason }), ifRev: rev };
+  // reading (B6). `decision` (B19): D2's block of a NEEDS DECISION line carries the decision flag with it.
+  follow(key: string, move: { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true }, lane: string, rev: number): BoardResult {
+    const action: TaskAction = { action: "move", to: move.to, ...(move.reason === null ? {} : { reason: move.reason }), ...(move.decision === true ? { decision: true } : {}), ifRev: rev };
     return this.act(key, action, { kind: "board", rule: move.rule, lane });
   }
 

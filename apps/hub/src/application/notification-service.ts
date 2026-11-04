@@ -1,6 +1,7 @@
 // Application service for Notifications (ADR-0008 phase F; N1–N5 in docs/domain.md): it hears a Decision start
 // waiting, a worker start needing the principal and a device being linked, waits a second per kind (the latest
 // wins), and then, unless he is attending on any device, sends the counts, numbers only, to every Push subscription.
+// B19 (ADR-0040) adds one notice of its own, outside the counts: a board decision gone overdue.
 // A push service answering 404 or 410 drops that subscription (N4). It grants and starts nothing (N5): it reads the
 // board and the roster and writes only push_subscriptions and the audit's Notification rows.
 import { DECISION_SETTLE_MS, NotificationQueue, PUSH_TOPICS, anyAttending, payloadOf, raises, reasonCode, suppressedWhileAttending, type AttendingReport, type Counts, type NotificationEvent, type NotificationKind } from "@morndo/domain";
@@ -134,6 +135,20 @@ export class NotificationService {
     if (raises({ kind: "usage" })) this.#raise("usage");
   }
 
+  // B19 (ADR-0040): a board decision went overdue, and the principal hears of it once — one push of the decision kind,
+  // counts only like every other (N1: the payload's schema is strict and refuses text). The line naming the task goes
+  // to the manager's lane, which has the whole list hourly; the push says only that a decision waits.
+  boardOverdue() {
+    this.#sending = this.#sending.then(() => this.#boardNotice()).catch((e: unknown) => log.error("sending notifications failed", e));
+  }
+  async #boardNotice(): Promise<void> {
+    const now = this.#now();
+    if (anyAttending(this.#reports.values(), now)) return;      // N3: he is looking at it
+    const counts: Counts = { decisions: 1, workers: 0, linked: 0, alerts: 0, usage: 0 };
+    const sent = await this.#toAll("decision", Buffer.from(JSON.stringify(payloadOf("decision", counts))), OPTIONS.decision);
+    if (sent) this.#store.record([{ type: "NotificationSent", kind: "decision", counts, devices: sent, at: this.#now() }]);
+  }
+
   // What each device's app says about the principal using it (N3); a connection that closes says nothing any more.
   attending(connection: string, attending: boolean) { this.#reports.set(connection, { attending, at: this.#now() }); }
   left(connection: string) { this.#reports.delete(connection); }
@@ -181,24 +196,30 @@ export class NotificationService {
       if (p.kind === "linked") this.#linked = 0;
       if (p.kind === "usage") this.#usageNotices = 0;
       if (relevant === 0) continue;                                  // answered meanwhile: nothing to say
-      const payload = Buffer.from(JSON.stringify(payloadOf(p.kind, counts)));
-      let sent = 0;
-      for (const s of this.#store.pushSubscriptions()) {
-        const r = await this.#send(s, payload, OPTIONS[p.kind]).catch((): PushResult => ({ status: 0 }));
-        const at = this.#now();
-        if (delivered(r.status)) sent++;
-        else if (r.status === 404 || r.status === 410 || r.status === UNUSABLE_KEY) {   // gone, or never usable (N4)
-          if (this.#store.deletePushSubscription(s.endpointId)) this.#store.record([{ type: "PushUnsubscribed", endpointId: s.endpointId, reason: r.status === UNUSABLE_KEY ? "invalid" : "gone", at }]);
-        } else {
-          // Kept and said: the status and the service's reason code tell what to fix (a 403 is our token, not his
-          // device). Whatever the sender returned, only a code gets this far (N1).
-          const reason = reasonCode(r.reason);
-          this.#store.record([reason === undefined ? { type: "NotificationFailed", kind: p.kind, status: r.status, at } : { type: "NotificationFailed", kind: p.kind, status: r.status, reason, at }]);
-          log.warn(r.status === 0 ? `a push service couldn't be reached for a ${p.kind} notification`
-            : `a push service refused a ${p.kind} notification: ${r.status}${reason === undefined ? "" : ` ${reason}`}`);
-        }
-      }
+      const sent = await this.#toAll(p.kind, Buffer.from(JSON.stringify(payloadOf(p.kind, counts))), OPTIONS[p.kind]);
       if (sent) this.#store.record([{ type: "NotificationSent", kind: p.kind, counts, devices: sent, at: this.#now() }]);
     }
+  }
+
+  // One payload to every subscription: how many it reached. A subscription the service dropped (404, 410, an unusable
+  // key) is deleted with its record (N4); any other failure is kept and said, and whatever the sender returned, only a
+  // code gets this far (N1).
+  async #toAll(kind: NotificationKind, payload: Buffer, options: PushOptions): Promise<number> {
+    let sent = 0;
+    for (const s of this.#store.pushSubscriptions()) {
+      const r = await this.#send(s, payload, options).catch((): PushResult => ({ status: 0 }));
+      const at = this.#now();
+      if (delivered(r.status)) sent++;
+      else if (r.status === 404 || r.status === 410 || r.status === UNUSABLE_KEY) {   // gone, or never usable (N4)
+        if (this.#store.deletePushSubscription(s.endpointId)) this.#store.record([{ type: "PushUnsubscribed", endpointId: s.endpointId, reason: r.status === UNUSABLE_KEY ? "invalid" : "gone", at }]);
+      } else {
+        // Kept and said: the status and the service's reason code tell what to fix (a 403 is our token, not his device).
+        const reason = reasonCode(r.reason);
+        this.#store.record([reason === undefined ? { type: "NotificationFailed", kind, status: r.status, at } : { type: "NotificationFailed", kind, status: r.status, reason, at }]);
+        log.warn(r.status === 0 ? `a push service couldn't be reached for a ${kind} notification`
+          : `a push service refused a ${kind} notification: ${r.status}${reason === undefined ? "" : ` ${reason}`}`);
+      }
+    }
+    return sent;
   }
 }
