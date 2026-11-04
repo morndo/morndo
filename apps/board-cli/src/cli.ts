@@ -295,7 +295,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const lanes = new Set(d.lanes as string[]);
         // B11: each task's merges by key, so a row can say where its merge stands (the hub's label, its own brackets).
         const mergedBy = new Map((Array.isArray(d.merged) ? d.merged as MergedView[] : []).map(m => [m.key, m]));
-        // B23: the pull requests that merged without a merge record, by key, as the hub's last pass flagged them.
+        // B23: the pull requests that merged without a merge record, by key, as the hub flags them now (live).
         const prMerged = new Map(((d.mergedPrs as { key: string; prs: string[] }[] | undefined) ?? []).map(f => [f.key, f.prs.join(" · ")]));
         if (d.standIn === true) io.out("(proof references are read from a stand-in forge, not GitHub)");
         for (const s of LIST_ORDER) {
@@ -511,12 +511,12 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       }
       case "merged": {
         // B23 (ADR-0042): with no task named, the open tasks whose pull request merged without a merge record, as the
-        // hub's last pass flagged them. The board moves nothing and records nothing there; it lists.
+        // hub flags them now (live). The board moves nothing and records nothing there; it lists.
         if (rest.length === 0) {
           const d = await call("GET", "/api/agent/board");
           const flagged = (d.mergedPrs as { key: string; prs: string[] }[] | undefined) ?? [];
+          if (flags.json === true) { io.out(JSON.stringify(flagged)); return 0; }   // [] when nothing is flagged; the sentence is the plain form's
           if (flagged.length === 0) { io.out("no merged pull requests without a merge record"); return 0; }
-          if (flags.json === true) { io.out(JSON.stringify(flagged)); return 0; }
           const statusOf = new Map((d.tasks as Task[]).map(t => [t.key as string, t.status]));
           for (const f of flagged) {
             const status = statusOf.get(f.key);
