@@ -44,7 +44,8 @@ what is waiting. The principal reads it instead of asking you, so keep it true a
   needs quotes in a shell: '#93'). The board reads them itself and moves
   the task back to to do when all are over (\`board (D7)\`). A block of words only that sat two days is flagged in the
   list: check it, or name its waits. From 2026-11-12 a block that names no wait and asks no decision is refused
-  (\`no_wait\`): name what it waits on, or ask with --decision.
+  (\`no_wait\`): name what it waits on with \`--on\`, or ask with \`--decision\`; a lane's \`STATUS: BLOCKED\` line may end
+  \`next: <who> by <when>\` and the board's own block waits for that.
 - Proposals (tasks in the backlog nobody is assigned to) come from lanes. Triage them: assign, or comment why not.
 - Your own work is a task too, assigned to you (\`--assign manager\`); start it before you do it.
 - Talk through comments on the task (\`morndo-board comment T-12 "…"\`), short, one fact per line, so the record
@@ -61,8 +62,6 @@ your turns. The principal reads the board instead of asking you.
   \`STATUS: DONE T-12\`, \`STATUS: BLOCKED T-12 <what you need, from whom>\`, \`STATUS: NEEDS DECISION T-12 <which>\` or
   \`STATUS: WAITING T-12 <on what> for <N> min\`. The board reads it and moves only the task you name; a line without a
   key falls back to your task in progress. A question or a thank-you does not take a task out of review or blocked.
-  A BLOCKED or NEEDS DECISION line ends with \`next: <owner|manager|lane|T-n> by <when>\` — who owes the next move and
-  by when; the board waits for that.
 - The board moves your task as you work: into progress when your turn starts, to review when it ends DONE, to blocked
   when it ends BLOCKED or NEEDS DECISION, with your status line as the reason. So \`morndo-board start T-12\`,
   \`morndo-board review T-12 --note "…"\` and \`morndo-board block T-12 --why "…"\` are no longer needed; they still work.
@@ -72,8 +71,9 @@ your turns. The principal reads the board instead of asking you.
 - Work on one task at a time; the board refuses a second in progress. When a block clears: \`morndo-board resume T-12\`.
   If you block on something the board can see, name it: \`morndo-board block T-12 --why "…" --on morndo/morndo#93\` (also a task,
   a card ny-530 or until:<time>, at most 31 days ahead); the board moves the task back to to do when it is over. A
-  block that names no wait and asks no decision is refused: end the line with \`next: <who> by <when>\` and the board
-  waits for that.
+  \`morndo-board block\` names its wait with \`--on\` — a task, a pull request, a card or until:<time>, at most 31 days
+  ahead — or asks the manager with \`--decision\`, or it is refused from 2026-11-12. A \`STATUS: BLOCKED\` status line
+  may end \`next: <who> by <when>\` and the board's own block then waits for that.
 - Work only on tasks assigned to you. If you find work that isn't on the board, file it as a proposal:
   \`morndo-board new "<what>" --desc "<why>"\`. It lands in the backlog for the manager; don't start it yourself.
 - Say DONE only when the task is finished and you have checked it, and say what you ran. You can't mark a task done;
