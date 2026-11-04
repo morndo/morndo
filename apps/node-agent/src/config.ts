@@ -10,7 +10,8 @@
 // An op can't add a word to the command (spec §11): only `{account}` and `--resume <session>`, both of fixed formats.
 // Reliable lanes (design §3.1, §3.3):
 // - `statusContract`: whether the relay asks a lane, once per turn, for the status line its answer lacks; never the lanes in
-//   `exempt` (the orchestrator).
+//   `exempt` (the orchestrator). `next` (B22): whether it also asks a BLOCKED or NEEDS DECISION answer with no `next:`
+//   for one; absent: ask.
 // - `engines`: the engine layer's CLI on this node (`cli`), a launch command per provider (`launch`, with `{model}`,
 //   `{effort}`, `{account}` and `{lane}` filled from the pick and the op), and the Role a new lane runs on when its start
 //   names neither a role nor an engine (`defaultRole`). Without `engines`, lane.start refuses a role or an engine.
@@ -27,7 +28,8 @@ import { MAX_TIMER_MS } from "./ops/job-limits.ts";
 import { agentPaths } from "./paths.ts";
 
 export type Launch = { command: string[]; via: "shell" | "direct" };
-export type StatusContract = { mode: "ask" | "off"; exempt: string[] };
+// `next` (B22): whether the relay also asks a BLOCKED or NEEDS DECISION line with no `next:` for one; absent: ask.
+export type StatusContract = { mode: "ask" | "off"; exempt: string[]; next?: "ask" | "off" };
 export type EnginesPolicy = { cli?: string; launch: Record<string, Launch>; defaultRole?: string };
 export type JobClassPolicy = { limit: number; timeoutSec?: number };
 export type JobGuardPolicy = { load1?: number; memAvailableMiB?: number };
@@ -123,17 +125,19 @@ function parseLaunch(v: unknown, where: string, name = "launch"): Launch {
 }
 
 function parseStatusContract(v: unknown, where: string): StatusContract {
-  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: statusContract must be an object { mode, exempt }`);
+  if (v === null || typeof v !== "object" || Array.isArray(v)) throw new ConfigError(`${where}: statusContract must be an object { mode, exempt, next }`);
   const o = v as Obj;
-  const unknown = Object.keys(o).filter(k => k !== "mode" && k !== "exempt");
-  if (unknown.length) throw new ConfigError(`${where}: statusContract has an unknown field ${unknown.join(", ")} (known: mode, exempt)`);
+  const unknown = Object.keys(o).filter(k => k !== "mode" && k !== "exempt" && k !== "next");
+  if (unknown.length) throw new ConfigError(`${where}: statusContract has an unknown field ${unknown.join(", ")} (known: mode, exempt, next)`);
   const mode = o.mode ?? DEFAULT_POLICY.statusContract.mode;
   if (mode !== "ask" && mode !== "off") throw new ConfigError(`${where}: statusContract.mode must be "ask" or "off"`);
   const exempt = o.exempt ?? DEFAULT_POLICY.statusContract.exempt;
   if (!Array.isArray(exempt) || !exempt.every(n => typeof n === "string" && LANE_NAME.test(n))) {
     throw new ConfigError(`${where}: statusContract.exempt must be a list of lane names`);
   }
-  return { mode, exempt: [...new Set(exempt as string[])] };
+  const next = o.next;
+  if (next !== undefined && next !== "ask" && next !== "off") throw new ConfigError(`${where}: statusContract.next must be "ask" or "off"`);
+  return { mode, exempt: [...new Set(exempt as string[])], ...(next !== undefined ? { next } : {}) };
 }
 
 const STASH_AFTER_MAX = 1440;

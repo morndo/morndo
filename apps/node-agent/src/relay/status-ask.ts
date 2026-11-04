@@ -25,11 +25,24 @@
 // end, and the Stop Claude Code sends after it (stop_hook_active) is the one that counts. So a turn is asked at most once,
 // whichever question it gets. A Stop hook's "block" "prevents Claude from stopping", with `reason` telling it why; Claude
 // Code overrides the ninth block in a row (same page, Stop decision control, read 2026-10-20).
+//
+// B22 (T-805, ADR-0041): a line that ends BLOCKED or NEEDS DECISION with no `next:` is asked for one, third in the same
+// order — STATUS_ASK first, the waker ask second, this one only for a block or a decision — under the rules every ask
+// already has (mode, an exempt window never, Stop, not stop_hook_active, nothing running or scheduled, an answer to
+// read). The contract can turn it off (`statusContract.next: "off"`, absent: ask). A WAITING line is never asked for a
+// next: its wait has a lease and a waker (W1), and it makes no block. Whether the node can count the lane's jobs says
+// nothing here: a block waits on no job of its own.
 import { firstLineOf, statusLineOf } from "@morndo/protocol";
 import type { StatusContract } from "../config.ts";
 
 export const STATUS_ASK = "Start a short answer with one line saying where this lane stands, then stop: STATUS: DONE, "
   + "STATUS: BLOCKED, STATUS: NEEDS DECISION, or STATUS: WAITING <on what> for <N> min. Don't redo the work.";
+
+// B22: the ask for a next (T-805, ADR-0041): a lane that ends its turn BLOCKED or NEEDS DECISION with no `next:` is
+// asked to name who owes the next move and by when, in the two spellings the board reads. Its examples must themselves
+// parse (a test holds that): the date and the `in <N> h` forms of lane-status.ts.
+export const NEXT_ASK = "End your status line with: next: <owner|manager|lane|T-n> by <when>, e.g. next: manager by "
+  + "2026-11-05 or next: owner by in 2 h. Then end the turn with your status line again.";
 
 // How many jobs of a lane are queued, starting or running on this node, or null when the node can't tell.
 export type JobsOf = (lane: string) => number | null;
@@ -59,6 +72,10 @@ export function statusAsk(body: unknown, window: string | null, contract: Status
   if (typeof b.last_assistant_message !== "string") return null;
   const line = statusLineOf(firstLineOf(b.last_assistant_message));
   if (line === null) return STATUS_ASK;
+  // B22: a block or a decision that names no next is asked for one, under the rules every ask already has; a job of
+  // the lane says nothing here (a block waits on no job of its own), whatever `jobsOf` counts. A WAITING line is never
+  // asked for a next: its wait has a lease and a waker (W1), and it makes no block.
+  if ((line.status === "blocked" || line.status === "needs_decision") && line.next === undefined && contract.next !== "off") return NEXT_ASK;
   if (line.status !== "waiting" || jobsOf === undefined) return null;
   if (!none(b.background_tasks) || !none(b.session_crons)) return null;
   return jobsOf(window) === 0 ? wakerAsk(window, line.waitingOn) : null;
