@@ -46,6 +46,8 @@ export const validResult = (op: string, node: string): unknown => {
     "job.cancel": { ok: true }, "job.notice": { ok: true }, "job.noticeResult": { ok: true },
     "connections.priority": { ok: true }, "connections.role": { ok: true }, "connections.revoke": { ok: true }, "connections.narrow": { ok: true },
     "update.apply": { accepted: true },
+    "signin.accounts": { accounts: [] }, "signin.start": { link: "https://claude.com/cai/oauth/authorize?x=1", userCode: null, needsCode: false, recipient: null, expiresAt: 0 },
+    "signin.code": { accepted: true }, "signin.status": { phase: "waiting", identity: null, problem: null }, "signin.cancel": { cancelled: true },
   };
   return Object.hasOwn(results, op) ? results[op as keyof OpResult] : {};
 };

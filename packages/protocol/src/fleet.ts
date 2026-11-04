@@ -12,6 +12,10 @@ import * as z from "./z.ts";
 import { NarrowCommand, PriorityCommand, RevokeCommand, RoleCommand } from "./connections.ts";
 import { SEMVER } from "./releases.ts";
 import { NODE_NAME, WORKER_ID } from "./worker-id.ts";
+import {
+  SignInAccountsArgs, SignInAccountsResult, SignInCancelResult, SignInCodeArgs, SignInCodeResult, SignInIdArgs, SignInStartArgs,
+  SignInStartResult, SignInStatusResult,
+} from "./signin.ts";
 import type { TurnStatus } from "./lane-status.ts";
 
 export const FLEET_PROTO = 1;            // the agent channel; accepted: [FLEET_PROTO - 1, FLEET_PROTO] ∩ ≥ 1
@@ -138,7 +142,8 @@ export type OpName = "inventory.get" | "pane.captureMany" | "pane.frame" | "pane
   | "transcript.size" | "transcript.read" | "transcript.locate" | "file.stat" | "file.get" | "file.put"
   | "lane.start" | "lane.stop" | "worktree.list" | "worktree.add" | "pane.capture" | "lane.deliver" | "delivery.cancel" | "memory.sync"
   | "job.cancel" | "job.notice" | "job.noticeResult"
-  | "connections.priority" | "connections.role" | "connections.revoke" | "connections.narrow" | "update.apply";
+  | "connections.priority" | "connections.role" | "connections.revoke" | "connections.narrow" | "update.apply"
+  | "signin.accounts" | "signin.start" | "signin.code" | "signin.status" | "signin.cancel";
 // What a lane runs on, as lane.start answers it (reliable lanes §3.3): the engine layer's entry (provider:model[@effort]),
 // the Role it was picked for, and the entries the resolver passed over first, each with its reason (none: the first choice).
 export type LaneEngine = { entry: string; role?: string; skipped?: { entry: string; reason: string }[] };
@@ -183,6 +188,12 @@ export type OpArgs = {
   // `attempt`: the fleet's own id for this ask, which it sets (a caller's is replaced): the id the node's updater
   // reports a rollback of it under (review of #107, round 4).
   "update.apply": { version: string; attempt?: string };
+  // Sign-in from the app (ADR-0039; protocol signin.ts): the CLI's own sign-in for one account, run by the node.
+  "signin.accounts": z.output<typeof SignInAccountsArgs>;
+  "signin.start": z.output<typeof SignInStartArgs>;
+  "signin.code": z.output<typeof SignInCodeArgs>;
+  "signin.status": z.output<typeof SignInIdArgs>;
+  "signin.cancel": z.output<typeof SignInIdArgs>;
 };
 export type OpResult = {
   "inventory.get": { panes: Pane[]; invVersion: number };
@@ -217,6 +228,11 @@ export type OpResult = {
   // The node took the ask: it queued or started the move to the Version (updates §5.4). What became of it arrives with
   // the next health (state rolled_back, applying, …), never in this answer.
   "update.apply": { accepted: true };
+  "signin.accounts": z.output<typeof SignInAccountsResult>;
+  "signin.start": z.output<typeof SignInStartResult>;
+  "signin.code": z.output<typeof SignInCodeResult>;
+  "signin.status": z.output<typeof SignInStatusResult>;
+  "signin.cancel": z.output<typeof SignInCancelResult>;
 };
 // Ops with a side effect, which carry a caller's idempotency key (§5.3). Keystrokes carry none: they are never retried.
 // Nor do lane.deliver and delivery.cancel: a delivery's id is its idempotency (fleet clients §4.1), and its typing runs
@@ -224,10 +240,16 @@ export type OpResult = {
 export const KEYED_OPS: ReadonlySet<OpName> = new Set<OpName>([
   "pane.send", "file.put", "lane.start", "lane.stop", "worktree.add", "job.notice", "memory.sync",
   "connections.priority", "connections.role", "connections.revoke", "connections.narrow", "update.apply",
+  // signin.start's key is its id, so a retried start finds the sign-in it began. signin.code is not keyed: FL7's record
+  // must never hold its ciphertext (ADR-0039).
+  "signin.start",
 ]);
 // A fresh passkey. Narrowing (off, a lower budget, a deny) is not in this set. update.apply moves a whole node to
 // another Version, so it takes one too (updates §5.4).
-export const STEP_UP_OPS: ReadonlySet<OpName> = new Set<OpName>(["connections.priority", "connections.role", "connections.revoke", "update.apply"]);
+// Starting a sign-in and sending its code take one too (ADR-0039 SI7; the hub checks a passkey from the last 5 minutes).
+export const STEP_UP_OPS: ReadonlySet<OpName> = new Set<OpName>([
+  "connections.priority", "connections.role", "connections.revoke", "update.apply", "signin.start", "signin.code",
+]);
 
 // A node's updater as its health reports it (updates §6.3, §7): the state of the domain's own state machine (§5.4),
 // the Version it reports from, and — for the states that have one — the Version it was moving to, why it left it and
@@ -420,6 +442,7 @@ export const OP_NAMES = [
   "lane.start", "lane.stop", "worktree.list", "worktree.add", "pane.capture", "lane.deliver", "delivery.cancel", "memory.sync",
   "job.cancel", "job.notice", "job.noticeResult",
   "connections.priority", "connections.role", "connections.revoke", "connections.narrow", "update.apply",
+  "signin.accounts", "signin.start", "signin.code", "signin.status", "signin.cancel",
 ] as const satisfies readonly OpName[];
 
 // Each op's arguments, as the agent accepts them (fleet → agent: strict).
@@ -479,6 +502,11 @@ export const OP_ARGS = {
   "connections.revoke": RevokeCommand,
   "connections.narrow": NarrowCommand,
   "update.apply": z.object({ version: releaseVersion(), attempt: z.exactOptional(attemptId()) }),
+  "signin.accounts": SignInAccountsArgs,
+  "signin.start": SignInStartArgs,
+  "signin.code": SignInCodeArgs,
+  "signin.status": SignInIdArgs,
+  "signin.cancel": SignInIdArgs,
 } satisfies Record<OpName, z.ZodMiniType>;
 
 const PaneSchema = z.object({
@@ -539,6 +567,11 @@ export const OP_RESULTS = {
   "connections.revoke": z.object({ ok: z.literal(true) }),
   "connections.narrow": z.object({ ok: z.literal(true) }),
   "update.apply": z.object({ accepted: z.literal(true) }),
+  "signin.accounts": SignInAccountsResult,
+  "signin.start": SignInStartResult,
+  "signin.code": SignInCodeResult,
+  "signin.status": SignInStatusResult,
+  "signin.cancel": SignInCancelResult,
 } satisfies Record<OpName, z.ZodMiniType>;
 
 const ERROR_CODES = Object.keys(ERROR_EXECUTED) as ErrorCode[];

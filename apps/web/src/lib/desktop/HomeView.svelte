@@ -161,6 +161,9 @@
                   <span class="seatby">set by {a.seat.by} · {a.seat.owner === "pool" ? "the pool" : "a lane's failure"}</span>
                 </span>
                 <button type="button" class="clearseat" aria-label="Clear this mark for {a.account}" onclick={() => clearMark(a.account)}>Clear this mark</button>
+                {#if a.seat.state === "logged-out"}
+                  <a class="signin-link" href="/settings/accounts">Sign in</a>
+                {/if}
               {/if}
               {#if a.reportedAt > 0}<span class="when">reported {ago(a.reportedAt, now)}</span>{/if}
             </header>
@@ -267,10 +270,12 @@
   .empty code { font: 400 13px/18px var(--mono); background: var(--code-bg); padding: 0 4px; border-radius: 4px; color: var(--text); }
   .cards { margin-top: 16px; display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
   .card { display: grid; gap: 12px; padding: 14px 16px 16px; border-radius: 10px; border: 1px solid var(--border); background: var(--main-bg); }
-  .card header { display: flex; align-items: center; gap: 10px; }
+  /* One row while it fits; with a seat mark the mark and its Clear button move to the next line rather than squeeze the
+     name (it was crushed to one letter per line). */
+  .card header { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
   .card h3 { margin: 0; font: 900 16px/22px var(--font); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* The name, then the email, organization and plan after it, one line of text that wraps (on a phone) and never cuts the name. */
-  .who { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  .who { flex: 1 1 10em; min-width: 10em; overflow-wrap: anywhere; }
   .card .who h3 { display: inline; white-space: normal; }
   .ident { font: 400 13px/18px var(--font); color: var(--muted); }
   .when { margin-left: auto; font: 400 12px/16px var(--font); color: var(--muted); white-space: nowrap; }
@@ -311,11 +316,12 @@
   .notices .when { color: var(--muted); font: 400 12px/16px var(--font); white-space: nowrap; }
   .notices .text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
   /* The seat badge, in the card header: words, an icon and who set it — never colour alone. */
-  .seat { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--code-bg); font: 400 12px/16px var(--font); }
+  .seat { max-width: 100%; display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 2px 8px; border-radius: 6px; border: 1px solid var(--border); background: var(--code-bg); font: 400 12px/16px var(--font); }
   .seat :global(svg) { flex: none; color: var(--warn-fg); }
   .seatfix { color: var(--text); font-weight: 700; }
   .seatby { color: var(--muted); overflow-wrap: anywhere; }
   .clearseat { border: 1px solid var(--border); border-radius: 6px; background: var(--main-bg); color: var(--text); font: 400 12px/16px var(--font); padding: 4px 8px; cursor: pointer; }
+  .signin-link { font: 700 12px/16px var(--font); color: var(--link); text-decoration: underline; white-space: nowrap; }
   .clearseat:hover { background: var(--hover); }
   /* A state the meters cannot show: unreadable or never read, in words with an icon (role=status). */
   .unreadable { display: grid; gap: 4px; padding: 10px 12px; border-radius: 8px; background: var(--warn-bg); color: var(--warn-fg); }

@@ -49,6 +49,7 @@ export function redactFeed(frame: unknown): unknown {
 // JSON body still blanks key material.
 export function redactResponse(path: string, body: unknown): unknown {
   if (path === "/api/identity" || path === "/api/identity/prove" || path === "/api/push/key"
-    || path.startsWith("/api/pair/") || path.startsWith("/api/login/") || path.startsWith("/api/stepup/")) return body;
+    || path.startsWith("/api/pair/") || path.startsWith("/api/login/") || path.startsWith("/api/stepup/")
+    || path.startsWith("/api/signins")) return body;
   return redactFeed(body);
 }

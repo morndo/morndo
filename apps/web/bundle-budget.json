@@ -1,6 +1,6 @@
 {
-  "entryGzipBytes": 35904,
-  "allJsGzipBytes": 374417,
-  "recorded": "2026-10-13",
-  "why": "decision briefs on desktop and phone, +52.8 KB"
+  "entryGzipBytes": 37662,
+  "allJsGzipBytes": 456206,
+  "recorded": "2026-11-02",
+  "why": "sign-in from the app (ADR-0039): age-encryption seals the one-time code in the browser (a lazy chunk, ~47 KB gzipped, loaded only to send a code) plus the sheet and Accounts list (~4 KB); main was 394.4 KB"
 }

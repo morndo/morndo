@@ -9,6 +9,7 @@
 import * as z from "./z.ts";
 import { SEMVER } from "./releases.ts";
 import { NODE_NAME } from "./worker-id.ts";
+import { SIGNIN_ID } from "./signin.ts";
 
 // The header the assertion travels in, and the prefix the signature is computed over — the prefix so a signed
 // assertion can never double as a signed document of another format.
@@ -20,19 +21,24 @@ export const PRINCIPAL_MAX_AHEAD_MS = 60_000;
 // 16 random bytes as base64url (22 characters, unpadded): the one-use word that makes a replayed proof worthless.
 export const PRINCIPAL_NONCE = /^[A-Za-z0-9_-]{22}$/;
 
-export type PrincipalOp = "rollout.resume" | "update.apply";
+export type PrincipalOp = "rollout.resume" | "update.apply" | "signin.start" | "signin.code";
 // What the proof is for: exactly one request. `node` only with update.apply — a resume is the fleet's, not a
 // machine's, and a proof for one machine must not open another's door.
-export type PrincipalAsk = { op: PrincipalOp; version: string; node?: string };
+// A sign-in's proof (ADR-0039) names its node and its sign-in id instead of a Version.
+export type PrincipalAsk = { op: PrincipalOp; version?: string; signin?: string; node?: string };
 export type PrincipalAssertion = PrincipalAsk & { exp: number; nonce: string };
 
 export const PrincipalAssertionSchema = z.strictObject({
-  op: z.enum(["rollout.resume", "update.apply"]),
-  version: z.string().check(z.regex(SEMVER), z.refine(v => !v.includes("+"), "a Release's Version carries no build metadata")),
+  op: z.enum(["rollout.resume", "update.apply", "signin.start", "signin.code"]),
+  version: z.exactOptional(z.string().check(z.regex(SEMVER), z.refine(v => !v.includes("+"), "a Release's Version carries no build metadata"))),
+  signin: z.exactOptional(z.string().check(z.regex(SIGNIN_ID))),
   node: z.exactOptional(z.string().check(z.regex(NODE_NAME), z.refine(n => n !== "control-plane", "the control plane is the hub's own updater's, not a proof's"))),
   exp: z.int().check(z.gte(0)),
   nonce: z.string().check(z.regex(PRINCIPAL_NONCE)),
-}).check(z.refine(a => (a.op === "update.apply") === (a.node !== undefined), "update.apply names a node; a resume names none"));
+}).check(z.refine(a => a.op === "signin.start" || a.op === "signin.code"
+  ? a.node !== undefined && a.signin !== undefined && a.version === undefined
+  : a.version !== undefined && a.signin === undefined && (a.op === "update.apply") === (a.node !== undefined),
+  "update.apply names a Version and a node; a resume a Version and no node; a sign-in its node and id, no Version"));
 
 // ---- base64url (RFC 4648 §5), unpadded, over Uint8Array
 
@@ -78,7 +84,8 @@ const fromBase64url = (text: string): Uint8Array | null => {
 export function principalPayloadText(a: PrincipalAssertion): string {
   const fields: [string, string][] = [
     ["op", JSON.stringify(a.op)],
-    ["version", JSON.stringify(a.version)],
+    ...(a.version === undefined ? [] : [["version", JSON.stringify(a.version)]] as [string, string][]),
+    ...(a.signin === undefined ? [] : [["signin", JSON.stringify(a.signin)]] as [string, string][]),
     ...(a.node === undefined ? [] : [["node", JSON.stringify(a.node)]] as [string, string][]),
     ["exp", String(a.exp)],
     ["nonce", JSON.stringify(a.nonce)],
