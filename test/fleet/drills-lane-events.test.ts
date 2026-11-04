@@ -49,7 +49,8 @@ describe("lane events delivered to the manager", () => {
     const o = await office();
     for (const r of await Promise.all([
       stopped(o.agent, o.w1, "STATUS: DONE\nshipped the docs"),
-      stopped(o.agent, o.w2, "STATUS: BLOCKED\nneeds the staging key"),
+      // B22: a BLOCKED line with no next: is asked for one and is no turn end; this lane names who owes the next move.
+      stopped(o.agent, o.w2, "STATUS: BLOCKED next: owner by 2030-01-01\nneeds the staging key"),
       stopped(o.agent, o.pool, "STATUS: DONE\na pool probe"),
       stopped(o.agent, o.manager, "STATUS: DONE\nthe manager's own turn"),
     ])) expect(r.status).toBe(200);
