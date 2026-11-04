@@ -18,24 +18,30 @@ prose of the reason.
 
 ## Decision
 
-1. **A block gate (B21).** A move to blocked by a person or a lane — a restatement too — that names no wait and asks
-   no decision is refused (`no_wait`). The board's own moves are never gated (D2 blocks on the status line alone, D5:
-   the board grants nothing), and a decision never is (B19: it is the manager's to answer, with its own deadline and
-   inbox). The hub's setting is `MORNDO_BLOCK_GATE`: `off`, `warn` or `on`, any other value refused at start as
-   `MORNDO_PROOF_GATE`'s is; unset, the gate warns and refuses from 2026-11-12T00:00Z, the one week the manager
-   approved, read per change against the hub's clock so a hub that runs past the date refuses without a restart. In
-   `warn` the block is taken and the move event carries `unwatched: true`; the CLI prints a notice naming the date and
-   the waits it could name. The cap a time wait must fit drops from 90 days to 31.
+1. **A block gate (B21).** A move to blocked by a lane or the manager — a restatement too — that names no wait and
+   asks no decision is refused (`no_wait`). The board's own moves are never gated (D2 blocks on the status line alone,
+   D5: the board grants nothing), and neither is the owner's own block from the app's console: a person typing a
+   reason there has no wait field to fill, and a gate that refused it would lock the owner out of his own board. A
+   decision never is gated (B19: it is the manager's to answer, with its own deadline and inbox). The hub's setting is
+   `MORNDO_BLOCK_GATE`: `off`, `warn` or `on`, any other value refused at start as `MORNDO_PROOF_GATE`'s is; unset,
+   the gate warns and refuses from 2026-11-12T00:00Z, the one week the manager approved, read per change against the
+   hub's clock so a hub that runs past the date refuses without a restart. In `warn` the block is taken and the move
+   event carries `unwatched: true`; the CLI prints a notice naming the date and the waits it could name, and that the
+   hub's setting may say otherwise. The cap a time wait must fit drops from 90 days to 31.
 2. **`next:` on status lines (B22).** A status line may end with `next: <who> by <when>`: who owes the next move on
    the task — the owner, the manager, a lane, a task key — and by when, as a date (that day's 23:59 UTC), an instant
-   with Z or an offset, or `in <N> min|h` resolved against the run the line rode in on. The hub passes a next on only
-   while it is ahead and within the 31-day cap, and D2's block then carries it as the block's `until:` wait, so the
-   board itself ends the block — the same watch B18 gives a typed `--on`, without anyone typing it. A next already
-   past, or too far ahead, is dropped, never a refusal: a board block is never lost to the clock, and a wait that
-   slips into the past between the reading and the move is retried without it. The node's relay asks a BLOCKED or
-   NEEDS DECISION answer with no next for one (`NEXT_ASK`, third after the status ask and the waker ask; the
-   contract's `statusContract.next` turns it off), never a WAITING one: a wait has its lease and a waker (W1), and it
-   makes no block.
+   with Z or an offset, or `in <N> min|h` resolved against the run the line rode in on. What the lane puts around the
+   clause goes — a bracket, quote, backtick, bold or italic marker, a trailing full stop — and anything that does not
+   parse leaves the line as it was. The hub passes a next on only while it is ahead and within the 31-day cap, and a
+   BLOCKED outcome's D2 block then carries it as the block's `until:` wait, so the board itself ends the block — the
+   same watch B18 gives a typed `--on`, without anyone typing it. A NEEDS DECISION outcome's block carries no wait
+   whatever its next: the decision's own 24 h deadline and inbox are its watch, and a wait that ended first would move
+   the unanswered decision to do (D7), out of the manager's inbox. A next already past, or too far ahead, is dropped,
+   never a refusal: a board block is never lost to the clock, and a wait that slips into the past between the reading
+   and the move is retried without it. The node's relay asks a BLOCKED or NEEDS DECISION answer with no next for one
+   (`NEXT_ASK`, third after the status ask and the waker ask, saying the relay reads 200 characters; the contract's
+   `statusContract.next` turns it off), never a WAITING one: a wait has its lease and a waker (W1), and it makes no
+   block.
 
 ## Consequences
 
