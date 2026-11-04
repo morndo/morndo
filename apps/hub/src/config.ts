@@ -66,8 +66,10 @@ export type Config = {
   proofRepos?: string[];
   // MORNDO_BLOCK_GATE (B21, ADR-0041): the block gate's mode — off, warn or on. Always set by loadConfig, as a function
   // of the moment, so a hub that runs past the switch reads the mode it is in, not the one it started in: unset, it
-  // warns until 2026-11-12T00:00Z and refuses from then (the one week the manager approved); `from`, the instant the
-  // gate refuses from, is that date whatever the setting, because the moment a setting was given is not known.
+  // warns until 2026-11-12T00:00Z and refuses from then (the one week the manager approved). `from` is the instant
+  // that date rule switches to refusing, that date whatever the setting (the moment a setting was given is not
+  // known); the domain reads only the mode, and the CLI names the same default date and says the hub's setting may
+  // differ.
   blockGate?: (now: number) => { mode: "off" | "warn" | "on"; from: number };
   // MORNDO_GITHUB_TOKEN_FILE: an absolute path to a file holding a read-only forge token (adapters/token-file.ts reads
   // it at start; the token is never a setting). Optional: without it only public repositories answer, the
@@ -186,9 +188,9 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
 }
 
 // MORNDO_BLOCK_GATE (B21, ADR-0041): off, warn or on; unset or empty is the date rule. Unset, the gate warns for one
-// week from the rule's landing and refuses from 2026-11-12T00:00Z on — the mode is read per call against the clock the
-// caller holds, so a hub that runs past the date refuses without a restart. Anything else is refused in one sentence
-// that says the three, as MORNDO_PROOF_GATE's is.
+// week from the rule's landing and refuses from 2026-11-12T00:00Z on — the mode is read per call against the clock
+// the caller holds (the board service's own), so a hub that runs past the date refuses without a restart. Anything
+// else is refused in one sentence that says the three, as MORNDO_PROOF_GATE's is.
 export const BLOCK_GATE_FROM = Date.parse("2026-11-12T00:00:00Z");
 function blockGateOf(env: NodeJS.ProcessEnv): NonNullable<Config["blockGate"]> {
   const v = env.MORNDO_BLOCK_GATE;

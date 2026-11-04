@@ -58,8 +58,10 @@ export class BoardService {
   #cards: boolean;
   #waits: { readings(key: string, rev?: number): JudgedWait[] | null } | null = null;
   // B21 (ADR-0041): the block gate, read per change with the service's own clock, so the mode it answers is the mode
-  // of that moment; absent, no gate, a board without the hub's setting blocks as it always did.
-  #blockGate: (() => { mode: "off" | "warn" | "on"; from: number }) | null;
+  // of that moment and an injected clock decides it in tests. `from` is the instant the hub's date rule switches to
+  // refusing; the domain reads only the mode, and the CLI names the same default date and says the hub's setting may
+  // differ. Absent, no gate: a board without the hub's setting blocks as it always did.
+  #blockGate: ((now: number) => { mode: "off" | "warn" | "on"; from: number }) | null;
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
@@ -68,9 +70,9 @@ export class BoardService {
   // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
   // `repos` (B18): the repositories whose pull requests the hub reads (MORNDO_PROOF_REPOS); morndo/morndo when absent.
   // `cards`: whether the hub reads the owner's list (MORNDO_LEDGER); without it a card wait is refused at the block.
-  // `blockGate` (B21, ADR-0041): the block gate, called per change with the clock above (main.ts wires the setting's
-  // reading of the moment); absent, the domain gates nothing.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean; repos?: () => readonly string[]; cards?: boolean; blockGate?: () => { mode: "off" | "warn" | "on"; from: number } }) {
+  // `blockGate` (B21, ADR-0041): the block gate, called per change with the service's own clock, so the setting's
+  // date rule decides on the moment of the move, not on the real time; absent, the domain gates nothing.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean; repos?: () => readonly string[]; cards?: boolean; blockGate?: (now: number) => { mode: "off" | "warn" | "on"; from: number } }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
@@ -198,7 +200,7 @@ export class BoardService {
         && this.#store.taskEvents(key).filter(e => e.change.kind === "proof_listed" && e.actor.kind === "worker").length >= PROOF_LIST_CHANGES_MAX)
         return { ok: false as const, error: { problem: "too_many" as const, detail: "proof list changes" } };
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
-        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}), repos: this.#repos(), cards: this.#cards, ...(this.#blockGate !== null ? { blockGate: this.#blockGate() } : {}) });
+        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}), repos: this.#repos(), cards: this.#cards, ...(this.#blockGate !== null ? { blockGate: this.#blockGate(this.#now()) } : {}) });
       if (!applied.ok) return applied;
       this.#write(applied.value.task, applied.value.event);
       return applied;
