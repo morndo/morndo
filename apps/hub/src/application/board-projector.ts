@@ -20,13 +20,13 @@
 // - The key a line names (B12): a status line may name its task key right after the word ("STATUS: DONE T-285"). A keyed
 //   line moves only that task and only if it is the lane's; a key naming a task that is not its open task moves nothing
 //   and leaves one comment in the history of the lane's own task in progress (else the named task's), once (the memo per run, the record for ever).
-import { derivedMove, isOrphan, keyMismatch, parseTaskKey, unregisteredMove, type NamedStatus, type Task, type TaskKey } from "@morndo/domain";
+import { BLOCK_UNTIL_MAX_MS, derivedMove, isOrphan, keyMismatch, parseTaskKey, unregisteredMove, type NamedStatus, type Task, type TaskKey } from "@morndo/domain";
 import { statusLineOf, type RunView } from "@morndo/protocol";
 import { log as hubLog, type Logger } from "../adapters/log.ts";
 import type { BoardService } from "./board-service.ts";
 import type { RunsSource } from "./ports.ts";
 
-export type ProjectorBoard = Pick<BoardService, "openTasksOf" | "tasksInProgress" | "follow" | "runsChanged" | "act" | "task">;
+export type ProjectorBoard = Pick<BoardService, "openTasksOf" | "tasksInProgress" | "follow" | "runsChanged" | "act" | "task" | "now">;
 
 // A list that failed is asked for again on the next run event, but not more often than this.
 export const RETRY_MS = 5000;
@@ -41,10 +41,18 @@ const MOVES_PER_RUN = 8;
 
 // B12: the task the run's status line names right after the word ("STATUS: DONE T-285"), as the domain's NamedStatus, or
 // null when the line names none. The protocol parses the line; the domain judges the move.
-const namedOf = (run: RunView): NamedStatus | null => {
+// B22: the line's `next:` — who owes the next move and by when — becomes an instant the domain can wait on: an
+// `in <N> …` resolves against the run the line rode in on (not the hub's clock, which may read the line much later),
+// and only a next still ahead and within the 31-day cap of a time wait is passed on. One already past, or too far
+// ahead, is dropped here: D2 then blocks without a wait, as it always did, rather than losing the block to the clock.
+// The next is read whatever the key the line names: a keyless line (one the relay asked for a next, and the prompt
+// allows) names no task, so it cannot ride NamedStatus — it reaches derivedMove as its own argument.
+const namedOf = (run: RunView, now: number): { named: NamedStatus | null; next: NamedStatus["next"] } => {
   const s = statusLineOf(run.line ?? "");
   const key = s?.taskKey !== undefined ? parseTaskKey(s.taskKey) : null;
-  return s !== null && key !== null ? { key, status: s.status } : null;
+  const n = s?.next === undefined ? undefined : { who: s.next.who, by: "at" in s.next.by ? s.next.by.at : run.since + s.next.by.inMs };
+  const next = n !== undefined && now < n.by && n.by <= now + BLOCK_UNTIL_MAX_MS ? n : undefined;
+  return { named: s !== null && key !== null ? { key, status: s.status, ...(next !== undefined ? { next } : {}) } : null, next };
 };
 
 export class BoardProjector {
@@ -145,14 +153,14 @@ export class BoardProjector {
     try {
       // B12: a keyed line naming a task that is not the lane's open task moves nothing; one comment in the history of its
       // own task in progress says so.
-      const named = namedOf(run);
+      const { named, next } = namedOf(run, this.#board.now());
       const note = keyMismatch(run, named, this.#board.openTasksOf(run.lane));
       if (note !== null) this.#note(note, run);
       for (let i = 0; i < MOVES_PER_RUN; i++) {
         const tasks = this.#board.openTasksOf(run.lane);
         let due: { task: Task; move: NonNullable<ReturnType<typeof derivedMove>>; memo: string } | null = null;
         for (const task of tasks) {
-          const move = derivedMove(task, run, tasks, named);
+          const move = derivedMove(task, run, tasks, named, next);
           if (!move) continue;
           const memo = `${task.key}@${task.rev} ${run.lane}@${run.since} ${move.rule}`;
           if (this.#refused.has(memo)) continue;

@@ -30,8 +30,9 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
                                         blocked, with the reason; each --on is one thing the board watches for you and,
                                         once all are over, moves the task back to do: T-11 (done), owner/repo#93 or '#93'
                                         (merged or closed; quote a bare #), ny-530 (the owner's card closed),
-                                        until:2026-10-28T09:00+01:00. --decision marks a block that asks the manager
-                                        which way to go: it is due an answer in 24 h and inbox lists it
+                                        until:2026-10-28T09:00+01:00 (a time wait is at most 31 days ahead; a block
+                                        without one, or --decision, is refused). --decision marks a block that asks the
+                                        manager which way to go: it is due an answer in 24 h and inbox lists it
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
   brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json
@@ -86,6 +87,8 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "bad_repo": return "that isn't a repo name (owner/name)";
     case "too_many": return detail?.includes("waits") ? `a block names ${detail}; the rest belongs in --why` : `a task holds at most 5 merge records; clear a wrong one first: unmerged T-12 <sha>${detail ? ` (${detail})` : ""}`;
     case "bad_wait": return `the board can't watch that wait${detail ? `: ${detail}` : ""}`;
+    // B21 (ADR-0041): a block that named nothing the board watches and asked no decision.
+    case "no_wait": return "a block names what it waits on: --on T-12, #93, owner/repo#93, ny-530 or until:<time> (at most 31 days ahead); or --decision to ask the manager";
     case "no_commit": return "the hub's checkout doesn't have that commit yet; ask the manager to record it, or update the checkout";
     case "no_merge": return "that merge isn't recorded on this task (see show)";
     case "bad_item": return `an item is <kind>[@owner/repo]: <text>, kind one of pr, ci, tests, manual, ui, data, infra${detail && !detail.startsWith("an item is") ? `: ${detail}` : ""}`;
@@ -95,6 +98,9 @@ function explain(error: string, other: string | undefined, from: string | undefi
 }
 
 const when = (t: number) => new Date(t).toISOString().slice(0, 16).replace("T", " ");
+// B21 (ADR-0041): the instant an unset MORNDO_BLOCK_GATE refuses from — the same date the hub's own setting reads
+// (apps/hub/src/config.ts BLOCK_GATE_FROM) — named in the notice after a warned block.
+const BLOCK_GATE_FROM = Date.parse("2026-11-12T00:00:00Z");
 // The board's own moves (ADR-0032) name their rule and the lane whose run they followed.
 // B18: a wait as the CLI writes it, the same spelling --on takes.
 const waitText = (w: Wait) => w.kind === "task" ? w.key : w.kind === "card" ? w.id : w.kind === "time" ? `until:${new Date(w.at).toISOString()}`
@@ -434,7 +440,13 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const named = argv.filter(a => a === "--on" || a.startsWith("--on=")).length;
         if (named !== on.length || on.some(v => v.trim() === ""))
           throw new Usage("--on needs a wait after it: T-12, '#93' (quote it: a shell takes an unquoted # for a comment), owner/repo#93, ny-530 or until:<time>");
-        await act(k, { action: "move", to: "blocked", reason: why, ...(on.length > 0 ? { waits: on } : {}), ...(flags.decision === true ? { decision: true } : {}) });
+        const d = await call("POST", `/api/agent/board/tasks/${k}`, { action: "move", to: "blocked", reason: why, ...(on.length > 0 ? { waits: on } : {}), ...(flags.decision === true ? { decision: true } : {}) });
+        showTask(d);
+        // B21 (ADR-0041): a block the hub took while warning says so, with what is coming: from when a block without
+        // a wait is refused, and the waits it could name instead — the hub's own setting may say another date or mode.
+        const change = (d.event as TaskEvent | undefined)?.change;
+        if (change !== undefined && change.kind === "moved" && change.unwatched === true)
+          io.out(`no watched wait: from ${new Date(BLOCK_GATE_FROM).toISOString().slice(0, 10)} a block without --on or --decision is refused; name one (--on T-12, #93, owner/repo#93, ny-530 or until:<time>, at most 31 days ahead) (unless the hub's MORNDO_BLOCK_GATE says otherwise)`);
         return 0;
       }
       case "review": {

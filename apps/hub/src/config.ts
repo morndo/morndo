@@ -64,6 +64,13 @@ export type Config = {
   // names; a repository not on the list is never asked, so a lane cannot aim the credential at work of its own choosing.
   proofGate?: ProofMode;
   proofRepos?: string[];
+  // MORNDO_BLOCK_GATE (B21, ADR-0041): the block gate's mode — off, warn or on. Always set by loadConfig, as a function
+  // of the moment, so a hub that runs past the switch reads the mode it is in, not the one it started in: unset, it
+  // warns until 2026-11-12T00:00Z and refuses from then (the one week the manager approved). `from` is the instant
+  // that date rule switches to refusing, that date whatever the setting (the moment a setting was given is not
+  // known); the domain reads only the mode, and the CLI names the same default date and says the hub's setting may
+  // differ.
+  blockGate?: (now: number) => { mode: "off" | "warn" | "on"; from: number };
   // MORNDO_GITHUB_TOKEN_FILE: an absolute path to a file holding a read-only forge token (adapters/token-file.ts reads
   // it at start; the token is never a setting). Optional: without it only public repositories answer, the
   // unauthenticated limit is 60 requests an hour, and a private repository's references read "not checked".
@@ -120,7 +127,11 @@ export function isPushContact(v: string): boolean {
 // open the hub's database without its other settings (`morndo lanes start --task`) find it here too.
 export const dataDirOf = (env: NodeJS.ProcessEnv = process.env): string => env.MORNDO_HOME ?? join(homedir(), ".local/share/morndo");
 
-export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
+// What loadConfig answers: the config, with the block gate there to call — loadConfig always sets it (a Config built by
+// hand, as the tests' hubs are, simply leaves it out and gates nothing).
+export type LoadedConfig = Config & { blockGate: (now: number) => { mode: "off" | "warn" | "on"; from: number } };
+
+export function loadConfig(env: NodeJS.ProcessEnv = process.env): LoadedConfig {
   const port = Number(env.MORNDO_PORT ?? 8790);
   const origin = (env.MORNDO_ORIGIN ?? `http://localhost:${port}`).replace(/\/+$/, "");
   const url = new URL(origin);
@@ -170,9 +181,25 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     usageReadingsGate: readingsGate(env.MORNDO_USAGE_READINGS_GATE),
     proofGate: proofGateOf(env),
     proofRepos: proofReposOf(env),
+    blockGate: blockGateOf(env),
     githubTokenFile: tokenFileOf(env),
     forgeUrl: forgeUrlChecked(env),
   };
+}
+
+// MORNDO_BLOCK_GATE (B21, ADR-0041): off, warn or on; unset or empty is the date rule. Unset, the gate warns for one
+// week from the rule's landing and refuses from 2026-11-12T00:00Z on — the mode is read per call against the clock
+// the caller holds (the board service's own), so a hub that runs past the date refuses without a restart. Anything
+// else is refused in one sentence that says the three, as MORNDO_PROOF_GATE's is.
+export const BLOCK_GATE_FROM = Date.parse("2026-11-12T00:00:00Z");
+function blockGateOf(env: NodeJS.ProcessEnv): NonNullable<Config["blockGate"]> {
+  const v = env.MORNDO_BLOCK_GATE;
+  if (v !== undefined && v !== "") {
+    if (v !== "off" && v !== "warn" && v !== "on")
+      throw new Error(`MORNDO_BLOCK_GATE must be off, warn or on: ${v}`);
+    return _now => ({ mode: v, from: BLOCK_GATE_FROM });
+  }
+  return now => ({ mode: now < BLOCK_GATE_FROM ? "warn" : "on", from: BLOCK_GATE_FROM });
 }
 
 // MORNDO_PROOF_GATE: off, warn (the default) or on — anything else is refused in one sentence that says the three.

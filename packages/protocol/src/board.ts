@@ -63,7 +63,9 @@ export const BoardTaskSchema = z.object({
 });
 export const TaskChangeSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("created"), status: z.enum(STATUSES), assignee: z.nullable(text()) }),
-  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()), proofSeen: z.exactOptional(text()), waits: z.exactOptional(z.array(WaitSchema)), decisionDue: z.exactOptional(count()) }),
+  // B21 (ADR-0041): a block taken in warn mode that named no wait; absent on every other move, so an older reader
+  // never sees it.
+  z.object({ kind: z.literal("moved"), from: z.enum(STATUSES), to: z.enum(STATUSES), reason: z.nullable(text()), notLive: z.exactOptional(text()), proofSeen: z.exactOptional(text()), waits: z.exactOptional(z.array(WaitSchema)), decisionDue: z.exactOptional(count()), unwatched: z.exactOptional(z.literal(true)) }),
   z.object({ kind: z.literal("assigned"), from: z.nullable(text()), to: z.nullable(text()) }),
   z.object({ kind: z.literal("edited"), title: z.exactOptional(text()), description: z.exactOptional(text()), priority: z.exactOptional(z.enum(PRIORITIES)) }),
   z.object({ kind: z.literal("commented"), text: text() }),

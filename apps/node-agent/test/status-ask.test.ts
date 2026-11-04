@@ -12,7 +12,7 @@ import { agentPaths } from "../src/paths.ts";
 import { RelayFiles } from "../src/relay/relay-files.ts";
 import { startRelay, type Relay } from "../src/relay/server.ts";
 import { Spool } from "../src/relay/spool.ts";
-import { STATUS_ASK, statusAsk, wakerAsk, type JobsOf } from "../src/relay/status-ask.ts";
+import { NEXT_ASK, STATUS_ASK, statusAsk, wakerAsk, type JobsOf } from "../src/relay/status-ask.ts";
 import { captureLog, tempHome } from "./helpers.ts";
 
 const ASK: StatusContract = { mode: "ask", exempt: ["manager"] };
@@ -91,10 +91,11 @@ describe("W1: which WAITING Stops are asked for a waker", () => {
     expect(statusAsk(waiting({ session_crons: "none" }), "builder", ASK, none)).toBeNull();
   });
 
-  it("never for a settled status; and the status ask is as it was, whatever the jobs (it keeps priority)", () => {
-    for (const line of ["STATUS: DONE\nMerged.", "STATUS: BLOCKED on the key", "STATUS: NEEDS DECISION: which base?"]) {
-      expect(statusAsk(stop({ last_assistant_message: line }), "builder", ASK, none)).toBeNull();
+  it("never for a DONE or a NEEDS DECISION; a BLOCKED with no next is asked for one (B22); and the status ask is as it was, whatever the jobs (it keeps priority)", () => {
+    for (const line of ["STATUS: DONE\nMerged.", "STATUS: NEEDS DECISION: which base?"]) {
+      expect(statusAsk(stop({ last_assistant_message: line }), "builder", ASK, none), line).toBeNull();
     }
+    expect(statusAsk(stop({ last_assistant_message: "STATUS: BLOCKED on the key" }), "builder", ASK, none)).toBe(NEXT_ASK);
     const { background_tasks: _b, ...noTasks } = stop();
     for (const jobsOf of [none, () => 1, () => null]) {
       expect(statusAsk(stop(), "builder", ASK, jobsOf)).toBe(STATUS_ASK);     // no status line at all: the status ask
@@ -136,7 +137,7 @@ describe("the relay asks over HTTP", () => {
     expect(spool.after(0, 10).map(e => e.body)).toEqual([{ ...stop(), statusAsked: true }]);
     const after = await post(stop({ stop_hook_active: true, last_assistant_message: "STATUS: DONE\nPushed." }));
     expect(await after.json()).toEqual({ ok: true, queued: true });
-    const plain = await post(stop({ last_assistant_message: "STATUS: BLOCKED on the key" }));
+    const plain = await post(stop({ last_assistant_message: "STATUS: BLOCKED on the key, next: owner by 2026-11-05" }));
     expect(await plain.json()).toEqual({ ok: true, queued: true });
     expect(spool.after(0, 10).map(e => (e.body as { statusAsked?: boolean }).statusAsked ?? false)).toEqual([true, false, false]);
   });
