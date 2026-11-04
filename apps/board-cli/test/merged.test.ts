@@ -50,6 +50,12 @@ describe("morndo-board merged (B23)", () => {
     expect(JSON.parse(r.out)).toEqual([{ key: "T-1", prs: ["acme/shop#42 merged 3e9d1a7"] }]);
   });
 
+  it("--json with nothing flagged prints an empty list, not the sentence", async () => {
+    const r = await say("merged", "--json");
+    expect(r.code).toBe(0);
+    expect(JSON.parse(r.out)).toEqual([]);
+  });
+
   it("changes nothing on the board: the task keeps its status and has no merge record", async () => {
     await file("Ship the totals row");
     flags = [{ key: "T-1" as MergedFlag["key"], status: "todo", prs: [{ repo: "acme/shop", n: 42, mergeSha: SHA }] }];

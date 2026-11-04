@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { DEFAULT_POLICY, type BoardActor, type PrFacts } from "@morndo/domain";
 import { Store } from "../src/adapters/store.ts";
 import { BoardService } from "../src/application/board-service.ts";
-import { MergeWatch } from "../src/application/merge-watch.ts";
+import { MergeWatch, mergedPass } from "../src/application/merge-watch.ts";
 import { ProofService } from "../src/application/proof-service.ts";
 import type { ForgeAnswer, ForgeChecks } from "../src/application/ports.ts";
 
@@ -107,6 +107,8 @@ describe("flags, as the last pass saw them", () => {
     await rig.watch.tick();
     expect(rig.watch.flags()).toHaveLength(1);
     expect(rig.board.act(key, { action: "merged", sha: SHA.slice(0, 7), repo: "Acme/Widgets" }, manager).ok).toBe(true);
+    expect(rig.watch.flags()).toEqual([]);                                      // at once, with no pass: the facts are the last pass's, the board is now
+    expect("mergedPrs" in rig.board.view()).toBe(false);
     await rig.watch.tick();
     expect(rig.watch.flags()).toEqual([]);
     expect("mergedPrs" in rig.board.view()).toBe(false);
@@ -119,8 +121,20 @@ describe("flags, as the last pass saw them", () => {
     rig.forge.set("acme/widgets", 42, "merged", SHA);
     await rig.watch.tick();
     expect(rig.board.act(key, { action: "move", to: "done", reason: "checked, shipped" }, manager).ok).toBe(true);
+    expect(rig.watch.flags()).toEqual([]);                                      // at once, with no pass
     expect(await rig.watch.tick()).toEqual({ read: 0, flagged: 0 });
     expect(rig.watch.flags()).toEqual([]);
+    rig.store.close();
+  });
+
+  it("shows the task's status as it is now, not as it was at the pass", async () => {
+    const rig = made();
+    const key = await inReview(rig, [W(42)]);
+    rig.forge.set("acme/widgets", 42, "merged", SHA);
+    await rig.watch.tick();
+    expect(rig.watch.flags().map(f => f.status)).toEqual(["review"]);
+    expect(rig.board.act(key, { action: "move", to: "doing" }, lane).ok).toBe(true);
+    expect(rig.watch.flags().map(f => f.status)).toEqual(["doing"]);
     rig.store.close();
   });
 
@@ -196,5 +210,24 @@ describe("what it asks of the forge", () => {
     expect((await rig.watch.tick()).read).toBe(1);
     expect(rig.forge.asks.at(-1)).toBe(`acme/widgets#${unread}`);              // the one never read, not a re-read of an open one
     rig.store.close();
+  });
+});
+
+describe("mergedPass: the sweep follows the watch's pass, never goes before it", () => {
+  it("runs the watch, then the sweep once the watch has finished, and returns both answers", async () => {
+    const order: string[] = [];
+    const watch = { tick: async () => { order.push("watch start"); await new Promise(r => setTimeout(r, 5)); order.push("watch end"); return { read: 1, flagged: 2 }; } };
+    const sweep = { tick: async () => { order.push("sweep"); return { sent: true, items: 2 }; } };
+    expect(await mergedPass(watch, sweep)).toEqual({ read: 1, flagged: 2, sent: true });
+    expect(order).toEqual(["watch start", "watch end", "sweep"]);
+  });
+  it("with no sweep (a hub with no fleet) only the watch runs", async () => {
+    expect(await mergedPass({ tick: async () => ({ read: 3, flagged: 0 }) }, null)).toEqual({ read: 3, flagged: 0, sent: false });
+  });
+  it("a watch pass that fails is not followed by a sweep, and the failure reaches the caller", async () => {
+    let swept = false;
+    const sweep = { tick: async () => { swept = true; return { sent: false, items: 0 }; } };
+    await expect(mergedPass({ tick: async () => { throw new Error("the forge is down"); } }, sweep)).rejects.toThrow("the forge is down");
+    expect(swept).toBe(false);
   });
 });

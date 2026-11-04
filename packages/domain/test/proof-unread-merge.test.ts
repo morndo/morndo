@@ -44,6 +44,14 @@ describe("a merge record in a repository the hub reads still needs a reference t
     expect(checkBrief(input({ refs: [PR_VAULT, PR_SHOP] }), ctx(read)).ok).toBe(true);
   });
 
+  it("with records in two repositories the hub reads, a reference in either one is enough (as it was), and none names the first", () => {
+    const two = { allowedRepos: ["acme/shop", "acme/vault", "acme/other"], merges: [{ repo: "acme/vault", sha: "1111111" }, { repo: "acme/shop", sha: "2222222" }] };
+    expect(checkBrief(input({ refs: [PR_SHOP] }), ctx(two)).ok).toBe(true);
+    expect(checkBrief(input({ refs: [PR_VAULT] }), ctx(two)).ok).toBe(true);
+    expect(refusal(checkBrief(input({ refs: [`acme/other#3@${SHA}`] }), ctx(two))))
+      .toEqual({ problem: "ref_unrelated", detail: "the task records a merge in acme/vault; a reference to that repository is needed" });
+  });
+
   it("with two records, one read and one not, asks for a reference in the read one only, and names it", () => {
     const both = { allowedRepos: ["acme/shop", "acme/vault"], merges: [{ repo: "acme/elsewhere", sha: "2222222" }, { repo: "acme/vault", sha: "1111111" }] };
     expect(refusal(checkBrief(input({ refs: [PR_SHOP] }), ctx(both))))
