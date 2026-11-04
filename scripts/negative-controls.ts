@@ -4289,7 +4289,7 @@ export const CONTROLS: Control[] = [
     find: `if (gateMode === "on") return refuse("no_wait");`, replace: ``,
     run: ["packages/domain/test/board-block-gate.test.ts", "apps/hub/test/board-block-gate.test.ts"], expect: "expected true to be false" },
   { id: "b22-d2-waits-for-the-next", task: "B22", file: "packages/domain/src/board.ts",
-    find: "...(keyed?.next !== undefined ? { waits: [`until:${new Date(keyed.next.by).toISOString()}`] } : {})",
+    find: "...(!deciding && keyed?.next !== undefined ? { waits: [`until:${new Date(keyed.next.by).toISOString()}`] } : {})",
     replace: "",
     run: ["packages/domain/test/board-block-gate.test.ts", "apps/hub/test/board-next-d2.test.ts"], expect: "to deeply equal" },
   { id: "b22-next-ask-only-without-one", task: "B22", file: "apps/node-agent/src/relay/status-ask.ts",
