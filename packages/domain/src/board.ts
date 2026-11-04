@@ -10,7 +10,9 @@
 // the board verifies itself, and Done waits for them or a recorded override (B13 to B16, ADR-0035). A block may name what
 // it waits on in a form the board checks itself, and when all of it is over the board moves the task to do (B18, D7,
 // ADR-0038; board-waits.ts). A block may be a decision, carrying a deadline 24 h on while it stays blocked, and what is
-// idle too long with nothing the board watches is listed (B19, B20, ADR-0040; board-stale.ts).
+// idle too long with nothing the board watches is listed (B19, B20, ADR-0040; board-stale.ts). A block of a person or
+// a lane that names no wait and asks no decision is warned, then refused (B21, ADR-0041), and a status line may name
+// who owes the next move and by when, which the board's own block waits for (B22).
 import type { Run } from "./run.ts";
 import { DECISION_DUE_MS } from "./board-stale.ts";
 import { parseWaits, type Wait } from "./board-waits.ts";
@@ -61,7 +63,7 @@ export type Task = {
 
 export type TaskChange =
   | { kind: "created"; status: TaskStatus; assignee: string | null }
-  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string; proofSeen?: string; waits?: Wait[]; decisionDue?: number }
+  | { kind: "moved"; from: TaskStatus; to: TaskStatus; reason: string | null; notLive?: string; proofSeen?: string; waits?: Wait[]; decisionDue?: number; unwatched?: true }
   | { kind: "assigned"; from: string | null; to: string | null }
   | { kind: "edited"; title?: string; description?: string; priority?: TaskPriority }
   | { kind: "commented"; text: string }
@@ -100,7 +102,8 @@ export type BoardProblem =
   | "bad_ref" | "ref_unrelated" | "ref_repo"  // a brief's reference isn't one, hangs off no pull request or merge of the task, or names a repository the board does not check (B14)
   | "empty" | "too_long" | "bad_name" | "bad_text"
   | "bad_item" | "no_item"
-  | "bad_wait";         // a block's wait the board could never check, or waits on a move that is no block (B18)
+  | "bad_wait"          // a block's wait the board could never check, or waits on a move that is no block (B18)
+  | "no_wait";          // a block of a person or a lane that names no wait and asks no decision, once the gate is on (B21)
 // `other`: the task in the way (one_doing); `from`: where the task is (bad_transition), so a refusal can say so;
 // `detail`: the not_live label, so a refusal can say what the board sees (B11).
 export type BoardRefusal = { problem: BoardProblem; other?: TaskKey; from?: TaskStatus; detail?: string };
@@ -237,7 +240,9 @@ export function mergedView(key: TaskKey, merges: readonly MergeRecord[], livenes
 // the hub read for its references, in a mode; absent: done is not held for proof either (the hub passes none yet).
 // `repos` (B18): the repositories whose pull requests the hub reads, for a block's waits; absent: morndo/morndo only.
 // `cards`: whether the hub reads the owner's list, for a card wait; absent: it does.
-export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate; repos?: readonly string[]; cards?: boolean };
+// `blockGate` (B21, ADR-0041): the gate a block of a person or a lane passes — `mode`, and `from`, the instant it
+// refuses from, shown in the warning. Absent: no gate, a board without the hub's setting blocks as it always did.
+export type DoneGate = { merges: readonly MergeRecord[]; liveness: (sha: string) => Liveness; proof?: ProofGate; repos?: readonly string[]; cards?: boolean; blockGate?: { mode: "off" | "warn" | "on"; from: number } };
 
 // `board`: the tasks in progress now, for B5 when a task is filed straight into progress.
 export function createTask(input: NewTask, actor: BoardActor | { kind: "console" }, n: number, now: number, board: readonly Task[] = []): Result<{ task: Task; event: TaskEvent }, BoardRefusal> {
@@ -355,13 +360,23 @@ export function applyAction(task: Task, action: TaskAction, actor: TaskActor, no
         else proofSeen = fit(seen.line, warnSuffix);
       }
       if (restated && reason === task.blockedReason && sameWaits(waits, task.waits ?? []) && deciding === (task.decisionDue !== undefined)) return refuse("same");
+      // B21 (ADR-0041): a block of a person or a lane names what it waits on, or asks a decision — a restatement too.
+      // The board's own moves never pass a gate (D2 blocks on the line alone), a decision is the manager's to answer
+      // (B19), and a block with a wait is watched. `on` refuses it; `warn` takes it and marks the event, so the mover
+      // is told what is coming; `off`, and no gate at all, change nothing.
+      let unwatched = false;
+      if (action.to === "blocked" && actor.kind !== "board" && waits.length === 0 && !deciding) {
+        const gateMode = gate?.blockGate?.mode;
+        if (gateMode === "on") return refuse("no_wait");
+        unwatched = gateMode === "warn";
+      }
       // B19: the deadline of the block that is a decision — the task's own when a restatement keeps it one (the first
       // ask's clock stands, so restating does not buy another day), now's when a plain block becomes one, and none on
       // any other move: leaving blocked, or restating without the flag, clears it.
       const decisionDue = deciding ? (task.decisionDue ?? now + DECISION_DUE_MS) : undefined;
       const { waits: _left, decisionDue: _oldDue, ...rest } = task;
       const moved: Task = { ...rest, status: action.to, blockedReason: action.to === "blocked" ? reason : null, doneAt: action.to === "done" ? now : null, ...(waits.length > 0 ? { waits } : {}), ...(decisionDue !== undefined ? { decisionDue } : {}) };
-      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }), ...(waits.length > 0 ? { waits } : {}), ...(decisionDue !== undefined ? { decisionDue } : {}) });
+      return next(moved, { kind: "moved", from: task.status, to: action.to, reason, ...(notLive === undefined ? {} : { notLive }), ...(proofSeen === undefined ? {} : { proofSeen }), ...(waits.length > 0 ? { waits } : {}), ...(decisionDue !== undefined ? { decisionDue } : {}), ...(unwatched ? { unwatched: true as const } : {}) });
     }
     case "assign": {
       if (!runsTheBoard(actor)) return refuse("not_allowed");                // D5: never the board
@@ -509,14 +524,16 @@ export const boardChanged = (e: TaskEvent): BoardChanged => ({
 
 // B12: the task a lane's status line names ("STATUS: DONE T-285 …"), as the hub read it from the Run's line (the protocol's
 // parser; the domain imports no wire package). Only a turn's end, or a wait, is the line's word; a working Run's line is the last turn's.
-export type NamedStatus = { key: TaskKey; status: "done" | "blocked" | "needs_decision" | "waiting" };
+// B22: `next`, who owes the next move and by when, as the hub resolved it (an `in <N> …` against the run it rode in on,
+// and only one still ahead and within the cap); the domain reads `by` and asks nothing.
+export type NamedStatus = { key: TaskKey; status: "done" | "blocked" | "needs_decision" | "waiting"; next?: { who: string; by: number } };
 
 // B10, D1 to D6: the move the board makes by itself for `task`, following its assignee's Run, or null. D6: a Run whose
 // phase began at or before the task's last change of state (status, assignee, description; a comment is not one) moves
 // nothing, so the board never undoes what a person or a lane did after it. D5: never to Done, never an assignment (the board's actor can't: runsTheBoard is false for it).
 export const GONE_REASON = "its lane stopped without DONE";
 export const BACKGROUND_REASON = "background work still running";
-export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null): { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true } | null {
+export function derivedMove(task: Task, run: Run, board: readonly Task[], named: NamedStatus | null = null): { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true; waits?: string[] } | null {
   if (task.assignee === null || task.assignee !== run.lane || run.since <= task.stateChangedAt) return null;
   // B12: the key counts only when the line is the turn's word: a turn's end, or a wait.
   const keyed = run.phase === "ended" || run.phase === "waiting" ? named : null;
@@ -532,7 +549,9 @@ export function derivedMove(task: Task, run: Run, board: readonly Task[], named:
     // The same for a wake-up scheduled or a job running: the turn ended DONE, and its line is the reason (T-398).
     if (run.phase === "waiting" && (run.wait?.on === "wakeup" || run.wait?.on === "job") && run.outcome === "done") return { to: "review", reason: said, rule: "D1" };
     // B19: a NEEDS DECISION line is the ask itself, so the board's own block carries the decision flag with it.
-    if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2", ...(run.outcome === "needs_decision" ? { decision: true as const } : {}) };
+    // B22: a next: the line carries names who owes the next move and by when; the board's own block waits until then,
+    // in the one spelling a wait has, so the block is watched without anyone typing --on.
+    if (run.phase === "ended" && (run.outcome === "blocked" || run.outcome === "needs_decision")) return { to: "blocked", reason: said ?? run.outcome, rule: "D2", ...(run.outcome === "needs_decision" ? { decision: true as const } : {}), ...(keyed?.next !== undefined ? { waits: [`until:${new Date(keyed.next.by).toISOString()}`] } : {}) };
     if (run.phase === "gone") return { to: "todo", reason: GONE_REASON, rule: "D3" };
     return null;
   }

@@ -57,6 +57,9 @@ export class BoardService {
   #repos: () => readonly string[];
   #cards: boolean;
   #waits: { readings(key: string, rev?: number): JudgedWait[] | null } | null = null;
+  // B21 (ADR-0041): the block gate, read per change with the service's own clock, so the mode it answers is the mode
+  // of that moment; absent, no gate, a board without the hub's setting blocks as it always did.
+  #blockGate: (() => { mode: "off" | "warn" | "on"; from: number }) | null;
 
   // `lanes`: the lane names the hub lists now, sent with the board so the app can mark an assignee that isn't running.
   // `runs`: each lane's latest Run (BoardProjector.runs; none without a fleet). `orphans`: the to do tasks whose lane the
@@ -65,7 +68,9 @@ export class BoardService {
   // whether the hub's checkout holds a commit, asked once for a lane's merge record (actChecked); without one none is asked.
   // `repos` (B18): the repositories whose pull requests the hub reads (MORNDO_PROOF_REPOS); morndo/morndo when absent.
   // `cards`: whether the hub reads the owner's list (MORNDO_LEDGER); without it a card wait is refused at the block.
-  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean; repos?: () => readonly string[]; cards?: boolean }) {
+  // `blockGate` (B21, ADR-0041): the block gate, called per change with the clock above (main.ts wires the setting's
+  // reading of the moment); absent, the domain gates nothing.
+  constructor(p: { store: Store; now?: () => number; policy: () => AccessPolicy; lanes?: () => string[]; runs?: () => RunView[]; orphans?: (tasks: readonly Task[], now: number) => string[]; runsEveryMs?: number; liveness?: (sha: string) => Liveness; knows?: (sha: string) => Promise<"yes" | "no" | "unknown">; standIn?: boolean; repos?: () => readonly string[]; cards?: boolean; blockGate?: () => { mode: "off" | "warn" | "on"; from: number } }) {
     this.#store = p.store; this.#now = p.now ?? Date.now; this.#policy = p.policy; this.#lanes = p.lanes ?? (() => []);
     this.#runs = p.runs ?? (() => []); this.#orphans = p.orphans ?? (() => []); this.#runsEveryMs = p.runsEveryMs ?? RUNS_EVERY_MS;
     this.#liveness = p.liveness ?? (() => ({ live: false, blockers: [] }));
@@ -73,6 +78,7 @@ export class BoardService {
     this.#standIn = p.standIn ?? false;
     this.#repos = p.repos ?? (() => [MORNDO_REPO]);
     this.#cards = p.cards ?? false;
+    this.#blockGate = p.blockGate ?? null;
   }
 
   subscribe(fn: (b: BoardView) => void) { this.#listeners.add(fn); return () => this.#listeners.delete(fn); }
@@ -131,6 +137,9 @@ export class BoardService {
     return { task, events: this.#store.taskEvents(key), merged: merges.length > 0 ? mergedView(task.key, merges, this.#liveness) : null, ...(read ? { waitsRead: read } : {}) };
   }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
+  // The service's own clock, as injected: the projector resolves a status line's next: against it (B22), so the two
+  // read the same moment.
+  now(): number { return this.#now(); }
   openTasksOf(lane: string): Task[] { return this.#store.openTasksOf(lane); }
   tasksInProgress(): Task[] { return this.#store.tasksInProgress(); }
   // The blocked tasks, each with the waits its block named and the deadline of its decision (B18, B19): what the wait
@@ -189,7 +198,7 @@ export class BoardService {
         && this.#store.taskEvents(key).filter(e => e.change.kind === "proof_listed" && e.actor.kind === "worker").length >= PROOF_LIST_CHANGES_MAX)
         return { ok: false as const, error: { problem: "too_many" as const, detail: "proof list changes" } };
       const applied = applyAction(task, kept, actor, this.#now(), this.#store.tasksInProgress(),
-        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}), repos: this.#repos(), cards: this.#cards });
+        { merges: this.#store.mergesOf(key), liveness: this.#liveness, ...(proof !== undefined ? { proof } : {}), repos: this.#repos(), cards: this.#cards, ...(this.#blockGate !== null ? { blockGate: this.#blockGate() } : {}) });
       if (!applied.ok) return applied;
       this.#write(applied.value.task, applied.value.event);
       return applied;
@@ -220,10 +229,15 @@ export class BoardService {
 
   // B10: the board's own move of `key`, following `lane`'s Run (derivedMove's answer: D1 to D4), as that rule. `rev`: the
   // task's revision the move was judged on, so a task changed meanwhile is refused (`changed`), never moved on a stale
-  // reading (B6). `decision` (B19): D2's block of a NEEDS DECISION line carries the decision flag with it.
-  follow(key: string, move: { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true }, lane: string, rev: number): BoardResult {
-    const action: TaskAction = { action: "move", to: move.to, ...(move.reason === null ? {} : { reason: move.reason }), ...(move.decision === true ? { decision: true } : {}), ifRev: rev };
-    return this.act(key, action, { kind: "board", rule: move.rule, lane });
+  // reading (B6). `decision` (B19): D2's block of a NEEDS DECISION line carries the decision flag with it. `waits`
+  // (B22): the until wait a next: named; a wait that has passed by the time the move lands (or run past the 31-day
+  // cap) is dropped and the block made without it — never lose a board block to the clock.
+  follow(key: string, move: { to: TaskStatus; reason: string | null; rule: BoardRule; decision?: true; waits?: string[] }, lane: string, rev: number): BoardResult {
+    const actor = { kind: "board", rule: move.rule, lane } as const;
+    const action: TaskAction = { action: "move", to: move.to, ...(move.reason === null ? {} : { reason: move.reason }), ...(move.decision === true ? { decision: true } : {}), ...(move.waits !== undefined && move.waits.length > 0 ? { waits: move.waits } : {}), ifRev: rev };
+    const r = this.act(key, action, actor);
+    if (r.ok || r.problem !== "bad_wait" || move.waits === undefined || move.waits.length === 0) return r;
+    return this.act(key, { ...action, waits: undefined }, actor);
   }
 
   #write(task: Task, event: TaskEvent) {

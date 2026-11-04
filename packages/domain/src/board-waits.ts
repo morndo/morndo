@@ -18,8 +18,10 @@ export type Wait =
 
 // At most this many waits on one block: each is a read per check, and a list longer than this is a plan, not a wait.
 export const WAITS_MAX = 3;
-// A time wait is at most this far ahead: further than that is a reminder, and the board is not a calendar.
-export const TIME_AHEAD_MAX_MS = 90 * 24 * 3_600_000;
+// A time wait is at most this far ahead (B21, ADR-0041): further than that is a reminder, and the board is not a
+// calendar. The board's own until waits, the four it held from 2026-11-15 to 2026-12-04 when this was written, all
+// fit inside 31 days, so the cap takes nothing a block really used.
+export const BLOCK_UNTIL_MAX_MS = 31 * 24 * 3_600_000;
 // A block of words only, unchanged this long, is flagged (isStaleBlock).
 export const STALE_BLOCK_MS = 48 * 3_600_000;
 
@@ -54,7 +56,7 @@ export function parseWait(spec: string, now: number, repos: readonly string[], o
     const at = Date.parse(when);
     if (!Number.isFinite(at) || !realDate(when)) return refuse(`"${when}" is not a time`);
     if (at <= now) return refuse("that time has passed already");
-    if (at - now > TIME_AHEAD_MAX_MS) return refuse("a time wait is at most 90 days ahead");
+    if (at - now > BLOCK_UNTIL_MAX_MS) return refuse("a time wait is at most 31 days ahead");
     return ok({ kind: "time", at });
   }
   return refuse(`"${s}" is none of T-12, #93, owner/repo#93, ny-530 or until:<time>`);
