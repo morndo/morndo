@@ -8,14 +8,22 @@
 //   once when the list of them changed, at most every 12 h while it is unchanged, and again at the next pass when a
 //   message did not go.
 // The domain says what waits (board-stale.ts); these only read the board, build the id and the text, and ask the port.
-import { INBOX_EVERY_MS, STALE_REPEAT_MS, inboxItems, inboxMessage, staleMessage, staleTasks, type JudgedWait, type MergedView, type Task, type TaskKey } from "@morndo/domain";
+import { DECISION_DUE_MS, INBOX_EVERY_MS, STALE_REPEAT_MS, inboxItems, inboxMessage, staleMessage, staleTasks, type JudgedWait, type MergedView, type Task, type TaskKey } from "@morndo/domain";
 import { log as defaultLog } from "../adapters/log.ts";
+import type { Deliveries } from "./ports.ts";
 
 // The fleet's delivery port as these use it (ports.ts Deliveries, answer ok → true): one text, to one lane, under an
 // id of the caller's choosing, allowed to wait its ttlMs to be typed. A false answer and a throw are the same thing
 // here: it did not go, and the next pass tries again — under the same id, which is the fleet's idempotency key, so a
 // delivery that was taken but never answered is never doubled.
 export type DeliverText = (d: { id: string; lane: string; text: string; ttlMs?: number }) => Promise<boolean>;
+
+// The fleet takes a delivery id of the shape `<client>:<rest>`, the client lowercase letters, at most 16 of them
+// (fleet.ts deliveryId): `board-inbox:<ms>` is not one and was refused outright. The hub is a client like any other,
+// so its deliveries go out namespaced `hub:` ahead of the watcher's own id, which stays what the tests read.
+export function fleetDeliverText(deliveries: Pick<Deliveries, "deliver">): DeliverText {
+  return async d => (await deliveries.deliver({ ...d, id: `hub:${d.id}` })).ok;
+}
 // How long a message may wait on the lane to be typed: the inbox's list is stale in hours, the sweep's in half a day.
 export const INBOX_TTL_MS = 90 * 60_000;
 export const STALE_TTL_MS = 12 * 3_600_000;
@@ -33,14 +41,15 @@ type Tick = { sent: boolean; items: number };
 
 // B20: the keys the board itself watches, so the sweep leaves them out: a blocked task whose waits the hub has read
 // something of (an open wait may end any moment, and D7 moves the task), a review task whose merge is not live on
-// every node yet, and every decision the inbox has (B19), a legacy one included. `view` is what the board holds: the
-// shown tasks, the wait watch's readings, the merged views.
-export function watchedKeys(view: { tasks: readonly Task[]; waits?: readonly { key: string; readings: JudgedWait[] }[]; merged: readonly MergedView[] }, now: number, legacySince: number): Set<string> {
+// every node yet, and every decision the inbox has (B19), a legacy one included — an answered one excluded, for the
+// sweep has it again (the inbox let it go). `view` is what the board holds: the shown tasks, the wait watch's readings,
+// the merged views.
+export function watchedKeys(view: { tasks: readonly Task[]; waits?: readonly { key: string; readings: JudgedWait[] }[]; merged: readonly MergedView[] }, now: number, legacySince: number, answered?: (key: TaskKey, since: number) => boolean): Set<string> {
   const keys = new Set<string>();
   for (const w of view.waits ?? []) if (w.readings.some(r => r.state !== "unknown")) keys.add(w.key);
   const status = new Map(view.tasks.map(t => [t.key as string, t.status]));
   for (const m of view.merged) if (m.live === false && status.get(m.key) === "review") keys.add(m.key);
-  for (const i of inboxItems(view.tasks, now, { legacySince })) keys.add(i.key);
+  for (const i of inboxItems(view.tasks, now, { legacySince, ...(answered !== undefined ? { answered } : {}) })) keys.add(i.key);
   return keys;
 }
 
@@ -57,7 +66,7 @@ export class BoardInbox {
   #ttlMs: number;
   #everyMs: number;
   #sentAt: number | null = null;               // the pass's now of the last message that went; null: none has yet
-  #pendingId: string | null = null;            // the id of the message that did not go: retried under it, never doubled
+  #pending: { id: string; text: string } | null = null;   // the message that did not go: retried under its id, its text unchanged
   #told = new Set<string>();                   // key@dueAt of the decisions the principal was told of
   #running: Promise<Tick> | null = null;
   #again = false;
@@ -96,16 +105,18 @@ export class BoardInbox {
     }
     if (items.length === 0) return { sent: false, items: 0 };
     // At most one message an hour after one that went; one that did not go is tried again at the next pass, under the
-    // same id (the fleet answers what became of it, so a delivery that was in doubt is never doubled).
+    // same id while its text is unchanged (the fleet answers what became of an id it knows, and answers the same id
+    // with other text as id_conflict), and under a fresh one once the text has moved on.
     if (this.#sentAt !== null && now - this.#sentAt < this.#everyMs) return { sent: false, items: items.length };
-    const id = this.#pendingId ?? `board-inbox:${now}`;
-    const r = await tryDeliver(this.#deliver, { id, lane: this.#lane, text: inboxMessage(items, now), ttlMs: this.#ttlMs });
+    const text = inboxMessage(items, now);
+    const id = this.#pending?.text === text ? this.#pending.id : `board-inbox:${now}`;
+    const r = await tryDeliver(this.#deliver, { id, lane: this.#lane, text, ttlMs: this.#ttlMs });
     if (!r.went) {
-      this.#pendingId = id;
+      this.#pending = { id, text };
       this.#log.warn(`board inbox: the message to ${this.#lane} did not go (${r.why}); the next pass tries again`);
       return { sent: false, items: items.length };
     }
-    this.#pendingId = null;
+    this.#pending = null;
     this.#sentAt = now;
     return { sent: true, items: items.length };
   }
@@ -115,6 +126,7 @@ export class BoardInbox {
 export class StaleSweep {
   #tasks: () => readonly Task[];
   #watched: () => ReadonlySet<string>;
+  #answered: ((key: TaskKey, since: number) => boolean) | null;
   #deliver: DeliverText;
   #lane: string;
   #now: () => number;
@@ -123,12 +135,14 @@ export class StaleSweep {
   #repeatMs: number;
   #sentAt: number | null = null;               // the pass's now of the last message that went
   #lastList: string | null = null;             // that message's list, key and status per line: what "unchanged" means
-  #pendingId: string | null = null;            // the id of the message that did not go: retried under it, never doubled
+  #pending: { id: string; text: string } | null = null;   // the message that did not go: retried under its id, its text unchanged
   #running: Promise<Tick> | null = null;
   #again = false;
 
-  constructor(p: { tasks: () => readonly Task[]; watched: () => ReadonlySet<string>; deliver: DeliverText; lane: string; now?: () => number; log?: Warn; ttlMs?: number; repeatMs?: number }) {
-    this.#tasks = p.tasks; this.#watched = p.watched; this.#deliver = p.deliver; this.#lane = p.lane;
+  // `answered` (B19): a decision the manager answered while the task stays blocked is not the inbox's any more — it
+  // goes back to being swept like any block that sits, so it is never lost between the two.
+  constructor(p: { tasks: () => readonly Task[]; watched: () => ReadonlySet<string>; answered?: (key: TaskKey, since: number) => boolean; deliver: DeliverText; lane: string; now?: () => number; log?: Warn; ttlMs?: number; repeatMs?: number }) {
+    this.#tasks = p.tasks; this.#watched = p.watched; this.#answered = p.answered ?? null; this.#deliver = p.deliver; this.#lane = p.lane;
     this.#now = p.now ?? Date.now; this.#log = p.log ?? defaultLog; this.#ttlMs = p.ttlMs ?? STALE_TTL_MS; this.#repeatMs = p.repeatMs ?? STALE_REPEAT_MS;
   }
 
@@ -146,21 +160,28 @@ export class StaleSweep {
 
   async #pass(): Promise<Tick> {
     const now = this.#now();
-    const items = staleTasks(this.#tasks(), now, { watched: this.#watched() });
+    // A decision the inbox has let go (answered, the task still blocked) reads here as any other block, so the sweep
+    // takes it; an unanswered one keeps its deadline and stays the inbox's.
+    const tasks = this.#tasks().map(t => t.decisionDue !== undefined && this.#answered !== null && this.#answered(t.key, t.decisionDue - DECISION_DUE_MS)
+      ? (() => { const { decisionDue: _due, ...plain } = t; return plain; })()
+      : t);
+    const items = staleTasks(tasks, now, { watched: this.#watched() });
     if (items.length === 0) return { sent: false, items: 0 };
     const list = items.map(i => `${i.key} ${i.status}`).join("\n");
     // An unchanged list is sent at most every repeatMs; a changed one at once. A message that did not go leaves both
     // as they were, so the next pass sends it however long the list has been the same.
     if (this.#sentAt !== null && list === this.#lastList && now - this.#sentAt < this.#repeatMs) return { sent: false, items: items.length };
-    // A message that did not go is retried under its own id, so a delivery that was in doubt is never doubled.
-    const id = this.#pendingId ?? `board-stale:${now}`;
-    const r = await tryDeliver(this.#deliver, { id, lane: this.#lane, text: staleMessage(items), ttlMs: this.#ttlMs });
+    // A message that did not go is retried under its own id while its text is unchanged (the fleet answers the same
+    // id with other text as id_conflict), and under a fresh one once the text has moved on.
+    const text = staleMessage(items);
+    const id = this.#pending?.text === text ? this.#pending.id : `board-stale:${now}`;
+    const r = await tryDeliver(this.#deliver, { id, lane: this.#lane, text, ttlMs: this.#ttlMs });
     if (!r.went) {
-      this.#pendingId = id;
+      this.#pending = { id, text };
       this.#log.warn(`board stale: the message to ${this.#lane} did not go (${r.why}); the next pass tries again`);
       return { sent: false, items: items.length };
     }
-    this.#pendingId = null;
+    this.#pending = null;
     this.#sentAt = now;
     this.#lastList = list;
     return { sent: true, items: items.length };

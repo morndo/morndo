@@ -49,7 +49,7 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
-import { BoardInbox, StaleSweep, watchedKeys } from "./application/board-inbox.ts";
+import { BoardInbox, StaleSweep, fleetDeliverText, watchedKeys } from "./application/board-inbox.ts";
 import { ProofService } from "./application/proof-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
@@ -397,16 +397,16 @@ switch (cmd) {
     // delivery queue; a message that did not go is tried again at the next pass. A blocked task from before the rule
     // is a decision from the hub's start, and an answer is a comment by the manager, the principal or the console.
     if (fleet) {
-      const boardDeliveries = fleetDeliveries(fleet.client);
-      const deliverOk = async (d: { id: string; lane: string; text: string; ttlMs?: number }) => (await boardDeliveries.deliver(d)).ok;
+      // The fleet's delivery ids are `<client>:<rest>` with a lowercase client (fleetDeliverText adds the hub's own).
+      const deliver = fleetDeliverText(fleetDeliveries(fleet.client));
       const legacySince = Date.now();
       const answered = (key: string, since: number) =>
         (board.task(key)?.events ?? []).some(e => e.at > since && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"));
-      const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver: deliverOk, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });
+      const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });
       const staleSweep = new StaleSweep({
         tasks: () => [...board.tasksIn("blocked"), ...board.tasksIn("review")],
-        watched: () => watchedKeys(board.view(), Date.now(), legacySince),
-        deliver: deliverOk, lane: config.managerWindow,
+        watched: () => watchedKeys(board.view(), Date.now(), legacySince, answered),
+        answered, deliver, lane: config.managerWindow,
       });
       const firstWatch = setTimeout(() => {
         void boardInbox.tick().catch((e: unknown) => log.error("board inbox: the pass failed", e));
