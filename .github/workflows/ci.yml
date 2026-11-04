@@ -90,6 +90,10 @@ jobs:
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/desktop" }
         run: node e2e/desktop.e2e.ts
+      - name: e2e desktop on a phone and a tablet
+        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
+        env: { E2E_OUT: "${{ runner.temp }}/e2e/desktop-mobile" }
+        run: node e2e/desktop-mobile.e2e.ts
       - name: e2e ink
         if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.tools.outcome == 'success' }}
         env: { E2E_OUT: "${{ runner.temp }}/e2e/ink" }
