@@ -35,8 +35,10 @@ const DURATION_ELSEWHERE = new RegExp(String.raw`[,(]\s*${QUALIFIER}\s*${AMOUNT}
 // B22: the trailing `next: <who> by <when>`. The clause ends the line; `who` is a task key (any case, read upper) or a
 // lowercase name — the owner, the manager, a lane; a capital outside a task key is nobody's name, and a space is not
 // allowed in one. `when` is a date (that day's end, 23:59 UTC), an instant with Z or an offset (whose day and minute
-// must be real: 2026-13-45 is no date), or `in <N> min|h` with N from 1 to 999999.
-const NEXT_CLAUSE = /[\s,;]*\bnext\b\s*:\s*([A-Za-z0-9][A-Za-z0-9-]{0,31})\s+by\s+(.+)$/i;
+// must be real: 2026-13-45 is no date), or `in <N> min|h` with N from 1 to 999999. What a lane puts around the clause
+// goes: an opening bracket, quote, backtick or bold/italic marker before the word, and the same closing (a bracket, a
+// quote, a backtick, a marker, a full stop) after the when — decoration around the clause only, never inside the when.
+const NEXT_CLAUSE = /[\s,;*_~'"“”‘’(`]*\bnext\b\s*:\s*([A-Za-z0-9][A-Za-z0-9-]{0,31})\s+by\s+(.+?)[\s*_~`'"“”‘’)\]]*(?:\.{1,3}|…)?$/i;
 const NEXT_KEY = /^T-[1-9]\d{0,8}$/i;
 const NEXT_NAME = /^[a-z0-9][a-z0-9-]{0,31}$/;
 const NEXT_IN = /^in ([1-9]\d{0,5}) (minutes|mins|min|hours|hour|hrs|hr|h)$/i;
