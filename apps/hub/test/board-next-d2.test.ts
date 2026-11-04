@@ -74,16 +74,13 @@ describe("D2 reads the wait a next: names (B22)", () => {
     expect(task(key)).toMatchObject({ status: "blocked", blockedReason: line, waits: [{ kind: "time", at: Date.parse("2026-11-07T23:59:00Z") }] });
   });
 
-  it("a NEEDS DECISION line with next: by in 3 h keeps its decision deadline and waits until the run began plus 3 h", async () => {
+  it("a NEEDS DECISION line with next: by in 3 h blocks as a decision with its 24 h deadline and NO wait: it is not moved to do when the 3 h pass", async () => {
     const key = doing("Plan it", NOW);
     await projector.start();
     now = NOW + 60_000;
     source.tell(run("ended", NOW + 30_000, { outcome: "needs_decision", line: `STATUS: NEEDS DECISION ${key} which db?, next: manager by in 3 h` }));
-    expect(task(key)).toMatchObject({
-      status: "blocked",
-      decisionDue: NOW + 60_000 + DECISION_DUE_MS,
-      waits: [{ kind: "time", at: NOW + 30_000 + 3 * HOUR }],
-    });
+    expect(task(key)).toMatchObject({ status: "blocked", decisionDue: NOW + 60_000 + DECISION_DUE_MS });
+    expect(task(key)?.waits).toBeUndefined();
   });
 
   it("a next in the past is dropped: blocked with no waits, never a refusal", async () => {

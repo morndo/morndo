@@ -47,6 +47,7 @@ describe("a BLOCKED or NEEDS DECISION line with no next is asked for one (B22)",
   it("NEXT_ASK's own examples parse as a next", () => {
     expect(NEXT_ASK).toContain("End your status line with: next:");
     expect(NEXT_ASK).toContain("Then end the turn with your status line again.");
+    expect(NEXT_ASK).toContain("under 200 characters");          // firstLineOf cuts a status line at 200: a next: past it is lost
     const EXAMPLE = /next: [a-z0-9][a-z0-9-]* by (?:\d{4}-\d{2}-\d{2}(?:T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})?)?|in \d{1,6} (?:minutes|mins|min|hours|hour|h))/g;
     const examples = [...NEXT_ASK.matchAll(EXAMPLE)].map(m => m[0]);
     expect(examples.length).toBeGreaterThanOrEqual(1);

@@ -30,6 +30,7 @@ describe("the block gate in the CLI (B21)", () => {
     const r = await stubCli({ task: shipIt, event: moved({ unwatched: true }) }, 200, ["block", "T-1", "--why", "needs the API key"]);
     expect(r.code, r.err).toBe(0);
     expect(r.out).toContain("no watched wait: from 2026-11-12 a block without --on or --decision is refused; name one (--on T-12, #93, owner/repo#93, ny-530 or until:<time>, at most 31 days ahead)");
+    expect(r.out).toContain("unless the hub's MORNDO_BLOCK_GATE says otherwise");   // the hub's setting may differ from the default date
   });
   it("a no_wait refusal exits non-zero, in words naming --on and the 31 days", async () => {
     const r = await stubCli({ error: "no_wait" }, 400, ["block", "T-1", "--why", "needs the API key"]);

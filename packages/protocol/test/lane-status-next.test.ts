@@ -19,6 +19,20 @@ describe("a trailing next: on a status line (B22)", () => {
       .toEqual({ status: "blocked", next: { who: "owner", by: { at: Date.parse("2026-11-05T23:59:00Z") } } });
   });
 
+  it("the clause survives what a lane puts around the end of a line: a full stop, bold or italic markers, quotes, brackets", () => {
+    const owner = { who: "owner", by: { at: Date.parse("2026-11-05T23:59:00Z") } };
+    for (const l of [
+      "STATUS: BLOCKED stuck, next: owner by 2026-11-05.",
+      "**STATUS: BLOCKED stuck, next: owner by 2026-11-05**",
+      "STATUS: BLOCKED stuck (next: owner by 2026-11-05)",
+      "STATUS: BLOCKED stuck, `next: owner by 2026-11-05`",
+      "STATUS: BLOCKED stuck, next: owner by 2026-11-05 .",
+      "_STATUS: BLOCKED stuck, next: owner by 2026-11-05_",
+    ]) expect(statusLineOf(l), l).toEqual({ status: "blocked", next: owner });
+    expect(statusLineOf("STATUS: WAITING main CI for 12 min (next: manager by in 3 h)"))
+      .toEqual({ status: "waiting", waitingOn: "main CI", forMs: 720_000, next: { who: "manager", by: { inMs: 10_800_000 } } });
+  });
+
   it("a WAITING line keeps its own lease: the duration inside next: is not the wait's", () => {
     expect(statusLineOf("STATUS: WAITING main CI for 12 min, next: manager by in 3 h"))
       .toEqual({ status: "waiting", waitingOn: "main CI", forMs: 720_000, next: { who: "manager", by: { inMs: 10_800_000 } } });
