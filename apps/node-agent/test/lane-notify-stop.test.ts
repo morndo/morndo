@@ -9,7 +9,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { firstLineOf, statusLineOf } from "@morndo/protocol";
 import type { StatusContract } from "../src/config.ts";
-import { STATUS_ASK, statusAsk } from "../src/relay/status-ask.ts";
+import { NEXT_ASK, STATUS_ASK, statusAsk } from "../src/relay/status-ask.ts";
 import { until } from "./helpers.ts";
 
 const SCRIPT = join(import.meta.dirname, "../hooks/lane-notify-stop");
@@ -417,7 +417,8 @@ describe("lane-notify-stop", () => {
       expect(statusLineOf(firstLineOf(String(body.text)))).toEqual(want);
       expect(statusLineOf(firstLineOf(String(body.last_assistant_message)))).toEqual(want);
       const asked = statusAsk(body, "lane-x", ASK);
-      expect(asked).toBe(want === null ? STATUS_ASK : null);
+      // B22: a BLOCKED or NEEDS DECISION line with no next is asked for one; every other status, no ask.
+      expect(asked).toBe(want === null ? STATUS_ASK : want.status === "blocked" || want.status === "needs_decision" ? NEXT_ASK : null);
     }
   });
 
