@@ -66,7 +66,7 @@ export type PaneView = {
 };
 export type TranscriptView = {
   size(sessionId: string): Promise<number | null>;          // null: no transcript of that session on this node (yet)
-  identity?(sessionId: string): Promise<string | null>;     // which file it is (device and inode): another file at the same path is another identity
+  identity?(sessionId: string): Promise<string | null>;     // which file it is (device, inode and birth time): another file at the same path is another identity
   // whole lines from a byte offset, with the byte offset each starts at (a receipt must come after the typing, receipt.ts cameAfter)
   lines(sessionId: string, from: number): Promise<{ lines: string[]; starts?: number[]; next: number } | null>;
 };
