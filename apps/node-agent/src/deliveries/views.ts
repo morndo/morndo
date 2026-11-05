@@ -6,7 +6,7 @@
 // - where a stashed draft's copy goes (#64): <drafts>/<time>-<lane>.txt, readable by this node's user only. The last 50
 //   are kept.
 import { execFileSync } from "node:child_process";
-import { readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { type BigIntStats, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { draftOnScreen, localTranscriptBytes, type Tmux } from "@morndo/node-ops";
 import { LIMITS } from "@morndo/protocol";
@@ -115,12 +115,21 @@ export function agentPaneView(d: { inventory: Inventory; tmux: Pick<Tmux, "captu
 
 const READ_MAX = 1 << 20;
 
+// Which file a stat is of: device, inode and birth time. The inode alone is not enough: a file system hands a freed number to the
+// next file made (ext4 at once), so a transcript removed and put back at its path would look like the one before. The birth time
+// is set when the file is made and does not move when it is appended to (ctime and mtime do), so it tells the two apart. A file
+// system without one reports 0 (Node, fs.Stats "Stat time values"): then the device and inode are all there is. The inode is read
+// whole, as a bigint: it can pass 2^53.
+export function fileIdentity(st: Pick<BigIntStats, "dev" | "ino" | "birthtimeNs">): string {
+  return st.birthtimeNs > 0n ? `${st.dev}:${st.ino}:${st.birthtimeNs}` : `${st.dev}:${st.ino}`;
+}
+
 export function agentTranscripts(transcriptPath: (sessionId: string) => string | null): TranscriptView {
   return {
     async identity(sessionId) {
       const path = transcriptPath(sessionId);
       if (path === null) return null;
-      try { const s = statSync(path); return `${s.dev}:${s.ino}`; } catch { return null; }
+      try { return fileIdentity(statSync(path, { bigint: true })); } catch { return null; }
     },
     async size(sessionId) {
       const path = transcriptPath(sessionId);
