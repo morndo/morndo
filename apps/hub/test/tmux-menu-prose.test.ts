@@ -1,13 +1,14 @@
 // F13: an agent's prose that mentions a menu phrase, above its empty input box, is not a menu. Sends go through, and
 // no "Waiting at a prompt" decision appears. Private tmux server, synthetic pane (tmux-fake-claude.fixture.ts).
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { Store } from "../src/adapters/store.ts";
 import { menuOnScreen, tmuxAdapter } from "@morndo/node-ops";
 import { EscalationService } from "../src/application/escalation-service.ts";
+import { readSubmitted } from "../../node-agent/test/helpers.ts";
 
 const SOCKET = `morndo-val-f13-${process.pid}`;
 const FIXTURE = join(import.meta.dirname, "tmux-fake-claude.fixture.ts");
@@ -18,7 +19,7 @@ const PROSE = "I changed the schema and wrote the migration.\nDo you want to pro
 let dir: string;
 let box: string;
 let store: Store;
-const submitted = () => (existsSync(join(dir, "submitted.jsonl")) ? readFileSync(join(dir, "submitted.jsonl"), "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+const submitted = () => readSubmitted(dir);
 const styled = () => tmux("capture-pane", "-p", "-e", "-t", box, "-S", "-30");
 
 beforeAll(async () => {

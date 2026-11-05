@@ -2,13 +2,13 @@
 // (fake-claude.fixture.ts). Spec §4 "The expectation check", §5.3, §9 "Pane reuse" with its negative control, and the
 // test hooks that act on panes (noExpect, clockOffsetMs).
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync as writeFile } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { PaneLock } from "@morndo/node-ops";
-import { isolatedTmux, tempHome, until, wait, type TestTmux } from "./helpers.ts";
+import { isolatedTmux, readSubmitted, tempHome, type TestTmux, until, wait } from "./helpers.ts";
 import { opsHarness, type Harness } from "./ops-harness.ts";
 
 const FIXTURE = join(import.meta.dirname, "fake-claude.fixture.ts");
@@ -19,7 +19,7 @@ let lane = { workerId: "", stamp: "" };
 const wrappers: string[] = [];
 const dirOf = (name: string) => { const d = join(home.home, name); mkdirSync(d, { recursive: true }); return d; };
 const claude = (dir: string) => `${process.execPath} ${FIXTURE} ${dir}`;
-const submitted = (dir: string) => (existsSync(join(dir, "submitted.jsonl")) ? readFileSync(join(dir, "submitted.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+const submitted = (dir: string) => readSubmitted(dir);
 const screen = (target: string) => t.tmux("capture-pane", "-p", "-t", target);
 
 async function startLane(dir: string, name = "lane-a") {

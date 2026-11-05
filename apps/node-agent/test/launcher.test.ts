@@ -12,7 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Launch, Policy } from "../src/config.ts";
 import { launchCommand, promptId, shellLine, trustDialogOnScreen, type LaneWaits } from "../src/ops/lane-ops.ts";
 import { claudeSession } from "./claude-session.ts";
-import { isolatedTmux, tempHome, until, type TestTmux } from "./helpers.ts";
+import { isolatedTmux, readSubmitted, tempHome, type TestTmux, until } from "./helpers.ts";
 import { opsHarness, type Harness } from "./ops-harness.ts";
 
 const ROOT = join(import.meta.dirname, "..", "..", "..");
@@ -68,8 +68,7 @@ const argv = (name: string) => (existsSync(join(argvDir, `${name}.argv`)) ? read
 const paneOf = (workerId: string) => `%${workerId.replace(/^.*\./, "")}`;
 const show = (...args: string[]) => t.tmux(...args).replace(/\n$/, "");
 const windows = () => show("list-windows", "-t", "=main", "-F", "#{window_name}").split("\n");
-const submitted = (dir: string) => (existsSync(join(dir, "submitted.jsonl"))
-  ? readFileSync(join(dir, "submitted.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+const submitted = (dir: string) => readSubmitted(dir);
 const boxIn = (name: string) => { const dir = join(home.home, name); mkdirSync(dir, { recursive: true }); return dir; };
 const showsBox = (workerId: string) => until(() => t.tmux("capture-pane", "-p", "-t", paneOf(workerId)).includes("❯"));
 async function start(h: Harness, args: Record<string, unknown>, key: string) {

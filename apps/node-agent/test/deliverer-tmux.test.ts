@@ -3,7 +3,7 @@
 // the transcript's prompts, the receipts the deliverer reads. Covered: plan Review Focus 2, with the bytes the pane
 // received; a draft waited through; a `started` key from before a restart, with its negative control; and when a pane's
 // process started, for the start grace (RECONCILIATION.md ruling 14).
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { LIMITS, type Delivery } from "@morndo/protocol";
@@ -11,7 +11,7 @@ import { ProcessStarts, startFromProcStat } from "../src/deliveries/views.ts";
 import { argsHash } from "../src/ops/done-keys.ts";
 import type { TestHooks } from "../src/test-hooks.ts";
 import { claudeSession } from "./claude-session.ts";
-import { isolatedTmux, tempHome, until, wait, type TestTmux } from "./helpers.ts";
+import { isolatedTmux, readSubmitted, tempHome, type TestTmux, until, wait } from "./helpers.ts";
 import { opsHarness, type Harness } from "./ops-harness.ts";
 
 const FIXTURE = join(import.meta.dirname, "fake-claude.fixture.ts");
@@ -23,8 +23,7 @@ let pane = "";
 let stopFollowing = () => {};
 let emitted: Delivery[] = [];
 const box = () => join(home.home, "box");
-const submitted = () => (existsSync(join(box(), "submitted.jsonl"))
-  ? readFileSync(join(box(), "submitted.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+const submitted = () => readSubmitted(box());
 const screen = () => t.tmux("capture-pane", "-p", "-t", pane);
 const harness = (hooks?: TestHooks) => opsHarness({ home: home.home, socket: t.socket, emitDelivery: d => { emitted.push(d); }, ...(hooks ? { hooks } : {}) });
 

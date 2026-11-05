@@ -1,11 +1,11 @@
 // Briefs to a lane of another engine (ADR-0030), on a real isolated tmux server and the agent's own op side, with a stand-in
 // for the engine layer's `engine-lane` (fake-engine-lane.fixture.ts) as the pane's program. The node must find the lane's
 // session where the engine layer records it, type into its input line, and read the receipt from its transcript.
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LIMITS, type DeliveryTarget } from "@morndo/protocol";
-import { isolatedTmux, tempHome, until, type TestTmux } from "./helpers.ts";
+import { isolatedTmux, readSubmitted, tempHome, type TestTmux, until } from "./helpers.ts";
 import { opsHarness, type Harness } from "./ops-harness.ts";
 
 const FIXTURE = join(import.meta.dirname, "fake-engine-lane.fixture.ts");
@@ -13,8 +13,7 @@ let home: { home: string; cleanup: () => void };
 let t: TestTmux;
 let h: Harness;
 let box = "";
-const submitted = () => (existsSync(join(box, "submitted.jsonl"))
-  ? readFileSync(join(box, "submitted.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+const submitted = () => readSubmitted(box);
 const laneOf = (name: string) => h.inventory.last().lanes.find(l => l.window === name);
 const kickUntil = (done: () => boolean, ms = 15_000) =>
   until(async () => { await h.inventory.refresh(); h.deliverer.kick("hook"); await h.deliverer.drain(); return done(); }, ms, 100);
