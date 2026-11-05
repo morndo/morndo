@@ -8,10 +8,10 @@
 // The agent's tests use this rather than the shared fake box (test/fixtures/fake-claude-pane.ts), which Task 16 rewrites
 // for the drills.
 import { randomUUID } from "node:crypto";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { SessionStatus } from "@morndo/protocol";
-import type { TestTmux } from "./helpers.ts";
+import { readSubmitted, type TestTmux } from "./helpers.ts";
 
 export type TestSession = {
   sessionId: string;
@@ -21,13 +21,6 @@ export type TestSession = {
   follow(stateDir: string): () => void;            // write a prompt for each submitted line; the result stops it
   end(): void;                                     // the session file gone
 };
-
-// The lines a file holds so far that are whole: each ended by its newline. The fake box appends a long line in more than
-// one write, so a read can catch the start of it; that part is not a line yet and waits for the rest.
-export function wholeLines(text: string): string[] {
-  const end = text.lastIndexOf("\n");
-  return end < 0 ? [] : text.slice(0, end).split("\n").filter(Boolean);
-}
 
 export function claudeSession(o: { tmux: TestTmux; claudeDir: string; pane: string; tmuxSession?: string; sessionId?: string }): TestSession {
   const sessionId = o.sessionId ?? randomUUID();
@@ -50,19 +43,17 @@ export function claudeSession(o: { tmux: TestTmux; claudeDir: string; pane: stri
     follow(stateDir) {
       let seen = 0;
       const timer = setInterval(() => {
-        const f = join(stateDir, "submitted.jsonl");
-        if (!existsSync(f)) return;
-        const lines = wholeLines(readFileSync(f, "utf8"));
-        for (const l of lines.slice(seen)) {
+        // A long line is appended in one write, but a poll can run while that write is half done; readSubmitted skips it until its newline is there.
+        const texts = readSubmitted(stateDir);
+        for (const text of texts.slice(seen)) {
           // A long paste lands wrapped in pasted_content tags, as Claude Code writes one; the receipt strips them again.
-          const text = JSON.parse(l) as string;
           const content = text.length > 1000 ? `\n\n<pasted_content id="p1">\n${text}\n</pasted_content id="p1">\n` : text;
           appendFileSync(transcript, `${JSON.stringify({
             type: "user", uuid: randomUUID(), timestamp: new Date().toISOString(), promptSource: "typed",
             message: { role: "user", content },
           })}\n`);
         }
-        seen = lines.length;
+        seen = texts.length;
       }, 25);
       return () => clearInterval(timer);
     },
