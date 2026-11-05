@@ -1,7 +1,7 @@
 // F7: a send only goes into an agent's input box. A pane with no input box (the agent's CLI exited to a shell) is
 // refused, and a real draft that starts with 'Try "' still counts as a draft. Private tmux server, synthetic panes.
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -11,6 +11,7 @@ import { localTmux } from "../src/adapters/local-node.ts";
 import { draftOnScreen, tmuxAdapter } from "@morndo/node-ops";
 import { SteeringService } from "../src/application/steering-service.ts";
 import type { Authenticated } from "../src/application/access-service.ts";
+import { readSubmitted } from "../../node-agent/test/helpers.ts";
 
 const SOCKET = `morndo-val-f7-${process.pid}`;
 const FIXTURE = join(import.meta.dirname, "tmux-fake-claude.fixture.ts");
@@ -27,7 +28,7 @@ let store: Store;
 let shell: string;
 let box: string;
 let boxDir: string;
-const submitted = () => (existsSync(join(boxDir, "submitted.jsonl")) ? readFileSync(join(boxDir, "submitted.jsonl"), "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+const submitted = () => readSubmitted(boxDir);
 const screen = (pane: string) => tmux("capture-pane", "-p", "-t", pane);
 
 beforeAll(async () => {

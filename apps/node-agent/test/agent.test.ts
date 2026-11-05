@@ -17,7 +17,7 @@ import { openAgentDb } from "../src/db/open.ts";
 import { Spool } from "../src/relay/spool.ts";
 import { startFakeFleet, type FakeFleet, type Msg } from "./fake-fleet.ts";
 import { joinedConfig, runAgent } from "./agent-harness.ts";
-import { isolatedTmux, tempHome, until, wait, type TestTmux } from "./helpers.ts";
+import { isolatedTmux, readSubmitted, tempHome, type TestTmux, until, wait } from "./helpers.ts";
 
 const MAIN = join(import.meta.dirname, "..", "src", "main.ts");
 const FIXTURE = join(import.meta.dirname, "fake-claude.fixture.ts");
@@ -400,8 +400,7 @@ describe("test hooks over the connection (test-hooks.ts)", () => {
     mkdirSync(dir);
     t.tmux("new-session", "-d", "-s", "main", "-n", "api", "-x", "100", "-y", "20", `${process.execPath} ${FIXTURE} ${dir}`);
     expect(await until(() => t.tmux("capture-pane", "-p", "-t", "=main:0").includes("❯"))).toBe(true);
-    const file = join(dir, "submitted.jsonl");
-    return () => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+    return () => readSubmitted(dir);
   }
   const sendReq = (id: string, workerId: string, text: string, key: string) =>
     fleet.send({ t: "req", id, op: "pane.send", args: { workerId, text, expect: { server: workerId.split(".")[1], window: "api" } }, timeoutMs: 10_000, key });
@@ -516,8 +515,7 @@ describe("in-flight work, in status.json and across a stop (§6.3)", () => {
     mkdirSync(dir);
     t.tmux("new-session", "-d", "-s", "main", "-n", "api", "-x", "100", "-y", "20", `${process.execPath} ${FIXTURE} ${dir}`);
     expect(await until(() => t.tmux("capture-pane", "-p", "-t", "=main:0").includes("❯"))).toBe(true);
-    const file = join(dir, "submitted.jsonl");
-    return () => (existsSync(file) ? readFileSync(file, "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : []);
+    return () => readSubmitted(dir);
   }
   // The fake tmux: each paste sleeps ~300 ms before the real binary runs, and is counted.
   function slowTmux() {
