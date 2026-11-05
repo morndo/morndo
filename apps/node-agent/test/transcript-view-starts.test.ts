@@ -2,8 +2,8 @@
 import { appendFileSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { agentTranscripts } from "../src/deliveries/views.ts";
-import { tempHome } from "./helpers.ts";
+import { agentTranscripts, fileIdentity } from "../src/deliveries/views.ts";
+import { tempHome, wait } from "./helpers.ts";
 
 const homes: { cleanup: () => void }[] = [];
 afterEach(() => { for (const h of homes.splice(0)) h.cleanup(); });
@@ -76,13 +76,35 @@ describe("agentTranscripts.identity", () => {
     expect(await view.identity?.("s")).toBeNull();                       // no file yet
     writeFileSync(path, "a\n");
     const first = await view.identity?.("s");
-    expect(first).toMatch(/^\d+:\d+$/);
+    expect(first).toMatch(/^\d+:\d+(:\d+)?$/);
     appendFileSync(path, "b\n");
     expect(await view.identity?.("s")).toBe(first);
-    rmSync(path);
+    rmSync(path);                                                        // no handle is held: the file system may give the new file this inode
+    await wait(30);                                                      // a birth time is as fine as the kernel's clock tick, on older kernels some milliseconds
     writeFileSync(join(home.home, "other"), "x");
     renameSync(join(home.home, "other"), path);
     expect(await view.identity?.("s")).not.toBe(first);
     expect(await view.identity?.("none")).toBeNull();
+  });
+
+  it("is another for a file renamed over the live file at its path", async () => {
+    const home = tempHome();
+    homes.push(home);
+    const path = join(home.home, "t.jsonl");
+    writeFileSync(path, "a\n");
+    const view = agentTranscripts(() => path);
+    const first = await view.identity?.("s");
+    expect(first).toMatch(/^\d+:\d+(:\d+)?$/);
+    writeFileSync(join(home.home, "other"), "x");
+    renameSync(join(home.home, "other"), path);
+    expect(await view.identity?.("s")).not.toBe(first);
+  });
+});
+
+describe("fileIdentity", () => {
+  it("adds the birth time to the device and inode, and is the device and inode alone where the file system has no birth time", () => {
+    expect(fileIdentity({ dev: 2049n, ino: 177894n, birthtimeNs: 1_700_000_000_123_456_789n })).toBe("2049:177894:1700000000123456789");
+    expect(fileIdentity({ dev: 2049n, ino: 177894n, birthtimeNs: 0n })).toBe("2049:177894");
+    expect(fileIdentity({ dev: 1n, ino: 9007199254740993n, birthtimeNs: 5n })).toBe("1:9007199254740993:5");   // an inode past 2^53 is kept whole
   });
 });
