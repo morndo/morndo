@@ -22,6 +22,13 @@ export type TestSession = {
   end(): void;                                     // the session file gone
 };
 
+// The lines a file holds so far that are whole: each ended by its newline. The fake box appends a long line in more than
+// one write, so a read can catch the start of it; that part is not a line yet and waits for the rest.
+export function wholeLines(text: string): string[] {
+  const end = text.lastIndexOf("\n");
+  return end < 0 ? [] : text.slice(0, end).split("\n").filter(Boolean);
+}
+
 export function claudeSession(o: { tmux: TestTmux; claudeDir: string; pane: string; tmuxSession?: string; sessionId?: string }): TestSession {
   const sessionId = o.sessionId ?? randomUUID();
   const pid = Number(o.tmux.tmux("display-message", "-p", "-t", o.pane, "#{pane_pid}").trim());
@@ -45,7 +52,7 @@ export function claudeSession(o: { tmux: TestTmux; claudeDir: string; pane: stri
       const timer = setInterval(() => {
         const f = join(stateDir, "submitted.jsonl");
         if (!existsSync(f)) return;
-        const lines = readFileSync(f, "utf8").split("\n").filter(Boolean);
+        const lines = wholeLines(readFileSync(f, "utf8"));
         for (const l of lines.slice(seen)) {
           // A long paste lands wrapped in pasted_content tags, as Claude Code writes one; the receipt strips them again.
           const text = JSON.parse(l) as string;
