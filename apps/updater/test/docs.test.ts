@@ -30,48 +30,61 @@ const pages = (): Record<string, string> => {
 
 const NOTE_HEADING = "the-gh-version-the-attestation-check-needs";
 
-// The commands a page shows: a fenced line or an inline code span that starts with `gh attestation verify` and names
-// a file after it (a wrapped line is joined). A span that is only the name, or the name and a flag, is prose.
+// The commands a page shows: every `gh attestation verify` inside a fenced line or an inline code span, wherever it sits
+// on the line (after a prompt, `sudo`, `&&`), up to the next one or the next shell separator, a wrapped line joined.
+// A name with nothing after it, or only the bare flag, is prose.
 const attestationCommands = (text: string): string[] => {
   const out: string[] = [];
-  const keep = (raw: string): void => {
-    const command = raw.replace(/\s+/g, " ").replace(/^\$ /, "").trim();
-    const subject = /^gh attestation verify (\S+)/.exec(command)?.[1];
-    if (subject !== undefined && !subject.startsWith("-")) out.push(command);
+  const scan = (raw: string): void => {
+    for (const part of raw.replace(/\s+/g, " ").split("gh attestation verify").slice(1)) {
+      const args = (part.split(/&&|\|\||\||;/)[0] ?? "").trim();
+      if (args !== "" && args !== "--signer-workflow") out.push(`gh attestation verify ${args}`);
+    }
   };
-  for (const block of fences(text)) for (const line of block.replace(/\\\n\s*/g, " ").split("\n")) keep(line);
+  for (const block of fences(text)) for (const line of block.replace(/\\\n\s*/g, " ").split("\n")) scan(line);
   const prose = text.replace(/```[^\n]*\n[\s\S]*?```/g, "");
-  for (const span of prose.matchAll(/`([^`]+)`/g)) keep(span[1] ?? "");
+  for (const span of prose.matchAll(/`([^`]+)`/g)) scan(span[1] ?? "");
   return out;
 };
 
 // A command must pin the whole workflow the release job signs with, as the value of --signer-workflow.
 const pinProblems = (text: string, signer: string): string[] =>
   attestationCommands(text).flatMap(command => {
-    const value = /--signer-workflow(?:\s+|=)(\S+)/.exec(command)?.[1]?.replace(/^["']|["';]+$/g, "");
+    const value = /--signer-workflow(?:\s+|=)(\S+)/.exec(command)?.[1]?.replace(/^["']|["']+$/g, "");
     return value === signer ? [] : [`${value === undefined ? "no pin" : "another workflow"}: ${command}`];
   });
 
-// The note on which gh to use: the minimum version, the Ubuntu package, or the advice not to drop the flag.
-const holdsVersionNote = (text: string): boolean =>
-  /`gh` 2\.51\.0 or newer|packages is 2\.45\.0|never drop `--signer-workflow`/.test(text);
+// The note on which gh to use, in two sizes. The short form is the minimum version and the advice not to drop the flag;
+// the full form adds the Ubuntu package and the release notes.
+const holdsShortNote = (text: string): boolean => /`gh` 2\.51\.0 or newer|never drop `--signer-workflow`/.test(text);
+const holdsFullNote = (text: string): boolean => /packages is 2\.45\.0|releases\/tag\/v2\.(49|51)\.0/.test(text);
 
-// Does the page link to the README's note on the gh version (a relative link that lands on the repository README)?
+// Does the page link to the README's note on the gh version? A relative link, a link from the repository root
+// (/README.md) or the README's address on github.com, with or without a title.
 const linksToVersionNote = (file: string, text: string): boolean =>
-  [...text.matchAll(/\]\(([^)#\s]*)#([^)\s]+)\)/g)].some(
-    m => m[2] === NOTE_HEADING && posix.normalize(posix.join(posix.dirname(file), m[1] ?? "")) === "README.md");
+  [...text.matchAll(/\]\(<?([^)#\s>]*)#([^)\s>]+)>?(?:\s+"[^"]*")?\)/g)].some(m => {
+    if (m[2] !== NOTE_HEADING) return false;
+    const target = (m[1] ?? "").replace(/^https:\/\/github\.com\/morndo\/morndo\/blob\/main\//, "/");
+    return posix.normalize(target.startsWith("/") ? target.slice(1) : posix.join(posix.dirname(file), target)) === "README.md";
+  });
 
-// Everything the pages must satisfy about the attestation command. Empty is a pass.
+// Everything the pages must satisfy about the attestation command. Empty is a pass. The README holds the whole note;
+// SECURITY.md keeps the short form of it and links to the rest; no other page copies either.
 const attestationRules = (docs: Record<string, string>, signer: string): string[] => {
   const problems: string[] = [];
   for (const [file, text] of Object.entries(docs)) {
     const shows = attestationCommands(text).length > 0;
     problems.push(...pinProblems(text, signer).map(p => `${file}: ${p}`));
+    const linked = linksToVersionNote(file, text);
     if (file === "README.md") {
-      if (!holdsVersionNote(text)) problems.push("README.md: has no note on the gh version");
+      if (!holdsShortNote(text) || !holdsFullNote(text)) problems.push("README.md: has no note on the gh version");
+    } else if (file === "SECURITY.md") {
+      if (!holdsShortNote(text)) problems.push("SECURITY.md: has no short note on the gh version");
+      if (holdsFullNote(text)) problems.push("SECURITY.md: copies the whole gh version note");
+      if (!linked) problems.push("SECURITY.md: does not link to the README's note");
     } else {
-      if (holdsVersionNote(text)) problems.push(`${file}: copies the gh version note`);
-      if (shows && !linksToVersionNote(file, text)) problems.push(`${file}: shows the command and does not link to the README's note`);
+      if (holdsShortNote(text) || holdsFullNote(text)) problems.push(`${file}: copies the gh version note`);
+      if (shows && !linked) problems.push(`${file}: shows the command and does not link to the README's note`);
     }
   }
   return problems;
@@ -203,12 +216,13 @@ describe("install and update documentation", () => {
     expect(readme).toContain("#### The gh version the attestation check needs");
   });
 
-  it("every tracked page that shows gh attestation verify pins the release workflow, and only the README holds the version note", () => {
+  it("every tracked page that shows gh attestation verify pins the release workflow; the README holds the version note, SECURITY.md its short form, no other page a copy", () => {
     const docs = pages();
     expect(Object.keys(docs)).toEqual(expect.arrayContaining(["README.md", "SECURITY.md", "docs/design/updates/README.md", "docs/design/updates/manual-qa.md", "docs/plans/2026-10-28-c6-per-machine.md"]));
     expect(Object.keys(docs)).not.toContain("CHANGELOG.md");
     const showing = Object.entries(docs).filter(([, text]) => attestationCommands(text).length > 0).map(([file]) => file);
     expect(showing).toEqual(expect.arrayContaining(["README.md", "SECURITY.md", "docs/design/updates/README.md", "docs/design/updates/manual-qa.md", "docs/plans/2026-10-28-c6-per-machine.md"]));
+    expect(Object.values(docs).filter(text => /^\s*~~~/m.test(text)), "no ~~~ fences: the scan reads ``` fences only").toEqual([]);
     expect(attestationRules(docs, releaseSigner())).toEqual([]);
   });
 
@@ -216,7 +230,9 @@ describe("install and update documentation", () => {
     const signer = releaseSigner();
     const ok = `gh attestation verify install.sh --repo morndo/morndo --signer-workflow ${signer}`;
     const link = `[the README](README.md#${NOTE_HEADING})`;
-    const base = { "README.md": "It needs `gh` 2.51.0 or newer. Run `" + ok + "`.", "A.md": "Run `" + ok + "`. " + link };
+    const note = "It needs `gh` 2.51.0 or newer ([notes](https://github.com/cli/cli/releases/tag/v2.51.0)); Ubuntu packages is 2.45.0.";
+    const short = "It needs `gh` 2.51.0 or newer; on an older `gh`, upgrade it and never drop `--signer-workflow`.";
+    const base = { "README.md": note + " Run `" + ok + "`.", "SECURITY.md": short + " " + link, "A.md": "Run `" + ok + "`. " + link };
     expect(attestationRules(base, signer)).toEqual([]);
     const without = (command: string): string[] => attestationRules({ ...base, "A.md": "Run `" + command + "`. " + link }, signer);
     expect(without("gh attestation verify install.sh --repo morndo/morndo")).toHaveLength(1);
@@ -228,6 +244,21 @@ describe("install and update documentation", () => {
     expect(attestationRules({ ...base, "A.md": "```sh\n" + ok + ";\n```\n" + link }, signer)).toEqual([]);
     expect(attestationRules({ ...base, "A.md": "```sh\ngh attestation verify install.sh --repo morndo/morndo\n```\n" + link }, signer)).toHaveLength(1);
     expect(attestationRules({ ...base, "A.md": "Run `" + ok + "` and, without the pin, `gh attestation verify x`. " + link }, signer)).toHaveLength(1);
+    // Every occurrence counts, wherever it is on the line and with flags before the file; each is checked for the pin.
+    const fenced = (body: string): string[] => attestationRules({ ...base, "A.md": "```sh\n" + body + "\n```\n" + link }, signer);
+    expect(fenced(`gh attestation verify --repo morndo/morndo install.sh`)).toHaveLength(1);
+    expect(fenced(`gh attestation verify -R morndo/morndo install.sh`)).toHaveLength(1);
+    expect(fenced(`gh attestation verify --repo morndo/morndo --signer-workflow ${signer} install.sh`)).toEqual([]);
+    expect(fenced(`sudo gh attestation verify install.sh --repo morndo/morndo`)).toHaveLength(1);
+    expect(fenced(`GH_TOKEN=x gh attestation verify install.sh --repo morndo/morndo`)).toHaveLength(1);
+    expect(fenced(`   $ gh attestation verify install.sh --repo morndo/morndo`)).toHaveLength(1);
+    expect(fenced(`ssh-keygen -Y verify -f s -I i -n n -s sig < install.sh && gh attestation verify install.sh --repo morndo/morndo`)).toHaveLength(1);
+    expect(fenced(`if gh attestation verify install.sh --repo morndo/morndo; then echo ok; fi`)).toHaveLength(1);
+    expect(fenced(`ssh-keygen -Y verify -f s -I i -n n -s sig < install.sh && ${ok}`)).toEqual([]);
+    expect(fenced(`${ok} && gh attestation verify other.sh --repo morndo/morndo`)).toHaveLength(1);
+    expect(fenced(`${ok} && ${ok.replace("install.sh", "other.sh")}`)).toEqual([]);
+    expect(fenced(`gh attestation verify install.sh --repo morndo/morndo\necho --signer-workflow ${signer}`)).toHaveLength(1);
+    expect(attestationRules({ ...base, "A.md": "Run `a && " + ok + " && gh attestation verify b`. " + link }, signer)).toHaveLength(1);
     // Prose that names the command or the flag is not a command.
     expect(attestationRules({ ...base, "B.md": "Checked with `ssh-keygen` and `gh attestation verify`, and `gh attestation verify --signer-workflow` pins it." }, signer)).toEqual([]);
     // A page that shows the command needs the link; a copy of the note belongs to the README only.
@@ -235,6 +266,12 @@ describe("install and update documentation", () => {
     expect(attestationRules({ ...base, "A.md": "Run `" + ok + "`. " + link, "C.md": "It needs `gh` 2.51.0 or newer." }, signer)).toHaveLength(1);
     expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](README.md#" + NOTE_HEADING + ")" }, signer)).toHaveLength(1);   // that resolves to docs/README.md
     expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](../README.md#" + NOTE_HEADING + ")" }, signer)).toEqual([]);
+    expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](/README.md#" + NOTE_HEADING + " \"title\")" }, signer)).toEqual([]);
+    expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](https://github.com/morndo/morndo/blob/main/README.md#" + NOTE_HEADING + ")" }, signer)).toEqual([]);
+    // SECURITY.md keeps the short note and the link, and not the whole note.
+    expect(attestationRules({ ...base, "SECURITY.md": link }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "SECURITY.md": short }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "SECURITY.md": short + " " + link + " Ubuntu packages is 2.45.0." }, signer)).toHaveLength(1);
   });
 
   it("the README's Status line does not call release verification unbuilt", () => {
