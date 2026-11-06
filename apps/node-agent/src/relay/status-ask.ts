@@ -42,9 +42,10 @@ export const STATUS_ASK = "Start a short answer with one line saying where this 
 // B22: the ask for a next (T-805, ADR-0041): a lane that ends its turn BLOCKED with no `next:` is asked to name who
 // owes the next move and by when, in the two spellings the board reads, and to keep the whole line under the 200
 // characters the relay reads (firstLineOf cuts at 200: a next: past that is lost). Its examples must themselves
-// parse (a test holds that): the date and the `in <N> h` forms of lane-status.ts.
+// parse (a test holds that), and they use the relative `in <N> h` form of lane-status.ts on purpose: a fixed date
+// goes stale the day it passes (the test holds that every example points ahead of now).
 export const NEXT_ASK = "End your status line with: next: <owner|manager|lane|T-n> by <when>, e.g. next: manager by "
-  + "2026-11-05 or next: owner by in 2 h, and keep the whole status line under 200 characters: the relay cuts a line "
+  + "in 4 h or next: owner by in 2 h, and keep the whole status line under 200 characters: the relay cuts a line "
   + "at 200 and a next: past that is lost. Then end the turn with your status line again.";
 
 // How many jobs of a lane are queued, starting or running on this node, or null when the node can't tell.

@@ -52,6 +52,14 @@ describe("a BLOCKED line with no next is asked for one (B22); a decision is not:
     const examples = [...NEXT_ASK.matchAll(EXAMPLE)].map(m => m[0]);
     expect(examples.length).toBeGreaterThanOrEqual(1);
     for (const e of examples) expect(statusLineOf(`STATUS: BLOCKED ${e}`)?.next, e).toMatchObject({ who: expect.any(String) });
+    // A lane copies an example as it stands: one that names a fixed date goes stale the day it passes, and the block
+    // it makes then has no wait. Every example must still point ahead of now, whenever the test runs.
+    const now = Date.now();
+    for (const e of examples) {
+      const by = statusLineOf(`STATUS: BLOCKED ${e}`)?.next?.by;
+      const ahead = by === undefined ? false : "at" in by ? by.at > now : by.inMs > 0;
+      expect(ahead, `${e} points ahead of now`).toBe(true);
+    }
   });
 });
 
