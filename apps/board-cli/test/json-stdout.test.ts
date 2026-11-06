@@ -93,8 +93,8 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     expect(r.out).toContain("[open] tests: x");
     expect(r.err).toBe("");
   });
-  it("brief with flags and --json prints one document: the proof the hub holds, the shape brief --show --json has", async () => {
-    const r = await cli(["brief", "T-1", "--summary", "did it", "--left-out", "nothing", "--limit", "none", "--test", "npm test", "--json"], hub);
+  it("brief with flags and --out-json prints one document: the proof the hub holds, the shape brief --show --json has", async () => {
+    const r = await cli(["brief", "T-1", "--summary", "did it", "--left-out", "nothing", "--limit", "none", "--test", "npm test", "--out-json"], hub);
     expect(r.code, r.err).toBe(0);
     const doc = document(r.out) as { coverage: unknown[]; state: { line: string } };
     expect(doc.coverage).toHaveLength(2);
@@ -103,38 +103,45 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     const shown = await cli(["brief", "T-1", "--show", "--json"], { ...hub, [`GET ${TASK}`]: { task: doing, events: [event({ kind: "briefed", brief: briefed })], proof: proofView([item("tests: x"), item("manual: y")], briefed) } });
     expect(Object.keys(document(shown.out) as object).sort()).toEqual(Object.keys(doc).sort());   // one shape for the family
   });
-  it("brief --file reads the wire shape from a file, and --json beside it asks for the JSON output", async () => {
+  it("brief --file reads the wire shape from a file; --out-json beside it asks for the JSON output", async () => {
     const wire = { summary: "from file", leftOut: "nothing", limits: "none" };
     const filed = await cli(["brief", "T-1", "--file", "brief.json"], hub, { "brief.json": JSON.stringify(wire) });
     expect(filed.code, filed.err).toBe(0);
     expect(filed.calls.find(c => c.body?.action === "brief")?.body).toEqual({ action: "brief", brief: wire });
     expect(filed.out).toContain("T-1 brief filed (rev 8)");
-    const asJson = await cli(["brief", "T-1", "--file", "brief.json", "--json"], hub, { "brief.json": JSON.stringify(wire) });
+    expect(filed.err).toBe("");
+    const asJson = await cli(["brief", "T-1", "--file", "brief.json", "--out-json"], hub, { "brief.json": JSON.stringify(wire) });
     expect(asJson.code, asJson.err).toBe(0);
     expect((document(asJson.out) as { coverage: unknown[] }).coverage).toHaveLength(2);
   });
-  it("brief --json brief.json, the old file form, still files the brief as before, with one line on stderr naming --file", async () => {
+  it("brief --json <file> keeps its old meaning exactly: the file, the plain lines, one line on stderr naming --file", async () => {
     const wire = { summary: "from file", leftOut: "nothing", limits: "none" };
-    for (const [path, argv] of [["brief.json", ["brief", "T-1", "--json", "brief.json"]], ["brief.json", ["brief", "T-1", "--json=brief.json"]],
-      ["brief.txt", ["brief", "T-1", "--json", "brief.txt"]]] as const) {
-      const r = await cli([...argv], hub, { [path]: JSON.stringify(wire) });
+    for (const argv of [["brief", "T-1", "--json", "brief.json"], ["brief", "T-1", "--json=brief.json"], ["brief", "T-1", "--json", "brief.txt"]]) {
+      const r = await cli(argv, hub, { "brief.json": JSON.stringify(wire), "brief.txt": JSON.stringify(wire) });
       expect(r.code, `${argv.join(" ")}: ${r.err}`).toBe(0);
-      expect(r.calls.find(c => c.body?.action === "brief")?.body).toEqual({ action: "brief", brief: wire });
-      expect(r.out, argv.join(" ")).toContain("T-1 brief filed (rev 8)");       // the plain form, as it always was
+      expect(r.calls.find(c => c.body?.action === "brief")?.body, argv.join(" ")).toEqual({ action: "brief", brief: wire });
+      expect(r.out, argv.join(" ")).toContain("T-1 brief filed (rev 8)");
       expect(r.err, argv.join(" ")).toBe("--json <file> is deprecated for brief: use --file <file>");
     }
   });
-  it("--json=<value> that is no file is refused in words, never taken for the output switch", async () => {
-    const brief = await cli(["brief", "T-1", "--json=false"], hub);
-    expect(brief.code).toBe(2);
-    expect(brief.err).toContain("--json takes no value");   // the file named false cannot be read
-    expect(brief.err).toContain("--file");
-    expect(brief.calls).toEqual([]);
-    for (const argv of [["show", "T-1", "--json=false"], ["brief", "T-1", "--show", "--json=x"]]) {
+  it("brief: --file together with --json <file> is a usage error, and so is a bare --json with the flags; nothing is sent", async () => {
+    const both = await cli(["brief", "T-1", "--file", "a.json", "--json", "b.json"], hub, { "a.json": "{}", "b.json": "{}" });
+    expect(both.code).toBe(2);
+    expect(both.err).toContain("--file");
+    expect(both.out).toBe("");
+    expect(both.calls).toEqual([]);
+    const bare = await cli(["brief", "T-1", "--summary", "s", "--left-out", "n", "--limit", "n", "--json"], hub);
+    expect(bare.code).toBe(2);
+    expect(bare.err).toContain("--out-json");
+    expect(bare.calls).toEqual([]);
+  });
+  it("--json=<value> on any command but brief is refused in words, never taken for the output switch", async () => {
+    for (const argv of [["show", "T-1", "--json=false"], ["list", "--json=x"], ["review", "T-1", "--json=1"]]) {
       const r = await cli(argv, hub);
       expect(r.code, argv.join(" ")).toBe(2);
       expect(r.out, argv.join(" ")).toBe("");
       expect(r.err, argv.join(" ")).toContain("--json takes no value");
+      expect(r.calls, argv.join(" ")).toEqual([]);
     }
   });
   it("an unquoted flag value in brief names its real cause: the stray word, not --file", async () => {
@@ -144,14 +151,16 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     expect(r.err).toContain("quote");
     expect(r.err).not.toContain("deprecated");
     expect(r.calls).toEqual([]);
-    const withJson = await cli(["brief", "T-1", "--summary", "did", "it", "--left-out", "nothing", "--limit", "none", "--json"], hub);   // no such file: still the stray word
-    expect(withJson.code).toBe(2);
-    expect(withJson.err).toContain('unexpected word "it"');
   });
-  it("brief --show --json with no brief filed prints the proof view, not the sentence", async () => {
+
+  it("brief --show --json with no brief filed prints the proof view, and --from-last prints null, never the sentence", async () => {
     const r = await cli(["brief", "T-1", "--show", "--json"], hub);
     expect(r.code, r.err).toBe(0);
     expect(document(r.out)).toMatchObject({ brief: null, coverage: [item("tests: x"), item("manual: y")] });
+    const last = await cli(["brief", "T-1", "--show", "--from-last", "--json"], hub);
+    expect(document(last.out)).toBeNull();
+    const viaOut = await cli(["brief", "T-1", "--show", "--out-json"], hub);
+    expect(document(viaOut.out)).toMatchObject({ brief: null });
   });
   it("assign with --proof and --json prints one document, not one per call", async () => {
     const r = await cli(["assign", "T-1", "builder", "--proof", "tests: x", "--json"], hub);
@@ -198,6 +207,25 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     expect((document(r.out) as { task: { key: string } }).task.key).toBe("T-1");
     expect(r.err).toContain("refused:");
   });
+  it("plain new --proof whose proof list is refused still shows the key of the task that was filed", async () => {
+    const r = await cli(["new", "Ship it", "--proof", "bad"], { ...hub, "POST /api/agent/board/tasks": { task: doing, event: event({ kind: "created", status: "todo" }) }, [`POST ${TASK} proof_list`]: refuse("bad_item") });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("T-1  Ship it");
+    expect(r.err).toContain("refused:");
+  });
+  it("plain new --proof, all answered, shows the task once, as before", async () => {
+    const r = await cli(["new", "Ship it", "--proof", "tests: x"], { ...hub, "POST /api/agent/board/tasks": { task: doing, event: event({ kind: "created", status: "todo" }) } });
+    expect(r.code, r.err).toBe(0);
+    expect(r.out.split("\n").filter(l => l.startsWith("T-1  Ship it"))).toHaveLength(1);
+  });
+  it("a free-text word that ends in .json is the title or the comment, not a value of --json", async () => {
+    const filed = await cli(["new", "--json", "Bump package.json"], { ...hub, "POST /api/agent/board/tasks": { task: doing, event: event({ kind: "created", status: "todo" }) } });
+    expect(filed.code, filed.err).toBe(0);
+    expect(filed.calls[0]?.body).toMatchObject({ title: "Bump package.json" });
+    const said = await cli(["comment", "T-1", "--json", "regenerated tsconfig.json"], { ...hub, [`POST ${TASK} comment`]: { task: doing, event: event({ kind: "commented", text: "x" }) } });
+    expect(said.code, said.err).toBe(0);
+    expect(said.calls[0]?.body).toEqual({ action: "comment", text: "regenerated tsconfig.json" });
+  });
   it("without --json a refused note leaves the move on stdout and the refusal on stderr, as before", async () => {
     const r = await cli(["review", "T-1", "--note", "ran it"], { ...hub, [`POST ${TASK} comment`]: refuse("too_long") });
     expect(r.code).toBe(1);
@@ -210,10 +238,11 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     expect(r.err).toBe("(proof references are read from a stand-in forge, not GitHub)");
   });
 
-  it("--json never takes the word after it: parseArgs leaves it positional, whatever the order", () => {
-    expect(parseArgs(["show", "--json", "T-1"])).toEqual({ positional: ["show", "T-1"], flags: { json: true } });
-    expect(parseArgs(["--json", "list"])).toEqual({ positional: ["list"], flags: { json: true } });
-    expect(parseArgs(["list", "--json", "--mine"])).toEqual({ positional: ["list"], flags: { json: true, mine: true } });
+  it("parseArgs: the flags named as booleans never take the word after them; with none named every flag does, as morndo-decide has it", () => {
+    expect(parseArgs(["show", "--json", "T-1"], ["json"])).toEqual({ positional: ["show", "T-1"], flags: { json: true } });
+    expect(parseArgs(["list", "--json", "--mine"], ["json"])).toEqual({ positional: ["list"], flags: { json: true, mine: true } });
+    expect(parseArgs(["list", "--json=x"], ["json"]).flags).toEqual({ json: "x" });
+    expect(parseArgs(["show", "--json", "T-1"])).toEqual({ positional: ["show"], flags: { json: "T-1" } });
   });
   it("--json before the key still means the output form: show --json T-1, block --json T-1 --why …", async () => {
     const shown = await cli(["show", "--json", "T-1"], hub);

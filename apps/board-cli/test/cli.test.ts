@@ -556,7 +556,7 @@ describe("the brief and the proof (B13 to B16)", () => {
 
   it("brief without its required flags is a usage error naming the flag", async () => {
     await atReview("T-1", "Ship the totals row");
-    expect(HELP).toContain('brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --file brief.json');
+    expect(HELP).toContain('brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json');
     expect(HELP).toContain("brief T-12 --show [--json] [--from-last]   the brief the hub holds and how each reference checked out");
     expect(HELP).toContain('done T-12 --why "…" [--not-live "…"] [--proof-override "<reason>"]');
     const noSummary = await builderSays("brief", "T-1", "--left-out", "nothing", "--limit", "none known");

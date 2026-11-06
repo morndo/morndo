@@ -46,6 +46,24 @@ What a lane may do is the hub's rule, not the prompt's: a worker token can't ass
 says, and the record keeps who changed what. The prompt is there so the agents keep the board true without being
 told each time.
 
+## Reading the board from a script: `--json`
+
+`--json` on any `morndo-board` command that prints data makes stdout exactly one JSON document and moves every other
+line (notices such as "proof list updated", the unwatched-block warning) to stderr, so `jq` can read stdout. It takes
+no value: the word after it stays an argument (`morndo-board show --json T-12`). `help` and `prompt` have no JSON form.
+
+- `review T-12 --note "…"`, `assign T-12 <lane> --proof "…"` and `new "…" --proof "…"` make more than one call. Under
+  `--json` stdout is the answer of the last call that went through. If a later call is refused, stdout still carries
+  that answer (the task has moved, been assigned, or been filed), the refusal goes to stderr and the exit code is 1:
+  **check the exit code before you trust the document.** Without `--json` the same commands print each answer as it
+  comes, and `new` tells the key of the task it filed even when its proof list is refused.
+- `proof T-12 --add/--drop … --json` prints the proof list as a JSON array, as `proof T-12 --json` does.
+- `brief` is the one command where `--json <file>` already meant something: the file with the brief (also `--file
+  <file>`, which is the spelling to use; `--json <file>` prints one line on stderr saying so). Its machine output is
+  `--out-json`: filing a brief, or `brief T-12 --show --out-json`, prints the proof view the hub holds. `--show
+  --from-last` prints the brief itself.
+- `inbox --json` and `stale --json` print an array, `[]` when nothing waits.
+
 ## For the manager's lane
 
 <!-- prompt:manager -->

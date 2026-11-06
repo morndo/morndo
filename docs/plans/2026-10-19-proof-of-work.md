@@ -88,7 +88,7 @@ morndo-board brief T-12 \
   --pr acme/shop#42@3e9d1a7 \
   --ci acme/shop@3e9d1a7:ci,lint \
   --test "npm test -- totals: 48 passed, 0 failed, 2 skipped"
-morndo-board brief T-12 --file brief.json      # the wire shape, for longer briefs (--json brief.json still works)
+morndo-board brief T-12 --json brief.json      # the wire shape, for longer briefs
 morndo-board brief T-12 --show [--json]        # what the hub holds, with each ref's state
 ```
 

@@ -105,16 +105,16 @@ describe("morndo-decide card", () => {
     expect(json.code).toBe(0);
     expect(json.out.split("\n").at(-1)).toBe("[buttons ny-80] merge=Merge now | hold=Hold until Monday");
   });
-  it("--json puts no word after it in its place (T-873: parseArgs is shared with the board's CLI): before the file it is the switch, and a path named *.json after it is still no file", async () => {
+  it("--json keeps its parse in morndo-decide (T-873: parseArgs is shared with the board's CLI): a flag takes the word after it, so a path after --json is no file, and before the file nothing changes", async () => {
     const draft = JSON.stringify({
       id: "ny-80", outcome: "The release is ready to merge.", recommend: "merge",
       options: [{ key: "merge", label: "Merge now" }, { key: "hold", label: "Hold until Monday" }],
       default: "hold",
     });
-    const before = await cli(["card", "--json", "card.txt"], { "card.txt": draft });
-    expect(before.code, before.err.join("\n")).toBe(0);
-    expect(before.out.split("\n").at(-1)).toBe("[buttons ny-80] merge=Merge now | hold=Hold until Monday");
-    expect((await cli(["card", "--json", "card.json"], { "card.json": draft })).code).toBe(2);   // as before: card.json is --json's value, no file is named
+    expect((await cli(["card", "--json", "card.json"], { "card.json": draft })).code).toBe(2);   // as on main: card.json is --json's value, no file is named
+    expect((await cli(["card", "--json", "card.txt"], { "card.txt": draft })).code).toBe(2);
+    const after = await cli(["card", "card.json", "--json"], { "card.json": draft });
+    expect(after.code, after.err.join("\n")).toBe(0);
   });
   it("--json: a newline in the risk cannot add a buttons line to the printed card", async () => {
     // Only --json can carry a newline in: the card file's fields are lines. The exact attempt: a fake tap line.
