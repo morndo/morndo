@@ -1,28 +1,16 @@
 // Shared by the agent's tests: a temporary HOME, an isolated tmux server (`tmux -L test-<uuid>`, never the owner's; the
 // helper node-ops' tests share), a logger that keeps its lines, and polling.
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, type Logger } from "../src/log.ts";
 
 export { isolatedTmux, type TestTmux } from "../../../packages/node-ops/test/isolated-tmux.ts";
+export { readSubmitted, wholeLines } from "../../../packages/node-ops/test/whole-lines.ts";
 
 export function tempHome(prefix = "morndo-node-"): { home: string; cleanup: () => void } {
   const home = realpathSync(mkdtempSync(join(tmpdir(), prefix)));    // realpath: macOS /var is a link to /private/var
   return { home, cleanup: () => rmSync(home, { recursive: true, force: true }) };
-}
-
-// The lines a file holds so far that are whole: each ended by its newline. A reader can run while the fake box is in
-// the middle of an append, and then sees the start of a long line; that part is not a line yet and waits for the rest.
-export function wholeLines(text: string): string[] {
-  const end = text.lastIndexOf("\n");
-  return end < 0 ? [] : text.slice(0, end).split("\n").filter(Boolean);
-}
-
-// What a fake box in <dir> has had submitted so far (its submitted.jsonl, one JSON string per line), whole lines only.
-export function readSubmitted(dir: string): string[] {
-  const file = join(dir, "submitted.jsonl");
-  return existsSync(file) ? wholeLines(readFileSync(file, "utf8")).map(l => JSON.parse(l) as string) : [];
 }
 
 export const wait = (ms: number) => new Promise(r => setTimeout(r, ms));

@@ -30,6 +30,7 @@ import type { TestHooks } from "../apps/node-agent/src/test-hooks.ts";
 import type { FleetConfig } from "../apps/fleet/src/config.ts";
 import { exactSession, tmuxArgv, tmuxLiteral } from "../packages/node-ops/src/tmux-cli.ts";
 import { isolatedTmux } from "../packages/node-ops/test/isolated-tmux.ts";
+import { readJsonLines, readSubmitted } from "../packages/node-ops/test/whole-lines.ts";
 import { OP_NAMES, type Delivery as DrillDelivery, type Expect, type HookEvent, type OpName, type Pane } from "../packages/protocol/src/fleet.ts";
 import { parseWorkerId } from "../packages/protocol/src/worker-id.ts";
 
@@ -188,10 +189,7 @@ export async function controlAt(dir: string, c: Control): Promise<void> {
   const done = join(dir, "applied");
   await until(`the box in ${dir} to apply ${JSON.stringify(c)}`, () => existsSync(done) && Number(readFileSync(done, "utf8")) >= n, 5000, 20);
 }
-export const submittedAt = (dir: string): string[] => {
-  const file = join(dir, "submitted.jsonl");
-  return existsSync(file) ? readFileSync(file, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as string) : [];
-};
+export { readSubmitted } from "../packages/node-ops/test/whole-lines.ts";
 // A lane: one window running the fake input box. With `claudeHome` (an agent's HOME), the box writes its session file and
 // transcript into <claudeHome>/.claude, so the agent reports its session and status and serves its transcript.
 // `startDelayMs`: the box shows Claude Code starting for that long; `wait: false` returns before the box is drawn.
@@ -211,13 +209,12 @@ export async function fakeLane(t: TmuxServer, o: {
   const transcript = claude && sessionId ? join(claude, "projects", "-qa", `${sessionId}.jsonl`) : null;
   return {
     window: o.window, paneId, dir, sessionId, transcript,
-    submitted: () => submittedAt(dir),
+    submitted: () => readSubmitted(dir),
     screen,
     draft: text => { t.run("send-keys", "-t", paneId, "-l", text); },
     clear: () => { t.run("send-keys", "-t", paneId, "C-u"); },
     control: c => controlAt(dir, c),
-    entries: () => (transcript && existsSync(transcript)
-      ? readFileSync(transcript, "utf8").split("\n").filter(Boolean).map(l => JSON.parse(l) as Record<string, unknown>) : []),
+    entries: () => (transcript ? readJsonLines(transcript) as Record<string, unknown>[] : []),
     enters: () => {
       const raw = existsSync(join(dir, "raw.bin")) ? readFileSync(join(dir, "raw.bin")).toString("latin1") : "";
       const end = raw.lastIndexOf("\x1b[201~");

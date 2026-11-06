@@ -19,7 +19,6 @@ let lane = { workerId: "", stamp: "" };
 const wrappers: string[] = [];
 const dirOf = (name: string) => { const d = join(home.home, name); mkdirSync(d, { recursive: true }); return d; };
 const claude = (dir: string) => `${process.execPath} ${FIXTURE} ${dir}`;
-const submitted = (dir: string) => readSubmitted(dir);
 const screen = (target: string) => t.tmux("capture-pane", "-p", "-t", target);
 
 async function startLane(dir: string, name = "lane-a") {
@@ -50,10 +49,10 @@ describe("pane.send", () => {
     const typedAt = r.ok ? (r.result as { typedAt: number }).typedAt : 0;
     expect(typedAt).toBeGreaterThanOrEqual(before);
     expect(typedAt).toBeLessThanOrEqual(Date.now());
-    expect(await until(() => submitted(join(home.home, "a")).length === 1)).toBe(true);
+    expect(await until(() => readSubmitted(join(home.home, "a")).length === 1)).toBe(true);
     expect(await send("hello world", "hub:s1")).toEqual(r.ok ? { ...r, id: "r2" } : r);
     await wait(500);
-    expect(submitted(join(home.home, "a"))).toEqual(["hello world"]);
+    expect(readSubmitted(join(home.home, "a"))).toEqual(["hello world"]);
   });
 
   it("refuses with no_pane (not executed) when the window, server or session differ, and frees the key for the retry", async () => {
@@ -62,8 +61,8 @@ describe("pane.send", () => {
       expect(h.doneKeys.status("hub:s2")).toEqual({ state: "unknown" });
     }
     expect(await send("only once", "hub:s2")).toMatchObject({ ok: true, result: { problem: null } });
-    expect(await until(() => submitted(join(home.home, "a")).length === 1)).toBe(true);
-    expect(submitted(join(home.home, "a"))).toEqual(["only once"]);
+    expect(await until(() => readSubmitted(join(home.home, "a")).length === 1)).toBe(true);
+    expect(readSubmitted(join(home.home, "a"))).toEqual(["only once"]);
   });
 
   it("reports typedAt on the node's wall clock, which the clockOffsetMs test hook moves", async () => {
@@ -90,8 +89,8 @@ describe("pane.send", () => {
     t.tmux("send-keys", "-t", "=main:0", "BSpace", "BSpace", "BSpace", "BSpace");
     expect(await until(() => !screen("=main:0").includes("half"))).toBe(true);
     expect(await send("the message", "hub:s3")).toMatchObject({ ok: true, result: { problem: null } });
-    expect(await until(() => submitted(join(home.home, "a")).length === 1)).toBe(true);
-    expect(submitted(join(home.home, "a"))).toEqual(["the message"]);
+    expect(await until(() => readSubmitted(join(home.home, "a")).length === 1)).toBe(true);
+    expect(readSubmitted(join(home.home, "a"))).toEqual(["the message"]);
   });
 });
 
@@ -111,7 +110,7 @@ describe("pane reuse after a tmux restart (spec §9)", () => {
     const fresh = await restartWithReusedPane();
     expect(await send("meant for the old lane", "hub:r1")).toMatchObject({ ok: false, error: { code: "no_pane", executed: "no" } });
     await wait(600);
-    expect(submitted(fresh)).toEqual([]);
+    expect(readSubmitted(fresh)).toEqual([]);
   });
 
   it("negative control: with the expectation check disabled, the same send types into the new pane", async () => {
@@ -120,8 +119,8 @@ describe("pane reuse after a tmux restart (spec §9)", () => {
     const unguarded = opsHarness({ home: other.home, socket: t.socket, guard: () => true });
     try {
       expect(await send("meant for the old lane", "hub:r2", {}, lane.workerId, unguarded)).toMatchObject({ ok: true, result: { problem: null } });
-      expect(await until(() => submitted(fresh).length === 1)).toBe(true);
-      expect(submitted(fresh)).toEqual(["meant for the old lane"]);
+      expect(await until(() => readSubmitted(fresh).length === 1)).toBe(true);
+      expect(readSubmitted(fresh)).toEqual(["meant for the old lane"]);
     } finally {
       unguarded.close();
       other.cleanup();
@@ -134,8 +133,8 @@ describe("pane reuse after a tmux restart (spec §9)", () => {
     const unguarded = opsHarness({ home: other.home, socket: t.socket, hooks: { noExpect: true } });
     try {
       expect(await send("meant for the old lane", "hub:r3", {}, lane.workerId, unguarded)).toMatchObject({ ok: true, result: { problem: null } });
-      expect(await until(() => submitted(fresh).length === 1)).toBe(true);
-      expect(submitted(fresh)).toEqual(["meant for the old lane"]);
+      expect(await until(() => readSubmitted(fresh).length === 1)).toBe(true);
+      expect(readSubmitted(fresh)).toEqual(["meant for the old lane"]);
     } finally {
       unguarded.close();
       other.cleanup();
@@ -177,9 +176,9 @@ describe("a pane lock that comes too late (spec §5.3, \"Deadlines\")", () => {
     expect(held).toBe(1);
     expect(h.doneKeys.status("hub:late")).toEqual({ state: "unknown" });
     await wait(500);
-    expect(submitted(join(home.home, "a"))).toEqual([]);
+    expect(readSubmitted(join(home.home, "a"))).toEqual([]);
     expect(await send("in time", "hub:late", {}, lane.workerId, h, 5000)).toMatchObject({ ok: true });   // negative control: a deadline the lock makes
-    expect(await until(() => submitted(join(home.home, "a")).length === 1)).toBe(true);
+    expect(await until(() => readSubmitted(join(home.home, "a")).length === 1)).toBe(true);
   });
 
   // pane.send has a second check of its own: node-ops' tmux send asks the deadline's signal again before its paste. Keys
@@ -220,7 +219,7 @@ describe("a window named like an Object.prototype key (Task 8 review)", () => {
       expect(await until(() => screen(`=main:${name}`).includes("❯"))).toBe(true);
       const r = await h.call("pane.send", { workerId, text: `to ${name}`, expect: { server: lane.stamp, window: name } }, { key: `hub:${name}` });
       expect(r, `${name}: ${JSON.stringify(r)}`).toMatchObject({ ok: true, result: { problem: null } });
-      expect(await until(() => submitted(dir).length === 1), name).toBe(true);
+      expect(await until(() => readSubmitted(dir).length === 1), name).toBe(true);
     }
     expect(taken).toEqual([]);
     expect(await send("locked", "hub:lane-a")).toMatchObject({ ok: true });            // negative control: lane-a's lock is taken
@@ -242,7 +241,7 @@ describe("the pane lock (spec §3.1 \"Pane lock\")", () => {
       expect(await h.call("pane.send", { workerId: lane.workerId, text: "locked out", expect: { server: lane.stamp, window: "lane-a" } }, { key: "hub:l1", timeoutMs: 1500 }))
         .toMatchObject({ ok: false, error: { code: "busy", executed: "no" } });
       expect(h.doneKeys.status("hub:l1")).toEqual({ state: "unknown" });
-      expect(submitted(join(home.home, "a"))).toEqual([]);
+      expect(readSubmitted(join(home.home, "a"))).toEqual([]);
     } finally {
       holder.kill();
     }
@@ -284,7 +283,7 @@ describe("pane.send with a tmux that stalls at the paste", () => {
     try {
       expect(await send("late text", "hub:v44", {}, lane.workerId, h, 1500)).toMatchObject({ ok: false, error: { code: "timeout", executed: "no" } });
       await wait(1500);
-      expect(submitted(join(home.home, "a"))).toEqual([]);
+      expect(readSubmitted(join(home.home, "a"))).toEqual([]);
     } finally { process.env.PATH = saved; }
   }, 30_000);
   // The worst case for the deadline: the paste really runs (the wrapper calls tmux), then the client hangs past the
@@ -306,10 +305,10 @@ describe("pane.send with a tmux that stalls at the paste", () => {
       expect(performance.now() - t0).toBeGreaterThan(2000);                     // answered after the deadline, at the kill
       expect(first).toMatchObject({ ok: false, error: { code: "internal", executed: "maybe" } });
       expect(h.doneKeys.status("hub:killed-late")).toMatchObject({ state: "started" });
-      expect(await until(() => submitted(join(home.home, "a")).length === 1)).toBe(true);
+      expect(await until(() => readSubmitted(join(home.home, "a")).length === 1)).toBe(true);
       expect(await send("typed once", "hub:killed-late", {}, lane.workerId, h, 5000)).toMatchObject({ ok: false, error: { code: "uncertain", executed: "maybe" } });
       await wait(1000);
-      expect(submitted(join(home.home, "a"))).toEqual(["typed once"]);
+      expect(readSubmitted(join(home.home, "a"))).toEqual(["typed once"]);
     } finally { process.env.PATH = saved; }
   }, 30_000);
 });
