@@ -449,8 +449,11 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         // B21 (ADR-0041): a block the hub took while warning says so, with what is coming: from when a block without
         // a wait is refused, and the waits it could name instead — the hub's own setting may say another date or mode.
         const change = (d.event as TaskEvent | undefined)?.change;
-        if (change !== undefined && change.kind === "moved" && change.unwatched === true)
-          io.out(`no watched wait: from ${new Date(BLOCK_GATE_FROM).toISOString().slice(0, 10)} a block without --on or --decision is refused; name one (--on T-12, #93, owner/repo#93, ny-530 or until:<time>, at most 31 days ahead) (unless the hub's MORNDO_BLOCK_GATE says otherwise)`);
+        if (change !== undefined && change.kind === "moved" && change.unwatched === true) {
+          // with --json the notice goes to stderr: jq reads stdout, and nothing but the task may be on it.
+          const say = flags.json === true ? io.err : io.out;
+          say(`no watched wait: from ${new Date(BLOCK_GATE_FROM).toISOString().slice(0, 10)} a block without --on or --decision is refused; name one (--on T-12, #93, owner/repo#93, ny-530 or until:<time>, at most 31 days ahead) (unless the hub's MORNDO_BLOCK_GATE says otherwise)`);
+        }
         return 0;
       }
       case "review": {
