@@ -49,7 +49,7 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   prompt --role manager|worker          the instructions block for a lane's prompt
 
 --json, on any command that prints data, makes stdout exactly one JSON document and moves every other line to stderr;
-it never takes the word after it. (help and prompt have no JSON form.)
+it takes no value. (help and prompt have no JSON form; brief's old '--json brief.json' still works, deprecated for --file.)
 
 Environment: MORNDO_HUB (the hub's address), MORNDO_AGENT_TOKEN (from \`morndo agent-token new\`), MORNDO_LANE (this
 lane's name; without it, the tmux window's name).`;
@@ -148,8 +148,9 @@ const watchedOf = (d: Record<string, unknown>, tasks: readonly Task[], now: numb
   return keys;
 };
 
-// Flags: --name value, --name=value, or a bare --flag; the rest are positional, in order. --json is the one flag that
-// never takes the word after it (T-873): it is only ever the output switch, so that word stays positional.
+// Flags: --name value, --name=value, or a bare --flag; the rest are positional, in order. --json is the output switch
+// (T-873) and takes the word after it only when that word names a .json file (the old `brief --json brief.json`); any
+// other word, a task key or an id, stays positional. Shared with morndo-decide.
 export function parseArgs(argv: readonly string[]): { positional: string[]; flags: Record<string, string | true> } {
   const positional: string[] = [];
   const flags: Record<string, string | true> = {};
@@ -158,7 +159,11 @@ export function parseArgs(argv: readonly string[]): { positional: string[]; flag
     if (!a.startsWith("--")) { positional.push(a); continue; }
     const eq = a.indexOf("=");
     if (eq !== -1) { flags[a.slice(2, eq)] = a.slice(eq + 1); continue; }
-    if (a === "--json") { flags.json = true; continue; }
+    if (a === "--json") {
+      const next = argv[i + 1];
+      if (next !== undefined && /\.json$/i.test(next)) { flags.json = next; i++; } else flags.json = true;
+      continue;
+    }
     const next = argv[i + 1];
     if (next !== undefined && !next.startsWith("--")) { flags[a.slice(2)] = next; i++; }
     else flags[a.slice(2)] = true;
@@ -199,7 +204,9 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
   const text = (f: string) => (typeof flags[f] === "string" ? (flags[f] as string) : undefined);
   // T-873: under --json, stdout is exactly one JSON document (jq reads it), so every sentence that is not that
   // document goes to stderr instead — the notice helper is the one way each of them is written.
-  const asJson = flags.json !== undefined;
+  // A string is a value: brief's old file form, or a mistake (refused below).
+  let asJson = flags.json === true;
+  const jsonValue = typeof flags.json === "string" ? flags.json : undefined;
   const notice = (l: string) => (asJson ? io.err : io.out)(l);
   try {
     if (cmd === "help" || flags.help === true) { io.out(HELP); return 0; }
@@ -209,6 +216,8 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       io.out(promptFor(role).trimEnd());
       return 0;
     }
+    if (jsonValue !== undefined && !(cmd === "brief" && flags.show !== true))
+      throw new Usage(`--json takes no value (${JSON.stringify(jsonValue)}); it asks for JSON output. brief's file form is --file <file>`);
     const hub = (env.MORNDO_HUB ?? "").replace(/\/+$/, "");
     const token = env.MORNDO_AGENT_TOKEN ?? "";
     if (!hub || !token) throw new Usage("set MORNDO_HUB (the hub's address) and MORNDO_AGENT_TOKEN (from `morndo agent-token new`)");
@@ -265,6 +274,21 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       if (event && !events.length) io.out(`  ${who(event.actor)} ${changeText(event)}`);
     };
     const act = async (k: string, action: Record<string, unknown>) => showTask(await call("POST", `/api/agent/board/tasks/${k}`, action));
+    // A command of several calls. Plain, each answer that has `plain` is shown as it comes; under --json stdout is one
+    // document, the last answer with `keep` that came, printed even when a later call is refused (the refusal goes to
+    // stderr and the exit code is the refusal's), so a script can tell what did take effect.
+    const chain = async (steps: { call: () => Promise<Record<string, unknown>>; plain?: boolean; keep?: boolean }[]) => {
+      let kept: Record<string, unknown> | undefined;
+      try {
+        for (const step of steps) {
+          const d = await step.call();
+          if (!asJson && step.plain !== false) showTask(d);
+          if (step.keep !== false) kept = d;
+        }
+      } finally { if (asJson && kept !== undefined) showTask(kept); }
+    };
+    const post = (k: string, action: Record<string, unknown>) => () => call("POST", `/api/agent/board/tasks/${k}`, action);
+    const read = (k: string) => () => call("GET", `/api/agent/board/tasks/${k}`);
     const printProofList = (proof: ProofView | undefined) => {
       if (proof === undefined) { io.out("no proof list"); return; }
       const coverage = proof.coverage ?? [];
@@ -299,14 +323,14 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
           if (!STATUSES.has(status)) throw new Usage(`--status takes one of ${LIST_ORDER.join(", ")}`);
           tasks = tasks.filter(t => t.status === status);
         }
-        if (asJson) { io.out(JSON.stringify(tasks.map(t => ({ ...t, ...(orphans.has(t.key) ? { orphan: true } : {}), ...(proofLines !== undefined && t.key in proofLines ? { proof: proofLines[t.key] } : {}), ...(readsOf.has(t.key) ? { waitsRead: readsOf.get(t.key) } : {}), ...(stale.has(t.key) ? { staleBlock: true } : {}) })))); return 0; }
+        if (asJson) { if (d.standIn === true) notice("(proof references are read from a stand-in forge, not GitHub)"); io.out(JSON.stringify(tasks.map(t => ({ ...t, ...(orphans.has(t.key) ? { orphan: true } : {}), ...(proofLines !== undefined && t.key in proofLines ? { proof: proofLines[t.key] } : {}), ...(readsOf.has(t.key) ? { waitsRead: readsOf.get(t.key) } : {}), ...(stale.has(t.key) ? { staleBlock: true } : {}) })))); return 0; }
         if (!tasks.length) { io.out(flags.mine === true ? `nothing assigned to ${me ?? "you"}` : "the board is empty"); return 0; }
         const lanes = new Set(d.lanes as string[]);
         // B11: each task's merges by key, so a row can say where its merge stands (the hub's label, its own brackets).
         const mergedBy = new Map((Array.isArray(d.merged) ? d.merged as MergedView[] : []).map(m => [m.key, m]));
         // B23: the pull requests that merged without a merge record, by key, as the hub flags them now (live).
         const prMerged = new Map(((d.mergedPrs as { key: string; prs: string[] }[] | undefined) ?? []).map(f => [f.key, f.prs.join(" · ")]));
-        if (d.standIn === true) notice("(proof references are read from a stand-in forge, not GitHub)");
+        if (d.standIn === true) io.out("(proof references are read from a stand-in forge, not GitHub)");
         for (const s of LIST_ORDER) {
           const rows = tasks.filter(t => t.status === s);
           if (!rows.length) continue;
@@ -373,10 +397,9 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const body = { title, ...(text("desc") !== undefined ? { description: text("desc") } : {}), ...(text("assign") !== undefined ? { assignee: text("assign") } : {}), ...(priority ? { priority } : {}), ...(status ? { status } : {}) };
         const created = await call("POST", "/api/agent/board/tasks", body);
         const k = (created.task as Task).key;
-        if (proofSpecs.length > 0) {
-          await call("POST", `/api/agent/board/tasks/${k}`, { action: "proof_list", add: proofSpecs });   // a refusal here leaves the task as filed
-          showTask(await call("GET", `/api/agent/board/tasks/${k}`));
-        } else showTask(created);
+        // a refusal of the proof list leaves the task as filed: under --json that is the document
+        await chain([{ call: async () => created, plain: proofSpecs.length === 0 },
+          ...(proofSpecs.length > 0 ? [{ call: post(k, { action: "proof_list", add: proofSpecs }), plain: false, keep: false }, { call: read(k) }] : [])]);
         return 0;
       }
       case "assign": {
@@ -384,13 +407,9 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const to = rest[1];
         if (!to) throw new Usage("usage: morndo-board assign T-12 <lane>|none");
         const proofSpecs = valuesOf(argv, "proof");
-        // T-873: both calls still go out, but under --json stdout is one document — the final read, not one per call.
-        const assigned = await call("POST", `/api/agent/board/tasks/${k}`, { action: "assign", to: to === "none" ? null : to });
-        if (!asJson || proofSpecs.length === 0) showTask(assigned);
-        if (proofSpecs.length > 0) {
-          await call("POST", `/api/agent/board/tasks/${k}`, { action: "proof_list", add: proofSpecs });   // a refusal here leaves the task as filed
-          showTask(await call("GET", `/api/agent/board/tasks/${k}`));
-        }
+        // a refusal of the proof list leaves the task as assigned: under --json that is the document
+        await chain([{ call: post(k, { action: "assign", to: to === "none" ? null : to }) },
+          ...(proofSpecs.length > 0 ? [{ call: post(k, { action: "proof_list", add: proofSpecs }), plain: false, keep: false }, { call: read(k) }] : [])]);
         return 0;
       }
       case "proof": {
@@ -471,20 +490,24 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       }
       case "review": {
         const k = key(rest[0]);
-        // T-873: the move and the note both go out whatever the form; under --json stdout is one document, the last
-        // call's answer, so the first is shown only in the plain form.
-        const moved = await call("POST", `/api/agent/board/tasks/${k}`, { action: "move", to: "review" });
         const note = text("note");
-        if (!asJson || !note) showTask(moved);
-        if (note) showTask(await call("POST", `/api/agent/board/tasks/${k}`, { action: "comment", text: note }));
+        await chain([{ call: post(k, { action: "move", to: "review" }) }, ...(note ? [{ call: post(k, { action: "comment", text: note }) }] : [])]);
         return 0;
       }
       // B13 (ADR-0035): the brief, the lane's word on what it did, with the references the board checks itself.
       case "brief": {
         const k = key(rest[0]);
-        // T-873: the file form is --file — --json is the output switch and never takes a path, so a path that landed
-        // in the positionals is the old form; refuse it in words, before anything reaches the hub.
-        if (rest[1] !== undefined) throw new Usage("usage: morndo-board brief T-12 --file brief.json   # the file form is --file now; --json asks for JSON output");
+        // T-873: the file form is --file; --json is the output switch. The old `--json brief.json` keeps working (a
+        // path named *.json after --json, or a file that exists left positional by a bare --json), with one line on
+        // stderr, and prints what it always printed. Any other word after the key is refused for what it is.
+        let legacyPath = jsonValue;
+        let legacyRaw: string | undefined;
+        if (legacyPath === undefined && asJson && flags.show !== true && flags.file === undefined && rest[1] !== undefined && io.readFile !== undefined) {
+          try { legacyRaw = await io.readFile(rest[1]); legacyPath = rest[1]; } catch { /* no such file: a stray word, below */ }
+        }
+        const stray = legacyRaw !== undefined ? rest[2] : rest[1];
+        if (stray !== undefined) throw new Usage(`unexpected word ${JSON.stringify(stray)} after the task key; quote a flag value that has spaces, like --summary "…" (the file form is --file brief.json)`);
+        if (legacyPath !== undefined && flags.show !== true) asJson = false;   // the old form printed the plain lines
         // --show: what the hub holds and how each reference checked out; --from-last, the brief of the last round even
         // once it is stale (a new round starts from it); nothing ever filed, one plain line.
         if (flags.show === true) {
@@ -492,11 +515,9 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
           const events = (d.events as TaskEvent[] | undefined) ?? [];
           let lastBrief: ProofView["brief"] = null;
           for (const e of events) if (e.change.kind === "briefed") lastBrief = e.change.brief;
-          if (lastBrief === null) {
-            if (asJson) io.out(JSON.stringify(null));   // T-873: one document, not the sentence
-            else io.out("no brief filed");
-            return 0;
-          }
+          // under --json one shape for the family: the proof view, as filing prints it (--from-last asks for the brief itself)
+          if (lastBrief === null && asJson) { io.out(flags["from-last"] === true ? "null" : JSON.stringify(d.proof ?? null, null, 2)); return 0; }
+          if (lastBrief === null) { io.out("no brief filed"); return 0; }
           if (flags["from-last"] === true) { io.out(JSON.stringify(lastBrief, null, 2)); return 0; }
           if (asJson) { io.out(JSON.stringify(d.proof ?? null, null, 2)); return 0; }
           const shown = d.proof as ProofView | undefined;
@@ -506,11 +527,13 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         // Filing: the required words from the flags, the references and the attested checks in the order the command
         // line gave them (a flag may repeat), or the whole wire shape from a file.
         let brief: Record<string, unknown>;
-        const filePath = text("file");
+        const filePath = text("file") ?? legacyPath;
         if (filePath !== undefined) {
           if (io.readFile === undefined) throw new Usage("usage: morndo-board brief T-12 --file <file>   # the wire shape, from a file this CLI can read");
           let raw: string;
-          try { raw = await io.readFile(filePath); } catch { throw new Usage(`usage: morndo-board brief T-12 --file <file>   # cannot read ${filePath}`); }
+          try { raw = legacyRaw !== undefined && filePath === legacyPath ? legacyRaw : await io.readFile(filePath); }
+          catch { throw new Usage(`usage: morndo-board brief T-12 --file <file>   # cannot read ${filePath}${filePath === legacyPath ? " (--json takes no value: it asks for JSON output)" : ""}`); }
+          if (filePath === legacyPath) io.err("--json <file> is deprecated for brief: use --file <file>");
           try { brief = JSON.parse(raw) as Record<string, unknown>; } catch { throw new Usage(`usage: morndo-board brief T-12 --file <file>   # ${filePath} is not JSON`); }
         } else {
           const summary = text("summary"), leftOut = text("left-out"), limits = text("limit");
@@ -531,7 +554,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         // What the hub holds right after: the proof block of the brief just filed, its references on their way; under
         // --json that read is stdout's one document (T-873).
         const d = await call("GET", `/api/agent/board/tasks/${k}`);
-        if (asJson) { io.out(JSON.stringify({ event: r.event, proof: d.proof ?? null })); return 0; }
+        if (asJson) { io.out(JSON.stringify(d.proof ?? null, null, 2)); return 0; }
         const proof = d.proof as ProofView | undefined;
         if (proof !== undefined) for (const l of proofBlock(proof)) io.out(l);
         return 0;

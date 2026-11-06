@@ -535,21 +535,21 @@ describe("the brief and the proof (B13 to B16)", () => {
     expect(proofHub.proof.view("T-1")?.brief).toMatchObject({ refs: [], noCode: "an analysis, no code changed" });
   });
 
-  it("brief --file reads the wire shape from a file", async () => {
+  it("brief --json reads the wire shape from a file", async () => {
     await atReview("T-1", "Ship the totals row");
     const wire = {
       summary: "Totals row rounds to cents", decisions: "round at display, not at sum", leftOut: "nothing", limits: "locale formats not covered",
       refs: [PR], attested: [{ kind: "tests", how: "npm test: 48 passed, 0 failed" }],
     };
     files.set("brief.json", JSON.stringify(wire));
-    const filed = await builderSays("brief", "T-1", "--file", "brief.json");
+    const filed = await builderSays("brief", "T-1", "--json", "brief.json");
     expect(filed.code).toBe(0);
     expect(filed.out).toContain("T-1 brief filed (rev 4)");
     expect(proofHub.proof.view("T-1")?.brief).toEqual({ ...wire, noCode: "" });
     // a file that is not there or not JSON is a usage error, never a hub call
     files.set("broken.json", "{not json");
-    expect(await builderSays("brief", "T-1", "--file", "broken.json")).toMatchObject({ code: 2 });
-    const missing = await builderSays("brief", "T-1", "--file", "missing.json");
+    expect(await builderSays("brief", "T-1", "--json", "broken.json")).toMatchObject({ code: 2 });
+    const missing = await builderSays("brief", "T-1", "--json", "missing.json");
     expect(missing).toMatchObject({ code: 2 });
     expect(missing.err).toContain("usage:");
   });

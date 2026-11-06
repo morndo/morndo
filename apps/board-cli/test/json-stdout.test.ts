@@ -1,6 +1,7 @@
 // --json on every command (T-873): stdout is exactly one JSON document, and every notice goes to stderr. The hub is a
 // fake that answers the shapes the agents' route returns, by method, path and action; each test names the command it
-// pins. parseArgs lets --json take the word after it as a value, so the order of the flags is pinned too.
+// pins. --json never takes the word after it (only a path that names a .json file, brief's old file form), so the order
+// of the flags is pinned too.
 import { describe, expect, it } from "vitest";
 import { parseArgs, run } from "../src/cli.ts";
 
@@ -28,7 +29,8 @@ async function cli(argv: string[], answers: Record<string, unknown>, files: Reco
       calls.push({ method, path, body });
       const hit = answers[`${method} ${path} ${String(body?.action)}`] ?? answers[`${method} ${path}`];
       if (hit === undefined) throw new Error(`the stub hub has no answer for ${method} ${path} ${String(body?.action)}`);
-      return new Response(JSON.stringify(hit), { status: 200, headers: { "content-type": "application/json" } });
+      const refusal = (hit as { refuse?: string }).refuse;
+      return new Response(JSON.stringify(refusal === undefined ? hit : { error: refusal }), { status: refusal === undefined ? 200 : 400, headers: { "content-type": "application/json" } });
     },
     lane: async () => "builder", out: l => out.push(l), err: l => err.push(l),
     readFile: async p => { const f = files[p]; if (f === undefined) throw new Error("no such file"); return f; },
@@ -38,6 +40,9 @@ async function cli(argv: string[], answers: Record<string, unknown>, files: Reco
 
 // stdout as one JSON document: two documents, or a sentence before one, do not parse.
 const document = (out: string): unknown => JSON.parse(out);
+
+// What the hub answers when it refuses the call.
+const refuse = (error: string) => ({ refuse: error });
 
 const TASK = "/api/agent/board/tasks/T-1";
 const doing = task("doing");
@@ -88,13 +93,15 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     expect(r.out).toContain("[open] tests: x");
     expect(r.err).toBe("");
   });
-  it("brief with flags and --json prints one document: the event and the proof the hub holds", async () => {
+  it("brief with flags and --json prints one document: the proof the hub holds, the shape brief --show --json has", async () => {
     const r = await cli(["brief", "T-1", "--summary", "did it", "--left-out", "nothing", "--limit", "none", "--test", "npm test", "--json"], hub);
     expect(r.code, r.err).toBe(0);
-    const doc = document(r.out) as { event: { rev: number }; proof: { coverage: unknown[] } };
-    expect(doc.event.rev).toBe(8);
-    expect(doc.proof.coverage).toHaveLength(2);
+    const doc = document(r.out) as { coverage: unknown[]; state: { line: string } };
+    expect(doc.coverage).toHaveLength(2);
+    expect(doc.state.line).toBe("no brief");
     expect(r.err).toBe("T-1 brief filed (rev 8)");
+    const shown = await cli(["brief", "T-1", "--show", "--json"], { ...hub, [`GET ${TASK}`]: { task: doing, events: [event({ kind: "briefed", brief: briefed })], proof: proofView([item("tests: x"), item("manual: y")], briefed) } });
+    expect(Object.keys(document(shown.out) as object).sort()).toEqual(Object.keys(doc).sort());   // one shape for the family
   });
   it("brief --file reads the wire shape from a file, and --json beside it asks for the JSON output", async () => {
     const wire = { summary: "from file", leftOut: "nothing", limits: "none" };
@@ -104,19 +111,47 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     expect(filed.out).toContain("T-1 brief filed (rev 8)");
     const asJson = await cli(["brief", "T-1", "--file", "brief.json", "--json"], hub, { "brief.json": JSON.stringify(wire) });
     expect(asJson.code, asJson.err).toBe(0);
-    expect((document(asJson.out) as { event: { rev: number } }).event.rev).toBe(8);
+    expect((document(asJson.out) as { coverage: unknown[] }).coverage).toHaveLength(2);
   });
-  it("brief --json brief.json, the old file form, is refused in words naming --file, with nothing on stdout and nothing sent", async () => {
-    const r = await cli(["brief", "T-1", "--json", "brief.json"], hub, { "brief.json": "{}" });
+  it("brief --json brief.json, the old file form, still files the brief as before, with one line on stderr naming --file", async () => {
+    const wire = { summary: "from file", leftOut: "nothing", limits: "none" };
+    for (const [path, argv] of [["brief.json", ["brief", "T-1", "--json", "brief.json"]], ["brief.json", ["brief", "T-1", "--json=brief.json"]],
+      ["brief.txt", ["brief", "T-1", "--json", "brief.txt"]]] as const) {
+      const r = await cli([...argv], hub, { [path]: JSON.stringify(wire) });
+      expect(r.code, `${argv.join(" ")}: ${r.err}`).toBe(0);
+      expect(r.calls.find(c => c.body?.action === "brief")?.body).toEqual({ action: "brief", brief: wire });
+      expect(r.out, argv.join(" ")).toContain("T-1 brief filed (rev 8)");       // the plain form, as it always was
+      expect(r.err, argv.join(" ")).toBe("--json <file> is deprecated for brief: use --file <file>");
+    }
+  });
+  it("--json=<value> that is no file is refused in words, never taken for the output switch", async () => {
+    const brief = await cli(["brief", "T-1", "--json=false"], hub);
+    expect(brief.code).toBe(2);
+    expect(brief.err).toContain("--json takes no value");   // the file named false cannot be read
+    expect(brief.err).toContain("--file");
+    expect(brief.calls).toEqual([]);
+    for (const argv of [["show", "T-1", "--json=false"], ["brief", "T-1", "--show", "--json=x"]]) {
+      const r = await cli(argv, hub);
+      expect(r.code, argv.join(" ")).toBe(2);
+      expect(r.out, argv.join(" ")).toBe("");
+      expect(r.err, argv.join(" ")).toContain("--json takes no value");
+    }
+  });
+  it("an unquoted flag value in brief names its real cause: the stray word, not --file", async () => {
+    const r = await cli(["brief", "T-1", "--summary", "did", "it", "--left-out", "nothing", "--limit", "none"], hub);
     expect(r.code).toBe(2);
-    expect(r.err).toContain("--file");
-    expect(r.out).toBe("");
+    expect(r.err).toContain('unexpected word "it" after the task key');
+    expect(r.err).toContain("quote");
+    expect(r.err).not.toContain("deprecated");
     expect(r.calls).toEqual([]);
+    const withJson = await cli(["brief", "T-1", "--summary", "did", "it", "--left-out", "nothing", "--limit", "none", "--json"], hub);   // no such file: still the stray word
+    expect(withJson.code).toBe(2);
+    expect(withJson.err).toContain('unexpected word "it"');
   });
-  it("brief --show --json with no brief filed prints null, not the sentence", async () => {
+  it("brief --show --json with no brief filed prints the proof view, not the sentence", async () => {
     const r = await cli(["brief", "T-1", "--show", "--json"], hub);
     expect(r.code, r.err).toBe(0);
-    expect(document(r.out)).toBeNull();
+    expect(document(r.out)).toMatchObject({ brief: null, coverage: [item("tests: x"), item("manual: y")] });
   });
   it("assign with --proof and --json prints one document, not one per call", async () => {
     const r = await cli(["assign", "T-1", "builder", "--proof", "tests: x", "--json"], hub);
@@ -143,6 +178,36 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     expect(r.code, r.err).toBe(0);
     expect((document(r.out) as { task: { key: string } }).task.key).toBe("T-1");
     expect(r.err).toBe("");
+  });
+
+  it("review --note --json whose note is refused still prints the move on stdout, the refusal on stderr, and exits 1", async () => {
+    const r = await cli(["review", "T-1", "--note", "ran it", "--json"], { ...hub, [`POST ${TASK} comment`]: refuse("too_long") });
+    expect(r.code).toBe(1);
+    expect((document(r.out) as { event: { change: { kind: string } } }).event.change.kind).toBe("moved");   // the task is in review: stdout says so
+    expect(r.err).toContain("refused:");
+  });
+  it("assign --proof --json whose proof list is refused still prints the assigned task, and exits 1", async () => {
+    const r = await cli(["assign", "T-1", "builder", "--proof", "tests: x", "--json"], { ...hub, [`POST ${TASK} proof_list`]: refuse("bad_item") });
+    expect(r.code).toBe(1);
+    expect((document(r.out) as { event: { change: { kind: string } } }).event.change.kind).toBe("assigned");
+    expect(r.err).toContain("refused:");
+  });
+  it("new --proof --json whose proof list is refused still prints the task as filed, and exits 1", async () => {
+    const r = await cli(["new", "Ship it", "--proof", "tests: x", "--json"], { ...hub, "POST /api/agent/board/tasks": { task: doing, event: event({ kind: "created", status: "todo" }) }, [`POST ${TASK} proof_list`]: refuse("bad_item") });
+    expect(r.code).toBe(1);
+    expect((document(r.out) as { task: { key: string } }).task.key).toBe("T-1");
+    expect(r.err).toContain("refused:");
+  });
+  it("without --json a refused note leaves the move on stdout and the refusal on stderr, as before", async () => {
+    const r = await cli(["review", "T-1", "--note", "ran it"], { ...hub, [`POST ${TASK} comment`]: refuse("too_long") });
+    expect(r.code).toBe(1);
+    expect(r.out).toContain("builder doing → review");
+  });
+  it("list --json against a stand-in forge keeps stdout one document and sends the notice to stderr", async () => {
+    const r = await cli(["list", "--json"], { ...hub, "GET /api/agent/board": { tasks: [doing], at: 0, lanes: ["builder"], standIn: true } });
+    expect(r.code, r.err).toBe(0);
+    expect(document(r.out)).toHaveLength(1);
+    expect(r.err).toBe("(proof references are read from a stand-in forge, not GitHub)");
   });
 
   it("--json never takes the word after it: parseArgs leaves it positional, whatever the order", () => {
