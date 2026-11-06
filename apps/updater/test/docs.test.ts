@@ -54,36 +54,40 @@ const pinProblems = (text: string, signer: string): string[] =>
     return value === signer ? [] : [`${value === undefined ? "no pin" : "another workflow"}: ${command}`];
   });
 
-// The note on which gh to use, in two sizes. The short form is the minimum version and the advice not to drop the flag;
-// the full form adds the Ubuntu package and the release notes.
-const holdsShortNote = (text: string): boolean => /`gh` 2\.51\.0 or newer|never drop `--signer-workflow`/.test(text);
+// The note on which gh to use, in two sizes. The short form is both halves: the minimum version AND the advice not to drop
+// the flag; the full form adds the Ubuntu package and the release notes. A page may name the minimum (the QA steps do)
+// but only the README and SECURITY.md carry the advice, and every `gh` N.N.N or newer must be the same version.
+const namesMinimum = (text: string): boolean => /`gh` 2\.51\.0 or newer/.test(text);
+const advisesKeepingFlag = (text: string): boolean => /never drop `--signer-workflow`/.test(text);
+const holdsShortNote = (text: string): boolean => namesMinimum(text) && advisesKeepingFlag(text);
 const holdsFullNote = (text: string): boolean => /packages is 2\.45\.0|releases\/tag\/v2\.(49|51)\.0/.test(text);
 
-// Does the page link to the README's note on the gh version? A relative link, a link from the repository root
-// (/README.md) or the README's address on github.com, with or without a title.
+// Does the page link to the README's note on the gh version? A relative link, or one from the repository root
+// (/README.md), with or without a title. Not a github.com address: that points at main, not at the page's own release.
 const linksToVersionNote = (file: string, text: string): boolean =>
   [...text.matchAll(/\]\(<?([^)#\s>]*)#([^)\s>]+)>?(?:\s+"[^"]*")?\)/g)].some(m => {
     if (m[2] !== NOTE_HEADING) return false;
-    const target = (m[1] ?? "").replace(/^https:\/\/github\.com\/morndo\/morndo\/blob\/main\//, "/");
+    const target = m[1] ?? "";
     return posix.normalize(target.startsWith("/") ? target.slice(1) : posix.join(posix.dirname(file), target)) === "README.md";
   });
 
 // Everything the pages must satisfy about the attestation command. Empty is a pass. The README holds the whole note;
-// SECURITY.md keeps the short form of it and links to the rest; no other page copies either.
+// SECURITY.md keeps the short form of it, both halves, and links to the rest; no other page copies the advice or the rest.
 const attestationRules = (docs: Record<string, string>, signer: string): string[] => {
   const problems: string[] = [];
   for (const [file, text] of Object.entries(docs)) {
     const shows = attestationCommands(text).length > 0;
     problems.push(...pinProblems(text, signer).map(p => `${file}: ${p}`));
     const linked = linksToVersionNote(file, text);
+    for (const m of text.matchAll(/`gh` (\d+\.\d+\.\d+) or newer/g)) if (m[1] !== "2.51.0") problems.push(`${file}: names gh ${m[1]}, not 2.51.0`);
     if (file === "README.md") {
       if (!holdsShortNote(text) || !holdsFullNote(text)) problems.push("README.md: has no note on the gh version");
     } else if (file === "SECURITY.md") {
-      if (!holdsShortNote(text)) problems.push("SECURITY.md: has no short note on the gh version");
+      if (!holdsShortNote(text)) problems.push("SECURITY.md: the short note needs both halves, the minimum gh and not to drop --signer-workflow");
       if (holdsFullNote(text)) problems.push("SECURITY.md: copies the whole gh version note");
       if (!linked) problems.push("SECURITY.md: does not link to the README's note");
     } else {
-      if (holdsShortNote(text) || holdsFullNote(text)) problems.push(`${file}: copies the gh version note`);
+      if (advisesKeepingFlag(text) || holdsFullNote(text)) problems.push(`${file}: copies the gh version note`);
       if (shows && !linked) problems.push(`${file}: shows the command and does not link to the README's note`);
     }
   }
@@ -230,7 +234,7 @@ describe("install and update documentation", () => {
     const signer = releaseSigner();
     const ok = `gh attestation verify install.sh --repo morndo/morndo --signer-workflow ${signer}`;
     const link = `[the README](README.md#${NOTE_HEADING})`;
-    const note = "It needs `gh` 2.51.0 or newer ([notes](https://github.com/cli/cli/releases/tag/v2.51.0)); Ubuntu packages is 2.45.0.";
+    const note = "It needs `gh` 2.51.0 or newer ([notes](https://github.com/cli/cli/releases/tag/v2.51.0)); Ubuntu packages is 2.45.0; never drop `--signer-workflow` to make the check pass.";
     const short = "It needs `gh` 2.51.0 or newer; on an older `gh`, upgrade it and never drop `--signer-workflow`.";
     const base = { "README.md": note + " Run `" + ok + "`.", "SECURITY.md": short + " " + link, "A.md": "Run `" + ok + "`. " + link };
     expect(attestationRules(base, signer)).toEqual([]);
@@ -263,14 +267,23 @@ describe("install and update documentation", () => {
     expect(attestationRules({ ...base, "B.md": "Checked with `ssh-keygen` and `gh attestation verify`, and `gh attestation verify --signer-workflow` pins it." }, signer)).toEqual([]);
     // A page that shows the command needs the link; a copy of the note belongs to the README only.
     expect(attestationRules({ ...base, "A.md": "Run `" + ok + "`." }, signer)).toHaveLength(1);
-    expect(attestationRules({ ...base, "A.md": "Run `" + ok + "`. " + link, "C.md": "It needs `gh` 2.51.0 or newer." }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "A.md": "Run `" + ok + "`. " + link, "C.md": "On an older `gh`, never drop `--signer-workflow`." }, signer)).toHaveLength(1);
     expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](README.md#" + NOTE_HEADING + ")" }, signer)).toHaveLength(1);   // that resolves to docs/README.md
     expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](../README.md#" + NOTE_HEADING + ")" }, signer)).toEqual([]);
     expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](/README.md#" + NOTE_HEADING + " \"title\")" }, signer)).toEqual([]);
-    expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](https://github.com/morndo/morndo/blob/main/README.md#" + NOTE_HEADING + ")" }, signer)).toEqual([]);
+    expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](https://github.com/morndo/morndo/blob/main/README.md#" + NOTE_HEADING + ")" }, signer)).toHaveLength(1);
     // SECURITY.md keeps the short note and the link, and not the whole note.
     expect(attestationRules({ ...base, "SECURITY.md": link }, signer)).toHaveLength(1);
     expect(attestationRules({ ...base, "SECURITY.md": short }, signer)).toHaveLength(1);
+    // The short note is both halves: the minimum gh and not to drop the flag. Either half alone fails.
+    expect(attestationRules({ ...base, "SECURITY.md": "It needs `gh` 2.51.0 or newer. " + link }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "SECURITY.md": "On an older `gh`, upgrade it and never drop `--signer-workflow`. " + link }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "README.md": "It needs `gh` 2.51.0 or newer. Ubuntu packages is 2.45.0. Run `" + ok + "`." }, signer)).toHaveLength(1);
+    // Another page may name the minimum, with the same version, and not the advice; a link to main's README does not count.
+    expect(attestationRules({ ...base, "docs/D.md": "It needs `gh` 2.51.0 or newer ([why](../README.md#" + NOTE_HEADING + "))." }, signer)).toEqual([]);
+    expect(attestationRules({ ...base, "docs/D.md": "It needs `gh` 2.49.0 or newer." }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "docs/D.md": "On an older `gh`, never drop `--signer-workflow`." }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "SECURITY.md": short + " [why](https://github.com/morndo/morndo/blob/main/README.md#" + NOTE_HEADING + ")" }, signer)).toHaveLength(1);
     expect(attestationRules({ ...base, "SECURITY.md": short + " " + link + " Ubuntu packages is 2.45.0." }, signer)).toHaveLength(1);
   });
 
