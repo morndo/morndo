@@ -222,10 +222,49 @@ describe("how often tmux is started", () => {
     expect(t.calls()).toBe(0);
   });
 
-  it.each([["board", ["show", "T-1"]], ["decide", ["show", "dr-1"]], ["memory", ["search", "anything"]]] as const)("morndo-%s %j starts tmux once, though it answers nothing", async (name, args) => {
+  it.each([["board", ["show", "T-1"]], ["decide", ["show", "dr-1"]], ["memory", ["search", "anything"]]] as const)("morndo-%s %j asks tmux once for its lane, with its pane's query and the fallback after it", async (name, args) => {
     const t = standIn();
     await runProgram(PROGRAMS[name], [...args], { HOME: home(true), ...inTmux(t.bin) });
-    expect(t.calls()).toBe(1);
+    expect(t.calls()).toBe(2);
+  });
+
+  it("morndo-board --role worker prompt starts no tmux: the command word is prompt, not worker", async () => {
+    const t = standIn();
+    await runProgram(PROGRAMS.board, ["--role", "worker", "prompt"], { HOME: home(true), ...inTmux(t.bin) });
+    expect(t.calls()).toBe(0);
+  });
+});
+
+describe("commands whose arguments look like a help request", () => {
+  it("morndo-job start, with -h or --help in the job's own command, still loads its settings", async () => {
+    for (const child of [["ls", "-h", "/tmp"], ["grep", "--help"]]) {
+      const r = await runProgram(PROGRAMS.job, ["start", "--notify", "lane:builder", "--", ...child], { HOME: home(true), MORNDO_LANE: "builder" });
+      expect(r.err, child.join(" ")).not.toMatch(/MORNDO_AGENT_TOKEN/);
+    }
+  });
+
+  it("morndo-memory --kind help search x reaches the hub with the file's settings: help is a flag's value", async () => {
+    seen.length = 0;
+    const r = await runProgram(PROGRAMS.memory, ["--kind", "help", "search", "x"], { HOME: home(true), MORNDO_LANE: "builder" });
+    expect(seen.length, r.err).toBeGreaterThan(0);
+  });
+});
+
+describe("a token in the environment is not sent to a hub from a file", () => {
+  it("with MORNDO_AGENT_TOKEN set and no MORNDO_HUB, morndo-board calls no hub and says what it said before", async () => {
+    seen.length = 0;
+    const r = await runProgram(PROGRAMS.board, ["show", "T-1"], { HOME: home(true), MORNDO_LANE: "builder", MORNDO_AGENT_TOKEN: ENV_TOKEN });
+    expect(seen).toEqual([]);
+    expect(r.err).toMatch(/MORNDO_HUB/);
+    noToken(r);
+  });
+
+  it("with MORNDO_HUB set and no token, no token from a file is sent to it", async () => {
+    seen.length = 0;
+    const r = await runProgram(PROGRAMS.board, ["show", "T-1"], { HOME: home(true), MORNDO_LANE: "builder", MORNDO_HUB: hubUrl });
+    expect(seen).toEqual([]);
+    expect(r.err).toMatch(/MORNDO_AGENT_TOKEN/);
+    noToken(r);
   });
 });
 

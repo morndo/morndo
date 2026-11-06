@@ -2,7 +2,7 @@
 // ~/.config/morndo when the environment has none. This is what the per-machine wrappers did by hand (T-318, P1). Every
 // token here is a made-up string.
 import { describe, expect, it } from "vitest";
-import { agentSettingsIo, laneFromTmux, runsOffline, withAgentSettings, type AgentEnv, type AgentSettingsIo } from "../src/agent-settings.ts";
+import { agentSettingsIo, laneFromTmux, withAgentSettings, type AgentEnv, type AgentSettingsIo } from "../src/agent-settings.ts";
 
 const HOME = "/home/lane";
 const DIR = `${HOME}/.config/morndo`;
@@ -83,12 +83,25 @@ describe("withAgentSettings: the environment wins", () => {
     expect(got.MORNDO_AGENT_TOKEN).toBe("fake-lane-token");
   });
 
-  it("one set value does not stop the others from being filled", async () => {
-    const { made } = io(FILES, "builder");
-    const got = await withAgentSettings({ MORNDO_AGENT_TOKEN: "env-token" }, made);
+  it("a token without a hub address, or the reverse, is never paired with the other from a file", async () => {
+    const tokenOnly = io(FILES, "builder");
+    const got = await withAgentSettings({ MORNDO_AGENT_TOKEN: "env-token" }, tokenOnly.made);
     expect(got.MORNDO_AGENT_TOKEN).toBe("env-token");
-    expect(got.MORNDO_HUB).toBe("https://hub.example.test");
-    expect(got.MORNDO_NODE).toBe("build-pc");
+    expect(got.MORNDO_HUB).toBeUndefined();
+    expect(got.MORNDO_NODE).toBe("build-pc");                    // the node name is no credential: it is still filled
+    expect(tokenOnly.reads).not.toContain(`${DIR}/agent-hub`);
+    const hubOnly = io(FILES, "builder");
+    const got2 = await withAgentSettings({ MORNDO_HUB: "https://other.example.test" }, hubOnly.made);
+    expect(got2.MORNDO_HUB).toBe("https://other.example.test");
+    expect(got2.MORNDO_AGENT_TOKEN).toBeUndefined();
+    expect(hubOnly.reads).not.toContain(`${DIR}/agent-lanes.token`);
+    expect(hubOnly.reads).not.toContain(`${DIR}/agent-manager.token`);
+  });
+
+  it("a command that does not use the hub takes its token from the file whatever the hub variable says", async () => {
+    const m = io(FILES, "builder");
+    const got = await withAgentSettings({ MORNDO_HUB: "https://other.example.test" }, m.made, { skip: ["hub", "node"] });
+    expect(got.MORNDO_AGENT_TOKEN).toBe("fake-lane-token");
   });
 
   it("the input is not changed", async () => {
@@ -162,7 +175,14 @@ describe("laneFromTmux asks about the pane the command runs in", () => {
     expect(calls).toEqual([["display-message", "-p", "#W"]]);
   });
 
-  it("a failing or empty answer is no lane", async () => {
+  it("when the pane's own query fails, it asks as the old helper did, without -t", async () => {
+    const calls: string[][] = [];
+    const lane = await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async args => { calls.push(args); return args.includes("-t") ? null : "builder\n"; });
+    expect(lane).toBe("builder");
+    expect(calls).toEqual([["display-message", "-p", "-t", "%5", "#W"], ["display-message", "-p", "#W"]]);
+  });
+
+  it("when both queries fail or answer blank there is no lane", async () => {
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => null)).toBeNull();
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => "  \n")).toBeNull();
   });
@@ -218,24 +238,11 @@ describe("withAgentSettings: it reads and asks only for what is missing", () => 
     expect(m.reads).toEqual([`${DIR}/agent-lanes.token`]);
   });
 
-  it("the window is asked once however often the lane is wanted", async () => {
+  it("the window is asked once however often the lane is wanted (the pane query and its fallback, one time)", async () => {
     const asked: string[][] = [];
     const real = agentSettingsIo({ HOME: "/h", TMUX: "x", TMUX_PANE: "%1" }, async args => { asked.push(args); return null; });
     expect(await real.lane()).toBeNull();
     expect(await real.lane()).toBeNull();
-    expect(asked.length).toBe(1);
-  });
-});
-
-describe("runsOffline: a command that only prints text needs no settings", () => {
-  it("help, a bare command, a help flag and the listed commands run offline; the others do not", () => {
-    const offline = ["help", "prompt"];
-    expect(runsOffline([], offline)).toBe(true);
-    expect(runsOffline(["help"], offline)).toBe(true);
-    expect(runsOffline(["prompt", "--role", "worker"], offline)).toBe(true);
-    expect(runsOffline(["show", "T-1", "--help"], offline)).toBe(true);
-    expect(runsOffline(["--json", "help"], offline)).toBe(true);
-    expect(runsOffline(["show", "T-1"], offline)).toBe(false);
-    expect(runsOffline(["--json", "show", "T-1"], offline)).toBe(false);
+    expect(asked.length).toBe(2);
   });
 });
