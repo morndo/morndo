@@ -22,7 +22,7 @@ async function cli(argv: string[], answers: Record<string, unknown>, files: Reco
   const out: string[] = [], err: string[] = [];
   const code = await run(argv, { MORNDO_HUB: "https://hub.example.test", MORNDO_AGENT_TOKEN: "mat_stub", MORNDO_LANE: "builder" }, {
     fetch: async (url, init) => {
-      const path = new URL(String(url)).pathname;
+      const path = new URL(typeof url === "string" ? url : url instanceof URL ? url.href : url.url).pathname;
       const body = init?.body === undefined ? undefined : JSON.parse(init.body as string) as Record<string, unknown>;
       const method = init?.method ?? "GET";
       calls.push({ method, path, body });
