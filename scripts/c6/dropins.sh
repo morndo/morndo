@@ -62,7 +62,12 @@ fi
 while IFS= read -r f; do
   tmp="$f.c6-tmp"
   cp -p "$f" "$tmp"
-  grep -v '^[[:space:]]*ExecStart[[:space:]]*=' "$f" > "$tmp" || true
+  # An ExecStart= line, and the lines a trailing backslash joins to it (systemd reads them as one line).
+  awk '
+    skip { skip = ($0 ~ /\\$/); next }
+    /^[ \t]*ExecStart[ \t]*=/ { skip = ($0 ~ /\\$/); next }
+    { print }
+  ' "$f" > "$tmp"
   mv -f "$tmp" "$f"
   echo "ExecStart taken out of: $f"
 done <<EOT
