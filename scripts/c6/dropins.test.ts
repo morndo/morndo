@@ -144,8 +144,8 @@ describe("dropins.sh never hides an error", () => {
     const bk = backupOf(m);
     const bin = join(m.root, "bin");
     mkdirSync(bin);
-    // an awk that does the lookups and fails the rewrite
-    writeFileSync(join(bin, "awk"), `#!/bin/sh\ncase "$*" in *found*) exec "${spawnSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).stdout.trim()}" "$@" ;; *) exit 2 ;; esac\n`, { mode: 0o755 });
+    // an awk that does everything but the rewrite (the one program that has a `skip` in it)
+    writeFileSync(join(bin, "awk"), `#!/bin/sh\ncase "$*" in *skip*) exit 2 ;; *) exec "${spawnSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).stdout.trim()}" "$@" ;; esac\n`, { mode: 0o755 });
     const r = runWith(m, { PATH: `${bin}:${process.env.PATH ?? ""}` }, bk);
     expect(r.code).toBe(2);
     expect(r.err).toContain("ship.conf");

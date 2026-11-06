@@ -560,13 +560,14 @@ async function main(): Promise<number> {
     `wrappers moved aside (${moved}); install exited ${installed.code} after ${installed.seconds} s: ${firstLines(installed, 8)}`);
   if (failed) { journals("d-install"); return finish(server); }
 
-  // Finding 2, observed without acting: do the running units run the new tree within about 20 s of the install's end?
+  // Finding 2, observed without acting: does the install itself bring the (stopped) units up on the new tree within about 20 s of its end?
+  // (Over RUNNING legacy units it exited 0 after about 276 s and left them on the old code, which is why the plan stops them first.)
   const sawNew = await waitUntil(20_000, async () => {
     const cmd = SERVICES.map(s => cmdlineOf(s.unit));
     return cmd.every(runsNew) && (await hubVersion()) === VERSION_A && (await fleetVersion()) === VERSION_A && nodeVersion() === VERSION_A ? "new" : null;
   });
   const cmdAfter = SERVICES.map(s => `${s.app}: ${cmdlineOf(s.unit)}`);
-  const restartObserved = `within 20 s of the install the three units ${sawNew === "new" ? "ran the NEW tree" : "did NOT all run the new tree"}; health ${await healthNow()}; install took ${installed.seconds} s and its output said: ${installed.out.split("\n").filter(l => l.includes("healthy") || l.includes("no answer")).join(" | ") || "(no health lines)"}; processes: ${cmdAfter.join(" || ")}`;
+  const restartObserved = `the units were stopped first (the plan's step 4), so this is whether the install itself starts them on the new tree: within 20 s of the install the three units ${sawNew === "new" ? "ran the NEW tree" : "did NOT all run the new tree"}; health ${await healthNow()}; install took ${installed.seconds} s and its output said: ${installed.out.split("\n").filter(l => l.includes("healthy") || l.includes("no answer")).join(" | ") || "(no health lines)"}; processes: ${cmdAfter.join(" || ")}`;
   check("finding-restart", true, restartObserved);
   if (PUBLISHED !== null) {
     const firstFeed = `${installed.out}${installed.err}`.split("\n").filter(l => /feed|first check|checking for/i.test(l));
@@ -581,8 +582,11 @@ async function main(): Promise<number> {
   // The unit starts the launcher link in ~/.local/bin; it is the installed Version's when the link's target sits under the releases.
   const nodeLauncher = join(BIN, "morndo-node");
   const launcherTarget = (() => { try { return realpathSync(nodeLauncher); } catch { return ""; } })();
-  check("d-node-execstart-is-launcher", nodeExec.includes(nodeLauncher) && launcherTarget.includes("morndo-releases") && !nodeExec.includes("abc1234") && !nodeExec.includes("decoy0") && nodeEnv.includes("/.local/bin:"),
-    `the node unit's ExecStart names ${nodeLauncher}, whose target is ${launcherTarget || "(unreadable)"}: ${nodeExec.split("\n")[0]?.slice(0, 160)}; the PATH from the drop-in (with ~/.local/bin) is kept: ${nodeEnv.includes("/.local/bin:")}`);
+  // ship.conf's own PATH, as systemd expands it: the old unit's carried-over PATH (before-morndo.conf) lacks ~/.local/bin and sorts before ship.conf, so this
+  // value is in what systemd loaded only when dropins.sh left ship.conf's PATH line in place.
+  const shipPath = SHIP_PATH_LINE.slice("Environment=".length).split("%h").join(HOME);
+  check("d-node-execstart-is-launcher", nodeExec.includes(nodeLauncher) && launcherTarget.includes("morndo-releases") && !nodeExec.includes("abc1234") && !nodeExec.includes("decoy0") && nodeEnv.includes(shipPath),
+    `the node unit's ExecStart names ${nodeLauncher}, whose target is ${launcherTarget || "(unreadable)"}: ${nodeExec.split("\n")[0]?.slice(0, 160)}; ship.conf's PATH (${shipPath}) is what systemd loaded: ${nodeEnv.includes(shipPath)}`);
   check("d-services-healthy", afterRestart.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))),
     `${sawNew === "new" ? "no restart needed" : "after systemctl --user restart of the three units"}: ${afterRestart.detail}`);
   if (failed) { journals("d-restart"); return finish(server); }

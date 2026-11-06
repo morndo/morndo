@@ -17,7 +17,9 @@
 set -eu
 umask 077
 
-units="$HOME/.config/systemd/user"
+# The user unit folder is where systemd reads it: $XDG_CONFIG_HOME/systemd/user, else ~/.config/systemd/user. Paths are compared by
+# their real location, so a HOME reached through a symlink, or a path systemd spells differently, still matches.
+units="${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user"
 sc=${C6_SYSTEMCTL:-systemctl}
 services="morndo-hub.service morndo-fleet.service morndo-node.service"
 
@@ -34,11 +36,21 @@ has_execstart() {
   awk '/^[ \t]*ExecStart[ \t]*=/ { found = 1 } END { exit found ? 0 : 1 }' "$1"
 }
 
-# Every drop-in file that applies to our service units: systemd's own list, then the folders under ~/.config.
+# A path's real location: its folder resolved, its own name kept (a drop-in that is itself a link is not followed).
+realpath_of() {
+  d=$(dirname -- "$1")
+  b=$(basename -- "$1")
+  r=$(cd -P -- "$d" 2>/dev/null && pwd -P) || return 1
+  printf '%s/%s\n' "$r" "$b"
+}
+
+# Every drop-in file that applies to our service units: systemd's own list, then the folders under the user unit folder. A
+# failed question to systemd ends the script with status 2 (this runs in a command substitution, never on the left of a pipe).
 files() {
   for u in $services; do
     out=$("$sc" --user show -p DropInPaths --value "$u") || { echo "dropins.sh: could not ask systemd about $u" >&2; exit 2; }
-    for f in $out; do printf '%s\n' "$f"; done
+    # systemd separates the paths with a space and does not quote them; every path is absolute, so one starts at " /"
+    printf '%s\n' "$out" | awk '{ gsub(/ \//, "\n/"); print }' || { echo "dropins.sh: could not read systemd's answer about $u" >&2; exit 2; }
   done
   for d in "$units"/morndo-*.service.d; do
     [ -d "$d" ] || continue
@@ -49,10 +61,13 @@ files() {
   done
 }
 
-# Those of them that have an ExecStart= line.
+# Those of them that have an ExecStart= line, by real path.
 candidates() {
-  files | sort -u | while IFS= read -r f; do
-    [ -f "$f" ] || continue
+  all=$(files)
+  printf '%s\n' "$all" | while IFS= read -r f; do
+    if [ -f "$f" ]; then realpath_of "$f" || true; fi
+  done | sort -u | while IFS= read -r f; do
+    [ -n "$f" ] || continue
     if has_execstart "$f"; then
       printf '%s\n' "$f"
     else
@@ -62,6 +77,7 @@ candidates() {
   done
 }
 
+units_real=$(cd -P -- "$units" 2>/dev/null && pwd -P) || units_real=$units
 found=$(candidates)
 
 if [ "$1" = "--list" ]; then
@@ -82,8 +98,8 @@ outside=
 missing=
 while IFS= read -r f; do
   case $f in
-    "$units"/*)
-      name=${f#"$units"/}
+    "$units_real"/*)
+      name=${f#"$units_real"/}
       if ! cmp -s "$f" "$bk/units/$name"; then missing="$missing $name"; fi ;;
     *) outside="$outside $f" ;;
   esac
@@ -91,7 +107,7 @@ done <<EOT
 $found
 EOT
 if [ -n "$outside" ]; then
-  echo "dropins.sh: these drop-ins set ExecStart but are not under $units, so no backup holds them; nothing was changed:$outside" >&2
+  echo "dropins.sh: these drop-ins set ExecStart but are not under $units_real, so no backup holds them; nothing was changed:$outside" >&2
   exit 4
 fi
 if [ -n "$missing" ]; then
@@ -106,7 +122,7 @@ while IFS= read -r f; do
   cp -p "$f" "$tmp" || { echo "dropins.sh: could not write beside $f" >&2; exit 2; }
   # Without the ExecStart= lines, and the lines a trailing backslash joins to them (systemd reads them as one line).
   if ! awk '
-      skip { skip = ($0 ~ /\\$/); next }
+      skip { if ($0 ~ /^[ \t]*[#;]/) next; skip = ($0 ~ /\\$/); next }
       /^[ \t]*ExecStart[ \t]*=/ { skip = ($0 ~ /\\$/); next }
       { print }
     ' "$f" > "$tmp"; then
