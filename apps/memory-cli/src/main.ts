@@ -9,7 +9,7 @@
 // tree, report an error").
 import { execFile } from "node:child_process";
 import { hostname } from "node:os";
-import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe } from "@morndo/service-kit";
+import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe, agentSettingsIo, laneFromTmux, withAgentSettings } from "@morndo/service-kit";
 import { run, type GitPlace } from "./cli.ts";
 
 quietBrokenPipe();
@@ -18,10 +18,7 @@ if (argvWantsVersion(process.argv)) {
   process.exit(0);
 }
 
-const laneFromTmux = () => new Promise<string | null>(resolve => {
-  if (!process.env.TMUX) return resolve(null);
-  execFile("tmux", ["display-message", "-p", "#W"], { encoding: "utf8", timeout: 3000 }, (error, stdout) => resolve(error ? null : stdout.trim() || null));
-});
+const env = await withAgentSettings(process.env, agentSettingsIo(process.env));
 
 const gitPlace = () => new Promise<GitPlace | null>(resolve => {
   execFile("git", ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], { encoding: "utf8", timeout: 5000 }, (error, stdout) => {
@@ -36,8 +33,8 @@ const stdin = async () => {
   return Buffer.concat(chunks).toString("utf8");
 };
 
-const code = await run(process.argv.slice(2), process.env, {
-  fetch, lane: laneFromTmux, git: gitPlace, host: hostname, stdin,
+const code = await run(process.argv.slice(2), env, {
+  fetch, lane: () => laneFromTmux(process.env), git: gitPlace, host: hostname, stdin,
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });

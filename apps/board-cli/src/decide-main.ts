@@ -1,17 +1,14 @@
 #!/usr/bin/env node
 // morndo-decide: the agents' command for a decision brief (ADR-0023). Everything is in decide.ts; this wires the real
-// fetch, the environment, the file it reads ("-" is stdin) and, inside tmux, the window's name as this lane's name.
-import { execFile } from "node:child_process";
+// fetch, the environment — the settings files under ~/.config/morndo behind it, service-kit agent-settings.ts — the
+// file it reads ("-" is stdin) and, inside tmux, the window's name as this lane's name.
 import { readFileSync } from "node:fs";
-import { exitAfterOutput, quietBrokenPipe } from "@morndo/service-kit";
+import { exitAfterOutput, quietBrokenPipe, agentSettingsIo, laneFromTmux, withAgentSettings } from "@morndo/service-kit";
 import { run } from "./decide.ts";
 
 quietBrokenPipe();
 
-const laneFromTmux = () => new Promise<string | null>(resolve => {
-  if (!process.env.TMUX) return resolve(null);
-  execFile("tmux", ["display-message", "-p", "#W"], { encoding: "utf8", timeout: 3000 }, (error, stdout) => resolve(error ? null : stdout.trim() || null));
-});
+const env = await withAgentSettings(process.env, agentSettingsIo(process.env));
 
 const read = async (path: string) => {
   if (path === "-") {
@@ -22,8 +19,8 @@ const read = async (path: string) => {
   return readFileSync(path, "utf8");
 };
 
-const code = await run(process.argv.slice(2), process.env, {
-  fetch, lane: laneFromTmux, read,
+const code = await run(process.argv.slice(2), env, {
+  fetch, lane: () => laneFromTmux(process.env), read,
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });
