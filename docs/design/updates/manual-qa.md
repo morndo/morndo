@@ -4,7 +4,7 @@ Results go in the private QA notes, never in this tree, and nothing in this file
 
 1. On a fresh throwaway VM (Linux x64), run the verify-first install once per role, pair a phone, and start two lanes. Check the signature before `install.sh` runs, using the release key line from SECURITY.md.
 
-The attestation line needs `gh` 2.51.0 or newer (`gh --version`); on an older `gh`, upgrade it and never drop `--signer-workflow` to make it pass.
+Check `gh --version` first: [the README says which `gh` the attestation line needs](../../../README.md#the-gh-version-the-attestation-check-needs).
 
 ```sh
 curl -fsSLO https://github.com/morndo/morndo/releases/latest/download/install.sh
@@ -115,7 +115,7 @@ Record: what the phone showed, the versions in the table, and the exit code.
 
 12. On the real release assets, check the signature and the attestation by hand. Change one installed file and run `morndo doctor`, which finds that file.
 
-The attestation line needs `gh` 2.51.0 or newer, as in step 1.
+The attestation line needs a recent `gh`: [the README says which](../../../README.md#the-gh-version-the-attestation-check-needs).
 
 ```sh
 ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s install.sh.sig < install.sh

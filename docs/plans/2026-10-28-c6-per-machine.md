@@ -118,7 +118,7 @@ machine (a node must never be newer than its control plane; `skew()` / `node_ahe
    ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s install.sh.sig < install.sh
    gh attestation verify install.sh --repo morndo/morndo --signer-workflow morndo/morndo/.github/workflows/release.yml@refs/heads/main
    ```
-   (`gh` runs where it is logged in, usually the lane's machine; the file is the same bytes: compare `sha256sum install.sh` on both.)
+   (`gh` runs where it is logged in, usually the lane's machine; the file is the same bytes: compare `sha256sum install.sh` on both. Which `gh` the attestation line needs: [the README](../../README.md#the-gh-version-the-attestation-check-needs).)
 3. **Backup, and arm the dead-man's switch.**
    ```sh
    BK=$HOME/.local/share/morndo-backups/$(date +%F)-c6-<role>

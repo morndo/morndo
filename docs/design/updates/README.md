@@ -460,7 +460,7 @@ A job in the GitHub environment `release`. With required reviewers, "a job canno
 2. Sign `manifest.json` and `install.sh` with the release key: `ssh-keygen -Y sign -n release@morndo.github.io` [U13]. The key comes from the environment secret, lives in a 0600 file on the runner for the length of the step, and is deleted after it.
 3. Attest build provenance for every Artifact, the Manifest and `install.sh` with `actions/attest` (v4.2.2 on 2026-10-11; `attest-build-provenance` is now a wrapper on it) [U7]. The job needs `id-token: write`, `attestations: write` and `contents: read`. On its own this gives SLSA v1.0 Build Level 2, and a reusable workflow can reach Level 3; public repositories sign through Sigstore's public-good instance [U7].
 4. Upload the assets to the draft, then publish it. Immutable releases are turned on for the repository: "the assets and associated Git tag cannot be changed after publication", and a deleted release's tag can't be reused [U8].
-5. Check what was published, from outside: download the assets again, `ssh-keygen -Y verify` the Manifest and `install.sh`, `gh attestation verify <file> --repo morndo/morndo --signer-workflow <release workflow>` [U7], and `gh release verify-asset` [U8].
+5. Check what was published, from outside: download the assets again, `ssh-keygen -Y verify` the Manifest and `install.sh`, `gh attestation verify <file> --repo morndo/morndo --signer-workflow morndo/morndo/.github/workflows/release.yml@refs/heads/main` [U7], and `gh release verify-asset` [U8].
 
 Release notes are the Release Please changelog, plus an upgrade section generated from the Manifest: which databases migrate, which raise their floor (so a later rollback restores a Backup), and the protocol range.
 
@@ -564,7 +564,7 @@ ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n re
 - Nothing runs before it is checked, and a truncated download fails the check instead of running half a script.
 - `install.sh` is only a bootstrap. It fetches the Manifest and its signature for its own Release and checks them with `ssh-keygen` and the same key. It then downloads that Artifact into a temporary directory, checks its size and SHA-256 (`sha256sum` or `shasum -a 256`), and only then runs the Artifact's own `morndo install`.
 - `morndo install` reads the chosen Channel's Feed (`stable` unless `--channel latest`) and installs that Channel's Version through the full chain of section 10.2, fetching it if it isn't the bootstrap's own. A first install therefore lands on the Channel, not on whatever `/releases/latest` points to. It checks the file list, lays out section 5, writes the units, starts the services and runs the health checks.
-- With the GitHub CLI there is a second, independent check: `gh attestation verify install.sh --repo morndo/morndo` [U7].
+- With the GitHub CLI there is a second, independent check: `gh attestation verify install.sh --repo morndo/morndo --signer-workflow morndo/morndo/.github/workflows/release.yml@refs/heads/main` [U7]; without the pin `gh` accepts an attestation made by any workflow of the repository. Which `gh` it needs is in [the README](../../../README.md#the-gh-version-the-attestation-check-needs).
 - The key line comes over HTTPS from GitHub, like the code itself. It is printed in the README, in every release's notes and in `SECURITY.md`, so a mismatch between them shows.
 
 ### 10.4 Threats and defences
