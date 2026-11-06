@@ -36,7 +36,7 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
                                         manager which way to go: it is due an answer in 24 h and inbox lists it
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
-  brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json
+  brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --file brief.json
   brief T-12 --show [--json] [--from-last]   the brief the hub holds and how each reference checked out
   merged T-12 <sha> [--repo owner/name]   record the commit its PR merged as (default repo morndo/morndo; manager, or the task's lane)
   unmerged T-12 <sha> [--repo …]   clear a wrong merge record (manager only); to replace one, unmerged then merged
@@ -47,6 +47,9 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   edit T-12 [--title "…"] [--desc "…"] [--priority P]   (manager only)
   whoami                                who the hub takes this call for
   prompt --role manager|worker          the instructions block for a lane's prompt
+
+--json, on any command that prints data, makes stdout exactly one JSON document and moves every other line to stderr;
+it never takes the word after it. (help and prompt have no JSON form.)
 
 Environment: MORNDO_HUB (the hub's address), MORNDO_AGENT_TOKEN (from \`morndo agent-token new\`), MORNDO_LANE (this
 lane's name; without it, the tmux window's name).`;
