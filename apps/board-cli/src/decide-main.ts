@@ -3,12 +3,14 @@
 // fetch, the environment — the settings files under ~/.config/morndo behind it, service-kit agent-settings.ts — the
 // file it reads ("-" is stdin) and, inside tmux, the window's name as this lane's name.
 import { readFileSync } from "node:fs";
-import { exitAfterOutput, quietBrokenPipe, agentSettingsIo, laneFromTmux, withAgentSettings } from "@morndo/service-kit";
+import { exitAfterOutput, quietBrokenPipe, agentSettingsIo, runsOffline, withAgentSettings } from "@morndo/service-kit";
 import { run } from "./decide.ts";
 
 quietBrokenPipe();
 
-const env = await withAgentSettings(process.env, agentSettingsIo(process.env));
+// help, template, prompt and the local lint of a draft print text and need no settings.
+const settings = agentSettingsIo(process.env);
+const env = runsOffline(process.argv.slice(2), ["help", "template", "prompt", "lint"]) ? process.env : await withAgentSettings(process.env, settings, { skip: ["node"] });
 
 const read = async (path: string) => {
   if (path === "-") {
@@ -20,7 +22,7 @@ const read = async (path: string) => {
 };
 
 const code = await run(process.argv.slice(2), env, {
-  fetch, lane: () => laneFromTmux(process.env), read,
+  fetch, lane: settings.lane, read,
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });

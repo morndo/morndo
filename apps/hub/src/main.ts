@@ -90,6 +90,7 @@ const HELP = `morndo: your agents, on your phone.
   morndo audit [count]    the latest device and session events (morndo audit --help)
   morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
                           events (morndo lanes --help)
+  morndo job …            start, list, show, read the logs of and cancel this node's jobs (morndo job start --notify …)
   morndo agent-token new <name> --role manager|worker [--scope usage-pool]
                           a token for the manager's lane, or one the worker lanes share (shown once)
   morndo agent-token list

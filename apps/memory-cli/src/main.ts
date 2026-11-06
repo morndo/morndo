@@ -11,7 +11,7 @@
 // tree, report an error").
 import { execFile } from "node:child_process";
 import { hostname } from "node:os";
-import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe, agentSettingsIo, laneFromTmux, withAgentSettings } from "@morndo/service-kit";
+import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe, agentSettingsIo, runsOffline, withAgentSettings } from "@morndo/service-kit";
 import { run, type GitPlace } from "./cli.ts";
 
 quietBrokenPipe();
@@ -20,7 +20,9 @@ if (argvWantsVersion(process.argv)) {
   process.exit(0);
 }
 
-const env = await withAgentSettings(process.env, agentSettingsIo(process.env));
+// help prints text and needs no settings.
+const settings = agentSettingsIo(process.env);
+const env = runsOffline(process.argv.slice(2), ["help"]) ? process.env : await withAgentSettings(process.env, settings);
 
 const gitPlace = () => new Promise<GitPlace | null>(resolve => {
   execFile("git", ["rev-parse", "--path-format=absolute", "--show-toplevel", "--git-common-dir"], { encoding: "utf8", timeout: 5000 }, (error, stdout) => {
@@ -36,7 +38,7 @@ const stdin = async () => {
 };
 
 const code = await run(process.argv.slice(2), env, {
-  fetch, lane: () => laneFromTmux(process.env), git: gitPlace, host: hostname, stdin,
+  fetch, lane: settings.lane, git: gitPlace, host: hostname, stdin,
   out: line => process.stdout.write(`${line}\n`),
   err: line => process.stderr.write(`${line}\n`),
 });
