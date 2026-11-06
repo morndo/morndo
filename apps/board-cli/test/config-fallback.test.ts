@@ -2,7 +2,7 @@
 // right token, the manager's window gets the manager's token and any other window the lane token, the environment wins
 // when set, and with the files missing each says what it said before. Real processes, a stub hub on a local port, a
 // home folder of its own. Every token is a made-up string and none may appear in any output.
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
@@ -152,5 +152,54 @@ describe("morndo job through the morndo launcher", () => {
     const r = await runProgram(PROGRAMS.hub, ["job", "start", "--notify", "lane:builder", "--", "true"], { HOME: home(false), MORNDO_LANE: "builder" });
     expect(r.code).toBe(4);
     expect(r.err).toContain("the hub has no token for this call (MORNDO_AGENT_TOKEN)");
+  });
+});
+
+// The help of the CLIs that read these settings says where they come from.
+describe.each([["board", ["help"]], ["decide", ["help"]], ["memory", ["help"]]] as const)("morndo-%s help", (name, args) => {
+  it("names the settings files, so no one keeps exporting the token into every lane's environment", async () => {
+    const r = await runProgram(PROGRAMS[name], [...args], { HOME: home(false) });
+    expect(r.out).toContain("agent-hub");
+    expect(r.out).toContain("~/.config/morndo");
+  });
+});
+
+// The lane is the window of the pane the command runs in, not the window on screen: with the manager's window in front,
+// a command in a lane's pane must still get the lane token, and the manager's pane the manager's token. A real tmux server of
+// its own, on its own socket.
+describe("morndo-board in real tmux panes", () => {
+  const dir = mkdtempSync(join(tmpdir(), "morndo-p1-tmux-"));
+  homes.push(dir);
+  const socket = join(dir, "sock");
+  const tmux = (...a: string[]) => execFileSync("tmux", ["-S", socket, "-f", "/dev/null", ...a], { encoding: "utf8", env: { PATH: process.env.PATH ?? "", TMUX_TMPDIR: dir } }).trim();
+  let tmuxEnv = "";
+  const panes: Record<string, string> = {};
+
+  beforeAll(() => {
+    tmux("new-session", "-d", "-s", "t", "-n", "manager", "sleep 300");
+    tmux("new-window", "-d", "-t", "t", "-n", "builder", "sleep 300");
+    for (const line of tmux("list-panes", "-a", "-F", "#{window_name} #{pane_id}").split("\n")) {
+      const [window, pane] = line.split(" ");
+      if (window && pane) panes[window] = pane;
+    }
+    tmux("select-window", "-t", "t:manager");                       // the manager's window is the one on screen
+    tmuxEnv = `${socket},${tmux("display-message", "-p", "#{pid}")},0`;
+  });
+  afterAll(() => { try { tmux("kill-server"); } catch { /* already gone */ } });
+
+  it("a command in the lane's pane gets the lane token while the manager's window is in front", async () => {
+    seen.length = 0;
+    const r = await runProgram(PROGRAMS.board, ["show", "T-1"], { HOME: home(true), TMUX: tmuxEnv, TMUX_PANE: panes.builder! });
+    expect(seen.length, r.err).toBeGreaterThan(0);
+    expect(seen.every(s => s.authorization === `Bearer ${LANE_TOKEN}` && s.lane === "builder")).toBe(true);
+    noToken(r);
+  });
+
+  it("a command in the manager's pane gets the manager's token and its name", async () => {
+    seen.length = 0;
+    const r = await runProgram(PROGRAMS.board, ["show", "T-1"], { HOME: home(true), TMUX: tmuxEnv, TMUX_PANE: panes.manager! });
+    expect(seen.length, r.err).toBeGreaterThan(0);
+    expect(seen.every(s => s.authorization === `Bearer ${MANAGER_TOKEN}` && s.lane === "manager")).toBe(true);
+    noToken(r);
   });
 });

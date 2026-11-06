@@ -125,6 +125,21 @@ describe("withAgentSettings: missing or unusable files leave today's behaviour",
   });
 });
 
+describe("withAgentSettings: a value with a control character is not used", () => {
+  it("a control character inside the first line makes the value unset, so it never reaches a header or an error", async () => {
+    const { made } = io({ ...FILES, [`${DIR}/agent-lanes.token`]: "fake-lane\rtoken\n", [`${DIR}/agent-hub`]: "https://hub.example.test\u0000x\n", [`${DIR}/agent-node`]: "build\tpc\n" }, "builder");
+    const got = await withAgentSettings({}, made);
+    expect(got.MORNDO_AGENT_TOKEN).toBeUndefined();
+    expect(got.MORNDO_HUB).toBeUndefined();
+    expect(got.MORNDO_NODE).toBeUndefined();
+  });
+
+  it("a line ending in CRLF is still read: the trailing carriage return is not inside the value", async () => {
+    const { made } = io({ ...FILES, [`${DIR}/agent-lanes.token`]: "fake-lane-token\r\n" }, "builder");
+    expect((await withAgentSettings({}, made)).MORNDO_AGENT_TOKEN).toBe("fake-lane-token");
+  });
+});
+
 describe("laneFromTmux asks about the pane the command runs in", () => {
   it("passes -t with TMUX_PANE: the active window of the session is another lane's", async () => {
     const calls: string[][] = [];
