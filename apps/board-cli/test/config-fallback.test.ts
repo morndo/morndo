@@ -3,7 +3,7 @@
 // when set, and with the files missing each says what it said before. Real processes, a stub hub on a local port, a
 // home folder of its own. Every token is a made-up string and none may appear in any output.
 import { execFileSync, spawn } from "node:child_process";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -201,5 +201,49 @@ describe("morndo-board in real tmux panes", () => {
     expect(seen.length, r.err).toBeGreaterThan(0);
     expect(seen.every(s => s.authorization === `Bearer ${MANAGER_TOKEN}` && s.lane === "manager")).toBe(true);
     noToken(r);
+  });
+});
+
+// tmux is only asked when a command needs the lane, and only once; never for help. A stand-in tmux program that notes each call
+// and answers nothing.
+describe("how often tmux is started", () => {
+  function standIn(): { bin: string; marker: string; calls: () => number } {
+    const d = mkdtempSync(join(tmpdir(), "morndo-p1-stub-"));
+    homes.push(d);
+    const marker = join(d, "calls");
+    writeFileSync(join(d, "tmux"), `#!/bin/sh\necho x >> "${marker}"\nexit 1\n`, { mode: 0o755 });
+    return { bin: d, marker, calls: () => { try { return readFileSync(marker, "utf8").split("\n").filter(Boolean).length; } catch { return 0; } } };
+  }
+  const inTmux = (bin: string) => ({ PATH: `${bin}:${process.env.PATH ?? ""}`, TMUX: "/tmp/none,1,0", TMUX_PANE: "%9" });
+
+  it.each([["board", ["help"]], ["decide", ["help"]], ["memory", ["help"]], ["board", ["prompt", "--role", "worker"]]] as const)("morndo-%s %j does not start tmux", async (name, args) => {
+    const t = standIn();
+    await runProgram(PROGRAMS[name], [...args], { HOME: home(true), ...inTmux(t.bin) });
+    expect(t.calls()).toBe(0);
+  });
+
+  it.each([["board", ["show", "T-1"]], ["decide", ["show", "dr-1"]], ["memory", ["search", "anything"]]] as const)("morndo-%s %j starts tmux once, though it answers nothing", async (name, args) => {
+    const t = standIn();
+    await runProgram(PROGRAMS[name], [...args], { HOME: home(true), ...inTmux(t.bin) });
+    expect(t.calls()).toBe(1);
+  });
+});
+
+describe("a node name from the file that is no node name", () => {
+  it("does not stop morndo-memory with an error about MORNDO_NODE or print the file's content", async () => {
+    seen.length = 0;
+    const h = home(true);
+    writeFileSync(join(h, ".config/morndo/agent-node"), "Build_PC\n");
+    const r = await runProgram(PROGRAMS.memory, ["remember", "--kind", "fact", "--title", "t", "--body", "b"], { HOME: h, MORNDO_LANE: "builder" });
+    expect(r.err).not.toMatch(/MORNDO_NODE/);
+    expect(r.err).not.toContain("Build_PC");
+    expect(seen.length, r.err).toBeGreaterThan(0);
+  });
+});
+
+describe("morndo --help", () => {
+  it("lists morndo job", async () => {
+    const r = await runProgram(PROGRAMS.hub, ["help"], { HOME: home(true) });
+    expect(r.out).toMatch(/morndo job\b/);
   });
 });

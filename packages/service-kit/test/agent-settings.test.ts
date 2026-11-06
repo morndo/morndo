@@ -2,7 +2,7 @@
 // ~/.config/morndo when the environment has none. This is what the per-machine wrappers did by hand (T-318, P1). Every
 // token here is a made-up string.
 import { describe, expect, it } from "vitest";
-import { laneFromTmux, withAgentSettings, type AgentEnv, type AgentSettingsIo } from "../src/agent-settings.ts";
+import { agentSettingsIo, laneFromTmux, runsOffline, withAgentSettings, type AgentEnv, type AgentSettingsIo } from "../src/agent-settings.ts";
 
 const HOME = "/home/lane";
 const DIR = `${HOME}/.config/morndo`;
@@ -118,10 +118,10 @@ describe("withAgentSettings: missing or unusable files leave today's behaviour",
     expect(got.MORNDO_AGENT_TOKEN).toBe("fake-lane-token");
   });
 
-  it("a read that throws is a missing file, and nothing the file held is in any error", async () => {
-    const made: AgentSettingsIo = { home: HOME, readText: async () => { throw new Error("EACCES: permission denied, open 'secret-path'"); }, lane: async () => "builder" };
-    const got = await withAgentSettings({}, made);
-    expect(got.MORNDO_AGENT_TOKEN).toBeUndefined();
+  it("the real reader answers null for a file it cannot read, and says nothing of why", async () => {
+    const reader = agentSettingsIo({ HOME: "/nonexistent-morndo-test-home" });
+    expect(await reader.readText("/nonexistent-morndo-test-home/.config/morndo/agent-lanes.token")).toBeNull();
+    expect(await reader.readText("/")).toBeNull();   // a directory cannot be read as text either
   });
 });
 
@@ -148,17 +148,94 @@ describe("laneFromTmux asks about the pane the command runs in", () => {
     expect(calls).toEqual([["display-message", "-p", "-t", "%5", "#W"]]);
   });
 
-  it("outside tmux, or with no pane, tmux is not asked and there is no lane", async () => {
+  it("outside tmux tmux is not asked and there is no lane", async () => {
     const calls: string[][] = [];
     const ask = async (args: string[]) => { calls.push(args); return "builder"; };
     expect(await laneFromTmux({}, ask)).toBeNull();
-    expect(await laneFromTmux({ TMUX: "x" }, ask)).toBeNull();
     expect(await laneFromTmux({ TMUX_PANE: "%5" }, ask)).toBeNull();
     expect(calls).toEqual([]);
+  });
+
+  it("with TMUX but no TMUX_PANE it asks as before, without -t: an environment that dropped the pane keeps its lane", async () => {
+    const calls: string[][] = [];
+    expect(await laneFromTmux({ TMUX: "x" }, async args => { calls.push(args); return "builder"; })).toBe("builder");
+    expect(calls).toEqual([["display-message", "-p", "#W"]]);
   });
 
   it("a failing or empty answer is no lane", async () => {
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => null)).toBeNull();
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => "  \n")).toBeNull();
+  });
+});
+
+describe("withAgentSettings: the manager's window is the hub's MORNDO_MANAGER_WINDOW", () => {
+  it("a renamed manager window gets the manager's token, and the old name no longer does", async () => {
+    const boss = io(FILES, "boss");
+    expect((await withAgentSettings({ MORNDO_MANAGER_WINDOW: "boss" }, boss.made)).MORNDO_AGENT_TOKEN).toBe("fake-manager-token");
+    const old = io(FILES, "manager");
+    const got = await withAgentSettings({ MORNDO_MANAGER_WINDOW: "boss" }, old.made);
+    expect(got.MORNDO_AGENT_TOKEN).toBe("fake-lane-token");
+    expect(old.reads).not.toContain(`${DIR}/agent-manager.token`);
+  });
+
+  it("MORNDO_LANE and an empty or blank MORNDO_MANAGER_WINDOW: the default name is manager", async () => {
+    expect((await withAgentSettings({ MORNDO_LANE: "boss", MORNDO_MANAGER_WINDOW: "boss" }, io(FILES).made)).MORNDO_AGENT_TOKEN).toBe("fake-manager-token");
+    expect((await withAgentSettings({ MORNDO_LANE: "manager", MORNDO_MANAGER_WINDOW: "  " }, io(FILES).made)).MORNDO_AGENT_TOKEN).toBe("fake-manager-token");
+  });
+});
+
+describe("withAgentSettings: a node name from the file must look like a node name", () => {
+  it("a name the memory CLI would refuse is not used, so it falls back to the host name as before", async () => {
+    for (const bad of ["Build_PC", "build pc", "-pc", "x".repeat(65)]) {
+      const { made } = io({ ...FILES, [`${DIR}/agent-node`]: `${bad}\n` }, "builder");
+      expect((await withAgentSettings({}, made)).MORNDO_NODE, bad).toBeUndefined();
+    }
+    const { made } = io({ ...FILES, [`${DIR}/agent-node`]: "pc-2\n" }, "builder");
+    expect((await withAgentSettings({}, made)).MORNDO_NODE).toBe("pc-2");
+  });
+});
+
+describe("withAgentSettings: it reads and asks only for what is missing", () => {
+  it("everything set, no lane: no file is read and the window is not asked", async () => {
+    const m = io(FILES, "builder");
+    await withAgentSettings({ MORNDO_HUB: "h", MORNDO_NODE: "n", MORNDO_AGENT_TOKEN: "t" }, m.made);
+    expect(m.reads).toEqual([]);
+    expect(m.state.lanes).toBe(0);
+  });
+
+  it("the token set: the window is not asked either, unless the caller wants the lane filled", async () => {
+    const quiet = io(FILES, "builder");
+    expect((await withAgentSettings({ MORNDO_AGENT_TOKEN: "t" }, quiet.made)).MORNDO_LANE).toBeUndefined();
+    expect(quiet.state.lanes).toBe(0);
+    const wanted = io(FILES, "builder");
+    expect((await withAgentSettings({ MORNDO_AGENT_TOKEN: "t" }, wanted.made, { fillLane: true })).MORNDO_LANE).toBe("builder");
+    expect(wanted.state.lanes).toBe(1);
+  });
+
+  it("files a command does not use are not read", async () => {
+    const m = io(FILES, "builder");
+    await withAgentSettings({}, m.made, { skip: ["hub", "node"] });
+    expect(m.reads).toEqual([`${DIR}/agent-lanes.token`]);
+  });
+
+  it("the window is asked once however often the lane is wanted", async () => {
+    const asked: string[][] = [];
+    const real = agentSettingsIo({ HOME: "/h", TMUX: "x", TMUX_PANE: "%1" }, async args => { asked.push(args); return null; });
+    expect(await real.lane()).toBeNull();
+    expect(await real.lane()).toBeNull();
+    expect(asked.length).toBe(1);
+  });
+});
+
+describe("runsOffline: a command that only prints text needs no settings", () => {
+  it("help, a bare command, a help flag and the listed commands run offline; the others do not", () => {
+    const offline = ["help", "prompt"];
+    expect(runsOffline([], offline)).toBe(true);
+    expect(runsOffline(["help"], offline)).toBe(true);
+    expect(runsOffline(["prompt", "--role", "worker"], offline)).toBe(true);
+    expect(runsOffline(["show", "T-1", "--help"], offline)).toBe(true);
+    expect(runsOffline(["--json", "help"], offline)).toBe(true);
+    expect(runsOffline(["show", "T-1"], offline)).toBe(false);
+    expect(runsOffline(["--json", "show", "T-1"], offline)).toBe(false);
   });
 });
