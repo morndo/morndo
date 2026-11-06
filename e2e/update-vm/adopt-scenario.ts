@@ -9,7 +9,7 @@
 // Every check prints one JSON line on stdout — {"step": "...", "ok": true|false, "detail": ...} — and the host
 // side reads exactly those. Made-up names only: machine "m1", node "node-demo", lane "lane-demo", folder abc1234.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { get as httpsGet } from "node:https";
 import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
@@ -578,8 +578,11 @@ async function main(): Promise<number> {
   const afterRestart = await servicesHealthy("new", VERSION_A);
   const nodeExec = run("systemctl", ["--user", "show", "-p", "ExecStart", "--value", "morndo-node.service"]).out;
   const nodeEnv = run("systemctl", ["--user", "show", "-p", "Environment", "--value", "morndo-node.service"]).out;
-  check("d-node-execstart-is-launcher", nodeExec.includes("morndo-releases") && !nodeExec.includes("abc1234") && !nodeExec.includes("decoy0") && nodeEnv.includes("/.local/bin:"),
-    `the node unit's ExecStart is the installed Version's launcher: ${nodeExec.split("\n")[0]?.slice(0, 160)}; the PATH from the drop-in (with ~/.local/bin) is kept: ${nodeEnv.includes("/.local/bin:")}`);
+  // The unit starts the launcher link in ~/.local/bin; it is the installed Version's when the link's target sits under the releases.
+  const nodeLauncher = join(BIN, "morndo-node");
+  const launcherTarget = (() => { try { return realpathSync(nodeLauncher); } catch { return ""; } })();
+  check("d-node-execstart-is-launcher", nodeExec.includes(nodeLauncher) && launcherTarget.includes("morndo-releases") && !nodeExec.includes("abc1234") && !nodeExec.includes("decoy0") && nodeEnv.includes("/.local/bin:"),
+    `the node unit's ExecStart names ${nodeLauncher}, whose target is ${launcherTarget || "(unreadable)"}: ${nodeExec.split("\n")[0]?.slice(0, 160)}; the PATH from the drop-in (with ~/.local/bin) is kept: ${nodeEnv.includes("/.local/bin:")}`);
   check("d-services-healthy", afterRestart.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))),
     `${sawNew === "new" ? "no restart needed" : "after systemctl --user restart of the three units"}: ${afterRestart.detail}`);
   if (failed) { journals("d-restart"); return finish(server); }
