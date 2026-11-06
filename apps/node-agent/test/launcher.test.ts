@@ -68,7 +68,6 @@ const argv = (name: string) => (existsSync(join(argvDir, `${name}.argv`)) ? read
 const paneOf = (workerId: string) => `%${workerId.replace(/^.*\./, "")}`;
 const show = (...args: string[]) => t.tmux(...args).replace(/\n$/, "");
 const windows = () => show("list-windows", "-t", "=main", "-F", "#{window_name}").split("\n");
-const submitted = (dir: string) => readSubmitted(dir);
 const boxIn = (name: string) => { const dir = join(home.home, name); mkdirSync(dir, { recursive: true }); return dir; };
 const showsBox = (workerId: string) => until(() => t.tmux("capture-pane", "-p", "-t", paneOf(workerId)).includes("❯"));
 async function start(h: Harness, args: Record<string, unknown>, key: string) {
@@ -169,10 +168,10 @@ describe("lane.start (spec §5)", () => {
     const kick = async () => { await h.inventory.refresh(); h.deliverer.kick("status"); await h.deliverer.drain(); };
     // No Claude Code session in the pane yet: the prompt waits (no_session), within its pane process's grace (ruling 14).
     expect(await until(async () => { await kick(); return h.deliveries.get(id)?.waiting?.reason === "no_session"; })).toBe(true);
-    expect(submitted(dir)).toEqual([]);
+    expect(readSubmitted(dir)).toEqual([]);
     claudeSession({ tmux: t, claudeDir: join(home.home, ".claude"), pane: paneOf(r.workerId) }).status("idle");
-    expect(await until(async () => { await kick(); return submitted(dir).length > 0; })).toBe(true);
-    expect(submitted(dir)).toEqual(["Build the login page"]);
+    expect(await until(async () => { await kick(); return readSubmitted(dir).length > 0; })).toBe(true);
+    expect(readSubmitted(dir)).toEqual(["Build the login page"]);
     expect(h.deliveries.get(id)?.state).toBe("typed");
   });
 
@@ -188,8 +187,8 @@ describe("lane.start (spec §5)", () => {
     const kick = async () => { await h.inventory.refresh(); h.deliverer.kick("status"); await h.deliverer.drain(); };
     expect(await until(async () => { await kick(); return h.deliveries.get(id)?.waiting?.reason === "no_session"; })).toBe(true);
     claudeSession({ tmux: t, claudeDir: join(home.home, ".claude"), pane: paneOf(r.workerId) }).status("idle");
-    expect(await until(async () => { await kick(); return submitted(dir).length > 0; })).toBe(true);
-    expect(submitted(dir)).toEqual([prompt]);
+    expect(await until(async () => { await kick(); return readSubmitted(dir).length > 0; })).toBe(true);
+    expect(readSubmitted(dir)).toEqual([prompt]);
     expect(h.deliveries.get(id)?.state).toBe("typed");
   });
 });
@@ -218,7 +217,7 @@ describe("lane.stop (spec §5)", () => {
     expect(await showsBox(r.workerId)).toBe(true);
     expect(await h.call("lane.stop", { name: "with-tasks" }, { key: "lanes:e2", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
     expect(windows()).not.toContain("with-tasks");
-    expect(submitted(dir)).toEqual(["/exit"]);
+    expect(readSubmitted(dir)).toEqual(["/exit"]);
   });
 
   it("stop closes the window after the agent exits (the pane back at its shell)", async () => {
@@ -228,7 +227,7 @@ describe("lane.stop (spec §5)", () => {
     expect(await showsBox(r.workerId)).toBe(true);
     expect(await h.call("lane.stop", { name: "shell-lane" }, { key: "lanes:e4", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
     expect(windows()).not.toContain("shell-lane");
-    expect(submitted(dir)).toEqual(["/exit"]);
+    expect(readSubmitted(dir)).toEqual(["/exit"]);
   });
 
   it("stop does not fail when the window closed itself after the look (nothing is left to close)", async () => {
@@ -249,7 +248,7 @@ describe("lane.stop (spec §5)", () => {
     t.tmux("set-hook", "-g", "after-capture-pane", `if-shell 'test -e ${looked}' 'kill-window -t ${pane}'`);
     expect(await h.call("lane.stop", { name: "closing-lane" }, { key: "lanes:e6", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
     expect(windows()).not.toContain("closing-lane");
-    expect(submitted(dir)).toEqual(["/exit"]);
+    expect(readSubmitted(dir)).toEqual(["/exit"]);
   });
 
   it("--keep-window leaves it: keepWindow leaves the window at its shell after the exit", async () => {
@@ -260,7 +259,7 @@ describe("lane.stop (spec §5)", () => {
     expect(await h.call("lane.stop", { name: "kept-lane", keepWindow: true }, { key: "lanes:k2", timeoutMs: 30_000 })).toMatchObject({ ok: true, result: { ok: true } });
     expect(windows()).toContain("kept-lane");
     expect(show("display-message", "-p", "-t", paneOf(r.workerId), "#{pane_current_command}")).toBe("bash");
-    expect(submitted(dir)).toEqual(["/exit"]);
+    expect(readSubmitted(dir)).toEqual(["/exit"]);
   });
 
   it("mode exit never types into a menu (menu_open, not executed), and is uncertain when the lane neither closes nor reaches its shell in time", async () => {
@@ -275,7 +274,7 @@ describe("lane.stop (spec §5)", () => {
     expect(await showsBox(r.workerId)).toBe(true);
     expect(await stays.call("lane.stop", { name: "stays" }, { key: "lanes:m4", timeoutMs: 30_000 })).toMatchObject({ ok: false, error: { code: "uncertain", executed: "maybe" } });
     expect(stays.doneKeys.status("lanes:m4")).toEqual({ state: "started" });
-    expect(submitted(dir)).toEqual(["/exit"]);
+    expect(readSubmitted(dir)).toEqual(["/exit"]);
     expect(windows()).toContain("stays");
   });
 

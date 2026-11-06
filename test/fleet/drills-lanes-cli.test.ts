@@ -13,7 +13,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  FAKE_CLAUDE, HUB_MAIN, cleanEnv, fakeLane, hook, joinAgent, paneOf, startFleet, stopAll, submittedAt, tempDir, tmuxServer, until,
+  FAKE_CLAUDE, HUB_MAIN, cleanEnv, fakeLane, hook, joinAgent, paneOf, startFleet, stopAll, readSubmitted, tempDir, tmuxServer, until,
   updatePolicy, type Fleet,
 } from "../fleet-harness.ts";
 
@@ -101,7 +101,7 @@ describe("morndo lanes against a real fleet and agent", () => {
     const result = JSON.parse(started.out) as { node: string; workerId: string; prompt: string };
     expect(result).toMatchObject({ node: "n1", prompt: expect.stringMatching(/^lanes:prompt:[0-9a-f]{16}$/) });   // ruling 7
     await until("the first prompt delivered", async () => (await lanes(o.fleet, ["status", result.prompt])).out.includes(": delivered"), 30_000, 500);
-    expect(submittedAt(cwd)).toEqual(["first words"]);
+    expect(readSubmitted(cwd)).toEqual(["first words"]);
     expect(await lanes(o.fleet, ["stop", "w2"])).toMatchObject({ code: 0, out: expect.stringContaining("stopped w2") });
     expect(o.tmux.run("list-windows", "-t", "=qa", "-F", "#{window_name}").split("\n")).not.toContain("w2");
   });

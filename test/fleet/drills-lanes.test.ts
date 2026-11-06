@@ -15,7 +15,7 @@ import type { TestHooks } from "../../apps/node-agent/src/test-hooks.ts";
 import { LIMITS } from "../../packages/protocol/src/fleet.ts";
 import { parseWorkerId } from "../../packages/protocol/src/worker-id.ts";
 import {
-  FAKE_CLAUDE, controlAt, fakeLane, joinAgent, paneOf, sleep, startFleet, stopAll, submittedAt, tempDir, tmuxServer, until,
+  FAKE_CLAUDE, controlAt, fakeLane, joinAgent, paneOf, sleep, startFleet, stopAll, readSubmitted, tempDir, tmuxServer, until,
   updatePolicy, watchDeliveries,
 } from "../fleet-harness.ts";
 
@@ -127,7 +127,7 @@ describe("lane.start through the shell", () => {
     await until("the box running in s1", () => current() === "node", 20_000);
     await watch.until(promptId, d => d.state === "delivered", 60_000);
     expect(watch.states(promptId).some(d => d.waiting?.reason === "no_session")).toBe(true);   // it waited for the CLI
-    expect(submittedAt(cwd)).toEqual(["first words"]);
+    expect(readSubmitted(cwd)).toEqual(["first words"]);
     await controlAt(cwd, { exit: true });                                // the CLI exits…
     await until("s1 back at its shell", () => /^-?(bash|sh)$/.test(current()), 15_000);
     expect(tmux.run("list-windows", "-t", "=qa", "-F", "#{window_name}").split("\n")).toContain("s1");   // …and the window stays
