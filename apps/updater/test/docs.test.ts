@@ -3,9 +3,9 @@
 // HOME is a checkout, as cli.test.ts uses, so a parsed command ends in not_ours or a settings write, never in
 // the usage exit, when the words are ones the program takes.
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { runUpdater } from "../src/cli.ts";
@@ -16,41 +16,66 @@ const KEY_LINE = readFileSync(join(ROOT, "trust/release_allowed_signers"), "utf8
 
 const read = (path: string): string => readFileSync(join(ROOT, path), "utf8");
 
-// Every Markdown page of the repository, from the root: the scan for a command or a note must not depend on a list.
-const docFiles = (): string[] => {
-  const skip = new Set(["node_modules", ".git", ".worktrees", ".keryx", "dist", "build", "coverage"]);
-  const out: string[] = [];
-  const walk = (dir: string): void => {
-    for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        if (!skip.has(entry.name)) walk(dir === "" ? entry.name : `${dir}/${entry.name}`);
-      } else if (entry.name.endsWith(".md")) {
-        out.push(dir === "" ? entry.name : `${dir}/${entry.name}`);
-      }
-    }
-  };
-  walk("");
-  return out.sort();
+// The Markdown pages git tracks, read once. CHANGELOG.md is written by Release Please from commit subjects, not by hand.
+let pagesOnce: Record<string, string> | null = null;
+const pages = (): Record<string, string> => {
+  if (pagesOnce !== null) return pagesOnce;
+  const listed = spawnSync("git", ["ls-files", "-z", "*.md"], { cwd: ROOT, encoding: "utf8" });
+  expect(listed.status, "git ls-files").toBe(0);
+  const out: Record<string, string> = {};
+  for (const file of listed.stdout.split("\0").filter(f => f !== "" && posix.basename(f) !== "CHANGELOG.md")) out[file] = read(file);
+  pagesOnce = out;
+  return out;
 };
 
-// Each `gh attestation verify` in a text, read to the closing backtick or the end of its line, must carry
-// `--signer-workflow`, and when a workflow follows it, that one (or a <placeholder> standing for it).
-const attestationProblems = (text: string, signer: string): string[] => {
+const NOTE_HEADING = "the-gh-version-the-attestation-check-needs";
+
+// The commands a page shows: a fenced line or an inline code span that starts with `gh attestation verify` and names
+// a file after it (a wrapped line is joined). A span that is only the name, or the name and a flag, is prose.
+const attestationCommands = (text: string): string[] => {
+  const out: string[] = [];
+  const keep = (raw: string): void => {
+    const command = raw.replace(/\s+/g, " ").replace(/^\$ /, "").trim();
+    const subject = /^gh attestation verify (\S+)/.exec(command)?.[1];
+    if (subject !== undefined && !subject.startsWith("-")) out.push(command);
+  };
+  for (const block of fences(text)) for (const line of block.replace(/\\\n\s*/g, " ").split("\n")) keep(line);
+  const prose = text.replace(/```[^\n]*\n[\s\S]*?```/g, "");
+  for (const span of prose.matchAll(/`([^`]+)`/g)) keep(span[1] ?? "");
+  return out;
+};
+
+// A command must pin the whole workflow the release job signs with, as the value of --signer-workflow.
+const pinProblems = (text: string, signer: string): string[] =>
+  attestationCommands(text).flatMap(command => {
+    const value = /--signer-workflow(?:\s+|=)(\S+)/.exec(command)?.[1]?.replace(/^["']|["';]+$/g, "");
+    return value === signer ? [] : [`${value === undefined ? "no pin" : "another workflow"}: ${command}`];
+  });
+
+// The note on which gh to use: the minimum version, the Ubuntu package, or the advice not to drop the flag.
+const holdsVersionNote = (text: string): boolean =>
+  /`gh` 2\.51\.0 or newer|packages is 2\.45\.0|never drop `--signer-workflow`/.test(text);
+
+// Does the page link to the README's note on the gh version (a relative link that lands on the repository README)?
+const linksToVersionNote = (file: string, text: string): boolean =>
+  [...text.matchAll(/\]\(([^)#\s]*)#([^)\s]+)\)/g)].some(
+    m => m[2] === NOTE_HEADING && posix.normalize(posix.join(posix.dirname(file), m[1] ?? "")) === "README.md");
+
+// Everything the pages must satisfy about the attestation command. Empty is a pass.
+const attestationRules = (docs: Record<string, string>, signer: string): string[] => {
   const problems: string[] = [];
-  for (const line of text.split("\n")) {
-    for (const part of line.split("gh attestation verify").slice(1)) {
-      const command = part.split("`")[0] ?? "";
-      const flag = /--signer-workflow(?:[ =](\S+))?/.exec(command);
-      if (flag === null) problems.push(`no --signer-workflow: ${line.trim()}`);
-      else if (flag[1] !== undefined && !flag[1].startsWith("<") && flag[1] !== signer) problems.push(`another workflow: ${line.trim()}`);
+  for (const [file, text] of Object.entries(docs)) {
+    const shows = attestationCommands(text).length > 0;
+    problems.push(...pinProblems(text, signer).map(p => `${file}: ${p}`));
+    if (file === "README.md") {
+      if (!holdsVersionNote(text)) problems.push("README.md: has no note on the gh version");
+    } else {
+      if (holdsVersionNote(text)) problems.push(`${file}: copies the gh version note`);
+      if (shows && !linksToVersionNote(file, text)) problems.push(`${file}: shows the command and does not link to the README's note`);
     }
   }
   return problems;
 };
-
-// A copy of the gh version note: the minimum version, the Ubuntu package, or the advice not to drop the flag.
-const holdsVersionNote = (text: string): boolean =>
-  /`gh` 2\.51\.0 or newer|packages is 2\.45\.0|never drop `--signer-workflow`/.test(text);
 
 // Fenced blocks. `lang` empty is every fence; "sh" is the shell blocks the command lists live in.
 const fences = (text: string, lang = ""): string[] => {
@@ -163,57 +188,53 @@ describe("install and update documentation", () => {
     expect(read("SECURITY.md")).toMatch(/gh attestation verify install\.sh[\s\S]*?independent check[^.]*not optional/);
   });
 
-  it("the gh version note is in the README alone, and every other page that shows the command links to it", () => {
+  const releaseSigner = (): string => {
+    const tail = /--signer-workflow "\$\{GITHUB_REPOSITORY\}(\/\.github\/workflows\/release\.yml@[^"]+)"/.exec(read(".github/workflows/release.yml"))?.[1];
+    expect(tail, "release.yml verifies with --signer-workflow").toBeDefined();
+    return `morndo/morndo${tail}`;
+  };
+
+  it("the README holds the gh version note, under a heading the other pages link to", () => {
     const readme = read("README.md");
     expect(readme).toMatch(/needs `gh` 2\.51\.0 or newer/);
     expect(readme).toContain("releases/tag/v2.49.0");
     expect(readme).toContain("releases/tag/v2.51.0");
     expect(readme).toMatch(/never drop `--signer-workflow` to make the check pass/);
     expect(readme).toContain("#### The gh version the attestation check needs");
-    const holders = docFiles().filter(file => holdsVersionNote(read(file)));
-    expect(holders).toEqual(["README.md"]);
-    for (const file of ["SECURITY.md", "docs/design/updates/manual-qa.md"]) {
-      expect(read(file), file).toMatch(/\]\((\.\.\/)*README\.md#the-gh-version-the-attestation-check-needs\)/);
-    }
   });
 
-  it("holdsVersionNote sees a copy of the note, and not a link to it (negative control)", () => {
-    expect(holdsVersionNote("It needs `gh` 2.51.0 or newer: the `attestation` command came in 2.49.0.")).toBe(true);
-    expect(holdsVersionNote("The `gh` that Ubuntu 24.04 packages is 2.45.0 (seen 2026-10-28).")).toBe(true);
-    expect(holdsVersionNote("On an older `gh`, upgrade it; never drop `--signer-workflow` to make the check pass.")).toBe(true);
-    expect(holdsVersionNote("Which `gh` it needs is in [the README](README.md#the-gh-version-the-attestation-check-needs).")).toBe(false);
+  it("every tracked page that shows gh attestation verify pins the release workflow, and only the README holds the version note", () => {
+    const docs = pages();
+    expect(Object.keys(docs)).toEqual(expect.arrayContaining(["README.md", "SECURITY.md", "docs/design/updates/README.md", "docs/design/updates/manual-qa.md", "docs/plans/2026-10-28-c6-per-machine.md"]));
+    expect(Object.keys(docs)).not.toContain("CHANGELOG.md");
+    const showing = Object.entries(docs).filter(([, text]) => attestationCommands(text).length > 0).map(([file]) => file);
+    expect(showing).toEqual(expect.arrayContaining(["README.md", "SECURITY.md", "docs/design/updates/README.md", "docs/design/updates/manual-qa.md", "docs/plans/2026-10-28-c6-per-machine.md"]));
+    expect(attestationRules(docs, releaseSigner())).toEqual([]);
   });
 
-  it("every gh attestation verify in any page of the repository pins the workflow the release job uses", () => {
-    const release = read(".github/workflows/release.yml");
-    const tail = /--signer-workflow "\$\{GITHUB_REPOSITORY\}(\/\.github\/workflows\/release\.yml@[^"]+)"/.exec(release)?.[1];
-    expect(tail, "release.yml verifies with --signer-workflow").toBeDefined();
-    const signer = `morndo/morndo${tail}`;
-    const files = docFiles();
-    for (const known of ["README.md", "SECURITY.md", "docs/design/updates/README.md", "docs/design/updates/manual-qa.md", "docs/plans/2026-10-28-c6-per-machine.md", "docs/adr/0019-releases-and-updates.md"]) {
-      expect(files, "the scan reaches every page").toContain(known);
-    }
-    let seen = 0;
-    for (const file of files) {
-      const text = read(file);
-      seen += text.split("gh attestation verify").length - 1;
-      expect(attestationProblems(text, signer), file).toEqual([]);
-    }
-    expect(seen).toBeGreaterThanOrEqual(8);
-  });
-
-  it("attestationProblems fails a command without the pin, with another workflow, or with the flag cut off (negative control)", () => {
-    const signer = "morndo/morndo/.github/workflows/release.yml@refs/heads/main";
+  it("the rules fail a page that breaks them, and pass the same page when it does not (negative control)", () => {
+    const signer = releaseSigner();
     const ok = `gh attestation verify install.sh --repo morndo/morndo --signer-workflow ${signer}`;
-    expect(attestationProblems("Run `" + ok + "` first.", signer)).toEqual([]);
-    expect(attestationProblems("```sh\n" + ok + "\n```", signer)).toEqual([]);
-    expect(attestationProblems("`gh attestation verify <file> --repo morndo/morndo --signer-workflow <release workflow>` [U7]", signer)).toEqual([]);
-    expect(attestationProblems("Run `gh attestation verify install.sh --repo morndo/morndo` first.", signer)).toHaveLength(1);
-    expect(attestationProblems("```sh\ngh attestation verify install.sh --repo morndo/morndo\n```", signer)).toHaveLength(1);
-    expect(attestationProblems("with `ssh-keygen` and `gh attestation verify`.", signer)).toHaveLength(1);
-    expect(attestationProblems("`gh attestation verify install.sh --signer-workflow other/repo/.github/workflows/x.yml@refs/heads/main`", signer)).toHaveLength(1);
-    expect(attestationProblems("`gh attestation verify install.sh --repo morndo/morndo` and `--signer-workflow " + signer + "`", signer)).toHaveLength(1);
-    expect(attestationProblems("a pinned one `" + ok + "` and a bare `gh attestation verify x`", signer)).toHaveLength(1);
+    const link = `[the README](README.md#${NOTE_HEADING})`;
+    const base = { "README.md": "It needs `gh` 2.51.0 or newer. Run `" + ok + "`.", "A.md": "Run `" + ok + "`. " + link };
+    expect(attestationRules(base, signer)).toEqual([]);
+    const without = (command: string): string[] => attestationRules({ ...base, "A.md": "Run `" + command + "`. " + link }, signer);
+    expect(without("gh attestation verify install.sh --repo morndo/morndo")).toHaveLength(1);
+    expect(without("gh attestation verify install.sh --repo morndo/morndo --signer-workflow")).toHaveLength(1);
+    expect(without("gh attestation verify install.sh --signer-workflow <release workflow>")).toHaveLength(1);
+    expect(without("gh attestation verify install.sh --signer-workflow other/repo/.github/workflows/x.yml@refs/heads/main")).toHaveLength(1);
+    expect(without(ok + "  ")).toEqual([]);
+    expect(attestationRules({ ...base, "A.md": "```sh\n" + ok.replace(" --signer-workflow", " \\\n  --signer-workflow") + "\n```\n" + link }, signer)).toEqual([]);
+    expect(attestationRules({ ...base, "A.md": "```sh\n" + ok + ";\n```\n" + link }, signer)).toEqual([]);
+    expect(attestationRules({ ...base, "A.md": "```sh\ngh attestation verify install.sh --repo morndo/morndo\n```\n" + link }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "A.md": "Run `" + ok + "` and, without the pin, `gh attestation verify x`. " + link }, signer)).toHaveLength(1);
+    // Prose that names the command or the flag is not a command.
+    expect(attestationRules({ ...base, "B.md": "Checked with `ssh-keygen` and `gh attestation verify`, and `gh attestation verify --signer-workflow` pins it." }, signer)).toEqual([]);
+    // A page that shows the command needs the link; a copy of the note belongs to the README only.
+    expect(attestationRules({ ...base, "A.md": "Run `" + ok + "`." }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "A.md": "Run `" + ok + "`. " + link, "C.md": "It needs `gh` 2.51.0 or newer." }, signer)).toHaveLength(1);
+    expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](README.md#" + NOTE_HEADING + ")" }, signer)).toHaveLength(1);   // that resolves to docs/README.md
+    expect(attestationRules({ ...base, "docs/D.md": "Run `" + ok + "`. [x](../README.md#" + NOTE_HEADING + ")" }, signer)).toEqual([]);
   });
 
   it("the README's Status line does not call release verification unbuilt", () => {

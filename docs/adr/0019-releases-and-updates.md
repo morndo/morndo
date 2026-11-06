@@ -121,7 +121,7 @@
 
 ## Consequences
 
-- **Good:** updating is one command, or nothing at all. A failed update returns the machine to the version that worked and says why. A bad release stops at the first machine that fails. Every artifact can be checked by anyone, with `ssh-keygen` and `gh attestation verify --signer-workflow`.
+- **Good:** updating is one command, or nothing at all. A failed update returns the machine to the version that worked and says why. A bad release stops at the first machine that fails. Every artifact can be checked by anyone, with `ssh-keygen` and `gh attestation verify`.
 - **Good:** the precondition work (PR 0) fixes a hazard that exists today without any updater: restarting the agent on a fresh machine would end every lane.
 - **Cost:** a new app, `apps/updater`. A floor declaration on every migration from now on. One protocol addition per direction: the control plane's version and rollout state in `welcome`, and the node's update state in `health`. Health endpoints in the hub and the fleet, a hold every service obeys, a store id for the hub's database, and revocation journals. A weekly workflow, and an owner approval for every release.
 - **Cost:** the owner keeps an offline root key and signs a new Key set at least once a year. A Key set left to expire stops updates everywhere, with an Alert, 30 days ahead.

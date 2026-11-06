@@ -115,7 +115,7 @@ Record: what the phone showed, the versions in the table, and the exit code.
 
 12. On the real release assets, check the signature and the attestation by hand. Change one installed file and run `morndo doctor`, which finds that file.
 
-The attestation line needs the `gh` named in step 1.
+The attestation line needs a recent `gh`: [the README says which](../../../README.md#the-gh-version-the-attestation-check-needs).
 
 ```sh
 ssh-keygen -Y verify -f morndo.allowed_signers -I release@morndo.github.io -n release@morndo.github.io -s install.sh.sig < install.sh
