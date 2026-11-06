@@ -118,6 +118,16 @@ describe("dropins.sh <backup>", () => {
   });
 });
 
+describe("dropins.sh with an ExecStart over several lines", () => {
+  it("takes the continuation lines out with it and leaves no fragment behind", () => {
+    const text = "[Service]\nEnvironment=PATH=/x\nExecStart=\nExecStart=/h/node \\\n  --no-warnings \\\n  /h/main.ts run\nRestart=always\n";
+    const m = machine({ "multi.conf": text });
+    const bk = backupOf(m);
+    expect(run(m, bk).code).toBe(0);
+    expect(readFileSync(join(m.folder, "multi.conf"), "utf8")).toBe("[Service]\nEnvironment=PATH=/x\nRestart=always\n");
+  });
+});
+
 describe("dropins.sh usage", () => {
   it("wants exactly one argument: --list or a backup folder that exists", () => {
     const m = machine();
