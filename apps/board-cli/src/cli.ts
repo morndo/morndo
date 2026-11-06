@@ -36,8 +36,8 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
                                         manager which way to go: it is due an answer in 24 h and inbox lists it
   resume T-12                           back in progress
   review T-12 [--note "…"]              you say it is done; the manager checks and marks it done
-  brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --json brief.json
-  brief T-12 --show [--json] [--from-last]   the brief the hub holds and how each reference checked out
+  brief T-12 --summary "…" --left-out "…" --limit "…" [--decision "…"] [--pr owner/repo#42@sha]… [--ci owner/repo@sha:ci,lint]… [--test "…"]… [--manual|--ui|--data|--infra "…"]… [--no-code "…"] | --file brief.json   [--out-json]
+  brief T-12 --show [--out-json] [--from-last]   the brief the hub holds and how each reference checked out
   merged T-12 <sha> [--repo owner/name]   record the commit its PR merged as (default repo morndo/morndo; manager, or the task's lane)
   unmerged T-12 <sha> [--repo …]   clear a wrong merge record (manager only); to replace one, unmerged then merged
   done T-12 --why "…" [--not-live "…"] [--proof-override "<reason>"]  accept it, naming what you checked; refused while its morndo/morndo merge is not live on every node (manager only)
@@ -50,8 +50,9 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
 
 --json, on any command that prints data, makes stdout exactly one JSON document and moves every other line to stderr;
 it takes no value. A command of several calls that is refused part-way prints what happened so far, then exits non-zero:
-check the exit code before you trust the document. brief keeps --json <file> for its file form (also --file <file>);
-its machine output is --out-json. help and prompt have no JSON form.
+check the exit code before you trust the document. On brief, --json is not the output flag: the machine output is
+--out-json, and the file form is --file <file> (the old --json <file> still works, with a deprecation line on stderr).
+help and prompt have no JSON form.
 
 Environment: MORNDO_HUB (the hub's address), MORNDO_AGENT_TOKEN (from \`morndo agent-token new\`), MORNDO_LANE (this
 lane's name; without it, the tmux window's name).`;
@@ -198,14 +199,16 @@ class Unreachable extends Error { constructor(message: string) { super(message);
 
 export async function run(argv: readonly string[], env: Env, io: Io): Promise<number> {
   // --json takes no value on every command but brief, where `--json <file>` is the old file form and the machine
-  // output is --out-json (T-873).
-  const { positional, flags } = parseArgs(argv, argv[0] === "brief" ? ["out-json"] : ["json"]);
+  // output is --out-json (T-873). The command is the first word that is not a flag (no flag of this CLI that may come
+  // before it takes a value), so the set is picked before the line is parsed.
+  const word = argv.find(a => !a.startsWith("--"));
+  const { positional, flags } = parseArgs(argv, word === "brief" ? ["out-json"] : ["json", "out-json"]);
   const [cmd = "help", ...rest] = positional;
   const text = (f: string) => (typeof flags[f] === "string" ? (flags[f] as string) : undefined);
   // Under --json, stdout is exactly one JSON document (jq reads it), so every sentence that is not that document goes
   // to stderr instead — the notice helper is the one way each of them is written. brief's old `--show --json` still
   // prints JSON.
-  const asJson = cmd === "brief" ? flags["out-json"] === true || (flags.show === true && flags.json !== undefined) : flags.json === true;
+  const asJson = cmd === "brief" ? flags["out-json"] === true || (flags.show === true && flags.json === true) : flags.json === true;
   const notice = (l: string) => (asJson ? io.err : io.out)(l);
   try {
     if (cmd === "help" || flags.help === true) { io.out(HELP); return 0; }
@@ -216,6 +219,8 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       return 0;
     }
     if (cmd !== "brief" && typeof flags.json === "string") throw new Usage(`--json takes no value (${JSON.stringify(flags.json)}); it asks for JSON output`);
+    if (cmd !== "brief" && flags["out-json"] !== undefined) throw new Usage("--out-json is brief's; on any other command the flag is --json");
+    if (cmd === "brief" && flags.show === true && typeof flags.json === "string") throw new Usage("brief --show prints JSON with --out-json; --json <file> is the file form of filing a brief");
     const hub = (env.MORNDO_HUB ?? "").replace(/\/+$/, "");
     const token = env.MORNDO_AGENT_TOKEN ?? "";
     if (!hub || !token) throw new Usage("set MORNDO_HUB (the hub's address) and MORNDO_AGENT_TOKEN (from `morndo agent-token new`)");

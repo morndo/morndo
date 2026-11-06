@@ -1,7 +1,7 @@
 // --json on every command (T-873): stdout is exactly one JSON document, and every notice goes to stderr. The hub is a
 // fake that answers the shapes the agents' route returns, by method, path and action; each test names the command it
-// pins. --json never takes the word after it (only a path that names a .json file, brief's old file form), so the order
-// of the flags is pinned too.
+// pins. --json takes no value on every command but brief (where --json <file> is the old file form and --out-json the
+// machine output), so the order of the flags is pinned too.
 import { describe, expect, it } from "vitest";
 import { parseArgs, run } from "../src/cli.ts";
 
@@ -217,6 +217,36 @@ describe("--json: one JSON document on stdout, notices on stderr (T-873)", () =>
     const r = await cli(["new", "Ship it", "--proof", "tests: x"], { ...hub, "POST /api/agent/board/tasks": { task: doing, event: event({ kind: "created", status: "todo" }) } });
     expect(r.code, r.err).toBe(0);
     expect(r.out.split("\n").filter(l => l.startsWith("T-1  Ship it"))).toHaveLength(1);
+  });
+  it("the command is the first word that is no flag, so a flag before it does not change how brief parses", async () => {
+    const shown = await cli(["--out-json", "brief", "T-1", "--show"], hub);
+    expect(shown.code, shown.err).toBe(0);
+    expect(document(shown.out)).toMatchObject({ brief: null });
+    const listed = await cli(["--json", "list"], hub);
+    expect(listed.code, listed.err).toBe(0);
+    expect(document(listed.out)).toHaveLength(1);
+  });
+  it("brief --show with --json <file> is a usage error, and --out-json on any other command is refused in words", async () => {
+    const mixed = await cli(["brief", "T-1", "--show", "--json", "brief.json"], hub);
+    expect(mixed.code).toBe(2);
+    expect(mixed.err).toContain("--out-json");
+    expect(mixed.out).toBe("");
+    expect(mixed.calls).toEqual([]);
+    for (const argv of [["show", "--out-json", "T-1"], ["list", "--out-json"], ["show", "T-1", "--out-json"]]) {
+      const r = await cli(argv, hub);
+      expect(r.code, argv.join(" ")).toBe(2);
+      expect(r.err, argv.join(" ")).toContain("--out-json is brief's");
+      expect(r.out, argv.join(" ")).toBe("");
+      expect(r.calls, argv.join(" ")).toEqual([]);
+    }
+  });
+  it("the help lists the forms that work: --file, --out-json, and says --json is not the output flag on brief", async () => {
+    const out: string[] = [];
+    await run(["help"], {}, { fetch, lane: async () => null, out: l => out.push(l), err: () => {} });
+    const help = out.join("\n");
+    expect(help).toContain("| --file brief.json   [--out-json]");
+    expect(help).toContain("brief T-12 --show [--out-json] [--from-last]");
+    expect(help).toContain("--out-json, and the file form is --file <file>");
   });
   it("a free-text word that ends in .json is the title or the comment, not a value of --json", async () => {
     const filed = await cli(["new", "--json", "Bump package.json"], { ...hub, "POST /api/agent/board/tasks": { task: doing, event: event({ kind: "created", status: "todo" }) } });
