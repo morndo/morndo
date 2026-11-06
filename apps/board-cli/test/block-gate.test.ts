@@ -32,6 +32,13 @@ describe("the block gate in the CLI (B21)", () => {
     expect(r.out).toContain("no watched wait: from 2026-11-12 a block without --on or --decision is refused; name one (--on T-12, #93, owner/repo#93, ny-530 or until:<time>, at most 31 days ahead)");
     expect(r.out).toContain("unless the hub's MORNDO_BLOCK_GATE says otherwise");   // the hub's setting may differ from the default date
   });
+  it("with --json the whole of stdout is the task as JSON: the unwatched notice goes to stderr", async () => {
+    const r = await stubCli({ task: shipIt, event: moved({ unwatched: true }) }, 200, ["block", "T-1", "--why", "needs the API key", "--json"]);
+    expect(r.code, r.err).toBe(0);
+    expect(JSON.parse(r.out).task.key).toBe("T-1");               // jq reads stdout: nothing but the JSON may be on it
+    expect(r.out).not.toContain("no watched wait");
+    expect(r.err).toContain("no watched wait: from 2026-11-12 a block without --on or --decision is refused");
+  });
   it("a no_wait refusal exits non-zero, in words naming --on and the 31 days", async () => {
     const r = await stubCli({ error: "no_wait" }, 400, ["block", "T-1", "--why", "needs the API key"]);
     expect(r.code).toBe(1);
