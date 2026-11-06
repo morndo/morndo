@@ -9,12 +9,12 @@
 // lives with the poller in Task 14 (apps/hub/test, against fake-fleet.ts). Here the stalled node's own lane is shown not
 // to move, which proves the stall is real.
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
 import { afterEach, describe, expect, it } from "vitest";
 import { matchEchoes, type OutboxRecord } from "../../apps/web/src/lib/outbox/state.ts";
 import type { TestHooks } from "../../apps/node-agent/src/test-hooks.ts";
 import { parseWorkerId } from "../../packages/protocol/src/worker-id.ts";
 import { expectOf, fakeLane, joinAgent, paneOf, sleep, startFleet, startHub, stopAll, tmuxServer, until } from "../fleet-harness.ts";
+import { readJsonLines } from "../../packages/node-ops/test/whole-lines.ts";
 
 afterEach(stopAll);
 const POLL = 500;
@@ -80,8 +80,8 @@ describe("clocks", () => {
     expect(at).toBeGreaterThan(hubNow + OFFSET - 2000);                       // the node's time of typing, not the hub's
     expect(at).toBeLessThan(hubNow + OFFSET + 2000);
     type Line = { uuid?: string; message?: { content?: unknown }; timestamp?: string };
-    const line = await until("the echo in the transcript", () => readFileSync(box.transcript ?? "", "utf8").split("\n").filter(Boolean)
-      .map(l => JSON.parse(l) as Line).find(l => l.message?.content === "clock drill echo") ?? null);
+    const line = await until("the echo in the transcript", () => (readJsonLines(box.transcript ?? "") as Line[])
+      .find(l => l.message?.content === "clock drill echo") ?? null);
     const echo = { id: line.uuid ?? "echo", at: Date.parse(line.timestamp ?? ""), text: "clock drill echo" };
     // The app's own matcher (apps/web/src/lib/outbox/state.ts), on the record the app keeps once the hub answers 200:
     // `typedAt` is the hub's `at`, the node's time of typing (Task 5).

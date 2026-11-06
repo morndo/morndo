@@ -189,7 +189,7 @@ export async function controlAt(dir: string, c: Control): Promise<void> {
   const done = join(dir, "applied");
   await until(`the box in ${dir} to apply ${JSON.stringify(c)}`, () => existsSync(done) && Number(readFileSync(done, "utf8")) >= n, 5000, 20);
 }
-export { readSubmitted } from "../packages/node-ops/test/whole-lines.ts";
+export { readSubmitted };
 // A lane: one window running the fake input box. With `claudeHome` (an agent's HOME), the box writes its session file and
 // transcript into <claudeHome>/.claude, so the agent reports its session and status and serves its transcript.
 // `startDelayMs`: the box shows Claude Code starting for that long; `wait: false` returns before the box is drawn.

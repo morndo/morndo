@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { createLogger, type Logger } from "../src/log.ts";
 
 export { isolatedTmux, type TestTmux } from "../../../packages/node-ops/test/isolated-tmux.ts";
-export { readSubmitted, wholeLines } from "../../../packages/node-ops/test/whole-lines.ts";
+export { readJsonLines, readSubmitted, wholeLines } from "../../../packages/node-ops/test/whole-lines.ts";
 
 export function tempHome(prefix = "morndo-node-"): { home: string; cleanup: () => void } {
   const home = realpathSync(mkdtempSync(join(tmpdir(), prefix)));    // realpath: macOS /var is a link to /private/var

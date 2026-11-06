@@ -11,6 +11,7 @@ import { readReceipts } from "../../packages/node-ops/src/receipt.ts";
 import { sessionRegistry } from "../../packages/node-ops/src/sessions.ts";
 import { inputBoxOnScreen, menuOnScreen } from "../../packages/node-ops/src/tmux.ts";
 import { fakeLane, stopAll, tempDir, tmuxServer, until, type Lane, type TmuxServer } from "../fleet-harness.ts";
+import { wholeLines } from "../../packages/node-ops/test/whole-lines.ts";
 
 afterEach(stopAll);
 
@@ -26,7 +27,7 @@ async function type(b: { t: TmuxServer; lane: Lane }, text: string) {
   b.t.run("send-keys", "-t", b.lane.paneId, "Enter");
   await until(`"${text}" submitted`, () => b.lane.submitted().includes(text));
 }
-const lines = (lane: Lane) => readFileSync(lane.transcript ?? "", "utf8").split("\n").filter(Boolean);
+const lines = (lane: Lane) => wholeLines(readFileSync(lane.transcript ?? "", "utf8"));
 // Each pending text's last verdict, as the deliverer would end up reading it ("none" when no entry decided it).
 function verdict(lane: Lane, text: string, typedAt: number): string {
   const all = readReceipts(lines(lane), [{ id: "d", text, typedAt }]);
