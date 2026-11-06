@@ -1,10 +1,11 @@
 // The settings a lane's command needs (T-318, P1): the hub's address (MORNDO_HUB, file agent-hub), this machine's node
 // name (MORNDO_NODE, agent-node), the agent token (MORNDO_AGENT_TOKEN, agent-lanes.token or agent-manager.token) and
 // the lane's own name (MORNDO_LANE, the tmux window's name) — read from ~/.config/morndo when the environment has
-// none, which is what the per-machine wrapper scripts did by hand. The environment always wins; a value that is empty
-// after trim counts as unset, as the wrappers' `[ -z … ]` did. A file's value is its first line, trimmed; a missing
-// file, a blank first line or a read that fails all mean "not set", and neither a file's content nor why it could not
-// be read is ever said anywhere: a token file's content is a secret, and its path is this machine's layout.
+// none, which is what the per-machine wrapper scripts did by hand. The environment always wins; an empty value counts
+// as unset, as the wrappers' `[ -z … ]` did — and a blank one (whitespace only) counts as unset here too. A file's
+// value is its first line, trimmed; a missing file, a blank first line or a read that fails all mean "not set", and
+// neither a file's content nor why it could not be read is ever said anywhere: a token file's content is a secret, and
+// its path is this machine's layout.
 //
 // The token follows the lane: a lane named exactly `manager` (from the environment or the window) reads only
 // agent-manager.token, every other lane — or no lane known — reads only the one the workers share,
@@ -22,17 +23,29 @@ export type AgentEnv = { [name: string]: string | undefined };
 // and the lane's name (the tmux window's). A test brings its own versions of all three.
 export type AgentSettingsIo = { home: string; readText: (path: string) => Promise<string | null>; lane: () => Promise<string | null> };
 
-// A value counts as set only when it is there and not blank (the wrappers' `[ -z … ]`).
+// A value counts as set only when it is there and not blank: the wrappers' `[ -z … ]` asked only for empty, and a
+// whitespace-only value counts as unset here too.
 const set = (value: string | undefined): value is string => value !== undefined && value.trim() !== "";
 
+// Any character a value must not carry: the C0 controls and DEL. Such a value would end up in an HTTP header or an
+// error text, where the runtime throws an error that quotes it — so it is treated as not set before it gets there.
+const hasControl = (value: string): boolean => {
+  for (let i = 0; i < value.length; i += 1) {
+    const code = value.charCodeAt(i);
+    if (code < 0x20 || code === 0x7f) return true;
+  }
+  return false;
+};
+
 // One settings file's first line, trimmed; null for a file that is missing, blank or cannot be read — all the same
-// "not set", with nothing of it said.
+// "not set", with nothing of it said — and for a value with a control character in it (hasControl). A line ending in
+// CRLF still works: the trailing carriage return is removed by the trim, before the look.
 async function firstLine(io: AgentSettingsIo, name: string): Promise<string | null> {
   try {
     const text = await io.readText(join(io.home, ".config/morndo", name));
     if (text === null) return null;
     const value = (text.split("\n")[0] ?? "").trim();
-    return value === "" ? null : value;
+    return value !== "" && !hasControl(value) ? value : null;
   } catch {
     return null;   // never the error, never the content
   }

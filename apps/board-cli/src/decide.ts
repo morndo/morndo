@@ -36,7 +36,10 @@ export const HELP = `morndo-decide: a decision brief for the principal.
   prompt --role manager|worker            the instruction block for a lane's prompt
 
 Environment: MORNDO_HUB (the hub's address), MORNDO_AGENT_TOKEN (from \`morndo agent-token new\`), MORNDO_LANE (this
-lane's name; without it, the tmux window's name). A worker's brief is a draft until the manager forwards it.`;
+lane's name; without it, the tmux window's name). With none of them in the environment, the settings are read from
+~/.config/morndo: agent-hub (the hub's address), agent-node (this machine's name), agent-lanes.token (the token the
+lanes share) and agent-manager.token (used only for the window named manager); an environment setting always wins.
+A worker's brief is a draft until the manager forwards it.`;
 
 const ID = /^[A-Za-z0-9_-]{1,32}$/;
 

@@ -40,7 +40,10 @@ comment); no lane gets it until the owner approves it. --ref: the work it came f
 --supersedes: this note replaces that one, with the same kind and scope.
 
 Environment: MORNDO_HUB (the hub's address), MORNDO_AGENT_TOKEN (from \`morndo agent-token new\`), MORNDO_LANE (this
-lane's name; without it, the tmux window's name), MORNDO_NODE (this machine's name; without it, the host name).`;
+lane's name; without it, the tmux window's name), MORNDO_NODE (this machine's name; without it, agent-node, then the
+host name). With none of them in the environment, the settings are read from ~/.config/morndo: agent-hub (the hub's
+address), agent-node (this machine's name), agent-lanes.token (the token the lanes share) and agent-manager.token
+(used only for the window named manager); an environment setting always wins.`;
 
 const TIMEOUT_MS = 20_000;
 const NODE_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;   // the domain's node name (M3)

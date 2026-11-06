@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 // morndo-memory: the lanes' command for Memory (ADR-0031). Everything is in cli.ts; this wires the real fetch, the
-// environment, standard input (`--body -`), the host's name, inside tmux the window's name as this lane's name (`tmux
-// display-message -p '#W'`, the name the hub lists the lane under), and where the working directory sits in git:
+// environment — the settings files under ~/.config/morndo behind it, service-kit agent-settings.ts — standard input
+// (`--body -`), the host's name, inside tmux the window's name as this lane's name (service-kit's laneFromTmux asks
+// tmux about the command's own pane, `display-message -p -t "$TMUX_PANE" '#W'`, never the session's active window),
+// and where the working directory sits in git:
 // `git rev-parse --path-format=absolute --show-toplevel --git-common-dir`, "one line per flag" (in the order given,
 // checked with git 2.50.1). `--path-format=absolute` makes both paths "absolute and canonical"; without it the common
 // directory of a main checkout's subdirectory comes back relative, such as `../.git` (git-scm.com/docs/git-rev-parse,
