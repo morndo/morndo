@@ -1,7 +1,7 @@
 // scripts/c6/dropins.sh, run for real against a made-up HOME: the drop-ins that set ExecStart are found, and taken out of
 // the way (in place, after the backup holds them) so the unit the install writes is the one that starts.
 import { spawnSync } from "node:child_process";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,8 +23,8 @@ const SHIP = [
 const LIMITS = "[Service]\nMemoryMax=1G\n";
 const PRE = "[Service]\nExecStartPre=/bin/true\n";
 
-function machine(extra: Record<string, string> = {}) {
-  const root = mkdtempSync(join(tmpdir(), "morndo-c6-dropins-"));
+function machine(extra: Record<string, string> = {}, o: { prefix?: string } = {}) {
+  const root = mkdtempSync(join(tmpdir(), o.prefix ?? "morndo-c6-dropins-"));
   dirs.push(root);
   const home = join(root, "home");
   const units = join(home, ".config/systemd/user");
@@ -38,7 +38,7 @@ function machine(extra: Record<string, string> = {}) {
   for (const [name, text] of Object.entries(extra)) writeFileSync(join(folder, name), text);
   // systemd's own answer to `show -p DropInPaths`: the files of the folder and whatever the test adds (FAKE_PATHS)
   const fake = join(root, "fake-systemctl");
-  writeFileSync(fake, `#!/bin/sh\nif [ "$1 $2 $3 $4 $5" = "--user show -p DropInPaths --value" ] && [ "$6" = "morndo-node.service" ]; then echo "$FAKE_PATHS"; fi\nexit 0\n`, { mode: 0o755 });
+  writeFileSync(fake, `#!/bin/sh\nif [ -n "$FAKE_FAIL" ]; then exit 1; fi\nif [ "$1 $2 $3 $4 $5" = "--user show -p DropInPaths --value" ] && [ "$6" = "morndo-node.service" ]; then echo "$FAKE_PATHS"; fi\nexit 0\n`, { mode: 0o755 });
   return { root, home, units, folder, fake, outside: [] as string[] };
 }
 
@@ -193,6 +193,66 @@ describe("dropins.sh and the drop-ins it must leave alone or cannot back up", ()
     expect(r.err).toContain(elsewhere);
     expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
     expect(readFileSync(elsewhere, "utf8")).toBe(SHIP);
+  });
+});
+
+describe("dropins.sh and systemd's own answers", () => {
+  it("exits 2 when systemd cannot be asked, for the list and for the rewrite, instead of calling it clean", () => {
+    const m = machine();
+    const bk = backupOf(m);
+    for (const args of [["--list"], [bk]]) {
+      const r = runWith(m, { FAKE_FAIL: "1" }, ...args);
+      expect(r.code, args.join(" ")).toBe(2);
+      expect(r.err).toContain("systemd");
+    }
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+  });
+
+  it("does not split a path with a space, or expand a glob in it: the drop-in is found whole", () => {
+    const m = machine();
+    const odd = join(m.root, "etc *systemd user", "morndo-node.service.d");
+    mkdirSync(odd, { recursive: true });
+    writeFileSync(join(odd, "ship.conf"), SHIP);
+    m.outside.push(join(odd, "ship.conf"));
+    const bk = backupOf(m);
+    expect(run(m, "--list").out.trim().split("\n").sort()).toEqual([join(odd, "ship.conf"), join(m.folder, "ship.conf")].sort());
+    const r = run(m, bk);
+    expect(r.code).toBe(4);
+    expect(r.err).toContain(join(odd, "ship.conf"));
+  });
+
+  it("finds the user config folder through XDG_CONFIG_HOME, and through a HOME that is a symlink", () => {
+    const m = machine();
+    const link = join(m.root, "link-home");
+    symlinkSync(m.home, link);
+    const viaLink = spawnSync("sh", [SCRIPT, "--list"], {
+      encoding: "utf8",
+      env: { HOME: link, PATH: process.env.PATH ?? "", C6_SYSTEMCTL: m.fake, FAKE_PATHS: join(m.folder, "ship.conf") },   // systemd answers with real paths
+    });
+    expect(viaLink.status, viaLink.stderr).toBe(0);
+    expect(viaLink.stdout.trim()).toBe(join(m.folder, "ship.conf"));
+    const bk = backupOf(m);
+    const xdg = mkdtempSync(join(tmpdir(), "morndo-c6-xdg-"));
+    dirs.push(xdg);
+    mkdirSync(join(xdg, "systemd/user/morndo-node.service.d"), { recursive: true });
+    writeFileSync(join(xdg, "systemd/user/morndo-node.service.d/ship.conf"), SHIP);
+    mkdirSync(join(bk, "units/morndo-node.service.d"), { recursive: true });
+    const viaXdg = spawnSync("sh", [SCRIPT, bk], {
+      encoding: "utf8",
+      env: { HOME: m.home, XDG_CONFIG_HOME: xdg, PATH: process.env.PATH ?? "", C6_SYSTEMCTL: m.fake, FAKE_PATHS: join(xdg, "systemd/user/morndo-node.service.d/ship.conf") },
+    });
+    expect(viaXdg.status, viaXdg.stderr).toBe(0);        // inside the user config folder: backed up as units/<name>.d/ship.conf, which backupOf() put there
+    expect(readFileSync(join(xdg, "systemd/user/morndo-node.service.d/ship.conf"), "utf8")).not.toContain("ExecStart");
+  });
+});
+
+describe("dropins.sh with a comment inside a continued ExecStart", () => {
+  it("skips the comment line as systemd does and takes the rest of the command out too", () => {
+    const text = "[Service]\nEnvironment=PATH=/x\nExecStart=/h/node \\\n# a note\n; another\n  /h/main.ts run\nRestart=always\n";
+    const m = machine({ "comment.conf": text });
+    const bk = backupOf(m);
+    expect(run(m, bk).code).toBe(0);
+    expect(readFileSync(join(m.folder, "comment.conf"), "utf8")).toBe("[Service]\nEnvironment=PATH=/x\nRestart=always\n");
   });
 });
 
