@@ -127,6 +127,17 @@ describe("install and update documentation", () => {
     expect(read("SECURITY.md")).toMatch(/gh attestation verify install\.sh[\s\S]*?independent check[^.]*not optional/);
   });
 
+  it("README and SECURITY.md say the attestation check needs gh 2.51.0 or newer, and not to drop the flag on an older one", () => {
+    for (const file of ["README.md", "SECURITY.md"]) {
+      const text = read(file);
+      expect(text, file).toMatch(/needs `gh` 2\.51\.0 or newer/);
+      expect(text, file).toContain("releases/tag/v2.49.0");
+      expect(text, file).toContain("releases/tag/v2.51.0");
+      expect(text, file).toMatch(/never drop `--signer-workflow` to make the check pass/);
+    }
+    expect(read("docs/design/updates/manual-qa.md")).toMatch(/`gh` 2\.51\.0 or newer/);
+  });
+
   it("every gh attestation verify in the docs pins the workflow the release job uses", () => {
     const release = read(".github/workflows/release.yml");
     const tail = /--signer-workflow "\$\{GITHUB_REPOSITORY\}(\/\.github\/workflows\/release\.yml@[^"]+)"/.exec(release)?.[1];
