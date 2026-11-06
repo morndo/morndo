@@ -5,8 +5,8 @@
 // pane (`display-message -p -t "$TMUX_PANE" '#W'`, never the session's active window), the name the hub lists the
 // lane under.
 import { readFile } from "node:fs/promises";
-import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe, agentSettingsIo, runsOffline, withAgentSettings } from "@morndo/service-kit";
-import { run } from "./cli.ts";
+import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe, agentSettingsIo, withAgentSettings } from "@morndo/service-kit";
+import { run, runsOffline } from "./cli.ts";
 
 quietBrokenPipe();
 if (argvWantsVersion(process.argv)) {
@@ -16,7 +16,7 @@ if (argvWantsVersion(process.argv)) {
 
 // help and prompt print text and need no settings; the other commands read the hub address and the token (not the node).
 const settings = agentSettingsIo(process.env);
-const env = runsOffline(process.argv.slice(2), ["help", "prompt"]) ? process.env : await withAgentSettings(process.env, settings, { skip: ["node"] });
+const env = runsOffline(process.argv.slice(2)) ? process.env : await withAgentSettings(process.env, settings, { skip: ["node"] });
 
 const code = await run(process.argv.slice(2), env, {
   fetch, lane: settings.lane, readFile: p => readFile(p, "utf8"),

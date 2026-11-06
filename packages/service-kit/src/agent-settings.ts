@@ -61,9 +61,16 @@ async function firstLine(io: AgentSettingsIo, name: string): Promise<string | nu
 // The manager's window is the hub's MORNDO_MANAGER_WINDOW (default `manager`).
 export async function withAgentSettings(env: AgentEnv, io: AgentSettingsIo, want: AgentSettingsWant = {}): Promise<AgentEnv> {
   const got: AgentEnv = { ...env };
-  const needHub = !set(env.MORNDO_HUB) && !want.skip?.includes("hub");
+  const hubWanted = !want.skip?.includes("hub");
+  const hubSet = set(env.MORNDO_HUB);
+  const tokenSet = set(env.MORNDO_AGENT_TOKEN);
+  // A token belongs to one hub: a token from the environment is never sent to a hub address from a file, nor a token from a
+  // file to a hub address from the environment. With only one of the two set (and the hub used), neither is filled and the
+  // command says what it said before.
+  const paired = !hubWanted || hubSet === tokenSet;
+  const needHub = hubWanted && !hubSet && paired;
   const needNode = !set(env.MORNDO_NODE) && !want.skip?.includes("node");
-  const needToken = !set(env.MORNDO_AGENT_TOKEN);
+  const needToken = !tokenSet && paired;
   let lane: string | null = set(env.MORNDO_LANE) ? env.MORNDO_LANE!.trim() : null;
   const askLane = lane === null && (needToken || want.fillLane === true);
   const [hub, node, window] = await Promise.all([
@@ -85,25 +92,23 @@ export async function withAgentSettings(env: AgentEnv, io: AgentSettingsIo, want
   return got;
 }
 
-// A command that only prints text (help, a prompt, a usage line) needs no settings, and must not wait on tmux for them:
-// no arguments, a help flag, or a first word that is one of the command's `offline` words.
-export function runsOffline(argv: readonly string[], offline: readonly string[]): boolean {
-  if (argv.some(a => a === "--help" || a === "-h")) return true;
-  const first = argv.find(a => !a.startsWith("-"));
-  return first === undefined || offline.includes(first);
-}
-
 const askTmux = (args: string[]): Promise<string | null> => new Promise(resolve => {
   execFile("tmux", args, { encoding: "utf8", timeout: 3000 }, (error, stdout) => resolve(error ? null : stdout));
 });
 
 // The name of the tmux window this command runs in, asked about its own pane ($TMUX_PANE) when the environment has one:
-// the pane's window, not the session's active one. An environment with TMUX and no TMUX_PANE (a pane lost on the way)
-// is asked as before, without `-t`. Null outside tmux, when tmux fails, or when the answer is blank.
+// the pane's window, not the session's active one. When that query fails (a pane that has closed since) or there is no
+// TMUX_PANE, it asks as the old per-command lookup did, without `-t`. Null outside tmux, when tmux fails, or when the
+// answer is blank.
 export async function laneFromTmux(env: AgentEnv, tmux: (args: string[]) => Promise<string | null> = askTmux): Promise<string | null> {
   if (!set(env.TMUX)) return null;
-  const name = ((await tmux(set(env.TMUX_PANE) ? ["display-message", "-p", "-t", env.TMUX_PANE, "#W"] : ["display-message", "-p", "#W"])) ?? "").trim();
-  return name === "" ? null : name;
+  const named = (answer: string | null) => (answer ?? "").trim();
+  if (set(env.TMUX_PANE)) {
+    const own = named(await tmux(["display-message", "-p", "-t", env.TMUX_PANE, "#W"]));
+    if (own !== "") return own;
+  }
+  const active = named(await tmux(["display-message", "-p", "#W"]));
+  return active === "" ? null : active;
 }
 
 // The io of the real machine: the home directory, a reader that turns any failure into "not set", and the tmux window's

@@ -89,6 +89,14 @@ function answerText(a: Answer): string {
   return `${a.key} · ${a.label}`;
 }
 
+// Whether this call needs no settings: it prints text or lints a file without asking the hub. Read from the same parse and
+// the same command word the dispatch below uses.
+export function runsOffline(argv: readonly string[]): boolean {
+  const { positional, flags } = parseArgs(argv);
+  const [cmd = "help"] = positional;
+  return cmd === "help" || flags.help === true || cmd === "template" || cmd === "prompt" || cmd === "lint" || (cmd === "card" && flags.template === true);
+}
+
 export async function run(argv: readonly string[], env: Env, io: Io): Promise<number> {
   const { positional, flags } = parseArgs(argv);
   const [cmd = "help", ...rest] = positional;

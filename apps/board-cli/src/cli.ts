@@ -190,6 +190,15 @@ class Usage extends Error {}
 class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
 class Unreachable extends Error { constructor(message: string) { super(message); this.name = "Unreachable"; } }
 
+// Whether this call needs no settings: it prints text without asking the hub (help, the prompt blocks). Read from the same
+// parse and the same command word the dispatch below uses, so a flag's value or a word of some other command is never taken
+// for one.
+export function runsOffline(argv: readonly string[]): boolean {
+  const { positional, flags } = parseArgs(argv);
+  const [cmd = "help"] = positional;
+  return cmd === "help" || flags.help === true || cmd === "prompt";
+}
+
 export async function run(argv: readonly string[], env: Env, io: Io): Promise<number> {
   const { positional, flags } = parseArgs(argv);
   const [cmd = "help", ...rest] = positional;

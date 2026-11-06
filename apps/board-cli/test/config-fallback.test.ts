@@ -243,9 +243,9 @@ describe("commands whose arguments look like a help request", () => {
     }
   });
 
-  it("morndo-memory --kind help search x reaches the hub with the file's settings: help is a flag's value", async () => {
+  it("morndo-memory --title help remember … reaches the hub with the file's settings: help is a flag's value", async () => {
     seen.length = 0;
-    const r = await runProgram(PROGRAMS.memory, ["--kind", "help", "search", "x"], { HOME: home(true), MORNDO_LANE: "builder" });
+    const r = await runProgram(PROGRAMS.memory, ["--title", "help", "remember", "--kind", "fact", "--body", "b"], { HOME: home(true), MORNDO_LANE: "builder" });
     expect(seen.length, r.err).toBeGreaterThan(0);
   });
 });

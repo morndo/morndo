@@ -2,8 +2,8 @@
 // morndo job: start, list, show, logs and cancel on this node (ADR-0017). The node asks the hub. The command
 // stays on the local socket.
 import { homedir } from "node:os";
-import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe, agentSettingsIo, runsOffline, withAgentSettings } from "@morndo/service-kit";
-import { callNode, runJob, type NodeRequest, type NodeResult } from "./job-cli.ts";
+import { argvWantsVersion, exitAfterOutput, buildLabel, quietBrokenPipe, agentSettingsIo, withAgentSettings } from "@morndo/service-kit";
+import { callNode, runJob, runsOffline, type NodeRequest, type NodeResult } from "./job-cli.ts";
 import { agentPaths } from "./paths.ts";
 
 quietBrokenPipe();
@@ -13,7 +13,7 @@ if (argvWantsVersion(process.argv)) {
 }
 
 // The job program talks to the node, not the hub: it needs the token and the lane (from the window, when the environment has none), not the hub address or the node name.
-const env = runsOffline(process.argv.slice(2), []) ? process.env : await withAgentSettings(process.env, agentSettingsIo(process.env), { skip: ["hub", "node"], fillLane: true });
+const env = runsOffline(process.argv.slice(2)) ? process.env : await withAgentSettings(process.env, agentSettingsIo(process.env), { skip: ["hub", "node"], fillLane: true });
 
 const home = process.env.HOME || homedir();
 const sock = agentPaths(home).jobSock;

@@ -44,6 +44,12 @@ const REFUSAL = new Set(["id_conflict", "denied", "disk", "not_yours", "disabled
 
 const USAGE = "usage: morndo job start --notify <lane:name|task:T-n|fleet> [--name <name>] [--timeout <seconds>] [--class <name>] [--id <id>] -- <command...>";
 
+// Whether this call needs no settings: only `start` and the reads go to the node; anything else prints the usage. The command
+// is the first word, as in runJob below: a -h or --help further on (the job's own command) changes nothing.
+export function runsOffline(argv: readonly string[]): boolean {
+  return !["start", "list", "show", "logs", "cancel"].includes(argv[0] ?? "");
+}
+
 export async function runJob(argv: string[], env: JobEnv, io: JobIo): Promise<number> {
   const command = argv[0];
   if (command === "list" || command === "show" || command === "logs" || command === "cancel") return runRead(command, argv.slice(1), env, io);

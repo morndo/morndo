@@ -160,6 +160,14 @@ class Usage extends Error {}
 class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
 class Unreachable extends Error { constructor(message: string) { super(message); this.name = "Unreachable"; } }
 
+// Whether this call needs no settings: help, or a command it does not know (a usage line). Read from the same parse and
+// the same command word the dispatch below uses.
+export function runsOffline(argv: readonly string[]): boolean {
+  const { positional, flags } = parseArgs(argv);
+  const [cmd = "help"] = positional;
+  return cmd === "help" || flags.help === true || FLAGS[cmd] === undefined;
+}
+
 export async function run(argv: readonly string[], env: Env, io: Io): Promise<number> {
   const { positional, flags } = parseArgs(argv);
   const [cmd = "help", ...rest] = positional;
