@@ -1,10 +1,12 @@
 // scripts/c6/dropins.sh, run for real against a made-up HOME: the drop-ins that set ExecStart are found, and taken out of
 // the way (in place, after the backup holds them) so the unit the install writes is the one that starts.
 import { spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+
+const NOT_ROOT = typeof process.getuid === "function" && process.getuid() !== 0;   // root reads any file, so a test of an unreadable one is moot
 
 const SCRIPT = join(import.meta.dirname, "dropins.sh");
 const dirs: string[] = [];
@@ -34,7 +36,10 @@ function machine(extra: Record<string, string> = {}) {
   mkdirSync(join(units, "other.service.d"));
   writeFileSync(join(units, "other.service.d/ship.conf"), SHIP);          // not one of ours
   for (const [name, text] of Object.entries(extra)) writeFileSync(join(folder, name), text);
-  return { root, home, units, folder };
+  // systemd's own answer to `show -p DropInPaths`: the files of the folder and whatever the test adds (FAKE_PATHS)
+  const fake = join(root, "fake-systemctl");
+  writeFileSync(fake, `#!/bin/sh\nif [ "$1 $2 $3 $4 $5" = "--user show -p DropInPaths --value" ] && [ "$6" = "morndo-node.service" ]; then echo "$FAKE_PATHS"; fi\nexit 0\n`, { mode: 0o755 });
+  return { root, home, units, folder, fake, outside: [] as string[] };
 }
 
 // A backup the way backup.sh makes it: the unit folders copied as they are under <backup>/units.
@@ -45,10 +50,15 @@ function backupOf(m: ReturnType<typeof machine>) {
   return bk;
 }
 
-const run = (m: ReturnType<typeof machine>, ...args: string[]) => {
-  const done = spawnSync("sh", [SCRIPT, ...args], { encoding: "utf8", env: { HOME: m.home, PATH: process.env.PATH ?? "" } });
+const run = (m: ReturnType<typeof machine>, ...args: string[]) => runWith(m, {}, ...args);
+function runWith(m: ReturnType<typeof machine>, env: Record<string, string>, ...args: string[]) {
+  const here = readdirSync(m.folder).filter(n => n.endsWith(".conf")).map(n => join(m.folder, n));
+  const done = spawnSync("sh", [SCRIPT, ...args], {
+    encoding: "utf8",
+    env: { HOME: m.home, PATH: process.env.PATH ?? "", C6_SYSTEMCTL: m.fake, FAKE_PATHS: [...here, ...m.outside].join(" "), ...env },
+  });
   return { code: done.status, out: done.stdout, err: done.stderr };
-};
+}
 
 describe("dropins.sh --list", () => {
   it("names the drop-ins of our units that set ExecStart, and no others", () => {
@@ -128,6 +138,64 @@ describe("dropins.sh with an ExecStart over several lines", () => {
   });
 });
 
+describe("dropins.sh never hides an error", () => {
+  it("stops, changing nothing and leaving no temporary file, when the rewrite itself fails", () => {
+    const m = machine();
+    const bk = backupOf(m);
+    const bin = join(m.root, "bin");
+    mkdirSync(bin);
+    // an awk that does the lookups and fails the rewrite
+    writeFileSync(join(bin, "awk"), `#!/bin/sh\ncase "$*" in *found*) exec "${spawnSync("sh", ["-c", "command -v awk"], { encoding: "utf8" }).stdout.trim()}" "$@" ;; *) exit 2 ;; esac\n`, { mode: 0o755 });
+    const r = runWith(m, { PATH: `${bin}:${process.env.PATH ?? ""}` }, bk);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("ship.conf");
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+    expect(readdirSync(m.folder).sort()).toEqual(["limits.conf", "pre.conf", "ship.conf"]);
+    expect(r.out).not.toContain("ExecStart taken out");
+  });
+
+  it.skipIf(!NOT_ROOT)("stops with a message naming a drop-in it cannot read, instead of calling it clean", () => {
+    const m = machine();
+    const bk = backupOf(m);
+    chmodSync(join(m.folder, "pre.conf"), 0o000);
+    for (const args of [["--list"], [bk]]) {
+      const r = run(m, ...args);
+      expect(r.code, args.join(" ")).toBe(2);
+      expect(r.err).toContain("pre.conf");
+    }
+    chmodSync(join(m.folder, "pre.conf"), 0o644);
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+  });
+});
+
+describe("dropins.sh and the drop-ins it must leave alone or cannot back up", () => {
+  it("leaves a job unit's drop-in out, as backup.sh does", () => {
+    const m = machine();
+    const jobDir = join(m.units, "morndo-job-x.service.d");
+    mkdirSync(jobDir);
+    writeFileSync(join(jobDir, "foo.conf"), "[Service]\nExecStart=/bin/true\n");
+    const bk = backupOf(m);
+    expect(run(m, "--list").out.trim().split("\n")).toEqual([join(m.folder, "ship.conf")]);
+    expect(run(m, bk).code).toBe(0);
+    expect(readFileSync(join(jobDir, "foo.conf"), "utf8")).toBe("[Service]\nExecStart=/bin/true\n");
+  });
+
+  it("lists a drop-in systemd reads from another place, and refuses to rewrite what the backup does not keep", () => {
+    const m = machine();
+    const elsewhere = join(m.root, "etc-systemd-user/morndo-node.service.d/ship.conf");
+    mkdirSync(join(m.root, "etc-systemd-user/morndo-node.service.d"), { recursive: true });
+    writeFileSync(elsewhere, SHIP);
+    m.outside.push(elsewhere);
+    const bk = backupOf(m);
+    expect(run(m, "--list").out.trim().split("\n").sort()).toEqual([elsewhere, join(m.folder, "ship.conf")].sort());
+    const r = run(m, bk);
+    expect(r.code).toBe(4);
+    expect(r.err).toContain(elsewhere);
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+    expect(readFileSync(elsewhere, "utf8")).toBe(SHIP);
+  });
+});
+
 describe("dropins.sh usage", () => {
   it("wants exactly one argument: --list or a backup folder that exists", () => {
     const m = machine();
@@ -146,8 +214,6 @@ describe("dropins.sh style", () => {
     expect(r.status).toBe(0);
   });
   it("is a plain sh script with set -eu", () => {
-    expect(existsSync(SCRIPT)).toBe(true);
-    chmodSync(SCRIPT, statSync(SCRIPT).mode);
     expect(readFileSync(SCRIPT, "utf8")).toMatch(/^#!\/bin\/sh\n[\s\S]*\nset -eu\n/);
   });
 });
