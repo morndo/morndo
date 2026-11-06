@@ -221,6 +221,19 @@ describe("dropins.sh and systemd's own answers", () => {
     expect(r.err).toContain(join(odd, "ship.conf"));
   });
 
+  it("rewrites through a HOME that is a symlink: systemd's real paths still count as inside the user folder", () => {
+    const m = machine();
+    const bk = backupOf(m);
+    const link = join(m.root, "link-home");
+    symlinkSync(m.home, link);
+    const r = spawnSync("sh", [SCRIPT, bk], {
+      encoding: "utf8",
+      env: { HOME: link, PATH: process.env.PATH ?? "", C6_SYSTEMCTL: m.fake, FAKE_PATHS: join(m.folder, "ship.conf") },
+    });
+    expect(r.status, r.stderr).toBe(0);
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).not.toContain("ExecStart");
+  });
+
   it("finds the user config folder through XDG_CONFIG_HOME, and through a HOME that is a symlink", () => {
     const m = machine();
     const link = join(m.root, "link-home");
