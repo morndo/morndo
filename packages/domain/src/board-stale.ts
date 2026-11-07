@@ -1,12 +1,14 @@
 // Board context, B19 and B20 (ADR-0040): a board that cannot go stale silently. A block that is a decision — a lane
 // asking its manager which way to go, or the manager's own checkpoint — carries a deadline 24 h on (board.ts), and
-// what passed it without an answer is the decision inbox's, listed for the manager with how late it is. What nobody
-// changed for 48 h, in blocked or review, with nothing the board itself watches (an open wait, a merge not live yet,
-// a decision), is the stale sweep's. Both are pure: the hub reads the tasks and says who it watches, these say what
+// what passed it without an answer is the decision inbox's, listed for the manager with how late it is. An answer is
+// a comment after the ask by the manager, the principal or the console (`isAnswered`): the hub's sweep and the CLI
+// read that one rule. What nobody changed for 48 h, in blocked or review, with nothing the board itself watches (an
+// open wait, a merge not live yet, a decision still waiting), is the stale sweep's; a decision that was answered is
+// swept like any block that sits. Both are pure: the hub reads the tasks and says who it watches, these say what
 // waits, and the messages are plain text, one line per task, cut where a line stops being readable.
 import { STALE_BLOCK_MS } from "./board-waits.ts";
 import { cutText } from "./shared.ts";
-import type { Task, TaskKey } from "./board.ts";
+import type { Task, TaskEvent, TaskKey } from "./board.ts";
 
 // B19: a decision is due an answer this long after it was asked; past it the manager has let it sit a day.
 export const DECISION_DUE_MS = 24 * 3_600_000;
@@ -33,6 +35,13 @@ const oneLine = (t: string) => (t.length > LINE_MAX ? `${cutText(t, LINE_MAX)}�
 const hours = (ms: number) => Math.round(ms / HOUR);
 const numberOf = (key: TaskKey) => Number(key.slice(2));
 const byNumber = (a: { key: TaskKey }, b: { key: TaskKey }) => numberOf(a.key) - numberOf(b.key);
+
+// T-863: the one rule for "answered", shared by the hub's sweep and the CLI's inbox and stale views. True when some
+// event after `since` is a comment by the manager, the principal or the console. The lane's own comment, a comment at
+// or before the ask, and any change that is not a comment do not answer it.
+export function isAnswered(events: readonly TaskEvent[], since: number): boolean {
+  return events.some(e => e.at > since && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"));
+}
 
 // B19: the decisions the manager owes an answer to, most overdue first. A blocked task with a decisionDue is one, asked
 // when that deadline's 24 h began. A blocked task from before the rule whose reason says it needs a decision or is a
@@ -64,14 +73,16 @@ export function inboxMessage(items: readonly InboxItem[], now: number): string {
 }
 
 // B20: the tasks in blocked or review that nobody changed for STALE_BLOCK_MS, the longest idle first, leaving out what
-// the hub says it watches (`watched`: an open wait, a merge not live yet) and every decision (the inbox has those, B19).
-// The idle time counts from the task's last event of any kind (updatedAt), not its last move: a comment, a brief or a
-// merge record is a change somebody made.
-export function staleTasks(tasks: readonly Task[], now: number, o: { watched?: ReadonlySet<string> } = {}): StaleItem[] {
+// the hub says it watches (`watched`: an open wait, a merge not live yet) and every decision still waiting on an
+// answer (the inbox has those, B19). A task with a decisionDue is one of those unless `answered(key, decisionDue -
+// DECISION_DUE_MS)` is true: the inbox has let it go, and it is swept like any block that sits. The idle time counts
+// from the task's last event of any kind (updatedAt), not its last move: a comment, a brief or a merge record is a
+// change somebody made.
+export function staleTasks(tasks: readonly Task[], now: number, o: { watched?: ReadonlySet<string>; answered?: (key: TaskKey, since: number) => boolean } = {}): StaleItem[] {
   const items: StaleItem[] = [];
   for (const t of tasks) {
     if (t.status !== "blocked" && t.status !== "review") continue;
-    if (t.decisionDue !== undefined) continue;
+    if (t.decisionDue !== undefined && o.answered?.(t.key, t.decisionDue - DECISION_DUE_MS) !== true) continue;
     if (o.watched?.has(t.key)) continue;
     const idleMs = now - t.updatedAt;
     if (idleMs < STALE_BLOCK_MS) continue;

@@ -11,7 +11,7 @@
 //   same rhythm as the stale sweep; nothing moves and nothing is recorded (the flag is a list, D5, B11).
 // The domain says what waits (board-stale.ts, board-merged.ts); these only read the board, build the id and the text,
 // and ask the port.
-import { DECISION_DUE_MS, INBOX_EVERY_MS, STALE_REPEAT_MS, inboxItems, inboxMessage, mergedMessage, staleMessage, staleTasks, type JudgedWait, type MergedFlag, type MergedView, type Task, type TaskKey } from "@morndo/domain";
+import { INBOX_EVERY_MS, STALE_REPEAT_MS, inboxItems, inboxMessage, mergedMessage, staleMessage, staleTasks, type JudgedWait, type MergedFlag, type MergedView, type Task, type TaskKey } from "@morndo/domain";
 import { log as defaultLog } from "../adapters/log.ts";
 import type { Deliveries } from "./ports.ts";
 
@@ -201,12 +201,9 @@ export class StaleSweep {
 
   async #pass(): Promise<Tick> {
     const now = this.#now();
-    // A decision the inbox has let go (answered, the task still blocked) reads here as any other block, so the sweep
-    // takes it; an unanswered one keeps its deadline and stays the inbox's.
-    const tasks = this.#tasks().map(t => t.decisionDue !== undefined && this.#answered !== null && this.#answered(t.key, t.decisionDue - DECISION_DUE_MS)
-      ? (() => { const { decisionDue: _due, ...plain } = t; return plain; })()
-      : t);
-    const items = staleTasks(tasks, now, { watched: this.#watched() });
+    // A decision the inbox has let go (answered, the task still blocked) is swept like any block that sits; an
+    // unanswered one keeps its deadline and stays the inbox's. staleTasks reads `answered` for that.
+    const items = staleTasks(this.#tasks(), now, { watched: this.#watched(), ...(this.#answered !== null ? { answered: this.#answered } : {}) });
     if (items.length === 0) return { sent: false, items: 0 };
     return this.#gate.send(items.length, items.map(i => `${i.key} ${i.status}`).join("\n"), staleMessage(items));
   }

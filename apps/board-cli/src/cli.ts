@@ -3,7 +3,7 @@
 // given streams, so the tests drive it against an in-process hub and the entry point (main.ts) wires the real ones.
 // Exit codes: 0 done, 1 the hub refused (one line on stderr, in words an agent can act on), 2 usage, 3 the hub can't
 // be reached or didn't answer in a shape this CLI knows.
-import { inboxItems, staleMessage, staleTasks, type InboxItem, type JudgedWait, type MergeRecord, type MergedView, type Task, type TaskEvent, type TaskStatus, type Wait } from "@morndo/domain";
+import { inboxItems, isAnswered, staleMessage, staleTasks, type JudgedWait, type MergeRecord, type MergedView, type Task, type TaskEvent, type TaskKey, type TaskStatus, type Wait } from "@morndo/domain";
 import { promptFor } from "./prompt.ts";
 import { lintWhy, proofBlock, whyTokens, type ProofView } from "./proof-text.ts";
 
@@ -141,15 +141,31 @@ const line = (t: Task) =>
 
 // B19, B20: the hours a decision has waited or a task has sat idle, as the inbox and the stale list show them.
 const inHours = (ms: number) => `${Math.round(ms / 3_600_000)} h`;
+// B19: one GET per decision the inbox might list, its events, as the predicate both views apply. A decision from
+// before the rule is a candidate too: an answer closes it the same way. `legacySince` stays 0 — the hub's start is
+// not on the wire.
+async function answeredFor(
+  call: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Record<string, unknown>>,
+  tasks: readonly Task[],
+  now: number,
+): Promise<(key: TaskKey, since: number) => boolean> {
+  const eventsByKey = new Map<TaskKey, readonly TaskEvent[]>();
+  for (const item of inboxItems(tasks, now, { legacySince: 0 })) {
+    const events = ((await call("GET", `/api/agent/board/tasks/${item.key}`)).events as TaskEvent[] | undefined) ?? [];
+    eventsByKey.set(item.key, events);
+  }
+  return (key, since) => isAnswered(eventsByKey.get(key) ?? [], since);
+}
 // B20: what the board itself watches, as the hub names it for its sweep (board-inbox.ts watchedKeys): a blocked task
 // whose waits the hub has read something of, a review task whose merge is not live on every node yet, and every
-// decision the inbox has — a decision from before the rule too, whose clock began before this CLI could know it.
-const watchedOf = (d: Record<string, unknown>, tasks: readonly Task[], now: number): Set<string> => {
+// decision still waiting on an answer. An answered one, from before the rule or with a deadline, is not watched, so
+// the sweep can take it once it has sat.
+const watchedOf = (d: Record<string, unknown>, tasks: readonly Task[], now: number, answered?: (key: TaskKey, since: number) => boolean): Set<string> => {
   const keys = new Set<string>();
   for (const w of (d.waits as { key: string; readings: { state: string }[] }[] | undefined) ?? []) if (w.readings.some(r => r.state !== "unknown")) keys.add(w.key);
   const status = new Map(tasks.map(t => [t.key as string, t.status]));
   for (const m of (Array.isArray(d.merged) ? d.merged as MergedView[] : [])) if (m.live === false && status.get(m.key) === "review") keys.add(m.key);
-  for (const i of inboxItems(tasks, now, { legacySince: 0 })) keys.add(i.key);
+  for (const i of inboxItems(tasks, now, { legacySince: 0, ...(answered !== undefined ? { answered } : {}) })) keys.add(i.key);
   return keys;
 };
 
@@ -379,18 +395,13 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         return 0;
       }
       case "show": showTask(await call("GET", `/api/agent/board/tasks/${key(rest[0])}`)); return 0;
-      // B19: the decisions that wait for the manager, with how long. An answer after the ask closes one, as the hub
-      // reads one (a comment by the manager, the principal or the console); a decision from before the rule has no ask
-      // to count from and stays listed until the task moves.
+      // B19: the decisions that wait for the manager, with how long. An answer after the ask closes one, a decision
+      // from before the rule included — the same rule the hub's sweep uses (isAnswered).
       case "inbox": {
         const d = await call("GET", "/api/agent/board");
         const now = (d.at as number | undefined) ?? Date.now();
-        const open: InboxItem[] = [];
-        for (const i of inboxItems(d.tasks as Task[], now, { legacySince: 0 })) {
-          if (i.legacy) { open.push(i); continue; }
-          const events = ((await call("GET", `/api/agent/board/tasks/${i.key}`)).events as TaskEvent[] | undefined) ?? [];
-          if (!events.some(e => e.at > i.openedAt && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"))) open.push(i);
-        }
+        const tasks = d.tasks as Task[];
+        const open = inboxItems(tasks, now, { legacySince: 0, answered: await answeredFor(call, tasks, now) });
         if (asJson) { io.out(JSON.stringify(open)); return 0; }   // T-873: one array, [] when none, not the sentence
         if (open.length === 0) { io.out("no decisions wait"); return 0; }
         for (const i of open)
@@ -402,7 +413,8 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const d = await call("GET", "/api/agent/board");
         const now = (d.at as number | undefined) ?? Date.now();
         const tasks = d.tasks as Task[];
-        const items = staleTasks(tasks, now, { watched: watchedOf(d, tasks, now) });
+        const answered = await answeredFor(call, tasks, now);
+        const items = staleTasks(tasks, now, { watched: watchedOf(d, tasks, now, answered), answered });
         if (asJson) { io.out(JSON.stringify(items)); return 0; }   // T-873: one array, [] when none, not the sentence
         if (items.length === 0) { io.out("nothing stale"); return 0; }
         io.out(staleMessage(items));
