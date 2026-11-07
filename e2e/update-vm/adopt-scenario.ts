@@ -9,7 +9,7 @@
 // Every check prints one JSON line on stdout — {"step": "...", "ok": true|false, "detail": ...} — and the host
 // side reads exactly those. Made-up names only: machine "m1", node "node-demo", lane "lane-demo", folder abc1234.
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { get as httpsGet } from "node:https";
 import { request as httpRequest } from "node:http";
 import { homedir } from "node:os";
@@ -59,6 +59,18 @@ const DEADMAN_SECONDS = 1500;
 const FIRING_SECONDS = 120;
 const OLD_DROPIN = "[Service]\nMemoryMax=1G\n";
 const DROPIN_DIR = join(UNIT_DIR, "morndo-node.service.d");
+// The release tool's drop-in on the machines (T-318, P2): the PATH the engines need, and an ExecStart that resets the unit's
+// own and sets the tree the tool shipped. A drop-in outranks the unit file, so the node's own ExecStart (a path that does not
+// exist, below) is never used, and `morndo install` leaves this one alone: scripts/c6/dropins.sh takes its ExecStart out.
+const SHIP_PATH_LINE = "Environment=PATH=%h/.local/bin:%h/.nvm/versions/node/v24.0.0/bin:/usr/local/bin:/usr/bin:/bin";
+const SHIP_DROPIN = [
+  "# The release tool's drop-in (rehearsal): PATH, and an ExecStart that outranks the unit's own.",
+  "[Service]",
+  SHIP_PATH_LINE,
+  "ExecStart=",
+  "ExecStart=%h/.nvm/versions/node/v24.0.0/bin/node --no-warnings %h/morndo/releases/abc1234/apps/node-agent/src/main.ts run",
+  "",
+].join("\n");
 const SERVICES = [
   { unit: "morndo-hub.service", app: "hub", cmd: "serve", wrapper: "morndo" },
   { unit: "morndo-fleet.service", app: "fleet", cmd: "serve", wrapper: "morndo-fleet" },
@@ -218,7 +230,8 @@ const legacyUnitText = (s: (typeof SERVICES)[number]): string => [
   `After=network.target`,
   ``,
   `[Service]`,
-  `ExecStart=%h/${OLD_NODE_REL} --no-warnings %h/morndo/releases/abc1234/apps/${s.app}/src/main.ts ${s.cmd}`,
+  // the node's own ExecStart names a folder that does not exist: only its drop-in (SHIP_DROPIN) starts the old tree
+  `ExecStart=%h/${OLD_NODE_REL} --no-warnings %h/morndo/releases/${s.app === "node-agent" ? "decoy0" : "abc1234"}/apps/${s.app}/src/main.ts ${s.cmd}`,
   `Environment=PATH=%h/.nvm/versions/node/v24.0.0/bin:/usr/local/bin:/usr/bin:/bin`,
   `Restart=on-failure`,
   `RestartSec=5`,
@@ -451,6 +464,8 @@ async function main(): Promise<number> {
     writeFileSync(join(UNIT_DIR, s.unit), OLD_UNITS.get(s.unit)!);
     writeFileSync(join(BIN, s.wrapper), OLD_WRAPPERS.get(s.wrapper)!, { mode: 0o755 });
   }
+  mkdirSync(DROPIN_DIR, { recursive: true });
+  writeFileSync(join(DROPIN_DIR, "ship.conf"), SHIP_DROPIN);
   run("systemctl", ["--user", "daemon-reload"]);
   const wrappersReal = SERVICES.every(s => !lstatSync(join(BIN, s.wrapper)).isSymbolicLink());
   check("b-old-state", !existsSync(join(OLD_FOLDER, "build.json")) && !existsSync(join(OLD_FOLDER, "VERSION")) && wrappersReal && existsSync(OLD_NODE),
@@ -501,6 +516,7 @@ async function main(): Promise<number> {
   const backedOk = backed.code === 0 && existsSync(join(BACKUP, "restore.sh")) && existsSync(join(BACKUP, "ROLLBACK.md"))
     && DBS.every(([n]) => existsSync(join(BACKUP, `dbs/${n}.db`)) && missingRows(sqlite(join(BACKUP, `dbs/${n}.db`), "SELECT v FROM c6_marker"), MARKERS).length === 0)
     && existsSync(join(BACKUP, "units/morndo-node.service.d/limits.conf"))
+    && existsSync(join(BACKUP, "units/morndo-node.service.d/ship.conf"))
     && SERVICES.every(s => existsSync(join(BACKUP, "units", s.unit)) && existsSync(join(BACKUP, "wrappers", s.wrapper)))
     && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").some(l => l.startsWith(`${SPARE_UNIT} active=no `))
     && readFileSync(join(BACKUP, "state.txt"), "utf8").split("\n").some(l => l === `${SPARE2_UNIT} active=no enabled=no`);
@@ -511,24 +527,47 @@ async function main(): Promise<number> {
     `armed for ${DEADMAN_SECONDS} s, no ok marker: ${firstLines(armed, 3)}`);
   if (failed) return finish(server);
 
+  // ---- c2: the drop-in that sets ExecStart. It outranks the unit file (proved here); it is taken out of the way in d, with the
+  // units stopped, before the install (scripts/c6/dropins.sh); the backup keeps it as it was.
+  const shownBefore = run("systemctl", ["--user", "show", "-p", "ExecStart", "--value", "morndo-node.service"]).out;
+  check("c2-dropin-outranks-unit", shownBefore.includes("releases/abc1234") && !shownBefore.includes("decoy0"),
+    `before: the node unit's own ExecStart names a folder that does not exist, yet systemd would start: ${shownBefore.split("\n")[0]?.slice(0, 160)}`);
+  const listed = run("sh", [join(E2E, "scripts/c6/dropins.sh"), "--list"]);
+  check("c2-dropin-listed", listed.code === 0 && listed.out.trim() === join(DROPIN_DIR, "ship.conf"), `dropins.sh --list: ${listed.out.trim() || "(nothing)"}`);
+  if (failed) return finish(server);
+
   // ---- d: install over the machine.
   const refused = installOnce("d-install-with-wrappers");
   const installedAnyway = existsSync(join(RELEASES, "current"));
   check("finding-wrappers", true,
     `install over real-file wrappers exited ${refused.code}: ${firstLines(refused, 3)}; ~/.local/share/morndo-releases/current exists: ${installedAnyway}`);
+  // The plan's order (step 4): the units stopped first, then dropins.sh on the backup, then a daemon-reload, then the launchers
+  // aside and the install. The first install above was refused (exit 78) and changed nothing.
+  run("systemctl", ["--user", "stop", ...SERVICE_UNITS]);
+  const dropins = command("d-dropins", "sh", [join(E2E, "scripts/c6/dropins.sh"), BACKUP]);
+  const shipNow = readFileSync(join(DROPIN_DIR, "ship.conf"), "utf8");
+  check("d-dropin-neutralized", dropins.code === 0 && dropins.out.includes(`ExecStart taken out of: ${join(DROPIN_DIR, "ship.conf")}`)
+    && !/^\s*ExecStart\s*=/m.test(shipNow) && shipNow.split("\n").includes(SHIP_PATH_LINE)
+    && readFileSync(join(BACKUP, "units/morndo-node.service.d/ship.conf"), "utf8") === SHIP_DROPIN
+    && readFileSync(join(DROPIN_DIR, "limits.conf"), "utf8") === OLD_DROPIN
+    && readdirSync(DROPIN_DIR).sort().join(",") === "limits.conf,ship.conf",
+    `with the units stopped, dropins.sh exited ${dropins.code}: ${firstLines(dropins, 2)}; ship.conf has no ExecStart line and keeps its PATH line; the backup's copy is byte-identical to the original; limits.conf is untouched`);
+  run("systemctl", ["--user", "daemon-reload"]);
+  if (failed) return finish(server);
   const moved = moveWrappersAside();
   const installed = installOnce("d-install");
   check("d-installed", installed.code === 0 && installed.out.includes(`Morndo ${VERSION_A} installed (control-plane, channel ${CHANNEL}).`),
     `wrappers moved aside (${moved}); install exited ${installed.code} after ${installed.seconds} s: ${firstLines(installed, 8)}`);
   if (failed) { journals("d-install"); return finish(server); }
 
-  // Finding 2, observed without acting: do the running units run the new tree within about 20 s of the install's end?
+  // Finding 2, observed without acting: does the install itself bring the (stopped) units up on the new tree within about 20 s of its end?
+  // (Over RUNNING legacy units it exited 0 after about 276 s and left them on the old code, which is why the plan stops them first.)
   const sawNew = await waitUntil(20_000, async () => {
     const cmd = SERVICES.map(s => cmdlineOf(s.unit));
     return cmd.every(runsNew) && (await hubVersion()) === VERSION_A && (await fleetVersion()) === VERSION_A && nodeVersion() === VERSION_A ? "new" : null;
   });
   const cmdAfter = SERVICES.map(s => `${s.app}: ${cmdlineOf(s.unit)}`);
-  const restartObserved = `within 20 s of the install the three units ${sawNew === "new" ? "ran the NEW tree" : "did NOT all run the new tree"}; health ${await healthNow()}; install took ${installed.seconds} s and its output said: ${installed.out.split("\n").filter(l => l.includes("healthy") || l.includes("no answer")).join(" | ") || "(no health lines)"}; processes: ${cmdAfter.join(" || ")}`;
+  const restartObserved = `the units were stopped first (the plan's step 4), so this is whether the install itself starts them on the new tree: within 20 s of the install the three units ${sawNew === "new" ? "ran the NEW tree" : "did NOT all run the new tree"}; health ${await healthNow()}; install took ${installed.seconds} s and its output said: ${installed.out.split("\n").filter(l => l.includes("healthy") || l.includes("no answer")).join(" | ") || "(no health lines)"}; processes: ${cmdAfter.join(" || ")}`;
   check("finding-restart", true, restartObserved);
   if (PUBLISHED !== null) {
     const firstFeed = `${installed.out}${installed.err}`.split("\n").filter(l => /feed|first check|checking for/i.test(l));
@@ -538,6 +577,16 @@ async function main(): Promise<number> {
     for (const s of SERVICES) command(`d-restart-${s.app}`, "systemctl", ["--user", "restart", s.unit]);
   }
   const afterRestart = await servicesHealthy("new", VERSION_A);
+  const nodeExec = run("systemctl", ["--user", "show", "-p", "ExecStart", "--value", "morndo-node.service"]).out;
+  const nodeEnv = run("systemctl", ["--user", "show", "-p", "Environment", "--value", "morndo-node.service"]).out;
+  // The unit starts the launcher link in ~/.local/bin; it is the installed Version's when the link's target sits under the releases.
+  const nodeLauncher = join(BIN, "morndo-node");
+  const launcherTarget = (() => { try { return realpathSync(nodeLauncher); } catch { return ""; } })();
+  // ship.conf's own PATH, as systemd expands it: the old unit's carried-over PATH (before-morndo.conf) lacks ~/.local/bin and sorts before ship.conf, so this
+  // value is in what systemd loaded only when dropins.sh left ship.conf's PATH line in place.
+  const shipPath = SHIP_PATH_LINE.slice("Environment=".length).split("%h").join(HOME);
+  check("d-node-execstart-is-launcher", nodeExec.includes(nodeLauncher) && launcherTarget.includes("morndo-releases") && !nodeExec.includes("abc1234") && !nodeExec.includes("decoy0") && nodeEnv.includes(shipPath),
+    `the node unit's ExecStart names ${nodeLauncher}, whose target is ${launcherTarget || "(unreadable)"}: ${nodeExec.split("\n")[0]?.slice(0, 160)}; ship.conf's PATH (${shipPath}) is what systemd loaded: ${nodeEnv.includes(shipPath)}`);
   check("d-services-healthy", afterRestart.ok && SERVICES.every(s => runsNew(cmdlineOf(s.unit))),
     `${sawNew === "new" ? "no restart needed" : "after systemctl --user restart of the three units"}: ${afterRestart.detail}`);
   if (failed) { journals("d-restart"); return finish(server); }
@@ -587,8 +636,9 @@ async function main(): Promise<number> {
     `the three units are the old unmarked text again: ${unitsBack}; morndo-* in the unit folder: ${morndoUnits.join(", ")}`);
   const dropinFiles = existsSync(DROPIN_DIR) ? readdirSync(DROPIN_DIR).sort() : [];
   const dropinText = (() => { try { return readFileSync(join(DROPIN_DIR, "limits.conf"), "utf8"); } catch { return null; } })();
-  check("f-dropin-restored", dropinText === OLD_DROPIN && JSON.stringify(dropinFiles) === JSON.stringify(["limits.conf"]) && !existsSync(join(DROPIN_DIR, "before-morndo.conf")),
-    `limits.conf is byte-identical to the old drop-in: ${dropinText === OLD_DROPIN}; the install's before-morndo.conf is gone; the folder holds: ${dropinFiles.join(", ") || "(nothing)"}`);
+  const shipText = (() => { try { return readFileSync(join(DROPIN_DIR, "ship.conf"), "utf8"); } catch { return null; } })();
+  check("f-dropin-restored", dropinText === OLD_DROPIN && shipText === SHIP_DROPIN && JSON.stringify(dropinFiles) === JSON.stringify(["limits.conf", "ship.conf"]) && !existsSync(join(DROPIN_DIR, "before-morndo.conf")),
+    `limits.conf and ship.conf (with its ExecStart lines) are byte-identical to the old drop-ins: ${dropinText === OLD_DROPIN} ${shipText === SHIP_DROPIN}; the install's before-morndo.conf is gone; the folder holds: ${dropinFiles.join(", ") || "(nothing)"}`);
   const wrappersBack = SERVICES.every(s => {
     try { return !lstatSync(join(BIN, s.wrapper)).isSymbolicLink() && readFileSync(join(BIN, s.wrapper), "utf8") === OLD_WRAPPERS.get(s.wrapper); } catch { return false; }
   });
@@ -689,6 +739,14 @@ async function main(): Promise<number> {
   // The corrected procedure the first install showed the need of: the three services stopped before the install (the
   // lane's tmux sits in its own scope), so the install starts them on the new tree.
   run("systemctl", ["--user", "stop", ...SERVICE_UNITS]);
+  const shipRestored = readFileSync(join(DROPIN_DIR, "ship.conf"), "utf8");
+  const dropinsAgain = command("g-dropins", "sh", [join(E2E, "scripts/c6/dropins.sh"), BACKUP]);
+  run("systemctl", ["--user", "daemon-reload"]);
+  // The script must have acted: the restore had put the ExecStart lines back, and its own words say it took them out again.
+  check("g-dropin-neutralized", /^\s*ExecStart\s*=/m.test(shipRestored) && dropinsAgain.code === 0
+    && dropinsAgain.out.includes(`ExecStart taken out of: ${join(DROPIN_DIR, "ship.conf")}`)
+    && !/^\s*ExecStart\s*=/m.test(readFileSync(join(DROPIN_DIR, "ship.conf"), "utf8")),
+    `the restore had put the ExecStart lines back (${/^\s*ExecStart\s*=/m.test(shipRestored)}); dropins.sh again, with the units stopped, before the retry exited ${dropinsAgain.code}: ${firstLines(dropinsAgain, 2)}`);
   const second = installOnce("g-install");
   check("g-installed", second.code === 0 && second.out.includes(`Morndo ${VERSION_A} installed (control-plane, channel ${CHANNEL}).`),
     `after the reset (releases, update state, update config removed), wrappers moved aside (${movedAgain}), services stopped: install exited ${second.code} after ${second.seconds} s: ${firstLines(second, 8)}`);
