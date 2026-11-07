@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
-import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, isAnswered, watchedKeys, type AccessPolicy } from "@morndo/domain";
+import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, isDecisionAnswered, watchedKeys, type AccessPolicy } from "@morndo/domain";
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
 import { Store, type SignInAudit } from "./adapters/store.ts";
 import { GithubChecks } from "./adapters/github-checks.ts";
@@ -422,7 +422,10 @@ switch (cmd) {
       // The fleet's delivery ids are `<client>:<rest>` with a lowercase client (fleetDeliverText adds the hub's own).
       const deliver = fleetDeliverText(fleetDeliveries(fleet.client));
       const legacySince = Date.now();
-      const answered = (key: string, since: number) => isAnswered(board.task(key)?.events ?? [], since);
+      const answered = (key: string, since: number) => {
+        const found = board.task(key);
+        return found !== null && isDecisionAnswered(found.task, found.events, since);
+      };
       const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });
       const staleSweep = new StaleSweep({
         tasks: () => [...board.tasksIn("blocked"), ...board.tasksIn("review")],

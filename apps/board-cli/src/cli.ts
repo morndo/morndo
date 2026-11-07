@@ -3,7 +3,8 @@
 // given streams, so the tests drive it against an in-process hub and the entry point (main.ts) wires the real ones.
 // Exit codes: 0 done, 1 the hub refused (one line on stderr, in words an agent can act on), 2 usage, 3 the hub can't
 // be reached or didn't answer in a shape this CLI knows.
-import { inboxItems, isAnswered, staleMessage, staleTasks, watchedKeys, type JudgedWait, type MergeRecord, type MergedView, type Task, type TaskEvent, type TaskKey, type TaskStatus, type Wait } from "@morndo/domain";
+import { STALE_BLOCK_MS, inboxItems, isDecisionAnswered, staleMessage, staleTasks, watchedKeys, type JudgedWait, type MergeRecord, type MergedView, type Task, type TaskEvent, type TaskKey, type TaskStatus, type Wait } from "@morndo/domain";
+import { mapLimit } from "@morndo/service-kit";
 import { promptFor } from "./prompt.ts";
 import { lintWhy, proofBlock, whyTokens, type ProofView } from "./proof-text.ts";
 
@@ -144,58 +145,37 @@ const inHours = (ms: number) => `${Math.round(ms / 3_600_000)} h`;
 // How many decision-event reads may be in flight at once. More than this crowds the hub; fewer leaves the list waiting.
 const EVENT_READS = 8;
 
-async function eachLimited<T>(items: readonly T[], limit: number, run: (item: T, index: number) => Promise<void>): Promise<void> {
-  let next = 0;
-  const lane = async () => {
-    while (next < items.length) {
-      const index = next++;
-      const item = items[index];
-      if (item === undefined) return;
-      await run(item, index);
-    }
-  };
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, () => lane()));
-}
-
-// B19: one GET per decision the inbox might list, at most EVENT_READS at once, as the predicate both views apply.
-// `legacySince` stays 0: the hub's start is not on the wire. A comment answers a decision from before the rule only
-// after the block began (its last move to blocked); one with a deadline keeps the ask time it is given. A read that
-// fails leaves that task unanswered, and one warning names every such key.
+// B19: one GET per decision the inbox might list, at most EVENT_READS at once, as the predicate both views apply
+// (isDecisionAnswered). `legacySince` stays 0: the hub's start is not on the wire. `idleMs`: only a decision idle at
+// least that long is read; a younger one counts as unanswered and draws no warning. A read that fails leaves that
+// task unanswered, and one warning names every such key.
 async function answeredFor(
   call: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Record<string, unknown>>,
   tasks: readonly Task[],
   now: number,
   err: (line: string) => void,
+  o: { idleMs?: number } = {},
 ): Promise<(key: TaskKey, since: number) => boolean> {
-  const candidates = inboxItems(tasks, now, { legacySince: 0 });
   const byKey = new Map(tasks.map(t => [t.key, t]));
-  const eventsByKey = new Map<TaskKey, readonly TaskEvent[]>();
-  const reads: { key: TaskKey; events: readonly TaskEvent[]; failed: boolean }[] = [];
-  await eachLimited(candidates, EVENT_READS, async (item, index) => {
+  const candidates = inboxItems(tasks, now, { legacySince: 0 }).filter(item => {
+    if (o.idleMs === undefined) return true;
+    const task = byKey.get(item.key);
+    return task !== undefined && now - task.updatedAt >= o.idleMs;
+  });
+  const reads = await mapLimit(candidates, EVENT_READS, async (item): Promise<{ key: TaskKey; events: readonly TaskEvent[]; failed: boolean }> => {
     try {
       const events = ((await call("GET", `/api/agent/board/tasks/${item.key}`)).events as TaskEvent[] | undefined) ?? [];
-      reads[index] = { key: item.key, events, failed: false };
+      return { key: item.key, events, failed: false };
     } catch {
-      reads[index] = { key: item.key, events: [], failed: true };
+      return { key: item.key, events: [], failed: true };
     }
   });
-  for (const read of reads) if (read !== undefined) eventsByKey.set(read.key, read.events);
-  const unread = reads.flatMap(read => read !== undefined && read.failed ? [read.key] : []);
+  const eventsByKey = new Map(reads.map(read => [read.key, read.events]));
+  const unread = reads.flatMap(read => read.failed ? [read.key] : []);
   if (unread.length > 0) err(`warning: could not read the events of ${unread.join(", ")}; counted as unanswered`);
   return (key, since) => {
-    const events = eventsByKey.get(key) ?? [];
     const task = byKey.get(key);
-    if (task === undefined || task.decisionDue !== undefined) return isAnswered(events, since);
-    // A later edit of the assignee or the description moves stateChangedAt; the block itself is the last move to blocked.
-    let floor = since;
-    for (let i = events.length - 1; i >= 0; i--) {
-      const event = events[i];
-      if (event !== undefined && event.change.kind === "moved" && event.change.to === "blocked") {
-        floor = Math.max(since, event.at);
-        break;
-      }
-    }
-    return isAnswered(events, floor);
+    return task !== undefined && isDecisionAnswered(task, eventsByKey.get(key) ?? [], since);
   };
 }
 
@@ -426,7 +406,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       }
       case "show": showTask(await call("GET", `/api/agent/board/tasks/${key(rest[0])}`)); return 0;
       // B19: the decisions that wait for the manager, with how long. An answer after the ask closes one, a decision
-      // from before the rule included — the same rule the hub's sweep uses (isAnswered).
+      // from before the rule included — the same rule the hub's sweep uses (isDecisionAnswered).
       case "inbox": {
         const d = await call("GET", "/api/agent/board");
         const now = (d.at as number | undefined) ?? Date.now();
@@ -443,7 +423,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const d = await call("GET", "/api/agent/board");
         const now = (d.at as number | undefined) ?? Date.now();
         const tasks = d.tasks as Task[];
-        const answered = await answeredFor(call, tasks, now, io.err);
+        const answered = await answeredFor(call, tasks, now, io.err, { idleMs: STALE_BLOCK_MS });
         const waits = d.waits as { key: string; readings: JudgedWait[] }[] | undefined;
         const watched = watchedKeys({ tasks, ...(waits !== undefined ? { waits } : {}), merged: Array.isArray(d.merged) ? d.merged as MergedView[] : [] }, now, 0, answered);
         const items = staleTasks(tasks, now, { watched, answered });

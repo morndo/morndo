@@ -1,8 +1,9 @@
 // Board context, B19 and B20 (ADR-0040): a board that cannot go stale silently. A block that is a decision — a lane
 // asking its manager which way to go, or the manager's own checkpoint — carries a deadline 24 h on (board.ts), and
 // what passed it without an answer is the decision inbox's, listed for the manager with how late it is. An answer is
-// a comment after the ask by the manager, the principal or the console (`isAnswered`): the hub's sweep and the CLI
-// read that one rule. What nobody changed for 48 h, in blocked or review, with nothing the board itself watches (an
+// a comment after the ask by the manager, the principal or the console (`isDecisionAnswered`): the hub's sweep and
+// the CLI read that one rule, and for a decision from before the rule the ask is its last move into blocked. What
+// nobody changed for 48 h, in blocked or review, with nothing the board itself watches (an
 // open wait, a merge not live yet, a decision still waiting), is the stale sweep's; a decision that was answered is
 // swept like any block that sits. Both are pure: the hub reads the tasks and says who it watches, these say what
 // waits, and the messages are plain text, one line per task, cut where a line stops being readable.
@@ -41,6 +42,24 @@ const byNumber = (a: { key: TaskKey }, b: { key: TaskKey }) => numberOf(a.key) -
 // or before the ask, and any change that is not a comment do not answer it.
 export function isAnswered(events: readonly TaskEvent[], since: number): boolean {
   return events.some(e => e.at > since && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"));
+}
+
+// T-863: whether this decision has been answered, the one rule the hub's sweep and the CLI both use. A task with a
+// deadline is answered by a comment after `since` (when it was asked). Any other task, a decision from before the
+// rule, is answered by a comment after its last move into blocked: that `at` is the cutoff, and the ask time it is
+// given does not raise it. The cutoff is the same on both sides and does not move on a reassign or a description edit.
+// With no move into blocked in the events, the cutoff is `since`.
+export function isDecisionAnswered(task: Task, events: readonly TaskEvent[], since: number): boolean {
+  if (task.decisionDue !== undefined) return isAnswered(events, since);
+  let cutoff = since;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const event = events[i];
+    if (event !== undefined && event.change.kind === "moved" && event.change.to === "blocked") {
+      cutoff = event.at;
+      break;
+    }
+  }
+  return isAnswered(events, cutoff);
 }
 
 // T-863: one ask of the rule per task and ask time. The sweep hands the same predicate to the watched set and to the
