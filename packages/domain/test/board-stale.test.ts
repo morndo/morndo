@@ -3,7 +3,7 @@
 // manager. Both are pure: the hub reads the tasks, these say what is waiting, and the messages are plain text.
 import { describe, expect, it } from "vitest";
 import {
-  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, answeredOnce, inboxItems, inboxMessage, isAnswered, staleMessage, staleTasks, watchedKeys,
+  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, answeredOnce, inboxItems, inboxMessage, isAnswered, isDecisionAnswered, staleMessage, staleTasks, watchedKeys,
   type BoardActor, type EndpointId, type JudgedWait, type MergedView, type SessionId, type Task, type TaskActor, type TaskEvent, type TaskKey,
 } from "../src/index.ts";
 
@@ -172,5 +172,40 @@ describe("answeredOnce (T-863)", () => {
     const once = answeredOnce((k, since) => { seen.push(`${k}@${since}`); return k === "T-1"; });
     expect([once("T-1" as TaskKey, 5), once("T-1" as TaskKey, 5), once("T-2" as TaskKey, 5), once("T-2" as TaskKey, 5), once("T-1" as TaskKey, 6)]).toEqual([true, true, false, false, true]);
     expect(seen).toEqual(["T-1@5", "T-2@5", "T-1@6"]);
+  });
+});
+
+// T-863: the cutoff for a decision from before the rule is the task's last move into blocked, read from its events; the
+// hub and the CLI both ask this one function.
+describe("isDecisionAnswered (T-863)", () => {
+  const manager: TaskActor = { kind: "manager", name: "manager", token: "tok-m" };
+  const lane: TaskActor = { kind: "worker", name: "builder", token: "tok-w" };
+  const ev = (at: number, actor: TaskActor, change: TaskEvent["change"]): TaskEvent => ({ key: "T-1" as TaskKey, rev: 1, at, actor, change });
+  const toBlocked = (at: number) => ev(at, lane, { kind: "moved", from: "doing", to: "blocked", reason: "checkpoint: go on?" });
+  const word = (at: number) => ev(at, manager, { kind: "commented", text: "go on" });
+  const legacy = blocked(1, 10, { blockedReason: "checkpoint: go on?" });
+  const due = decision(2, 10);
+  const BLOCK = NOW - 10 * HOUR;
+  it("a legacy decision is answered only by a comment after its last move into blocked", () => {
+    expect(isDecisionAnswered(legacy, [word(BLOCK - HOUR), toBlocked(BLOCK)], 0)).toBe(false);          // the comment came before the block
+    expect(isDecisionAnswered(legacy, [toBlocked(BLOCK), word(BLOCK + HOUR)], 0)).toBe(true);
+    const again = [toBlocked(BLOCK - 5 * HOUR), word(BLOCK - 4 * HOUR), toBlocked(BLOCK)];
+    expect(isDecisionAnswered(legacy, again, 0)).toBe(false);                                           // blocked again after the old answer
+  });
+  it("the cutoff does not move on a reassign or a description edit after the answer", () => {
+    const events = [toBlocked(BLOCK), word(BLOCK + HOUR),
+      ev(BLOCK + 2 * HOUR, manager, { kind: "assigned", from: "builder", to: "reviewer" }),
+      ev(BLOCK + 3 * HOUR, manager, { kind: "edited", description: "new words" })];
+    expect(isDecisionAnswered(legacy, events, 0)).toBe(true);
+  });
+  it("a legacy decision ignores the ask time it is given (the hub's start); one with a deadline uses it", () => {
+    expect(isDecisionAnswered(legacy, [toBlocked(BLOCK), word(BLOCK + HOUR)], NOW)).toBe(true);
+    const dueAsk = NOW - 10 * HOUR;
+    expect(isDecisionAnswered(due, [word(dueAsk + 1)], dueAsk)).toBe(true);
+    expect(isDecisionAnswered(due, [word(dueAsk - 1), toBlocked(dueAsk - 2)], dueAsk)).toBe(false);
+  });
+  it("a legacy decision whose events hold no move into blocked is answered by a comment after the ask time given", () => {
+    expect(isDecisionAnswered(legacy, [word(NOW - HOUR)], NOW - 2 * HOUR)).toBe(true);
+    expect(isDecisionAnswered(legacy, [word(NOW - 3 * HOUR)], NOW - 2 * HOUR)).toBe(false);
   });
 });

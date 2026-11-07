@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "../../hub/test/inprocess-hub.ts";
 import { GithubChecks } from "../../hub/src/adapters/github-checks.ts";
 import { startFakeForge, type FakeForge } from "../../hub/test/fake-forge.ts";
-import { DECISION_DUE_MS, isAnswered, watchedKeys } from "@morndo/domain";
+import { DECISION_DUE_MS, isDecisionAnswered, watchedKeys } from "@morndo/domain";
 import { StaleSweep } from "../../hub/src/application/board-inbox.ts";
 import { HELP, parseArgs, run, valuesOf } from "../src/cli.ts";
 import { PR_EVERY_MS } from "../../hub/src/application/wait-watch.ts";
@@ -897,11 +897,14 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
       "- T-2 blocked 49 h (reviewer): The old one",
     ]);
     // the hub's own sweep, built from the hub's board with the shared rule, lists the same tasks in the same words
-    const answered = (key: string, since: number) => isAnswered(bh.board.task(key)?.events ?? [], since);
+    const answered = (key: string, since: number) => {
+      const found = bh.board.task(key);
+      return found !== undefined && isDecisionAnswered(found.task, found.events, since);
+    };
     const sent: string[] = [];
     const sweep = new StaleSweep({
       tasks: () => [...bh.board.tasksIn("blocked"), ...bh.board.tasksIn("review")],
-      watched: () => watchedKeys(bh.board.view(), clock, hubStart, answered),
+      watched: a => watchedKeys(bh.board.view(), clock, hubStart, a),
       answered, deliver: async d => { sent.push(d.text); return true; }, lane: "manager", now: () => clock,
     });
     expect(await sweep.tick()).toEqual({ sent: true, items: 2 });
@@ -964,6 +967,29 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
       "[board-stale] 1 task idle 48 h or more with no wait the board watches:",
       "- T-1 blocked 49 h (builder): The old one",
     ]);
+  });
+
+  // T-863: stale reads the events of a decision only when the task has been idle long enough to be stale.
+  it("stale reads the events only of decisions idle for 48 h; a recent one costs no read", async () => {
+    await managerSays("new", "Old", "--assign", "builder");
+    await laneSays("builder", "start", "T-1");
+    await laneSays("builder", "block", "T-1", "--why", "checkpoint: old", "--decision");
+    clock += 50 * HOUR;
+    await managerSays("new", "Recent", "--assign", "reviewer");
+    await laneSays("reviewer", "start", "T-2");
+    await laneSays("reviewer", "block", "T-2", "--why", "checkpoint: recent", "--decision");
+    clock += HOUR;
+    const reads: string[] = [];
+    const counting = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = urlOf(url);
+      if (/\/api\/agent\/board\/tasks\/T-\d+$/.test(u)) reads.push(u.slice(u.lastIndexOf("/") + 1));
+      return fetch(url, init);
+    }) as typeof fetch;
+    const out: string[] = [];
+    const code = await run(["stale"], { MORNDO_HUB: bh.base, MORNDO_AGENT_TOKEN: bm }, { fetch: counting, lane: async () => null, out: l => out.push(l), err: () => {} });
+    expect(code).toBe(0);
+    expect(out.join("\n")).toBe("nothing stale");
+    expect(reads).toEqual(["T-1"]);
   });
 
   // T-863: the per-task reads go out together, at most 8 at a time.
