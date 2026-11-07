@@ -408,6 +408,8 @@ One thing the user registered on this machine that can run agent work: a subscri
 | CN14 | Off and revoke stop new leases at once and open ones at the next refresh. Off is undone by turning on. Revoked is never on again. |
 | CN15 | A connection grants nothing. Which connection runs a role is the routing policy. A lease is not a mandate. Spend decides the lease gate. Under Auto, a key's expected cost, remaining budget and daily cap may also rank, fence or exclude a candidate. They still grant nothing, never admit what the gate refuses, and never move a pick outside the allowed set. |
 
+A Codex key run against a non-OpenAI endpoint never offers the hosted web search tool. A Codex key run with catalog prices is charged from its reported tokens.
+
 Aggregate **Connection**, with its open leases inside it. Closed leases leave as events. The clock is the `now` argument.
 
 Events: ConnectionAdded, ConnectionRotated, ConnectionRevoked, ConnectionTurnedOn, ConnectionTurnedOff, TermsAcknowledged, TermsChanged, RepoListChanged, IsolationChanged, BudgetChanged, ExpiryChanged, LeaseGranted, LeaseRefused, LeaseRefreshed, LeaseRefreshRefused, LeaseClosed, LeaseLost, SpendRecorded, SpendReconciled, ThresholdCrossed. Widening events carry the command id.

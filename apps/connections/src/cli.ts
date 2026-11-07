@@ -23,7 +23,7 @@ import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
 import { acceptsPoolKey, FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
 import { filterSocketTrusted, sendToFilter, serveFilterChannel } from "./filter-channel.ts";
-import { catalogTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
+import { catalogTokenCost, codexModelArg, codexTokenCost, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
@@ -496,7 +496,12 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     try {
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";
       const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl, party);
-      const cost = catalogPrices ? catalogTokenCost(stdout, preset.prices, model) : costFromOutput(stdout);
+      const codexPrices = preset.spend.includes("token-price") && connection.runtime === "codex" && !subscription;
+      const cost = catalogPrices
+        ? catalogTokenCost(stdout, preset.prices, model)
+        : codexPrices
+          ? codexTokenCost(stdout, preset.prices, codexModelArg(parsed.rest) ?? model) ?? costFromOutput(stdout)
+          : costFromOutput(stdout);
       // The cost is an estimate and goes to the lease the grant names now (the last member). The first lease is the fallback
       // when the grant is gone. A failed run is attributed before the grant closes, so the wrapper can report that member (KP18).
       const tracked = grant === null ? null : again.keypools.grantOf(grant.pool, grant.id);

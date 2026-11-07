@@ -153,7 +153,7 @@ describe("vendor catalog", () => {
     const autoRules = parseAutoRoutingCatalog(JSON.parse(readFileSync(join(import.meta.dirname, "../catalog/auto-routing.json"), "utf8")));
     if (!autoRules) throw new Error("auto-routing.json is not an Auto routing catalog");
     expect(catalog.map(p => p.id)).toEqual([
-      "anthropic", "openai", "deepseek", "moonshot", "zai", "openrouter", "custom-anthropic", "custom-openai",
+      "anthropic", "openai", "deepseek", "moonshot", "zai", "mistral", "openrouter", "custom-anthropic", "custom-openai",
       "claude", "codex", "cursor", "studio", "cursor-cloud", "agy",
     ]);
     // https://docs.z.ai/guides/llm/glm-5.3 and https://docs.z.ai/devpack/latest-model (read 2026-10-10):

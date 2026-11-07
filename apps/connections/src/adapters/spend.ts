@@ -48,6 +48,70 @@ export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[]
   return roundDollars(total);
 }
 
+// A Codex key run (`codex exec --json`) reports usage on each turn.completed line.
+// cached_input_tokens is part of input_tokens, and output_tokens includes reasoning.
+// No completed turn, no catalog price for the model, or a bad count is null, so the
+// lease keeps its fallback instead of a partial or invented figure.
+export function codexTokenCost(stdout: string, prices: readonly CatalogPrice[], model: string, asOf = todayUtc()): number | null {
+  const turns = codexTurns(stdout);
+  if (turns === null) return null;
+  const price = priceTable(prices, asOf).get(model);
+  if (price === undefined) return null;
+  let total = 0;
+  for (const turn of turns) {
+    const part = charge({ input: turn.input - turn.cached, output: turn.output, cacheRead: turn.cached, cacheWrite: 0 }, price);
+    if (part === null) return null;
+    total += part;
+  }
+  return roundDollars(total);
+}
+
+// The model a Codex argv names, the first `-m` or `--model` (including `--model=x`).
+export function codexModelArg(argv: readonly string[]): string | null {
+  for (let index = 0; index < argv.length; index += 1) {
+    const arg = argv[index];
+    if (arg === undefined) continue;
+    if (arg === "-m" || arg === "--model") return argv[index + 1] ?? null;
+    if (arg.startsWith("--model=")) return arg.slice("--model=".length);
+  }
+  return null;
+}
+
+type CodexUsage = { input: number; cached: number; output: number };
+
+function codexTurns(stdout: string): CodexUsage[] | null {
+  const turns: CodexUsage[] = [];
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "") continue;
+    let body: unknown;
+    try { body = JSON.parse(trimmed); }
+    catch { continue; }
+    if (typeof body !== "object" || body === null || !("type" in body) || body.type !== "turn.completed") continue;
+    if (!("usage" in body)) return null;
+    const usage = codexUsage(body.usage);
+    if (usage === null) return null;
+    turns.push(usage);
+  }
+  return turns.length === 0 ? null : turns;
+}
+
+function codexUsage(value: unknown): CodexUsage | null {
+  if (typeof value !== "object" || value === null) return null;
+  const input = countOf(value, "input_tokens");
+  const cached = countOf(value, "cached_input_tokens");
+  const output = countOf(value, "output_tokens");
+  if (input === null || cached === null || output === null) return null;
+  return { input, cached, output };
+}
+
+function countOf(value: object, key: string): number | null {
+  if (!(key in value)) return null;
+  const count = (value as Record<string, unknown>)[key];
+  if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return null;
+  return count;
+}
+
 // cacheRead is the vendor's cached-input price per 1M tokens. Z.ai lists Cached Input and no cache-creation
 // price (https://docs.z.ai/guides/overview/pricing, read 2026-10-11), so cache creation is charged as input.
 // A row with no cacheRead price charges cache reads as input too.
