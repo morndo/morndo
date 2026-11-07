@@ -6,9 +6,9 @@
 // open wait, a merge not live yet, a decision still waiting), is the stale sweep's; a decision that was answered is
 // swept like any block that sits. Both are pure: the hub reads the tasks and says who it watches, these say what
 // waits, and the messages are plain text, one line per task, cut where a line stops being readable.
-import { STALE_BLOCK_MS } from "./board-waits.ts";
+import { STALE_BLOCK_MS, type JudgedWait } from "./board-waits.ts";
 import { cutText } from "./shared.ts";
-import type { Task, TaskEvent, TaskKey } from "./board.ts";
+import type { MergedView, Task, TaskEvent, TaskKey } from "./board.ts";
 
 // B19: a decision is due an answer this long after it was asked; past it the manager has let it sit a day.
 export const DECISION_DUE_MS = 24 * 3_600_000;
@@ -43,6 +43,20 @@ export function isAnswered(events: readonly TaskEvent[], since: number): boolean
   return events.some(e => e.at > since && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"));
 }
 
+// T-863: one ask of the rule per task and ask time. The sweep hands the same predicate to the watched set and to the
+// stale list, so a decision is judged once in a pass and both places hear the same answer.
+export function answeredOnce(answered: (key: TaskKey, since: number) => boolean): (key: TaskKey, since: number) => boolean {
+  const seen = new Map<string, boolean>();
+  return (key, since) => {
+    const id = `${key}@${since}`;
+    const hit = seen.get(id);
+    if (hit !== undefined) return hit;
+    const answer = answered(key, since);
+    seen.set(id, answer);
+    return answer;
+  };
+}
+
 // B19: the decisions the manager owes an answer to, most overdue first. A blocked task with a decisionDue is one, asked
 // when that deadline's 24 h began. A blocked task from before the rule whose reason says it needs a decision or is a
 // checkpoint is one from `legacySince` (the hub's start: its clock begins there, once). `answered(key, since)`: an
@@ -58,6 +72,20 @@ export function inboxItems(tasks: readonly Task[], now: number, o: { legacySince
     items.push({ key: t.key, title: t.title, assignee: t.assignee, line: t.blockedReason ?? "", openedAt, dueAt, overdue: now >= dueAt, legacy: t.decisionDue === undefined });
   }
   return items.sort((a, b) => a.dueAt - b.dueAt || byNumber(a, b));
+}
+
+// B20: the keys the board itself watches, so the sweep leaves them out: a blocked task whose waits the hub has read
+// something of (an open wait may end any moment, and D7 moves the task), a review task whose merge is not live on
+// every node yet, and every decision the inbox has (B19), a legacy one included — an answered one excluded, for the
+// sweep has it again (the inbox let it go). `view` is what the board holds: the shown tasks, the wait watch's readings,
+// the merged views. The hub's sweep and the CLI's stale view both call this.
+export function watchedKeys(view: { tasks: readonly Task[]; waits?: readonly { key: string; readings: JudgedWait[] }[]; merged: readonly MergedView[] }, now: number, legacySince: number, answered?: (key: TaskKey, since: number) => boolean): Set<string> {
+  const keys = new Set<string>();
+  for (const w of view.waits ?? []) if (w.readings.some(r => r.state !== "unknown")) keys.add(w.key);
+  const status = new Map(view.tasks.map(t => [t.key as string, t.status]));
+  for (const m of view.merged) if (m.live === false && status.get(m.key) === "review") keys.add(m.key);
+  for (const i of inboxItems(view.tasks, now, { legacySince, ...(answered !== undefined ? { answered } : {}) })) keys.add(i.key);
+  return keys;
 }
 
 // B19: what the manager gets: how many wait, how many are past their deadline, and one line per decision, the most

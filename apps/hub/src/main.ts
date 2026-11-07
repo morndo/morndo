@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
-import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, isAnswered, type AccessPolicy } from "@morndo/domain";
+import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, isAnswered, watchedKeys, type AccessPolicy } from "@morndo/domain";
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
 import { Store, type SignInAudit } from "./adapters/store.ts";
 import { GithubChecks } from "./adapters/github-checks.ts";
@@ -50,7 +50,7 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
-import { BoardInbox, MergedSweep, StaleSweep, fleetDeliverText, watchedKeys } from "./application/board-inbox.ts";
+import { BoardInbox, MergedSweep, StaleSweep, fleetDeliverText } from "./application/board-inbox.ts";
 import { ProofService } from "./application/proof-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
@@ -426,7 +426,7 @@ switch (cmd) {
       const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });
       const staleSweep = new StaleSweep({
         tasks: () => [...board.tasksIn("blocked"), ...board.tasksIn("review")],
-        watched: () => watchedKeys(board.view(), Date.now(), legacySince, answered),
+        watched: a => watchedKeys(board.view(), Date.now(), legacySince, a),
         answered, deliver, lane: config.managerWindow,
       });
       // B23: the merged sweep, over the merge watch's live flags, to the manager's lane. It is run by the same timer
