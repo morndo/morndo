@@ -3,8 +3,8 @@
 // manager. Both are pure: the hub reads the tasks, these say what is waiting, and the messages are plain text.
 import { describe, expect, it } from "vitest";
 import {
-  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, inboxItems, inboxMessage, isAnswered, staleMessage, staleTasks,
-  type BoardActor, type Task, type TaskEvent, type TaskKey,
+  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, answeredOnce, inboxItems, inboxMessage, isAnswered, staleMessage, staleTasks, watchedKeys,
+  type BoardActor, type EndpointId, type JudgedWait, type MergedView, type SessionId, type Task, type TaskActor, type TaskEvent, type TaskKey,
 } from "../src/index.ts";
 
 const NOW = 1_800_000_000_000;
@@ -118,19 +118,22 @@ describe("the stale sweep (B20)", () => {
 // T-863: one rule for "answered", read by the hub's sweep and by the CLI's inbox and stale views.
 describe("isAnswered (T-863)", () => {
   const SINCE = NOW - 10 * HOUR;
-  const said = (at: number, actor: TaskEvent["actor"], kind: "commented" | "briefed" = "commented"): TaskEvent =>
-    ({ key: "T-1" as TaskKey, rev: 2, at, actor, change: kind === "commented" ? { kind: "commented", text: "go on" } : ({ kind: "unmerged", repo: "a/b", sha: "abc1234" } as never) });
-  const lane: TaskEvent["actor"] = { kind: "worker", name: "builder" } as never;
+  const manager: TaskActor = { kind: "manager", name: "manager", token: "tok-m" };
+  const principal: TaskActor = { kind: "principal", endpointId: "e1" as EndpointId, sessionId: "s1" as SessionId };
+  const console_: TaskActor = { kind: "console" };
+  const lane: TaskActor = { kind: "worker", name: "builder", token: "tok-w" };
+  const said = (at: number, actor: TaskActor): TaskEvent => ({ key: "T-1" as TaskKey, rev: 2, at, actor, change: { kind: "commented", text: "go on" } });
+  const merged = (at: number, actor: TaskActor): TaskEvent => ({ key: "T-1" as TaskKey, rev: 2, at, actor, change: { kind: "merged", repo: "a/b", sha: "abc1234" } });
   it("a comment by the manager, the principal or the console after the ask answers it", () => {
-    expect(isAnswered([said(SINCE + 1, { kind: "manager", name: "manager" } as never)], SINCE)).toBe(true);
-    expect(isAnswered([said(SINCE + 1, { kind: "principal" } as never)], SINCE)).toBe(true);
-    expect(isAnswered([said(SINCE + 1, { kind: "console" } as never)], SINCE)).toBe(true);
+    expect(isAnswered([said(SINCE + 1, manager)], SINCE)).toBe(true);
+    expect(isAnswered([said(SINCE + 1, principal)], SINCE)).toBe(true);
+    expect(isAnswered([said(SINCE + 1, console_)], SINCE)).toBe(true);
   });
   it("the lane's own comment, a comment at or before the ask, and a change that is no comment do not", () => {
     expect(isAnswered([said(SINCE + 1, lane)], SINCE)).toBe(false);
-    expect(isAnswered([said(SINCE, { kind: "manager", name: "manager" } as never)], SINCE)).toBe(false);
-    expect(isAnswered([said(SINCE - 1, { kind: "manager", name: "manager" } as never)], SINCE)).toBe(false);
-    expect(isAnswered([said(SINCE + 1, { kind: "manager", name: "manager" } as never, "briefed")], SINCE)).toBe(false);
+    expect(isAnswered([said(SINCE, manager)], SINCE)).toBe(false);
+    expect(isAnswered([said(SINCE - 1, manager)], SINCE)).toBe(false);
+    expect(isAnswered([merged(SINCE + 1, manager)], SINCE)).toBe(false);
     expect(isAnswered([], SINCE)).toBe(false);
   });
   it("staleTasks sweeps an answered decision like any block that sits, and keeps an unanswered one out", () => {
@@ -140,5 +143,34 @@ describe("isAnswered (T-863)", () => {
     expect(staleTasks([asked, open], NOW, { answered }).map(i => i.key)).toEqual(["T-1"]);
     expect(staleTasks([asked, open], NOW)).toEqual([]);
     expect(staleTasks([asked], NOW, { answered: () => true, watched: new Set(["T-1"]) })).toEqual([]);
+  });
+});
+
+// T-863: what the board itself watches, one rule for the hub's sweep and the CLI's stale view.
+describe("watchedKeys (T-863)", () => {
+  const view = (tasks: Task[], extra: { waits?: { key: string; readings: JudgedWait[] }[]; merged?: MergedView[] } = {}) =>
+    ({ tasks, merged: extra.merged ?? [], ...(extra.waits ? { waits: extra.waits } : {}) });
+  it("an unanswered decision and a legacy one are watched; an answered one is not", () => {
+    const tasks = [decision(1, 5), blocked(2, 5, { blockedReason: "checkpoint: go on?" }), decision(3, 5), blocked(4, 5)];
+    const answered = (k: TaskKey) => k === "T-3" || k === "T-2";
+    expect([...watchedKeys(view(tasks), NOW, NOW, answered)].sort()).toEqual(["T-1"]);
+    expect([...watchedKeys(view(tasks), NOW, NOW)].sort()).toEqual(["T-1", "T-2", "T-3"]);
+  });
+  it("a wait the hub has read something of, and a review task whose merge is not live yet, are watched", () => {
+    const tasks = [blocked(1, 60), blocked(2, 60), review(3, 60), review(4, 60)];
+    const w = watchedKeys(view(tasks, {
+      waits: [{ key: "T-1", readings: [{ state: "open", label: "x" }] }, { key: "T-2", readings: [{ state: "unknown", label: "y" }] }],
+      merged: [{ key: "T-3" as TaskKey, merges: [], live: false, label: "" }, { key: "T-4" as TaskKey, merges: [], live: true, label: "" }],
+    }), NOW, NOW);
+    expect([...w].sort()).toEqual(["T-1", "T-3"]);
+  });
+});
+
+describe("answeredOnce (T-863)", () => {
+  it("asks the rule once per task and ask time, and gives the same answer every time", () => {
+    const seen: string[] = [];
+    const once = answeredOnce((k, since) => { seen.push(`${k}@${since}`); return k === "T-1"; });
+    expect([once("T-1" as TaskKey, 5), once("T-1" as TaskKey, 5), once("T-2" as TaskKey, 5), once("T-2" as TaskKey, 5), once("T-1" as TaskKey, 6)]).toEqual([true, true, false, false, true]);
+    expect(seen).toEqual(["T-1@5", "T-2@5", "T-1@6"]);
   });
 });
