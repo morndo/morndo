@@ -159,8 +159,8 @@ async function eachLimited<T>(items: readonly T[], limit: number, run: (item: T,
 
 // B19: one GET per decision the inbox might list, at most EVENT_READS at once, as the predicate both views apply.
 // `legacySince` stays 0: the hub's start is not on the wire. A comment answers a decision from before the rule only
-// after the block began; one with a deadline keeps the ask time it is given. A read that fails leaves that task
-// unanswered, and one warning names every such key.
+// after the block began (its last move to blocked); one with a deadline keeps the ask time it is given. A read that
+// fails leaves that task unanswered, and one warning names every such key.
 async function answeredFor(
   call: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Record<string, unknown>>,
   tasks: readonly Task[],
@@ -183,9 +183,19 @@ async function answeredFor(
   const unread = reads.flatMap(read => read !== undefined && read.failed ? [read.key] : []);
   if (unread.length > 0) err(`warning: could not read the events of ${unread.join(", ")}; counted as unanswered`);
   return (key, since) => {
+    const events = eventsByKey.get(key) ?? [];
     const task = byKey.get(key);
-    const at = task !== undefined && task.decisionDue === undefined ? Math.max(since, task.stateChangedAt) : since;
-    return isAnswered(eventsByKey.get(key) ?? [], at);
+    if (task === undefined || task.decisionDue !== undefined) return isAnswered(events, since);
+    // A later edit of the assignee or the description moves stateChangedAt; the block itself is the last move to blocked.
+    let floor = since;
+    for (let i = events.length - 1; i >= 0; i--) {
+      const event = events[i];
+      if (event !== undefined && event.change.kind === "moved" && event.change.to === "blocked") {
+        floor = Math.max(since, event.at);
+        break;
+      }
+    }
+    return isAnswered(events, floor);
   };
 }
 
