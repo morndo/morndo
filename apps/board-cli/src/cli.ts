@@ -49,7 +49,9 @@ export const HELP = `morndo-board: the team's board, for the manager and the lan
   prompt --role manager|worker          the instructions block for a lane's prompt
 
 Environment: MORNDO_HUB (the hub's address), MORNDO_AGENT_TOKEN (from \`morndo agent-token new\`), MORNDO_LANE (this
-lane's name; without it, the tmux window's name).`;
+lane's name; without it, the tmux window's name). With none of them in the environment, the settings are read from
+~/.config/morndo: agent-hub (the hub's address), agent-node (this machine's name), agent-lanes.token (the token the
+lanes share) and agent-manager.token (used only for the window named manager); an environment setting always wins.`;
 
 const STATUS_WORDS: Record<TaskStatus, string> = { doing: "In progress", blocked: "Blocked", review: "In review", todo: "To do", backlog: "Backlog", done: "Done this week" };
 const LIST_ORDER: TaskStatus[] = ["doing", "blocked", "review", "todo", "backlog", "done"];
@@ -187,6 +189,15 @@ const ATTESTED_FLAG_KIND: Record<string, string> = { test: "tests", manual: "man
 class Usage extends Error {}
 class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
 class Unreachable extends Error { constructor(message: string) { super(message); this.name = "Unreachable"; } }
+
+// Whether this call needs no settings: it prints text without asking the hub (help, the prompt blocks). Read from the same
+// parse and the same command word the dispatch below uses, so a flag's value or a word of some other command is never taken
+// for one.
+export function runsOffline(argv: readonly string[]): boolean {
+  const { positional, flags } = parseArgs(argv);
+  const [cmd = "help"] = positional;
+  return cmd === "help" || flags.help === true || cmd === "prompt";
+}
 
 export async function run(argv: readonly string[], env: Env, io: Io): Promise<number> {
   const { positional, flags } = parseArgs(argv);

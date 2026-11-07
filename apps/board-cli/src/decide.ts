@@ -36,7 +36,10 @@ export const HELP = `morndo-decide: a decision brief for the principal.
   prompt --role manager|worker            the instruction block for a lane's prompt
 
 Environment: MORNDO_HUB (the hub's address), MORNDO_AGENT_TOKEN (from \`morndo agent-token new\`), MORNDO_LANE (this
-lane's name; without it, the tmux window's name). A worker's brief is a draft until the manager forwards it.`;
+lane's name; without it, the tmux window's name). With none of them in the environment, the settings are read from
+~/.config/morndo: agent-hub (the hub's address), agent-node (this machine's name), agent-lanes.token (the token the
+lanes share) and agent-manager.token (used only for the window named manager); an environment setting always wins.
+A worker's brief is a draft until the manager forwards it.`;
 
 const ID = /^[A-Za-z0-9_-]{1,32}$/;
 
@@ -84,6 +87,14 @@ function answerText(a: Answer): string {
   if (a === null) return "no answer yet";
   if (a.kind === "words") return "in words";
   return `${a.key} · ${a.label}`;
+}
+
+// Whether this call needs no settings: it prints text or lints a file without asking the hub. Read from the same parse and
+// the same command word the dispatch below uses.
+export function runsOffline(argv: readonly string[]): boolean {
+  const { positional, flags } = parseArgs(argv);
+  const [cmd = "help"] = positional;
+  return cmd === "help" || flags.help === true || cmd === "template" || cmd === "prompt" || cmd === "lint" || (cmd === "card" && flags.template === true);
 }
 
 export async function run(argv: readonly string[], env: Env, io: Io): Promise<number> {

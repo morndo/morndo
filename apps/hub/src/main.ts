@@ -74,6 +74,7 @@ import { MemorySync, SYNC_EVERY_MS } from "./application/memory-sync.ts";
 import { SignInService } from "./application/signin-service.ts";
 import { readCodeLine, runMemory } from "./console/memory.ts";
 import { runUpdaterProgram } from "./console/update.ts";
+import { runJobProgram } from "./console/job.ts";
 import { AUDIT_SYNOPSIS, AUDIT_USAGE, parseAuditArgs } from "./console/audit.ts";
 import { agentTokenLine, agentTokenMade } from "./console/agent-token.ts";
 import { mkdtempSync, rmSync } from "node:fs";
@@ -89,6 +90,7 @@ const HELP = `morndo: your agents, on your phone.
   morndo audit [count]    the latest device and session events (morndo audit --help)
   morndo lanes …          every node's lanes through the fleet: list, peek, send, keys, start, stop, status,
                           events (morndo lanes --help)
+  morndo job …            start, list, show, read the logs of and cancel this node's jobs (morndo job start --notify …)
   morndo agent-token new <name> --role manager|worker [--scope usage-pool]
                           a token for the manager's lane, or one the worker lanes share (shown once)
   morndo agent-token list
@@ -124,6 +126,8 @@ const crash = exitOnCrash(log);
 // `morndo lanes` (fleet-clients §9.2) runs before the hub's settings and database are read: it needs neither, and runs
 // on a machine with no hub. Every line it writes is out before the exit (console/lanes.ts processIo).
 if (process.argv[2] === "lanes") await exitAfterOutput(await runLanes(process.argv.slice(3), processIo()));
+// `morndo job …` (ADR-0017) runs the node-agent's job program here too, before the hub's settings and database are read: it needs neither.
+if (process.argv[2] === "job") await exitAfterOutput(await runJobProgram(process.argv.slice(3)));
 // `serve`, `pair`, `devices`, `revoke` and `agent-token` answer `--help` here too, before settings and the database
 // are read: `revoke --help` is usage, not a device named "--help" (console/args.ts).
 const consoleArgs = parseConsoleArgs(process.argv.slice(2));
