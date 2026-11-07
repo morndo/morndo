@@ -160,8 +160,18 @@ morndo-keys ack <name> --by you@example.com
 `engines.json` provider:
 
 ```json
-"<name>": { "adapter": "codex", "bin": "morndo-keys run --connection <name> --", "probe": "morndo-keys check --connection <name>" }
+"<name>": {
+  "kind": "cli", "adapter": "codex", "family": "zai",
+  "bin": ["morndo-keys", "run", "--connection", "<name>", "--"],
+  "probe": ["morndo-keys", "check", "--connection", "<name>"],
+  "models": ["zai-glm-5-3", "zai-glm-5-3-flash"], "efforts": ["low", "high", "max"]
+}
 ```
+
+`bin` and `probe` are argument lists: the engine layer puts `bin` in front of the Codex arguments, and a single
+string would be taken as one program name. Use the absolute path of `morndo-keys` when the lanes' shell does not
+have its directory on `PATH`; `morndo-keys` itself starts `codex` from `PATH`. The node reads its policy when the
+node agent starts, so a new launch entry is live after the agent's next start.
 
 Launch entry, beside the others in the node's policy:
 
