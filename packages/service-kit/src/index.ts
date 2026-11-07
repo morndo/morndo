@@ -1,3 +1,4 @@
+export * from "./agent-settings.ts";
 export * from "./errno.ts";
 export * from "./version.ts";
 export * from "./exit-after-output.ts";
