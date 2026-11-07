@@ -948,6 +948,24 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     }
   });
 
+  // T-863 (review 2): a decision from before the rule is answered by a comment after the block began; a later change of
+  // the assignee moves stateChangedAt past the comment but does not take the answer back.
+  it("an answer to a decision from before the rule still counts after the task is reassigned", async () => {
+    await managerSays("new", "The old one", "--assign", "reviewer");
+    await laneSays("reviewer", "start", "T-1");
+    await laneSays("reviewer", "block", "T-1", "--why", "checkpoint: step 1 done, go on?");
+    clock += HOUR;
+    await managerSays("comment", "T-1", "yes, step 2");
+    clock += HOUR;
+    expect((await managerSays("assign", "T-1", "builder")).code).toBe(0);
+    clock += 49 * HOUR;
+    expect((await managerSays("inbox")).out).toBe("no decisions wait");
+    expect((await managerSays("stale")).out.split("\n")).toEqual([
+      "[board-stale] 1 task idle 48 h or more with no wait the board watches:",
+      "- T-1 blocked 49 h (builder): The old one",
+    ]);
+  });
+
   // T-863: the per-task reads go out together, at most 8 at a time.
   it("reads the events of many decisions together, at most 8 at a time", async () => {
     for (let i = 1; i <= 12; i++) {
