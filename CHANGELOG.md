@@ -1,5 +1,41 @@
 # Changelog
 
+## [0.4.0](https://github.com/morndo/morndo/compare/v0.3.0...v0.4.0) (2026-11-07)
+
+
+### Features
+
+* **c6:** dropins.sh, and a drop-in that sets ExecStart in the adoption rehearsal ([2f96a82](https://github.com/morndo/morndo/commit/2f96a8255925dc82ebd46cf3dc3da8bc426992fb))
+* **c6:** dropins.sh, and a drop-in that sets ExecStart in the adoption rehearsal ([cc04ff8](https://github.com/morndo/morndo/commit/cc04ff862a8dfc2e4c1e38da237e2f8f0b8e7905))
+* **cli:** read the hub, node, token and lane from the settings files when the environment has none ([e29a718](https://github.com/morndo/morndo/commit/e29a71814b64ef0e4634e18856c66788f5213695))
+* **cli:** read the hub, node, token and lane from the settings files when the environment has none ([655d292](https://github.com/morndo/morndo/commit/655d2928278b77a6287dac77975c651e4f9e3bcd))
+* **connections:** mistral as a codex vendor with GLM 5.3 ([607a15b](https://github.com/morndo/morndo/commit/607a15becde6285d3a005edb2e7ebbdad29c2e7e))
+* **connections:** mistral as a codex vendor with GLM 5.3 ([c900ed7](https://github.com/morndo/morndo/commit/c900ed791b6116474c9a6b020a9b81d50bc11aaf))
+
+
+### Bug Fixes
+
+* **board-cli:** --json prints one JSON document per command, notices on stderr ([89c42f7](https://github.com/morndo/morndo/commit/89c42f7114cce41ff8e506dfd7bb477d61d155d6))
+* **board-cli:** --json takes no value per command through a boolean set, brief keeps --json &lt;file&gt; and gains --out-json ([e1654c1](https://github.com/morndo/morndo/commit/e1654c1bfde1a372c0b5fbd91e46089ce9fb36fa))
+* **board-cli:** keep --json output to one document a command, notices on stderr ([fa7d0cd](https://github.com/morndo/morndo/commit/fa7d0cd5e4eaa6de053ee70aa4d1518967c45dc7))
+* **board-cli:** keep brief --json &lt;file&gt; working, print the first result when a later call is refused, and one proof shape for brief ([bbe956a](https://github.com/morndo/morndo/commit/bbe956ae0050387e5a5dc77bc70a72323baa02b8))
+* **board-cli:** name --file in the brief help and tests, and say what --json does in help ([0b95085](https://github.com/morndo/morndo/commit/0b95085d5aa5314202a528d21f0dc52d311ead40))
+* **board-cli:** pick the valueless flags from the command word, refuse stray --out-json and --show with --json &lt;file&gt;, and list the working forms in help ([abf4abe](https://github.com/morndo/morndo/commit/abf4abe05af3791a2c758296677623df4c1b410e))
+* **board-cli:** send the unwatched notice to stderr with --json ([c85018c](https://github.com/morndo/morndo/commit/c85018cdc422528c85a92a02ac1705b160d0808b))
+* **board-cli:** send the unwatched notice to stderr with --json ([2bfdd4c](https://github.com/morndo/morndo/commit/2bfdd4c73c62b3c223657fe6d113cf75056fd265))
+* **c6:** dropins.sh fails loudly when systemd cannot be asked, keeps paths whole, follows XDG_CONFIG_HOME and real paths, skips comments in a continued ExecStart; the rehearsal checks ship.conf's own PATH ([cb79f9c](https://github.com/morndo/morndo/commit/cb79f9c611e442988fde6cfdf6486b38940ff0a5))
+* **c6:** dropins.sh hides no error and sees every drop-in systemd reads; the rehearsal runs it in the plan's order ([317eea0](https://github.com/morndo/morndo/commit/317eea0527e16d4582284dd3c2dd84db4778a500))
+* **c6:** dropins.sh takes an ExecStart over several lines out whole ([4d334a7](https://github.com/morndo/morndo/commit/4d334a7317a7b4fbf9977ea2a42eb50a05bc8d80))
+* **c6:** the rehearsal tests the node launcher by its link's target, not by the unit text ([70ec7e3](https://github.com/morndo/morndo/commit/70ec7e319777f48b4d699fcfc20611c81bb78940))
+* **cli:** honour the manager window setting, ask tmux and read files only when needed, keep a bad node name out ([106ef7f](https://github.com/morndo/morndo/commit/106ef7fdabaa94187faf9df626d478656f161d81))
+* **cli:** keep a token and its hub together, fall back to the plain tmux query, decide offline from each CLI's own dispatch ([5027c74](https://github.com/morndo/morndo/commit/5027c748cb342a216563649f16d12cf51dc4785d))
+* **cli:** reject control characters in the settings files, and say where the settings come from ([ad9398a](https://github.com/morndo/morndo/commit/ad9398a051a950647ac11941e6faf3b3f469e130))
+* **connections:** charge a codex run the tokens it added to its session ([1cd11b8](https://github.com/morndo/morndo/commit/1cd11b85e80ba5669f1d00a8425161b3e5fac39d))
+* **node-agent:** tell a recreated transcript apart by its birth time ([cf5b10a](https://github.com/morndo/morndo/commit/cf5b10a84566165e2e739e152bf580ad067d5984))
+* **node-agent:** tell a recreated transcript apart by its birth time ([9997e50](https://github.com/morndo/morndo/commit/9997e50b2d7da71524bd9e13ad1c792c5d480484))
+* **node-agent:** use a relative time in the next-ask example ([7ac6491](https://github.com/morndo/morndo/commit/7ac64917cc9cfe194c6ab344da781bffca577aca))
+* **node-agent:** use a relative time in the next-ask example ([7dcc156](https://github.com/morndo/morndo/commit/7dcc1563fd14261b0eb8c3ce8ac957721594a474))
+
 ## [0.3.0](https://github.com/morndo/morndo/compare/v0.2.3...v0.3.0) (2026-11-04)
 
 
