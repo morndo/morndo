@@ -4,6 +4,7 @@
   {"vendor": "deepseek", "families": [], "class": []},
   {"vendor": "moonshot", "families": [], "class": []},
   {"vendor": "zai", "families": [], "class": [{"pattern": "glm-5.3-flash", "class": "fast"}, {"pattern": "glm-5.3", "class": "flagship"}]},
+  {"vendor": "mistral", "families": [], "class": [{"pattern": "*glm-5-3-flash*", "class": "fast"}, {"pattern": "*glm-5-3*", "class": "flagship"}]},
   {"vendor": "openrouter", "families": [{"pattern": "openrouter/auto", "family": "unknown"}, {"pattern": "anthropic/*", "family": "anthropic"}, {"pattern": "openai/*", "family": "openai"}], "class": [{"pattern": "openrouter/auto", "class": "unknown"}, {"pattern": "*opus*", "class": "flagship"}, {"pattern": "*fable*", "class": "flagship"}, {"pattern": "*sonnet*", "class": "everyday"}, {"pattern": "*haiku*", "class": "fast"}]},
   {"vendor": "custom-anthropic", "families": [], "class": []},
   {"vendor": "custom-openai", "families": [], "class": []},

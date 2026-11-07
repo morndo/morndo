@@ -407,6 +407,8 @@ One thing the user registered on this machine that can run agent work: a subscri
 | CN13 | Narrowing is anyone's. Widening is the principal's, judged by effect: afterwards the connection may run, in more workspaces, spend more, run longer, or run with less isolation. Emptying a non-empty allow list widens, because an empty allow list admits every repo the deny list does not name. A negative figure or a balance reading that lowers spent widens. Revocation is the principal's. |
 | CN14 | Off and revoke stop new leases at once and open ones at the next refresh. Off is undone by turning on. Revoked is never on again. |
 | CN15 | A connection grants nothing. Which connection runs a role is the routing policy. A lease is not a mandate. Spend decides the lease gate. Under Auto, a key's expected cost, remaining budget and daily cap may also rank, fence or exclude a candidate. They still grant nothing, never admit what the gate refuses, and never move a pick outside the allowed set. |
+| CN16 | A Codex key run against a non-OpenAI endpoint never offers the hosted web search tool. |
+| CN17 | A Codex key run with catalog prices is charged from the tokens the run added to its session. |
 
 Aggregate **Connection**, with its open leases inside it. Closed leases leave as events. The clock is the `now` argument.
 

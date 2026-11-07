@@ -45,7 +45,9 @@ export function permissionName(text: string): string | null {
   return name;
 }
 
-export function codexConfig(profile: string, deny: readonly string[], auth: string): string {
+// Vendor root keys follow model_provider and precede every table. A root key the profile already
+// sets is the profile's: Codex reads one value, and a later -c on the command line still wins.
+export function codexConfig(profile: string, deny: readonly string[], auth: string, vendor = ""): string {
   if (/^\s*model_provider\s*=/m.test(profile)) {
     throw new Error("profile sets model_provider; remove it so the morndo provider stays selected");
   }
@@ -55,7 +57,53 @@ export function codexConfig(profile: string, deny: readonly string[], auth: stri
   const denies = name
     ? deny.map(path => `[permissions.${name}.filesystem.${quoted(path)}]\n"." = "deny"\n`).join("\n")
     : "";
-  return `${root}\n${profile.trim()}\n${denies}${tables}\n`;
+  return `${root}\n${vendorRoot(vendor, profile)}${profile.trim()}\n${denies}${tables}\n`;
+}
+
+// Hosted web_search is OpenAI's tool and cannot run on any other endpoint (HTTP 400).
+// OpenAI's own host gets no vendor lines, so those key runs stay as they were. Every other
+// endpoint turns the tool off and, when the plan names an effort, sets it. A host that only
+// looks like OpenAI's, or a base URL with no scheme, is not OpenAI's. Mistral's GLM 5.3
+// accepts reasoning effort low, high or max. Probe 2026-11-07, Codex 0.163.0.
+export function codexVendorToml(baseUrl: string, effort: string): string {
+  if (openAiApiHost(baseUrl)) return "";
+  const lines = ['web_search = "disabled"'];
+  if (effort !== "") lines.push(`model_reasoning_effort = ${quoted(effort)}`);
+  return lines.join("\n");
+}
+
+function openAiApiHost(baseUrl: string): boolean {
+  try {
+    const host = new URL(baseUrl).hostname;
+    return (host.endsWith(".") ? host.slice(0, -1) : host) === "api.openai.com";
+  } catch {
+    return false;
+  }
+}
+
+function rootKeys(text: string): Set<string> {
+  const keys = new Set<string>();
+  for (const line of text.split("\n")) {
+    const trimmed = line.trim();
+    if (trimmed === "" || trimmed.startsWith("#")) continue;
+    if (trimmed.startsWith("[")) break;
+    const key = /^([A-Za-z0-9_-]+)\s*=/.exec(trimmed)?.[1];
+    if (key !== undefined) keys.add(key);
+  }
+  return keys;
+}
+
+function vendorRoot(vendor: string, profile: string): string {
+  if (vendor === "") return "";
+  const taken = rootKeys(profile);
+  const kept: string[] = [];
+  for (const line of vendor.split("\n")) {
+    const trimmed = line.trim();
+    const key = /^([A-Za-z0-9_-]+)\s*=/.exec(trimmed)?.[1];
+    if (key === undefined || taken.has(key)) continue;
+    kept.push(trimmed);
+  }
+  return kept.length === 0 ? "" : `${kept.join("\n")}\n`;
 }
 
 export function codexAuthToml(command: string, args: readonly string[], baseUrl: string): string {
@@ -197,7 +245,12 @@ export class CodexRuntime implements Runtime {
       }
     }
     const profile = this.#profileText();
-    const config = codexConfig(profile, plan.deny, codexAuthToml(this.#command, this.#args, this.#baseUrl));
+    const config = codexConfig(
+      profile,
+      plan.deny,
+      codexAuthToml(this.#command, this.#args, this.#baseUrl),
+      codexVendorToml(this.#baseUrl, plan.effort),
+    );
     if (!this.#configDir) throw new Error("missing config dir");
     const path = `${this.#configDir}/config.toml`;
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });

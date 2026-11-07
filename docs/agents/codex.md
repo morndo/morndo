@@ -146,6 +146,31 @@ From OpenAI's model guidance (https://learn.chatgpt.com/docs/models and /model-s
 | hard design, by name only | `codex:gpt-6-astra@low` | "Light for Astra" (read as `low`: an inference). |
 | never unattended | `max`, `ultra` | "Most tasks do not need Max or Ultra", and `ultra` delegates to sub-agents. |
 
+## 7. Mistral (GLM 5.3)
+
+A Mistral API key runs through Codex on the `mistral` preset. The default pick is `zai-glm-5-3@high`; GLM 5.3 Flash is `zai-glm-5-3-flash`. The endpoint accepts effort `low`, `high` and `max`, and it refuses the hosted web search tool, so a key run turns that tool off and writes the pick's effort into the Codex config. An `-c model_reasoning_effort=...` on the Codex command line still wins. The lease is charged from the tokens the run added to its session, at the catalog price.
+
+`<name>` is the Connection. The key is read from stdin, and only when stdin is not a terminal, so the add redirects a file. Then add the provider and the launch entry on the node.
+
+```sh
+morndo-keys add <name> --vendor mistral --runtime codex --billing metered --budget 20 < keyfile
+morndo-keys ack <name> --by you@example.com
+```
+
+`engines.json` provider:
+
+```json
+"<name>": { "adapter": "codex", "bin": "morndo-keys run --connection <name> --", "probe": "morndo-keys check --connection <name>" }
+```
+
+Launch entry, beside the others in the node's policy:
+
+```json
+"<name>": { "command": ["/opt/engines/bin/engine-lane", "--engine", "<name>", "--model", "{model}", "--effort", "{effort}", "--window", "{lane}"], "via": "shell" }
+```
+
+Start one: `morndo lanes start <lane> --cwd <repo> --engine <name>:zai-glm-5-3@high --reason "<why>" --prompt "<brief>"`.
+
 ## Terms
 
 OpenAI recommends API keys for automation, and its CI guide warns against using a ChatGPT login for public or open-source repositories (https://learn.chatgpt.com/docs/non-interactive-mode, read 2026-10-15). Read your plan's terms before you run lanes on it.
