@@ -166,6 +166,16 @@ describe("watchedKeys (T-863)", () => {
   });
 });
 
+describe("staleTasks asks `answered` only of tasks idle long enough to be stale (T-863)", () => {
+  it("a decision asked minutes ago is never put to the rule", () => {
+    const asked: TaskKey[] = [];
+    const answered = (k: TaskKey) => { asked.push(k); return true; };
+    const items = staleTasks([decision(1, 60), decision(2, 1)], NOW, { answered });
+    expect(items.map(i => i.key)).toEqual(["T-1"]);
+    expect(asked).toEqual(["T-1"]);
+  });
+});
+
 describe("answeredOnce (T-863)", () => {
   it("asks the rule once per task and ask time, and gives the same answer every time", () => {
     const seen: string[] = [];
@@ -204,8 +214,10 @@ describe("isDecisionAnswered (T-863)", () => {
     expect(isDecisionAnswered(due, [word(dueAsk + 1)], dueAsk)).toBe(true);
     expect(isDecisionAnswered(due, [word(dueAsk - 1), toBlocked(dueAsk - 2)], dueAsk)).toBe(false);
   });
-  it("a legacy decision whose events hold no move into blocked is answered by a comment after the ask time given", () => {
-    expect(isDecisionAnswered(legacy, [word(NOW - HOUR)], NOW - 2 * HOUR)).toBe(true);
-    expect(isDecisionAnswered(legacy, [word(NOW - 3 * HOUR)], NOW - 2 * HOUR)).toBe(false);
+  it("a legacy decision whose events hold no move into blocked falls back to the task's creation time, whatever ask time is given", () => {
+    expect(isDecisionAnswered(legacy, [word(legacy.createdAt + 1)], NOW)).toBe(true);
+    expect(isDecisionAnswered(legacy, [word(legacy.createdAt + 1)], 0)).toBe(true);
+    expect(isDecisionAnswered(legacy, [word(legacy.createdAt)], 0)).toBe(false);
+    expect(isDecisionAnswered(legacy, [word(legacy.createdAt - 1)], NOW)).toBe(false);
   });
 });

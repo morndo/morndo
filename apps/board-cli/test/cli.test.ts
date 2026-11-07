@@ -913,8 +913,9 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
 
   const urlOf = (u: string | URL | Request) => (typeof u === "string" ? u : u instanceof URL ? u.href : u.url);
 
-  // T-863: a task whose events cannot be read counts as unanswered, with one warning on stderr; the answer keeps its shape.
-  it("a failed read of one task's events does not abort inbox or stale: that task is unanswered, one warning goes to stderr", async () => {
+  // T-863: only a task that is gone (404) is skipped, with one warning on stderr. A refusal (401, 403) or an unreachable
+  // hub fails the command with its usual exit code, as it did before: a wrong list is never printed quietly.
+  it("a task whose events are gone (404) is skipped with one warning; a refusal or an unreachable hub fails the command", async () => {
     await managerSays("new", "Plan it", "--assign", "builder");                         // T-1: its events cannot be read
     await managerSays("new", "Other", "--assign", "reviewer");                          // T-2: answered, readable
     for (const [lane, k] of [["builder", "T-1"], ["reviewer", "T-2"]] as const) {
@@ -925,29 +926,33 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     await managerSays("comment", "T-1", "go on");
     await managerSays("comment", "T-2", "go on");
     clock += 49 * HOUR;
-    for (const failure of ["http500", "throws"] as const) {
+    const go = async (failure: "gone" | "forbidden" | "throws", ...argv: string[]) => {
       const flaky = ((url: string | URL | Request, init?: RequestInit) => {
-        if (urlOf(url).endsWith("/api/agent/board/tasks/T-1")) return failure === "throws" ? Promise.reject(new Error("socket hang up")) : Promise.resolve(new Response('{"error":"boom"}', { status: 500 }));
-        return fetch(url, init);
+        if (!urlOf(url).endsWith("/api/agent/board/tasks/T-1")) return fetch(url, init);
+        if (failure === "throws") return Promise.reject(new Error("socket hang up"));
+        return Promise.resolve(failure === "gone" ? new Response('{"error":"no_task"}', { status: 404 }) : new Response('{"error":"forbidden"}', { status: 403 }));
       }) as typeof fetch;
-      const go = async (...argv: string[]) => {
-        const out: string[] = [], err: string[] = [];
-        const code = await run(argv, { MORNDO_HUB: bh.base, MORNDO_AGENT_TOKEN: bm }, { fetch: flaky, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
-        return { code, out: out.join("\n"), err };
-      };
-      const inbox = await go("inbox", "--json");
-      expect(inbox.code).toBe(0);
-      expect((JSON.parse(inbox.out) as { key: string }[]).map(i => i.key)).toEqual(["T-1"]);   // unanswered, so still the inbox's
-      expect(inbox.err).toHaveLength(1);
-      expect(inbox.err[0]).toMatch(/T-1/);
-      const stale = await go("stale", "--json");
-      expect(stale.code).toBe(0);
-      expect((JSON.parse(stale.out) as { key: string }[]).map(i => i.key)).toEqual(["T-2"]);   // T-1 is watched as unanswered, T-2 swept
-      expect(stale.err).toHaveLength(1);
-      expect(stale.err[0]).toMatch(/T-1/);
-      const plain = await go("inbox");
-      expect(plain.out).toMatch(/^T-1 /);
-      expect(plain.err).toHaveLength(1);
+      const out: string[] = [], err: string[] = [];
+      const code = await run(argv, { MORNDO_HUB: bh.base, MORNDO_AGENT_TOKEN: bm }, { fetch: flaky, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+      return { code, out: out.join("\n"), err };
+    };
+    const inbox = await go("gone", "inbox", "--json");
+    expect(inbox.code).toBe(0);
+    expect((JSON.parse(inbox.out) as { key: string }[]).map(i => i.key)).toEqual(["T-1"]);   // unanswered, so still the inbox's
+    expect(inbox.err).toHaveLength(1);
+    expect(inbox.err[0]).toMatch(/T-1/);
+    const stale = await go("gone", "stale", "--json");
+    expect(stale.code).toBe(0);
+    expect((JSON.parse(stale.out) as { key: string }[]).map(i => i.key)).toEqual(["T-2"]);   // T-1 is watched as unanswered, T-2 swept
+    expect(stale.err).toHaveLength(1);
+    expect(stale.err[0]).toMatch(/T-1/);
+    for (const cmd of ["inbox", "stale"]) {
+      const refused = await go("forbidden", cmd, "--json");
+      expect(refused.code).toBe(1);
+      expect(refused.out).toBe("");
+      const down = await go("throws", cmd, "--json");
+      expect(down.code).toBe(3);
+      expect(down.out).toBe("");
     }
   });
 

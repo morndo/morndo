@@ -103,6 +103,18 @@ describe("an answered decision that stays blocked is not lost", () => {
     expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
     expect(seen).toEqual([`T-1@${T0 - 60 * HOUR}`]);
   });
+  it("the sweep puts a decision to the rule only once the task has been idle for 48 h", async () => {
+    const recent = asked(1, T0 - HOUR);
+    const old = asked(2, T0 - 60 * HOUR);
+    const seen: string[] = [];
+    const answered = (k: string) => { seen.push(k); return true; };
+    const sweep = new StaleSweep({
+      tasks: () => [recent, old], watched: a => watchedKeys({ tasks: [recent, old], merged: [] }, T0, T0, a), answered,
+      deliver: async () => true, lane: "manager", now: () => T0,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
+    expect(seen).toEqual(["T-2"]);
+  });
   it("an unanswered decision stays out of the sweep, as before", async () => {
     const t = asked(1, T0 - 60 * HOUR);
     const sweep = new StaleSweep({ tasks: () => [t], watched: () => new Set(), answered: () => false, deliver: async () => true, lane: "manager", now: () => T0 });
