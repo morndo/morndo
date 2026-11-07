@@ -115,6 +115,16 @@ describe("an answered decision that stays blocked is not lost", () => {
     expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
     expect(seen).toEqual(["T-2"]);
   });
+  it("one pass, one clock: the watched set is judged at the pass's own now", async () => {
+    const t = asked(1, T0 - 60 * HOUR);
+    const nows: number[] = [];
+    const sweep = new StaleSweep({
+      tasks: () => [t], watched: (a, now) => { nows.push(now as number); return watchedKeys({ tasks: [t], merged: [] }, now as number, T0, a); }, answered: () => true,
+      deliver: async () => true, lane: "manager", now: () => T0,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
+    expect(nows).toEqual([T0]);
+  });
   it("an unanswered decision stays out of the sweep, as before", async () => {
     const t = asked(1, T0 - 60 * HOUR);
     const sweep = new StaleSweep({ tasks: () => [t], watched: () => new Set(), answered: () => false, deliver: async () => true, lane: "manager", now: () => T0 });

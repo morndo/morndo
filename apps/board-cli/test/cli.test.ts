@@ -938,12 +938,12 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     };
     const inbox = await go("gone", "inbox", "--json");
     expect(inbox.code).toBe(0);
-    expect((JSON.parse(inbox.out) as { key: string }[]).map(i => i.key)).toEqual(["T-1"]);   // unanswered, so still the inbox's
+    expect((JSON.parse(inbox.out) as { key: string }[]).map(i => i.key)).toEqual([]);          // T-1 is gone: dropped, with the warning
     expect(inbox.err).toHaveLength(1);
     expect(inbox.err[0]).toMatch(/T-1/);
     const stale = await go("gone", "stale", "--json");
     expect(stale.code).toBe(0);
-    expect((JSON.parse(stale.out) as { key: string }[]).map(i => i.key)).toEqual(["T-2"]);   // T-1 is watched as unanswered, T-2 swept
+    expect((JSON.parse(stale.out) as { key: string }[]).map(i => i.key)).toEqual(["T-2"]);   // T-1 is gone: dropped, T-2 swept
     expect(stale.err).toHaveLength(1);
     expect(stale.err[0]).toMatch(/T-1/);
     for (const cmd of ["inbox", "stale"]) {
@@ -972,6 +972,36 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
       "[board-stale] 1 task idle 48 h or more with no wait the board watches:",
       "- T-1 blocked 49 h (builder): The old one",
     ]);
+  });
+
+  // T-863 (review 4): re-blocking a blocked task to restate the reason is not a new block; the answer stands.
+  it("a legacy decision answered and then restated while blocked stays answered, as the hub's sweep has it", async () => {
+    await managerSays("new", "The old one", "--assign", "reviewer");
+    await laneSays("reviewer", "start", "T-1");
+    await laneSays("reviewer", "block", "T-1", "--why", "checkpoint: step 1 done, go on?");
+    clock += HOUR;
+    await managerSays("comment", "T-1", "yes, step 2");
+    clock += HOUR;
+    expect((await laneSays("reviewer", "block", "T-1", "--why", "checkpoint: step 1 done, go on? (still here)")).code).toBe(0);
+    clock += 49 * HOUR;
+    expect((await managerSays("inbox")).out).toBe("no decisions wait");
+    const stale = (await managerSays("stale")).out;
+    expect(stale.split("\n")).toEqual([
+      "[board-stale] 1 task idle 48 h or more with no wait the board watches:",
+      "- T-1 blocked 49 h (reviewer): The old one",
+    ]);
+    const answered = (key: string, since: number) => {
+      const found = bh.board.task(key);
+      return found !== null && isDecisionAnswered(found.task, found.events, since);
+    };
+    const sent: string[] = [];
+    const sweep = new StaleSweep({
+      tasks: () => [...bh.board.tasksIn("blocked"), ...bh.board.tasksIn("review")],
+      watched: (a, now) => watchedKeys(bh.board.view(), now ?? clock, clock, a),
+      answered, deliver: async d => { sent.push(d.text); return true; }, lane: "manager", now: () => clock,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
+    expect(sent[0]).toBe(stale);
   });
 
   // T-863: stale reads the events of a decision only when the task has been idle long enough to be stale.

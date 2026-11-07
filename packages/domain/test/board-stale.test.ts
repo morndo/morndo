@@ -3,7 +3,7 @@
 // manager. Both are pure: the hub reads the tasks, these say what is waiting, and the messages are plain text.
 import { describe, expect, it } from "vitest";
 import {
-  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, answeredOnce, inboxItems, inboxMessage, isAnswered, isDecisionAnswered, staleMessage, staleTasks, watchedKeys,
+  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, answeredOnce, inboxItems, inboxMessage, isAnswered, isDecisionAnswered, isIdleForStale, staleMessage, staleTasks, watchedKeys,
   type BoardActor, type EndpointId, type JudgedWait, type MergedView, type SessionId, type Task, type TaskActor, type TaskEvent, type TaskKey,
 } from "../src/index.ts";
 
@@ -176,6 +176,20 @@ describe("staleTasks asks `answered` only of tasks idle long enough to be stale 
   });
 });
 
+describe("the idle test and the order of the checks in staleTasks (T-863)", () => {
+  it("isIdleForStale is true from STALE_BLOCK_MS of idle time, and not before", () => {
+    expect(isIdleForStale(blocked(1, 48), NOW)).toBe(true);
+    expect(isIdleForStale(blocked(1, 47.9), NOW)).toBe(false);
+    expect(isIdleForStale(blocked(1, 100), NOW)).toBe(true);
+  });
+  it("a decision the watched set already holds is not put to the rule", () => {
+    const asked: TaskKey[] = [];
+    const answered = (k: TaskKey) => { asked.push(k); return true; };
+    expect(staleTasks([decision(1, 60), decision(2, 60)], NOW, { watched: new Set(["T-1"]), answered }).map(i => i.key)).toEqual(["T-2"]);
+    expect(asked).toEqual(["T-2"]);
+  });
+});
+
 describe("answeredOnce (T-863)", () => {
   it("asks the rule once per task and ask time, and gives the same answer every time", () => {
     const seen: string[] = [];
@@ -213,6 +227,12 @@ describe("isDecisionAnswered (T-863)", () => {
     const dueAsk = NOW - 10 * HOUR;
     expect(isDecisionAnswered(due, [word(dueAsk + 1)], dueAsk)).toBe(true);
     expect(isDecisionAnswered(due, [word(dueAsk - 1), toBlocked(dueAsk - 2)], dueAsk)).toBe(false);
+  });
+  it("a block restated while blocked (blocked to blocked) does not move the cutoff and so does not erase an answer", () => {
+    const restate = (at: number) => ev(at, lane, { kind: "moved", from: "blocked", to: "blocked", reason: "checkpoint: go on? (restated)" });
+    expect(isDecisionAnswered(legacy, [toBlocked(BLOCK), word(BLOCK + HOUR), restate(BLOCK + 2 * HOUR)], 0)).toBe(true);
+    expect(isDecisionAnswered(legacy, [toBlocked(BLOCK), restate(BLOCK + HOUR), word(BLOCK + 2 * HOUR)], 0)).toBe(true);
+    expect(isDecisionAnswered(legacy, [word(BLOCK - HOUR), toBlocked(BLOCK), restate(BLOCK + HOUR)], 0)).toBe(false);   // the comment was before the block
   });
   it("a legacy decision whose events hold no move into blocked falls back to the task's creation time, whatever ask time is given", () => {
     expect(isDecisionAnswered(legacy, [word(legacy.createdAt + 1)], NOW)).toBe(true);
