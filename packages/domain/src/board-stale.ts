@@ -2,12 +2,12 @@
 // asking its manager which way to go, or the manager's own checkpoint — carries a deadline 24 h on (board.ts), and
 // what passed it without an answer is the decision inbox's, listed for the manager with how late it is. An answer is
 // a comment after the ask by the manager, the principal or the console (`isDecisionAnswered`): the hub's sweep and
-// the CLI read that one rule, and for a decision from before the rule the ask is its last move into blocked, or its
-// creation when it never moved there. What nobody changed for 48 h, in blocked or review, with nothing the board
-// itself watches (an
-// open wait, a merge not live yet, a decision still waiting), is the stale sweep's; a decision that was answered is
-// swept like any block that sits. Both are pure: the hub reads the tasks and says who it watches, these say what
-// waits, and the messages are plain text, one line per task, cut where a line stops being readable.
+// the CLI read that one rule, and for a decision from before the rule the ask is its last move into blocked from
+// another status, or its creation when it never moved there. What nobody changed for 48 h, in blocked or review,
+// with nothing the board itself watches (an open wait, a merge not live yet, a decision still waiting), is the stale
+// sweep's; a decision that was answered is swept like any block that sits. Both are pure: the hub reads the tasks
+// and says who it watches, these say what waits, and the messages are plain text, one line per task, cut where a
+// line stops being readable.
 import { STALE_BLOCK_MS, type JudgedWait } from "./board-waits.ts";
 import { cutText } from "./shared.ts";
 import type { MergedView, Task, TaskEvent, TaskKey } from "./board.ts";
@@ -47,15 +47,16 @@ export function isAnswered(events: readonly TaskEvent[], since: number): boolean
 
 // T-863: whether this decision has been answered, the one rule the hub's sweep and the CLI both use. A task with a
 // deadline is answered by a comment after `since` (when it was asked). Any other task, a decision from before the
-// rule, is answered by a comment after its last move into blocked. With no such move the cutoff is the task's
-// creation, never `since` and never the hub's start. The cutoff is the same on both sides and does not move on a
-// reassign or a description edit.
+// rule, is answered by a comment after its last move into blocked from another status. A restatement that stays
+// blocked (blocked to blocked) does not move the cutoff. With no such move the cutoff is the task's creation, never
+// `since` and never the hub's start. The cutoff is the same on both sides and does not move on a reassign or a
+// description edit.
 export function isDecisionAnswered(task: Task, events: readonly TaskEvent[], since: number): boolean {
   if (task.decisionDue !== undefined) return isAnswered(events, since);
   let cutoff = task.createdAt;
   for (let i = events.length - 1; i >= 0; i--) {
     const event = events[i];
-    if (event !== undefined && event.change.kind === "moved" && event.change.to === "blocked") {
+    if (event !== undefined && event.change.kind === "moved" && event.change.to === "blocked" && event.change.from !== "blocked") {
       cutoff = event.at;
       break;
     }
@@ -120,21 +121,26 @@ export function inboxMessage(items: readonly InboxItem[], now: number): string {
   ].join("\n");
 }
 
+// B20: a task has sat long enough to be stale. The sweep, the CLI and `staleTasks` share this one test.
+export function isIdleForStale(task: Task, now: number): boolean {
+  return now - task.updatedAt >= STALE_BLOCK_MS;
+}
+
 // B20: the tasks in blocked or review that nobody changed for STALE_BLOCK_MS, the longest idle first, leaving out what
 // the hub says it watches (`watched`: an open wait, a merge not live yet) and every decision still waiting on an
 // answer (the inbox has those, B19). A task with a decisionDue is one of those unless `answered(key, decisionDue -
-// DECISION_DUE_MS)` is true: the inbox has let it go, and it is swept like any block that sits. A task idle less than
-// STALE_BLOCK_MS is skipped before `answered` is asked. The idle time counts from the task's last event of any kind
-// (updatedAt), not its last move: a comment, a brief or a merge record is a change somebody made.
+// DECISION_DUE_MS)` is true: the inbox has let it go, and it is swept like any block that sits. A task that is not
+// idle is skipped first, and a key the watched set already holds is skipped before `answered` is asked. The idle time
+// counts from the task's last event of any kind (updatedAt), not its last move: a comment, a brief or a merge record
+// is a change somebody made.
 export function staleTasks(tasks: readonly Task[], now: number, o: { watched?: ReadonlySet<string>; answered?: (key: TaskKey, since: number) => boolean } = {}): StaleItem[] {
   const items: StaleItem[] = [];
   for (const t of tasks) {
     if (t.status !== "blocked" && t.status !== "review") continue;
-    const idleMs = now - t.updatedAt;
-    if (idleMs < STALE_BLOCK_MS) continue;
-    if (t.decisionDue !== undefined && o.answered?.(t.key, t.decisionDue - DECISION_DUE_MS) !== true) continue;
+    if (!isIdleForStale(t, now)) continue;
     if (o.watched?.has(t.key)) continue;
-    items.push({ key: t.key, status: t.status, title: t.title, assignee: t.assignee, idleMs });
+    if (t.decisionDue !== undefined && o.answered?.(t.key, t.decisionDue - DECISION_DUE_MS) !== true) continue;
+    items.push({ key: t.key, status: t.status, title: t.title, assignee: t.assignee, idleMs: now - t.updatedAt });
   }
   return items.sort((a, b) => b.idleMs - a.idleMs || byNumber(a, b));
 }

@@ -429,7 +429,7 @@ switch (cmd) {
       const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });
       const staleSweep = new StaleSweep({
         tasks: () => [...board.tasksIn("blocked"), ...board.tasksIn("review")],
-        watched: a => watchedKeys(board.view(), Date.now(), legacySince, a),
+        watched: (a, now) => watchedKeys(board.view(), now ?? Date.now(), legacySince, a),
         answered, deliver, lane: config.managerWindow,
       });
       // B23: the merged sweep, over the merge watch's live flags, to the manager's lane. It is run by the same timer

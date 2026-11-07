@@ -11,7 +11,7 @@
 //   same rhythm as the stale sweep; nothing moves and nothing is recorded (the flag is a list, D5, B11).
 // The domain says what waits (board-stale.ts, board-merged.ts); these only read the board, build the id and the text,
 // and ask the port.
-import { INBOX_EVERY_MS, STALE_BLOCK_MS, STALE_REPEAT_MS, answeredOnce, inboxItems, inboxMessage, mergedMessage, staleMessage, staleTasks, type MergedFlag, type Task, type TaskKey } from "@morndo/domain";
+import { INBOX_EVERY_MS, STALE_REPEAT_MS, answeredOnce, inboxItems, inboxMessage, isIdleForStale, mergedMessage, staleMessage, staleTasks, type MergedFlag, type Task, type TaskKey } from "@morndo/domain";
 import { log as defaultLog } from "../adapters/log.ts";
 import type { Deliveries } from "./ports.ts";
 
@@ -159,7 +159,7 @@ class GatedSweep {
 // B20: the stale sweep.
 export class StaleSweep {
   #tasks: () => readonly Task[];
-  #watched: (answered?: (key: TaskKey, since: number) => boolean) => ReadonlySet<string>;
+  #watched: (answered?: (key: TaskKey, since: number) => boolean, now?: number) => ReadonlySet<string>;
   #answered: ((key: TaskKey, since: number) => boolean) | null;
   #now: () => number;
   #gate: GatedSweep;
@@ -168,9 +168,9 @@ export class StaleSweep {
 
   // `answered` (B19): a decision the manager answered while the task stays blocked is not the inbox's any more — it
   // goes back to being swept like any block that sits, so it is never lost between the two. `watched` receives that
-  // predicate for the pass (a caller that takes none still works): the rule runs once per decision, for the watched
-  // set and the list together.
-  constructor(p: { tasks: () => readonly Task[]; watched: (answered?: (key: TaskKey, since: number) => boolean) => ReadonlySet<string>; answered?: (key: TaskKey, since: number) => boolean; deliver: DeliverText; lane: string; now?: () => number; log?: Warn; ttlMs?: number; repeatMs?: number }) {
+  // predicate and the pass's own `now` (a caller that takes neither still works): the rule runs once per decision,
+  // for the watched set and the list together.
+  constructor(p: { tasks: () => readonly Task[]; watched: (answered?: (key: TaskKey, since: number) => boolean, now?: number) => ReadonlySet<string>; answered?: (key: TaskKey, since: number) => boolean; deliver: DeliverText; lane: string; now?: () => number; log?: Warn; ttlMs?: number; repeatMs?: number }) {
     this.#tasks = p.tasks; this.#watched = p.watched; this.#answered = p.answered ?? null; this.#now = p.now ?? Date.now;
     this.#gate = new GatedSweep({ deliver: p.deliver, lane: p.lane, now: this.#now, log: p.log ?? defaultLog, ttlMs: p.ttlMs ?? STALE_TTL_MS, repeatMs: p.repeatMs ?? STALE_REPEAT_MS, prefix: "board-stale", label: "board stale" });
   }
@@ -190,17 +190,18 @@ export class StaleSweep {
   async #pass(): Promise<Tick> {
     const now = this.#now();
     // A decision the inbox has let go (answered, the task still blocked) is swept like any block that sits; an
-    // unanswered one keeps its deadline and stays the inbox's. The rule is asked only of a task idle STALE_BLOCK_MS,
-    // and only once in the pass, for the watched set and the list together.
+    // unanswered one keeps its deadline and stays the inbox's. The rule is asked only of a task that isIdleForStale,
+    // and only once in the pass, for the watched set and the list together. Both are judged at this pass's `now`.
     const tasks = this.#tasks();
+    const byKey = new Map(tasks.map(t => [t.key, t]));
     const raw = this.#answered;
     const idleEnough = raw === null ? undefined : (key: TaskKey, since: number): boolean => {
-      const task = tasks.find(t => t.key === key);
-      if (task !== undefined && now - task.updatedAt < STALE_BLOCK_MS) return false;
+      const task = byKey.get(key);
+      if (task !== undefined && !isIdleForStale(task, now)) return false;
       return raw(key, since);
     };
     const answered = idleEnough === undefined ? undefined : answeredOnce(idleEnough);
-    const items = staleTasks(tasks, now, { watched: this.#watched(answered), ...(answered !== undefined ? { answered } : {}) });
+    const items = staleTasks(tasks, now, { watched: this.#watched(answered, now), ...(answered !== undefined ? { answered } : {}) });
     if (items.length === 0) return { sent: false, items: 0 };
     return this.#gate.send(items.length, items.map(i => `${i.key} ${i.status}`).join("\n"), staleMessage(items));
   }

@@ -28,7 +28,7 @@ person "this has sat, and nobody answered".
    past its deadline with no answer tells the principal once, numbers only, as every push is. A blocked task from
    before the rule, whose reason says it needs a decision or is a checkpoint, is an inbox item from the hub's start:
    its clock begins there, once, and a restart may tell the principal of an overdue one a second time. For that
-   decision the ask is the task's last move into blocked, or the task's creation when none is recorded: the same on
+   decision the ask is the task's last move into blocked from another status, or the task's creation when none is recorded: the same on
    the hub and in the CLI, and a reassign or an edit does not move it.
 3. **The stale sweep (B20)**: a task in blocked or review that nobody changed for 48 h — a comment, a brief or a merge
    record is a change — and that the board watches nothing on (no wait it has read, no merge still going live, not a
