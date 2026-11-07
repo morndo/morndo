@@ -60,12 +60,14 @@ export function codexConfig(profile: string, deny: readonly string[], auth: stri
   return `${root}\n${vendorRoot(vendor, profile)}${profile.trim()}\n${denies}${tables}\n`;
 }
 
-// Hosted web_search is OpenAI's tool. Any other host, including one that only looks like OpenAI's,
-// refuses it (HTTP 400). Mistral's GLM 5.3 accepts reasoning effort low, high or max.
-// Probe 2026-11-07, Codex 0.163.0. https://docs.mistral.ai/models/zai-glm-5-3
+// Hosted web_search is OpenAI's tool and cannot run on any other endpoint (HTTP 400).
+// OpenAI's own host gets no vendor lines, so those key runs stay as they were. Every other
+// endpoint turns the tool off and, when the plan names an effort, sets it. A host that only
+// looks like OpenAI's, or a base URL with no scheme, is not OpenAI's. Mistral's GLM 5.3
+// accepts reasoning effort low, high or max. Probe 2026-11-07, Codex 0.163.0.
 export function codexVendorToml(baseUrl: string, effort: string): string {
-  const lines: string[] = [];
-  if (!openAiApiHost(baseUrl)) lines.push('web_search = "disabled"');
+  if (openAiApiHost(baseUrl)) return "";
+  const lines = ['web_search = "disabled"'];
   if (effort !== "") lines.push(`model_reasoning_effort = ${quoted(effort)}`);
   return lines.join("\n");
 }
