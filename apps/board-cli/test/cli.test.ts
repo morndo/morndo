@@ -899,7 +899,7 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     // the hub's own sweep, built from the hub's board with the shared rule, lists the same tasks in the same words
     const answered = (key: string, since: number) => {
       const found = bh.board.task(key);
-      return found !== undefined && isDecisionAnswered(found.task, found.events, since);
+      return found !== null && isDecisionAnswered(found.task, found.events, since);
     };
     const sent: string[] = [];
     const sweep = new StaleSweep({
