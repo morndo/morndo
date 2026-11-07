@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "../../hub/test/inprocess-hub.ts";
 import { GithubChecks } from "../../hub/src/adapters/github-checks.ts";
 import { startFakeForge, type FakeForge } from "../../hub/test/fake-forge.ts";
-import { DECISION_DUE_MS } from "@morndo/domain";
+import { DECISION_DUE_MS, isAnswered } from "@morndo/domain";
+import { StaleSweep, watchedKeys } from "../../hub/src/application/board-inbox.ts";
 import { HELP, parseArgs, run, valuesOf } from "../src/cli.ts";
 import { PR_EVERY_MS } from "../../hub/src/application/wait-watch.ts";
 import { execFile } from "node:child_process";
@@ -864,6 +865,42 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     await managerSays("comment", "T-1", "the owner is back tomorrow");                   // a comment is a change
     clock += HOUR;
     expect((await managerSays("stale")).out).toBe("nothing stale");
+  });
+
+  // T-863: the CLI applies the hub's "answered" rule, so what it prints is what the hub's sweep lists.
+  it("an answered decision, with its deadline or from before the rule, is no longer the inbox's and is stale after 48 h, as the hub's sweep lists it", async () => {
+    await managerSays("new", "Plan it", "--assign", "builder");                         // T-1: a decision with a deadline
+    await managerSays("new", "The old one", "--assign", "reviewer");                    // T-2: from before the rule, read by its words
+    await managerSays("new", "Unanswered", "--assign", "builder");                      // T-3: a decision nobody answered
+    await laneSays("builder", "start", "T-1");
+    await laneSays("builder", "block", "T-1", "--why", "checkpoint: plan", "--decision");
+    await laneSays("reviewer", "start", "T-2");
+    await laneSays("reviewer", "block", "T-2", "--why", "checkpoint: step 1 done, go on?");
+    await laneSays("builder", "start", "T-3");
+    await laneSays("builder", "block", "T-3", "--why", "checkpoint: which way", "--decision");
+    clock += HOUR;
+    await managerSays("comment", "T-1", "go on with the plan");
+    await managerSays("comment", "T-2", "yes, step 2");
+    clock += 49 * HOUR;
+    const inbox = await managerSays("inbox");
+    expect(inbox.out.split("\n")).toHaveLength(1);
+    expect(inbox.out).toMatch(/^T-3 /);
+    const stale = (await managerSays("stale")).out;
+    expect(stale.split("\n")).toEqual([
+      "[board-stale] 2 tasks idle 48 h or more with no wait the board watches:",
+      "- T-1 blocked 49 h (builder): Plan it",
+      "- T-2 blocked 49 h (reviewer): The old one",
+    ]);
+    // the hub's own sweep, built from the hub's board with the shared rule, lists the same tasks in the same words
+    const answered = (key: string, since: number) => isAnswered(bh.board.task(key)?.events ?? [], since);
+    const sent: string[] = [];
+    const sweep = new StaleSweep({
+      tasks: () => [...bh.board.tasksIn("blocked"), ...bh.board.tasksIn("review")],
+      watched: () => watchedKeys(bh.board.view(), clock, 1_800_000_000_000 - HOUR, answered),
+      answered, deliver: async d => { sent.push(d.text); return true; }, lane: "manager", now: () => clock,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 2 });
+    expect(sent[0]).toBe(stale);
   });
 
   it("the help names inbox, stale and --decision", () => {

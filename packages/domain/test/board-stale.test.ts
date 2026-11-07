@@ -3,8 +3,8 @@
 // manager. Both are pure: the hub reads the tasks, these say what is waiting, and the messages are plain text.
 import { describe, expect, it } from "vitest";
 import {
-  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, inboxItems, inboxMessage, staleMessage, staleTasks,
-  type BoardActor, type Task, type TaskKey,
+  DECISION_DUE_MS, STALE_BLOCK_MS, STALE_LIST_MAX, createTask, inboxItems, inboxMessage, isAnswered, staleMessage, staleTasks,
+  type BoardActor, type Task, type TaskEvent, type TaskKey,
 } from "../src/index.ts";
 
 const NOW = 1_800_000_000_000;
@@ -112,5 +112,33 @@ describe("the stale sweep (B20)", () => {
   it("nothing stale says nothing", () => {
     expect(staleMessage([])).toBe("");
     expect(inboxMessage([], NOW)).toBe("");
+  });
+});
+
+// T-863: one rule for "answered", read by the hub's sweep and by the CLI's inbox and stale views.
+describe("isAnswered (T-863)", () => {
+  const SINCE = NOW - 10 * HOUR;
+  const said = (at: number, actor: TaskEvent["actor"], kind: "commented" | "briefed" = "commented"): TaskEvent =>
+    ({ key: "T-1" as TaskKey, rev: 2, at, actor, change: kind === "commented" ? { kind: "commented", text: "go on" } : ({ kind: "unmerged", repo: "a/b", sha: "abc1234" } as never) });
+  const lane: TaskEvent["actor"] = { kind: "worker", name: "builder" } as never;
+  it("a comment by the manager, the principal or the console after the ask answers it", () => {
+    expect(isAnswered([said(SINCE + 1, { kind: "manager", name: "manager" } as never)], SINCE)).toBe(true);
+    expect(isAnswered([said(SINCE + 1, { kind: "principal" } as never)], SINCE)).toBe(true);
+    expect(isAnswered([said(SINCE + 1, { kind: "console" } as never)], SINCE)).toBe(true);
+  });
+  it("the lane's own comment, a comment at or before the ask, and a change that is no comment do not", () => {
+    expect(isAnswered([said(SINCE + 1, lane)], SINCE)).toBe(false);
+    expect(isAnswered([said(SINCE, { kind: "manager", name: "manager" } as never)], SINCE)).toBe(false);
+    expect(isAnswered([said(SINCE - 1, { kind: "manager", name: "manager" } as never)], SINCE)).toBe(false);
+    expect(isAnswered([said(SINCE + 1, { kind: "manager", name: "manager" } as never, "briefed")], SINCE)).toBe(false);
+    expect(isAnswered([], SINCE)).toBe(false);
+  });
+  it("staleTasks sweeps an answered decision like any block that sits, and keeps an unanswered one out", () => {
+    const asked = decision(1, 60);
+    const open = decision(2, 60);
+    const answered = (k: TaskKey, since: number) => k === "T-1" && since === NOW - 60 * HOUR;
+    expect(staleTasks([asked, open], NOW, { answered }).map(i => i.key)).toEqual(["T-1"]);
+    expect(staleTasks([asked, open], NOW)).toEqual([]);
+    expect(staleTasks([asked], NOW, { answered: () => true, watched: new Set(["T-1"]) })).toEqual([]);
   });
 });
