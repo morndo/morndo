@@ -423,7 +423,7 @@ switch (cmd) {
       const deliver = fleetDeliverText(fleetDeliveries(fleet.client));
       const legacySince = Date.now();
       const answered = (key: string, since: number) => {
-        const found = board.task(key);
+        const found = board.decisionRead(key);
         return found !== null && isDecisionAnswered(found.task, found.events, since);
       };
       const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });

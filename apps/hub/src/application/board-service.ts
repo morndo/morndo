@@ -148,6 +148,12 @@ export class BoardService {
     const read = task.status === "blocked" && (task.waits ?? []).length > 0 ? this.#waits?.readings(key, task.rev) ?? null : null;
     return { task, events: this.#store.taskEvents(key), merged: merges.length > 0 ? mergedView(task.key, merges, this.#liveness) : null, ...(read ? { waitsRead: read } : {}) };
   }
+  // The task and its events alone: the answer rule reads those, not the task's merges or its wait readings.
+  decisionRead(key: string): { task: Task; events: TaskEvent[] } | null {
+    const task = this.#store.task(key);
+    if (!task) return null;
+    return { task, events: this.#store.taskEvents(key) };
+  }
   workingOn(lane: string): Task | null { return this.#store.taskInProgressOf(lane); }
   // The service's own clock, as injected: the projector resolves a status line's next: against it (B22), so the two
   // read the same moment.

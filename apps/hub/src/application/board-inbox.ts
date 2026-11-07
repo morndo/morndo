@@ -11,7 +11,7 @@
 //   same rhythm as the stale sweep; nothing moves and nothing is recorded (the flag is a list, D5, B11).
 // The domain says what waits (board-stale.ts, board-merged.ts); these only read the board, build the id and the text,
 // and ask the port.
-import { INBOX_EVERY_MS, STALE_REPEAT_MS, answeredOnce, inboxItems, inboxMessage, mergedMessage, staleMessage, staleTasks, type MergedFlag, type Task, type TaskKey } from "@morndo/domain";
+import { INBOX_EVERY_MS, STALE_BLOCK_MS, STALE_REPEAT_MS, answeredOnce, inboxItems, inboxMessage, mergedMessage, staleMessage, staleTasks, type MergedFlag, type Task, type TaskKey } from "@morndo/domain";
 import { log as defaultLog } from "../adapters/log.ts";
 import type { Deliveries } from "./ports.ts";
 
@@ -190,8 +190,15 @@ export class StaleSweep {
   async #pass(): Promise<Tick> {
     const now = this.#now();
     // A decision the inbox has let go (answered, the task still blocked) is swept like any block that sits; an
-    // unanswered one keeps its deadline and stays the inbox's. One predicate for this pass, asked once per decision.
-    const answered = this.#answered === null ? undefined : answeredOnce(this.#answered);
+    // unanswered one keeps its deadline and stays the inbox's. The rule is asked only of a task idle STALE_BLOCK_MS,
+    // and only once in the pass, for the watched set and the list together.
+    const raw = this.#answered;
+    const idleEnough = raw === null ? undefined : (key: TaskKey, since: number): boolean => {
+      const task = this.#tasks().find(t => t.key === key);
+      if (task !== undefined && now - task.updatedAt < STALE_BLOCK_MS) return false;
+      return raw(key, since);
+    };
+    const answered = idleEnough === undefined ? undefined : answeredOnce(idleEnough);
     const items = staleTasks(this.#tasks(), now, { watched: this.#watched(answered), ...(answered !== undefined ? { answered } : {}) });
     if (items.length === 0) return { sent: false, items: 0 };
     return this.#gate.send(items.length, items.map(i => `${i.key} ${i.status}`).join("\n"), staleMessage(items));

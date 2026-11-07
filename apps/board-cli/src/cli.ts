@@ -147,8 +147,8 @@ const EVENT_READS = 8;
 
 // B19: one GET per decision the inbox might list, at most EVENT_READS at once, as the predicate both views apply
 // (isDecisionAnswered). `legacySince` stays 0: the hub's start is not on the wire. `idleMs`: only a decision idle at
-// least that long is read; a younger one counts as unanswered and draws no warning. A read that fails leaves that
-// task unanswered, and one warning names every such key.
+// least that long is read; a younger one counts as unanswered and draws no warning. A task that is gone (404) counts
+// as unanswered, and one warning names every such key. Any other failure is the command's.
 async function answeredFor(
   call: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Record<string, unknown>>,
   tasks: readonly Task[],
@@ -166,13 +166,14 @@ async function answeredFor(
     try {
       const events = ((await call("GET", `/api/agent/board/tasks/${item.key}`)).events as TaskEvent[] | undefined) ?? [];
       return { key: item.key, events, failed: false };
-    } catch {
-      return { key: item.key, events: [], failed: true };
+    } catch (e) {
+      if (e instanceof Refused && e.status === 404) return { key: item.key, events: [], failed: true };
+      throw e;
     }
   });
   const eventsByKey = new Map(reads.map(read => [read.key, read.events]));
   const unread = reads.flatMap(read => read.failed ? [read.key] : []);
-  if (unread.length > 0) err(`warning: could not read the events of ${unread.join(", ")}; counted as unanswered`);
+  if (unread.length > 0) err(`warning: ${unread.join(", ")} ${unread.length === 1 ? "is" : "are"} gone; counted as unanswered`);
   return (key, since) => {
     const task = byKey.get(key);
     return task !== undefined && isDecisionAnswered(task, eventsByKey.get(key) ?? [], since);
@@ -222,7 +223,10 @@ export const valuesOf = (argv: readonly string[], name: string): string[] => fla
 const ATTESTED_FLAG_KIND: Record<string, string> = { test: "tests", manual: "manual", ui: "ui", data: "data", infra: "infra" };
 
 class Usage extends Error {}
-class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
+class Refused extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) { super(message); this.name = "Refused"; this.status = status; }
+}
 class Unreachable extends Error { constructor(message: string) { super(message); this.name = "Unreachable"; } }
 
 // Whether this call needs no settings: it prints text without asking the hub (help, the prompt blocks). Read from the same
@@ -274,7 +278,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       try { data = await res.json(); } catch { throw new Unreachable(`the hub at ${hub} answered ${res.status} without JSON`); }
       if (typeof data !== "object" || data === null) throw new Unreachable(`the hub answered ${res.status} in a shape this CLI doesn't know`);
       const d = data as Record<string, unknown>;
-      if (!res.ok) throw new Refused(explain(typeof d.error === "string" ? d.error : `http_${res.status}`, typeof d.other === "string" ? d.other : undefined, typeof d.from === "string" ? d.from : undefined, typeof d.detail === "string" ? d.detail : undefined));
+      if (!res.ok) throw new Refused(explain(typeof d.error === "string" ? d.error : `http_${res.status}`, typeof d.other === "string" ? d.other : undefined, typeof d.from === "string" ? d.from : undefined, typeof d.detail === "string" ? d.detail : undefined), res.status);
       return d;
     };
     const key = (s: string | undefined) => {
