@@ -3,9 +3,9 @@
 // reuse an id only for the same text (the same id with other text is the fleet's id_conflict); and a decision that was
 // answered but whose task stays blocked belongs to the stale sweep again. Synthetic times only.
 import { describe, expect, it } from "vitest";
-import { DECISION_DUE_MS, createTask, type BoardActor, type Task } from "@morndo/domain";
+import { DECISION_DUE_MS, createTask, watchedKeys, type BoardActor, type Task } from "@morndo/domain";
 import { LIMITS } from "@morndo/protocol";
-import { BoardInbox, StaleSweep, fleetDeliverText, watchedKeys } from "../src/application/board-inbox.ts";
+import { BoardInbox, StaleSweep, fleetDeliverText } from "../src/application/board-inbox.ts";
 
 const T0 = 1_800_000_000_000;
 const HOUR = 3_600_000;
@@ -91,6 +91,39 @@ describe("an answered decision that stays blocked is not lost", () => {
     expect(sent[0]).toContain("- T-1 blocked 60 h (builder): Task 1");
     expect(watchedKeys({ tasks: [t], merged: [] }, T0, T0, answered).has("T-1")).toBe(false);
     expect(watchedKeys({ tasks: [t], merged: [] }, T0, T0).has("T-1")).toBe(true);         // unanswered: the inbox watches it
+  });
+  it("the sweep asks the rule once per decision in a pass, for the watched set and the list together", async () => {
+    const t = asked(1, T0 - 60 * HOUR);
+    const seen: string[] = [];
+    const answered = (k: string, since: number) => { seen.push(`${k}@${since}`); return true; };
+    const sweep = new StaleSweep({
+      tasks: () => [t], watched: a => watchedKeys({ tasks: [t], merged: [] }, T0, T0, a), answered,
+      deliver: async () => true, lane: "manager", now: () => T0,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
+    expect(seen).toEqual([`T-1@${T0 - 60 * HOUR}`]);
+  });
+  it("the sweep puts a decision to the rule only once the task has been idle for 48 h", async () => {
+    const recent = asked(1, T0 - HOUR);
+    const old = asked(2, T0 - 60 * HOUR);
+    const seen: string[] = [];
+    const answered = (k: string) => { seen.push(k); return true; };
+    const sweep = new StaleSweep({
+      tasks: () => [recent, old], watched: a => watchedKeys({ tasks: [recent, old], merged: [] }, T0, T0, a), answered,
+      deliver: async () => true, lane: "manager", now: () => T0,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
+    expect(seen).toEqual(["T-2"]);
+  });
+  it("one pass, one clock: the watched set is judged at the pass's own now", async () => {
+    const t = asked(1, T0 - 60 * HOUR);
+    const nows: number[] = [];
+    const sweep = new StaleSweep({
+      tasks: () => [t], watched: (a, now) => { nows.push(now as number); return watchedKeys({ tasks: [t], merged: [] }, now as number, T0, a); }, answered: () => true,
+      deliver: async () => true, lane: "manager", now: () => T0,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
+    expect(nows).toEqual([T0]);
   });
   it("an unanswered decision stays out of the sweep, as before", async () => {
     const t = asked(1, T0 - 60 * HOUR);

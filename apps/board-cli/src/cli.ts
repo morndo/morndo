@@ -3,7 +3,8 @@
 // given streams, so the tests drive it against an in-process hub and the entry point (main.ts) wires the real ones.
 // Exit codes: 0 done, 1 the hub refused (one line on stderr, in words an agent can act on), 2 usage, 3 the hub can't
 // be reached or didn't answer in a shape this CLI knows.
-import { inboxItems, staleMessage, staleTasks, type InboxItem, type JudgedWait, type MergeRecord, type MergedView, type Task, type TaskEvent, type TaskStatus, type Wait } from "@morndo/domain";
+import { inboxItems, isDecisionAnswered, isIdleForStale, staleMessage, staleTasks, watchedKeys, type JudgedWait, type MergeRecord, type MergedView, type Task, type TaskEvent, type TaskKey, type TaskStatus, type Wait } from "@morndo/domain";
+import { mapLimit } from "@morndo/service-kit";
 import { promptFor } from "./prompt.ts";
 import { lintWhy, proofBlock, whyTokens, type ProofView } from "./proof-text.ts";
 
@@ -141,17 +142,47 @@ const line = (t: Task) =>
 
 // B19, B20: the hours a decision has waited or a task has sat idle, as the inbox and the stale list show them.
 const inHours = (ms: number) => `${Math.round(ms / 3_600_000)} h`;
-// B20: what the board itself watches, as the hub names it for its sweep (board-inbox.ts watchedKeys): a blocked task
-// whose waits the hub has read something of, a review task whose merge is not live on every node yet, and every
-// decision the inbox has — a decision from before the rule too, whose clock began before this CLI could know it.
-const watchedOf = (d: Record<string, unknown>, tasks: readonly Task[], now: number): Set<string> => {
-  const keys = new Set<string>();
-  for (const w of (d.waits as { key: string; readings: { state: string }[] }[] | undefined) ?? []) if (w.readings.some(r => r.state !== "unknown")) keys.add(w.key);
-  const status = new Map(tasks.map(t => [t.key as string, t.status]));
-  for (const m of (Array.isArray(d.merged) ? d.merged as MergedView[] : [])) if (m.live === false && status.get(m.key) === "review") keys.add(m.key);
-  for (const i of inboxItems(tasks, now, { legacySince: 0 })) keys.add(i.key);
-  return keys;
-};
+// How many decision-event reads may be in flight at once. More than this crowds the hub; fewer leaves the list waiting.
+const EVENT_READS = 8;
+
+// B19: one GET per decision the inbox might list, at most EVENT_READS at once, as the predicate both views apply
+// (isDecisionAnswered). `legacySince` stays 0: the hub's start is not on the wire. `idleOnly`: stale reads a decision
+// only once it isIdleForStale; inbox reads them all, and a younger one counts as unanswered and draws no warning. A
+// task that is gone (404) is left out of both lists, and one warning names every such key. Any other failure is the
+// command's. `gone` is that set, beside the predicate.
+async function answeredFor(
+  call: (method: "GET" | "POST", path: string, body?: unknown) => Promise<Record<string, unknown>>,
+  tasks: readonly Task[],
+  now: number,
+  err: (line: string) => void,
+  o: { idleOnly?: boolean } = {},
+): Promise<{ answered: (key: TaskKey, since: number) => boolean; gone: ReadonlySet<TaskKey> }> {
+  const byKey = new Map(tasks.map(t => [t.key, t]));
+  const candidates = inboxItems(tasks, now, { legacySince: 0 }).filter(item => {
+    if (o.idleOnly !== true) return true;
+    const task = byKey.get(item.key);
+    return task !== undefined && isIdleForStale(task, now);
+  });
+  const reads = await mapLimit(candidates, EVENT_READS, async (item): Promise<{ key: TaskKey; events: readonly TaskEvent[]; failed: boolean }> => {
+    try {
+      const events = ((await call("GET", `/api/agent/board/tasks/${item.key}`)).events as TaskEvent[] | undefined) ?? [];
+      return { key: item.key, events, failed: false };
+    } catch (e) {
+      if (e instanceof Refused && e.status === 404) return { key: item.key, events: [], failed: true };
+      throw e;
+    }
+  });
+  const eventsByKey = new Map(reads.map(read => [read.key, read.events]));
+  const gone = new Set(reads.flatMap(read => read.failed ? [read.key] : []));
+  if (gone.size > 0) err(`warning: ${[...gone].join(", ")} ${gone.size === 1 ? "is" : "are"} gone; left out`);
+  return {
+    gone,
+    answered: (key, since) => {
+      const task = byKey.get(key);
+      return task !== undefined && isDecisionAnswered(task, eventsByKey.get(key) ?? [], since);
+    },
+  };
+}
 
 // Flags: --name value, --name=value, or a bare --flag; the rest are positional, in order. `booleans` names the flags
 // that take no value, so the word after one stays positional (a task key, a title); with none named every flag takes
@@ -196,7 +227,10 @@ export const valuesOf = (argv: readonly string[], name: string): string[] => fla
 const ATTESTED_FLAG_KIND: Record<string, string> = { test: "tests", manual: "manual", ui: "ui", data: "data", infra: "infra" };
 
 class Usage extends Error {}
-class Refused extends Error { constructor(message: string) { super(message); this.name = "Refused"; } }
+class Refused extends Error {
+  readonly status: number;
+  constructor(message: string, status: number) { super(message); this.name = "Refused"; this.status = status; }
+}
 class Unreachable extends Error { constructor(message: string) { super(message); this.name = "Unreachable"; } }
 
 // Whether this call needs no settings: it prints text without asking the hub (help, the prompt blocks). Read from the same
@@ -248,7 +282,7 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
       try { data = await res.json(); } catch { throw new Unreachable(`the hub at ${hub} answered ${res.status} without JSON`); }
       if (typeof data !== "object" || data === null) throw new Unreachable(`the hub answered ${res.status} in a shape this CLI doesn't know`);
       const d = data as Record<string, unknown>;
-      if (!res.ok) throw new Refused(explain(typeof d.error === "string" ? d.error : `http_${res.status}`, typeof d.other === "string" ? d.other : undefined, typeof d.from === "string" ? d.from : undefined, typeof d.detail === "string" ? d.detail : undefined));
+      if (!res.ok) throw new Refused(explain(typeof d.error === "string" ? d.error : `http_${res.status}`, typeof d.other === "string" ? d.other : undefined, typeof d.from === "string" ? d.from : undefined, typeof d.detail === "string" ? d.detail : undefined), res.status);
       return d;
     };
     const key = (s: string | undefined) => {
@@ -379,18 +413,14 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         return 0;
       }
       case "show": showTask(await call("GET", `/api/agent/board/tasks/${key(rest[0])}`)); return 0;
-      // B19: the decisions that wait for the manager, with how long. An answer after the ask closes one, as the hub
-      // reads one (a comment by the manager, the principal or the console); a decision from before the rule has no ask
-      // to count from and stays listed until the task moves.
+      // B19: the decisions that wait for the manager, with how long. An answer after the ask closes one, a decision
+      // from before the rule included — the same rule the hub's sweep uses (isDecisionAnswered).
       case "inbox": {
         const d = await call("GET", "/api/agent/board");
         const now = (d.at as number | undefined) ?? Date.now();
-        const open: InboxItem[] = [];
-        for (const i of inboxItems(d.tasks as Task[], now, { legacySince: 0 })) {
-          if (i.legacy) { open.push(i); continue; }
-          const events = ((await call("GET", `/api/agent/board/tasks/${i.key}`)).events as TaskEvent[] | undefined) ?? [];
-          if (!events.some(e => e.at > i.openedAt && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"))) open.push(i);
-        }
+        const tasks = d.tasks as Task[];
+        const read = await answeredFor(call, tasks, now, io.err);
+        const open = inboxItems(tasks, now, { legacySince: 0, answered: read.answered }).filter(i => !read.gone.has(i.key));
         if (asJson) { io.out(JSON.stringify(open)); return 0; }   // T-873: one array, [] when none, not the sentence
         if (open.length === 0) { io.out("no decisions wait"); return 0; }
         for (const i of open)
@@ -402,7 +432,11 @@ export async function run(argv: readonly string[], env: Env, io: Io): Promise<nu
         const d = await call("GET", "/api/agent/board");
         const now = (d.at as number | undefined) ?? Date.now();
         const tasks = d.tasks as Task[];
-        const items = staleTasks(tasks, now, { watched: watchedOf(d, tasks, now) });
+        const read = await answeredFor(call, tasks, now, io.err, { idleOnly: true });
+        const waits = d.waits as { key: string; readings: JudgedWait[] }[] | undefined;
+        const watched = watchedKeys({ tasks, ...(waits !== undefined ? { waits } : {}), merged: Array.isArray(d.merged) ? d.merged as MergedView[] : [] }, now, 0, read.answered);
+        for (const key of read.gone) watched.delete(key);
+        const items = staleTasks(tasks, now, { watched, answered: read.answered }).filter(i => !read.gone.has(i.key));
         if (asJson) { io.out(JSON.stringify(items)); return 0; }   // T-873: one array, [] when none, not the sentence
         if (items.length === 0) { io.out("nothing stale"); return 0; }
         io.out(staleMessage(items));

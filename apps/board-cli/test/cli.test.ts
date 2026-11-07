@@ -4,7 +4,8 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { startInProcessHub, type InProcessHub } from "../../hub/test/inprocess-hub.ts";
 import { GithubChecks } from "../../hub/src/adapters/github-checks.ts";
 import { startFakeForge, type FakeForge } from "../../hub/test/fake-forge.ts";
-import { DECISION_DUE_MS } from "@morndo/domain";
+import { DECISION_DUE_MS, isDecisionAnswered, watchedKeys } from "@morndo/domain";
+import { StaleSweep } from "../../hub/src/application/board-inbox.ts";
 import { HELP, parseArgs, run, valuesOf } from "../src/cli.ts";
 import { PR_EVERY_MS } from "../../hub/src/application/wait-watch.ts";
 import { execFile } from "node:child_process";
@@ -864,6 +865,188 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     await managerSays("comment", "T-1", "the owner is back tomorrow");                   // a comment is a change
     clock += HOUR;
     expect((await managerSays("stale")).out).toBe("nothing stale");
+  });
+
+  // T-863: the CLI applies the hub's "answered" rule, so what it prints is what the hub's sweep lists.
+  it("an answered decision, with its deadline or from before the rule, is no longer the inbox's and is stale after 48 h, as the hub's sweep lists it", async () => {
+    await managerSays("new", "Plan it", "--assign", "builder");                         // T-1: a decision with a deadline
+    await managerSays("new", "The old one", "--assign", "reviewer");                    // T-2: from before the rule, read by its words
+    await managerSays("new", "Unanswered", "--assign", "builder");                      // T-3: a decision nobody answered
+    await managerSays("new", "Earlier word", "--assign", "writer");                     // T-4: a manager comment BEFORE its legacy block
+    await managerSays("comment", "T-4", "use approach A");
+    await laneSays("builder", "start", "T-1");
+    await laneSays("builder", "block", "T-1", "--why", "checkpoint: plan", "--decision");
+    await laneSays("reviewer", "start", "T-2");
+    await laneSays("reviewer", "block", "T-2", "--why", "checkpoint: step 1 done, go on?");
+    await laneSays("builder", "start", "T-3");
+    await laneSays("builder", "block", "T-3", "--why", "checkpoint: which way", "--decision");
+    clock += HOUR / 2;
+    const hubStart = clock;                                                             // the hub's own clock for a legacy decision
+    await laneSays("writer", "start", "T-4");
+    await laneSays("writer", "block", "T-4", "--why", "checkpoint: step 1 done, go on?");  // an earlier comment is not its answer
+    clock += HOUR / 2;
+    await managerSays("comment", "T-1", "go on with the plan");
+    await managerSays("comment", "T-2", "yes, step 2");
+    clock += 49 * HOUR;
+    const inbox = await managerSays("inbox");
+    expect(inbox.out.split("\n").map(l => l.slice(0, 4)).sort()).toEqual(["T-3 ", "T-4 "]);
+    const stale = (await managerSays("stale")).out;
+    expect(stale.split("\n")).toEqual([
+      "[board-stale] 2 tasks idle 48 h or more with no wait the board watches:",
+      "- T-1 blocked 49 h (builder): Plan it",
+      "- T-2 blocked 49 h (reviewer): The old one",
+    ]);
+    // the hub's own sweep, built from the hub's board with the shared rule, lists the same tasks in the same words
+    const answered = (key: string, since: number) => {
+      const found = bh.board.task(key);
+      return found !== null && isDecisionAnswered(found.task, found.events, since);
+    };
+    const sent: string[] = [];
+    const sweep = new StaleSweep({
+      tasks: () => [...bh.board.tasksIn("blocked"), ...bh.board.tasksIn("review")],
+      watched: a => watchedKeys(bh.board.view(), clock, hubStart, a),
+      answered, deliver: async d => { sent.push(d.text); return true; }, lane: "manager", now: () => clock,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 2 });
+    expect(sent[0]).toBe(stale);
+  });
+
+  const urlOf = (u: string | URL | Request) => (typeof u === "string" ? u : u instanceof URL ? u.href : u.url);
+
+  // T-863: only a task that is gone (404) is skipped, with one warning on stderr. A refusal (401, 403) or an unreachable
+  // hub fails the command with its usual exit code, as it did before: a wrong list is never printed quietly.
+  it("a task whose events are gone (404) is skipped with one warning; a refusal or an unreachable hub fails the command", async () => {
+    await managerSays("new", "Plan it", "--assign", "builder");                         // T-1: its events cannot be read
+    await managerSays("new", "Other", "--assign", "reviewer");                          // T-2: answered, readable
+    for (const [lane, k] of [["builder", "T-1"], ["reviewer", "T-2"]] as const) {
+      await laneSays(lane, "start", k);
+      await laneSays(lane, "block", k, "--why", "checkpoint: plan", "--decision");
+    }
+    clock += HOUR;
+    await managerSays("comment", "T-1", "go on");
+    await managerSays("comment", "T-2", "go on");
+    clock += 49 * HOUR;
+    const go = async (failure: "gone" | "forbidden" | "throws", ...argv: string[]) => {
+      const flaky = ((url: string | URL | Request, init?: RequestInit) => {
+        if (!urlOf(url).endsWith("/api/agent/board/tasks/T-1")) return fetch(url, init);
+        if (failure === "throws") return Promise.reject(new Error("socket hang up"));
+        return Promise.resolve(failure === "gone" ? new Response('{"error":"no_task"}', { status: 404 }) : new Response('{"error":"forbidden"}', { status: 403 }));
+      }) as typeof fetch;
+      const out: string[] = [], err: string[] = [];
+      const code = await run(argv, { MORNDO_HUB: bh.base, MORNDO_AGENT_TOKEN: bm }, { fetch: flaky, lane: async () => null, out: l => out.push(l), err: l => err.push(l) });
+      return { code, out: out.join("\n"), err };
+    };
+    const inbox = await go("gone", "inbox", "--json");
+    expect(inbox.code).toBe(0);
+    expect((JSON.parse(inbox.out) as { key: string }[]).map(i => i.key)).toEqual([]);          // T-1 is gone: dropped, with the warning
+    expect(inbox.err).toHaveLength(1);
+    expect(inbox.err[0]).toMatch(/T-1/);
+    const stale = await go("gone", "stale", "--json");
+    expect(stale.code).toBe(0);
+    expect((JSON.parse(stale.out) as { key: string }[]).map(i => i.key)).toEqual(["T-2"]);   // T-1 is gone: dropped, T-2 swept
+    expect(stale.err).toHaveLength(1);
+    expect(stale.err[0]).toMatch(/T-1/);
+    for (const cmd of ["inbox", "stale"]) {
+      const refused = await go("forbidden", cmd, "--json");
+      expect(refused.code).toBe(1);
+      expect(refused.out).toBe("");
+      const down = await go("throws", cmd, "--json");
+      expect(down.code).toBe(3);
+      expect(down.out).toBe("");
+    }
+  });
+
+  // T-863 (review 2): a decision from before the rule is answered by a comment after the block began; a later change of
+  // the assignee moves stateChangedAt past the comment but does not take the answer back.
+  it("an answer to a decision from before the rule still counts after the task is reassigned", async () => {
+    await managerSays("new", "The old one", "--assign", "reviewer");
+    await laneSays("reviewer", "start", "T-1");
+    await laneSays("reviewer", "block", "T-1", "--why", "checkpoint: step 1 done, go on?");
+    clock += HOUR;
+    await managerSays("comment", "T-1", "yes, step 2");
+    clock += HOUR;
+    expect((await managerSays("assign", "T-1", "builder")).code).toBe(0);
+    clock += 49 * HOUR;
+    expect((await managerSays("inbox")).out).toBe("no decisions wait");
+    expect((await managerSays("stale")).out.split("\n")).toEqual([
+      "[board-stale] 1 task idle 48 h or more with no wait the board watches:",
+      "- T-1 blocked 49 h (builder): The old one",
+    ]);
+  });
+
+  // T-863 (review 4): re-blocking a blocked task to restate the reason is not a new block; the answer stands.
+  it("a legacy decision answered and then restated while blocked stays answered, as the hub's sweep has it", async () => {
+    await managerSays("new", "The old one", "--assign", "reviewer");
+    await laneSays("reviewer", "start", "T-1");
+    await laneSays("reviewer", "block", "T-1", "--why", "checkpoint: step 1 done, go on?");
+    clock += HOUR;
+    await managerSays("comment", "T-1", "yes, step 2");
+    clock += HOUR;
+    expect((await laneSays("reviewer", "block", "T-1", "--why", "checkpoint: step 1 done, go on? (still here)")).code).toBe(0);
+    clock += 49 * HOUR;
+    expect((await managerSays("inbox")).out).toBe("no decisions wait");
+    const stale = (await managerSays("stale")).out;
+    expect(stale.split("\n")).toEqual([
+      "[board-stale] 1 task idle 48 h or more with no wait the board watches:",
+      "- T-1 blocked 49 h (reviewer): The old one",
+    ]);
+    const answered = (key: string, since: number) => {
+      const found = bh.board.task(key);
+      return found !== null && isDecisionAnswered(found.task, found.events, since);
+    };
+    const sent: string[] = [];
+    const sweep = new StaleSweep({
+      tasks: () => [...bh.board.tasksIn("blocked"), ...bh.board.tasksIn("review")],
+      watched: (a, now) => watchedKeys(bh.board.view(), now ?? clock, clock, a),
+      answered, deliver: async d => { sent.push(d.text); return true; }, lane: "manager", now: () => clock,
+    });
+    expect(await sweep.tick()).toEqual({ sent: true, items: 1 });
+    expect(sent[0]).toBe(stale);
+  });
+
+  // T-863: stale reads the events of a decision only when the task has been idle long enough to be stale.
+  it("stale reads the events only of decisions idle for 48 h; a recent one costs no read", async () => {
+    await managerSays("new", "Old", "--assign", "builder");
+    await laneSays("builder", "start", "T-1");
+    await laneSays("builder", "block", "T-1", "--why", "checkpoint: old", "--decision");
+    clock += 50 * HOUR;
+    await managerSays("new", "Recent", "--assign", "reviewer");
+    await laneSays("reviewer", "start", "T-2");
+    await laneSays("reviewer", "block", "T-2", "--why", "checkpoint: recent", "--decision");
+    clock += HOUR;
+    const reads: string[] = [];
+    const counting = (async (url: string | URL | Request, init?: RequestInit) => {
+      const u = urlOf(url);
+      if (/\/api\/agent\/board\/tasks\/T-\d+$/.test(u)) reads.push(u.slice(u.lastIndexOf("/") + 1));
+      return fetch(url, init);
+    }) as typeof fetch;
+    const out: string[] = [];
+    const code = await run(["stale"], { MORNDO_HUB: bh.base, MORNDO_AGENT_TOKEN: bm }, { fetch: counting, lane: async () => null, out: l => out.push(l), err: () => {} });
+    expect(code).toBe(0);
+    expect(out.join("\n")).toBe("nothing stale");
+    expect(reads).toEqual(["T-1"]);
+  });
+
+  // T-863: the per-task reads go out together, at most 8 at a time.
+  it("reads the events of many decisions together, at most 8 at a time", async () => {
+    for (let i = 1; i <= 12; i++) {
+      await managerSays("new", `Decide ${i}`, "--assign", `lane${i}`);
+      await laneSays(`lane${i}`, "start", `T-${i}`);
+      await laneSays(`lane${i}`, "block", `T-${i}`, "--why", "checkpoint: which way", "--decision");
+    }
+    let inflight = 0, peak = 0, reads = 0;
+    const counting = (async (url: string | URL | Request, init?: RequestInit) => {
+      const isRead = /\/api\/agent\/board\/tasks\/T-\d+$/.test(urlOf(url));
+      if (isRead) { reads++; peak = Math.max(peak, ++inflight); }
+      try { return await fetch(url, init); } finally { if (isRead) inflight--; }
+    }) as typeof fetch;
+    const out: string[] = [];
+    const code = await run(["inbox"], { MORNDO_HUB: bh.base, MORNDO_AGENT_TOKEN: bm }, { fetch: counting, lane: async () => null, out: l => out.push(l), err: () => {} });
+    expect(code).toBe(0);
+    expect(out).toHaveLength(12);
+    expect(reads).toBe(12);
+    expect(peak).toBeGreaterThan(1);
+    expect(peak).toBeLessThanOrEqual(8);
   });
 
   it("the help names inbox, stale and --decision", () => {

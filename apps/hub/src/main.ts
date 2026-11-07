@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // morndo: the principal's hub. `serve` runs it; `pair`, `devices`, `revoke`, `audit` are the console (the trust root).
 import QRCode from "qrcode";
-import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, type AccessPolicy } from "@morndo/domain";
+import { CONVERSATION_CAP, MORNDO_REPO, formatFingerprint, isDecisionAnswered, watchedKeys, type AccessPolicy } from "@morndo/domain";
 import { DEFAULT_PUSH_CONTACT, engineSessionsOk, fleetSocketOk, isPushContact, loadConfig, morndoRepoOk, standInNotice } from "./config.ts";
 import { Store, type SignInAudit } from "./adapters/store.ts";
 import { GithubChecks } from "./adapters/github-checks.ts";
@@ -50,7 +50,7 @@ import { enginesCli } from "./adapters/engines-cli.ts";
 import { EnginesService } from "./application/engines-service.ts";
 import { ConnectionsPageService } from "./application/connections-page.ts";
 import { BoardService } from "./application/board-service.ts";
-import { BoardInbox, MergedSweep, StaleSweep, fleetDeliverText, watchedKeys } from "./application/board-inbox.ts";
+import { BoardInbox, MergedSweep, StaleSweep, fleetDeliverText } from "./application/board-inbox.ts";
 import { ProofService } from "./application/proof-service.ts";
 import { BoardProjector } from "./application/board-projector.ts";
 import { fleetRuns } from "./adapters/fleet-runs.ts";
@@ -422,12 +422,14 @@ switch (cmd) {
       // The fleet's delivery ids are `<client>:<rest>` with a lowercase client (fleetDeliverText adds the hub's own).
       const deliver = fleetDeliverText(fleetDeliveries(fleet.client));
       const legacySince = Date.now();
-      const answered = (key: string, since: number) =>
-        (board.task(key)?.events ?? []).some(e => e.at > since && e.change.kind === "commented" && (e.actor.kind === "manager" || e.actor.kind === "principal" || e.actor.kind === "console"));
+      const answered = (key: string, since: number) => {
+        const found = board.decisionRead(key);
+        return found !== null && isDecisionAnswered(found.task, found.events, since);
+      };
       const boardInbox = new BoardInbox({ tasks: () => board.blockedTasks(), deliver, lane: config.managerWindow, legacySince, answered, push: () => notifications.boardOverdue() });
       const staleSweep = new StaleSweep({
         tasks: () => [...board.tasksIn("blocked"), ...board.tasksIn("review")],
-        watched: () => watchedKeys(board.view(), Date.now(), legacySince, answered),
+        watched: (a, now) => watchedKeys(board.view(), now ?? Date.now(), legacySince, a),
         answered, deliver, lane: config.managerWindow,
       });
       // B23: the merged sweep, over the merge watch's live flags, to the manager's lane. It is run by the same timer
