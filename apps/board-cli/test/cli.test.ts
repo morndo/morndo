@@ -908,6 +908,8 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     expect(sent[0]).toBe(stale);
   });
 
+  const urlOf = (u: string | URL | Request) => (typeof u === "string" ? u : u instanceof URL ? u.href : u.url);
+
   // T-863: a task whose events cannot be read counts as unanswered, with one warning on stderr; the answer keeps its shape.
   it("a failed read of one task's events does not abort inbox or stale: that task is unanswered, one warning goes to stderr", async () => {
     await managerSays("new", "Plan it", "--assign", "builder");                         // T-1: its events cannot be read
@@ -922,7 +924,7 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     clock += 49 * HOUR;
     for (const failure of ["http500", "throws"] as const) {
       const flaky = ((url: string | URL | Request, init?: RequestInit) => {
-        if (String(url).endsWith("/api/agent/board/tasks/T-1")) return failure === "throws" ? Promise.reject(new Error("socket hang up")) : Promise.resolve(new Response('{"error":"boom"}', { status: 500 }));
+        if (urlOf(url).endsWith("/api/agent/board/tasks/T-1")) return failure === "throws" ? Promise.reject(new Error("socket hang up")) : Promise.resolve(new Response('{"error":"boom"}', { status: 500 }));
         return fetch(url, init);
       }) as typeof fetch;
       const go = async (...argv: string[]) => {
@@ -955,7 +957,7 @@ describe("the decision inbox and the stale sweep (B19, B20)", () => {
     }
     let inflight = 0, peak = 0, reads = 0;
     const counting = (async (url: string | URL | Request, init?: RequestInit) => {
-      const isRead = /\/api\/agent\/board\/tasks\/T-\d+$/.test(String(url));
+      const isRead = /\/api\/agent\/board\/tasks\/T-\d+$/.test(urlOf(url));
       if (isRead) { reads++; peak = Math.max(peak, ++inflight); }
       try { return await fetch(url, init); } finally { if (isRead) inflight--; }
     }) as typeof fetch;
