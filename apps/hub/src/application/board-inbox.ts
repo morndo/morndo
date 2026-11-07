@@ -192,14 +192,15 @@ export class StaleSweep {
     // A decision the inbox has let go (answered, the task still blocked) is swept like any block that sits; an
     // unanswered one keeps its deadline and stays the inbox's. The rule is asked only of a task idle STALE_BLOCK_MS,
     // and only once in the pass, for the watched set and the list together.
+    const tasks = this.#tasks();
     const raw = this.#answered;
     const idleEnough = raw === null ? undefined : (key: TaskKey, since: number): boolean => {
-      const task = this.#tasks().find(t => t.key === key);
+      const task = tasks.find(t => t.key === key);
       if (task !== undefined && now - task.updatedAt < STALE_BLOCK_MS) return false;
       return raw(key, since);
     };
     const answered = idleEnough === undefined ? undefined : answeredOnce(idleEnough);
-    const items = staleTasks(this.#tasks(), now, { watched: this.#watched(answered), ...(answered !== undefined ? { answered } : {}) });
+    const items = staleTasks(tasks, now, { watched: this.#watched(answered), ...(answered !== undefined ? { answered } : {}) });
     if (items.length === 0) return { sent: false, items: 0 };
     return this.#gate.send(items.length, items.map(i => `${i.key} ${i.status}`).join("\n"), staleMessage(items));
   }
