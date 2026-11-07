@@ -14,9 +14,13 @@ the agents' prompts. The blocks are printed by `morndo-board prompt --role manag
    morndo agent-token new lanes --role worker        # shared by the worker lanes: each names itself per call
    ```
    Each secret is shown once. `morndo agent-token list` and `morndo agent-token revoke <id>` manage them.
-2. **In every lane's environment:** `MORNDO_HUB` (the hub's address, the one the browser opens) and
-   `MORNDO_AGENT_TOKEN`. A worker lane also needs its name: `MORNDO_LANE`, or nothing when the lane runs in a tmux
-   window named after it (the CLI asks tmux).
+2. **The lanes' settings, from files or the environment:** the lanes read them from four files under
+   `~/.config/morndo`, private to the owner — `agent-hub` (the hub's address, the one the browser opens),
+   `agent-node` (this machine's name), `agent-lanes.token` (the token the worker lanes share) and
+   `agent-manager.token` (used only for the window named `manager`) — the same settings the environment carries:
+   `MORNDO_HUB` and `MORNDO_AGENT_TOKEN` for the hub and the token. Putting them in a lane's environment still works
+   and wins over the files, but is not needed. A worker lane also needs its name: `MORNDO_LANE`, or nothing when the
+   lane runs in a tmux window named after it (the CLI asks tmux).
 3. **The instruction block, in the lane's prompt:** the manager's block in the manager's instructions, the worker's
    block in every worker lane's (a `CLAUDE.md`, an agent definition, a system prompt: wherever that engine takes
    standing instructions). Paste it, or generate it: `morndo-board prompt --role worker >> CLAUDE.md`.
