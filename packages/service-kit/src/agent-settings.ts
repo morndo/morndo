@@ -96,19 +96,14 @@ const askTmux = (args: string[]): Promise<string | null> => new Promise(resolve 
   execFile("tmux", args, { encoding: "utf8", timeout: 3000 }, (error, stdout) => resolve(error ? null : stdout));
 });
 
-// The name of the tmux window this command runs in, asked about its own pane ($TMUX_PANE) when the environment has one:
-// the pane's window, not the session's active one. When that query fails (a pane that has closed since) or there is no
-// TMUX_PANE, it asks as the old per-command lookup did, without `-t`. Null outside tmux, when tmux fails, or when the
-// answer is blank.
+// The name of the tmux window this command runs in, asked only about this pane ($TMUX_PANE) via `display-message -p -t
+// "$TMUX_PANE" '#W'`. Null outside tmux, when TMUX_PANE is unset or blank, when the query fails, or when the answer is
+// blank — never the session's active window.
 export async function laneFromTmux(env: AgentEnv, tmux: (args: string[]) => Promise<string | null> = askTmux): Promise<string | null> {
   if (!set(env.TMUX)) return null;
-  const named = (answer: string | null) => (answer ?? "").trim();
-  if (set(env.TMUX_PANE)) {
-    const own = named(await tmux(["display-message", "-p", "-t", env.TMUX_PANE, "#W"]));
-    if (own !== "") return own;
-  }
-  const active = named(await tmux(["display-message", "-p", "#W"]));
-  return active === "" ? null : active;
+  if (!set(env.TMUX_PANE)) return null;
+  const own = (await tmux(["display-message", "-p", "-t", env.TMUX_PANE, "#W"]) ?? "").trim();
+  return own === "" ? null : own;
 }
 
 // The io of the real machine: the home directory, a reader that turns any failure into "not set", and the tmux window's

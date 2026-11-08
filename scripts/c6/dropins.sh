@@ -31,8 +31,10 @@ usage() {
 [ $# -eq 1 ] || usage
 
 # The one definition of what is looked for: ExecStart= at the start of a line (blanks allowed before it and before the =).
-# Exit status 0: there is one; 1: there is none; 2: the file could not be read.
+# Exit status 0: there is one; 1: there is none; 2: the file could not be read. Unreadable files are rejected before awk
+# (awk's exit status on a missing file is not reliable across implementations).
 has_execstart() {
+  [ -f "$1" ] && [ -r "$1" ] || return 2
   awk '/^[ \t]*ExecStart[ \t]*=/ { found = 1 } END { exit found ? 0 : 1 }' "$1"
 }
 
