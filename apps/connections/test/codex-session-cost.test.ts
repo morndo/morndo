@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readdirSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -133,15 +133,38 @@ describe("codex session totals under a lock", () => {
     expect(store.settle(totals, { start: store.read("t9"), resumed: true }, priced)).toBeNull();
   });
 
-  it("waits for a lock someone holds and gives up with an error, leaving their lock and the record alone", () => {
+  it("waits for a lock someone holds and then prices the run from where it began, writing nothing and leaving their lock alone", () => {
     const dir = dirOf();
     const store = new CodexSessionUsageFile(dir, { lockWaitMs: 150 });
     store.write(S0);
     writeFileSync(join(dir, "t1.lock"), "held\n");
     const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(() => store.settle(totals, { start: S0, resumed: true }, priced)).toThrow(/locked/);
-    expect(existsSync(join(dir, "t1.lock"))).toBe(true);
+    expect(store.settle(totals, { start: S0, resumed: true }, priced)).toBe(priced({ input: 50_000, cached: 20_000, output: 10_000 }));
+    expect(store.settle(totals, { start: null, resumed: true }, priced)).toBeNull();                       // nothing to price it from
+    expect(store.settle(totals, { start: null, resumed: false }, priced)).toBe(priced({ input: 150_000, cached: 60_000, output: 20_000 }));
+    expect(readFileSync(join(dir, "t1.lock"), "utf8")).toBe("held\n");
     expect(store.read("t1")).toEqual(S0);
+  });
+
+  it("keeps the cost it priced when the record cannot be written", () => {
+    const dir = dirOf();
+    mkdirSync(join(dir, "t1.json"));                                   // a folder where the record goes: the rename onto it fails
+    const store = new CodexSessionUsageFile(dir);
+    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
+    expect(store.settle(totals, { start: null, resumed: false }, priced)).toBe(priced({ input: 150_000, cached: 60_000, output: 20_000 }));
+    expect(readdirSync(dir)).toEqual(["t1.json"]);                      // no temporary file, no lock
+  });
+
+  it("releases only the lock it made: one another run holds by then stays", () => {
+    const dir = dirOf();
+    const store = new CodexSessionUsageFile(dir);
+    store.write(S0);
+    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
+    store.settle(totals, { start: S0, resumed: true }, added => {
+      writeFileSync(join(dir, "t1.lock"), "another run's lock\n");     // this run's lock was taken as stale and the file is another run's now
+      return priced(added);
+    });
+    expect(readFileSync(join(dir, "t1.lock"), "utf8")).toBe("another run's lock\n");
   });
 
   it("takes over a lock nobody has touched for minutes, and leaves no lock or temporary file behind", () => {
