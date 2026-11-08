@@ -18,11 +18,12 @@ agent token, and keeps the latest per account.
    prints. The JSON on stdin goes to the hub as it is; the hub reads only the fields named above:
    ```sh
    input=$(cat)
+   lane=${MORNDO_LANE:-$(case ${TMUX_PANE-} in %[0-9]*) set -- $(tmux display-message -p -t "$TMUX_PANE" '#{pane_id} #{window_name}' 2>/dev/null); [ "${1-}" = "$TMUX_PANE" ] && echo "${2-}";; esac)}
    printf '%s' "$input" | curl -sS -m 3 -o /dev/null -X POST "$MORNDO_HUB/api/agent/usage" \
-     -H "Authorization: Bearer $MORNDO_AGENT_TOKEN" -H "X-Morndo-Lane: ${MORNDO_LANE:-${TMUX_PANE:+$(tmux display-message -p -t "$TMUX_PANE" '#W' 2>/dev/null)}}" \
+     -H "Authorization: Bearer $MORNDO_AGENT_TOKEN" -H "X-Morndo-Lane: $lane" \
      -H "X-Morndo-Account: ${MORNDO_ACCOUNT:-default}" -H 'Content-Type: application/json' --data-binary @- &
    ```
-   The lane is named by its own pane, never by the window on screen (that may be the manager's). Without `TMUX_PANE` — outside tmux, or an environment that dropped it — the header is empty, so set `MORNDO_LANE` in the lane's environment.
+   The lane is named by its own pane and accepted only when tmux answers with that pane's id (a closed pane or a window's name makes tmux answer with the window on screen, which may be the manager's); without a usable `TMUX_PANE` the header is empty, so set `MORNDO_LANE` in the lane's environment.
    The `&` keeps the status line fast: the post runs on its own and the script's output is already printed. `-m 3`
    gives up on a hub that doesn't answer, silently.
 
