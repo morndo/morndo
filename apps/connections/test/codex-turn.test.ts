@@ -1,7 +1,7 @@
 // A pool turn's stream (ADR-0029, §6.8): what a failure was, when the account comes back, and the arguments of the turn that
 // goes on elsewhere. Messages are codex-cli 0.161.0's (codex-rs/protocol/src/error.rs at rust-v0.161.0).
 import { describe, expect, it } from "vitest";
-import { classifyFailure, continuationArgs, handoffArgs, promptOf, resumesLast, resumesSession, retryAt, sessionOf } from "../src/adapters/codex-turn.ts";
+import { classifyFailure, continuationArgs, handoffArgs, promptOf, resumesLast, retryAt, sessionOf } from "../src/adapters/codex-turn.ts";
 
 const LIMIT = "You’ve hit your usage limit. Upgrade to Pro (https://chatgpt.com/explore/pro), visit https://chatgpt.com/settings/usage to purchase more credits or try again at 3:05 PM.";
 const NOON = Date.UTC(2026, 9, 15, 12);
@@ -69,15 +69,5 @@ describe("codex turn: reading `exec resume` as the CLI does", () => {
 
   it("drops the session id for a handoff wherever it stands", () => {
     expect(handoffArgs(["exec", "resume", "--json", "-m", "model-x", "t-1", "go on"], "HAND")).toEqual(["exec", "--json", "-m", "model-x", "HAND"]);
-  });
-});
-
-describe("codex turn: is it a resume", () => {
-  it("is true for `exec resume` with an id or with --last, false for a first turn and for anything else", () => {
-    expect(resumesSession(["exec", "resume", "t-1", "go on"])).toBe(true);
-    expect(resumesSession(["exec", "resume", "--last", "go on"])).toBe(true);
-    expect(resumesSession(["exec", "--json", "-m", "model-x", "Make hello.txt"])).toBe(false);
-    expect(resumesSession(["resume", "t-1"])).toBe(false);
-    expect(resumesSession([])).toBe(false);
   });
 });

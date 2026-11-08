@@ -62,6 +62,23 @@ describe("codex vendor lines", () => {
     expect(codexVendorToml("https://api.openai.com", 'bad"')).toBe("");
   });
 
+  it("warns once, naming the word and the effort used, when an effort is not one plain word; says nothing for a good one or none", () => {
+    const said: string[] = [];
+    const warn = (line: string) => { said.push(line); };
+    codexVendorToml("https://api.mistral.ai/v1", "high", warn);
+    codexVendorToml("https://api.mistral.ai/v1", "", warn);
+    codexVendorToml("https://api.mistral.ai/v1", "  ", warn);
+    codexVendorToml("https://api.openai.com", 'bad"', warn);          // OpenAI's own host gets no vendor lines at all
+    expect(said).toEqual([]);
+    codexVendorToml("https://api.mistral.ai/v1", "very high", warn);
+    expect(said).toEqual(['codex effort "very high" is not one plain word (letters, digits, - and _, up to 32); model_reasoning_effort is not set, so the model\'s own default effort is used']);
+    said.length = 0;
+    codexVendorToml("https://api.mistral.ai/v1", 'high"\nsandbox_mode = "x"\u001b[31m', warn);
+    expect(said.length).toBe(1);
+    expect(said[0]).not.toMatch(/[\u0000-\u001f\u007f]/);               // the word is shown escaped, never as raw control characters
+    expect(said[0]).toContain("sandbox_mode");
+  });
+
   it("leaves the three-argument config as it was", () => {
     expect(codexConfig('sandbox_mode = "workspace-write"\n', [], "")).toBe(codexConfig('sandbox_mode = "workspace-write"\n', [], "", ""));
   });

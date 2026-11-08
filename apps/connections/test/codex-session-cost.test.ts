@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { codexVendorToml } from "../src/adapters/runtime-codex.ts";
-import { CodexSessionUsageFile } from "../src/adapters/codex-session-usage.ts";
+import { CodexSessionUsageFile, keepTotals } from "../src/adapters/codex-session-usage.ts";
 import * as spend from "../src/adapters/spend.ts";
-import { codexAddedCost, codexRunCost, codexUsageTotals, countOf } from "../src/adapters/spend.ts";
+import { codexRunCost, codexUsageTotals, countOf } from "../src/adapters/spend.ts";
 
 const prices = [{ at: "2026-11-07", model: "zai-glm-5-3", input: 1.4, output: 4.4, cacheRead: 0.14 }];
 const run = (thread: string, input: number, cached: number, output: number) => [
@@ -72,129 +72,42 @@ describe("one count reader", () => {
   });
 });
 
-describe("codex session totals under a lock", () => {
-  const MODEL = "zai-glm-5-3";
-  const S0 = { thread: "t1", input: 100_000, cached: 40_000, output: 10_000 };
-  const priced = (added: { input: number; cached: number; output: number } | null) => codexAddedCost(added, prices, MODEL);
+describe("keeping the session record", () => {
   const dirOf = () => { const dir = mkdtempSync(join(tmpdir(), "morndo-codex-usage-")); dirs.push(dir); return dir; };
+  const totals = { thread: "t1", input: 150_000, cached: 60_000, output: 20_000 };
 
-  it("prices a delta the way a resumed run is priced", () => {
-    const before = { thread: "t1", input: 11_440, cached: 7_552, output: 49 };
-    expect(priced({ input: 22_936 - before.input, cached: 18_944 - before.cached, output: 52 - before.output })).toBe(0.001754);
-    expect(priced(null)).toBeNull();
-    expect(codexAddedCost({ input: 10, cached: 0, output: 1 }, prices, "unknown-model")).toBeNull();
-  });
-
-  it("two overlapping resumes each pay what they added, and the record ends at the true total", () => {
-    const store = new CodexSessionUsageFile(dirOf());
-    store.write(S0);
-    const startA = store.read("t1");
-    const startB = store.read("t1");                                   // both began from the same record
-    const a = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    const b = codexUsageTotals(run("t1", 140_000, 50_000, 15_000))!;   // B's own view is below A's: it never saw A's tokens
-    const costA = store.settle(a, { start: startA, resumed: true }, priced);
-    const costB = store.settle(b, { start: startB, resumed: true }, priced);
-    expect(costA).toBe(codexRunCost(run("t1", 150_000, 60_000, 20_000), prices, MODEL, S0));
-    expect(costB).toBe(codexRunCost(run("t1", 140_000, 50_000, 15_000), prices, MODEL, S0));
-    expect(store.read("t1")).toEqual({ thread: "t1", input: 190_000, cached: 70_000, output: 25_000 });
-  });
-
-  it("a resume with no record is not charged the whole session again: no price, and the record is kept for the next one", () => {
-    const store = new CodexSessionUsageFile(dirOf());
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(store.settle(totals, { start: null, resumed: true }, priced)).toBeNull();
-    expect(store.read("t1")).toEqual(totals);
-    const next = codexUsageTotals(run("t1", 160_000, 64_000, 22_000))!;
-    expect(store.settle(next, { start: store.read("t1"), resumed: true }, priced)).toBe(priced({ input: 10_000, cached: 4_000, output: 2_000 }));
-  });
-
-  it("a resume with no start reading takes the record found under the lock as its start (--last names no thread beforehand)", () => {
-    const store = new CodexSessionUsageFile(dirOf());
-    store.write(S0);
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(store.settle(totals, { start: null, resumed: true }, priced)).toBe(priced({ input: 50_000, cached: 20_000, output: 10_000 }));
-    expect(store.read("t1")).toEqual(totals);
-  });
-
-  it("a new session is charged whole, and so is one whose totals went down (a reset), which becomes the record", () => {
-    const store = new CodexSessionUsageFile(dirOf());
-    const first = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(store.settle(first, { start: null, resumed: false }, priced)).toBe(priced({ input: 150_000, cached: 60_000, output: 20_000 }));
-    expect(store.read("t1")).toEqual(first);
-    const reset = codexUsageTotals(run("t1", 30_000, 10_000, 5_000))!;
-    expect(store.settle(reset, { start: first, resumed: true }, priced)).toBe(priced({ input: 30_000, cached: 10_000, output: 5_000 }));
-    expect(store.read("t1")).toEqual(reset);
-  });
-
-  it("another thread's record is not this thread's start", () => {
-    const store = new CodexSessionUsageFile(dirOf());
-    store.write({ thread: "t9", input: 10, cached: 0, output: 1 });
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(store.settle(totals, { start: store.read("t9"), resumed: true }, priced)).toBeNull();
-  });
-
-  it("waits for a lock someone holds and then prices the run from where it began, writing nothing and leaving their lock alone", () => {
+  it("writes through a temporary file in the same folder and leaves none behind", () => {
     const dir = dirOf();
-    const store = new CodexSessionUsageFile(dir, { lockWaitMs: 150 });
-    store.write(S0);
-    writeFileSync(join(dir, "t1.lock"), "held\n");
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(store.settle(totals, { start: S0, resumed: true }, priced)).toBe(priced({ input: 50_000, cached: 20_000, output: 10_000 }));
-    expect(store.settle(totals, { start: null, resumed: true }, priced)).toBeNull();                       // nothing to price it from
-    expect(store.settle(totals, { start: null, resumed: false }, priced)).toBe(priced({ input: 150_000, cached: 60_000, output: 20_000 }));
-    expect(readFileSync(join(dir, "t1.lock"), "utf8")).toBe("held\n");
-    expect(store.read("t1")).toEqual(S0);
+    const store = new CodexSessionUsageFile(dir);
+    store.write({ thread: "t1", input: 1, cached: 0, output: 2 });
+    store.write(totals);
+    expect(readdirSync(dir)).toEqual(["t1.json"]);
+    expect(store.read("t1")).toEqual(totals);
   });
 
-  it("keeps the cost it priced when the record cannot be written", () => {
+  it("a write that fails leaves no temporary file", () => {
     const dir = dirOf();
     mkdirSync(join(dir, "t1.json"));                                   // a folder where the record goes: the rename onto it fails
-    const store = new CodexSessionUsageFile(dir);
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(store.settle(totals, { start: null, resumed: false }, priced)).toBe(priced({ input: 150_000, cached: 60_000, output: 20_000 }));
-    expect(readdirSync(dir)).toEqual(["t1.json"]);                      // no temporary file, no lock
-  });
-
-  it("releases only the lock it made: one another run holds by then stays", () => {
-    const dir = dirOf();
-    const store = new CodexSessionUsageFile(dir);
-    store.write(S0);
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    store.settle(totals, { start: S0, resumed: true }, added => {
-      writeFileSync(join(dir, "t1.lock"), "another run's lock\n");     // this run's lock was taken as stale and the file is another run's now
-      return priced(added);
-    });
-    expect(readFileSync(join(dir, "t1.lock"), "utf8")).toBe("another run's lock\n");
-  });
-
-  it("takes over a lock nobody has touched for minutes, and leaves no lock or temporary file behind", () => {
-    const dir = dirOf();
-    const store = new CodexSessionUsageFile(dir, { lockWaitMs: 150 });
-    store.write(S0);
-    writeFileSync(join(dir, "t1.lock"), "left by a run that died\n");
-    const old = new Date(Date.now() - 10 * 60_000);
-    utimesSync(join(dir, "t1.lock"), old, old);
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(store.settle(totals, { start: S0, resumed: true }, priced)).toBe(priced({ input: 50_000, cached: 20_000, output: 10_000 }));
+    expect(() => new CodexSessionUsageFile(dir).write(totals)).toThrow();
     expect(readdirSync(dir)).toEqual(["t1.json"]);
   });
 
-  it("a thread id that is not a plain id gets a price (whole when new, none when resumed) and no file, no lock", () => {
+  it("keepTotals writes the record and says nothing when it lands", () => {
     const dir = dirOf();
-    const store = new CodexSessionUsageFile(dir);
-    const odd = { thread: "../escape", input: 10, cached: 0, output: 1 };
-    expect(store.settle(odd, { start: null, resumed: false }, priced)).toBe(priced({ input: 10, cached: 0, output: 1 }));
-    expect(store.settle(odd, { start: null, resumed: true }, priced)).toBeNull();
-    expect(readdirSync(dir)).toEqual([]);
+    const said: string[] = [];
+    keepTotals(new CodexSessionUsageFile(dir), totals, line => said.push(line));
+    expect(said).toEqual([]);
+    expect(new CodexSessionUsageFile(dir).read("t1")).toEqual(totals);
   });
 
-  it("a price function that throws leaves the record as it was and the lock released", () => {
+  it("keepTotals logs a record that cannot be written once, with the error code and no path, and does not throw", () => {
     const dir = dirOf();
-    const store = new CodexSessionUsageFile(dir);
-    store.write(S0);
-    const totals = codexUsageTotals(run("t1", 150_000, 60_000, 20_000))!;
-    expect(() => store.settle(totals, { start: S0, resumed: true }, () => { throw new Error("boom"); })).toThrow("boom");
-    expect(readdirSync(dir)).toEqual(["t1.json"]);
-    expect(store.read("t1")).toEqual(S0);
+    mkdirSync(join(dir, "t1.json"));
+    writeFileSync(join(dir, "other"), "x");
+    const said: string[] = [];
+    expect(() => keepTotals(new CodexSessionUsageFile(dir), totals, line => said.push(line))).not.toThrow();
+    expect(said.length).toBe(1);
+    expect(said[0]).toMatch(/^could not keep the codex usage record \([A-Z]+\)/);
+    expect(said[0]).not.toContain(dir);
   });
 });
