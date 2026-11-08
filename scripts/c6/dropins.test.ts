@@ -211,6 +211,26 @@ describe("dropins.sh with an awk that does not fail on a file it cannot read", (
   }
 });
 
+describe("dropins.sh reads each drop-in once, with a status it checks", () => {
+  // A `cat` that gives a first line of pre.conf and then fails, as a read error after the open does (EIO on a failing disk).
+  it("stops, naming the file, when reading one fails part way: a partial read is not 'no ExecStart'", () => {
+    const m = machine();
+    const bk = backupOf(m);
+    const bin = join(m.root, "bin");
+    mkdirSync(bin);
+    const realCat = spawnSync("sh", ["-c", "command -v cat"], { encoding: "utf8" }).stdout.trim();
+    writeFileSync(join(bin, "cat"), `#!/bin/sh\ncase "$*" in *pre.conf*) echo "[Service]"; echo "cat: read error: Input/output error" >&2; exit 1 ;; *) exec "${realCat}" "$@" ;; esac\n`, { mode: 0o755 });
+    for (const args of [["--list"], [bk]]) {
+      const r = runWith(m, { PATH: `${bin}:${process.env.PATH ?? ""}` }, ...args);
+      expect(r.code, args.join(" ")).toBe(2);
+      expect(r.err).toContain("pre.conf");
+      expect(r.out).not.toContain("ExecStart taken out");
+    }
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+    expect(readdirSync(m.folder).sort()).toEqual(["limits.conf", "pre.conf", "ship.conf"]);
+  });
+});
+
 describe("dropins.sh and the drop-ins it must leave alone or cannot back up", () => {
   it("leaves a job unit's drop-in out, as backup.sh does", () => {
     const m = machine();

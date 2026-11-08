@@ -183,6 +183,14 @@ describe("laneFromTmux asks about the pane the command runs in", () => {
     expect(calls).toEqual([["display-message", "-p", "-t", "%5", "#W"]]);
   });
 
+  it("TMUX_PANE is trimmed before it is passed to -t", async () => {
+    for (const pane of [" %5", "%5\n", "\t%5 "]) {
+      const calls: string[][] = [];
+      expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: pane }, async args => { calls.push(args); return "builder\n"; }), JSON.stringify(pane)).toBe("builder");
+      expect(calls, JSON.stringify(pane)).toEqual([["display-message", "-p", "-t", "%5", "#W"]]);
+    }
+  });
+
   it("a pane query that answers blank is no lane either, and the active window is not asked", async () => {
     const calls: string[][] = [];
     const lane = await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async args => { calls.push(args); return args.includes("-t") ? "  \n" : "manager\n"; });
@@ -190,7 +198,7 @@ describe("laneFromTmux asks about the pane the command runs in", () => {
     expect(calls).toEqual([["display-message", "-p", "-t", "%5", "#W"]]);
   });
 
-  it("when both queries fail or answer blank there is no lane", async () => {
+  it("a failed or a blank answer from the pane's query is no lane", async () => {
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => null)).toBeNull();
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => "  \n")).toBeNull();
   });
@@ -231,6 +239,38 @@ describe("withAgentSettings: a lane tmux cannot name never gets the manager's id
       expect(got.MORNDO_LANE, name).toBe(name);
       expect(got.MORNDO_AGENT_TOKEN, name).toBe(token);
     }
+  });
+});
+
+describe("agentSettingsIo says once, on stderr, when tmux cannot tell which lane this is", () => {
+  const collect = () => { const lines: string[] = []; return { lines, warn: (line: string) => { lines.push(line); } }; };
+
+  it("in tmux with no TMUX_PANE: one line, however often the lane is asked, and tmux is not started", async () => {
+    const w = collect();
+    const asked: string[][] = [];
+    const real = agentSettingsIo({ HOME: "/h", TMUX: "x" }, async args => { asked.push(args); return "manager\n"; }, w.warn);
+    expect(await real.lane()).toBeNull();
+    expect(await real.lane()).toBeNull();
+    expect(w.lines).toEqual(["TMUX_PANE is not set; cannot tell which lane this is"]);
+    expect(asked).toEqual([]);
+  });
+
+  it("in tmux with a pane tmux cannot name: one line that says the pane could not be named", async () => {
+    const w = collect();
+    const real = agentSettingsIo({ HOME: "/h", TMUX: "x", TMUX_PANE: "%5" }, async () => null, w.warn);
+    expect(await real.lane()).toBeNull();
+    expect(await real.lane()).toBeNull();
+    expect(w.lines.length).toBe(1);
+    expect(w.lines[0]).toContain("TMUX_PANE");
+    expect(w.lines[0]).toContain("cannot tell which lane this is");
+    expect(w.lines[0]).not.toContain("is not set");
+  });
+
+  it("a pane that resolves, and a command outside tmux, say nothing", async () => {
+    const w = collect();
+    expect(await agentSettingsIo({ HOME: "/h", TMUX: "x", TMUX_PANE: "%5" }, async () => "builder\n", w.warn).lane()).toBe("builder");
+    expect(await agentSettingsIo({ HOME: "/h" }, async () => "manager\n", w.warn).lane()).toBeNull();
+    expect(w.lines).toEqual([]);
   });
 });
 
@@ -286,7 +326,7 @@ describe("withAgentSettings: it reads and asks only for what is missing", () => 
 
   it("the window is asked once however often the lane is wanted (one pane query, one time)", async () => {
     const asked: string[][] = [];
-    const real = agentSettingsIo({ HOME: "/h", TMUX: "x", TMUX_PANE: "%1" }, async args => { asked.push(args); return null; });
+    const real = agentSettingsIo({ HOME: "/h", TMUX: "x", TMUX_PANE: "%1" }, async args => { asked.push(args); return null; }, () => {});
     expect(await real.lane()).toBeNull();
     expect(await real.lane()).toBeNull();
     expect(asked).toEqual([["display-message", "-p", "-t", "%1", "#W"]]);

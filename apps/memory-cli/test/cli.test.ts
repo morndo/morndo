@@ -202,7 +202,7 @@ describe("usage, refusals and the plumbing", () => {
     expect(await run(["help"], {}, { fetch, lane: async () => null, git: async () => null, host: () => "h", stdin: async () => "", out: l => out.push(l), err: () => {} })).toBe(0);
     expect(out.join("\n")).toBe(HELP);
     expect(await cli(["search", "x"], { status: 401, body: { error: "unknown_token" } })).toMatchObject({ code: 1, err: "The hub doesn't know this token (MORNDO_AGENT_TOKEN)." });
-    expect(await cli(["search", "x"], { status: 400, body: { error: "lane_needed" } })).toMatchObject({ code: 1, err: "Which lane? Set MORNDO_LANE, or run inside the lane's tmux window." });
+    expect(await cli(["search", "x"], { status: 400, body: { error: "lane_needed" } })).toMatchObject({ code: 1, err: "Which lane? Set MORNDO_LANE, or run in the lane's tmux window with TMUX_PANE set." });
     expect(await cli(["search", "x"], { status: 404, body: { error: "no such route" } })).toMatchObject({ code: 1, err: "This hub has no memory yet; it needs an update." });
   });
   it("a hub that can't be reached, fails, or answers without JSON is exit 3", async () => {

@@ -207,7 +207,8 @@ describe("morndo-board in real tmux panes", () => {
     seen.length = 0;
     const r = await runProgram(PROGRAMS.board, ["show", "T-1"], { HOME: home(true), TMUX: tmuxEnv });
     expect(seen.length, r.err).toBeGreaterThan(0);
-    expect(seen.some(s => s.authorization === `Bearer ${MANAGER_TOKEN}` || s.lane === "manager")).toBe(false);
+    expect(seen.every(s => s.authorization === `Bearer ${LANE_TOKEN}` && !s.lane)).toBe(true);
+    expect(r.err).toContain("TMUX_PANE is not set; cannot tell which lane this is");
     noToken(r);
   });
 });
