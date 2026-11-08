@@ -202,6 +202,14 @@ describe("morndo-board in real tmux panes", () => {
     expect(seen.every(s => s.authorization === `Bearer ${MANAGER_TOKEN}` && s.lane === "manager")).toBe(true);
     noToken(r);
   });
+
+  it("a command that has lost its pane variable never takes the window on screen: the manager's token is not sent", async () => {
+    seen.length = 0;
+    const r = await runProgram(PROGRAMS.board, ["show", "T-1"], { HOME: home(true), TMUX: tmuxEnv });
+    expect(seen.length, r.err).toBeGreaterThan(0);
+    expect(seen.some(s => s.authorization === `Bearer ${MANAGER_TOKEN}` || s.lane === "manager")).toBe(false);
+    noToken(r);
+  });
 });
 
 // tmux is only asked when a command needs the lane, and only once; never for help. A stand-in tmux program that notes each call
@@ -222,10 +230,10 @@ describe("how often tmux is started", () => {
     expect(t.calls()).toBe(0);
   });
 
-  it.each([["board", ["show", "T-1"]], ["decide", ["show", "dr-1"]], ["memory", ["search", "anything"]]] as const)("morndo-%s %j asks tmux once for its lane, with its pane's query and the fallback after it", async (name, args) => {
+  it.each([["board", ["show", "T-1"]], ["decide", ["show", "dr-1"]], ["memory", ["search", "anything"]]] as const)("morndo-%s %j asks tmux once for its lane, with its pane's query and no fallback after it", async (name, args) => {
     const t = standIn();
     await runProgram(PROGRAMS[name], [...args], { HOME: home(true), ...inTmux(t.bin) });
-    expect(t.calls()).toBe(2);
+    expect(t.calls()).toBe(1);
   });
 
   it("morndo-board --role worker prompt starts no tmux: the command word is prompt, not worker", async () => {
