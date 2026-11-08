@@ -135,7 +135,7 @@ describe("a lane's day", () => {
     expect((await cli(["whoami"], workers, { lane: "reviewer" })).out).toBe("the lane reviewer");
     expect((await cli(["start", "T-1"], workers, { lane: "reviewer" })).code).toBe(0);
     const nobody = await cli(["list", "--mine"], workers);
-    expect(nobody).toMatchObject({ code: 1, err: "refused: which lane? set MORNDO_LANE, or run inside the lane's tmux window" });
+    expect(nobody).toMatchObject({ code: 1, err: "refused: which lane? set MORNDO_LANE, or run in the lane's tmux window with TMUX_PANE set" });
   });
   it("show gives the task with its history; a comment keeps its lines; an unknown task says so", async () => {
     await asManager("new", "A", "--desc", "Line one\nLine two", "--assign", "builder");

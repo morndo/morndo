@@ -11,8 +11,8 @@
 // environment or the window, reads only agent-manager.token; every other lane — or no lane known — reads only the one
 // the workers share, agent-lanes.token. That is a choice of file, as the wrappers made it, not a boundary: every lane
 // runs as the same user and can read either file. The lane itself is asked of tmux about THIS pane (`display-message -p
-// -t "$TMUX_PANE" '#W'`), never the session's active window: without -t a lane would act as whichever window is on
-// screen, and could be handed the manager's token.
+// -t "$TMUX_PANE" '#{pane_id} #{window_name}'`), and accepted only when the answer's pane id is TMUX_PANE: a target
+// tmux cannot find is answered with the window on screen (often the manager's), which the pane id check rejects.
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -96,28 +96,47 @@ const askTmux = (args: string[]): Promise<string | null> => new Promise(resolve 
   execFile("tmux", args, { encoding: "utf8", timeout: 3000 }, (error, stdout) => resolve(error ? null : stdout));
 });
 
-// The name of the tmux window this command runs in, asked about its own pane ($TMUX_PANE) when the environment has one:
-// the pane's window, not the session's active one. When that query fails (a pane that has closed since) or there is no
-// TMUX_PANE, it asks as the old per-command lookup did, without `-t`. Null outside tmux, when tmux fails, or when the
-// answer is blank.
-export async function laneFromTmux(env: AgentEnv, tmux: (args: string[]) => Promise<string | null> = askTmux): Promise<string | null> {
-  if (!set(env.TMUX)) return null;
-  const named = (answer: string | null) => (answer ?? "").trim();
-  if (set(env.TMUX_PANE)) {
-    const own = named(await tmux(["display-message", "-p", "-t", env.TMUX_PANE, "#W"]));
-    if (own !== "") return own;
-  }
-  const active = named(await tmux(["display-message", "-p", "#W"]));
-  return active === "" ? null : active;
+export type LaneAnswer = { lane: string; reason: null } | { lane: null; reason: string | null };
+
+const PANE_ID = /^%[0-9]+$/;
+
+// The name of the tmux window this command runs in: one `display-message -p -t "$TMUX_PANE"
+// '#{pane_id} #{window_name}'`, accepted only when the first token of the answer is TMUX_PANE. Outside tmux, reason null
+// means nothing to say; in tmux, a non-null reason is why the lane could not be named.
+export async function laneFromTmux(env: AgentEnv, tmux: (args: string[]) => Promise<string | null> = askTmux): Promise<LaneAnswer> {
+  if (!set(env.TMUX)) return { lane: null, reason: null };
+  if (!set(env.TMUX_PANE)) return { lane: null, reason: "TMUX_PANE is not set" };
+  const pane = env.TMUX_PANE.trim();
+  if (!PANE_ID.test(pane)) return { lane: null, reason: "TMUX_PANE is not a pane id (%N)" };
+  const raw = await tmux(["display-message", "-p", "-t", pane, "#{pane_id} #{window_name}"]);
+  const text = (raw ?? "").trim();
+  const space = text.indexOf(" ");
+  if (space < 0) return { lane: null, reason: "tmux did not name the window of TMUX_PANE" };
+  const gotPane = text.slice(0, space);
+  const name = text.slice(space + 1).trim();
+  if (gotPane !== pane || name === "") return { lane: null, reason: "tmux did not name the window of TMUX_PANE" };
+  return { lane: name, reason: null };
 }
 
 // The io of the real machine: the home directory, a reader that turns any failure into "not set", and the tmux window's
 // name for this process's environment, asked at most once however often it is wanted (the command's own lookup shares it).
-export function agentSettingsIo(env: AgentEnv, tmux?: (args: string[]) => Promise<string | null>): AgentSettingsIo {
+export function agentSettingsIo(
+  env: AgentEnv,
+  tmux?: (args: string[]) => Promise<string | null>,
+  warn: (line: string) => void = line => process.stderr.write(`${line}\n`),
+): AgentSettingsIo {
   let asked: Promise<string | null> | null = null;
   return {
     home: set(env.HOME) ? env.HOME : homedir(),
     readText: async path => { try { return await readFile(path, "utf8"); } catch { return null; } },
-    lane: () => (asked ??= laneFromTmux(env, tmux)),
+    lane: () => {
+      if (asked === null) {
+        asked = laneFromTmux(env, tmux).then(({ lane, reason }) => {
+          if (reason !== null) warn(`${reason}; cannot tell which lane this is: run it from the lane's own pane, or set MORNDO_LANE`);
+          return lane;
+        });
+      }
+      return asked;
+    },
   };
 }

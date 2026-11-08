@@ -31,9 +31,19 @@ usage() {
 [ $# -eq 1 ] || usage
 
 # The one definition of what is looked for: ExecStart= at the start of a line (blanks allowed before it and before the =).
-# Exit status 0: there is one; 1: there is none; 2: the file could not be read.
+# Exit status 0: there is one; 1: there is none; 2: the file could not be read or copied (never the awk's own quirks).
 has_execstart() {
-  awk '/^[ \t]*ExecStart[ \t]*=/ { found = 1 } END { exit found ? 0 : 1 }' "$1"
+  hd=$(mktemp -d) || return 2
+  if ! cat -- "$1" > "$hd/copy"; then
+    rm -f -- "$hd/copy"
+    rmdir -- "$hd" 2>/dev/null || :
+    return 2
+  fi
+  awk '/^[ \t]*ExecStart[ \t]*=/ { found = 1 } END { exit found ? 0 : 1 }' "$hd/copy"
+  rc=$?
+  rm -f -- "$hd/copy"
+  rmdir -- "$hd" 2>/dev/null || :
+  case $rc in 0|1) return "$rc" ;; *) return 2 ;; esac
 }
 
 # A path's real location: its folder resolved, its own name kept (a drop-in that is itself a link is not followed).
@@ -130,8 +140,10 @@ while IFS= read -r f; do
     echo "dropins.sh: could not rewrite $f; it is as it was" >&2
     exit 2
   fi
-  # The copy must be shorter than the original and have no ExecStart= left; anything else is not put in its place.
-  if has_execstart "$tmp" || [ "$(lines "$tmp")" -ge "$(lines "$f")" ]; then
+  # The copy must be shorter than the original and have no ExecStart= left; a read error is not "none left".
+  rc=0
+  has_execstart "$tmp" || rc=$?
+  if [ "$rc" -ne 1 ] || [ "$(lines "$tmp")" -ge "$(lines "$f")" ]; then
     rm -f -- "$tmp"
     echo "dropins.sh: the rewrite of $f is not what was meant; it is as it was" >&2
     exit 2
