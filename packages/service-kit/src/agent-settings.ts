@@ -102,17 +102,33 @@ const askTmux = (args: string[]): Promise<string | null> => new Promise(resolve 
 export async function laneFromTmux(env: AgentEnv, tmux: (args: string[]) => Promise<string | null> = askTmux): Promise<string | null> {
   if (!set(env.TMUX)) return null;
   if (!set(env.TMUX_PANE)) return null;
-  const own = (await tmux(["display-message", "-p", "-t", env.TMUX_PANE, "#W"]) ?? "").trim();
+  const pane = env.TMUX_PANE.trim();
+  const own = (await tmux(["display-message", "-p", "-t", pane, "#W"]) ?? "").trim();
   return own === "" ? null : own;
 }
 
 // The io of the real machine: the home directory, a reader that turns any failure into "not set", and the tmux window's
 // name for this process's environment, asked at most once however often it is wanted (the command's own lookup shares it).
-export function agentSettingsIo(env: AgentEnv, tmux?: (args: string[]) => Promise<string | null>): AgentSettingsIo {
+export function agentSettingsIo(
+  env: AgentEnv,
+  tmux?: (args: string[]) => Promise<string | null>,
+  warn: (line: string) => void = line => process.stderr.write(`${line}\n`),
+): AgentSettingsIo {
   let asked: Promise<string | null> | null = null;
   return {
     home: set(env.HOME) ? env.HOME : homedir(),
     readText: async path => { try { return await readFile(path, "utf8"); } catch { return null; } },
-    lane: () => (asked ??= laneFromTmux(env, tmux)),
+    lane: () => {
+      if (asked === null) {
+        asked = laneFromTmux(env, tmux).then(lane => {
+          if (lane === null && set(env.TMUX)) {
+            if (!set(env.TMUX_PANE)) warn("TMUX_PANE is not set; cannot tell which lane this is");
+            else warn("tmux could not name the window of TMUX_PANE; cannot tell which lane this is");
+          }
+          return lane;
+        });
+      }
+      return asked;
+    },
   };
 }

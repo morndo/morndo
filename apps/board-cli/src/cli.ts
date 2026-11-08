@@ -83,7 +83,7 @@ function explain(error: string, other: string | undefined, from: string | undefi
     case "unknown": return "no such task";
     case "no_token": case "unknown_token": return "the hub doesn't know this token (MORNDO_AGENT_TOKEN)";
     case "revoked": return "this token was revoked";
-    case "lane_needed": return "which lane? set MORNDO_LANE, or run inside the lane's tmux window";
+    case "lane_needed": return "which lane? set MORNDO_LANE, or run in the lane's tmux window with TMUX_PANE set";
     case "rate_limited": return "too many calls; wait a moment";
     case "board_off": return "the hub has no board";
     case "not_live": return `its merge is not live${detail ? `: ${detail}` : ""}; if you accept it anyway: done T-12 --why "…" --not-live "<reason>"`;

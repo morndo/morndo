@@ -85,7 +85,7 @@ function explain(error: string): string {
     case "no such route": return "This hub has no memory yet; it needs an update.";
     case "no_token": case "unknown_token": return "The hub doesn't know this token (MORNDO_AGENT_TOKEN).";
     case "revoked": return "This token was revoked.";
-    case "lane_needed": return "Which lane? Set MORNDO_LANE, or run inside the lane's tmux window.";
+    case "lane_needed": return "Which lane? Set MORNDO_LANE, or run in the lane's tmux window with TMUX_PANE set.";
     case "bad_name": return "That isn't a lane name: letters, digits, . _ - (MORNDO_LANE).";
     case "rate_limited": return "Too many calls; wait a moment.";
     case "board_off": return "This hub has no agent door.";
