@@ -75,8 +75,8 @@ export function codexVendorToml(baseUrl: string, effort: string, warn = (line: s
   if (openAiApiHost(baseUrl)) return "";
   const lines = ['web_search = "disabled"'];
   const word = effort.trim().toLowerCase();
-  if (word !== "" && EFFORT_WORD.test(word)) lines.push(`model_reasoning_effort = ${quoted(word)}`);
-  else if (effort.trim() !== "") warn(`codex effort ${JSON.stringify(effort.trim())} is not one plain word (letters, digits, - and _, up to 32); model_reasoning_effort is not set, so the model's own default effort is used`);
+  if (EFFORT_WORD.test(word)) lines.push(`model_reasoning_effort = ${quoted(word)}`);
+  else if (word !== "") warn(`codex effort ${JSON.stringify(effort.trim())} is not one plain word (letters, digits, - and _, up to 32); model_reasoning_effort is not set, so the model's own default effort is used`);
   return lines.join("\n");
 }
 
