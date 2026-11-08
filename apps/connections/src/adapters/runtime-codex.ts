@@ -63,12 +63,20 @@ export function codexConfig(profile: string, deny: readonly string[], auth: stri
 // Hosted web_search is OpenAI's tool and cannot run on any other endpoint (HTTP 400).
 // OpenAI's own host gets no vendor lines, so those key runs stay as they were. Every other
 // endpoint turns the tool off and, when the plan names an effort, sets it. A host that only
-// looks like OpenAI's, or a base URL with no scheme, is not OpenAI's. Mistral's GLM 5.3
-// accepts reasoning effort low, high or max. Probe 2026-11-07, Codex 0.163.0.
-export function codexVendorToml(baseUrl: string, effort: string): string {
+// looks like OpenAI's, or a base URL with no scheme, is not OpenAI's. Codex 0.161.0 takes any
+// non-empty effort: its ReasoningEffort has none, minimal, low, medium, high, xhigh, max, ultra,
+// persistent and Custom(String) for the rest (codex-rs/protocol/src/openai_models.rs at rust-v0.161.0),
+// and the config reference says the levels depend on the model
+// (https://learn.chatgpt.com/docs/config-file/config-reference). Mistral's GLM 5.3 takes low, high
+// and max (probe 2026-11-07). Only a trimmed, lowercased plain word reaches the file.
+const EFFORT_WORD = /^[a-z][a-z0-9_-]{0,31}$/;
+
+export function codexVendorToml(baseUrl: string, effort: string, warn = (line: string) => { process.stderr.write(`${line}\n`); }): string {
   if (openAiApiHost(baseUrl)) return "";
   const lines = ['web_search = "disabled"'];
-  if (effort !== "") lines.push(`model_reasoning_effort = ${quoted(effort)}`);
+  const word = effort.trim().toLowerCase();
+  if (EFFORT_WORD.test(word)) lines.push(`model_reasoning_effort = ${quoted(word)}`);
+  else if (word !== "") warn(`codex effort ${JSON.stringify(effort.trim())} is not one plain word (letters, digits, - and _, up to 32); model_reasoning_effort is not set, so the model's own default effort is used`);
   return lines.join("\n");
 }
 

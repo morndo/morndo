@@ -3,7 +3,7 @@
 import { chmodSync, closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { join } from "node:path";
-import type { CodexUsageTotals } from "./spend.ts";
+import { countOf, type CodexUsageTotals } from "./spend.ts";
 
 const THREAD_ID = /^[A-Za-z0-9][A-Za-z0-9-]{0,127}$/;
 
@@ -48,16 +48,18 @@ export class CodexSessionUsageFile {
 function totalsOf(value: unknown, thread: string): CodexUsageTotals | null {
   if (typeof value !== "object" || value === null) return null;
   if (!("thread" in value) || value.thread !== thread) return null;
-  const input = count(value, "input");
-  const cached = count(value, "cached");
-  const output = count(value, "output");
+  const input = countOf(value, "input");
+  const cached = countOf(value, "cached");
+  const output = countOf(value, "output");
   if (input === null || cached === null || output === null) return null;
   return { thread, input, cached, output };
 }
 
-function count(value: object, key: string): number | null {
-  if (!(key in value)) return null;
-  const n = (value as Record<string, unknown>)[key];
-  if (typeof n !== "number" || !Number.isFinite(n) || n < 0) return null;
-  return n;
+export function keepTotals(store: CodexSessionUsageFile, totals: CodexUsageTotals, log: (line: string) => void): void {
+  try {
+    store.write(totals);
+  } catch (error) {
+    const code = typeof error === "object" && error !== null && "code" in error && typeof error.code === "string" ? error.code : "error";
+    log(`could not keep the codex usage record (${code}); the next resume of this thread is charged from the last record that landed`);
+  }
 }

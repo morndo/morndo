@@ -2,7 +2,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { FileCatalog } from "../src/adapters/catalog-file.ts";
 import { codexConfig, codexVendorToml } from "../src/adapters/runtime-codex.ts";
-import { codexModelArg, codexTokenCost } from "../src/adapters/spend.ts";
+import { codexModelArg } from "../src/adapters/spend.ts";
 
 const catalog = join(import.meta.dirname, "../../../packages/protocol/catalog/vendors.json");
 
@@ -41,28 +41,50 @@ describe("codex vendor lines", () => {
     expect(both).toContain('web_search = "disabled"');
   });
 
+  // Codex 0.161.0 takes any non-empty effort: its ReasoningEffort has none, minimal, low, medium, high, xhigh, max, ultra, persistent
+  // and Custom(String) for the rest (codex-rs/protocol/src/openai_models.rs at rust-v0.161.0), and the config reference says the levels
+  // depend on the model (https://learn.chatgpt.com/docs/config-file/config-reference). Mistral's GLM 5.3 takes low, high and max
+  // (probe 2026-11-07), so "max" must reach the file as it is. What must not reach it is anything that is not one plain word.
+  it("writes the efforts Codex and the endpoints take as they are, lowercased and trimmed", () => {
+    for (const effort of ["low", "medium", "high", "xhigh", "max"]) {
+      expect(codexVendorToml("https://api.mistral.ai/v1", effort), effort).toBe(`web_search = "disabled"\nmodel_reasoning_effort = "${effort}"`);
+    }
+    expect(codexVendorToml("https://api.mistral.ai/v1", " High\n")).toBe('web_search = "disabled"\nmodel_reasoning_effort = "high"');
+  });
+
+  it("never writes an effort that is not one plain word: no quote, newline, space, equals sign or length past 32", () => {
+    const bad = ['high"\nsandbox_mode = "danger-full-access"', "high\nweb_search = \"live\"", "a b", "=high", "x".repeat(33), "hi\\gh", "-high", "high\u0000"];
+    for (const effort of bad) {
+      const toml = codexVendorToml("https://api.mistral.ai/v1", effort);
+      expect(toml, JSON.stringify(effort)).toBe('web_search = "disabled"');
+      expect(toml).not.toContain("sandbox_mode");
+    }
+    expect(codexVendorToml("https://api.openai.com", 'bad"')).toBe("");
+  });
+
+  it("warns once, naming the word and the effort used, when an effort is not one plain word; says nothing for a good one or none", () => {
+    const said: string[] = [];
+    const warn = (line: string) => { said.push(line); };
+    codexVendorToml("https://api.mistral.ai/v1", "high", warn);
+    codexVendorToml("https://api.mistral.ai/v1", "", warn);
+    codexVendorToml("https://api.mistral.ai/v1", "  ", warn);
+    codexVendorToml("https://api.openai.com", 'bad"', warn);          // OpenAI's own host gets no vendor lines at all
+    expect(said).toEqual([]);
+    codexVendorToml("https://api.mistral.ai/v1", "very high", warn);
+    expect(said).toEqual(['codex effort "very high" is not one plain word (letters, digits, - and _, up to 32); model_reasoning_effort is not set, so the model\'s own default effort is used']);
+    said.length = 0;
+    codexVendorToml("https://api.mistral.ai/v1", 'high"\nsandbox_mode = "x"\u001b[31m', warn);
+    expect(said.length).toBe(1);
+    expect(/\p{Cc}/u.test(said[0] ?? "")).toBe(false);   // the word is shown escaped, never as raw control characters
+    expect(said[0]).toContain("sandbox_mode");
+  });
+
   it("leaves the three-argument config as it was", () => {
     expect(codexConfig('sandbox_mode = "workspace-write"\n', [], "")).toBe(codexConfig('sandbox_mode = "workspace-write"\n', [], "", ""));
   });
 });
 
 describe("codex spend", () => {
-  const prices = [{ at: "2026-11-07", model: "zai-glm-5-3", input: 1.4, output: 4.4, cacheRead: 0.14 }];
-  const turn = (input: number, cached: number, output: number) => JSON.stringify({
-    type: "turn.completed",
-    usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output, reasoning_output_tokens: 0 },
-  });
-
-  it("prices every completed turn from the catalog, cached input at the cache price", () => {
-    const stdout = [JSON.stringify({ type: "thread.started", thread_id: "t" }), turn(1_000_000, 400_000, 100_000), turn(500_000, 500_000, 0)].join("\n");
-    expect(codexTokenCost(stdout, prices, "zai-glm-5-3")).toBe(1.406);
-  });
-
-  it("is null without a completed turn or a price", () => {
-    expect(codexTokenCost(JSON.stringify({ type: "turn.failed", error: { message: "x" } }), prices, "zai-glm-5-3")).toBeNull();
-    expect(codexTokenCost(turn(10, 0, 10), prices, "unknown-model")).toBeNull();
-  });
-
   it("reads the model a codex argv names", () => {
     expect(codexModelArg(["exec", "--json", "-m", "zai-glm-5-3-flash", "-c", "x", "hi"])).toBe("zai-glm-5-3-flash");
     expect(codexModelArg(["exec", "--model", "zai-glm-5-3", "hi"])).toBe("zai-glm-5-3");

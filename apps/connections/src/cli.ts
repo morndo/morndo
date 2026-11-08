@@ -23,7 +23,7 @@ import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
 import { acceptsPoolKey, FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
 import { filterSocketTrusted, sendToFilter, serveFilterChannel } from "./filter-channel.ts";
-import { CodexSessionUsageFile } from "./adapters/codex-session-usage.ts";
+import { CodexSessionUsageFile, keepTotals } from "./adapters/codex-session-usage.ts";
 import { catalogTokenCost, codexModelArg, codexRunCost, codexUsageTotals, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
@@ -508,10 +508,7 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
         : codexPrices
           ? codexRunCost(stdout, preset.prices, codexModelArg(parsed.rest) ?? model, before) ?? costFromOutput(stdout)
           : costFromOutput(stdout);
-      if (totals !== null && sessions !== null) {
-        try { sessions.write(totals); }
-        catch { /* the next resume of this thread is charged from the last record that landed */ }
-      }
+      if (totals !== null && sessions !== null) keepTotals(sessions, totals, line => { io.stderr(`${line}\n`); });
       // The cost is an estimate and goes to the lease the grant names now (the last member). The first lease is the fallback
       // when the grant is gone. A failed run is attributed before the grant closes, so the wrapper can report that member (KP18).
       const tracked = grant === null ? null : again.keypools.grantOf(grant.pool, grant.id);

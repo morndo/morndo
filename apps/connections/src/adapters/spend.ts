@@ -48,25 +48,6 @@ export function catalogTokenCost(stdout: string, prices: readonly CatalogPrice[]
   return roundDollars(total);
 }
 
-// A Codex key run (`codex exec --json`) reports usage on each turn.completed line.
-// cached_input_tokens is part of input_tokens, and output_tokens includes reasoning.
-// Those counts are the session's running totals, so the lease uses codexRunCost.
-// This still sums every completed line. No completed turn, no catalog price for the
-// model, or a bad count is null, so the caller keeps its fallback.
-export function codexTokenCost(stdout: string, prices: readonly CatalogPrice[], model: string, asOf = todayUtc()): number | null {
-  const turns = codexTurns(stdout);
-  if (turns === null) return null;
-  const price = priceTable(prices, asOf).get(model);
-  if (price === undefined) return null;
-  let total = 0;
-  for (const turn of turns) {
-    const part = charge({ input: turn.input - turn.cached, output: turn.output, cacheRead: turn.cached, cacheWrite: 0 }, price);
-    if (part === null) return null;
-    total += part;
-  }
-  return roundDollars(total);
-}
-
 export type CodexUsageTotals = { thread: string; input: number; cached: number; output: number };
 
 // The last turn.completed is the session's running total, and thread.started names the thread.
@@ -96,7 +77,7 @@ export function codexUsageTotals(stdout: string): CodexUsageTotals | null {
   return { thread, input: usage.input, cached: usage.cached, output: usage.output };
 }
 
-// Same price as codexTokenCost, on the tokens this run added. `before` is subtracted only when
+// Priced per 1M tokens on the tokens this run added. `before` is subtracted only when
 // it is the same thread and no count went down. A new session, no record, another thread, or a
 // reset is the whole total. A missing price or a bad count is null.
 export function codexRunCost(
@@ -135,23 +116,6 @@ export function codexModelArg(argv: readonly string[]): string | null {
 
 type CodexUsage = { input: number; cached: number; output: number };
 
-function codexTurns(stdout: string): CodexUsage[] | null {
-  const turns: CodexUsage[] = [];
-  for (const line of stdout.split("\n")) {
-    const trimmed = line.trim();
-    if (trimmed === "") continue;
-    let body: unknown;
-    try { body = JSON.parse(trimmed); }
-    catch { continue; }
-    if (typeof body !== "object" || body === null || !("type" in body) || body.type !== "turn.completed") continue;
-    if (!("usage" in body)) return null;
-    const usage = codexUsage(body.usage);
-    if (usage === null) return null;
-    turns.push(usage);
-  }
-  return turns.length === 0 ? null : turns;
-}
-
 function codexUsage(value: unknown): CodexUsage | null {
   if (typeof value !== "object" || value === null) return null;
   const input = countOf(value, "input_tokens");
@@ -161,7 +125,7 @@ function codexUsage(value: unknown): CodexUsage | null {
   return { input, cached, output };
 }
 
-function countOf(value: object, key: string): number | null {
+export function countOf(value: object, key: string): number | null {
   if (!(key in value)) return null;
   const count = (value as Record<string, unknown>)[key];
   if (typeof count !== "number" || !Number.isFinite(count) || count < 0) return null;
