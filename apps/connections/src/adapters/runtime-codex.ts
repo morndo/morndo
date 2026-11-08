@@ -71,11 +71,12 @@ export function codexConfig(profile: string, deny: readonly string[], auth: stri
 // and max (probe 2026-11-07). Only a trimmed, lowercased plain word reaches the file.
 const EFFORT_WORD = /^[a-z][a-z0-9_-]{0,31}$/;
 
-export function codexVendorToml(baseUrl: string, effort: string): string {
+export function codexVendorToml(baseUrl: string, effort: string, warn = (line: string) => { process.stderr.write(`${line}\n`); }): string {
   if (openAiApiHost(baseUrl)) return "";
   const lines = ['web_search = "disabled"'];
   const word = effort.trim().toLowerCase();
   if (word !== "" && EFFORT_WORD.test(word)) lines.push(`model_reasoning_effort = ${quoted(word)}`);
+  else if (effort.trim() !== "") warn(`codex effort ${JSON.stringify(effort.trim())} is not one plain word (letters, digits, - and _, up to 32); model_reasoning_effort is not set, so the model's own default effort is used`);
   return lines.join("\n");
 }
 

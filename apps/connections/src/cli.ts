@@ -23,9 +23,8 @@ import { HELPER_LIMIT, HELPER_TTL_MS } from "./adapters/runtime-limits.ts";
 import { streamRedactor } from "./adapters/redact.ts";
 import { acceptsPoolKey, FilterIncomplete, guardedRelay, watchPoolKeys } from "./pool-keys.ts";
 import { filterSocketTrusted, sendToFilter, serveFilterChannel } from "./filter-channel.ts";
-import { resumesSession, sessionOf } from "./adapters/codex-turn.ts";
-import { CodexSessionUsageFile } from "./adapters/codex-session-usage.ts";
-import { catalogTokenCost, codexAddedCost, codexModelArg, codexUsageTotals, costFromOutput, modelFromOutput, type CodexUsageTotals } from "./adapters/spend.ts";
+import { CodexSessionUsageFile, keepTotals } from "./adapters/codex-session-usage.ts";
+import { catalogTokenCost, codexModelArg, codexRunCost, codexUsageTotals, costFromOutput, modelFromOutput } from "./adapters/spend.ts";
 import { resetEngines } from "./adapters/engines-file.ts";
 import { commandShape } from "./adapters/engines-bin.ts";
 import { adoptLayer, gateBin, gateCommand, publishOwned } from "./application/engines-sync.ts";
@@ -374,9 +373,6 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
   let polling: ReturnType<typeof setInterval> | null = null;
   let channel: { close(): Promise<void> } | null = null;
   let stopped: Error | null = null;
-  const codexPrices = preset.spend.includes("token-price") && connection.runtime === "codex" && !subscription;
-  let start: CodexUsageTotals | null = null;
-  let resumed = false;
   // Every key this run's filter holds: the start set, whatever the watch learns, and whatever the helper hands across.
   const known: string[] = [];
   try {
@@ -464,11 +460,6 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
         polling = timer;
       }
     }
-    if (codexPrices) {
-      const thread = sessionOf(parsed.rest);
-      resumed = resumesSession(parsed.rest);
-      start = thread === null ? null : new CodexSessionUsageFile(join(home.dir, "codex-usage")).read(thread);
-    }
     const codexHelper = helperParts(keys.command, lease.id);
     const child = connection.runtime === "codex"
       ? await new CodexRuntime({
@@ -506,26 +497,18 @@ async function runLeased(home: Opened, parsed: Parsed, io: Io, prep: RunPrep, le
     try {
       const outcome = failure !== "" ? failure : status === 0 ? "done" : "failed";
       const catalogPrices = preset.spend.includes("token-price") && connection.runtime === "claude" && !subscription && isThirdPartyAnthropicBase(baseUrl, party);
-      // turn.completed is the session's running total. Its record is read before the child runs;
-      // after the run, settle updates it under the thread's lock and prices what this run added.
-      // A resume with no record is not charged the whole session again. A null price keeps the fallback.
+      const codexPrices = preset.spend.includes("token-price") && connection.runtime === "codex" && !subscription;
+      // turn.completed is the session's running total. A resumed thread is charged only what this
+      // run added; the new totals are kept so the next resume starts there. A null price keeps the fallback.
       const totals = codexPrices ? codexUsageTotals(stdout) : null;
       const sessions = totals === null ? null : new CodexSessionUsageFile(join(again.dir, "codex-usage"));
+      const before = totals === null || sessions === null ? null : sessions.read(totals.thread);
       const cost = catalogPrices
         ? catalogTokenCost(stdout, preset.prices, model)
         : codexPrices
-          ? (() => {
-            if (totals === null) return costFromOutput(stdout);
-            const modelId = codexModelArg(parsed.rest) ?? model;
-            let settled: number | null = null;
-            if (sessions !== null) {
-              try {
-                settled = sessions.settle(totals, { start, resumed }, added => codexAddedCost(added, preset.prices, modelId));
-              } catch { /* locked or broken record: the fallback is the run's own total_cost_usd */ }
-            }
-            return settled ?? costFromOutput(stdout);
-          })()
+          ? codexRunCost(stdout, preset.prices, codexModelArg(parsed.rest) ?? model, before) ?? costFromOutput(stdout)
           : costFromOutput(stdout);
+      if (totals !== null && sessions !== null) keepTotals(sessions, totals, line => { io.stderr(`${line}\n`); });
       // The cost is an estimate and goes to the lease the grant names now (the last member). The first lease is the fallback
       // when the grant is gone. A failed run is attributed before the grant closes, so the wrapper can report that member (KP18).
       const tracked = grant === null ? null : again.keypools.grantOf(grant.pool, grant.id);
