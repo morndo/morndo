@@ -231,6 +231,57 @@ describe("dropins.sh reads each drop-in once, with a status it checks", () => {
   });
 });
 
+describe("dropins.sh checks every read and temporary file it makes", () => {
+  const shim = (m: ReturnType<typeof machine>, name: string, body: string) => {
+    const bin = join(m.root, "bin");
+    mkdirSync(bin, { recursive: true });
+    writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+    return `${bin}:${process.env.PATH ?? ""}`;
+  };
+  const tmpOf = (m: ReturnType<typeof machine>) => { const t = join(m.root, "tmp"); mkdirSync(t, { recursive: true }); return t; };
+
+  it("stops, leaving the drop-in as it was and no temporary file, when reading the rewrite fails: that is not 'no ExecStart left'", () => {
+    const m = machine();
+    const bk = backupOf(m);
+    const realCat = spawnSync("sh", ["-c", "command -v cat"], { encoding: "utf8" }).stdout.trim();
+    const PATH = shim(m, "cat", `case "$*" in *c6-tmp*) echo "cat: read error" >&2; exit 1 ;; *) exec "${realCat}" "$@" ;; esac`);
+    const TMPDIR = tmpOf(m);
+    const r = runWith(m, { PATH, TMPDIR }, bk);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain("ship.conf");
+    expect(r.out).not.toContain("ExecStart taken out");
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+    expect(readdirSync(m.folder).sort()).toEqual(["limits.conf", "pre.conf", "ship.conf"]);
+    expect(readdirSync(TMPDIR)).toEqual([]);
+  });
+
+  it("stops with a message when it cannot make its temporary folder", () => {
+    const m = machine();
+    const PATH = shim(m, "mktemp", `echo "mktemp: failed" >&2; exit 1`);
+    for (const args of [["--list"], [backupOf(m)]]) {
+      const r = runWith(m, { PATH }, ...args);
+      expect(r.code, args.join(" ")).toBe(2);
+      expect(r.err).toContain("dropins.sh: could not read");
+      expect(r.out).not.toContain("ExecStart taken out");
+    }
+    expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+  });
+
+  it("leaves nothing in its temporary folder after a run, whether it succeeds or stops", () => {
+    const m = machine();
+    const bk = backupOf(m);
+    const TMPDIR = tmpOf(m);
+    expect(runWith(m, { TMPDIR }, "--list").code).toBe(0);
+    expect(readdirSync(TMPDIR)).toEqual([]);
+    const realCat = spawnSync("sh", ["-c", "command -v cat"], { encoding: "utf8" }).stdout.trim();
+    const PATH = shim(m, "cat", `case "$*" in *pre.conf*) exit 1 ;; *) exec "${realCat}" "$@" ;; esac`);
+    expect(runWith(m, { TMPDIR, PATH }, bk).code).toBe(2);
+    expect(readdirSync(TMPDIR)).toEqual([]);
+    expect(runWith(m, { TMPDIR }, bk).code).toBe(0);
+    expect(readdirSync(TMPDIR)).toEqual([]);
+  });
+});
+
 describe("dropins.sh and the drop-ins it must leave alone or cannot back up", () => {
   it("leaves a job unit's drop-in out, as backup.sh does", () => {
     const m = machine();

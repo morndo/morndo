@@ -211,6 +211,21 @@ describe("morndo-board in real tmux panes", () => {
     expect(r.err).toContain("TMUX_PANE is not set; cannot tell which lane this is");
     noToken(r);
   });
+
+  it("a window's name in TMUX_PANE, or the id of a pane that has closed, never names the manager's window", async () => {
+    tmux("new-window", "-d", "-t", "t", "-n", "gone", "sleep 300");
+    const gone = tmux("list-panes", "-a", "-F", "#{window_name} #{pane_id}").split("\n").map(l => l.split(" ")).find(([w]) => w === "gone")?.[1];
+    expect(gone, "the pane to close").toMatch(/^%[0-9]+$/);
+    tmux("kill-window", "-t", "t:gone");
+    for (const pane of ["manager", "t:manager", gone!]) {
+      seen.length = 0;
+      const r = await runProgram(PROGRAMS.board, ["show", "T-1"], { HOME: home(true), TMUX: tmuxEnv, TMUX_PANE: pane });
+      expect(seen.length, `${pane}: ${r.err}`).toBeGreaterThan(0);
+      expect(seen.every(x => x.authorization === `Bearer ${LANE_TOKEN}` && !x.lane), pane).toBe(true);
+      expect(r.err, pane).toContain("cannot tell which lane this is");
+      noToken(r);
+    }
+  });
 });
 
 // tmux is only asked when a command needs the lane, and only once; never for help. A stand-in tmux program that notes each call
