@@ -75,7 +75,7 @@ describe("codex vendor lines", () => {
     said.length = 0;
     codexVendorToml("https://api.mistral.ai/v1", 'high"\nsandbox_mode = "x"\u001b[31m', warn);
     expect(said.length).toBe(1);
-    expect([...said[0]!].some(ch => ch.charCodeAt(0) < 0x20 || ch.charCodeAt(0) === 0x7f)).toBe(false);   // the word is shown escaped, never as raw control characters
+    expect(/\p{Cc}/u.test(said[0] ?? "")).toBe(false);   // the word is shown escaped, never as raw control characters
     expect(said[0]).toContain("sandbox_mode");
   });
 
