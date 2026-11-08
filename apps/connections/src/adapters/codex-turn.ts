@@ -88,6 +88,11 @@ export function sessionOf(args: readonly string[]): string | null {
   return readResume(args)?.session ?? null;
 }
 
+// True when the argv is `exec resume …`, including `--last`.
+export function resumesSession(args: readonly string[]): boolean {
+  return readResume(args) !== null;
+}
+
 // `exec resume --last` (or --all) continues whichever session is newest in the store: it can't be placed on an account.
 export function resumesLast(args: readonly string[]): boolean {
   return readResume(args)?.last ?? false;

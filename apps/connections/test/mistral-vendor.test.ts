@@ -68,12 +68,6 @@ describe("codex vendor lines", () => {
 });
 
 describe("codex spend", () => {
-  const prices = [{ at: "2026-11-07", model: "zai-glm-5-3", input: 1.4, output: 4.4, cacheRead: 0.14 }];
-  const turn = (input: number, cached: number, output: number) => JSON.stringify({
-    type: "turn.completed",
-    usage: { input_tokens: input, cached_input_tokens: cached, output_tokens: output, reasoning_output_tokens: 0 },
-  });
-
   it("reads the model a codex argv names", () => {
     expect(codexModelArg(["exec", "--json", "-m", "zai-glm-5-3-flash", "-c", "x", "hi"])).toBe("zai-glm-5-3-flash");
     expect(codexModelArg(["exec", "--model", "zai-glm-5-3", "hi"])).toBe("zai-glm-5-3");
