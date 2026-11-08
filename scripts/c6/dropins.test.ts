@@ -168,6 +168,49 @@ describe("dropins.sh never hides an error", () => {
   });
 });
 
+// has_execstart must not lean on the awk's own exit status for a file it cannot read: gawk (END's exit overrides the status of
+// a file it only warned about), busybox awk and others answer 1, "no ExecStart", for it (T-897). Each awk the box has is put
+// first on PATH under the name `awk`; `warns-and-goes-on` is a stand-in that behaves that way whichever awk the box has.
+function awkVariants(): { name: string; make: (bin: string) => void }[] {
+  const find = (cmd: string) => spawnSync("sh", ["-c", `command -v ${cmd}`], { encoding: "utf8" }).stdout.trim();
+  const real = find("awk");
+  const variants: { name: string; make: (bin: string) => void }[] = [{
+    name: "warns-and-goes-on",
+    make: bin => writeFileSync(join(bin, "awk"), `#!/bin/sh\nfor last; do :; done\nif [ -f "$last" ] && [ ! -r "$last" ]; then echo "awk: warning: cannot open $last" >&2; exit 1; fi\nexec "${real}" "$@"\n`, { mode: 0o755 }),
+  }];
+  for (const [name, cmd] of [["gawk", "gawk"], ["mawk", "mawk"], ["busybox awk", "busybox"]] as const) {
+    const path = find(cmd);
+    if (path === "") continue;
+    if (cmd === "busybox" && spawnSync(path, ["awk", "BEGIN { exit 0 }"]).status !== 0) continue;
+    variants.push({ name, make: bin => symlinkSync(path, join(bin, "awk")) });
+  }
+  return variants;
+}
+
+describe("dropins.sh with an awk that does not fail on a file it cannot read", () => {
+  for (const variant of awkVariants()) {
+    it.skipIf(!NOT_ROOT)(`${variant.name}: an unreadable drop-in is exit status 2 with its name, never "no ExecStart"`, () => {
+      const m = machine();
+      const bk = backupOf(m);
+      const bin = join(m.root, "bin");
+      mkdirSync(bin);
+      variant.make(bin);
+      chmodSync(join(m.folder, "pre.conf"), 0o000);
+      try {
+        for (const args of [["--list"], [bk]]) {
+          const r = runWith(m, { PATH: `${bin}:${process.env.PATH ?? ""}` }, ...args);
+          expect(r.code, `${variant.name} ${args.join(" ")}`).toBe(2);
+          expect(r.err).toContain("pre.conf");
+          expect(r.out).not.toContain("ExecStart taken out");
+        }
+      } finally {
+        chmodSync(join(m.folder, "pre.conf"), 0o644);
+      }
+      expect(readFileSync(join(m.folder, "ship.conf"), "utf8")).toBe(SHIP);
+    });
+  }
+});
+
 describe("dropins.sh and the drop-ins it must leave alone or cannot back up", () => {
   it("leaves a job unit's drop-in out, as backup.sh does", () => {
     const m = machine();

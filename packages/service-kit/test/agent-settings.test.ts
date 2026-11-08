@@ -169,22 +169,68 @@ describe("laneFromTmux asks about the pane the command runs in", () => {
     expect(calls).toEqual([]);
   });
 
-  it("with TMUX but no TMUX_PANE it asks as before, without -t: an environment that dropped the pane keeps its lane", async () => {
+  it("with TMUX but no TMUX_PANE there is no lane and tmux is not asked: the session's active window is never used", async () => {
     const calls: string[][] = [];
-    expect(await laneFromTmux({ TMUX: "x" }, async args => { calls.push(args); return "builder"; })).toBe("builder");
-    expect(calls).toEqual([["display-message", "-p", "#W"]]);
+    expect(await laneFromTmux({ TMUX: "x" }, async args => { calls.push(args); return "manager"; })).toBeNull();
+    expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "  " }, async args => { calls.push(args); return "manager"; })).toBeNull();
+    expect(calls).toEqual([]);
   });
 
-  it("when the pane's own query fails, it asks as the old helper did, without -t", async () => {
+  it("when the pane's own query fails there is no lane, and no second query without -t is made", async () => {
     const calls: string[][] = [];
-    const lane = await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async args => { calls.push(args); return args.includes("-t") ? null : "builder\n"; });
-    expect(lane).toBe("builder");
-    expect(calls).toEqual([["display-message", "-p", "-t", "%5", "#W"], ["display-message", "-p", "#W"]]);
+    const lane = await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async args => { calls.push(args); return args.includes("-t") ? null : "manager\n"; });
+    expect(lane).toBeNull();
+    expect(calls).toEqual([["display-message", "-p", "-t", "%5", "#W"]]);
+  });
+
+  it("a pane query that answers blank is no lane either, and the active window is not asked", async () => {
+    const calls: string[][] = [];
+    const lane = await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async args => { calls.push(args); return args.includes("-t") ? "  \n" : "manager\n"; });
+    expect(lane).toBeNull();
+    expect(calls).toEqual([["display-message", "-p", "-t", "%5", "#W"]]);
   });
 
   it("when both queries fail or answer blank there is no lane", async () => {
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => null)).toBeNull();
     expect(await laneFromTmux({ TMUX: "x", TMUX_PANE: "%5" }, async () => "  \n")).toBeNull();
+  });
+});
+
+describe("withAgentSettings: a lane tmux cannot name never gets the manager's identity", () => {
+  // tmux answers "manager" to a question without -t (the session's active window is the manager's) and fails the one about the pane.
+  const activeIsManager = async (args: string[]) => (args.includes("-t") ? null : "manager\n");
+  const withTmux = (env: AgentEnv) => {
+    const m = io(FILES);
+    const made: AgentSettingsIo = { ...m.made, lane: () => laneFromTmux(env, activeIsManager) };
+    return { made, reads: m.reads };
+  };
+
+  it("TMUX_PANE unset while the manager's window is active: the lane token, no MORNDO_LANE, the manager's file never opened", async () => {
+    const { made, reads } = withTmux({ TMUX: "x" });
+    const got = await withAgentSettings({}, made, { fillLane: true });
+    expect(got.MORNDO_AGENT_TOKEN).not.toBe("fake-manager-token");
+    expect(got.MORNDO_AGENT_TOKEN).toBe("fake-lane-token");
+    expect(got.MORNDO_LANE).toBeUndefined();
+    expect(reads).not.toContain(`${DIR}/agent-manager.token`);
+  });
+
+  it("the pane query failing while the manager's window is active: the same", async () => {
+    const { made, reads } = withTmux({ TMUX: "x", TMUX_PANE: "%5" });
+    const got = await withAgentSettings({}, made, { fillLane: true });
+    expect(got.MORNDO_AGENT_TOKEN).not.toBe("fake-manager-token");
+    expect(got.MORNDO_LANE).toBeUndefined();
+    expect(reads).not.toContain(`${DIR}/agent-manager.token`);
+  });
+
+  it("a normal pane still resolves its own lane, the manager's pane the manager's token", async () => {
+    const own = (name: string) => async (args: string[]) => (args.includes("-t") && args.includes("%5") ? `${name}\n` : "manager\n");
+    for (const [name, token] of [["builder", "fake-lane-token"], ["manager", "fake-manager-token"]] as const) {
+      const env = { TMUX: "x", TMUX_PANE: "%5" };
+      const m = io(FILES);
+      const got = await withAgentSettings({}, { ...m.made, lane: () => laneFromTmux(env, own(name)) }, { fillLane: true });
+      expect(got.MORNDO_LANE, name).toBe(name);
+      expect(got.MORNDO_AGENT_TOKEN, name).toBe(token);
+    }
   });
 });
 
@@ -238,11 +284,11 @@ describe("withAgentSettings: it reads and asks only for what is missing", () => 
     expect(m.reads).toEqual([`${DIR}/agent-lanes.token`]);
   });
 
-  it("the window is asked once however often the lane is wanted (the pane query and its fallback, one time)", async () => {
+  it("the window is asked once however often the lane is wanted (one pane query, one time)", async () => {
     const asked: string[][] = [];
     const real = agentSettingsIo({ HOME: "/h", TMUX: "x", TMUX_PANE: "%1" }, async args => { asked.push(args); return null; });
     expect(await real.lane()).toBeNull();
     expect(await real.lane()).toBeNull();
-    expect(asked.length).toBe(2);
+    expect(asked).toEqual([["display-message", "-p", "-t", "%1", "#W"]]);
   });
 });
