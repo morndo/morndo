@@ -36,10 +36,10 @@ Observed with 0.161.0: while one resume of thread T was alive, a second `exec re
 
 Codex already keeps, per response, the tokens billed and the turn they belong to. Morndo stops keeping a second copy. After the child exits, with `fs/promises` and off the event loop:
 
-1. Keep from the run: spawn time, exit time, the thread id and the number `n` of `turn.started` lines from stdout, whether argv has `--json`, and the run's stderr. Without `--json` there is no thread id and no `n`: the cost is null and today's `costFromOutput(stdout)` fallback stays.
-2. Find the rollout by file name under `sessions`. Thread ids are UUIDv7, so the day directory is the id's timestamp and its two neighbours (the observed id decodes to its file's creation time). Read backwards in bounded chunks, at most 16 MiB, until the earliest selected `task_started`.
+1. Keep from the run: spawn time, exit time, the thread id (accepted only if it is a plain id, as ADR-0043 requires, before it names any path) and the number `n` of `turn.started` lines from stdout, whether argv has `--json`, and the run's stderr. Without `--json` there is no thread id and no `n`: the cost is null and today's `costFromOutput(stdout)` fallback stays.
+2. Find the rollout by file name under `sessions`. Thread ids are UUIDv7, so the day directory is the id's timestamp and its two neighbours (the observed id decodes to its file's creation time). Read backwards in bounded chunks, at most 16 MiB, until the nearest turn-level line before the earliest selected `task_started` (step 3).
 3. This run's turns are the `task_started` lines timestamped between spawn and exit; there must be exactly `n`. Timestamps give the coarse bound and `ordinal` the cut: no other `task_started` may lie between the first selected one and the nearest earlier turn-level line (`task_complete`, `turn_aborted` or `session_meta`). Its records are the `token_usage_record` lines of those turns for this thread.
-4. Each record is priced at the model its turn's `turn_context` names, using the catalog row for that model; no row is null. Cost is the existing formula (`(input − cached) × input + cached × cache-read + output × output`) on the summed `usage`, rounded once.
+4. Each record is priced at the model its turn's `turn_context` names, using the catalog row for that model; no row is null. Cost is the existing formula (`(input − cached) × input + cached × cache-read + output × output`) applied to each model's summed `usage`, added up and rounded once.
 5. The final total on stdout is a log-only cross-check against the last record's `thread_token_usage`. A difference is logged, never used to price, because a compaction rewrites totals.
 
 Why: nothing is shared between runs, so settle order cannot matter, and a later run that appended before this one settled lies outside the window. Codex's lock makes the window exclusive; at its edges (a predecessor finishing, a successor that started before Morndo saw the exit) the turn-count and ordinal checks give null, not a charge. The thread comes from stdout, so `--last` needs no special case. `CodexSessionUsageFile`, `keepTotals` and `codexRunCost` go away, and old `codex-usage/*.json` is ignored.
@@ -51,8 +51,7 @@ Why: nothing is shared between runs, so settle order cannot matter, and a later 
 | Two runs of one thread, settles in either order | Each is charged its own turn. The sum is the `usage` of all their records. |
 | Second live resume refused by Codex | Cost 0 only when argv has `--json`, stdout is empty, the exit is non-zero and the kept stderr has "already has an active writer": no request was made (today the reservation). Any other failure before `thread.started` is null. |
 | `exec resume --last` | The thread id is read from stdout. No read before the run. |
-| Turn ends in `turn.failed` | Priced from the responses that landed, like a completed turn. |
-| Codex killed mid-run (neither `turn.completed` nor `turn.failed`) | Null, so the reservation stands. A response in flight at the kill is billed but in neither source, so pricing the landed records would under-charge. |
+| Codex killed mid-run, or a turn ends in `turn.failed` (no `turn.completed`) | Null, so the reservation stands. A response in flight at the end is billed but in neither source, so pricing the landed records would under-charge. |
 | Morndo killed before settle | No pricing runs. The lease reaper closes at the reservation, as now. The rollout keeps the truth for a later reconcile, not in this build. |
 | Rollout missing, compressed, unparsable, over 16 MiB, wrong turn count, or no catalog row for a turn's model | Null, so the lease keeps the reservation, with one stderr line naming the cause. Never the whole total and never a Morndo record. |
 | The run spawned child threads (`collab_tool_call` on stdout) | Their responses are billed in other rollouts. Null for now. |
@@ -65,7 +64,7 @@ All fail on today's code. Fixtures are rollouts written by the pinned Codex, plu
 1. Run 1 and run 2 resume one thread in turn and run 2 has appended before run 1 settles: run 1 is charged only its turn, run 2 only its own, and the two sum to the `usage` of all their records, whichever settles first.
 2. A refused resume (`--json`, empty stdout, exit 1, the conflict text on stderr) is 0. The same without the conflict text, or without `--json`, is null.
 3. `--last` argv: priced from the stdout thread, with no read before the run.
-4. A `turn.failed` run is priced from the landed records. A killed run (`turn.started`, no end event) is null whatever landed.
+4. A run with no `turn.completed` (killed, or `turn.failed`) is null whatever landed.
 5. Missing, compressed, truncated-line, over-16-MiB, wrong-turn-count and no-price-for-the-turn-model rollouts each give null with a named cause. A `collab_tool_call` run gives null.
 6. A rollout where `thread_token_usage` drops after a compaction is charged by `usage` only, and the difference from the final total is logged.
 7. The read does not block the event loop: a 10 ms timer keeps ticking while a rollout with 50 MB appended after the run is read, the read ends at the cap, and the lookup lists at most three directories.
@@ -84,3 +83,6 @@ One line each; the build settles them with a fixture from the pinned Codex, not 
 6. A 16 MiB cap means a very large later append makes the earlier run null. Is a larger cap or an index worth it?
 7. Is the lock released before Morndo records the exit, so that n+1 turns appear in the window? The count gives null, but how often it happens is unmeasured.
 8. Delete the old `codex-usage/` directory in the build or a later change? A rollback to ADR-0043 code reads those older, lower bases and charges too much, not too little.
+9. A killed run leaves a `task_started` with no end line, so the next resume's ordinal check may find it and return null. Skip an unended turn that began before the spawn?
+10. `turn_context` may name a model id spelled differently from the catalog row. Match with `sameModel` and the preset's `idPatterns`, or fall back to the argv or plan model as today?
+11. A resume Codex refuses for another reason before any request (an unknown thread, `--last` finding nothing, a pool move) is null and keeps the reservation. Which stderr texts also count as "no request was made"?
