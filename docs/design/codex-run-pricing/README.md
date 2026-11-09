@@ -4,7 +4,7 @@
 
 ## 1. The problem
 
-A key run on the Codex runtime is charged the tokens it added to its thread. ADR-0043 does that by subtracting a per-thread record (`codex-usage/<thread>.json`) that each run writes at settle. Two defects remain after PR 242 removed the file lock:
+ADR-0043 charges a key run the tokens it added to its thread, by subtracting a per-thread record (`codex-usage/<thread>.json`) that each run writes at settle. Two defects remain after PR 242 dropped the file lock:
 
 - Two runs of one thread that settle out of order read the same base, or leave the record lower than the real total. The next run is then charged tokens twice.
 - `exec resume --last` has no thread id before the run, so no start snapshot can exist for it.
@@ -44,7 +44,7 @@ Codex already keeps, per response, the exact tokens billed and which turn they b
 4. Cost is the existing price formula (`(input − cached) × input + cached × cache-read + output × output`, model from the argv or the plan) applied to the sum of their `usage`, rounded once.
 5. When `E` is present it must equal the last record's `thread_token_usage`. If not, treat the record as unreadable.
 
-Why: nothing is shared between runs, so settle order cannot matter. The thread comes from stdout, so `--last` needs no special case. A total that goes down after a compaction costs nothing, because only the run's own responses are summed. The code and files of `CodexSessionUsageFile`, `keepTotals` and `codexRunCost` go away. Old `codex-usage/*.json` files are ignored.
+Why: nothing is shared between runs, so settle order cannot matter. The thread comes from stdout, so `--last` needs no special case. A total that goes down after a compaction costs nothing extra, because only the run's own responses are summed. `CodexSessionUsageFile`, `keepTotals` and `codexRunCost` go away, and old `codex-usage/*.json` files are ignored.
 
 ## 5. Failure cases
 
@@ -56,7 +56,6 @@ Why: nothing is shared between runs, so settle order cannot matter. The thread c
 | Codex killed mid-run (no `turn.completed`) | Price the records that landed. Log that the run was partial. A response still in flight when it died is in neither source and is not charged. |
 | Morndo killed before settle | No pricing runs. The lease reaper closes at the reservation, as now. The rollout keeps the truth for a later reconcile, which is not in this build. |
 | Rollout missing, compressed, unparsable, or `E` mismatch | Cost null, so the lease keeps the reservation, and one stderr line names the cause. Never the whole `E` (it double-charges a resume) and never a Morndo record. |
-| Codex changes the line format | The pinned-fixture test fails first. Until then the mismatch rule above stops a wrong charge. |
 | Two homes sharing one sessions directory | Not a key-run layout. If one is added, the build must detect records from turns it cannot attribute and return null. |
 
 ## 6. Tests the build writes first
