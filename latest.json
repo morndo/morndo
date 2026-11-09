@@ -1,9 +1,9 @@
 {
   "schema": 1,
   "channel": "latest",
-  "seq": 6,
-  "issuedAt": "2026-11-05T14:52:17Z",
-  "expiresAt": "2026-11-19T14:52:17Z",
+  "seq": 7,
+  "issuedAt": "2026-11-09T08:23:18Z",
+  "expiresAt": "2026-11-23T08:23:18Z",
   "keySetVersion": 1,
   "releases": [
     {
