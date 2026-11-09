@@ -37,37 +37,37 @@ Observed with 0.161.0: while one resume of thread T was alive, a second `exec re
 
 Codex already keeps, per response, the exact tokens billed and which turn they belong to. Morndo stops keeping a second copy. After the child exits, with `fs/promises` and off the event loop:
 
-1. Keep from the run: the spawn time, the exit time, the thread id and the number `n` of `turn.started` lines on stdout, and whether the argv has `--json`.
-2. Find the rollout. Thread ids are UUIDv7 (the id in the observed file decodes to its creation time, which matches the file's directory), so look in the day directory of that timestamp and its neighbours, not in a walk of the history. Read from the end in bounded chunks.
-3. This run's turns are the `task_started` lines timestamped between spawn and exit. There must be exactly `n`. Its records are the `token_usage_record` lines of those turns for this thread. Any other count is null (section 5).
+1. Keep from the run: the spawn time, the exit time, the thread id and the number `n` of `turn.started` lines on stdout, and whether the argv has `--json`. Without `--json` there is no thread id and no `n`, so the cost is null, as today.
+2. Find the rollout. Thread ids are UUIDv7 (the id in the observed file decodes to its creation time, which matches the file's directory), so look in the day directory of that timestamp and its neighbours, not in a walk of the history. Read backwards from the end in bounded chunks and stop at the first line timestamped before the spawn, so a later run's appended lines cost only their size.
+3. This run's turns are the `task_started` lines timestamped between spawn and exit, and there must be exactly `n` distinct ones (a build fixture with an auto-compaction decides whether compaction tasks count). Its records are the `token_usage_record` lines of those turns for this thread. The `turn_context` line of each turn names its model, which must be the one priced. Any other case is null (section 5).
 4. Cost is the existing formula (`(input − cached) × input + cached × cache-read + output × output`, model from the argv or the plan) on the sum of their `usage`, rounded once. `cache_write_input_tokens` stays unpriced, as in ADR-0043, because the catalog has no cache-write row. A build that adds one must price it here.
 5. The final total `E` on stdout is a log-only cross-check: a difference from the last record's `thread_token_usage` is logged, never used to price (a compaction rewrites totals).
 
-Why: nothing is shared between runs, so settle order cannot matter, and a later run that appended before this one settled is outside the window. Codex's lock makes the window exclusive. At its edges (a predecessor still finishing just after spawn, a successor starting just before the exit was seen) the `n` check gives null, never a wrong charge. The thread comes from stdout, so `--last` needs no special case. `CodexSessionUsageFile`, `keepTotals` and `codexRunCost` go away, and old `codex-usage/*.json` is ignored.
+Why: nothing is shared between runs, so settle order cannot matter, and a later run that appended before this one settled is outside the window. Codex's lock makes the window exclusive. At its edges (a clock step, a successor that started before Morndo saw the exit) the turn-count check gives null, never a wrong charge. The thread comes from stdout, so `--last` needs no special case. `CodexSessionUsageFile`, `keepTotals` and `codexRunCost` go away, and old `codex-usage/*.json` is ignored until a later change deletes it. A rollback to ADR-0043 code would read those older, lower bases and charge too much, not too little.
 
 ## 5. Failure cases
 
 | Case | Result |
 |---|---|
 | Two runs of one thread, settles in either order | Each is charged its own turn. The sum equals the thread's growth. |
-| Second live resume refused by Codex | Only when argv has `--json`, stdout has no `thread.started` and the exit is non-zero: no request was made, cost 0 (today the reservation). Without `--json` the cost stays null. |
+| Second live resume refused by Codex | Only when argv has `--json`, stdout has no `thread.started`, the exit is non-zero and stderr has "already has an active writer": no request was made, cost 0 (today the reservation). Any other failure before `thread.started` stays null. |
 | `exec resume --last` | The thread id is read from stdout. No read before the run. |
-| Codex killed mid-run | Price the records of the turns that landed, if there are exactly `n`; log it as partial. A response in flight at the kill is in neither source and is not charged. If a turn never reached the file, null. |
+| Codex killed mid-run (no `turn.completed`) | Null, so the reservation stands. A response in flight at the kill is billed but in neither source, so pricing the landed records would under-charge. |
 | Morndo killed before settle | No pricing runs. The lease reaper closes at the reservation, as now. The rollout keeps the truth for a later reconcile, not in this build. |
 | Rollout missing, compressed, unparsable, no day directory, or turn count not `n` | Null, so the lease keeps the reservation, with one stderr line naming the cause. Never the whole `E` and never a Morndo record. |
 | The run spawned child threads (`collab_tool_call` item on stdout) | Their responses are billed in other rollouts. Null for now; adding them is a follow-up. |
-| Two homes sharing one sessions directory | Not a key-run layout. The lock would not span them, so the build must return null if one is added. |
+| A pool moves a thread to a member with another home | Codex there does not know the thread and refuses before any request. The rollout is not found, so null. Two homes sharing one sessions directory is not a key-run layout; if one is added the lock does not span them, so the build must return null. |
 
 ## 6. Tests the build writes first
 
 All fail on today's code. Fixtures are rollouts written by the pinned Codex, plus stdout captures.
 
 1. Run 1 and run 2 resume one thread in turn, and run 2 has appended before run 1 settles: run 1 is charged only its turn, and the two sum to the thread's growth, whichever settles first.
-2. A refused resume (`--json`, empty stdout, exit 1) is 0. The same without `--json` is null.
+2. A refused resume (`--json`, empty stdout, exit 1, the conflict text on stderr) is 0. The same without the conflict text, or without `--json`, is null.
 3. `--last` argv: priced from the stdout thread, with no read before the run.
-4. Killed run (`turn.started`, no `turn.completed`, two of three records landed): two priced, logged partial. Killed before `task_started` landed: null.
-5. Missing, compressed, truncated-line and wrong-turn-count rollouts each give null with a named cause. A `collab_tool_call` run gives null.
+4. A killed run (`turn.started`, no `turn.completed`) is null, whatever landed in the rollout.
+5. Missing, compressed, truncated-line, wrong-turn-count and other-model rollouts each give null with a named cause. A `collab_tool_call` run gives null.
 6. A rollout where `thread_token_usage` drops after a compaction: charged by `usage` only, and the `E` difference is logged.
-7. The rollout read and pricing do not block the event loop: a 10 ms timer keeps ticking while a 50 MB rollout is read, only the tail is read, and the day lookup lists at most three directories.
+7. The rollout read and pricing do not block the event loop: a 10 ms timer keeps ticking while a 50 MB rollout is read, reading stops at the first line before the spawn even when a later run appended 50 MB, and the day lookup lists at most three directories.
 8. An unwritable or missing `codex-usage/` has no effect on the cost.
-9. A fixture from the pinned Codex parses, and its version equals the pin in `runtime-codex.ts`.
+9. A fixture from the pinned Codex parses, and its version equals a `CODEX_PINNED_VERSION` constant the build adds (today 0.161.0 is only in comments).
