@@ -232,7 +232,7 @@ try {
       const weak = avs.filter(a => contrast(a.color, a.bg) < 4.5).map(a => `${a.cls}: ${a.color} on ${a.bg} ${contrast(a.color, a.bg).toFixed(2)}:1`);
       assert(weak.length === 0, `avatar initials under 4.5:1:\n${[...new Set(weak)].join("\n")}`);
       const own = avs.find(a => /\bprincipal\b/.test(a.cls));
-      if (own) assert(own.bg === css(t.ink) && own.color === css(t.inkFg), `the principal's avatar ${own.color} on ${own.bg}, want ink-fg on ink`);
+      if (own) assert(own.bg === css(t.fill) && own.color === css(t.text), `the principal's avatar ${own.color} on ${own.bg}, want text on fill`);
     });
 
     await check(`${scheme}: a decision's primary button is ink and turns ink-hover under the pointer`, async () => {

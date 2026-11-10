@@ -12,6 +12,8 @@
   import { present, withoutFileNotes } from "../desktop/present.ts";
   import { canCancel, canRetry, type OutboxRecord } from "../outbox/state.ts";
   import { deliveryNote, sendLabel, sendReason } from "../outbox/words.ts";
+  import { avatarLook } from "../avatar-look.ts";
+  import MorndoMark from "../MorndoMark.svelte";
   import { headline, sinceLabel, spanLabel } from "./words.ts";
 
   let { worker, name, view, mark, now, outgoing, loading, note, onReply, onOpen, onRetry, onDiscard, onVerify, onCancel = () => {} }: {
@@ -46,7 +48,8 @@
 </script>
 
 <header class="card-head">
-  <span class="avatar quiet" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+  {#if avatarLook(name, "agent") === "manager"}<span class="avatar quiet mark" aria-hidden="true"><MorndoMark size={36} /></span>
+  {:else}<span class="avatar quiet" aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>{/if}
   <span class="who"><b>{name}</b><span>{worker?.title ?? worker?.location ?? ""}{worker ? ` · ${worker.state === "active" ? "working" : `quiet ${spanLabel(now - worker.changedAt)}`}` : ""}</span></span>
   {#if worker?.needsYou}<span class="chip bad">Needs you</span>
   {:else if view?.claim === "says_done"}<span class="chip warn">Says done</span>{/if}
@@ -74,7 +77,8 @@
           <!-- Not listed on a card (counted above); kept for a hub older than this rule. -->
         {:else}
           <li class="msg" data-msg={m.id}>
-            <span class="avatar sm" class:quiet={m.author.kind !== "principal"} aria-hidden="true">{(m.author.kind === "principal" ? "You" : m.author.name).slice(0, 1).toUpperCase()}</span>
+            {#if avatarLook(m.author.name, m.author.kind) === "manager"}<span class="avatar sm mark" aria-hidden="true"><MorndoMark size={22} /></span>
+            {:else}<span class="avatar sm quiet" aria-hidden="true">{(m.author.kind === "principal" ? "You" : m.author.name).slice(0, 1).toUpperCase()}</span>{/if}
             <div>
               <button class="open" onclick={() => onOpen(m.id)} aria-label="Open this message from {m.author.kind === 'principal' ? 'you' : m.author.name} in the conversation">
                 <b>{m.author.kind === "principal" ? "You" : m.author.name}</b><time>{clock(m.at)}</time>
@@ -100,7 +104,7 @@
         {@const label = sendLabel(o, outgoing, now)}
         {@const stuck = o.state === "failed" || o.state === "uncertain"}
         <li class="msg mine" data-outgoing={o.state}>
-          <span class="avatar sm" aria-hidden="true">Y</span>
+          <span class="avatar sm quiet" aria-hidden="true">Y</span>
           <div>
             <p class="who-line"><b>You</b><time>{label}</time></p>
             <p class="text">{o.text}</p>

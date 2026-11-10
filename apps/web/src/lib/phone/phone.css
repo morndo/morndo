@@ -45,6 +45,11 @@
 }
 .phone .avatar.quiet { background: var(--fill); color: var(--fg); }
 .phone .avatar.sm { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+/* The manager's avatar: the Morndo mark, the page colour behind it (the mark's cut-outs show it through). The svg fills
+   the tile and clips its own square corners to the tile's shape (radius inherited); the tile itself never clips, so a
+   child like the chat list's live dot keeps its corner. */
+.phone .avatar.mark { background: var(--bg); color: var(--ink); }
+.phone .avatar.mark > svg { display: block; width: 100%; height: 100%; border-radius: inherit; overflow: hidden; }
 
 /* Buttons: at least 44px high (the design's done criterion 16; Apple's minimum hit target). */
 .phone .pbtn {

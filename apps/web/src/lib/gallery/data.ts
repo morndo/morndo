@@ -56,6 +56,19 @@ export function conversation(now: number) {
   return { messages, readUpTo: now - 30 * MIN };
 }
 
+// The manager's conversation (chat-authors): the manager wears the Morndo mark, "You" is the quiet fill with a person
+// icon — never the mark's ink. Two of its answers sit within a minute, so they group under one header, as in a chat.
+export function managerChat(now: number) {
+  const chief = { kind: "agent", name: "manager" } as const;
+  return [
+    msg(now - 9 * MIN, you, "Can we ship the small release tonight?"),
+    msg(now - 3 * MIN, chief, "Yes — the checklist is green and the build runs on the demo machine."),
+    msg(now - 3 * MIN + 30_000, chief, "I'll tag it once the last test run finishes."),
+    msg(now - 2 * MIN, you, "Go ahead, ship it."),
+    msg(now - 1 * MIN, chief, "Shipped and announced. The changelog is up."),
+  ];
+}
+
 // One outgoing message in each send state (S8), oldest first, so none is held behind a failed one but the last.
 export function sends(now: number): Outgoing[] {
   const base = { worker: `${MARK}-search`, workerName: "search", uploads: [], seen: "", images: [] as string[], files: [] };

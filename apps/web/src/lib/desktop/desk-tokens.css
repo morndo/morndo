@@ -29,8 +29,9 @@
   --selected: var(--morndo-selection);
   --selected-fg: var(--morndo-text);
   --selected-bar: var(--morndo-ink);             /* the 3px leading bar is the selection's 3:1 cue; the tint only supports it */
-  --you: var(--morndo-ink);                      /* the principal's avatar (COLOR.md 10) */
-  --you-fg: var(--morndo-ink-fg);
+  --you: var(--morndo-fill);                     /* the principal's avatar: the quiet fill, not ink — the mark's (COLOR.md 10) */
+  --you-fg: var(--morndo-text);
+  --mark: var(--morndo-ink);                     /* the Morndo mark: the manager's avatar */
   --manager: var(--morndo-text-muted);
   --badge: var(--morndo-danger);
   --count-bg: var(--morndo-ink);

@@ -1,26 +1,34 @@
 <script lang="ts">
-  // A rounded-square avatar like Slack's (36px, radius 22.222% clamped to 4..12px), shaded from the name.
-  // Ink has no decorative hues (packages/brand/COLOR.md 10), so a name picks one of four neutral tiles instead (.t0-.t3).
+  // A rounded-square avatar like Slack's (36px, radius 22.222% clamped to 4..12px). Who it shows is avatar-look.ts's:
+  // the manager wears the Morndo mark, and "You" is a quiet fill tile with a person icon — never ink, which is the
+  // mark's, so the owner's own messages never look like the manager's (chat-authors, COLOR.md 10). Ink has no decorative
+  // hues, so a lane picks one of four neutral tiles instead (.t0-.t3).
   import Bot from "@lucide/svelte/icons/bot";
   import Info from "@lucide/svelte/icons/info";
+  import UserRound from "@lucide/svelte/icons/user-round";
   import type { AuthorKind } from "@morndo/domain";
+  import { avatarLook } from "../avatar-look.ts";
+  import MorndoMark from "../MorndoMark.svelte";
 
   let { name, kind = "agent", size = 36 }: { name: string; kind?: AuthorKind; size?: number } = $props();
 
+  const look = $derived(avatarLook(name, kind));
   const TILES = 4;
   const tile = $derived([...name].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7) % TILES);
   const initials = $derived(name.replace(/^#/, "").split(/[\s_-]+/).filter(Boolean).slice(0, 2).map(p => p[0]?.toUpperCase()).join("") || "?");
 </script>
 
 <span
-  class="av {kind} t{tile}"
+  class="av {look} t{tile}"
   style:width="{size}px"
   style:height="{size}px"
   style:font-size="{Math.round(size * 0.42)}px"
   aria-hidden="true"
 >
-  {#if kind === "system"}<Info size={Math.round(size * 0.55)} />
-  {:else if kind === "agent" && size >= 28}<Bot size={Math.round(size * 0.5)} />
+  {#if look === "manager"}<MorndoMark {size} />
+  {:else if look === "principal"}<UserRound size={Math.round(size * 0.6)} />
+  {:else if look === "system"}<Info size={Math.round(size * 0.55)} />
+  {:else if look === "agent" && size >= 28}<Bot size={Math.round(size * 0.5)} />
   {:else}{initials}{/if}
 </span>
 
@@ -37,6 +45,7 @@
   .t1 { --tile: light-dark(var(--morndo-neutral-700), var(--morndo-neutral-400)); --initials: var(--morndo-ink-fg); }
   .t2 { --tile: light-dark(var(--morndo-neutral-800), var(--morndo-neutral-300)); --initials: var(--morndo-ink-fg); }
   .t3 { --tile: light-dark(var(--morndo-neutral-900), var(--morndo-neutral-400)); --initials: var(--morndo-ink-fg); }
+  .av.manager { background: var(--main-bg); color: var(--mark); }
   .av.principal { background: var(--you); color: var(--you-fg); }
   .av.peer { background: var(--manager); color: var(--main-bg); }
   .av.system { background: var(--muted-bg); color: var(--text); }

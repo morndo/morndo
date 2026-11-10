@@ -10,7 +10,7 @@
   import TopNav from "../desktop/TopNav.svelte";
   import "../desktop/desk-tokens.css";
   import { REFUSALS } from "../desktop/decisions.ts";
-  import { conversation, decisions, roster, sends } from "./data.ts";
+  import { conversation, decisions, managerChat, roster, sends } from "./data.ts";
 
   const now = Date.now();
   const r = roster(now);
@@ -88,6 +88,15 @@
       <MessageList worker={search} messages={chat.messages} loading={false} outgoing={[]} displayName="search"
         prefs={r.prefsOf("search")} decisionOf={() => undefined} card={noCard} focus={null}
         onRetry={noop} onDiscard={noop} onVerify={noop} onEdit={noop} dividerMark={chat.readUpTo} detached={true} newWhileDetached={3} />
+    </div>
+  </section>
+
+  <section data-shot="manager-chat">
+    <h2>The manager's conversation: your messages and its</h2>
+    <div class="frame">
+      <MessageList worker={r.manager} messages={managerChat(now)} loading={false} outgoing={[]} displayName="Manager"
+        prefs={r.prefsOf("manager")} decisionOf={() => undefined} card={noCard} focus={null}
+        onRetry={noop} onDiscard={noop} onVerify={noop} onEdit={noop} dividerMark={null} />
     </div>
   </section>
 
