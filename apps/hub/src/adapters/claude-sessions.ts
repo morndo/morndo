@@ -92,6 +92,8 @@ function questionParts(input: unknown): QuestionPart[] {
 // A long paste, as the agent CLI writes it: `<pasted_content id="x">`, the text, `</pasted_content id="x">`. The hub's own
 // typing is a bracketed paste (tmux.ts), so a long message from the app arrives like this.
 const PASTED = /^<pasted_content id="([^"\n]+)">\n([\s\S]*)\n<\/pasted_content id="\1">$/;
+// A new machine's tag is added here.
+const MACHINE_TAGS = /^\[(hourly-check|review-done|digest-timer|manager-guard|box-health|glm-done|board-inbox|board-stale|board-merged)\b[^\]\n]*\]/;
 // The prompt without its wrapper, when one wrapper with matching ids is the whole prompt; anything else as written.
 const unwrapped = (text: string) => PASTED.exec(text)?.[2]?.trim() ?? text;
 // The manager's inbox (ADR-0010) types a line that carries no id of its own with a short visible one at the end of its
@@ -117,7 +119,7 @@ export function parseLine(line: Line, agent: string, pendingQuestions: Set<strin
     const origin = (source ?? {}) as { kind?: string };
     const text = unmarked(unwrapped(raw.trim()));
     const say = (author: Author, body: string, kind: "text" | "event" = "text") => out.push({ id, at: when, author, kind, text: body });
-    const tag = /^\[([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b[^\]\n]*\]/.exec(text)?.[1];
+    const tag = MACHINE_TAGS.exec(text)?.[1];
     if (isCompactSummary) say({ kind: "system", name: "Morndo" }, "The conversation was compacted.", "event");
     else if (origin.kind === "peer") {
       const from = /from-name="([^"]+)"/.exec(text)?.[1] ?? "another session";
@@ -125,8 +127,8 @@ export function parseLine(line: Line, agent: string, pendingQuestions: Set<strin
     } else if (isMeta) { /* system reminders and similar: not part of the conversation */ }
     else if (origin.kind === "task-notification") say({ kind: "system", name: "Background task" }, between(text, "summary") ?? "A background task changed state.", "event");
     else if (text.startsWith("[lane-event]")) say({ kind: "system", name: "kira" }, "Lane events arrived.", "event");
-    // These are the notices this box's machines type (a Mac session's heads-up; timers and tools such as
-    // hourly-check, review-done, digest-timer, manager-guard, box-health), filed as the system's like lane events.
+    // These are the notices this box's machines type (a Mac session's heads-up; an allowlist of machine tags),
+    // filed as the system's like lane events.
     // A plain one-word tag such as [reminder] or [tap …] stays the owner's.
     else if (/^\[From the owner'?s? Mac session\b/.test(text)) say({ kind: "system", name: "Mac session" }, text, "event");
     else if (tag) say({ kind: "system", name: tag }, text, "event");
