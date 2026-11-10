@@ -1,4 +1,4 @@
-// The owner, 2026-11-10: in the chat it was hard to tell when he wrote a message and when the manager did. Every
+// The owner, 2026-11-10: in the chat it was hard to tell the owner's own messages from the manager's. Every
 // avatar was a dark tile, and "You" an ink tile like the rest. The manager now wears the Morndo mark, on the desktop and
 // on the phone, and "You" is no longer the mark's colour. Real clients in headless Chromium, fake feed (harness.ts).
 import type { Locator, Page } from "playwright";

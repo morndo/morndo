@@ -1,4 +1,4 @@
-// Who an avatar shows (the owner, 2026-11-10: in the chat it was hard to tell his own messages from the manager's).
+// Who an avatar shows (the owner, 2026-11-10: in the chat it was hard to tell the owner's own messages from the manager's).
 // The manager wears the Morndo mark wherever it appears; everyone else keeps a look of their own.
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
