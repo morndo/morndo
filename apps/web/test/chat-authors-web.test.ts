@@ -6,7 +6,16 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { MARK_PATH } from "../src/lib/avatar-look.ts";
 import { fakeFeed, startWeb, type FeedOptions, type Web } from "./harness.ts";
 
+// The brand's colour tokens, loaded as the app's layout loads them (routes/+layout.svelte): without them every colour
+// the avatars use is unset, and two avatars would both be transparent.
+const DESKTOP_PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+  import "@morndo/brand/tokens.css";
+  import { mount } from "svelte";
+  import Desktop from "/src/lib/desktop/Desktop.svelte";
+  mount(Desktop, { target: document.body, props: { device: "dev-1", office: "Test office", verifiedAt: Date.now(), policy: { stay: "7d", stepUp: "1h" }, desktop: false, onSignedOut: () => {} } });
+</script></body></html>`;
 const PHONE_PAGE = `<!doctype html><html><head><meta charset="utf-8"></head><body><script type="module">
+  import "@morndo/brand/tokens.css";
   import { mount } from "svelte";
   import Phone from "/src/lib/phone/Phone.svelte";
   mount(Phone, { target: document.body, props: { device: "phone-1", verifiedAt: Date.now(), policy: { stay: "7d", stepUp: "1h" }, onSignedOut: () => {} } });
@@ -25,7 +34,7 @@ let web: Web;
 let phone: Web;
 let tab: Page;
 let errors: string[];
-beforeAll(async () => { [web, phone] = await Promise.all([startWeb(), startWeb(PHONE_PAGE)]); }, 60_000);
+beforeAll(async () => { [web, phone] = await Promise.all([startWeb(DESKTOP_PAGE), startWeb(PHONE_PAGE)]); }, 60_000);
 afterAll(async () => { await Promise.all([web?.close(), phone?.close()]); });
 afterEach(async () => { await tab.context().close(); });
 
@@ -54,6 +63,8 @@ describe("the desktop", () => {
     const manager = await look(theirs.locator(".gutter .av"));
     const markFill = await theirs.locator(".gutter").locator(MARK).evaluate(e => getComputedStyle(e).fill);
     const you = await look(mine.locator(".gutter .av"));
+    expect(you.bg).not.toBe("rgba(0, 0, 0, 0)");
+    expect(markFill).not.toBe("rgba(0, 0, 0, 0)");
     expect(you.bg).not.toBe(markFill);
     expect(you.bg).not.toBe(manager.bg);
     expect(errors).toEqual([]);
