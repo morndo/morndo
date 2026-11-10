@@ -40,3 +40,17 @@ describe("a notice a machine typed into the pane is the system's, not the owner'
     }
   });
 });
+
+describe("only the machines' own tags are the system's", () => {
+  it("the owner's own hyphenated openings stay the owner's", () => {
+    for (const t of ["[to-do] buy milk", "[ny-12] ship it", "[follow-up 2] call the venue", "[demo-app] the login is slow"]) {
+      expect(one(t)).toMatchObject({ author: { kind: "principal", name: "You" } });
+    }
+  });
+
+  it("every machine tag seen on the manager's lane is the system's", () => {
+    for (const tag of ["hourly-check", "review-done", "digest-timer", "manager-guard", "box-health", "glm-done", "board-inbox", "board-stale", "board-merged"]) {
+      expect(one(`[${tag} 10:00] a note`)).toMatchObject({ kind: "event", author: { kind: "system", name: tag } });
+    }
+  });
+});
