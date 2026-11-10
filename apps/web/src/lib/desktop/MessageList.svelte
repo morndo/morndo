@@ -345,6 +345,8 @@
   .line span:nth-child(2) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .line time { visibility: hidden; margin-left: auto; }
   .line:hover time { visibility: visible; }
+  .line.ev { align-items: flex-start; }
+  .line.ev span:nth-child(2) { flex: 1; overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
   .ev strong { color: var(--text); font-weight: 700; }
   .ev.tap { color: var(--text); }
   .ev.tap .gut { color: var(--ok-fg); }
