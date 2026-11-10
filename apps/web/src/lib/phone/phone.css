@@ -45,6 +45,8 @@
 }
 .phone .avatar.quiet { background: var(--fill); color: var(--fg); }
 .phone .avatar.sm { width: 22px; height: 22px; border-radius: 6px; font-size: 11px; }
+/* The manager's avatar: the Morndo mark, the page colour behind it (the mark's cut-outs show it through). */
+.phone .avatar.mark { background: var(--bg); color: var(--ink); overflow: hidden; }
 
 /* Buttons: at least 44px high (the design's done criterion 16; Apple's minimum hit target). */
 .phone .pbtn {

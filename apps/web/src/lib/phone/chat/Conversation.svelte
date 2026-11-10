@@ -15,6 +15,8 @@
   import Clock from "@lucide/svelte/icons/clock-3";
   import CircleAlert from "@lucide/svelte/icons/circle-alert";
   import { UPLOAD_ACCEPT, type Message, type RosterEntry } from "@morndo/domain";
+  import { avatarLook } from "../../avatar-look.ts";
+  import MorndoMark from "../../MorndoMark.svelte";
   import { beginAttachments, fileSize, fileType, removalNote, settleAttachment, type AttachmentRow, type SentFile } from "../../attach.ts";
   import { uploadFile } from "../../api.ts";
   import type { LiveFeed } from "../../feed.svelte.ts";
@@ -185,7 +187,7 @@
 <section class="convo" class:on-desk={view === "desktop"} bind:this={root} aria-label="Conversation with {name}">
   <header class="bar">
     <button class="back" onclick={onBack} aria-label="Back to chats"><ChevronLeft size={26} /></button>
-    <span class="avatar" class:quiet={worker.name !== "manager"} aria-hidden="true">{name.slice(0, 1).toUpperCase()}</span>
+    <span class="avatar" class:quiet={worker.name !== "manager"} class:mark={avatarLook(name, "agent") === "manager"} aria-hidden="true">{#if avatarLook(name, "agent") === "manager"}<MorndoMark size={36} />{:else}{name.slice(0, 1).toUpperCase()}{/if}</span>
     <span class="who"><b>{name}</b><span class="sub {absent ? "idle" : st.kind}">{absent ? "Not running" : st.label}</span></span>
     {#if !absent}
       <div class="seg" role="tablist" aria-label="Show">

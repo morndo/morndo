@@ -23,6 +23,8 @@
   import SignInSheet from "../signin/SignInSheet.svelte";
   import { signinApi, type SignInTarget } from "../signin/api.ts";
   import { explain } from "../api.ts";
+  import { avatarLook } from "../avatar-look.ts";
+  import MorndoMark from "../MorndoMark.svelte";
 
   let { item, primed, index, of, now, answering, refusal, note, onPick, onUndo, onVerifyAgain, onTryAgain, onScreen, onNext, onOpenBrief }: {
     item: DecisionItem | null; primed: boolean; index: number; of: number; now: number;
@@ -100,7 +102,8 @@
 </script>
 
 <header class="card-head">
-  <span class="avatar" aria-hidden="true">{askerName.slice(0, 1).toUpperCase()}</span>
+  {#if avatarLook(askerName, "peer") === "manager"}<span class="avatar mark" aria-hidden="true"><MorndoMark size={36} /></span>
+  {:else}<span class="avatar" aria-hidden="true">{askerName.slice(0, 1).toUpperCase()}</span>{/if}
   <span class="who"><b>{askerName} asks you</b><span>{item?.project ? `#${item.project} · ` : ""}{item ? ago(item.askedAt, now) : ""}</span></span>
   {#if item?.blocking && open}<span class="chip bad">Blocking</span>{/if}
 </header>

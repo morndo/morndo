@@ -65,7 +65,7 @@ The neutral ramp is also available as `--morndo-neutral-50` to `--morndo-neutral
 10. **Avatars use the neutral ramp, never hues.**
     - Light: tiles 600-900 with white initials.
     - Dark: tiles 300 and 400 with `--morndo-ink-fg` initials, and 600 with `--morndo-text` initials. Skip 500: initials fail on it in both colours.
-    - The principal: an `--morndo-ink` tile with `--morndo-ink-fg` initials.
+    - The manager wears the Morndo mark, `--morndo-ink` on the page colour; the principal is a `--morndo-fill` tile with a person icon in `--morndo-text` — not ink, which is the mark's, so your own messages never look like the manager's.
 11. **Recessed areas** (a modal body under cards, the composer bar) use `--morndo-bg` in both themes. Cards on them stay `--morndo-surface` with a `--morndo-divider` edge. In dark, elevation means lighter, so a card stays above its surroundings.
 
 ## Why (research summary)

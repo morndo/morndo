@@ -7,6 +7,8 @@
   import Pin from "@lucide/svelte/icons/pin";
   import BellOff from "@lucide/svelte/icons/bell-off";
   import type { ConnState } from "../../feed.svelte.ts";
+  import { avatarLook } from "../../avatar-look.ts";
+  import MorndoMark from "../../MorndoMark.svelte";
   import { when, type ChatListRow } from "./rows.ts";
 
   let { rows, status, now, decisions, digestWaiting, onOpen, onDecide, onDigest, onSettings }: {
@@ -35,7 +37,7 @@
       <li>
         <button class="row" class:unread={r.unread > 0} data-chat={r.name} onclick={() => onOpen(r.worker)}
           aria-label="{r.display}{r.offline ? ', offline' : ''}{r.unread ? `, ${r.unread} unread` : ''}{r.needsYou ? ', waits for you' : ''}">
-          <span class="avatar" class:quiet={r.name !== "manager"} aria-hidden="true">{r.display.slice(0, 1).toUpperCase()}{#if r.active}<i class="live"></i>{/if}</span>
+          <span class="avatar" class:quiet={r.name !== "manager"} class:mark={avatarLook(r.display, "agent") === "manager"} aria-hidden="true">{#if avatarLook(r.display, "agent") === "manager"}<MorndoMark size={48} />{:else}{r.display.slice(0, 1).toUpperCase()}{/if}{#if r.active}<i class="live"></i>{/if}</span>
           <span class="name">{r.display}{#if r.name === "manager"}<Pin size={13} aria-label="pinned" />{/if}{#if r.muted}<BellOff size={13} aria-label="muted" />{/if}</span>
           <time>{r.lastAt ? when(r.lastAt, now) : ""}</time>
           <span class="pre">{#if r.offline}<b class="off">Offline</b>{#if r.needsYou || r.preview}{" · "}{/if}{/if}{#if r.needsYou}<b class="waits">Waits for you</b>{" · "}{/if}{r.preview}</span>
