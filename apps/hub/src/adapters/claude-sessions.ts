@@ -117,6 +117,7 @@ export function parseLine(line: Line, agent: string, pendingQuestions: Set<strin
     const origin = (source ?? {}) as { kind?: string };
     const text = unmarked(unwrapped(raw.trim()));
     const say = (author: Author, body: string, kind: "text" | "event" = "text") => out.push({ id, at: when, author, kind, text: body });
+    const tag = /^\[([a-z][a-z0-9]*(?:-[a-z0-9]+)+)\b[^\]\n]*\]/.exec(text)?.[1];
     if (isCompactSummary) say({ kind: "system", name: "Morndo" }, "The conversation was compacted.", "event");
     else if (origin.kind === "peer") {
       const from = /from-name="([^"]+)"/.exec(text)?.[1] ?? "another session";
@@ -124,6 +125,11 @@ export function parseLine(line: Line, agent: string, pendingQuestions: Set<strin
     } else if (isMeta) { /* system reminders and similar: not part of the conversation */ }
     else if (origin.kind === "task-notification") say({ kind: "system", name: "Background task" }, between(text, "summary") ?? "A background task changed state.", "event");
     else if (text.startsWith("[lane-event]")) say({ kind: "system", name: "kira" }, "Lane events arrived.", "event");
+    // These are the notices this box's machines type (a Mac session's heads-up; timers and tools such as
+    // hourly-check, review-done, digest-timer, manager-guard, box-health), filed as the system's like lane events.
+    // A plain one-word tag such as [reminder] or [tap …] stays the owner's.
+    else if (/^\[From the owner'?s? Mac session\b/.test(text)) say({ kind: "system", name: "Mac session" }, text, "event");
+    else if (tag) say({ kind: "system", name: tag }, text, "event");
     else if (text.startsWith("<command-name>")) say({ kind: "principal", name: "You" }, between(text, "command-name") ?? text, "event");
     else if (text.startsWith("<local-command") || text.startsWith("<bash-")) { /* local command output */ }
     else if (/^Manager:\s/.test(text)) say({ kind: "peer", name: "Manager" }, text.replace(/^Manager:\s*/, ""));
