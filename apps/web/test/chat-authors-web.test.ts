@@ -85,3 +85,25 @@ describe("the phone", () => {
     expect(errors).toEqual([]);
   });
 });
+
+describe("the phone's manager avatar", () => {
+  it("shows the whole mark inside its tile, and the live dot stays on top of it while the manager works", { timeout: 30_000 }, async () => {
+    await open(390);
+    const row = tab.locator('[data-chat="manager"]');
+    await row.waitFor();
+    await tab.evaluate(() => (globalThis as unknown as { __feedPush: (m: unknown) => void }).__feedPush({ t: "events", events: [
+      { epoch: "e1", seq: 1, at: 1, body: { type: "WorkerBecameActive", workerId: "%3", changedAt: 1 } }] }));
+    const dot = row.locator(".live");
+    await dot.waitFor();
+    const tile = (await row.locator(".avatar").boundingBox())!;
+    const mark = (await row.locator(".avatar svg").boundingBox())!;
+    expect(Math.abs(mark.x - tile.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(mark.y - tile.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(mark.width - tile.width)).toBeLessThanOrEqual(1);
+    expect(Math.abs(mark.height - tile.height)).toBeLessThanOrEqual(1);
+    const d = (await dot.boundingBox())!;
+    const onTop = await tab.evaluate(([x, y]) => document.elementFromPoint(x, y)?.classList.contains("live") ?? false, [d.x + d.width * 0.85, d.y + d.height * 0.85] as const);
+    expect(onTop).toBe(true);
+    expect(errors).toEqual([]);
+  });
+});
