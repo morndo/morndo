@@ -43,7 +43,7 @@ I'm a software engineer at a startup, and we live in Slack all day. When I thoug
 
 ## Status
 
-Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Releases are verified before anything is installed (signed files, and an updater that checks them), but none is published yet; verifying an agent's work, the proof the worker didn't produce, is built and in a trial period: the board checks a task's pull request and CI itself and, for now, only records the Dones it would have refused (setup: `docs/agents/board.md`). This is one person's project, a few weeks old, and it is not installable by anyone else yet: from source today; from the first release by the commands in Install and update.
+Today the desktop, the phone catch-up, decisions with passkeys, push and the multi-machine fleet work on my own setup. Releases are verified before anything is installed (signed files, and an updater that checks them), and they are published; my own machines are not on the published install yet (moving them is the next step; so far the install has been rehearsed on throwaway machines only), and verifying an agent's work, the proof the worker didn't produce, is built and in a trial period: the board checks a task's pull request and CI itself and, for now, only records the Dones it would have refused (setup: `docs/agents/board.md`). This is one person's project, a few weeks old: install a release by the commands in Install and update, or run it from source.
 
 ## Run locally
 
@@ -55,11 +55,11 @@ npm run build
 MORNDO_ORIGIN=http://localhost:8790 node apps/hub/src/main.ts serve
 ```
 
-Open `http://localhost:8790`. `MORNDO_ORIGIN` must be the exact origin the browser uses; http is allowed for localhost. Pair a browser with `node apps/hub/src/main.ts pair`. These commands are the start. There is no screenshot guide. A setup command by role (control plane, node) is not written yet. Until then, each service's README says how it runs: [`apps/hub`](apps/hub/README.md), [`apps/fleet`](apps/fleet/README.md), [`apps/node-agent`](apps/node-agent/README.md).
+Open `http://localhost:8790`. `MORNDO_ORIGIN` must be the exact origin the browser uses; http is allowed for localhost. Pair a browser with `node apps/hub/src/main.ts pair`. These commands are the start. There is no screenshot guide. To install a release by role (control plane or node), see [Install and update](#install-and-update). Each service's README says how it runs from source: [`apps/hub`](apps/hub/README.md), [`apps/fleet`](apps/fleet/README.md), [`apps/node-agent`](apps/node-agent/README.md).
 
 ## Install and update
 
-The first release is not published yet, so until it is the release URLs below answer 404; this section describes the install a release will have.
+Releases are published on [GitHub](https://github.com/morndo/morndo/releases). Each carries `install.sh` and its signature, a signed Manifest, and one archive per platform (linux-x64, linux-arm64, darwin-arm64).
 
 ### Install, verifying first
 
