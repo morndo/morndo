@@ -1,5 +1,62 @@
 # Changelog
 
+## [0.4.0](https://github.com/morndo/morndo/compare/v0.3.0...v0.4.0) (2026-11-11)
+
+
+### Features
+
+* **c6:** dropins.sh, and a drop-in that sets ExecStart in the adoption rehearsal ([2f96a82](https://github.com/morndo/morndo/commit/2f96a8255925dc82ebd46cf3dc3da8bc426992fb))
+* **c6:** dropins.sh, and a drop-in that sets ExecStart in the adoption rehearsal ([cc04ff8](https://github.com/morndo/morndo/commit/cc04ff862a8dfc2e4c1e38da237e2f8f0b8e7905))
+* **cli:** read the hub, node, token and lane from the settings files when the environment has none ([e29a718](https://github.com/morndo/morndo/commit/e29a71814b64ef0e4634e18856c66788f5213695))
+* **cli:** read the hub, node, token and lane from the settings files when the environment has none ([655d292](https://github.com/morndo/morndo/commit/655d2928278b77a6287dac77975c651e4f9e3bcd))
+* **connections:** mistral as a codex vendor with GLM 5.3 ([607a15b](https://github.com/morndo/morndo/commit/607a15becde6285d3a005edb2e7ebbdad29c2e7e))
+* **connections:** mistral as a codex vendor with GLM 5.3 ([c900ed7](https://github.com/morndo/morndo/commit/c900ed791b6116474c9a6b020a9b81d50bc11aaf))
+* **web:** the manager wears the Morndo mark and your messages stop looking like its ([1938da9](https://github.com/morndo/morndo/commit/1938da974e8f272fbdbbac6d8818aaac24e1f73f))
+* **web:** the manager wears the Morndo mark, your messages stop looking like its ([c0fef7a](https://github.com/morndo/morndo/commit/c0fef7a0ab89df674907ca3582359784d23722c4))
+
+
+### Bug Fixes
+
+* accept a lane name only when tmux answers with the pane id asked about, and read each drop-in through a checked copy ([a09e15f](https://github.com/morndo/morndo/commit/a09e15f2c6b1779f043cb66b06d6eab0d6d06544))
+* **board-cli:** --json prints one JSON document per command, notices on stderr ([89c42f7](https://github.com/morndo/morndo/commit/89c42f7114cce41ff8e506dfd7bb477d61d155d6))
+* **board-cli:** --json takes no value per command through a boolean set, brief keeps --json &lt;file&gt; and gains --out-json ([e1654c1](https://github.com/morndo/morndo/commit/e1654c1bfde1a372c0b5fbd91e46089ce9fb36fa))
+* **board-cli:** keep --json output to one document a command, notices on stderr ([fa7d0cd](https://github.com/morndo/morndo/commit/fa7d0cd5e4eaa6de053ee70aa4d1518967c45dc7))
+* **board-cli:** keep brief --json &lt;file&gt; working, print the first result when a later call is refused, and one proof shape for brief ([bbe956a](https://github.com/morndo/morndo/commit/bbe956ae0050387e5a5dc77bc70a72323baa02b8))
+* **board-cli:** name --file in the brief help and tests, and say what --json does in help ([0b95085](https://github.com/morndo/morndo/commit/0b95085d5aa5314202a528d21f0dc52d311ead40))
+* **board-cli:** pick the valueless flags from the command word, refuse stray --out-json and --show with --json &lt;file&gt;, and list the working forms in help ([abf4abe](https://github.com/morndo/morndo/commit/abf4abe05af3791a2c758296677623df4c1b410e))
+* **board-cli:** send the unwatched notice to stderr with --json ([c85018c](https://github.com/morndo/morndo/commit/c85018cdc422528c85a92a02ac1705b160d0808b))
+* **board-cli:** send the unwatched notice to stderr with --json ([2bfdd4c](https://github.com/morndo/morndo/commit/2bfdd4c73c62b3c223657fe6d113cf75056fd265))
+* **board-cli:** stale and inbox apply the hub's answered rule ([c93fed8](https://github.com/morndo/morndo/commit/c93fed8b7ad483b3db0c06dcb96b7241abe10bfa))
+* **c6:** dropins.sh fails loudly when systemd cannot be asked, keeps paths whole, follows XDG_CONFIG_HOME and real paths, skips comments in a continued ExecStart; the rehearsal checks ship.conf's own PATH ([cb79f9c](https://github.com/morndo/morndo/commit/cb79f9c611e442988fde6cfdf6486b38940ff0a5))
+* **c6:** dropins.sh hides no error and sees every drop-in systemd reads; the rehearsal runs it in the plan's order ([317eea0](https://github.com/morndo/morndo/commit/317eea0527e16d4582284dd3c2dd84db4778a500))
+* **c6:** dropins.sh takes an ExecStart over several lines out whole ([4d334a7](https://github.com/morndo/morndo/commit/4d334a7317a7b4fbf9977ea2a42eb50a05bc8d80))
+* **c6:** the rehearsal tests the node launcher by its link's target, not by the unit text ([70ec7e3](https://github.com/morndo/morndo/commit/70ec7e319777f48b4d699fcfc20611c81bb78940))
+* **cli:** honour the manager window setting, ask tmux and read files only when needed, keep a bad node name out ([106ef7f](https://github.com/morndo/morndo/commit/106ef7fdabaa94187faf9df626d478656f161d81))
+* **cli:** keep a token and its hub together, fall back to the plain tmux query, decide offline from each CLI's own dispatch ([5027c74](https://github.com/morndo/morndo/commit/5027c748cb342a216563649f16d12cf51dc4785d))
+* **cli:** reject control characters in the settings files, and say where the settings come from ([ad9398a](https://github.com/morndo/morndo/commit/ad9398a051a950647ac11941e6faf3b3f469e130))
+* close a legacy decision only after its block, and keep a failed event read on the list ([36fbd47](https://github.com/morndo/morndo/commit/36fbd47ec2e60e48ac64346ba0832d71477d796f))
+* codex effort is one plain word, one count reader, no dead codexTokenCost, a lost session record is logged ([5779b9a](https://github.com/morndo/morndo/commit/5779b9ad40cfad934a095acfeba734bbe5b3830f))
+* **connections:** charge a codex run the tokens it added to its session ([1cd11b8](https://github.com/morndo/morndo/commit/1cd11b85e80ba5669f1d00a8425161b3e5fac39d))
+* count only a missing task as unread, and ask the rule after 48 h idle ([8bd3cce](https://github.com/morndo/morndo/commit/8bd3ccec1f3b7fd1aedeb89d2eaea577396386bf))
+* **hub:** only the machines' own tags are the system's ([adfc8ba](https://github.com/morndo/morndo/commit/adfc8ba7775933204cd4922a6da08b352545e310))
+* **hub:** only the machines' own tags are the system's ([8f27e43](https://github.com/morndo/morndo/commit/8f27e4385dedae8dcc6cd2b42df6d5264d6b0908))
+* keep a legacy decision answered after the task is reassigned ([07db167](https://github.com/morndo/morndo/commit/07db167e87dce8066f61269f10844d0bedf8206a))
+* keep an answer across a restated block, and leave a missing task out ([36513eb](https://github.com/morndo/morndo/commit/36513eb295891692413686db929cc97d3cfe9ed3))
+* machine notices are the system's, hidden by default, whole in verbose ([3c9dcf8](https://github.com/morndo/morndo/commit/3c9dcf8940bedf321f2ee5de9693fbcbe73fe9db))
+* name the lane from its own trimmed pane only, say so on stderr when tmux cannot, and read each drop-in once with a checked status ([d95b93f](https://github.com/morndo/morndo/commit/d95b93f2f00d89a02b3f0bcfc9fd27ef1705fd6e))
+* no lane from the active tmux window, and dropins.sh stops on an unreadable drop-in ([bbf0bed](https://github.com/morndo/morndo/commit/bbf0bedd99e7583a3fb67e271116096faee050ed))
+* **node-agent:** tell a recreated transcript apart by its birth time ([cf5b10a](https://github.com/morndo/morndo/commit/cf5b10a84566165e2e739e152bf580ad067d5984))
+* **node-agent:** tell a recreated transcript apart by its birth time ([9997e50](https://github.com/morndo/morndo/commit/9997e50b2d7da71524bd9e13ad1c792c5d480484))
+* **node-agent:** use a relative time in the next-ask example ([7ac6491](https://github.com/morndo/morndo/commit/7ac64917cc9cfe194c6ab344da781bffca577aca))
+* **node-agent:** use a relative time in the next-ask example ([7dcc156](https://github.com/morndo/morndo/commit/7dcc1563fd14261b0eb8c3ce8ac957721594a474))
+* one plain-word effort in the codex file, per-thread session totals settled under a lock, one count reader, no dead codexTokenCost ([5614e71](https://github.com/morndo/morndo/commit/5614e7123473ccb1d3c23a84df613760f40f1e8c))
+* pane-only tmux lane lookup and unreadable drop-in detection ([8c5b0fa](https://github.com/morndo/morndo/commit/8c5b0fa0ff4395053af67b460ec79150ea8428a8))
+* read the sweep's task list once per pass ([2c33da2](https://github.com/morndo/morndo/commit/2c33da2ad7ead1489acdfb59e18f2ec410f14be2))
+* share the board's answered rule with the CLI inbox and stale views ([ddcdab0](https://github.com/morndo/morndo/commit/ddcdab06d7ceb80ad22b4a162243d69d521c414f))
+* share the legacy-decision cutoff and skip event reads for a fresh decision ([e11a807](https://github.com/morndo/morndo/commit/e11a80712603f7de96a2d6b17ed67f485782fb24))
+* **web:** machine notices are the system's: hidden by default, whole in verbose ([1971e03](https://github.com/morndo/morndo/commit/1971e0362cc262cd4a6558f903d3ddf85f97d39d))
+* **web:** the phone's manager mark fills its tile and keeps the live dot ([cb45a92](https://github.com/morndo/morndo/commit/cb45a9210357b9b0c52556d52536d222fd7aa4e6))
+
 ## [0.3.0](https://github.com/morndo/morndo/compare/v0.2.3...v0.3.0) (2026-11-04)
 
 
