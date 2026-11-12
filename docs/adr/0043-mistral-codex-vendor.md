@@ -1,6 +1,6 @@
 # ADR-0043: Mistral as a Codex-runtime vendor (GLM 5.3)
 
-- **Status:** Accepted, 2026-11-07.
+- **Status:** Accepted, 2026-11-07. Decision 3 (the per-thread record) is superseded by [the Codex run pricing design](../design/codex-run-pricing/README.md) once its build lands.
 - **Number:** 0043. 0040, 0041 and 0042 are already records.
 - **Builds on:** ADR-0018 (Connections, the vendor catalog, the lease gate), ADR-0028 (Codex as an engine).
 
