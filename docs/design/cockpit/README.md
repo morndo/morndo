@@ -7,7 +7,7 @@ Open the mockups in any browser. Each is one self-contained file:
 | File | What it shows |
 |---|---|
 | [`mockups/dev-cockpit.html`](mockups/dev-cockpit.html) | The development module: projects, lanes, pull requests, release decisions with proof. |
-| [`mockups/gtm-cockpit.html`](mockups/gtm-cockpit.html) | The go-to-market module: areas (content, outbound, paid, SEO, research), drafts, decisions. |
+| [`mockups/gtm-cockpit.html`](mockups/gtm-cockpit.html) | The go-to-market module: topics (content, outbound, paid, SEO, research), drafts, decisions. |
 
 Both are built from one shell, so they differ only in what a module brings. The workspace menu and Settings switch between them. All names, projects and numbers in them are made up.
 
@@ -45,9 +45,9 @@ These are the parts a native app has to keep. The mockups are the reference for 
 ### The sidebar
 
 - A row is one icon and one name. No status words, counts, avatars or guide lines on rows.
-- A colour mark appears only where it matters: red for stuck, amber for waiting on you, green for working. It shows once, at the deepest visible level: a closed group carries it, an open group's lanes do. Areas carry none. Decisions are counted only on the Decide pin. The state word is kept for screen readers and shows on hover.
-- At the top is a pin grid, at most 12 pins (4 by 3). The module brings Brief, Decide, Drafts or Pull requests, and Skills; you can pin areas, projects and skills as one-click macros. A macro pin opens "New lane" with the skill filled in.
-- Then one tree: the Manager pinned first, with lanes that fit no project yet under it; then "New lane"; then Projects (development) or Areas (go-to-market), each with its lanes inside. Subagents and artifacts live on a lane's page, not in the tree, so the tree stays two levels deep.
+- A colour mark appears only where it matters: red for stuck, amber for waiting on you, green for working. It shows once, at the deepest visible level: a closed group carries it, an open group's lanes do. Topics and projects carry none. Decisions are counted only on the Decide pin. The state word is kept for screen readers and shows on hover.
+- At the top is a pin grid, at most 12 pins (4 by 3). The module brings Brief, Decide, Drafts or Pull requests, and Skills; you can pin topics, projects and skills as one-click macros. A macro pin opens "New lane" with the skill filled in.
+- Then one tree: the Manager pinned first, with lanes that fit no project or topic yet under it; then "New lane"; then Projects (development) or Topics (go-to-market), each with its lanes inside. Subagents and artifacts live on a lane's page, not in the tree, so the tree stays two levels deep.
 - No destructive controls appear on hover. Removing something (unpin, for example) is in the context menu: right-click, long press on touch, or the menu key / Shift+F10.
 
 ### Lanes and the manager

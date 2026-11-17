@@ -309,7 +309,7 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .sugg button:hover{background:var(--fill)}
 .chat .composer{margin-top:auto}
 
-/* Area */
+/* Topic or project page */
 .stuck{display:flex;flex-direction:column;gap:16px;padding:18px}
 .stuck .top{display:flex;gap:14px}
 .flame{width:36px;height:36px;border-radius:11px;background:var(--bad-bg);color:var(--bad);display:grid;place-items:center;flex:none}
@@ -465,7 +465,7 @@ input[type=range]:disabled{opacity:.4;cursor:default}
 .tile.add:hover{background:none;color:var(--text)}
 .tiles.full .tile.add{display:none}
 @media (hover:none){.tile.add{opacity:1}}
-/* The right-click menu of a pin, or of an area that can become one. */
+/* The right-click menu of a pin, or of a topic or project that can become one. */
 .menu{position:fixed;z-index:70;min-width:184px;padding:5px;background:var(--raised);border:1px solid var(--edge);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.5);animation:pop .14s ease-out}
 .menu button{display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 12px 0 10px;border-radius:8px;font-weight:500;white-space:nowrap}
 .menu button:hover,.menu button:focus-visible{background:var(--row-on);outline:0}
@@ -676,13 +676,13 @@ try {
   <button class="row ws" data-wsmenu aria-haspopup="dialog" aria-label="Workspace: Tidewell, Development. Switch module or change the colour"><svg class="mark"><use href="#mark"/></svg><span class="grow">Tidewell<small class="mod">Development</small></span><svg class="i sm dim"><use href="#down"/></svg></button>
 
   <!-- The pins: what the owner keeps one click away, up to twelve (four by three). The module pins four pages to
-       start with; he adds areas and skills himself. A right-click on a pin takes it off, a right-click on an area
+       start with; he adds topics or projects and skills himself. A right-click on a pin takes it off, a right-click on a topic or project
        pins it. The script draws them from the list of what can be pinned. -->
   <div class="tiles" id="pins">
     <button class="tile add" data-pin-add aria-haspopup="dialog" aria-label="Pin something here" title="Pin something here"><svg class="i"><use href="#plus"/></svg><span>Pin</span></button>
   </div>
 
-  <!-- One tree. The manager is pinned on top: everything starts with it. Under it the projects (or areas), and inside
+  <!-- One tree. The manager is pinned on top: everything starts with it. Under it the projects (or topics), and inside
        each project its lanes. A lane the manager has not placed yet waits under the manager itself. -->
   <div class="group" id="tree">
     <a class="row mgr" href="#manager" data-nav="manager"><svg class="mark"><use href="#mark"/></svg><span class="grow">Manager</span><span class="word">Always here</span><svg class="i sm pin"><use href="#pin"/></svg></a>
@@ -1225,7 +1225,7 @@ try {
           <nav class="panes" aria-label="Settings sections"><a href="#settings" aria-current="page">Workspace</a><a href="#skills">Connections</a><a href="#skills">Guardrails</a></nav>
         </header>
         <section class="sec">
-          <div class="headrow"><h2 class="h2">Modules</h2><span>2 on · each brings its own areas, decisions and skills</span></div>
+          <div class="headrow"><h2 class="h2">Modules</h2><span>2 on · each brings its own topics or projects, decisions and skills</span></div>
           <div class="grid modcards">
             <a class="box modcard" href="gtm-cockpit.html" data-module-link="gtm"><svg class="i lg"><use href="#horn"/></svg><div><b>Go-to-market</b><span>Content, outbound, paid, SEO and research</span></div><span class="st" data-here>Open</span></a>
             <a class="box modcard" href="dev-cockpit.html" data-module-link="dev"><svg class="i lg"><use href="#pr"/></svg><div><b>Development</b><span>Projects, pull requests, reviews and releases</span></div><span class="st" data-here>Open</span></a>
@@ -1305,11 +1305,11 @@ try {
 </div>
 
 <!-- New lane: every message is filed as its own lane, under its group -->
-<!-- What can be pinned: the areas, and skills as one-click macros. Opens from the empty place in the pin grid. -->
+<!-- What can be pinned: the topics or projects, and skills as one-click macros. Opens from the empty place in the pin grid. -->
 <div class="pop" id="pinpop" role="dialog" aria-label="Pin to the top" hidden>
   <div class="ph"><span class="lt"><svg class="i sm"><use href="#pin"/></svg></span><div><b>Pin to the top</b><span id="pin-room"></span></div></div>
   <div id="pin-list"></div>
-  <p class="tip">To take a pin off, right-click it. You can also right-click an area in the list on the left to pin it.</p>
+  <p class="tip">To take a pin off, right-click it. You can also right-click a topic or project in the list on the left to pin it.</p>
 </div>
 <div class="menu" id="pinmenu" role="menu" hidden><button role="menuitem" data-pin-toggle><svg class="i"><use href="#pin"/></svg><span></span></button></div>
 
@@ -1418,7 +1418,7 @@ try {
     if (e.target.matches("[data-strength]")) { theme.k = near(K_DEFAULT) ? K_DEFAULT : v; applyTheme(true); }
     else if (e.target.matches("[data-glass-range]")) { theme.g = near(glassDefault()) ? null : v; applyTheme(true); }
   });
-  // What a right-click in the sidebar is on: a pin, or an area that can become one.
+  // What a right-click in the sidebar is on: a pin, or a topic or project that can become one.
   const pinAt = el => {
     const tile = el.closest("#pins .tile:not(.add)"), proj = el.closest(".proj");
     const id = tile ? tile.dataset.pinId : proj ? proj.closest(".grp").id : null;
@@ -1560,7 +1560,7 @@ try {
     $(".tog", grp).setAttribute("aria-expanded", String(open));
   }
 
-  // The pins. The module brings its own five; the owner adds areas and skills himself, up to twelve in all.
+  // The pins. The module brings its own five; the owner adds topics or projects and skills himself, up to twelve in all.
   const PINNABLE = [
     { id: "t-brief", kind: "Pages", label: "Brief", icon: "sun", href: "#brief", pinned: true },
     { id: "t-decide", kind: "Pages", label: "Decide", icon: "decide", href: "#decision", badge: true, pinned: true },
@@ -1628,7 +1628,7 @@ try {
     if (save) try { localStorage.setItem(pinsKey, JSON.stringify(pins)); } catch (e) {}
   }
 
-  // The right-click menu: take a pin off, or pin an area.
+  // The right-click menu: take a pin off, or pin a topic or project.
   function openPinMenu(id, x, y) {
     const p = PINNABLE.find(q => q.id === id), on = pins.includes(id), full = pins.length >= MAX_PINS, item = $("button", pinmenu);
     item.dataset.pinToggle = id;
@@ -1734,7 +1734,7 @@ try {
     else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); overlay.hidden ? openPalette() : closePalette(); }
     else if (e.key === "Escape" && !overlay.hidden) closePalette();
     else if ((e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) && e.target.closest && e.target.closest("#side") && pinAt(e.target)) {
-      // The keyboard's way to the same menu: the menu key, or Shift and F10, on a pin or an area.
+      // The keyboard's way to the same menu: the menu key, or Shift and F10, on a pin, a topic or a project.
       e.preventDefault();
       const r = e.target.closest(".tile,.proj").getBoundingClientRect();
       openPinMenu(pinAt(e.target), r.left + 12, r.bottom - 4);

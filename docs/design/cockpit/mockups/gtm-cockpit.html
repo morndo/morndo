@@ -309,7 +309,7 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .sugg button:hover{background:var(--fill)}
 .chat .composer{margin-top:auto}
 
-/* Area */
+/* Topic or project page */
 .stuck{display:flex;flex-direction:column;gap:16px;padding:18px}
 .stuck .top{display:flex;gap:14px}
 .flame{width:36px;height:36px;border-radius:11px;background:var(--bad-bg);color:var(--bad);display:grid;place-items:center;flex:none}
@@ -465,7 +465,7 @@ input[type=range]:disabled{opacity:.4;cursor:default}
 .tile.add:hover{background:none;color:var(--text)}
 .tiles.full .tile.add{display:none}
 @media (hover:none){.tile.add{opacity:1}}
-/* The right-click menu of a pin, or of an area that can become one. */
+/* The right-click menu of a pin, or of a topic or project that can become one. */
 .menu{position:fixed;z-index:70;min-width:184px;padding:5px;background:var(--raised);border:1px solid var(--edge);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.5);animation:pop .14s ease-out}
 .menu button{display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 12px 0 10px;border-radius:8px;font-weight:500;white-space:nowrap}
 .menu button:hover,.menu button:focus-visible{background:var(--row-on);outline:0}
@@ -676,19 +676,19 @@ try {
   <button class="row ws" data-wsmenu aria-haspopup="dialog" aria-label="Workspace: Tidewell, Go-to-market. Switch module or change the colour"><svg class="mark"><use href="#mark"/></svg><span class="grow">Tidewell<small class="mod">Go-to-market</small></span><svg class="i sm dim"><use href="#down"/></svg></button>
 
   <!-- The pins: what the owner keeps one click away, up to twelve (four by three). The module pins four pages to
-       start with; he adds areas and skills himself. A right-click on a pin takes it off, a right-click on an area
+       start with; he adds topics or projects and skills himself. A right-click on a pin takes it off, a right-click on a topic or project
        pins it. The script draws them from the list of what can be pinned. -->
   <div class="tiles" id="pins">
     <button class="tile add" data-pin-add aria-haspopup="dialog" aria-label="Pin something here" title="Pin something here"><svg class="i"><use href="#plus"/></svg><span>Pin</span></button>
   </div>
 
-  <!-- One tree. The manager is pinned on top: everything starts with it. Under it the projects (or areas), and inside
+  <!-- One tree. The manager is pinned on top: everything starts with it. Under it the projects (or topics), and inside
        each project its lanes. A lane the manager has not placed yet waits under the manager itself. -->
   <div class="group" id="tree">
     <a class="row mgr" href="#manager" data-nav="manager"><svg class="mark"><use href="#mark"/></svg><span class="grow">Manager</span><span class="word">Always here</span><svg class="i sm pin"><use href="#pin"/></svg></a>
     <div class="kids" id="mgr-lanes"></div>
     <button class="row" data-palette><svg class="i"><use href="#plus"/></svg><span class="grow">New lane</span><kbd>⌘K</kbd></button>
-    <h2 data-kind="Area">Areas</h2>
+    <h2 data-kind="Topic">Topics</h2>
     <div class="grp" id="a-content" data-unfolded>
       <div class="row proj"><button class="tog" aria-expanded="true" aria-label="Content: show or hide its lanes"><svg class="i ic"><use href="#pen"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><a class="grow" href="#area" data-nav="area">Content</a><span class="word">Stuck</span><i class="dot bad"></i></div>
       <div class="kids">
@@ -956,8 +956,8 @@ try {
       </div>
     </section>
 
-    <!-- 3. Inside one area -->
-    <section class="view" id="v-area" aria-label="Content area" hidden>
+    <!-- 3. Inside one topic -->
+    <section class="view" id="v-area" aria-label="Content topic" hidden>
       <div class="split">
         <div class="scroll">
           <div class="doc wide" style="gap:28px">
@@ -1045,8 +1045,8 @@ try {
               <article class="box skill"><div class="top"><h3>/product-clip</h3></div><p>Make a short product video from a script.</p><footer style="color:var(--text-2)"><svg class="i sm warn"><use href="#plug"/></svg>Needs a Seedance key</footer></article>
               <article class="box skill"><div class="top"><h3>/outbound-sequence</h3><button class="btn ink s">Run</button></div><p>Draft a 4-step email sequence for one segment.</p><footer>Outbound</footer></article>
               <article class="box skill"><div class="top"><h3>/ad-variants</h3><button class="btn ink s">Run</button></div><p>Write 6 ad variants and test them against a goal.</p><footer>Paid</footer></article>
-              <article class="box skill"><div class="top"><h3>/weekly-summary</h3><button class="btn ink s">Run</button></div><p>Write the weekly update and put it in your drafts.</p><footer>All areas · Mail</footer></article>
-              <article class="box skill"><div class="top"><h3>/decision-brief</h3><button class="btn ink s">Run</button></div><p>Put an open question into your decision format.</p><footer>All areas</footer></article>
+              <article class="box skill"><div class="top"><h3>/weekly-summary</h3><button class="btn ink s">Run</button></div><p>Write the weekly update and put it in your drafts.</p><footer>All topics · Mail</footer></article>
+              <article class="box skill"><div class="top"><h3>/decision-brief</h3><button class="btn ink s">Run</button></div><p>Put an open question into your decision format.</p><footer>All topics</footer></article>
               <button class="box skill own"><strong><svg class="i"><use href="#plus"/></svg>Make your own</strong><span>Say what you want in plain words. Morndo writes the skill and asks before the first run.</span></button>
             </div>
           </section>
@@ -1099,13 +1099,13 @@ try {
       <div class="doc" style="gap:26px">
         <header class="sec" style="gap:6px">
           <h1 class="h1">Manager</h1>
-          <p class="intro">Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane in the right area and names who leads it. It comes back to you only for decisions.</p>
+          <p class="intro">Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane under the right topic and names who leads it. It comes back to you only for decisions.</p>
         </header>
         <section class="sec">
-          <div class="headrow"><h2 class="h2">Everything in motion</h2><span>6 lanes in 4 areas · 3 wait for you</span></div>
+          <div class="headrow"><h2 class="h2">Everything in motion</h2><span>6 lanes in 4 topics · 3 wait for you</span></div>
           <div class="box tbl">
             <table class="jobs">
-              <thead><tr><th scope="col">Lane</th><th scope="col">Area</th><th scope="col">Lead</th><th scope="col">State</th><th scope="col">Next report</th></tr></thead>
+              <thead><tr><th scope="col">Lane</th><th scope="col">Topic</th><th scope="col">Lead</th><th scope="col">State</th><th scope="col">Next report</th></tr></thead>
               <tbody>
                 <tr><td><a href="#area">Webinar on Thursday</a></td><td>Content</td><td>Visuals</td><td><span class="st"><svg class="i sm bad"><use href="#flame"/></svg>Stuck</span></td><td>Now, needs your call</td></tr>
                 <tr><td><a href="#lane">Search budget shift</a></td><td>Paid</td><td>Paid buyer</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your decision</td></tr>
@@ -1132,7 +1132,7 @@ try {
         <button class="model" data-palette>Auto<svg class="i sm"><use href="#down"/></svg></button>
         <button class="sendb" data-file aria-label="Send"><svg class="i lg"><use href="#up"/></svg></button>
       </div></div>
-      <template class="chat-src" data-title="Manager" data-sub="Your chief of staff. It knows every area and every lane." data-placeholder="Tell the Manager">
+      <template class="chat-src" data-title="Manager" data-sub="Your chief of staff. It knows every topic and every lane." data-placeholder="Tell the Manager">
         <p class="said">What is still open on the budget shift?</p>
         <div class="answer">
           <p>One thing: your OK. The numbers for 14 days are checked and the decision brief is written.</p>
@@ -1207,7 +1207,7 @@ try {
           <nav class="panes" aria-label="Settings sections"><a href="#settings" aria-current="page">Workspace</a><a href="#skills">Connections</a><a href="#skills">Guardrails</a></nav>
         </header>
         <section class="sec">
-          <div class="headrow"><h2 class="h2">Modules</h2><span>2 on · each brings its own areas, decisions and skills</span></div>
+          <div class="headrow"><h2 class="h2">Modules</h2><span>2 on · each brings its own topics or projects, decisions and skills</span></div>
           <div class="grid modcards">
             <a class="box modcard" href="gtm-cockpit.html" data-module-link="gtm"><svg class="i lg"><use href="#horn"/></svg><div><b>Go-to-market</b><span>Content, outbound, paid, SEO and research</span></div><span class="st" data-here>Open</span></a>
             <a class="box modcard" href="dev-cockpit.html" data-module-link="dev"><svg class="i lg"><use href="#pr"/></svg><div><b>Development</b><span>Projects, pull requests, reviews and releases</span></div><span class="st" data-here>Open</span></a>
@@ -1287,11 +1287,11 @@ try {
 </div>
 
 <!-- New lane: every message is filed as its own lane, under its group -->
-<!-- What can be pinned: the areas, and skills as one-click macros. Opens from the empty place in the pin grid. -->
+<!-- What can be pinned: the topics or projects, and skills as one-click macros. Opens from the empty place in the pin grid. -->
 <div class="pop" id="pinpop" role="dialog" aria-label="Pin to the top" hidden>
   <div class="ph"><span class="lt"><svg class="i sm"><use href="#pin"/></svg></span><div><b>Pin to the top</b><span id="pin-room"></span></div></div>
   <div id="pin-list"></div>
-  <p class="tip">To take a pin off, right-click it. You can also right-click an area in the list on the left to pin it.</p>
+  <p class="tip">To take a pin off, right-click it. You can also right-click a topic or project in the list on the left to pin it.</p>
 </div>
 <div class="menu" id="pinmenu" role="menu" hidden><button role="menuitem" data-pin-toggle><svg class="i"><use href="#pin"/></svg><span></span></button></div>
 
@@ -1312,7 +1312,7 @@ try {
       <button class="pr" data-close><span class="lt">GP</span><b>GPT</b><span class="g">OpenAI</span><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Connected</span></button>
       <button class="pr" data-close><span class="lt">Ge</span><b>Gemini</b><span class="g">Google</span><span class="st" style="color:var(--text-2)">Add key</span></button>
       <button class="pr" data-close><span class="lt">Gr</span><b>Grok</b><span class="g">xAI</span><span class="st" style="color:var(--text-2)">Add key</span></button>
-      <h3>Agents · talk to one area only</h3>
+      <h3>Agents · talk to one topic only</h3>
       <a class="pr" href="#area"><svg class="i" style="margin:0 3px"><use href="#pen"/></svg><b>Content</b><span class="g">Writer, Visuals, Publisher</span></a>
       <button class="pr" data-close><svg class="i" style="margin:0 3px"><use href="#send"/></svg><b>Outbound</b><span class="g">Prospector, Sender</span></button>
       <button class="pr" data-close><svg class="i" style="margin:0 3px"><use href="#horn"/></svg><b>Paid</b><span class="g">Buyer, Analyst</span></button>
@@ -1400,7 +1400,7 @@ try {
     if (e.target.matches("[data-strength]")) { theme.k = near(K_DEFAULT) ? K_DEFAULT : v; applyTheme(true); }
     else if (e.target.matches("[data-glass-range]")) { theme.g = near(glassDefault()) ? null : v; applyTheme(true); }
   });
-  // What a right-click in the sidebar is on: a pin, or an area that can become one.
+  // What a right-click in the sidebar is on: a pin, or a topic or project that can become one.
   const pinAt = el => {
     const tile = el.closest("#pins .tile:not(.add)"), proj = el.closest(".proj");
     const id = tile ? tile.dataset.pinId : proj ? proj.closest(".grp").id : null;
@@ -1542,17 +1542,17 @@ try {
     $(".tog", grp).setAttribute("aria-expanded", String(open));
   }
 
-  // The pins. The module brings its own five; the owner adds areas and skills himself, up to twelve in all.
+  // The pins. The module brings its own five; the owner adds topics or projects and skills himself, up to twelve in all.
   const PINNABLE = [
     { id: "t-brief", kind: "Pages", label: "Brief", icon: "sun", href: "#brief", pinned: true },
     { id: "t-decide", kind: "Pages", label: "Decide", icon: "decide", href: "#decision", badge: true, pinned: true },
     { id: "t-drafts", kind: "Pages", label: "Drafts", icon: "mail", href: "#drafts", pinned: true },
     { id: "t-skills", kind: "Pages", label: "Skills", icon: "star", href: "#skills", pinned: true },
-    { id: "a-content", kind: "Areas", label: "Content", icon: "pen", href: "#area", pinned: true },
-    { id: "a-outbound", kind: "Areas", label: "Outbound", icon: "send" },
-    { id: "a-paid", kind: "Areas", label: "Paid", icon: "horn" },
-    { id: "a-seo", kind: "Areas", label: "SEO", icon: "search" },
-    { id: "a-research", kind: "Areas", label: "Research", icon: "target" },
+    { id: "a-content", kind: "Topics", label: "Content", icon: "pen", href: "#area", pinned: true },
+    { id: "a-outbound", kind: "Topics", label: "Outbound", icon: "send" },
+    { id: "a-paid", kind: "Topics", label: "Paid", icon: "horn" },
+    { id: "a-seo", kind: "Topics", label: "SEO", icon: "search" },
+    { id: "a-research", kind: "Topics", label: "Research", icon: "target" },
     { id: "s-weekly", kind: "Skills, as one-click macros", label: "Weekly", name: "/weekly-summary", note: "Write the weekly update", icon: "play", run: "/weekly-summary", pinned: true },
     { id: "s-post", kind: "Skills, as one-click macros", label: "Post", name: "/linkedin-post", note: "A post in your voice", icon: "play", run: "/linkedin-post" },
     { id: "s-visual", kind: "Skills, as one-click macros", label: "Visuals", name: "/brand-visual", note: "Images in your brand", icon: "play", run: "/brand-visual" },
@@ -1610,7 +1610,7 @@ try {
     if (save) try { localStorage.setItem(pinsKey, JSON.stringify(pins)); } catch (e) {}
   }
 
-  // The right-click menu: take a pin off, or pin an area.
+  // The right-click menu: take a pin off, or pin a topic or project.
   function openPinMenu(id, x, y) {
     const p = PINNABLE.find(q => q.id === id), on = pins.includes(id), full = pins.length >= MAX_PINS, item = $("button", pinmenu);
     item.dataset.pinToggle = id;
@@ -1716,7 +1716,7 @@ try {
     else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); overlay.hidden ? openPalette() : closePalette(); }
     else if (e.key === "Escape" && !overlay.hidden) closePalette();
     else if ((e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) && e.target.closest && e.target.closest("#side") && pinAt(e.target)) {
-      // The keyboard's way to the same menu: the menu key, or Shift and F10, on a pin or an area.
+      // The keyboard's way to the same menu: the menu key, or Shift and F10, on a pin, a topic or a project.
       e.preventDefault();
       const r = e.target.closest(".tile,.proj").getBoundingClientRect();
       openPinMenu(pinAt(e.target), r.left + 12, r.bottom - 4);
