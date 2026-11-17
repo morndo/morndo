@@ -1,0 +1,86 @@
+[
+ {
+  "file": "01-eos",
+  "title": "Eos opens the gates of morning",
+  "manner": "Tiepolo's ceiling frescoes",
+  "alt": "Eos, goddess of dawn, pushes open golden gates above the clouds while four white horses wait and the sun rises on the left."
+ },
+ {
+  "file": "02-forge",
+  "title": "The forge at first light",
+  "manner": "Caravaggio",
+  "alt": "A smith rests on his hammer beside a finished bronze shield in a dark forge; the sun rises through the open door."
+ },
+ {
+  "file": "03-hermes",
+  "title": "Hermes at the city gate",
+  "manner": "Poussin",
+  "alt": "Hermes hands a sealed scroll to a gatekeeper at a city wall as the sun comes up behind distant hills."
+ },
+ {
+  "file": "04-argo",
+  "title": "The Argo, finished",
+  "manner": "Turner",
+  "alt": "A finished wooden ship stands on a beach at sunrise; the shipwrights sleep beside their tools."
+ },
+ {
+  "file": "05-daedalus",
+  "title": "Daedalus's workshop",
+  "manner": "the Dutch Golden Age",
+  "alt": "A pair of finished feather wings lies on a workbench by a window; the sun rises over the sea outside."
+ },
+ {
+  "file": "06-owl",
+  "title": "Athena's owl comes home",
+  "manner": "Roman wall painting",
+  "alt": "A white owl with an olive branch flies over Athens at sunrise, painted like a cracked red Roman fresco."
+ },
+ {
+  "file": "07-sheaves",
+  "title": "Sheaves at sunrise",
+  "manner": "Van Gogh",
+  "alt": "Bound wheat sheaves in a field under a swirling dawn sky with a large yellow sun."
+ },
+ {
+  "file": "08-furrow",
+  "title": "The last furrow",
+  "manner": "Millet",
+  "alt": "A ploughman and two oxen finish the last furrow of a dark field as the sun breaks the horizon."
+ },
+ {
+  "file": "09-seaport",
+  "title": "Seaport at sunrise",
+  "manner": "Claude Lorrain",
+  "alt": "A classical harbour at sunrise with tall ships at anchor and cargo stacked on the quay."
+ },
+ {
+  "file": "10-kiln",
+  "title": "The kiln at dawn",
+  "manner": "Roman floor mosaics",
+  "alt": "A potter rests beside rows of finished amphorae at an open kiln while the sun rises over low hills, made of small mosaic stones."
+ },
+ {
+  "file": "11-fog",
+  "title": "Above the morning fog",
+  "manner": "Caspar David Friedrich",
+  "alt": "A traveller seen from behind stands on a rock above a valley filled with morning fog at sunrise."
+ },
+ {
+  "file": "12-boats",
+  "title": "The boats return",
+  "manner": "Hiroshige",
+  "alt": "Fishing boats return to harbour under a red rising sun, in the style of a Japanese woodblock print."
+ },
+ {
+  "file": "13-muses",
+  "title": "The Muses at sunrise",
+  "manner": "early Renaissance frescoes",
+  "alt": "The Muses rest on a hillside at sunrise, their lyres laid in the grass and a finished scroll tied with a ribbon."
+ },
+ {
+  "file": "14-scriptorium",
+  "title": "The finished book",
+  "manner": "medieval books of hours",
+  "alt": "A scribe has closed a gold-decorated book in a monastery writing room; the candle is burnt down and the sun rises through an arched window."
+ }
+]

@@ -1,0 +1,1242 @@
+<!doctype html>
+<html lang="en" data-module="@@MODULE_ID@@">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Brief · Morndo</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23e7e9ef' fill-rule='evenodd' d='M0 0L48 0L48 48L0 48ZM8 26A16 16 0 0 1 40 26A16 16 0 0 1 8 26ZM0 27L48 27L48 33L0 33Z'/%3E%3C/svg%3E">
+<!--
+  Morndo cockpit, @@MODULE_NAME@@ module: a design mockup in one file. Nothing here talks to a server; every name and
+  number is made up. Built from src/shell.html and src/@@MODULE_ID@@.blocks.html by src/build.py; edit those, not this file.
+  Hero artworks: fourteen images generated for Morndo with ChatGPT, each in the manner of a historical style.
+  Typefaces: Newsreader and Schibsted Grotesk, both under the SIL Open Font License, embedded below.
+-->
+<style>
+@font-face{font-family:"Newsreader";font-style:normal;font-weight:400 600;font-display:swap;src:url(data:font/woff2;base64,@@FONT_SERIF@@) format("woff2")}
+@font-face{font-family:"Newsreader";font-style:italic;font-weight:400 600;font-display:swap;src:url(data:font/woff2;base64,@@FONT_SERIF_ITALIC@@) format("woff2")}
+@font-face{font-family:"Schibsted Grotesk";font-style:normal;font-weight:400 700;font-display:swap;src:url(data:font/woff2;base64,@@FONT_SANS@@) format("woff2")}
+
+:root{
+  /* Morndo "Ink", dark: monochrome, colour only for status. */
+  --frame:#1c1f26; --tile:#272a32; --tile-on:#343741; --row-hover:#262931; --row-on:#2c2f38;
+  --bg:#0d0f16; --surface:#14171e; --raised:#1c1f26; --fill:#22242b; --fill-hover:#2b2e36;
+  --line:#262931; --line-2:#2c2f36; --line-soft:#20232b;
+  --text:#e7e9ef; --text-2:#cdd0d8; --muted:#9b9ea7;
+  --ink:#e7e9ef; --ink-hover:#ced0d6; --ink-fg:#0d0f16;
+  --ok:#3dc8b5; --warn:#ffd1a9; --bad:#f46974; --bad-bg:#361618;
+  /* Charts only. */
+  --best:#3987e5; --worst:#d95926;
+  /* The brief's masthead only: the painting's own sunrise. */
+  --sun:#f2dc8a;
+  --serif:"Newsreader","Iowan Old Style","Palatino Linotype",Georgia,serif;
+  --sans:"Schibsted Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+/* Workspace colour. Ink (above) is the monochrome default. A named theme re-derives the same lightness steps in its
+   own hue, so contrast stays where it was; --k (0 subtle to 1 bold) sets how much colour the steps carry. */
+:root{--k:.55;--edge:#3a3d47;--edge-2:#4a4d57}
+/* Glass: the window frame lets the brief's artwork shine through, as Dia's sidebar does with the desktop behind it.
+   The picture is a 64 px wide, already blurred image (src/glass.sh) that the browser only stretches: no blur filter,
+   no backdrop-filter and nothing that keeps moving, so it costs one paint.
+   --glass (0 to 1) is how much of the picture comes through; the user sets it (default: a quarter in Ink, half in a
+   colour theme). A veil of the frame's own colour covers the rest. In Ink nearly the whole frame can turn to glass; a coloured workspace keeps its own colour in charge.
+   Text stays readable at every setting by construction, not by tuning: the veil can only bring the frame closer to
+   its plain colour, the pictures have a fixed lightest tone (glass.sh), and on glass the sidebar's grey text is a
+   step lighter, enough for 4.5:1 on that lightest tone with no veil at all. */
+:root{--glass:.25;--veil:calc(100% - var(--glass)*92%)}
+:root[data-theme]{--veil:calc(100% - var(--glass)*55%)}
+.glass{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.glass i{position:absolute;inset:0;background:center/cover no-repeat;opacity:0;transition:opacity 1.1s ease}
+.glass i.on{opacity:1}
+.glass::after{content:"";position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),linear-gradient(color-mix(in srgb,var(--frame) var(--veil),transparent),color-mix(in srgb,var(--frame) var(--veil),transparent))}
+:root[data-glass="off"] .glass{display:none}
+/* On glass, the sidebar's own surfaces are glass too: a little light laid over whatever is behind them. */
+@media (min-width:901px){:root:not([data-glass="off"]) .side{--muted:#a9acb5;--tile:rgba(255,255,255,.075);--tile-on:rgba(255,255,255,.16);--row-hover:rgba(255,255,255,.06);--row-on:rgba(255,255,255,.11)}}
+
+/* The two sidebars' widths. The user can drag both; the choice is kept. */
+:root{--side-w:236px;--chat-w:380px}
+:root[data-theme]{
+  --cf:calc(.018 + .045*var(--k));--cp:calc(.012 + .014*var(--k));
+  --frame:oklch(.239 var(--cf) var(--h));
+  --frame-bg:linear-gradient(168deg,oklch(.262 calc(var(--cf)*1.2) var(--h)),oklch(.228 var(--cf) calc(var(--h) + 14)) 70%);
+  --tile:oklch(.305 var(--cf) var(--h));--tile-on:oklch(.365 calc(var(--cf)*1.15) var(--h));
+  --row-hover:oklch(.3 var(--cf) var(--h));--row-on:oklch(.33 calc(var(--cf)*1.1) var(--h));
+  --bg:oklch(.17 var(--cp) var(--h));--surface:oklch(.205 var(--cp) var(--h));--raised:oklch(.239 var(--cp) var(--h));
+  --fill:oklch(.261 var(--cp) var(--h));--fill-hover:oklch(.302 var(--cp) var(--h));
+  --line:oklch(.281 var(--cp) var(--h));--line-2:oklch(.305 var(--cp) var(--h));--line-soft:oklch(.257 var(--cp) var(--h));
+  --edge:oklch(.36 var(--cp) var(--h));--edge-2:oklch(.42 var(--cp) var(--h));
+  --accent:oklch(.87 calc(.07 + .07*var(--k)) var(--h));--sun:var(--accent);
+  --ink:oklch(.93 calc(.015 + .04*var(--k)) var(--h));--ink-hover:oklch(.875 calc(.02 + .045*var(--k)) var(--h));--ink-fg:oklch(.17 .02 var(--h));
+}
+:root[data-theme="ember"]{--h:48}:root[data-theme="sand"]{--h:85}:root[data-theme="moss"]{--h:150}:root[data-theme="tide"]{--h:200}:root[data-theme="sky"]{--h:250}:root[data-theme="iris"]{--h:295}:root[data-theme="rose"]{--h:5}
+/* Where a colour theme shows beyond the surfaces: what is selected, the workspace mark, the brief's command bar, receipts. */
+:root[data-theme] .tile[aria-current],:root[data-theme] .row[aria-current]{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 42%,transparent)}
+:root[data-theme] .ws .mark,:root[data-theme] .pop .mark{color:var(--accent)}
+:root[data-theme] .dock .composer{border-color:color-mix(in srgb,var(--accent) 26%,var(--line-2))}
+:root[data-theme] .dock::after{content:"";position:absolute;z-index:-1;left:50%;bottom:2px;width:min(520px,62%);height:36px;border-radius:50%;background:var(--accent);filter:blur(30px);opacity:.3;transform:translateX(-50%);animation:breathe 5s ease-in-out infinite alternate;pointer-events:none}
+@keyframes breathe{to{opacity:.13;transform:translateX(-50%) scaleX(.84)}}
+:root[data-theme] .receipt{border-color:color-mix(in srgb,var(--accent) 32%,var(--tile-on))}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--tile-on) transparent}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+body{margin:0;background:var(--frame-bg,var(--frame));color:var(--text);font:13px/1.45 var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;text-align:left}
+input{font:inherit;color:inherit}
+h1,h2,h3,p,ul,figure{margin:0}
+ul{list-style:none;padding:0}
+:focus-visible{outline:2px solid var(--text);outline-offset:2px;border-radius:6px}
+[hidden]{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.i.sm{width:13px;height:13px}.i.lg{width:18px;height:18px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.dot.hollow{background:none;border:1.5px solid var(--muted)}
+kbd{font:500 11px var(--sans);color:var(--text-2);background:var(--tile);border-radius:5px;padding:1px 6px}
+code,.cmd{font-family:var(--mono)}
+
+/* Shell */
+.app{position:fixed;inset:0;display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);gap:8px;padding:8px;transition:grid-template-columns .28s cubic-bezier(.2,.8,.2,1),gap .28s cubic-bezier(.2,.8,.2,1)}
+.app.side-off{grid-template-columns:0 minmax(0,1fr);gap:0}
+@media (min-width:901px){
+  .side{width:var(--side-w);transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s}
+  .app.side-off .side{transform:translateX(calc(-8px - var(--side-w)));visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s .28s}
+}
+.side{min-width:0;overflow:hidden auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:14px;padding:4px 4px 2px}
+.row{display:flex;align-items:center;gap:9px;width:100%;height:32px;padding:0 8px;border-radius:8px;color:var(--text-2);font-weight:500;white-space:nowrap}
+.row:hover{background:var(--row-hover)}
+.row[aria-current]{background:var(--row-on);color:var(--text);font-weight:600}
+.row .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row .state{display:flex;align-items:center;gap:6px;font-size:11.5px;font-weight:500;color:var(--muted)}
+.row.plain{font-weight:400}
+.ws{height:34px;color:var(--text);font-weight:600}
+.mark{width:18px;height:18px;border-radius:5px;flex:none}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;height:54px;border-radius:10px;background:var(--tile);color:var(--text-2);font-size:11px;font-weight:500;transition:background .15s}
+.tile:hover{background:color-mix(in srgb,var(--tile) 55%,var(--tile-on))}
+.tile[aria-current]{background:var(--tile-on);color:var(--text)}
+.badge{position:absolute;top:3px;right:2px;min-width:15px;height:15px;padding:0 4px;border-radius:8px;background:var(--ink);color:var(--ink-fg);font-size:9.5px;font-weight:700;line-height:15px;text-align:center}
+.side h2{padding:0 8px 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.side .group{display:flex;flex-direction:column;gap:2px}
+/* The sidebar is for finding your way, not for reading status: a row is one icon and one name. A colour mark appears
+   only where you are needed (red: stuck, amber: waiting for you) or where work is running (green). The word for a
+   row's state is there for screen readers and shows when you point at the row. */
+.side .word{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.side .row:hover>.word,.side .row:focus-visible>.word{position:static;width:auto;height:auto;overflow:visible;clip-path:none;font-size:11.5px;font-weight:400;color:var(--text-2)}
+.side kbd{padding:0;background:none;font-weight:400;color:var(--muted)}
+/* A pointed-at row is a little lighter than what is around it, so the small text on it steps up as well. */
+.side .row:hover kbd,.side .row:hover>.mark{color:var(--text-2)}
+.me{margin-top:auto;height:40px}
+.me .av{width:24px;height:24px;border-radius:8px;background:var(--tile-on);display:grid;place-items:center;flex:none}
+
+.pane{position:relative;min-width:0;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:44px minmax(0,1fr);background:var(--bg);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.bar{grid-column:1;grid-row:1;display:flex;align-items:center;gap:2px;padding:0 10px}
+.ib{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;color:var(--muted)}
+.ib:hover{background:var(--row-hover);color:var(--text)}
+.crumb{display:flex;align-items:center;gap:6px;margin-left:8px;min-width:0;white-space:nowrap}
+.crumb b{font-weight:500}.crumb span{color:var(--muted);overflow:hidden;text-overflow:ellipsis}
+.chatbtn{margin-left:auto;display:flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:15px;background:var(--raised);font-weight:500}
+.chatbtn:hover,.chatbtn[aria-pressed="true"]{background:var(--row-on)}
+.views{grid-column:1;grid-row:2;min-width:0;min-height:0;container:page/inline-size}
+.view{height:100%}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:34px;padding:0 15px;border-radius:17px;font-size:13px;font-weight:500;white-space:nowrap;transition:background .15s,transform .15s}
+.btn:active{transform:scale(.97)}
+.btn.ink{background:var(--ink);color:var(--ink-fg);font-weight:600}.btn.ink:hover{background:var(--ink-hover)}
+.btn.quiet{background:var(--fill)}.btn.quiet:hover{background:var(--fill-hover)}
+.btn.s{height:28px;padding:0 11px;border-radius:14px;font-size:12px}
+.link{color:var(--text);text-decoration:underline;text-underline-offset:3px;font-weight:500}
+
+.composer{position:relative;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 12px;background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(14px);border:1px solid var(--line-2);border-radius:26px}
+.composer label{position:relative;flex:1;min-width:0;display:flex}
+.composer input{flex:1;min-width:0;height:34px;background:none;border:0;font-size:14.5px;outline:0}
+.composer input::placeholder{color:var(--muted)}
+.composer:focus-within{border-color:var(--edge-2)}
+.model{display:inline-flex;align-items:center;gap:5px;height:34px;padding:0 10px;border-radius:17px;color:var(--text-2);font-weight:500}
+.model:hover{background:var(--row-hover)}
+.sendb{width:36px;height:36px;border-radius:18px;background:var(--ink);color:var(--ink-fg);display:grid;place-items:center;flex:none}
+.composer.s{padding:6px 6px 6px 14px;background:var(--bg);backdrop-filter:none;border-radius:22px}
+.composer.s input{height:32px;font-size:13.5px}.composer.s .sendb{width:32px;height:32px}.composer.s .model{height:32px;padding:0 8px;font-size:12.5px}
+
+/* The brief */
+.brief{overflow:hidden auto;overscroll-behavior:contain}
+.sheet{display:grid;grid-template-columns:minmax(72px,1fr) minmax(0,940px) minmax(72px,1fr);padding:14px 0 0}
+.sheet>*{grid-column:2}
+.rail{grid-row:1;display:grid;place-items:center;font:italic 500 34px/1 var(--serif);letter-spacing:.015em;white-space:nowrap;user-select:none}
+.rail span{writing-mode:vertical-rl}
+.rail.l{grid-column:1}.rail.l span{transform:rotate(180deg)}
+.rail.r{grid-column:3}
+.hero{grid-row:1;position:relative;container-type:inline-size;aspect-ratio:16/9.3;overflow:hidden;border-radius:3px;background:#1e2b29}
+.hero img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 30%}
+.pager{position:absolute;z-index:2;right:10px;bottom:10px;display:flex;align-items:center;gap:2px;padding:3px;border-radius:16px;background:rgba(10,12,16,.62);backdrop-filter:blur(8px);font-size:12px;color:#e7e9ef;opacity:0;transition:opacity .2s}
+.hero:hover .pager,.pager:focus-within{opacity:1}
+@media (hover:none){.pager{opacity:1}}
+.pager button{width:26px;height:26px;border-radius:13px;display:grid;place-items:center}
+.pager button:hover{background:rgba(255,255,255,.16)}
+.pager span{min-width:46px;text-align:center}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,16,18,.5),rgba(9,16,18,.12) 38%,rgba(9,16,18,0) 55%);pointer-events:none}
+.masthead{position:absolute;z-index:1;left:0;right:0;top:6.5%;text-align:center;color:var(--sun);font:500 clamp(44px,8vw,104px)/.9 var(--serif);font-size:clamp(44px,11cqw,104px);letter-spacing:-.024em;text-shadow:0 2px 28px rgba(6,12,14,.5)}
+.masthead i{display:block;font-weight:400;font-size:.45em;line-height:1.05;letter-spacing:-.01em}
+.under{display:flex;justify-content:space-between;align-items:flex-start;gap:12px 32px;padding:12px 2px 0}
+.lede{max-width:430px;font:italic 400 16px/1.42 var(--serif);color:var(--text-2);text-wrap:pretty}
+.credit{max-width:300px;font:11px/1.45 var(--mono);color:var(--muted);text-align:right}
+.minidate{display:none}
+.cards{display:flex;flex-direction:column;gap:12px;margin-top:38px}
+.card{display:grid;grid-template-columns:228px minmax(0,1fr);gap:20px 44px;padding:30px 34px;background:var(--surface);border-radius:14px}
+.card>header{display:flex;flex-direction:column;gap:8px;min-height:100%}
+.card h2{font:italic 400 23px/1.18 var(--serif);letter-spacing:-.005em}
+.card .sub{font-size:12.5px;color:var(--muted);text-wrap:pretty}
+.num{margin-top:auto;padding-top:14px;display:flex;align-items:flex-end;gap:12px;font:italic 400 44px/.86 var(--serif);color:var(--sun);font-variant-numeric:lining-nums}
+.num .i{width:30px;height:30px;margin-bottom:4px;stroke-width:1.5}
+.num span{display:inline-block}
+.item{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px 22px;align-items:center;padding:20px 0;border-top:1px solid var(--line)}
+.item:first-child{padding-top:2px;border-top:0}.item:last-child{padding-bottom:2px}
+.item .txt{display:flex;flex-direction:column;gap:5px;min-width:0}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;font-size:12px;color:var(--muted)}
+.meta b{color:var(--text-2);font-weight:500}.meta span{display:inline-flex;align-items:center;gap:6px}
+.item h3{font:600 15.5px/1.35 var(--sans);letter-spacing:-.008em;text-wrap:balance}
+.item p{font-size:13.5px;line-height:1.55;color:var(--text-2);text-wrap:pretty}
+.acts{display:flex;gap:8px}
+.done-note{display:none;grid-column:1/-1;align-items:center;gap:8px;font-size:13px;color:var(--text-2)}
+.decision.done .acts{display:none}.decision.done .done-note{display:flex;animation:rise .3s ease-out}
+.decision.done .txt{opacity:.5}
+.log li{display:grid;grid-template-columns:16px minmax(0,1fr) auto auto;gap:11px;align-items:center;min-height:40px;margin:0 -10px;padding:5px 10px;border-radius:10px;font-size:13.5px;color:var(--text-2)}
+.log li:hover{background:var(--fill)}
+.log b{color:var(--text);font-weight:600}
+.log time{font-size:12px;color:var(--muted)}
+.log .btn{opacity:0}.log li:hover .btn,.log li:focus-within .btn{opacity:1}
+.log li.undone{color:var(--muted);text-decoration:line-through}
+.dock{position:sticky;bottom:0;z-index:3;margin-top:8px;padding:48px 0 16px;background:linear-gradient(180deg,transparent,var(--bg) 44px);pointer-events:none}
+.dock .composer{max-width:720px;margin:0 auto;pointer-events:auto;box-shadow:0 10px 36px rgba(0,0,0,.45)}
+
+/* Views with a chat beside them */
+.split{height:100%}
+.split>.scroll{height:100%}
+.pane.chat-off .chat{display:none}
+.scroll{min-height:0;overflow:hidden auto;overscroll-behavior:contain}
+.doc{max-width:832px;margin:0 auto;padding:30px 36px 28px;display:flex;flex-direction:column;gap:32px}
+.doc.wide{max-width:none}
+.h1{font:500 38px/1.1 var(--serif);letter-spacing:-.018em;text-wrap:balance}
+.intro{font-size:15px;line-height:1.5;color:var(--text-2);max-width:640px;text-wrap:pretty}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:11px;background:var(--fill);color:var(--text);font-weight:500}
+.sec{display:flex;flex-direction:column;gap:11px}
+.label{display:flex;align-items:baseline;gap:9px;font-size:12px;font-weight:600;color:var(--muted)}
+.label b{font:italic 400 18px/1 var(--serif);color:var(--text)}.label em{font-style:normal;font-weight:400}
+.h2{font-size:13px;font-weight:600;padding:0 2px}
+.prose{max-width:670px;font-size:15.5px;line-height:1.55;color:var(--text-2);text-wrap:pretty}
+.grid{display:grid;gap:10px}
+.box{background:var(--surface);border:1px solid var(--line);border-radius:14px}
+.stat{display:flex;flex-direction:column;gap:5px;padding:15px 16px}
+.stat span{font-size:12px;color:var(--muted)}
+.stat strong{font:500 30px/1.15 var(--serif);letter-spacing:-.015em;font-variant-numeric:lining-nums;white-space:nowrap}
+.fig{display:flex;flex-direction:column;gap:12px;padding:18px}
+.fig figcaption{display:flex;flex-direction:column;gap:3px}
+.fig figcaption span{font-size:12px;color:var(--muted)}
+.fig figcaption strong{font:500 20px/1.25 var(--serif);letter-spacing:-.008em}
+.fig figcaption small{font-size:12.5px;color:var(--text-2)}
+.fig svg{display:block;width:100%;height:auto}
+.cg{fill:none;stroke:var(--line);stroke-width:1}
+.cb{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 4;stroke-linecap:round}
+.cl{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cm{stroke:var(--surface);stroke-width:2}
+.ct{font:10.5px var(--sans);fill:var(--muted)}.cv{font:600 11.5px var(--sans);fill:var(--text)}
+.te{text-anchor:end}.tm{text-anchor:middle}
+.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:11.5px;color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:2px;border-radius:1px}.legend i.d{height:0;border-top:2px dotted var(--muted)}
+.suggest{display:flex;flex-direction:column;gap:12px;padding:22px 24px;background:var(--raised);border-radius:14px}
+.suggest .big{font:400 22px/1.34 var(--serif);letter-spacing:-.006em;text-wrap:pretty}
+.suggest .guard{display:flex;gap:9px;color:var(--text-2);text-wrap:pretty}.suggest .guard .i{margin-top:2px}
+.tbl{overflow-x:auto}
+table{width:100%;min-width:520px;border-collapse:collapse;font-size:13px}
+th{text-align:left;padding:10px 16px;font-size:12px;font-weight:500;color:var(--muted);border-bottom:1px solid var(--line)}
+td{padding:11px 16px;border-bottom:1px solid var(--line-soft);color:var(--text-2);white-space:nowrap}
+td:first-child{color:var(--text);white-space:normal}tr:last-child td{border-bottom:0}
+td .st{display:inline-flex;align-items:center;gap:7px}
+.jobs td:first-child{font-weight:500}
+.decidebar{position:sticky;bottom:16px;z-index:3;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:10px 10px 10px 20px;background:color-mix(in srgb,var(--surface) 94%,transparent);backdrop-filter:blur(14px);border:1px solid var(--line-2);border-radius:28px;box-shadow:0 14px 44px rgba(0,0,0,.5)}
+.decidebar p{flex:1 1 220px;color:var(--muted)}
+.decidebar .acts{flex-wrap:wrap}.decidebar .btn{height:38px;border-radius:19px;padding:0 17px}
+
+/* The chat is one panel for the whole window. By default it floats over the page at the bottom right, as Dia's does:
+   it opens on demand and never pushes the page aside. As a sidebar (further down) it stays open at full height. */
+.chat{position:absolute;z-index:6;right:14px;bottom:14px;width:min(440px,calc(100% - 28px));height:min(720px,calc(100% - 72px));display:flex;flex-direction:column;gap:14px;padding:14px 16px 16px;background:var(--surface);border:1px solid var(--edge);border-radius:20px;box-shadow:0 28px 80px rgba(0,0,0,.62),0 2px 12px rgba(0,0,0,.4);transform-origin:100% 100%}
+.thread{flex:1;min-height:0;display:flex;flex-direction:column;gap:17px;margin:0 -16px;padding:2px 16px;overflow:hidden auto;overscroll-behavior:contain}
+/* On a decision the answer must stay in reach: while the chat is open, the answer bar ends where the chat begins.
+   846px is half the document's width (416) plus the chat's width and gaps (454 + 12) minus the document's padding (36). */
+.split{container-type:inline-size}
+.decidebar{transition:margin-right .28s cubic-bezier(.2,.8,.2,1)}
+@container (min-width:800px){.pane:not(.chat-off) .decidebar{margin-right:max(0px,min(430px,calc(846px - 50cqw)))}}
+/* The brief has its own command bar. While the chat floats open, the bar steps aside instead of sitting under it. */
+.pane:not(.chat-off) .dock{visibility:hidden}
+
+/* The chat as a sidebar: full height beside the page, always open, so the Chat button and the close button go. */
+@media (min-width:901px){
+  :root[data-chat="side"] .pane{grid-template-columns:minmax(0,1fr) var(--chat-w)}
+  :root[data-chat="side"] .pane .chat{position:relative;z-index:auto;grid-column:2;grid-row:1/3;right:auto;bottom:auto;display:flex;width:auto;height:auto;min-height:0;padding-top:8px;border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:none;animation:none}
+  :root[data-chat="side"] .chatbtn,:root[data-chat="side"] .chat [data-chat]{display:none}
+  :root[data-chat="side"] .chat .grip{display:block}
+  :root[data-chat="side"] .pane .decidebar{margin-right:0}
+  :root[data-chat="side"] .pane .dock{visibility:visible}
+}
+
+/* Both sidebars can be resized: drag the edge, or double-click it to put the width back. */
+.grip{position:absolute;z-index:7;top:0;bottom:0;width:10px;cursor:col-resize;touch-action:none;outline:0}
+.grip::after{content:"";position:absolute;top:10px;bottom:10px;left:4px;width:2px;border-radius:1px;background:var(--edge-2);opacity:0;transition:opacity .15s}
+.grip:hover::after,.grip:focus-visible::after,.grip.on::after{opacity:1}
+.grip.nav{top:8px;bottom:8px;left:calc(7px + var(--side-w))}
+.app.side-off .grip.nav{display:none}
+.chat .grip{left:-5px;display:none}
+.app.resizing{cursor:col-resize;user-select:none;transition:none}
+.app.resizing .side{transition:none}
+.seg,.setrow>.seg{display:inline-flex;flex:none;gap:2px;padding:3px;border-radius:17px;background:var(--fill)}
+.seg button{height:28px;padding:0 14px;border-radius:14px;font-weight:500;color:var(--text-2)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--ink-fg);font-weight:600}
+.chat header{display:flex;align-items:flex-start;gap:8px}
+.chat header div{flex:1;min-width:0}
+.chat header h2{font-size:13px;font-weight:600;line-height:28px}.chat header p{font-size:12px;color:var(--muted);margin-top:-3px}
+.ctx{align-self:flex-start;max-width:100%;display:flex;align-items:center;gap:7px;height:28px;padding:0 10px;border-radius:9px;background:var(--fill);font-size:12px;color:var(--text-2)}
+.said{align-self:flex-end;max-width:86%;padding:9px 13px;border-radius:16px;background:var(--fill);font-size:13.5px}
+.answer{display:flex;flex-direction:column;gap:8px;font-size:13.5px;line-height:1.55;color:var(--text-2);text-wrap:pretty}
+.msg{display:grid;grid-template-columns:24px minmax(0,1fr);gap:3px 10px}
+.av{width:24px;height:24px;border-radius:8px;background:var(--text-2);color:var(--ink-fg);font-size:11px;font-weight:700;display:grid;place-items:center}
+.msg .who{display:flex;align-items:baseline;gap:7px;font-weight:600}.msg .who time{font-size:11.5px;font-weight:400;color:var(--muted)}
+.msg p{grid-column:2;font-size:13.5px;line-height:1.5;color:var(--text-2);text-wrap:pretty}
+.msg .acts{grid-column:2;flex-wrap:wrap;margin-top:6px}
+.sugg{display:flex;flex-wrap:wrap;gap:6px}
+.sugg button{height:30px;padding:0 12px;border-radius:15px;border:1px solid var(--line-2);font-size:12.5px;color:var(--text-2)}
+.sugg button:hover{background:var(--fill)}
+.chat .composer{margin-top:auto}
+
+/* Area */
+.stuck{display:flex;flex-direction:column;gap:16px;padding:18px}
+.stuck .top{display:flex;gap:14px}
+.flame{width:36px;height:36px;border-radius:11px;background:var(--bad-bg);color:var(--bad);display:grid;place-items:center;flex:none}
+.stuck h2{font:500 22px/1.25 var(--serif);letter-spacing:-.008em}
+.stuck .top p{max-width:620px;color:var(--text-2);margin-top:4px;text-wrap:pretty}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(96px,100%),1fr));gap:8px}
+.thumbs div{aspect-ratio:4/5;border-radius:10px;background:var(--raised);border:1px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:11.5px}
+.thumbs .fail div{border-color:var(--bad)}
+.thumbs figcaption{display:flex;align-items:center;gap:5px;margin-top:6px;font-size:12px;color:var(--text-2)}
+.thumbs .fail figcaption{color:var(--text)}
+.stuck .acts{flex-wrap:wrap;align-items:center}.stuck .acts small{margin-left:auto;font-size:12px;color:var(--muted)}
+.agents{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.agent{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.agent .top{display:flex;align-items:center;gap:9px}
+.agent .av{width:26px;height:26px;border-radius:9px;font-size:12px}
+.agent h3{flex:1;font-size:13.5px;font-weight:600}
+.agent .st{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-2)}
+.agent p{color:var(--text-2)}
+.agent footer{display:flex;flex-wrap:wrap;gap:6px;font-size:11.5px;color:var(--muted)}.agent footer .cmd{color:var(--text-2)}
+
+/* Skills and setup */
+.cols{display:flex;flex-wrap:wrap;align-items:flex-start;gap:28px}
+.cols>.main{flex:999 1 480px;min-width:0}.cols>.aside{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:24px}
+.headrow{display:flex;align-items:baseline;gap:8px;min-height:24px;padding:0 2px}
+.headrow span{font-size:12.5px;color:var(--muted)}
+.skills{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))}
+.skill{display:flex;flex-direction:column;gap:6px;min-height:112px;padding:14px 16px;transition:border-color .15s}
+.skill:hover{border-color:var(--edge)}
+.skill .top{display:flex;align-items:center;gap:8px;min-height:24px}
+.skill h3{flex:1;font:600 13px var(--mono)}
+.skill p{flex:1;font-size:12.5px;color:var(--text-2);text-wrap:pretty}
+.skill footer{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--muted)}
+.skill .btn{opacity:0}.skill:hover .btn,.skill:focus-within .btn{opacity:1}
+.skill.own{border:1px dashed var(--edge-2);background:none;justify-content:center}
+.skill.own strong{display:flex;align-items:center;gap:7px;font-size:13px}
+.skill.own span{font-size:12.5px;color:var(--text-2);text-wrap:pretty}
+.list{padding:4px 0}
+.list li{display:flex;align-items:center;gap:11px;min-height:52px;padding:0 14px}
+.list li>div{flex:1;min-width:0}.list li>div b{display:block;font-weight:500}.list li>div span{font-size:12px;color:var(--muted)}
+.list .lt{width:28px;height:28px;border-radius:9px;background:var(--fill);font-size:12px;font-weight:700;display:grid;place-items:center;flex:none}
+.list .st{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-2)}
+.sw{position:relative;width:34px;height:20px;border-radius:10px;background:var(--tile-on);flex:none;transition:background .18s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .18s,background .18s}
+.sw[aria-checked="true"]{background:var(--ink)}.sw[aria-checked="true"]::after{transform:translateX(14px);background:var(--ink-fg)}
+
+/* Drafts */
+.draft{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 20px;align-items:center;padding:18px 20px}
+.draft .meta{grid-column:1/-1}
+.draft h3{font:500 20px/1.25 var(--serif);letter-spacing:-.006em}
+.draft p{grid-column:1;font-size:13.5px;line-height:1.55;color:var(--text-2);max-width:640px;text-wrap:pretty}
+.draft .acts{grid-column:2;grid-row:2/4}
+
+/* New lane */
+.overlay{position:fixed;inset:0;z-index:50;display:grid;justify-items:center;align-content:start;padding:11vh 16px 16px;background:rgba(8,9,13,.62);animation:fade .16s ease-out}
+.pal{width:100%;max-width:680px;display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--tile-on);border-radius:18px;box-shadow:0 24px 64px rgba(0,0,0,.5);overflow:hidden;animation:pop .2s cubic-bezier(.2,.9,.3,1.1)}
+.pal .ask{display:flex;align-items:center;gap:12px;height:56px;padding:0 12px 0 18px;border-bottom:1px solid var(--line-2)}
+.pal .ask input{flex:1;min-width:0;height:40px;background:none;border:0;outline:0;font-size:16px}
+.pal .ask input::placeholder{color:var(--muted)}
+.pal .cur{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 6px 0 12px;border-radius:15px;background:var(--row-on);font-weight:500}
+.pal .cur kbd{background:var(--edge);border-radius:9px;padding:1px 7px}
+.pal .rows{display:flex;flex-direction:column;padding:8px;max-height:min(60vh,520px);overflow:hidden auto;overscroll-behavior:contain}
+.pal h3{padding:8px 10px 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.pr{display:flex;align-items:center;gap:10px;width:100%;height:38px;padding:0 10px;border-radius:10px}
+.pr:hover,.pr.on{background:var(--row-on)}
+.pr b{font-weight:500}.pr .g{flex:1;min-width:0;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .lt{width:22px;height:22px;border-radius:7px;background:var(--tile-on);font-size:10px;font-weight:700;display:grid;place-items:center;flex:none}
+.pr .lt.ink{background:var(--ink);color:var(--ink-fg)}
+.pr .st{display:flex;align-items:center;gap:5px;font-size:11.5px;color:var(--muted)}
+.pr .cmd{font-weight:600}
+.pal footer{display:flex;align-items:center;gap:16px;height:40px;padding:0 14px;border-top:1px solid var(--line-2);font-size:12px;color:var(--muted)}
+.pal footer .g{flex:1;display:flex;align-items:center;gap:8px;color:var(--text-2)}
+.pal footer span,.pal footer button{display:flex;align-items:center;gap:6px}
+.pal footer kbd{background:var(--row-on)}
+
+/* Morndo's own icons: one line weight and one solid part each, so they still read at 16 px. */
+.tile .i{width:18px;height:18px;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.tile:hover .i{transform:translateY(-1px)}
+:root[data-theme] .tile[aria-current] .i,:root[data-theme] .row[aria-current]>.i{color:var(--accent)}
+
+/* Life, in small doses: the picture drifts, working agents breathe, and your own actions answer back. */
+@keyframes drift{from{transform:scale(1.001)}to{transform:scale(1.045) translate(-.6%,-.5%)}}
+.dot.ok{position:relative}
+.dot.ok::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--ok);animation:ping 2.8s cubic-bezier(.2,.6,.3,1) infinite}
+@keyframes ping{0%{transform:scale(1);opacity:.5}70%,100%{transform:scale(3);opacity:0}}
+.brief .card .num .i{animation:emin .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(.78s + var(--n,0)*.09s)}
+@keyframes emin{from{opacity:0;transform:scale(.8)}}
+.brief .card .num .i.stamp{animation:stamp .48s cubic-bezier(.3,1.5,.5,1)}
+@keyframes stamp{40%{transform:scale(1.22)}}
+.bump{animation:bump .32s ease-out}
+@keyframes bump{40%{transform:scale(1.3)}}
+.chat{animation:chatin .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes chatin{from{opacity:0;transform:translateY(16px) scale(.96)}}
+
+/* Workspace colour: the quick picker and the settings page */
+.pop{position:fixed;z-index:60;left:12px;top:48px;width:272px;display:flex;flex-direction:column;gap:14px;padding:14px;background:var(--raised);border:1px solid var(--edge);border-radius:16px;box-shadow:0 20px 56px rgba(0,0,0,.5);animation:pop .18s cubic-bezier(.2,.9,.3,1.1)}
+.pop .ph{display:flex;align-items:center;gap:10px}
+.pop .ph .mark{width:26px;height:26px;border-radius:8px}
+.pop .ph b{display:block;font-weight:600}.pop .ph span{font-size:12px;color:var(--muted)}
+.swatches{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:7px}
+.dotc{aspect-ratio:1;border-radius:50%;background:linear-gradient(135deg,oklch(.87 .12 var(--h)),oklch(.44 .09 var(--h)));transition:transform .15s}
+.dotc:hover{transform:scale(1.1)}
+.dotc.ink{background:linear-gradient(135deg,#e7e9ef,#3a3d47)}
+.dotc[aria-pressed="true"]{box-shadow:0 0 0 2px var(--raised),0 0 0 4px var(--text)}
+.strength{display:flex;flex-direction:column;gap:6px;font-size:12px;color:var(--muted)}
+.strength .top{display:flex;justify-content:space-between}
+.strength b{color:var(--text);font-weight:500}
+/* A slider's default is marked by a point under its track. The thumb settles on it when it comes close, and a click
+   on the point goes back to it. */
+.track{position:relative;display:block;padding-bottom:10px}
+.tick{position:absolute;bottom:0;left:calc(9px + (100% - 18px)*var(--d,.5));width:16px;height:12px;margin-left:-8px;display:grid;place-items:center}
+.tick::after{content:"";width:5px;height:5px;border-radius:50%;background:var(--text-2);transition:transform .15s,background .15s}
+.tick:hover::after{background:var(--text);transform:scale(1.5)}
+.track:has(input:disabled) .tick{opacity:.4;pointer-events:none}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:20px;margin:0;background:none;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--fill-hover),var(--accent,var(--muted)))}
+input[type=range]::-moz-range-track{height:6px;border-radius:3px;background:linear-gradient(90deg,var(--fill-hover),var(--accent,var(--muted)))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;margin-top:-6px;border-radius:50%;background:var(--ink);border:2px solid var(--raised);box-shadow:0 1px 4px rgba(0,0,0,.5)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--ink);border:2px solid var(--raised)}
+input[type=range]:disabled{opacity:.4;cursor:default}
+.panes{display:flex;flex-wrap:wrap;gap:6px}
+.panes a{display:inline-flex;align-items:center;height:30px;padding:0 13px;border-radius:15px;color:var(--text-2);font-weight:500}
+.panes a:hover,.panes a[aria-current]{background:var(--fill);color:var(--text)}
+.themes{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
+.theme{display:flex;flex-direction:column;gap:3px;padding:9px 9px 11px;transition:border-color .15s}
+.theme:hover{border-color:var(--edge-2)}
+.theme[aria-pressed="true"]{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.pv{display:block;position:relative;height:74px;margin-bottom:6px;border-radius:9px;overflow:hidden;background:linear-gradient(168deg,oklch(.27 .06 var(--h)),oklch(.225 .05 calc(var(--h) + 14)))}
+.pv::before{content:"";position:absolute;inset:6px 6px 6px 32%;border-radius:6px;background:oklch(.17 .022 var(--h))}
+.pv::after{content:"";position:absolute;right:13px;bottom:13px;width:30px;height:9px;border-radius:5px;background:oklch(.87 .13 var(--h))}
+.pv i{position:absolute;left:8px;top:10px;width:17%;height:5px;border-radius:3px;background:oklch(.87 .13 var(--h));box-shadow:0 11px 0 oklch(.42 .05 var(--h)),0 22px 0 oklch(.42 .05 var(--h))}
+.theme.ink .pv{background:#1c1f26}.theme.ink .pv::before{background:#0d0f16}
+.theme.ink .pv::after,.theme.ink .pv i{background:#e7e9ef}.theme.ink .pv i{box-shadow:0 11px 0 #343741,0 22px 0 #343741}
+.theme b{font-weight:600;padding:0 3px}.theme small{font-size:12px;color:var(--muted);padding:0 3px}
+.setrow{display:flex;flex-wrap:wrap;align-items:center;gap:12px 28px;padding:16px 18px}
+.setrow>div{flex:1 1 240px}.setrow>div b{display:block;font-weight:500}.setrow>div span{font-size:12.5px;color:var(--muted)}
+.setrow .strength{flex:1 1 260px;max-width:360px}
+
+/* Lanes, grouped automatically */
+/* The tree: the manager, then the projects, and inside each project its lanes. */
+/* The manager, pinned at the top of the tree. */
+.mgr{color:var(--text);font-weight:600}
+.mgr .mark{width:16px;height:16px;border-radius:4px}
+.mgr .pin{color:var(--muted)}
+/* The pins. Each is a link or a button inside its tile. The place for the next pin shows when the owner points at the
+   grid, and goes when all twelve are used. Taking a pin off is a right-click (or a long press, or the menu key). */
+.tgo>span{max-width:100%;padding:0 1px;letter-spacing:-.012em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tgo{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;height:100%;min-width:0;border-radius:inherit;font:inherit;color:inherit;text-align:center}
+.tile:has(>[aria-current]){background:var(--tile-on);color:var(--text)}
+:root[data-theme] .tile:has(>[aria-current]){box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 42%,transparent)}
+:root[data-theme] .tile:has(>[aria-current]) .i{color:var(--accent)}
+.tile.add{background:none;border:1px dashed var(--edge-2);color:var(--muted);opacity:0;transition:opacity .15s,color .15s}
+.tiles:hover .tile.add,.tile.add:focus-visible,.tile.add[aria-expanded="true"]{opacity:1}
+.tile.add:hover{background:none;color:var(--text)}
+.tiles.full .tile.add{display:none}
+@media (hover:none){.tile.add{opacity:1}}
+/* The right-click menu of a pin, or of an area that can become one. */
+.menu{position:fixed;z-index:70;min-width:184px;padding:5px;background:var(--raised);border:1px solid var(--edge);border-radius:12px;box-shadow:0 16px 44px rgba(0,0,0,.5);animation:pop .14s ease-out}
+.menu button{display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 12px 0 10px;border-radius:8px;font-weight:500;white-space:nowrap}
+.menu button:hover,.menu button:focus-visible{background:var(--row-on);outline:0}
+.menu button:disabled{background:none;color:var(--muted);cursor:default}
+#pinpop .tip{font-size:12px;line-height:1.45;color:var(--muted);text-wrap:pretty}
+#pinpop{width:252px}
+#pinpop .ph .lt{width:26px;height:26px;border-radius:8px;background:var(--fill);display:grid;place-items:center;flex:none}
+#pin-list{display:flex;flex-direction:column;gap:2px;max-height:min(52vh,420px);margin:0 -8px;padding:0 8px;overflow:hidden auto;overscroll-behavior:contain}
+#pin-list h3{padding:6px 0 4px}
+#pin-list .pr{width:auto;height:34px;margin:0 -8px;padding:0 8px}
+#pin-list p{font-size:12.5px;color:var(--text-2)}
+.side #tree h2{margin-top:14px}
+.grp{display:flex;flex-direction:column;gap:1px}
+/* A project's row has two parts: its name opens it, its icon folds its lanes away. Pointing at the row turns the
+   icon into the arrow that says so. */
+.proj{padding:0 8px 0 0;gap:0}
+.proj>.grow{align-self:stretch;font:inherit;line-height:32px;color:inherit;text-align:left}
+.proj>.word,.proj>.dot,.proj>.mark{margin-left:9px}
+.proj:has(>[aria-current]){background:var(--row-on);color:var(--text);font-weight:600}
+.tog{position:relative;flex:none;align-self:stretch;width:33px;display:grid;place-items:center;border-radius:8px}
+.tog .caret{position:absolute;color:var(--muted);opacity:0;transition:transform .16s}
+.proj:hover .tog .ic,.tog:focus-visible .ic{opacity:0}
+.proj:hover .tog .caret,.tog:focus-visible .caret{opacity:1}
+.grp:not([data-unfolded]) .caret{transform:rotate(-90deg)}
+.grp:not([data-unfolded])>.kids{display:none}
+/* A closed project carries the mark of what is inside. Open, its lanes show their own, so the project's goes. */
+.proj>.mark{color:var(--muted)}
+.grp[data-unfolded]>.proj>.dot,.grp[data-unfolded]>.proj>.mark{display:none}
+:root[data-theme] .proj:has(>[aria-current]){box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 42%,transparent)}
+:root[data-theme] .proj:has(>[aria-current]) .ic{color:var(--accent)}
+/* Inside a project every lane starts in the same 16px column, under the first letter of the project's name,
+   and leads with its state. */
+.kids{display:flex;flex-direction:column;gap:1px;margin-bottom:8px;padding-left:25px}
+.kids:empty{display:none}
+.kid{height:28px;gap:8px;font-size:12.5px;font-weight:400}
+.kid>.dot{margin:0 4.5px}.kid>.spin{margin:0 3.5px}.kid>.i{margin:0 1.5px;color:var(--muted)}
+.kid.sub,.kid.art{color:var(--muted)}
+.kid.sub{padding-left:24px}
+.kid:has(>.dot.bad),.kid:has(>.dot.warn),.kid:hover{color:var(--text)}
+.kid.fresh{animation:rise .35s ease-out}
+.spin{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--muted);border-top-color:transparent;animation:turn .8s linear infinite}
+@keyframes turn{to{transform:rotate(360deg)}}
+.receipts{position:fixed;z-index:45;top:62px;right:22px;width:min(340px,calc(100vw - 32px));display:flex;flex-direction:column;gap:8px}
+.receipt{display:flex;flex-direction:column;gap:7px;padding:12px 12px 12px 14px;background:var(--raised);border:1px solid var(--tile-on);border-radius:14px;box-shadow:0 14px 40px rgba(0,0,0,.45);animation:pop .22s cubic-bezier(.2,.9,.3,1.1)}
+.receipt .rh{display:flex;align-items:center;gap:7px;font-size:12.5px}
+.receipt .rh b{flex:1;font-weight:600}
+.receipt .rh .ib{width:22px;height:22px}
+.receipt .rt{font-size:13px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.receipt .rr{font-size:12px;color:var(--muted)}
+.pal .hint{padding:10px 18px 0;font-size:12px;color:var(--muted)}
+
+/* Modules: one workspace, several cockpits */
+.ws .mod{margin-left:7px;font-size:11.5px;font-weight:500;color:var(--muted)}
+.pop h3{font-size:11.5px;font-weight:600;color:var(--muted)}
+.pop .mods{display:flex;flex-direction:column;gap:2px}
+.pop .mods h3{padding-bottom:4px}
+.pop .mods .pr{width:auto;height:34px;margin:0 -8px;padding:0 8px}
+.pr .here{display:none}
+.pr[aria-current]{background:var(--row-on)}.pr[aria-current] .here{display:block}
+.modcards{grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))}
+.modcard{display:flex;align-items:center;gap:13px;padding:14px 16px;transition:border-color .15s}
+.modcard:hover{border-color:var(--edge-2)}
+.modcard[aria-current]{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.modcard div{flex:1;min-width:0}.modcard b{display:block;font-weight:600}.modcard div span{font-size:12.5px;color:var(--muted)}
+.modcard .st{font-size:12px;color:var(--text-2)}
+
+/* Development module: code-shaped details */
+.mono{font-family:var(--mono);font-size:.94em;letter-spacing:-.01em}
+.logbox{margin:0;padding:12px 14px;border-radius:10px;background:var(--bg);border:1px solid var(--line);font:12px/1.65 var(--mono);color:var(--text-2);overflow-x:auto;white-space:pre}
+.logbox b{font-weight:500;color:var(--bad)}.logbox i{font-style:normal;color:var(--muted)}
+.checks{display:flex;flex-wrap:wrap;gap:6px}
+.checks span{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px 0 8px;border-radius:13px;background:var(--fill);font-size:12px;color:var(--text-2)}
+.checks .fail{background:var(--bad-bg);color:var(--text)}
+.gate{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin-top:6px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:12px;color:var(--text-2)}
+.gate span{display:inline-flex;align-items:center;gap:5px}
+.gate .todo{color:var(--muted)}
+.gate .verdict{margin-left:auto;color:var(--text);font-weight:500}
+.unchecked{display:flex;align-items:baseline;gap:9px;max-width:670px;font-size:13px;line-height:1.5;color:var(--text-2);text-wrap:pretty}
+.unchecked b{color:var(--text);font-weight:600}
+.unchecked .dot{transform:translateY(-1px)}
+.jobs td small{display:block;margin-top:2px;font-size:12px;font-weight:400;color:var(--muted)}
+
+/* A lane's own page and the manager's: what was asked, where it stands, who leads, what it made. */
+.asked{margin:0;padding:18px 22px;border-radius:14px;background:var(--raised);font:400 21px/1.38 var(--serif);letter-spacing:-.006em;text-wrap:pretty}
+.wait{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;padding:14px 16px 14px 18px}
+.wait p{flex:1 1 300px;font-size:14px;line-height:1.5;color:var(--text-2);text-wrap:pretty}
+.wait p b{color:var(--text);font-weight:600}
+.steps{display:flex;flex-direction:column;gap:2px;padding:0 2px}
+.steps li{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:11px;align-items:center;min-height:34px;font-size:13.5px;color:var(--text-2)}
+.steps li>.dot{justify-self:center}
+.steps small{font-size:12px;color:var(--muted);white-space:nowrap}
+.steps .now{color:var(--text);font-weight:500}
+.steps .todo{color:var(--muted)}
+.jobs td a{text-decoration:underline;text-decoration-color:var(--edge-2);text-underline-offset:3px}
+.jobs td a:hover{text-decoration-color:var(--text)}
+.asks li{align-items:flex-start;padding:12px 14px}
+.asks li>div b{font-weight:500;text-wrap:pretty}
+.list .lt .i{color:var(--text-2)}
+.view.scroll>.dock{padding-left:18px;padding-right:18px}
+
+/* Entrance: one orchestrated reveal on the brief */
+@keyframes fade{from{opacity:0}}
+@keyframes pop{from{opacity:0;transform:translateY(-8px) scale(.98)}}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes settle{from{opacity:0;transform:scale(1.045)}}
+.brief .hero img{animation:settle 1.1s cubic-bezier(.2,.7,.2,1) both,drift 46s ease-in-out 1.2s infinite alternate}
+.brief .masthead{animation:rise .9s cubic-bezier(.2,.7,.2,1) .18s both}
+.brief .rail{animation:fade .9s ease-out .45s both}
+.brief .under{animation:fade .8s ease-out .55s both}
+.brief .card{animation:rise .7s cubic-bezier(.2,.7,.2,1) both;animation-delay:calc(.6s + var(--n,0)*.09s)}
+.view:not(.brief)>*{animation:fade .22s ease-out}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr);gap:0}
+  .side{position:fixed;z-index:40;inset:0 auto 0 0;width:264px;padding:12px;background:var(--frame);box-shadow:0 0 60px rgba(0,0,0,.6);transform:translateX(-105%);transition:transform .26s cubic-bezier(.2,.8,.2,1);overflow:auto}
+  .app.side-open .side{transform:none}
+  .app.side-off{grid-template-columns:minmax(0,1fr)}
+  .grip.nav,.chat [data-chat-mode]{display:none}
+  .chat{left:8px;right:8px;bottom:8px;width:auto;height:min(78%,640px)}
+}
+/* The page adapts to the room it has, not to the window: the sidebars on both sides can be any width. */
+@container page (max-width:1000px){
+  .card{grid-template-columns:190px minmax(0,1fr);gap:20px 32px;padding:26px 28px}
+}
+@container page (max-width:860px){
+  .sheet{grid-template-columns:16px minmax(0,1fr) 16px;padding-top:6px}
+  .rail{display:none}
+  .minidate{display:flex;justify-content:space-between;padding:0 2px 10px;font:italic 500 17px/1 var(--serif)}
+  .hero{grid-row:auto;aspect-ratio:4/3.4}.masthead{top:8%}
+  .under{flex-direction:column}.credit{text-align:left}
+  .card{grid-template-columns:minmax(0,1fr);padding:22px 20px}
+  .num{display:none}
+  .item{grid-template-columns:minmax(0,1fr)}
+  .doc{padding:22px 18px 24px}.h1{font-size:30px}.stat strong{font-size:23px}.decidebar{padding:10px}.decidebar p{display:none}
+  .draft{grid-template-columns:minmax(0,1fr)}.draft .acts{grid-column:1;grid-row:auto}
+  .log li{grid-template-columns:16px minmax(0,1fr) auto}.log .btn{display:none}
+  .steps li{grid-template-columns:16px minmax(0,1fr);padding:5px 0}.steps small{grid-column:2;white-space:normal}
+}
+</style>
+<script>
+try {
+  var saved = JSON.parse(localStorage.getItem("morndo.theme") || "{}");
+  if (/^(ember|sand|moss|tide|sky|iris|rose)$/.test(saved.id)) document.documentElement.dataset.theme = saved.id;
+  if (saved.k >= 0 && saved.k <= 1) document.documentElement.style.setProperty("--k", saved.k);
+  var glass = typeof saved.g === "number" && saved.g >= 0 && saved.g <= 1 ? saved.g : /^(ember|sand|moss|tide|sky|iris|rose)$/.test(saved.id) ? 0.5 : 0.25;
+  document.documentElement.style.setProperty("--glass", glass);
+  if (glass === 0) document.documentElement.dataset.glass = "off";
+  var lay = JSON.parse(localStorage.getItem("morndo.layout") || "{}");
+  if (lay.side >= 224 && lay.side <= 380) document.documentElement.style.setProperty("--side-w", lay.side + "px");
+  if (lay.chatW >= 320 && lay.chatW <= 640) document.documentElement.style.setProperty("--chat-w", lay.chatW + "px");
+  if (lay.chat === "side") document.documentElement.dataset.chat = "side";
+} catch (e) {}
+</script>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 48 48"><path fill="currentColor" stroke="none" fill-rule="evenodd" d="M0 0L48 0L48 48L0 48ZM8 26A16 16 0 0 1 40 26A16 16 0 0 1 8 26ZM0 27L48 27L48 33L0 33Z"/></symbol>
+  <symbol id="sun" viewBox="0 0 24 24"><path d="M3 17.5h18M8 21h8M12 6.2v3.300M5.300 9.500 7 11.500M18.700 9.500 17 11.500"/><path fill="currentColor" d="M7 17.500a5 5 0 0 1 10 0z"/></symbol>
+  <symbol id="decide" viewBox="0 0 24 24"><path d="M12 3v2.500M12 13.500V21M9 21h6"/><path fill="currentColor" d="M5.500 6h10l3.500 3.500-3.500 3.500h-10z"/></symbol>
+  <symbol id="mail" viewBox="0 0 24 24"><rect x="3" y="5.500" width="18" height="13.500" rx="2.500"/><path fill="currentColor" d="M5.300 7.700h13.400L12 12.900z"/></symbol>
+  <symbol id="star" viewBox="0 0 24 24"><path fill="currentColor" d="M11 3.500c.5 4.400 2.100 6 6.500 6.500-4.400.5-6 2.100-6.500 6.500-.5-4.400-2.100-6-6.500-6.500 4.400-.5 6-2.100 6.500-6.500z"/><path d="M18.500 15.500v5M16 18h5"/></symbol>
+  <symbol id="pen" viewBox="0 0 24 24"><path d="M4.500 19.500l1.200-4.600L16.600 4a2 2 0 0 1 2.800 0l.6.6a2 2 0 0 1 0 2.800L9.100 18.300z"/><path fill="currentColor" d="M4.500 19.500l1.200-4.600 3.400 3.400z"/><path d="M14.500 6.100l3.400 3.400"/></symbol>
+  <symbol id="send" viewBox="0 0 24 24"><path d="M21 3 3.500 10.200l6.900 3.400 3.400 6.900z"/><path fill="currentColor" d="M21 3 10.400 13.600l3.400 6.900z"/></symbol>
+  <symbol id="horn" viewBox="0 0 24 24"><path d="M7 9.500 19 5v14L7 14.500"/><path fill="currentColor" d="M3.500 9.500H7v5H3.500z"/><path d="M9.500 15.400v2.400a2 2 0 0 0 4 0v-.9"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="10.500" cy="10.500" r="6.500"/><path d="M15.400 15.400 20.500 20.500"/><circle fill="currentColor" cx="10.500" cy="10.500" r="1.600"/></symbol>
+  <symbol id="target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.800"/><path d="M12 2v3.200M12 18.800V22M2 12h3.200M18.800 12H22"/><circle fill="currentColor" cx="12" cy="12" r="1.800"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="chat" viewBox="0 0 24 24"><path d="M5.500 4h13A2.500 2.500 0 0 1 21 6.500v8a2.500 2.500 0 0 1-2.500 2.500H10.500L6 20.500V17h-.500A2.500 2.500 0 0 1 3 14.500v-8A2.500 2.500 0 0 1 5.500 4z"/><circle fill="currentColor" stroke="none" cx="8.200" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="12" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="15.800" cy="10.500" r="1.350"/></symbol>
+  <symbol id="down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></symbol>
+  <symbol id="dock" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path fill="currentColor" d="M15 4h3a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-3z"/></symbol>
+  <symbol id="float" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><rect fill="currentColor" stroke="none" x="11.500" y="10" width="7" height="7.500" rx="1.800"/></symbol>
+  <symbol id="up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="go" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="flame" viewBox="0 0 24 24"><path d="M12 3c.5 3.300 5.500 5.600 5.500 10.600a5.500 5.500 0 0 1-11 0c0-2 .9-3.600 2.200-4.800.2 1.500.9 2.500 2 2.900C10.300 8.700 10.700 5.300 12 3z"/><path fill="currentColor" d="M12 13c1 .9 1.500 1.600 1.500 2.500a1.500 1.500 0 0 1-3 0c0-.9.5-1.600 1.500-2.500z"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M12 3l7.500 2.800v5.700c0 4.400-3 7.600-7.500 9.500-4.500-1.900-7.500-5.100-7.500-9.500V5.800z"/><path fill="currentColor" d="M12 3v18c-4.500-1.900-7.500-5.100-7.500-9.500V5.800z"/></symbol>
+  <symbol id="plug" viewBox="0 0 24 24"><path d="M9 3v4.500M15 3v4.500M12 17.500V21"/><path fill="currentColor" d="M6.500 8h11v3.500a5.500 5.500 0 0 1-11 0z"/></symbol>
+  <symbol id="image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-9 9"/></symbol>
+  <symbol id="elbow" viewBox="0 0 24 24"><path d="M6 5v7a3 3 0 0 0 3 3h9"/><path d="m14 11 4 4-4 4"/></symbol>
+  <symbol id="file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path fill="currentColor" d="M14 3l5 5h-5z"/></symbol>
+  <symbol id="pr" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.300"/><circle cx="6" cy="18" r="2.300"/><path d="M6 8.300v7.400M18 15.700V10a3.500 3.500 0 0 0-3.500-3.500H11M13.700 3.800 11 6.500l2.700 2.700"/><circle fill="currentColor" cx="18" cy="18" r="2.300"/></symbol>
+  <symbol id="window" viewBox="0 0 24 24"><rect x="3" y="4.500" width="18" height="15" rx="2.500"/><path fill="currentColor" d="M3 9.500h18V7a2.500 2.500 0 0 0-2.500-2.500h-13A2.500 2.500 0 0 0 3 7z"/></symbol>
+  <symbol id="braces" viewBox="0 0 24 24"><path d="M9 4.500C7 4.500 6.500 5.700 6.500 7.200v2.300C6.500 10.900 5.600 12 4 12c1.600 0 2.500 1.100 2.500 2.500v2.300c0 1.500.5 2.700 2.500 2.700M15 4.500c2 0 2.500 1.200 2.500 2.700v2.300c0 1.400.9 2.500 2.500 2.500-1.600 0-2.500 1.100-2.500 2.500v2.300c0 1.500-.5 2.700-2.500 2.700"/><circle fill="currentColor" cx="12" cy="12" r="1.400"/></symbol>
+  <symbol id="card" viewBox="0 0 24 24"><rect x="3" y="5.500" width="18" height="13" rx="2.500"/><path fill="currentColor" d="M3 9.200h18v3H3z"/><path d="M6.500 15.500H10"/></symbol>
+  <symbol id="phone" viewBox="0 0 24 24"><rect x="7" y="2.500" width="10" height="19" rx="2.500"/><path fill="currentColor" d="M7 16.500h10V19a2.500 2.500 0 0 1-2.500 2.500h-5A2.500 2.500 0 0 1 7 19z"/></symbol>
+  <symbol id="server" viewBox="0 0 24 24"><rect x="3.500" y="4" width="17" height="6.500" rx="2"/><rect x="3.500" y="13.500" width="17" height="6.500" rx="2"/><circle fill="currentColor" stroke="none" cx="7.300" cy="7.250" r="1.350"/><circle fill="currentColor" stroke="none" cx="7.300" cy="16.750" r="1.350"/><path d="M12.500 7.250H17M12.500 16.750H17"/></symbol>
+  <symbol id="pin" viewBox="0 0 24 24"><path d="M12 14.500V21"/><path fill="currentColor" d="M9 3.500h6l-.700 5.200 3.200 3.800v2H6.500v-2l3.200-3.800z"/></symbol>
+  <symbol id="play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path fill="currentColor" d="M10.300 8.600v6.800l5.400-3.400z"/></symbol>
+  <symbol id="pause" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path d="M10 9v6M14 9v6"/></symbol>
+  <symbol id="moon" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></symbol>
+  <symbol id="done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path d="m8.200 12.300 2.700 2.700 4.900-5.400"/></symbol>
+  <symbol id="sliders" viewBox="0 0 24 24"><path d="M4 8h3.200M12.800 8H20M4 16h7.200M16.800 16H20"/><circle fill="currentColor" cx="10" cy="8" r="1.900"/><circle fill="currentColor" cx="14" cy="16" r="1.900"/></symbol>
+  <symbol id="user" viewBox="0 0 24 24"><circle fill="currentColor" cx="12" cy="8" r="2.800"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+</svg>
+
+<!-- The glass behind the window frame: the brief's artwork, already blurred. Two layers, so one can fade into the next. -->
+<div class="glass" aria-hidden="true"><i></i><i></i></div>
+
+<div class="app" id="app">
+
+<nav class="side" id="side" aria-label="Workspace">
+  <button class="row ws" data-wsmenu aria-haspopup="dialog" aria-label="Workspace: Tidewell, @@MODULE_NAME@@. Switch module or change the colour"><svg class="mark"><use href="#mark"/></svg><span class="grow">Tidewell<small class="mod">@@MODULE_NAME@@</small></span><svg class="i sm dim"><use href="#down"/></svg></button>
+
+  <!-- The pins: what the owner keeps one click away, up to twelve (four by three). The module pins four pages to
+       start with; he adds areas and skills himself. A right-click on a pin takes it off, a right-click on an area
+       pins it. The script draws them from the list of what can be pinned. -->
+  <div class="tiles" id="pins">
+    <button class="tile add" data-pin-add aria-haspopup="dialog" aria-label="Pin something here" title="Pin something here"><svg class="i"><use href="#plus"/></svg><span>Pin</span></button>
+  </div>
+
+  <!-- One tree. The manager is pinned on top: everything starts with it. Under it the projects (or areas), and inside
+       each project its lanes. A lane the manager has not placed yet waits under the manager itself. -->
+  <div class="group" id="tree">
+    <a class="row mgr" href="#manager" data-nav="manager"><svg class="mark"><use href="#mark"/></svg><span class="grow">Manager</span><span class="word">Always here</span><svg class="i sm pin"><use href="#pin"/></svg></a>
+    <div class="kids" id="mgr-lanes"></div>
+    <button class="row" data-palette><svg class="i"><use href="#plus"/></svg><span class="grow">New lane</span><kbd>⌘K</kbd></button>
+@@BLOCK:tree@@
+  </div>
+
+@@BLOCK:me@@
+</nav>
+
+<main class="pane chat-off" id="pane">
+  <div class="bar">
+    <button class="ib" data-side aria-label="Show or hide the sidebar"><svg class="i"><use href="#panel"/></svg></button>
+    <button class="ib" data-back aria-label="Back"><svg class="i"><use href="#left"/></svg></button>
+    <button class="ib" data-fwd aria-label="Forward"><svg class="i"><use href="#right"/></svg></button>
+    <div class="crumb"><b id="crumb-a">Brief</b><span id="crumb-b">/ Monday 16 November</span></div>
+    <button class="chatbtn" data-chat aria-pressed="false"><svg class="i sm"><use href="#chat"/></svg>Chat</button>
+  </div>
+
+  <div class="views">
+
+    <!-- 1. The brief -->
+    <section class="view brief" id="v-brief" aria-label="Morning brief">
+      <div class="sheet">
+        <div class="minidate"><span>16 Nov 2026</span><span>07:15 AM</span></div>
+        <div class="rail l" aria-hidden="true"><span>16 NOV 2026</span></div>
+        <figure class="hero">
+          <img id="hero-img" alt="">
+          <h1 class="masthead"><i>The</i>Monday Brief</h1>
+          <div class="pager"><button data-hero="-1" aria-label="Previous artwork"><svg class="i sm"><use href="#left"/></svg></button><span id="hero-n"></span><button data-hero="1" aria-label="Next artwork"><svg class="i sm"><use href="#right"/></svg></button></div>
+        </figure>
+        <div class="rail r" aria-hidden="true"><span>07:15 AM</span></div>
+
+        <div class="under">
+@@BLOCK:lede@@
+          <p class="credit"><span id="hero-title"></span><br><span id="hero-manner"></span></p>
+        </div>
+
+        <div class="cards">
+@@BLOCK:cards@@
+        </div>
+
+        <div class="dock"><div class="composer">
+          <button class="ib" aria-label="Add a file or a link"><svg class="i lg"><use href="#plus"/></svg></button>
+          <label><span class="sr">Message Morndo</span><input type="text" placeholder="Tell Morndo what to do" autocomplete="off"></label>
+          <button class="model" data-palette>Auto<svg class="i sm"><use href="#down"/></svg></button>
+          <button class="sendb" data-file aria-label="Send"><svg class="i lg"><use href="#up"/></svg></button>
+        </div></div>
+      </div>
+    </section>
+
+@@BLOCK:views@@
+
+
+    <!-- 6. Settings: the workspace's colour -->
+    <section class="view scroll" id="v-settings" aria-label="Settings" hidden>
+      <div class="doc" style="gap:26px">
+        <header class="sec" style="gap:12px">
+          <h1 class="h1">Settings</h1>
+          <nav class="panes" aria-label="Settings sections"><a href="#settings" aria-current="page">Workspace</a><a href="#skills">Connections</a><a href="#skills">Guardrails</a></nav>
+        </header>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Modules</h2><span>2 on · each brings its own areas, decisions and skills</span></div>
+          <div class="grid modcards">
+            <a class="box modcard" href="gtm-cockpit.html" data-module-link="gtm"><svg class="i lg"><use href="#horn"/></svg><div><b>Go-to-market</b><span>Content, outbound, paid, SEO and research</span></div><span class="st" data-here>Open</span></a>
+            <a class="box modcard" href="dev-cockpit.html" data-module-link="dev"><svg class="i lg"><use href="#pr"/></svg><div><b>Development</b><span>Projects, pull requests, reviews and releases</span></div><span class="st" data-here>Open</span></a>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Workspace colour</h2><span>Now: <span data-theme-name>Ink</span></span></div>
+          <p class="intro" style="font-size:13.5px">The colour belongs to this workspace, so two workspaces never look alike. It tints the window, marks what is selected and colours the brief.</p>
+          <div class="grid themes">
+            <button class="box theme ink" data-theme-set="ink" aria-pressed="true"><span class="pv"><i></i></span><b>Ink</b><small>Monochrome</small></button>
+            <button class="box theme" style="--h:48" data-theme-set="ember" aria-pressed="false"><span class="pv"><i></i></span><b>Ember</b><small>Warm orange</small></button>
+            <button class="box theme" style="--h:85" data-theme-set="sand" aria-pressed="false"><span class="pv"><i></i></span><b>Sand</b><small>Dry gold</small></button>
+            <button class="box theme" style="--h:150" data-theme-set="moss" aria-pressed="false"><span class="pv"><i></i></span><b>Moss</b><small>Soft green</small></button>
+            <button class="box theme" style="--h:200" data-theme-set="tide" aria-pressed="false"><span class="pv"><i></i></span><b>Tide</b><small>Sea teal</small></button>
+            <button class="box theme" style="--h:250" data-theme-set="sky" aria-pressed="false"><span class="pv"><i></i></span><b>Sky</b><small>Clear blue</small></button>
+            <button class="box theme" style="--h:295" data-theme-set="iris" aria-pressed="false"><span class="pv"><i></i></span><b>Iris</b><small>Violet</small></button>
+            <button class="box theme" style="--h:5" data-theme-set="rose" aria-pressed="false"><span class="pv"><i></i></span><b>Rose</b><small>Dusty pink</small></button>
+          </div>
+        </section>
+        <section class="box setrow">
+          <div><b>Strength</b><span>How much colour the window carries. Ink has no colour to turn up.</span></div>
+          <label class="strength"><span class="top"><span>Subtle</span><span>Bold</span></span><span class="track" style="--d:.55"><input type="range" min="0" max="100" value="55" data-strength aria-label="Colour strength"><button type="button" class="tick" data-strength-default title="Default: 55" aria-label="Back to the default colour strength, 55"></button></span></label>
+        </section>
+        <section class="box setrow">
+          <div><b>Glass</b><span>How much of the day's artwork shines through the window frame. All the way left turns it off. The point marks this theme's default.</span></div>
+          <label class="strength"><span class="top"><span>Off</span><span>Strong</span></span><span class="track" style="--d:.25"><input type="range" min="0" max="100" value="25" data-glass-range aria-label="Glass strength"><button type="button" class="tick" data-glass-default title="Default"></button></span></label>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Chat</h2><span>Where it sits</span></div>
+          <div class="box setrow">
+            <div><b>Floating or sidebar</b><span>Floating opens over the page when you ask for it. A sidebar stays open beside every page; drag its edge to resize it.</span></div>
+            <div class="seg" role="group" aria-label="Where the chat sits"><button data-chat-set="float" aria-pressed="true">Floating</button><button data-chat-set="side" aria-pressed="false">Sidebar</button></div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- The chat: one panel for the whole window. A page can bring its own thread (a template.chat-src inside its view);
+       the others share the general one below. It floats by default and can be kept as a sidebar. -->
+  <aside class="chat" aria-label="Chat">
+    <header>
+      <div><h2 id="chat-title">Chat</h2><p id="chat-sub" hidden></p></div>
+      <button class="ib" data-chat-mode aria-label="Keep the chat as a sidebar" title="Keep as a sidebar"><svg class="i"><use href="#dock"/></svg></button>
+      <button class="ib" data-chat aria-label="Close chat"><svg class="i"><use href="#x"/></svg></button>
+    </header>
+    <div class="thread" id="chat-thread"></div>
+    <div class="composer s">
+      <label><span class="sr">Message</span><input id="chat-input" type="text" placeholder="Ask Morndo" autocomplete="off"></label>
+      <button class="model" data-palette>Auto<svg class="i sm"><use href="#down"/></svg></button>
+      <button class="sendb" aria-label="Send"><svg class="i"><use href="#up"/></svg></button>
+    </div>
+    <div class="grip" data-resize="chat" role="separator" aria-orientation="vertical" aria-label="Resize the chat sidebar" tabindex="0"></div>
+  </aside>
+  <template id="chat-default" data-title="Manager" data-placeholder="Tell the Manager">
+    <div class="ctx"><svg class="i sm"><use href="#file"/></svg>Reading this page</div>
+    <div class="answer"><p>Ask about anything on this page, or say what you want done. A new job becomes its own lane.</p></div>
+    <div class="sugg"><button>What needs me today?</button><button>What is stuck?</button><button>Sum up this page</button></div>
+  </template>
+</main>
+<div class="grip nav" data-resize="side" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" tabindex="0"></div>
+</div>
+
+<!-- The workspace menu: its modules and its colour. Opens from the workspace name or a right-click on empty sidebar space. -->
+<div class="pop" id="themepop" role="dialog" aria-label="Workspace" hidden>
+  <div class="ph"><svg class="mark"><use href="#mark"/></svg><div><b>Tidewell</b><span>Workspace colour: <span data-theme-name>Ink</span></span></div></div>
+  <div class="mods"><h3>Modules</h3>
+    <a class="pr" href="gtm-cockpit.html" data-module-link="gtm"><svg class="i"><use href="#horn"/></svg><b>Go-to-market</b><span class="g"></span><svg class="i sm here"><use href="#check"/></svg></a>
+    <a class="pr" href="dev-cockpit.html" data-module-link="dev"><svg class="i"><use href="#pr"/></svg><b>Development</b><span class="g"></span><svg class="i sm here"><use href="#check"/></svg></a>
+  </div>
+  <h3>Colour</h3>
+  <div class="swatches"><button class="dotc ink" data-theme-set="ink" aria-pressed="true" aria-label="Ink, monochrome" title="Ink"></button><button class="dotc" style="--h:48" data-theme-set="ember" aria-pressed="false" aria-label="Ember" title="Ember"></button><button class="dotc" style="--h:85" data-theme-set="sand" aria-pressed="false" aria-label="Sand" title="Sand"></button><button class="dotc" style="--h:150" data-theme-set="moss" aria-pressed="false" aria-label="Moss" title="Moss"></button><button class="dotc" style="--h:200" data-theme-set="tide" aria-pressed="false" aria-label="Tide" title="Tide"></button><button class="dotc" style="--h:250" data-theme-set="sky" aria-pressed="false" aria-label="Sky" title="Sky"></button><button class="dotc" style="--h:295" data-theme-set="iris" aria-pressed="false" aria-label="Iris" title="Iris"></button><button class="dotc" style="--h:5" data-theme-set="rose" aria-pressed="false" aria-label="Rose" title="Rose"></button></div>
+  <label class="strength"><span class="top"><b>Strength</b><span>Subtle to bold</span></span><span class="track" style="--d:.55"><input type="range" min="0" max="100" value="55" data-strength aria-label="Colour strength"><button type="button" class="tick" data-strength-default title="Default: 55" aria-label="Back to the default colour strength, 55"></button></span></label>
+  <label class="strength"><span class="top"><b>Glass</b><span>Off to strong</span></span><span class="track" style="--d:.25"><input type="range" min="0" max="100" value="25" data-glass-range aria-label="Glass strength"><button type="button" class="tick" data-glass-default title="Default"></button></span></label>
+  <a class="btn quiet" href="#settings">All settings</a>
+</div>
+
+<!-- New lane: every message is filed as its own lane, under its group -->
+<!-- What can be pinned: the areas, and skills as one-click macros. Opens from the empty place in the pin grid. -->
+<div class="pop" id="pinpop" role="dialog" aria-label="Pin to the top" hidden>
+  <div class="ph"><span class="lt"><svg class="i sm"><use href="#pin"/></svg></span><div><b>Pin to the top</b><span id="pin-room"></span></div></div>
+  <div id="pin-list"></div>
+  <p class="tip">To take a pin off, right-click it. You can also right-click an area in the list on the left to pin it.</p>
+</div>
+<div class="menu" id="pinmenu" role="menu" hidden><button role="menuitem" data-pin-toggle><svg class="i"><use href="#pin"/></svg><span></span></button></div>
+
+<div class="receipts" id="receipts" aria-live="polite"></div>
+<div class="overlay" id="overlay" hidden>
+  <div class="pal" role="dialog" aria-modal="true" aria-label="New lane">
+    <div class="ask">
+      <svg class="i lg dim"><use href="#search"/></svg>
+      <label class="sr" for="ask">Say what you want done</label>
+      <input id="ask" type="text" placeholder="Say what you want done, or type / for a skill" autocomplete="off">
+      <span class="cur">Auto<kbd>Tab</kbd></span>
+    </div>
+    <p class="hint">Each message becomes its own lane, filed under the right group. Send several in a row; they do not mix.</p>
+    <div class="rows">
+@@BLOCK:palette_rows@@
+    </div>
+    <footer>
+      <span class="g"><svg class="mark" style="width:15px;height:15px;border-radius:4px"><use href="#mark"/></svg>New lane</span>
+@@BLOCK:palette_keys@@
+    </footer>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const app = $("#app"), pane = $("#pane"), overlay = $("#overlay");
+  const CRUMBS = {
+@@BLOCK:crumbs@@
+  };
+
+  // The brief's artwork: one of fourteen, picked by the date, so the brief looks different each morning.
+  const HEROES = @@HEROES_JSON@@;
+  const heroImg = $("#hero-img");
+  const dayOfYear = Math.floor((Date.UTC(2026, 10, 16) - Date.UTC(2026, 0, 0)) / 864e5);
+  let heroAt = dayOfYear % HEROES.length;
+  function showHero(i, fade) {
+    heroAt = (i + HEROES.length) % HEROES.length;
+    const h = HEROES[heroAt];
+    heroImg.src = h.src;
+    // The frame's glass follows the artwork: the hidden layer takes the new picture and the two swap by fading.
+    const layers = $$(".glass i"), to = layers.find(l => !l.classList.contains("on")) || layers[0];
+    to.style.backgroundImage = 'url("' + h.glass + '")';
+    layers.forEach(l => l.classList.toggle("on", l === to));
+    heroImg.alt = h.alt;
+    heroImg.style.objectPosition = h.pos || "";
+    $("#hero-title").textContent = h.title;
+    $("#hero-manner").textContent = "Generated for Morndo, in the manner of " + h.manner;
+    $("#hero-n").textContent = heroAt + 1 + " / " + HEROES.length;
+    if (fade && heroImg.animate) heroImg.animate([{ opacity: 0.25 }, { opacity: 1 }], { duration: 380, easing: "ease-out" });
+  }
+
+  // The workspace's colour: one of the presets, and how strong it is. Ink is the monochrome default.
+  const NAMES = { ink: "Ink", ember: "Ember", sand: "Sand", moss: "Moss", tide: "Tide", sky: "Sky", iris: "Iris", rose: "Rose" };
+  const pop = $("#themepop"), root = document.documentElement;
+
+  // Which module this file is. The other one is a file beside it; this one's own link leads back to the brief.
+  $$("[data-module-link]").forEach(a => {
+    if (a.dataset.moduleLink !== root.dataset.module) return;
+    a.setAttribute("aria-current", "true");
+    a.setAttribute("href", "#brief");
+    const here = $("[data-here]", a);
+    if (here) here.textContent = "You are here";
+  });
+  // g is the glass strength the user chose. null means "this theme's default": a quarter in Ink, half in a colour theme.
+  const stored = (() => { try { return JSON.parse(localStorage.getItem("morndo.theme") || "{}"); } catch (e) { return {}; } })();
+  const theme = { id: NAMES[root.dataset.theme] ? root.dataset.theme : "ink", k: Number(root.style.getPropertyValue("--k")) || 0.55,
+                  g: typeof stored.g === "number" && stored.g >= 0 && stored.g <= 1 ? stored.g : null };
+  const K_DEFAULT = 0.55, glassDefault = () => (theme.id === "ink" ? 0.25 : 0.5);
+  function applyTheme(save) {
+    if (theme.id === "ink") root.removeAttribute("data-theme"); else root.dataset.theme = theme.id;
+    root.style.setProperty("--k", theme.k);
+    $$("[data-theme-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeSet === theme.id)));
+    $$("[data-strength]").forEach(r => { r.value = Math.round(theme.k * 100); r.disabled = theme.id === "ink"; r.parentElement.style.setProperty("--d", K_DEFAULT); });
+    $$("[data-theme-name]").forEach(n => (n.textContent = NAMES[theme.id]));
+    const def = glassDefault(), glass = theme.g === null ? def : theme.g, pct = Math.round(def * 100);
+    root.style.setProperty("--glass", glass);
+    if (glass > 0) root.removeAttribute("data-glass"); else root.dataset.glass = "off";
+    $$("[data-glass-range]").forEach(r => { r.value = Math.round(glass * 100); r.parentElement.style.setProperty("--d", def); });
+    $$("[data-glass-default]").forEach(b => { b.title = "Default: " + pct; b.setAttribute("aria-label", "Back to the default glass strength, " + pct); });
+    if (save) try { localStorage.setItem("morndo.theme", JSON.stringify(theme)); } catch (e) {}
+  }
+  document.addEventListener("input", e => {
+    // Close to its default a slider settles on it. For glass that also means: follow each theme's default again.
+    const v = e.target.value / 100, near = d => Math.abs(Number(e.target.value) - Math.round(d * 100)) <= 2;
+    if (e.target.matches("[data-strength]")) { theme.k = near(K_DEFAULT) ? K_DEFAULT : v; applyTheme(true); }
+    else if (e.target.matches("[data-glass-range]")) { theme.g = near(glassDefault()) ? null : v; applyTheme(true); }
+  });
+  // What a right-click in the sidebar is on: a pin, or an area that can become one.
+  const pinAt = el => {
+    const tile = el.closest("#pins .tile:not(.add)"), proj = el.closest(".proj");
+    const id = tile ? tile.dataset.pinId : proj ? proj.closest(".grp").id : null;
+    return id && PINNABLE.some(p => p.id === id) ? id : null;
+  };
+  $("#side").addEventListener("contextmenu", e => {
+    const id = pinAt(e.target);
+    if (id) {
+      e.preventDefault();
+      // From the keyboard there is no pointer position: the menu opens at the thing itself.
+      const r = e.target.closest(".tile,.proj").getBoundingClientRect(), byKey = !e.clientX && !e.clientY;
+      openPinMenu(id, byKey ? r.left + 12 : e.clientX, byKey ? r.bottom - 4 : e.clientY);
+      return;
+    }
+    if (e.target.closest("a,button")) return;
+    e.preventDefault();
+    pop.hidden = false;
+    pop.style.left = Math.max(8, Math.min(e.clientX, innerWidth - pop.offsetWidth - 8)) + "px";
+    pop.style.top = Math.max(8, Math.min(e.clientY, innerHeight - pop.offsetHeight - 8)) + "px";
+  });
+
+  function show(name) {
+    const view = CRUMBS[name] ? name : "brief";
+    $$(".view").forEach(v => (v.hidden = v.id !== "v-" + view));
+    $$("[data-nav]").forEach(a => (a.dataset.nav === view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+    $("#crumb-a").textContent = CRUMBS[view][0];
+    $("#crumb-b").textContent = "/ " + CRUMBS[view][1];
+    document.title = CRUMBS[view][0] + " · Morndo";
+    pane.dataset.view = view;
+    // The tree shows where you are: the project of the page you opened unfolds.
+    const here = $('#tree .grp [data-nav="' + view + '"]');
+    if (here) fold(here.closest(".grp"), true);
+    fillChat(view);
+    pane.classList.toggle("chat-off", !sideChat());
+    syncChat();
+    closePalette();
+    pop.hidden = true;
+    closePins();
+    closePinMenu();
+    app.classList.remove("side-open");
+  }
+
+  // The chat. A sidebar needs room, so on a narrow window it always floats.
+  const wide = matchMedia("(min-width:901px)");
+  const sideChat = () => root.dataset.chat === "side" && wide.matches;
+  function fillChat(view) {
+    const src = $("#v-" + view + " template.chat-src") || $("#chat-default");
+    $("#chat-title").textContent = src.dataset.title || "Chat";
+    $("#chat-sub").textContent = src.dataset.sub || "";
+    $("#chat-sub").hidden = !src.dataset.sub;
+    $("#chat-input").placeholder = src.dataset.placeholder || "Ask Morndo";
+    $("#chat-thread").replaceChildren(src.content.cloneNode(true));
+  }
+  function syncChat() {
+    const side = sideChat();
+    if (side) pane.classList.remove("chat-off");
+    $(".chatbtn").setAttribute("aria-pressed", String(!pane.classList.contains("chat-off")));
+    const mode = $("[data-chat-mode]"), label = side ? "Let the chat float" : "Keep the chat as a sidebar";
+    $("use", mode).setAttribute("href", side ? "#float" : "#dock");
+    mode.setAttribute("aria-label", label);
+    mode.title = label;
+    $$("[data-chat-set]").forEach(b => b.setAttribute("aria-pressed", String((b.dataset.chatSet === "side") === (root.dataset.chat === "side"))));
+  }
+  function setChatMode(mode, open) {
+    if (mode === "side") root.dataset.chat = "side"; else root.removeAttribute("data-chat");
+    layout.chat = mode;
+    saveLayout();
+    pane.classList.toggle("chat-off", !open && !sideChat());
+    syncChat();
+  }
+  wide.addEventListener("change", () => { pane.classList.toggle("chat-off", !sideChat()); syncChat(); });
+
+  // Both sidebars can be dragged wider or narrower. A double-click puts one back to its normal width.
+  const layout = (() => { try { return JSON.parse(localStorage.getItem("morndo.layout") || "{}"); } catch (e) { return {}; } })();
+  const saveLayout = () => { try { localStorage.setItem("morndo.layout", JSON.stringify(layout)); } catch (e) {} };
+  const EDGES = {
+    // Not narrower than 224 px: below that the pins' labels no longer fit.
+    side: { prop: "--side-w", key: "side", min: 224, max: 380, normal: 236, at: x => x - app.getBoundingClientRect().left - 12 },
+    chat: { prop: "--chat-w", key: "chatW", min: 320, max: 640, normal: 380, at: x => pane.getBoundingClientRect().right - x },
+  };
+  function setWidth(which, px, save) {
+    const e = EDGES[which];
+    let w = Math.max(e.min, Math.min(e.max, px));
+    // The page itself always keeps at least 420 px.
+    if (which === "chat") w = Math.max(e.min, Math.min(w, pane.clientWidth - 420));
+    w = Math.round(w);
+    root.style.setProperty(e.prop, w + "px");
+    layout[e.key] = w;
+    $('[data-resize="' + which + '"]').setAttribute("aria-valuenow", w);
+    if (save) saveLayout();
+  }
+  $$("[data-resize]").forEach(grip => {
+    const which = grip.dataset.resize, e = EDGES[which];
+    grip.setAttribute("aria-valuemin", e.min);
+    grip.setAttribute("aria-valuemax", e.max);
+    grip.setAttribute("aria-valuenow", parseFloat(getComputedStyle(root).getPropertyValue(e.prop)));
+    grip.addEventListener("pointerdown", down => {
+      down.preventDefault();
+      grip.setPointerCapture(down.pointerId);
+      grip.classList.add("on");
+      app.classList.add("resizing");
+      const move = ev => setWidth(which, e.at(ev.clientX));
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.classList.remove("on");
+        app.classList.remove("resizing");
+        saveLayout();
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up, { once: true });
+      grip.addEventListener("pointercancel", up, { once: true });
+    });
+    grip.addEventListener("dblclick", () => setWidth(which, e.normal, true));
+    grip.addEventListener("keydown", ev => {
+      if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+      ev.preventDefault();
+      const wider = (ev.key === "ArrowRight") === (which === "side");
+      setWidth(which, parseFloat(getComputedStyle(root).getPropertyValue(e.prop)) + (wider ? 16 : -16), true);
+    });
+  });
+
+  function openPalette() { overlay.hidden = false; $("#ask").value = ""; $("#ask").focus(); }
+  function closePalette() { overlay.hidden = true; }
+
+  // How many decisions are still open, everywhere the number shows.
+  function count(moved) {
+    const open = $$("#v-brief .decision:not(.done)");
+    const minutes = open.reduce((n, d) => n + Number(d.dataset.min), 0);
+    const replay = (el, cls) => { el.classList.remove(cls); void el.getBoundingClientRect(); el.classList.add(cls); };
+    $$("[data-open]").forEach(el => { if (el.textContent !== String(open.length)) { el.textContent = open.length; replay(el, "bump"); } el.hidden = open.length === 0; });
+    const emblem = $("#decide-em"), want = open.length ? "#decide" : "#done";
+    if ($("use", emblem).getAttribute("href") !== want || moved) { $("use", emblem).setAttribute("href", want); replay(emblem, "stamp"); }
+    $("#decide-sub").textContent = open.length ? `${open.length} open · about ${minutes} minutes` : "All decided. Nothing waits for you.";
+  }
+
+  // Folding a project's lanes away or out.
+  function fold(grp, open) {
+    grp.toggleAttribute("data-unfolded", open);
+    $(".tog", grp).setAttribute("aria-expanded", String(open));
+  }
+
+  // The pins. The module brings its own five; the owner adds areas and skills himself, up to twelve in all.
+  const PINNABLE = [
+@@BLOCK:pinnable@@
+  ];
+  const MAX_PINS = 12, pinsKey = "morndo.pins2." + root.dataset.module, pinpop = $("#pinpop"), pinmenu = $("#pinmenu");
+  let pins = (() => {
+    try { const p = JSON.parse(localStorage.getItem(pinsKey)); if (Array.isArray(p)) return p; } catch (e) {}
+    return PINNABLE.filter(p => p.pinned).map(p => p.id);
+  })();
+  function closePins() { pinpop.hidden = true; $("[data-pin-add]").setAttribute("aria-expanded", "false"); }
+  function renderPins(save) {
+    const box = $("#pins"), add = $(".tile.add", box);
+    $$(".tile:not(.add)", box).forEach(t => t.remove());
+    pins = pins.filter(id => PINNABLE.some(p => p.id === id)).slice(0, MAX_PINS);
+    pins.forEach(id => {
+      const p = PINNABLE.find(x => x.id === id), el = document.createElement("div");
+      el.className = "tile";
+      el.dataset.pinId = id;
+      el.innerHTML = (p.href ? '<a class="tgo"></a>' : '<button class="tgo"></button>') + (p.badge ? '<span class="badge" data-open></span>' : "");
+      const go = el.firstChild;
+      go.innerHTML = '<svg class="i"><use href="#' + p.icon + '"/></svg><span></span>';
+      $("span", go).textContent = p.label;
+      if (p.href) { go.href = p.href; go.dataset.nav = p.href.slice(1); }
+      else if (p.run) { go.dataset.run = p.run; go.title = "Run " + p.run; }
+      else go.dataset.unfold = p.id;
+      box.insertBefore(el, add);
+    });
+    const left = MAX_PINS - pins.length;
+    box.classList.toggle("full", left <= 0);
+    $("#pin-room").textContent = left > 0 ? left + " of " + MAX_PINS + " places free" : "All " + MAX_PINS + " places are used";
+    // The list to pin from: whatever is not pinned yet, by kind.
+    const list = $("#pin-list");
+    list.replaceChildren();
+    [...new Set(PINNABLE.map(p => p.kind))].forEach(kind => {
+      const rest = PINNABLE.filter(p => p.kind === kind && !pins.includes(p.id));
+      if (!rest.length) return;
+      const h = document.createElement("h3");
+      h.textContent = kind;
+      list.append(h);
+      rest.forEach(p => {
+        const b = document.createElement("button");
+        b.className = "pr";
+        b.dataset.pin = p.id;
+        b.innerHTML = '<svg class="i"><use href="#' + p.icon + '"/></svg><b></b><span class="g"></span>';
+        $("b", b).textContent = p.name || p.label;
+        $(".g", b).textContent = p.note || "";
+        list.append(b);
+      });
+    });
+    if (!list.children.length) { const none = document.createElement("p"); none.textContent = "Everything that can be pinned is pinned."; list.append(none); }
+    if (pane.dataset.view) $$("#pins [data-nav]").forEach(a => (a.dataset.nav === pane.dataset.view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+    count();
+    if (save) try { localStorage.setItem(pinsKey, JSON.stringify(pins)); } catch (e) {}
+  }
+
+  // The right-click menu: take a pin off, or pin an area.
+  function openPinMenu(id, x, y) {
+    const p = PINNABLE.find(q => q.id === id), on = pins.includes(id), full = pins.length >= MAX_PINS, item = $("button", pinmenu);
+    item.dataset.pinToggle = id;
+    item.disabled = !on && full;
+    $("span", item).textContent = on ? "Unpin " + (p.name || p.label) : full ? "All " + MAX_PINS + " places are used" : "Pin " + (p.name || p.label) + " to the top";
+    closePins();
+    pinmenu.hidden = false;
+    pinmenu.style.left = Math.max(8, Math.min(x, innerWidth - pinmenu.offsetWidth - 8)) + "px";
+    pinmenu.style.top = Math.max(8, Math.min(y, innerHeight - pinmenu.offsetHeight - 8)) + "px";
+    item.focus({ preventScroll: true });
+  }
+  function closePinMenu() { pinmenu.hidden = true; }
+  // On a touch screen there is no right-click: a long press opens the same menu, and the tap that ends it does nothing.
+  let press = 0, pressed = false;
+  $("#side").addEventListener("pointerdown", e => {
+    const id = e.pointerType === "touch" && pinAt(e.target);
+    if (id) press = setTimeout(() => { pressed = true; openPinMenu(id, e.clientX, e.clientY); }, 550);
+  });
+  ["pointerup", "pointercancel", "pointermove"].forEach(type => $("#side").addEventListener(type, () => clearTimeout(press)));
+  $("#side").addEventListener("click", e => { if (pressed) { pressed = false; e.preventDefault(); e.stopPropagation(); } }, true);
+
+  // A stand-in for the manager's intake: in the product it reads the message and the lanes that are open.
+  const ROUTES = [
+@@BLOCK:routes@@
+  ];
+
+  // One message in, one lane out: the manager puts it in a project and names who leads, with a receipt the owner
+  // can correct. What fits no project stays with the manager until it knows where it belongs.
+  function fileDirection(raw) {
+    const text = raw.trim();
+    if (!text) return;
+    const route = ROUTES.find(r => r.re.test(text));
+    const grp = route && $("#" + route.id);
+    const kid = document.createElement("button");
+    kid.className = "row kid fresh";
+    kid.innerHTML = '<i class="spin"></i><span class="grow"></span><span class="word">Starting</span>';
+    $(".grow", kid).textContent = text;
+    $(grp ? ".kids" : "#mgr-lanes", grp || document).prepend(kid);
+    if (grp) fold(grp, true);
+
+    const box = $("#receipts"), el = document.createElement("div");
+    el.className = "receipt";
+    el.innerHTML = '<div class="rh"><svg class="i sm ok"><use href="#check"/></svg><b>Filed as its own lane</b><button class="ib" data-dismiss aria-label="Dismiss"><svg class="i sm"><use href="#x"/></svg></button></div><p class="rt"></p><p class="rr"></p><div class="acts"><button class="btn quiet s" data-dismiss>Move it</button><button class="btn quiet s" data-unfile>Undo</button></div>';
+    $(".rt", el).textContent = text;
+    $(".rr", el).textContent = grp ? $("#tree h2").dataset.kind + ": " + $(".proj .grow", grp).textContent + " · " + route.lead + " leads" : "With the Manager, until it knows where this belongs";
+    $("[data-unfile]", el).addEventListener("click", () => { kid.remove(); el.remove(); });
+    box.prepend(el);
+    while (box.children.length > 3) box.lastChild.remove();
+  }
+
+  document.addEventListener("click", e => {
+    const t = e.target.closest("a,button");
+    if (!e.target.closest("#themepop,[data-wsmenu]")) pop.hidden = true;
+    if (!e.target.closest("#pinpop,[data-pin-add]")) closePins();
+    if (!e.target.closest("#pinmenu")) closePinMenu();
+    if (!t) { if (e.target === overlay) closePalette(); return; }
+    if (t.matches("[data-wsmenu]")) { pop.style.left = pop.style.top = ""; pop.hidden = !pop.hidden; }
+    else if (t.matches("[data-theme-set]")) { theme.id = t.dataset.themeSet; applyTheme(true); }
+    else if (t.matches("[data-hero]")) showHero(heroAt + Number(t.dataset.hero), true);
+    else if (t.matches("[data-pin-add]")) {
+      pinpop.hidden = !pinpop.hidden;
+      t.setAttribute("aria-expanded", String(!pinpop.hidden));
+      const r = $("#pins").getBoundingClientRect();
+      pinpop.style.left = Math.max(8, r.left) + "px";
+      pinpop.style.top = r.bottom + 8 + "px";
+    }
+    else if (t.matches("[data-pin]")) { pins.push(t.dataset.pin); renderPins(true); if ($("#pins").classList.contains("full")) closePins(); }
+    else if (t.matches("[data-pin-toggle]")) {
+      const id = t.dataset.pinToggle;
+      pins = pins.includes(id) ? pins.filter(x => x !== id) : pins.concat(id);
+      closePinMenu();
+      renderPins(true);
+    }
+    else if (t.matches("[data-run]")) { openPalette(); $("#ask").value = t.dataset.run + " "; }
+    else if (t.matches("[data-unfold]")) { const g = $("#" + t.dataset.unfold); fold(g, true); g.scrollIntoView({ block: "nearest" }); }
+    else if (t.matches(".tog")) fold(t.closest(".grp"), !t.closest(".grp").hasAttribute("data-unfolded"));
+    else if (t.matches(".proj > button.grow")) fold(t.closest(".grp"), !t.closest(".grp").hasAttribute("data-unfolded"));
+    else if (t.matches("[data-dismiss]")) t.closest(".receipt").remove();
+    else if (t.matches("[data-file]")) { const inp = $("input", t.closest(".composer")); fileDirection(inp.value); inp.value = ""; }
+    else if (t.matches("[data-approve]")) { t.closest(".decision").classList.add("done"); count(true); }
+    else if (t.matches("[data-undo]")) { t.closest(".decision").classList.remove("done"); count(); }
+    else if (t.matches("[data-approve-id]")) { $("#" + t.dataset.approveId).classList.add("done"); count(true); }
+    else if (t.matches("[data-undo-log]")) { const li = t.closest("li"); li.classList.toggle("undone"); t.textContent = li.classList.contains("undone") ? "Redo" : "Undo"; }
+    else if (t.matches("[data-palette]")) openPalette();
+    else if (t.matches("[data-close]")) closePalette();
+    else if (t.matches("[data-chat]")) { pane.classList.toggle("chat-off"); syncChat(); if (!pane.classList.contains("chat-off")) $("#chat-input").focus(); }
+    else if (t.matches("[data-chat-mode]")) setChatMode(sideChat() ? "float" : "side", true);
+    else if (t.matches("[data-chat-set]")) setChatMode(t.dataset.chatSet, false);
+    else if (t.matches("[data-side]")) app.classList.toggle(matchMedia("(max-width:900px)").matches ? "side-open" : "side-off");
+    else if (t.matches("[data-back]")) history.back();
+    else if (t.matches("[data-fwd]")) history.forward();
+    else if (t.matches("[data-glass-default]")) { theme.g = null; applyTheme(true); }
+    else if (t.matches("[data-strength-default]")) { theme.k = K_DEFAULT; applyTheme(true); }
+    else if (t.matches(".sw")) t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"));
+  });
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.target.matches("#ask, .dock input") && e.target.value.trim()) { fileDirection(e.target.value); e.target.value = ""; closePalette(); }
+    else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); overlay.hidden ? openPalette() : closePalette(); }
+    else if (e.key === "Escape" && !overlay.hidden) closePalette();
+    else if ((e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) && e.target.closest && e.target.closest("#side") && pinAt(e.target)) {
+      // The keyboard's way to the same menu: the menu key, or Shift and F10, on a pin or an area.
+      e.preventDefault();
+      const r = e.target.closest(".tile,.proj").getBoundingClientRect();
+      openPinMenu(pinAt(e.target), r.left + 12, r.bottom - 4);
+    }
+    else if (e.key === "Escape" && !pinmenu.hidden) closePinMenu();
+    else if (e.key === "Escape" && !pinpop.hidden) closePins();
+    else if (e.key === "Escape" && !pop.hidden) pop.hidden = true;
+    else if (e.key === "Escape" && !sideChat()) { pane.classList.add("chat-off"); syncChat(); }
+  });
+
+  addEventListener("hashchange", () => show(location.hash.slice(1)));
+  renderPins(false);
+  show(location.hash.slice(1));
+  count();
+  applyTheme(false);
+  showHero(heroAt, false);
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+[
+  {
+    "id": "01-eos",
+    "title": "Eos opens the gates of morning",
+    "credit": "Generated for Morndo, in the manner of Tiepolo's ceiling frescoes",
+    "alt": "Eos, goddess of dawn, pushes open golden gates above the clouds while four white horses wait and the sun rises on the left.",
+    "webp": {
+      "1536": "01-eos-1536.webp",
+      "960": "01-eos-960.webp"
+    },
+    "jpg": "01-eos-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "02-forge",
+    "title": "The forge at first light",
+    "credit": "Generated for Morndo, in the manner of Caravaggio",
+    "alt": "A smith rests on his hammer beside a finished bronze shield in a dark forge; the sun rises through the open door.",
+    "webp": {
+      "1536": "02-forge-1536.webp",
+      "960": "02-forge-960.webp"
+    },
+    "jpg": "02-forge-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "03-hermes",
+    "title": "Hermes at the city gate",
+    "credit": "Generated for Morndo, in the manner of Poussin",
+    "alt": "Hermes hands a sealed scroll to a gatekeeper at a city wall as the sun comes up behind distant hills.",
+    "webp": {
+      "1536": "03-hermes-1536.webp",
+      "960": "03-hermes-960.webp"
+    },
+    "jpg": "03-hermes-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "04-argo",
+    "title": "The Argo, finished",
+    "credit": "Generated for Morndo, in the manner of Turner",
+    "alt": "A finished wooden ship stands on a beach at sunrise; the shipwrights sleep beside their tools.",
+    "webp": {
+      "1536": "04-argo-1536.webp",
+      "960": "04-argo-960.webp"
+    },
+    "jpg": "04-argo-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "05-daedalus",
+    "title": "Daedalus's workshop",
+    "credit": "Generated for Morndo, in the manner of the Dutch Golden Age",
+    "alt": "A pair of finished feather wings lies on a workbench by a window; the sun rises over the sea outside.",
+    "webp": {
+      "1536": "05-daedalus-1536.webp",
+      "960": "05-daedalus-960.webp"
+    },
+    "jpg": "05-daedalus-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "06-owl",
+    "title": "Athena's owl comes home",
+    "credit": "Generated for Morndo, in the manner of Roman wall painting",
+    "alt": "A white owl with an olive branch flies over Athens at sunrise, painted like a cracked red Roman fresco.",
+    "webp": {
+      "1536": "06-owl-1536.webp",
+      "960": "06-owl-960.webp"
+    },
+    "jpg": "06-owl-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "07-sheaves",
+    "title": "Sheaves at sunrise",
+    "credit": "Generated for Morndo, in the manner of Van Gogh",
+    "alt": "Bound wheat sheaves in a field under a swirling dawn sky with a large yellow sun.",
+    "webp": {
+      "1536": "07-sheaves-1536.webp",
+      "960": "07-sheaves-960.webp"
+    },
+    "jpg": "07-sheaves-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "08-furrow",
+    "title": "The last furrow",
+    "credit": "Generated for Morndo, in the manner of Millet",
+    "alt": "A ploughman and two oxen finish the last furrow of a dark field as the sun breaks the horizon.",
+    "webp": {
+      "1536": "08-furrow-1536.webp",
+      "960": "08-furrow-960.webp"
+    },
+    "jpg": "08-furrow-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "09-seaport",
+    "title": "Seaport at sunrise",
+    "credit": "Generated for Morndo, in the manner of Claude Lorrain",
+    "alt": "A classical harbour at sunrise with tall ships at anchor and cargo stacked on the quay.",
+    "webp": {
+      "1536": "09-seaport-1536.webp",
+      "960": "09-seaport-960.webp"
+    },
+    "jpg": "09-seaport-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "10-kiln",
+    "title": "The kiln at dawn",
+    "credit": "Generated for Morndo, in the manner of Roman floor mosaics",
+    "alt": "A potter rests beside rows of finished amphorae at an open kiln while the sun rises over low hills, made of small mosaic stones.",
+    "webp": {
+      "1536": "10-kiln-1536.webp",
+      "960": "10-kiln-960.webp"
+    },
+    "jpg": "10-kiln-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "11-fog",
+    "title": "Above the morning fog",
+    "credit": "Generated for Morndo, in the manner of Caspar David Friedrich",
+    "alt": "A traveller seen from behind stands on a rock above a valley filled with morning fog at sunrise.",
+    "webp": {
+      "1536": "11-fog-1536.webp",
+      "960": "11-fog-960.webp"
+    },
+    "jpg": "11-fog-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "12-boats",
+    "title": "The boats return",
+    "credit": "Generated for Morndo, in the manner of Hiroshige",
+    "alt": "Fishing boats return to harbour under a red rising sun, in the style of a Japanese woodblock print.",
+    "webp": {
+      "1536": "12-boats-1536.webp",
+      "960": "12-boats-960.webp"
+    },
+    "jpg": "12-boats-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "13-muses",
+    "title": "The Muses at sunrise",
+    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes",
+    "alt": "The Muses rest on a hillside at sunrise, their lyres laid in the grass and a finished scroll tied with a ribbon.",
+    "webp": {
+      "1536": "13-muses-1536.webp",
+      "960": "13-muses-960.webp"
+    },
+    "jpg": "13-muses-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  },
+  {
+    "id": "14-scriptorium",
+    "title": "The finished book",
+    "credit": "Generated for Morndo, in the manner of medieval books of hours",
+    "alt": "A scribe has closed a gold-decorated book in a monastery writing room; the candle is burnt down and the sun rises through an arched window.",
+    "webp": {
+      "1536": "14-scriptorium-1536.webp",
+      "960": "14-scriptorium-960.webp"
+    },
+    "jpg": "14-scriptorium-1536.jpg",
+    "width": 1536,
+    "height": 1024
+  }
+]

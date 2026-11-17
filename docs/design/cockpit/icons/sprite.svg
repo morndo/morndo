@@ -1,0 +1,42 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" style="position:absolute" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
+<symbol id="api" viewBox="0 0 24 24"><path d="M9 4.500C7 4.500 6.500 5.700 6.500 7.200v2.300C6.500 10.900 5.600 12 4 12c1.600 0 2.500 1.100 2.500 2.500v2.300c0 1.500.5 2.700 2.500 2.700M15 4.500c2 0 2.500 1.200 2.500 2.700v2.300c0 1.400.9 2.500 2.500 2.500-1.600 0-2.500 1.100-2.500 2.500v2.300c0 1.500-.5 2.700-2.500 2.700"/><circle fill="currentColor" cx="12" cy="12" r="1.400"/></symbol>
+<symbol id="arrow-right" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+<symbol id="arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+<symbol id="billing" viewBox="0 0 24 24"><rect x="3" y="5.500" width="18" height="13" rx="2.500"/><path fill="currentColor" d="M3 9.200h18v3H3z"/><path d="M6.500 15.500H10"/></symbol>
+<symbol id="brief" viewBox="0 0 24 24"><path d="M3 17.5h18M8 21h8M12 6.2v3.300M5.300 9.500 7 11.500M18.700 9.500 17 11.500"/><path fill="currentColor" d="M7 17.500a5 5 0 0 1 10 0z"/></symbol>
+<symbol id="chat-floating" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><rect fill="currentColor" stroke="none" x="11.500" y="10" width="7" height="7.500" rx="1.800"/></symbol>
+<symbol id="chat-sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path fill="currentColor" d="M15 4h3a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-3z"/></symbol>
+<symbol id="chat" viewBox="0 0 24 24"><path d="M5.500 4h13A2.500 2.500 0 0 1 21 6.500v8a2.500 2.500 0 0 1-2.500 2.500H10.500L6 20.500V17h-.500A2.500 2.500 0 0 1 3 14.500v-8A2.500 2.500 0 0 1 5.500 4z"/><circle fill="currentColor" stroke="none" cx="8.200" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="12" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="15.800" cy="10.500" r="1.350"/></symbol>
+<symbol id="check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+<symbol id="chevron-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+<symbol id="chevron-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+<symbol id="chevron-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+<symbol id="close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+<symbol id="connections" viewBox="0 0 24 24"><path d="M9 3v4.500M15 3v4.500M12 17.500V21"/><path fill="currentColor" d="M6.500 8h11v3.500a5.500 5.500 0 0 1-11 0z"/></symbol>
+<symbol id="content" viewBox="0 0 24 24"><path d="M4.500 19.500l1.200-4.600L16.600 4a2 2 0 0 1 2.800 0l.6.6a2 2 0 0 1 0 2.800L9.100 18.300z"/><path fill="currentColor" d="M4.500 19.500l1.200-4.600 3.400 3.400z"/><path d="M14.500 6.100l3.400 3.400"/></symbol>
+<symbol id="decide" viewBox="0 0 24 24"><path d="M12 3v2.500M12 13.500V21M9 21h6"/><path fill="currentColor" d="M5.500 6h10l3.500 3.500-3.500 3.500h-10z"/></symbol>
+<symbol id="done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path d="m8.200 12.300 2.700 2.700 4.900-5.400"/></symbol>
+<symbol id="drafts" viewBox="0 0 24 24"><rect x="3" y="5.500" width="18" height="13.500" rx="2.500"/><path fill="currentColor" d="M5.300 7.700h13.400L12 12.900z"/></symbol>
+<symbol id="file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path fill="currentColor" d="M14 3l5 5h-5z"/></symbol>
+<symbol id="guardrails" viewBox="0 0 24 24"><path d="M12 3l7.500 2.800v5.700c0 4.400-3 7.600-7.500 9.500-4.500-1.900-7.500-5.100-7.500-9.500V5.800z"/><path fill="currentColor" d="M12 3v18c-4.500-1.900-7.500-5.100-7.500-9.500V5.800z"/></symbol>
+<symbol id="image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-9 9"/></symbol>
+<symbol id="infra" viewBox="0 0 24 24"><rect x="3.500" y="4" width="17" height="6.500" rx="2"/><rect x="3.500" y="13.500" width="17" height="6.500" rx="2"/><circle fill="currentColor" stroke="none" cx="7.300" cy="7.250" r="1.350"/><circle fill="currentColor" stroke="none" cx="7.300" cy="16.750" r="1.350"/><path d="M12.500 7.250H17M12.500 16.750H17"/></symbol>
+<symbol id="mobile" viewBox="0 0 24 24"><rect x="7" y="2.500" width="10" height="19" rx="2.500"/><path fill="currentColor" d="M7 16.500h10V19a2.500 2.500 0 0 1-2.500 2.500h-5A2.500 2.500 0 0 1 7 19z"/></symbol>
+<symbol id="night" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></symbol>
+<symbol id="outbound" viewBox="0 0 24 24"><path d="M21 3 3.500 10.200l6.900 3.400 3.400 6.900z"/><path fill="currentColor" d="M21 3 10.400 13.600l3.400 6.900z"/></symbol>
+<symbol id="paid" viewBox="0 0 24 24"><path d="M7 9.500 19 5v14L7 14.500"/><path fill="currentColor" d="M3.500 9.500H7v5H3.500z"/><path d="M9.500 15.400v2.400a2 2 0 0 0 4 0v-.9"/></symbol>
+<symbol id="parked" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path d="M10 9v6M14 9v6"/></symbol>
+<symbol id="person" viewBox="0 0 24 24"><circle fill="currentColor" cx="12" cy="8" r="2.800"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+<symbol id="pin" viewBox="0 0 24 24"><path d="M12 14.500V21"/><path fill="currentColor" d="M9 3.500h6l-.700 5.200 3.200 3.800v2H6.500v-2l3.200-3.800z"/></symbol>
+<symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+<symbol id="pull-request" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.300"/><circle cx="6" cy="18" r="2.300"/><path d="M6 8.300v7.400M18 15.700V10a3.500 3.500 0 0 0-3.500-3.500H11M13.700 3.800 11 6.500l2.700 2.700"/><circle fill="currentColor" cx="18" cy="18" r="2.300"/></symbol>
+<symbol id="research" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.800"/><path d="M12 2v3.200M12 18.800V22M2 12h3.200M18.800 12H22"/><circle fill="currentColor" cx="12" cy="12" r="1.800"/></symbol>
+<symbol id="run" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path fill="currentColor" d="M10.300 8.600v6.800l5.400-3.400z"/></symbol>
+<symbol id="seo" viewBox="0 0 24 24"><circle cx="10.500" cy="10.500" r="6.500"/><path d="M15.400 15.400 20.500 20.500"/><circle fill="currentColor" cx="10.500" cy="10.500" r="1.600"/></symbol>
+<symbol id="settings" viewBox="0 0 24 24"><path d="M4 8h3.200M12.800 8H20M4 16h7.200M16.800 16H20"/><circle fill="currentColor" cx="10" cy="8" r="1.900"/><circle fill="currentColor" cx="14" cy="16" r="1.900"/></symbol>
+<symbol id="sidebar" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></symbol>
+<symbol id="skills" viewBox="0 0 24 24"><path fill="currentColor" d="M11 3.500c.5 4.400 2.100 6 6.500 6.500-4.400.5-6 2.100-6.500 6.500-.5-4.400-2.100-6-6.500-6.500 4.400-.5 6-2.100 6.500-6.500z"/><path d="M18.500 15.500v5M16 18h5"/></symbol>
+<symbol id="stuck" viewBox="0 0 24 24"><path d="M12 3c.5 3.300 5.500 5.600 5.500 10.600a5.500 5.500 0 0 1-11 0c0-2 .9-3.600 2.200-4.800.2 1.500.9 2.500 2 2.900C10.300 8.700 10.700 5.300 12 3z"/><path fill="currentColor" d="M12 13c1 .9 1.500 1.600 1.500 2.500a1.500 1.500 0 0 1-3 0c0-.9.5-1.600 1.500-2.500z"/></symbol>
+<symbol id="subagent" viewBox="0 0 24 24"><path d="M6 5v7a3 3 0 0 0 3 3h9"/><path d="m14 11 4 4-4 4"/></symbol>
+<symbol id="web-app" viewBox="0 0 24 24"><rect x="3" y="4.500" width="18" height="15" rx="2.500"/><path fill="currentColor" d="M3 9.500h18V7a2.500 2.500 0 0 0-2.500-2.500h-13A2.500 2.500 0 0 0 3 7z"/></symbol>
+</svg>
