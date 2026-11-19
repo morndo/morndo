@@ -41,7 +41,7 @@ context. No paragraphs on the first screen; a sentence is one line.
 |---|---|---|---|---|
 | 1 | Verdict and three numbers | Will we deliver? | A verdict word ("Behind plan") with what it asks of the reader ("Action needed"); signed of target; likely (forecast); still unsecured. The time left and when it was read, as a small line above | - |
 | 2 | Trajectory | Is it fast enough? | One chart: signed so far, the plan to the deadline, the forecast with its range, today; one line of insight | The values per day (hover), a text table |
-| 3 | Deals | Where will the result come from? | One row each: name, the next step in a few words, a track of factual milestones, a confidence word | Each deal's lane; what each forecast rests on (in the recovery plan) |
+| 3 | Deals | Where will the result come from? | One row per target slot, so the rows line up with the target (3 partners, 3 rows; candidates for the same slot share a row): name, the next step in a few words, a track of factual milestones, a confidence word | Each deal's lane; what each forecast rests on (in the recovery plan) |
 | 4 | Needs you | What needs me? | The one decision as a row: what, due, why it cannot wait (a few words), the button. Then team blockers: their count and the top two | The decision's reasoning ("Why", on its lane); the other blockers |
 | 5 | Funnel | Does the method work? | One strip: each step's count, this week's change, its rate against the plan, below-plan steps marked | - |
 | 6 | Recovery plan (closed) | How do we close the gap? | Its title and how many steps | The steps with dates, the assumptions, the evidence per deal, what is out of the goal |
@@ -149,3 +149,4 @@ What is missing is said on the page (R5, R7), not guessed.
 | 3 | Evidence and next step as sentences per deal | Read, not seen | R18, R19 |
 | 3 | The recovery plan and three blockers open on the page | Everything competed for attention | R9, R12 |
 | 3 | The funnel as columns of labels | Took a screen; one strip says it | R15 |
+| 4 | (A reviewer's sketch) Plan and forecast as straight lines between points, confidence words in orange | Signatures come one at a time, so steps tell the truth; orange is reserved for what waits or is blocked | R15, R16 |
