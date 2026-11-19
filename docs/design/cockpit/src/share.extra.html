@@ -59,6 +59,8 @@
 html[data-as]:not([data-as="mara"]) #pins,html[data-as]:not([data-as="mara"]) .row.mgr,html[data-as]:not([data-as="mara"]) #mgr-lanes{display:none}
 @container (max-width:720px){.sharerow{position:static;margin-top:8px}}
 <!-- @@ js -->
+  // This proposal shares a topic stage by stage, so it keeps the stage view of the topic's glance.
+  PAGES.stageGlance = true;
   // ---- Proposal: three ways to share a topic. Only in gtm-sharing.html. ----
   // Mara owns Partnerships. Lea runs Outreach, Jonas helps on Offers, Tom (the CEO) watches the status.
   // All three variants change the same access; "See it as" shows what each person then gets.

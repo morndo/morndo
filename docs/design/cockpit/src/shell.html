@@ -506,6 +506,49 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .hist .seenmark{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:var(--fs-xs);font-weight:600;color:var(--sun)}
 .hist .seenmark::after{background:color-mix(in srgb,var(--sun) 40%,transparent)}
 .hist-end{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-top:12px;font-size:var(--fs-sm);color:var(--muted)}
+/* A topic that brings a forecast is read the way its owner is asked about it: will we make it, what needs you, what
+   moved, who does what today. Every number names what it counts and over which time. */
+.doc.topic .h1.sm{font-size:var(--fs-3xl)}
+.verdict{display:flex;flex-direction:column;gap:var(--sp-4)}
+.fc-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--sp-3) var(--sp-7)}
+.fc-why{flex:1 1 320px;max-width:var(--w-read);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose);text-wrap:pretty}
+.fc-slots{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:var(--sp-2);margin:0;padding:0;list-style:none}
+.fc-slots a,.fc-slots div{display:flex;flex-direction:column;gap:3px;height:100%;padding:12px 14px;border-radius:var(--r-md);background:var(--surface)}
+.fc-slots a:hover{background:var(--fill-hover)}
+.fc-slots i{display:block;height:4px;margin-bottom:8px;border-radius:var(--r-pill);background:var(--fill)}
+.fc-slots .likely i{background:var(--ok)}.fc-slots .maybe i{background:linear-gradient(90deg,var(--warn) 50%,var(--fill) 50%)}
+.fc-slots b{font-size:var(--fs-md);font-weight:600;color:var(--text-hi)}
+.fc-slots span{font-size:var(--fs-sm);color:var(--muted)}
+.fc-slots .open div,.fc-slots .open a{background:none;outline:1px dashed var(--edge-2);outline-offset:-1px}
+.fc-slots .open b{color:var(--muted);font-weight:500}
+.fc-slots small{font-size:var(--fs-2xs);font-weight:600;color:var(--text-2)}
+/* The decision that waits for you comes with its recommendation and the cost of waiting. */
+.askline.rich{align-items:flex-start;padding:var(--sp-5) var(--sp-5) var(--sp-5) var(--sp-6);background:var(--surface)}
+.askline.rich>.dot{margin-top:7px}
+.al-body{flex:1 1 380px;display:flex;flex-direction:column;gap:var(--sp-2)}
+.al-body>p{flex:none;font-size:var(--fs-lg)}
+.rec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px var(--sp-3);margin:0;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.rec dt{color:var(--muted)}.rec dd{margin:0;text-wrap:pretty}
+.pl-steps{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:var(--sp-2);margin:0;padding:0;list-style:none}
+.pl-steps li{position:relative;display:flex;flex-direction:column;gap:2px;padding:2px 0 0}
+.pl-steps li+li{padding-left:var(--sp-3);border-left:1px solid var(--line)}
+.pl-steps b{font:400 var(--fs-2xl)/1.1 var(--serif);color:var(--text-hi);font-variant-numeric:lining-nums}
+.pl-steps b small{font-size:.6em;color:var(--muted)}
+.pl-steps span{font-size:var(--fs-sm);color:var(--text-2)}
+.pl-steps em{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:var(--fs-xs);font-style:normal;color:var(--muted)}
+.pl-steps .up em{color:var(--ok)}.pl-steps .warn em{color:var(--warn)}
+.pl-steps a{display:flex;flex-direction:column;gap:2px}.pl-steps a:hover span{color:var(--text)}
+.tm a.now:hover{color:var(--text)}
+.tm{display:flex;flex-direction:column}
+.tm li{display:grid;grid-template-columns:24px minmax(150px,200px) minmax(0,1fr) auto;gap:var(--sp-3);align-items:center;min-height:48px;padding:6px 0}
+.tm li+li{border-top:1px solid var(--line)}
+.tm .av.sm{width:24px;height:24px;font-size:var(--fs-3xs)}
+.tm .who b{display:block;font-weight:600;color:var(--text-hi)}.tm .who small{font-size:var(--fs-xs);color:var(--muted)}
+.tm .now{font-size:var(--fs-md);color:var(--text-2);text-wrap:pretty}.tm .now small{margin-left:8px;font-size:var(--fs-xs);color:var(--muted)}
+.tm .tm-st{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap}
+.tm-agents{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:var(--fs-sm);color:var(--muted)}
+@container (max-width:760px){.fc-slots{grid-template-columns:minmax(0,1fr)}.pl-steps{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:var(--sp-4)}.pl-steps li:nth-child(3n+1){padding-left:0;border-left:0}
+  .tm li{grid-template-columns:24px minmax(0,1fr)}.tm .now,.tm .tm-st{grid-column:2}}
 @container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr))}.gl-side{margin-left:0;justify-content:flex-start}}
 @container (max-width:760px){.hist>ul>li{grid-template-columns:38px 20px minmax(0,1fr) auto}.hist .end{display:none;grid-column:3/-1;justify-content:flex-start}.hist>ul>li:hover .end,.hist>ul>li:focus-within .end{display:flex}.hist>ul>li.subs{padding-left:79px}}
 .sw{position:relative;width:34px;height:20px;border-radius:var(--r-pill);background:var(--tile-on);flex:none;transition:background .18s}
@@ -1253,14 +1296,49 @@ try {
   }
 
   // The one thing on a topic that waits for you, in one line. A lane that waits for someone else is not shown here.
-  function askLine(l) {
+  function askLine(l, rich) {
     if (!l) return "";
     const st = stateOf(l), yes = decided(l);
     if (!yes && st !== "bad" && !(st === "warn" && !l.waits)) return "";
     const icon = yes ? '<svg class="i ok"><use href="#check"/></svg>' : st === "bad" ? '<svg class="i bad"><use href="#flame"/></svg>' : '<i class="dot warn still"></i>';
     const acts = yes ? `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`
       : l.decision ? `<button class="btn ink" data-approve-id="${l.decision}"><svg class="i"><use href="#check"/></svg>${l.approve || "Approve"}</button>` : l.acts || "";
-    return `<div class="box askline${yes ? " done" : ""}">${icon}<p><b>${esc(l.short || l.title)}${yes ? ": you approved it" : ""}</b><span>${yes ? l.shortAfter || "" : (st === "bad" ? "Stuck · " : "Waits for you · ") + (l.ask || "")}</span></p><div class="acts">${acts}<a class="btn quiet" href="#lane/${l.id}">Details</a></div></div>`;
+    const head = `<p><b>${esc(l.short || l.title)}${yes ? ": you approved it" : ""}</b><span>${yes ? l.shortAfter || "" : (st === "bad" ? "Stuck · " : "Waits for you · ") + (l.ask || "")}</span></p>`;
+    const go = `<a class="btn quiet" href="#lane/${l.id}">${l.rec ? "Open the offer" : "Details"}</a>`;
+    if (rich && l.rec && !yes) return `<div class="box askline rich">${icon}<div class="al-body">${head}<dl class="rec"><dt>We recommend</dt><dd>${l.rec}</dd><dt>If it waits</dt><dd>${l.delay}</dd></dl></div><div class="acts">${acts}${go}</div></div>`;
+    return `<div class="box askline${yes ? " done" : ""}${rich ? " rich" : ""}">${icon}${head}<div class="acts">${acts}${go}</div></div>`;
+  }
+
+  // A topic's forecast, pipeline and team today. A slot, a step or a row can name a decision and show what changes once
+  // it is approved.
+  const pick = o => (o && o.alt && isDone(o.alt.d) ? { ...o, ...o.alt } : o);
+  function forecastGlance(t) {
+    const f = t.forecast, slots = f.slots.map(pick), likely = slots.filter(x => x.st === "likely").length;
+    const cell = x => {
+      const inner = `<i></i><small>${{ likely: "Likely", maybe: "Possible", open: "Open" }[x.st]}</small><b>${x.name || "No deal yet"}</b><span>${x.sub}</span>`;
+      return `<li class="${x.st}">${x.href ? `<a href="${x.href}">${inner}</a>` : `<div>${inner}</div>`}</li>`;
+    };
+    const verdict = `<section class="verdict" aria-label="Will we make it">
+        <div class="fc-head"><div class="kpi"><b>${likely}<small>/${slots.length}</small></b><span>${f.goal}</span></div><p class="fc-why">${f.why}</p>
+          <span class="health"><i class="dot ${f.health[0]} still"></i>${f.health[1]}${t.when ? `<small>${t.when}</small>` : ""}</span></div>
+        <ol class="fc-slots" style="--n:${slots.length}">${slots.map(cell).join("")}</ol></section>`;
+    const p = t.pipeline;
+    const step = x => {
+      x = pick(x);
+      const inner = `<b>${x.n}${x.of ? `<small>/${x.of}</small>` : ""}</b><span>${x.what}</span><em>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.moved}</em>`;
+      return `<li class="${x.st || ""}">${x.href ? `<a href="${x.href}">${inner}</a>` : inner}</li>`;
+    };
+    const pipeline = `<section class="sec" aria-label="Pipeline"><div class="headrow"><h2 class="h2">Pipeline</h2><span>${p.period}</span></div><ol class="pl-steps" style="--n:${p.steps.length}">${p.steps.map(step).join("")}</ol></section>`;
+    const row = x => {
+      x = pick(x);
+      return `<li><span class="av sm person" aria-hidden="true">${x.av}</span><div class="who"><b>${x.name}</b><small>${x.role}</small></div><a class="now" href="${x.href}">${x.now}<small>${x.due}</small></a><span class="tm-st">${sign(x.st)}${x.state}</span></li>`;
+    };
+    const working = t.agents.filter(a => a[7] !== "p" && a[2] === "ok").map(a => a[1]), stuck = t.agents.filter(a => a[7] !== "p" && a[2] === "bad").length;
+    const today = `<section class="sec" aria-label="Who does what today"><div class="headrow"><h2 class="h2">Today</h2><span>Your team, what each one delivers next, and what waits for them</span></div>
+        <ul class="tm">${t.team.map(row).join("")}</ul>
+        <p class="tm-agents">${sign(stuck ? "bad" : "ok")}<span>Agents: ${working.join(", ")} working${stuck ? `, ${stuck} stuck` : ", none stuck"}.</span></p></section>`;
+    const night = t.overnight ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>Overnight, ready to use</span>${t.overnight.map(([n, what]) => `<span><b>${n}</b>${what}</span>`).join("")}</p>` : "";
+    return { verdict, pipeline, today, night };
   }
 
   function drawTopic(t) {
@@ -1277,17 +1355,21 @@ try {
       return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${leads(l)} · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${word(l)}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
     };
     const night = t.plan && t.plan.night ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>Overnight</span>${t.plan.night.map(([n, what]) => `<span><b>${n}</b>${what}</span>`).join("")}</p>` : "";
+    // The sharing proposal keeps the stage view: it shares a topic stage by stage.
+    const g = t.forecast && !PAGES.stageGlance ? forecastGlance(t) : null;
+    const plan = g && t.plan ? `<section class="sec"><div class="headrow"><h2 class="h2">Plan</h2><span>Stages and who works in each; click one</span></div><div class="box glance">${stagesBox(t)}</div></section>` : "";
     v.setAttribute("aria-label", t.name + " topic");
-    v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide topic" style="gap:22px">
-      <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1">${t.name}</h1></header>
-      <section class="box glance" aria-label="Where it stands">
+    v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide topic" style="gap:${g ? "var(--sp-7)" : "22px"}">
+      <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1${g ? " sm" : ""}">${t.name}</h1></header>
+      ${g ? g.verdict + (t.focusLane ? askLine(laneById(t.focusLane), true) : "") + g.pipeline + g.today + g.night : `<section class="box glance" aria-label="Where it stands">
         <div class="gl-top">${nums}<div class="gl-side">${crew}<span class="health"><i class="dot ${hs === "idle" ? "hollow" : hs} still"></i>${hw}${t.when ? `<small>${t.when}</small>` : ""}</span></div></div>
         ${t.plan ? stagesBox(t) : ""}
         ${night}
       </section>
-      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}
+      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}`}
       <details class="more" data-more="${t.id}"${ui.more[t.id] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Details<small>${lanes.length} lanes · ${people ? people + (people === 1 ? " person, " : " people, ") : ""}${agents} ${agents === 1 ? "agent" : "agents"}</small></summary><div class="body">
         <p class="intro">${t.intro}</p>
+        ${plan}
         <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done" : ""}</span></div>
           ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
         </section>

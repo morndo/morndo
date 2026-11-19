@@ -398,6 +398,39 @@
           night: [["+32", "brands"], ["+58", "contacts"], ["24", "emails drafted"]],
         },
         focusLane: "halden-offer",
+        // The glance: will we make it (each target partner and the deal that should fill it), the pipeline over the
+        // week, and who does what today. Each can name a decision and what changes once it is approved.
+        forecast: {
+          goal: "partners likely by 31 January", health: ["warn", "Tight"],
+          why: "Halden is the only deal with an offer. One of this week's three calls must reach an offer by mid-December to sign in time; Kestrel is out until spring.",
+          slots: [
+            { st: "likely", name: "Halden Freight Network", sub: "Offer waits for you · could sign in December", href: "#lane/halden-offer",
+              alt: { d: "d4", sub: "Offer goes out tomorrow · could sign in December" } },
+            { st: "maybe", name: "Brightmoor Retail", sub: "First call today at 15:00 · 9,000 retailers", href: "#lane/partner-calls" },
+            { st: "open", name: null, sub: "Northvale Bank (call Wed) or Corvane ERP (call Thu)", href: "#lane/partner-calls" },
+          ],
+        },
+        pipeline: {
+          period: "Since Monday",
+          steps: [
+            { n: "64", what: "brands that fit", moved: "+9 overnight", st: "up", href: "#lane/brand-list" },
+            { n: "52", what: "written to", moved: "Wave 2 waits for Lea", st: "warn", href: "#lane/outreach-wave-2" },
+            { n: "11", what: "replied", moved: "+2 this week", st: "up", href: "#lane/outreach-wave-1" },
+            { n: "2", of: "5", what: "calls held", moved: "+1 booked: Corvane", st: "up", href: "#lane/partner-calls" },
+            { n: "1", what: "offer", moved: "Waits for you", st: "warn", href: "#lane/halden-offer",
+              alt: { d: "d4", moved: "Goes out tomorrow", st: "up" } },
+            { n: "0", of: "3", what: "signed", moved: "Goal: 31 January", st: "" },
+          ],
+        },
+        team: [
+          { av: "L", name: "Lea Brandt", role: "GTM associate", now: "Checks 24 wave 2 emails from Sender, then 9 new brands from Brand scout", due: "by 11:00",
+            st: "warn", state: "Sender waits for her", href: "#lane/outreach-wave-2" },
+          { av: "J", name: "Jonas Falk", role: "Partner operations", now: "Partner contract template, with legal", due: "Wed",
+            st: "ok", state: "On time", href: "#lane/halden-offer" },
+          { av: "M", name: "Mara Lind, you", role: "Head of GTM", now: "Call with Brightmoor Retail", due: "15:00",
+            st: "ok", state: "Brief ready at 13:00", href: "#lane/partner-calls" },
+        ],
+        overnight: [["9 of 32", "new brands fit"], ["58", "contacts with a checked email"], ["24", "emails ready for Lea"]],
         // What happened, newest first. A row: time, avatar, who, person or agent, what, lane, flags, how many, a few
         // of the items, and a decision it waits for.
         history: {
@@ -672,6 +705,8 @@
       {
         id: "halden-offer", topic: "partnerships", title: "Offer for Halden Freight Network", state: "warn", lead: "Jonas", opened: "Opened 13 Nov", decision: "d4",
         short: "Offer to Halden", ask: "15% of first-year revenue for 12 months · due Thu", shortAfter: "It goes out tomorrow at 09:00.",
+        rec: "Send it as drafted: our standard partner terms, already cleared by legal. About 96 new customers in the first year (2,400 at 4%).",
+        delay: "Halden sets its partner budget on 1 December. After that, signing slips to February and the goal loses its only likely deal.",
         next: "After your OK", afterNext: "Mon 23 Nov, Jonas follows up",
         asked: "Send Halden a referral offer this week, while they are warm.",
         askedMeta: "You to the Manager after the call, Friday 13 November<i>·</i>The Manager filed it under Partnerships and named Jonas to lead.",
