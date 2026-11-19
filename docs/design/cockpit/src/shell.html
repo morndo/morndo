@@ -309,8 +309,7 @@ code,.cmd{font-family:var(--mono)}
 .cl{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
 .cm{stroke:var(--surface);stroke-width:2}
 .ct{font:var(--fs-3xs) var(--sans);fill:var(--muted)}.cv{font:600 var(--fs-2xs) var(--sans);fill:var(--text)}
-.te{text-anchor:end}.tm{text-anchor:middle}
-.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--fs-2xs);color:var(--muted)}
+.te{text-anchor:end}.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--fs-2xs);color:var(--muted)}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .legend i{width:14px;height:2px;border-radius:var(--r-pill)}.legend i.d{height:0;border-top:2px dotted var(--muted)}
 .suggest{display:flex;flex-direction:column;gap:12px;padding:22px 24px;background:var(--surface);border-radius:var(--r-lg)}
@@ -509,19 +508,55 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 /* A topic that brings a forecast is read the way its owner is asked about it: will we make it, what needs you, what
    moved, who does what today. Every number names what it counts and over which time. */
 .doc.topic .h1.sm{font-size:var(--fs-3xl)}
-.verdict{display:flex;flex-direction:column;gap:var(--sp-4)}
-.fc-head{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--sp-3) var(--sp-7)}
-.fc-why{flex:1 1 320px;max-width:var(--w-read);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose);text-wrap:pretty}
-.fc-slots{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:var(--sp-2);margin:0;padding:0;list-style:none}
-.fc-slots a,.fc-slots div{display:flex;flex-direction:column;gap:3px;height:100%;padding:12px 14px;border-radius:var(--r-md);background:var(--surface)}
-.fc-slots a:hover{background:var(--fill-hover)}
-.fc-slots i{display:block;height:4px;margin-bottom:8px;border-radius:var(--r-pill);background:var(--fill)}
-.fc-slots .likely i{background:var(--ok)}.fc-slots .maybe i{background:linear-gradient(90deg,var(--warn) 50%,var(--fill) 50%)}
-.fc-slots b{font-size:var(--fs-md);font-weight:600;color:var(--text-hi)}
-.fc-slots span{font-size:var(--fs-sm);color:var(--muted)}
-.fc-slots .open div,.fc-slots .open a{background:none;outline:1px dashed var(--edge-2);outline-offset:-1px}
-.fc-slots .open b{color:var(--muted);font-weight:500}
-.fc-slots small{font-size:var(--fs-2xs);font-weight:600;color:var(--text-2)}
+.status{display:flex;flex-direction:column;gap:var(--sp-3)}
+.st-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--sp-4) var(--sp-8)}
+.st-grp{display:flex;flex-direction:column;gap:var(--sp-2)}
+.st-grp>small{font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.st-grp.fc{padding-left:var(--sp-6);border-left:1px solid var(--line)}
+.st-kpis{display:flex;gap:var(--sp-7)}
+.st-row .health{margin-left:auto}
+.asof{font-size:var(--fs-xs);color:var(--muted)}
+.fc-why{max-width:var(--w-read);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose);text-wrap:pretty}
+.traj{position:relative;margin:var(--sp-2) 0 0;display:flex;flex-direction:column;gap:var(--sp-2)}
+.traj svg{display:block;width:100%;height:auto;overflow:visible}
+.traj .ct{font-size:var(--fs-2xs)}.traj .cv{font-size:var(--fs-sm)}
+.tr-band{fill:var(--best);opacity:.16}
+.tr-act{stroke:var(--text-2)}.tr-fc{stroke:var(--best)}
+.tr-now{stroke:var(--edge-2);stroke-width:1}.tr-x{stroke:var(--muted);stroke-width:1}
+.tr-dot{fill:var(--text-2);stroke:var(--bg);stroke-width:2}
+.legend .tr-k-act{background:var(--text-2)}.legend .tr-k-fc{height:8px;background:color-mix(in srgb,var(--best) 30%,transparent);box-shadow:inset 0 -2px 0 var(--best),inset 0 2px 0 transparent}
+.tr-tip{position:absolute;top:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--r-sm);background:var(--raised);border:1px solid var(--rim);box-shadow:var(--sh-pop);font-size:var(--fs-xs);color:var(--text-2);pointer-events:none;white-space:nowrap}
+.tr-tip b{color:var(--text-hi);font-weight:600}
+/* A deal at its last fact: a milestone track, never a percentage, so a first call never looks like a signature. */
+.deals{display:flex;flex-direction:column}
+.deals>li+li{border-top:1px solid var(--line)}
+.deals a{display:grid;grid-template-columns:minmax(150px,200px) 150px minmax(0,1fr);gap:var(--sp-2) var(--sp-5);align-items:start;padding:var(--sp-3) 0}
+.deals a:hover b{text-decoration:underline;text-underline-offset:3px}
+.deals .who b{display:block;font-weight:600;color:var(--text-hi)}
+.deals .who small{font-size:var(--fs-xs);color:var(--muted)}.deals .cf-likely{color:var(--text-2)}
+.ms{display:flex;flex-direction:column;gap:6px;padding-top:5px}.ms small{font-size:var(--fs-xs);color:var(--text-2)}
+.ms ol{display:flex;align-items:center;margin:0;padding:0;list-style:none}
+.ms li{position:relative;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--edge-2);flex:none}
+.ms li+li{margin-left:14px}.ms li+li::before{content:"";position:absolute;right:calc(100% + 1.5px);top:50%;width:14px;height:1.5px;margin-top:-.75px;background:var(--edge)}
+.ms li.done{background:var(--text-2);border-color:var(--text-2)}.ms li.done+li::before{background:var(--text-2)}
+.ms li.now{border-color:var(--text-hi);box-shadow:0 0 0 3px color-mix(in srgb,var(--text) 18%,transparent)}
+.ev{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}.ev .nx{color:var(--text-2)}
+.deals-out{font-size:var(--fs-sm);color:var(--muted)}
+.gap{display:flex;flex-direction:column;gap:6px;margin-top:var(--sp-2);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.gap b{color:var(--text-hi);font-weight:600}
+.gap ol{margin:0;padding:0;list-style:none;counter-reset:g;display:flex;flex-direction:column;gap:4px}
+.gap li{display:grid;grid-template-columns:24px minmax(0,1fr);text-wrap:pretty}
+.gap li::before{counter-increment:g;content:counter(g,decimal-leading-zero);padding-top:4px;font:var(--fs-xs)/1 var(--mono);color:var(--faint)}
+.attn{display:flex;flex-direction:column}
+.attn li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:var(--sp-3);align-items:start;padding:var(--sp-2) 0}
+.attn li+li{border-top:1px solid var(--line)}
+.attn .lt{padding-top:5px;display:flex;justify-content:center}
+.attn b{display:block;font-weight:600;color:var(--text-hi)}.attn b a:hover{text-decoration:underline;text-underline-offset:3px}
+.attn div span{font-size:var(--fs-md);color:var(--prose)}
+.attn .st{padding-top:2px;font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap}
+.routine{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-sm);color:var(--muted)}
+.moved{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;font-size:var(--fs-sm);color:var(--muted)}
+.moved>b{font-weight:600;color:var(--text-2)}.moved span b{font-weight:600;color:var(--text)}
 /* The decision that waits for you comes with its recommendation and the cost of waiting. */
 .askline.rich{align-items:flex-start;padding:var(--sp-5) var(--sp-5) var(--sp-5) var(--sp-6);background:var(--surface)}
 .askline.rich>.dot{margin-top:7px}
@@ -538,17 +573,8 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .pl-steps em{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:var(--fs-xs);font-style:normal;color:var(--muted)}
 .pl-steps .up em{color:var(--ok)}.pl-steps .warn em{color:var(--warn)}
 .pl-steps a{display:flex;flex-direction:column;gap:2px}.pl-steps a:hover span{color:var(--text)}
-.tm a.now:hover{color:var(--text)}
-.tm{display:flex;flex-direction:column}
-.tm li{display:grid;grid-template-columns:24px minmax(150px,200px) minmax(0,1fr) auto;gap:var(--sp-3);align-items:center;min-height:48px;padding:6px 0}
-.tm li+li{border-top:1px solid var(--line)}
-.tm .av.sm{width:24px;height:24px;font-size:var(--fs-3xs)}
-.tm .who b{display:block;font-weight:600;color:var(--text-hi)}.tm .who small{font-size:var(--fs-xs);color:var(--muted)}
-.tm .now{font-size:var(--fs-md);color:var(--text-2);text-wrap:pretty}.tm .now small{margin-left:8px;font-size:var(--fs-xs);color:var(--muted)}
-.tm .tm-st{display:inline-flex;align-items:center;gap:7px;font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap}
-.tm-agents{display:flex;align-items:center;gap:8px;margin-top:6px;font-size:var(--fs-sm);color:var(--muted)}
-@container (max-width:760px){.fc-slots{grid-template-columns:minmax(0,1fr)}.pl-steps{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:var(--sp-4)}.pl-steps li:nth-child(3n+1){padding-left:0;border-left:0}
-  .tm li{grid-template-columns:24px minmax(0,1fr)}.tm .now,.tm .tm-st{grid-column:2}}
+@container (max-width:760px){.deals a{grid-template-columns:minmax(0,1fr)}.st-grp.fc{padding-left:0;border-left:0}.st-row .health{margin-left:0}
+  .pl-steps{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:var(--sp-4)}.pl-steps li:nth-child(4n+1){padding-left:0;border-left:0}}
 @container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr))}.gl-side{margin-left:0;justify-content:flex-start}}
 @container (max-width:760px){.hist>ul>li{grid-template-columns:38px 20px minmax(0,1fr) auto}.hist .end{display:none;grid-column:3/-1;justify-content:flex-start}.hist>ul>li:hover .end,.hist>ul>li:focus-within .end{display:flex}.hist>ul>li.subs{padding-left:79px}}
 .sw{position:relative;width:34px;height:20px;border-radius:var(--r-pill);background:var(--tile-on);flex:none;transition:background .18s}
@@ -1312,33 +1338,85 @@ try {
   // A topic's forecast, pipeline and team today. A slot, a step or a row can name a decision and show what changes once
   // it is approved.
   const pick = o => (o && o.alt && isDone(o.alt.d) ? { ...o, ...o.alt } : o);
-  function forecastGlance(t) {
-    const f = t.forecast, slots = f.slots.map(pick), likely = slots.filter(x => x.st === "likely").length;
-    const cell = x => {
-      const inner = `<i></i><small>${{ likely: "Likely", maybe: "Possible", open: "Open" }[x.st]}</small><b>${x.name || "No deal yet"}</b><span>${x.sub}</span>`;
-      return `<li class="${x.st}">${x.href ? `<a href="${x.href}">${inner}</a>` : `<div>${inner}</div>`}</li>`;
+  // A topic with a goal is read the way its owner is asked about it each morning: are we going to make it, what needs
+  // me today, and is the way we work fast enough. What happened and what is forecast never share a number, and every
+  // forecast says what it rests on. docs/design/cockpit/topic-status-framework.md has the rules an agent follows.
+  const dayOf = (start, d) => { const x = new Date(start + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + d); return x.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }); };
+  const valAt = (pts, d) => pts.reduce((v, [x, y]) => (x <= d ? y : v), pts[0][1]);
+  const steps = pts => pts.flatMap(([x, y], i) => (i ? [[x, pts[i - 1][1]], [x, y]] : [[x, y]]));
+  const TG = { W: 900, H: 170, L: 22, R: 120, T: 12, B: 24 };   // the trajectory's drawing area, shared with its hover
+  function trajectory(c) {
+    const { W, H, L, R, T, B } = TG;
+    const X = d => L + (d / c.days) * (W - L - R), Y = v => T + (1 - v / c.goal) * (H - T - B), f = n => n.toFixed(1);
+    const path = pts => steps(pts).map(([x, y], i) => `${i ? "L" : "M"}${f(X(x))} ${f(Y(y))}`).join("");
+    const band = steps(c.high).concat(steps(c.low).reverse()).map(([x, y]) => `${f(X(x))},${f(Y(y))}`).join(" ");
+    const grid = [...Array(c.goal + 1).keys()].map(v => `<line class="cg" x1="${L}" x2="${W - R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ct te" x="${L - 8}" y="${f(Y(v) + 3.5)}">${v}</text>`).join("");
+    const ticks = c.ticks.map(([d, w]) => `<text class="ct tm" x="${f(X(d))}" y="${H - 6}">${w}</text>`).join("");
+    const end = a => a[a.length - 1][1], lo = end(c.low), hi = end(c.high), ex = end(c.expected);
+    const table = c.ticks.map(([d, w]) => `<tr><th scope="row">${w}</th><td>${valAt(c.plan, d)}</td><td>${d <= c.now ? valAt(c.actual, d) : "–"}</td><td>${d < c.now ? "–" : `${valAt(c.expected, d)} (${valAt(c.low, d)} to ${valAt(c.high, d)})`}</td></tr>`).join("");
+    return `<figure class="traj" data-traj>
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Signed partners against the plan: ${end(c.actual)} so far; forecast ${ex} by ${c.ticks[c.ticks.length - 1][1]}, range ${lo} to ${hi}; plan ${c.goal}.">
+          ${grid}<polygon class="tr-band" points="${band}"/><path class="cb" d="${path(c.plan)}"/><path class="cl tr-act" d="${path(c.actual)}"/><path class="cl tr-fc" d="${path(c.expected)}"/>
+          <line class="tr-now" x1="${f(X(c.now))}" x2="${f(X(c.now))}" y1="${T}" y2="${H - B}"/><circle class="tr-dot" cx="${f(X(c.now))}" cy="${f(Y(end(c.actual)))}" r="4"/>
+          <text class="cv" x="${W - R + 8}" y="${f(Y(c.goal) + 4)}">Plan ${c.goal}</text><text class="cv" x="${W - R + 8}" y="${f(Y(ex) + 4)}">Forecast ${ex}</text><text class="ct" x="${W - R + 8}" y="${f(Y(ex) + 18)}">range ${lo} to ${hi}</text>
+          ${ticks}<line class="tr-x" x1="0" x2="0" y1="${T}" y2="${H - B}" hidden/>
+        </svg>
+        <figcaption class="legend"><span><i class="tr-k-act"></i>Signed</span><span><i class="d"></i>Plan</span><span><i class="tr-k-fc"></i>Forecast and its range</span></figcaption>
+        <div class="tr-tip" role="status" hidden></div>
+        <table class="sr"><caption>Signed partners: plan, actual and forecast</caption><thead><tr><th scope="col">Date</th><th scope="col">Plan</th><th scope="col">Signed</th><th scope="col">Forecast</th></tr></thead><tbody>${table}</tbody></table>
+      </figure>`;
+  }
+  // Pointing at the trajectory shows that day: the plan, what was signed, and the forecast with its range.
+  let trajData = null;
+  document.addEventListener("pointermove", e => {
+    const fig = e.target.closest && e.target.closest("[data-traj]");
+    $$("[data-traj] .tr-tip").forEach(t => { if (!fig || !fig.contains(t)) t.hidden = true; });
+    if (!fig || !trajData) return;
+    const c = trajData, svg = $("svg", fig), box = svg.getBoundingClientRect(), k = box.width / TG.W, span = TG.W - TG.L - TG.R;
+    const d = Math.round(((e.clientX - box.left) / k - TG.L) / span * c.days);
+    const tip = $(".tr-tip", fig), x = $(".tr-x", fig);
+    if (d < 0 || d > c.days) { tip.hidden = true; x.setAttribute("hidden", ""); return; }
+    const px = TG.L + (d / c.days) * span;
+    x.removeAttribute("hidden"); x.setAttribute("x1", px); x.setAttribute("x2", px);
+    tip.hidden = false;
+    tip.innerHTML = `<b>${dayOf(c.start, d)}</b><span>Plan ${valAt(c.plan, d)}</span>${d <= c.now ? `<span>Signed ${valAt(c.actual, d)}</span>` : `<span>Forecast ${valAt(c.expected, d)}, range ${valAt(c.low, d)} to ${valAt(c.high, d)}</span>`}`;
+    tip.style.left = Math.min(px * k + 12, box.width - tip.offsetWidth) + "px";
+  });
+
+  function goalGlance(t) {
+    const g = t.goal, deals = g.deals.map(pick);
+    const likely = deals.filter(x => x.conf === "Likely").length, open = g.target - g.signed - likely;
+    trajData = g.trajectory;
+    const status = `<section class="status" aria-label="Are we going to make it">
+        <div class="st-row">
+          <div class="st-grp"><small>Signed</small><div class="kpi"><b>${g.signed}<small>/${g.target}</small></b><span>${g.targetWords}</span></div></div>
+          <div class="st-grp fc"><small>Forecast</small><div class="st-kpis"><div class="kpi"><b>${likely}</b><span>likely to close</span></div><div class="kpi"><b>${open}</b><span>not backed by a likely deal</span></div></div></div>
+          <span class="health"><i class="dot ${g.health[0]} still"></i>${g.health[1]}</span>
+        </div>
+        <p class="asof">${g.asOf}</p>
+        <p class="fc-why">${g.verdict}</p>
+        ${trajectory(g.trajectory)}
+      </section>`;
+    const MS = g.milestones;
+    const deal = x => {
+      const track = MS.map((m, i) => `<li class="${i < x.at ? "done" : i === x.at ? "now" : ""}" title="${m}"><span class="sr">${m}${i < x.at ? ": done" : i === x.at ? ": now" : ""}</span></li>`).join("");
+      return `<li><a href="${x.href}"><span class="who"><b>${x.name}</b><small class="cf-${x.conf.toLowerCase()}">${x.conf}${x.close ? " · " + x.close : ""}</small></span>
+        <span class="ms"><ol>${track}</ol><small>${x.stage}</small></span>
+        <span class="ev"><span>${x.evidence}</span><span class="nx">Next: ${x.next}</span></span></a></li>`;
     };
-    const verdict = `<section class="verdict" aria-label="Will we make it">
-        <div class="fc-head"><div class="kpi"><b>${likely}<small>/${slots.length}</small></b><span>${f.goal}</span></div><p class="fc-why">${f.why}</p>
-          <span class="health"><i class="dot ${f.health[0]} still"></i>${f.health[1]}${t.when ? `<small>${t.when}</small>` : ""}</span></div>
-        <ol class="fc-slots" style="--n:${slots.length}">${slots.map(cell).join("")}</ol></section>`;
-    const p = t.pipeline;
-    const step = x => {
-      x = pick(x);
-      const inner = `<b>${x.n}${x.of ? `<small>/${x.of}</small>` : ""}</b><span>${x.what}</span><em>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.moved}</em>`;
-      return `<li class="${x.st || ""}">${x.href ? `<a href="${x.href}">${inner}</a>` : inner}</li>`;
-    };
-    const pipeline = `<section class="sec" aria-label="Pipeline"><div class="headrow"><h2 class="h2">Pipeline</h2><span>${p.period}</span></div><ol class="pl-steps" style="--n:${p.steps.length}">${p.steps.map(step).join("")}</ol></section>`;
-    const row = x => {
-      x = pick(x);
-      return `<li><span class="av sm person" aria-hidden="true">${x.av}</span><div class="who"><b>${x.name}</b><small>${x.role}</small></div><a class="now" href="${x.href}">${x.now}<small>${x.due}</small></a><span class="tm-st">${sign(x.st)}${x.state}</span></li>`;
-    };
-    const working = t.agents.filter(a => a[7] !== "p" && a[2] === "ok").map(a => a[1]), stuck = t.agents.filter(a => a[7] !== "p" && a[2] === "bad").length;
-    const today = `<section class="sec" aria-label="Who does what today"><div class="headrow"><h2 class="h2">Today</h2><span>Your team, what each one delivers next, and what waits for them</span></div>
-        <ul class="tm">${t.team.map(row).join("")}</ul>
-        <p class="tm-agents">${sign(stuck ? "bad" : "ok")}<span>Agents: ${working.join(", ")} working${stuck ? `, ${stuck} stuck` : ", none stuck"}.</span></p></section>`;
-    const night = t.overnight ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>Overnight, ready to use</span>${t.overnight.map(([n, what]) => `<span><b>${n}</b>${what}</span>`).join("")}</p>` : "";
-    return { verdict, pipeline, today, night };
+    const path = `<section class="sec" aria-label="Path to the goal"><div class="headrow"><h2 class="h2">${g.pathTitle}</h2><span>Each deal at its last fact: ${MS.join(" → ")}</span></div>
+        <ul class="deals">${deals.map(deal).join("")}</ul>
+        ${g.out ? `<p class="deals-out">${g.out}</p>` : ""}
+        <div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div></section>`;
+    const att = x => `<li><span class="lt">${sign(x.st)}</span><div><b><a href="${x.href}">${x.what}</a></b><span>${x.why}</span></div><span class="st">${x.who}</span></li>`;
+    const attention = `<section class="sec" aria-label="Needs attention"><div class="headrow"><h2 class="h2">Needs attention</h2><span>Only what is blocked, late, or waits for someone</span></div>
+        <ul class="attn">${g.attention.map(att).join("")}</ul><p class="routine">${sign("ok")}<span>${g.routine}</span></p></section>`;
+    const fs = x => `<li class="${x.st || ""}"><b>${x.n}</b><span>${x.what}</span>${x.rate ? `<em>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</em>` : ""}</li>`;
+    const funnel = `<section class="sec" aria-label="Funnel"><div class="headrow"><h2 class="h2">Funnel</h2><span>${g.funnel.since}</span></div>
+        <ol class="pl-steps" style="--n:${g.funnel.steps.length}">${g.funnel.steps.map(fs).join("")}</ol>
+        <p class="moved"><b>This week</b>${g.funnel.week.map(([n, w]) => `<span><b>${n}</b> ${w}</span>`).join("")}</p>
+        <p class="moved"><b>Waiting longest</b><span>${g.funnel.aging}</span></p></section>`;
+    return { status, path, attention, funnel };
   }
 
   function drawTopic(t) {
@@ -1356,12 +1434,12 @@ try {
     };
     const night = t.plan && t.plan.night ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>Overnight</span>${t.plan.night.map(([n, what]) => `<span><b>${n}</b>${what}</span>`).join("")}</p>` : "";
     // The sharing proposal keeps the stage view: it shares a topic stage by stage.
-    const g = t.forecast && !PAGES.stageGlance ? forecastGlance(t) : null;
+    const g = t.goal && !PAGES.stageGlance ? goalGlance(t) : null;
     const plan = g && t.plan ? `<section class="sec"><div class="headrow"><h2 class="h2">Plan</h2><span>Stages and who works in each; click one</span></div><div class="box glance">${stagesBox(t)}</div></section>` : "";
     v.setAttribute("aria-label", t.name + " topic");
     v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide topic" style="gap:${g ? "var(--sp-7)" : "22px"}">
       <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1${g ? " sm" : ""}">${t.name}</h1></header>
-      ${g ? g.verdict + (t.focusLane ? askLine(laneById(t.focusLane), true) : "") + g.pipeline + g.today + g.night : `<section class="box glance" aria-label="Where it stands">
+      ${g ? g.status + (t.focusLane ? askLine(laneById(t.focusLane), true) : "") + g.path + g.attention + g.funnel : `<section class="box glance" aria-label="Where it stands">
         <div class="gl-top">${nums}<div class="gl-side">${crew}<span class="health"><i class="dot ${hs === "idle" ? "hollow" : hs} still"></i>${hw}${t.when ? `<small>${t.when}</small>` : ""}</span></div></div>
         ${t.plan ? stagesBox(t) : ""}
         ${night}

@@ -398,39 +398,68 @@
           night: [["+32", "brands"], ["+58", "contacts"], ["24", "emails drafted"]],
         },
         focusLane: "halden-offer",
-        // The glance: will we make it (each target partner and the deal that should fill it), the pipeline over the
-        // week, and who does what today. Each can name a decision and what changes once it is approved.
-        forecast: {
-          goal: "partners likely by 31 January", health: ["warn", "Tight"],
-          why: "Halden is the only deal with an offer. One of this week's three calls must reach an offer by mid-December to sign in time; Kestrel is out until spring.",
-          slots: [
-            { st: "likely", name: "Halden Freight Network", sub: "Offer waits for you · could sign in December", href: "#lane/halden-offer",
-              alt: { d: "d4", sub: "Offer goes out tomorrow · could sign in December" } },
-            { st: "maybe", name: "Brightmoor Retail", sub: "First call today at 15:00 · 9,000 retailers", href: "#lane/partner-calls" },
-            { st: "open", name: null, sub: "Northvale Bank (call Wed) or Corvane ERP (call Thu)", href: "#lane/partner-calls" },
+        // The goal glance (topic-status-framework.md): what is signed apart from what is forecast, the trajectory against
+        // the plan, each deal at its last fact with the evidence behind its forecast, what needs attention, and the funnel
+        // against the plan. A deal can name a decision and show what changes once it is approved.
+        goal: {
+          target: 3, signed: 0, targetWords: "partners by 31 January", health: ["warn", "Behind plan"],
+          asOf: "Updated 07:45 · forecast unchanged since yesterday · 10 weeks left",
+          verdict: "The forecast reaches 1 signed partner by 31 January, 0 to 2 at the edges; the plan needs 3. Halden is the only likely deal, and nothing else has reached a qualified call yet.",
+          // Days since 19 October. The plan is the one set in the strategy lane: 1 by 18 December, 2 by 15 January, 3 by 31 January.
+          trajectory: {
+            start: "2026-10-19", days: 104, now: 29, goal: 3,
+            ticks: [[0, "19 Oct"], [29, "Today"], [60, "18 Dec"], [88, "15 Jan"], [104, "31 Jan"]],
+            plan: [[0, 0], [60, 1], [88, 2], [104, 3]],
+            actual: [[0, 0], [29, 0]],
+            expected: [[29, 0], [56, 1], [104, 1]],
+            low: [[29, 0], [104, 0]],
+            high: [[29, 0], [50, 1], [95, 2], [104, 2]],
+          },
+          pathTitle: "Path to three",
+          milestones: ["Replied", "Call held", "Qualified", "Offer sent", "Signed"],
+          deals: [
+            { name: "Halden Freight Network", conf: "Likely", close: "December", at: 3, stage: "Offer drafted, not sent", href: "#lane/halden-offer",
+              evidence: "They asked for an offer on the 13 November call and named their budget date, 1 December.",
+              next: "your OK on the offer (due Thursday), then their budget on 1 December.",
+              alt: { d: "d4", stage: "Offer goes out tomorrow", next: "their budget is set on 1 December; Jonas follows up on 23 November." } },
+            { name: "Brightmoor Retail", conf: "Possible", close: "January at best", at: 1, stage: "First call today, 15:00", href: "#lane/partner-calls",
+              evidence: "Replied to wave 1 and booked a call. No partner owner or budget known yet.",
+              next: "today's call must name the partner owner and their budget date." },
+            { name: "Northvale Bank", conf: "Unqualified", close: "", at: 1, stage: "First call Wednesday", href: "#lane/partner-calls",
+              evidence: "Replied to wave 1. Nothing known yet about fit or budget.", next: "the first call on Wednesday." },
+            { name: "Corvane ERP", conf: "Unqualified", close: "", at: 1, stage: "First call Thursday", href: "#lane/partner-calls",
+              evidence: "Replied to wave 1. Nothing known yet about fit or budget.", next: "the first call on Thursday." },
           ],
-        },
-        pipeline: {
-          period: "Since Monday",
-          steps: [
-            { n: "64", what: "brands that fit", moved: "+9 overnight", st: "up", href: "#lane/brand-list" },
-            { n: "52", what: "written to", moved: "Wave 2 waits for Lea", st: "warn", href: "#lane/outreach-wave-2" },
-            { n: "11", what: "replied", moved: "+2 this week", st: "up", href: "#lane/outreach-wave-1" },
-            { n: "2", of: "5", what: "calls held", moved: "+1 booked: Corvane", st: "up", href: "#lane/partner-calls" },
-            { n: "1", what: "offer", moved: "Waits for you", st: "warn", href: "#lane/halden-offer",
-              alt: { d: "d4", moved: "Goes out tomorrow", st: "up" } },
-            { n: "0", of: "3", what: "signed", moved: "Goal: 31 January", st: "" },
+          out: "Out of this goal: Kestrel Parcel, budget frozen until spring (call on 12 November).",
+          gap: {
+            says: "To reach 3, two more deals must reach an offer in time:",
+            steps: [
+              "Brightmoor to an offer by 11 December. We assume 4 to 6 weeks from offer to signature; that is a guess until Halden signs.",
+              "Northvale or Corvane to an offer by 8 January, after this week's calls.",
+              "If neither call qualifies by Friday, send wave 2 at once. At wave 1's rates its 40 retail brands bring about 8 replies and 4 calls by mid-December.",
+            ],
+          },
+          attention: [
+            { st: "warn", what: "Wave 2 is blocked on Lea's review", why: "24 emails drafted at 04:30. Sender sends nothing until she checks them. Due 11:00.", who: "Lea Brandt", href: "#lane/outreach-wave-2" },
+            { st: "warn", what: "Calls booked are below plan", why: "45% of replies booked a call, against 50%. 4 brands asked to wait until January; Sender's follow-ups go out today.", who: "Sender", href: "#lane/outreach-wave-1" },
+            { st: "warn", what: "9 new brands wait for Lea's check", why: "Contact finder holds batch 4 until they are checked. Due Thursday.", who: "Lea Brandt", href: "#lane/brand-list" },
           ],
+          routine: "On schedule: Jonas, partner contract template with legal (Wed) · you, Brightmoor call at 15:00, brief ready at 13:00 · 4 agents working, none stuck.",
+          funnel: {
+            since: "Since outreach began on 6 November, against the plan",
+            steps: [
+              { n: "64", what: "brands that fit", rate: "of 160 found" },
+              { n: "52", what: "written to", rate: "wave 2 (24) waits for Lea", st: "warn" },
+              { n: "11", what: "replied", rate: "21% · plan 15%", st: "up" },
+              { n: "5", what: "calls booked", rate: "45% of replies · plan 50%", st: "warn" },
+              { n: "2", what: "calls held", rate: "3 more this week" },
+              { n: "1", what: "offer", rate: "plan: 2 by 30 November", st: "warn" },
+              { n: "0", what: "signed", rate: "plan: 1 by 18 December" },
+            ],
+            week: [["+9", "brands that fit"], ["+2", "replies"], ["+1", "call booked"], ["+1", "offer drafted"]],
+            aging: "the wave 2 emails, 5 hours with Lea (due 11:00) · Halden, 4 days from call to offer",
+          },
         },
-        team: [
-          { av: "L", name: "Lea Brandt", role: "GTM associate", now: "Checks 24 wave 2 emails from Sender, then 9 new brands from Brand scout", due: "by 11:00",
-            st: "warn", state: "Sender waits for her", href: "#lane/outreach-wave-2" },
-          { av: "J", name: "Jonas Falk", role: "Partner operations", now: "Partner contract template, with legal", due: "Wed",
-            st: "ok", state: "On time", href: "#lane/halden-offer" },
-          { av: "M", name: "Mara Lind, you", role: "Head of GTM", now: "Call with Brightmoor Retail", due: "15:00",
-            st: "ok", state: "Brief ready at 13:00", href: "#lane/partner-calls" },
-        ],
-        overnight: [["9 of 32", "new brands fit"], ["58", "contacts with a checked email"], ["24", "emails ready for Lea"]],
         // What happened, newest first. A row: time, avatar, who, person or agent, what, lane, flags, how many, a few
         // of the items, and a decision it waits for.
         history: {
