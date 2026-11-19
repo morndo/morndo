@@ -88,7 +88,12 @@ These are the parts a native app has to keep. The mockups are the reference for 
 2. A proof of concept of a native Mac app: a native sidebar with real lanes from the hub, a live terminal view, one lane with its own web tabs, and Decide working end to end. It passes only if it uses clearly less energy than a Chromium-based browser over a day, opens instantly from a local copy, and keeps working when the hub drops.
 3. A decision record for the native app (stack, how it gets the protocol types, distribution, updates). It supersedes ADR-0006 once accepted.
 
-The web app stays for the phone and for catching up away from the Mac.
+There are two clients, and both are first-class (owner, 2026-11-19):
+
+- **The native Mac app** is the cockpit for whoever runs the work: terminals, web tabs per lane, everything local and fast.
+- **The web app** is for everyone a topic is shared with (a teammate who runs one stage, a CEO who watches the status) and for the phone. Sharing a topic must not mean installing an app.
+
+Both show the same pages from the same records. What a person may see is decided by the hub, never by the client, so a shared view is the same in both.
 
 ## Credits and licences
 
