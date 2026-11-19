@@ -351,6 +351,12 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .list li>div{flex:1;min-width:0}.list li>div b{display:block;font-weight:500}.list li>div span{font-size:12px;color:var(--muted)}
 .list .lt{width:28px;height:28px;border-radius:9px;background:var(--fill);font-size:12px;font-weight:700;display:grid;place-items:center;flex:none}
 .list .st{display:flex;align-items:center;gap:5px;font-size:12px;color:var(--text-2)}
+/* A topic's numbers: four at most, each one figure and what it counts. */
+.facts{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
+.fact{display:flex;flex-direction:column;gap:4px;padding:14px 16px}
+.fact b{font:400 26px/1.1 var(--serif);letter-spacing:-.01em;color:var(--text)}.fact span{font-size:12px;color:var(--muted)}
+.list li>div b a:hover,.jobs td a:hover{text-decoration:underline;text-underline-offset:3px}
+.wait>.i{flex:none}.wait .acts{flex-wrap:wrap}
 .sw{position:relative;width:34px;height:20px;border-radius:10px;background:var(--tile-on);flex:none;transition:background .18s}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .18s,background .18s}
 .sw[aria-checked="true"]{background:var(--ink)}.sw[aria-checked="true"]::after{transform:translateX(14px);background:var(--ink-fg)}
@@ -1440,18 +1446,162 @@ try {
     pop.style.top = Math.max(8, Math.min(e.clientY, innerHeight - pop.offsetHeight - 8)) + "px";
   });
 
-  function show(name) {
+  // Topic and lane pages. A module that brings its topics and lanes as records gets a page for each one. The tree,
+  // the Manager's table and the pages all read the same records, so a decision taken anywhere shows everywhere.
+  const PAGES = {
+    // Development keeps its fixed project and lane pages for now.
+  };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const STATES = { bad: "Stuck", warn: "Needs you", ok: "Working", done: "Done", new: "Starting", idle: "Idle", next: "Up next" };
+  const RANK = { bad: 4, warn: 3, new: 2, ok: 1, done: 0 };
+  const decided = l => !!(l.decision && $("#" + l.decision) && $("#" + l.decision).classList.contains("done"));
+  const stateOf = l => (decided(l) ? "ok" : l.state);
+  const byRank = (a, b) => RANK[stateOf(b)] - RANK[stateOf(a)];
+  const topicOf = l => (PAGES.topics || []).find(t => t.id === l.topic);
+  const laneById = id => (PAGES.lanes || []).find(l => l.id === id);
+  // The small sign for a state: on a page a stuck thing shows its flame and a finished one its check.
+  const sign = st => st === "bad" ? '<svg class="i sm bad"><use href="#flame"/></svg>'
+    : st === "done" ? '<svg class="i sm ok"><use href="#check"/></svg>'
+    : st === "new" ? '<i class="spin"></i>'
+    : st === "idle" || st === "next" ? '<i class="dot hollow"></i>'
+    : '<i class="dot ' + st + '"></i>';
+  const kidRow = l => {
+    const st = stateOf(l), dot = st === "new" ? '<i class="spin"></i>' : '<i class="dot ' + st + '"></i>';
+    return `<a class="row kid${l.fresh ? " fresh" : ""}" href="#lane/${l.id}" data-nav="lane/${l.id}">${dot}<span class="grow">${esc(l.title)}</span><span class="word"><span class="sr">${STATES[st]}. </span>${esc(l.lead)} leads</span></a>`;
+  };
+  const agentCard = ([av, name, st, word, text, cmd, engine]) =>
+    `<article class="box agent"><div class="top"><span class="av">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p><footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
+
+  function drawTree() {
+    if (!PAGES.topics) return;
+    const tree = $("#tree"), open = new Set($$("#tree .grp[data-unfolded]").map(g => g.id));
+    if (!drawTree.once) { PAGES.topics.forEach(t => t.open && open.add("a-" + t.id)); drawTree.once = true; }
+    $$("#tree .grp").forEach(g => g.remove());
+    PAGES.topics.forEach(t => {
+      const lanes = PAGES.lanes.filter(l => l.topic === t.id && stateOf(l) !== "done").sort(byRank);
+      const worst = lanes.length ? stateOf(lanes[0]) : null, mark = worst === "new" ? "ok" : worst;
+      const g = document.createElement("div");
+      g.className = "grp";
+      g.id = "a-" + t.id;
+      g.innerHTML = `<div class="row proj"><button class="tog" aria-expanded="false" aria-label="${esc(t.name)}: show or hide its lanes"><svg class="i ic"><use href="#${t.icon}"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><a class="grow" href="#topic/${t.id}" data-nav="topic/${t.id}">${esc(t.name)}</a><span class="word">${worst ? STATES[worst] : "Idle"}</span>${mark ? `<i class="dot ${mark}"></i>` : ""}</div><div class="kids">${lanes.map(kidRow).join("")}</div>`;
+      tree.append(g);
+      fold(g, open.has(g.id));
+    });
+    $("#mgr-lanes").innerHTML = PAGES.lanes.filter(l => !l.topic).map(kidRow).join("");
+    PAGES.lanes.forEach(l => delete l.fresh);
+    // The Manager's table: every lane that is still open, the most urgent first.
+    const body = $("[data-lanes]");
+    if (body) {
+      const open = PAGES.lanes.filter(l => stateOf(l) !== "done").sort(byRank);
+      body.innerHTML = open.map(l => {
+        const st = stateOf(l), t = topicOf(l);
+        return `<tr><td><a href="#lane/${l.id}">${esc(l.title)}</a></td><td>${t ? `<a href="#topic/${t.id}">${esc(t.name)}</a>` : "Manager"}</td><td>${esc(l.lead)}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${decided(l) ? l.afterNext : l.next}</td></tr>`;
+      }).join("");
+      const topics = new Set(open.map(l => l.topic).filter(Boolean)).size, waiting = open.filter(l => ["warn", "bad"].includes(stateOf(l))).length;
+      $("[data-lanes-sum]").textContent = `${open.length} lanes in ${topics} topics · ${waiting ? waiting + " wait for you" : "none waits for you"}`;
+    }
+    markCurrent();
+  }
+
+  // Where a lane stands, in one box: what it waits for, and the buttons that settle it.
+  function standing(l, withLink) {
+    const st = stateOf(l), yes = decided(l);
+    const lead = yes ? "You approved it." : { bad: "It is stuck.", warn: "It waits for you.", ok: "It is working.", done: "Done.", new: "Starting." }[st];
+    const icon = st === "bad" ? '<svg class="i bad"><use href="#flame"/></svg>' : st === "done" || yes ? '<svg class="i ok"><use href="#check"/></svg>' : st === "new" ? '<i class="spin"></i>' : `<i class="dot ${st}"></i>`;
+    let acts = "";
+    if (yes) acts = `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`;
+    else if (st === "warn" && l.decision) acts = (l.decisionHref ? `<a class="btn quiet" href="${l.decisionHref}">Open the decision</a>` : "") + `<button class="btn ink" data-approve-id="${l.decision}"><svg class="i"><use href="#check"/></svg>${l.approve || "Approve"}</button>`;
+    else if (l.acts) acts = l.acts;
+    if (withLink) acts += `<a class="btn quiet" href="#lane/${l.id}">Open the lane</a>`;
+    return `<div class="box wait">${icon}<p><b>${lead}</b> ${yes ? l.after : l.status}</p>${acts ? `<div class="acts">${acts}</div>` : ""}</div>`;
+  }
+
+  function drawTopic(t) {
+    const v = $("#v-area"), lanes = PAGES.lanes.filter(l => l.topic === t.id);
+    const open = lanes.filter(l => stateOf(l) !== "done").sort(byRank), done = lanes.filter(l => stateOf(l) === "done");
+    const focus = t.focus || (t.focusLane ? standing(laneById(t.focusLane), true) : t.calm ? `<div class="box wait"><svg class="i ok"><use href="#check"/></svg><p>${t.calm}</p>${t.calmActs ? `<div class="acts">${t.calmActs}</div>` : ""}</div>` : "");
+    const li = l => {
+      const st = stateOf(l);
+      return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${esc(l.lead)} leads · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${STATES[st]}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
+    };
+    v.setAttribute("aria-label", t.name + " topic");
+    v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide" style="gap:28px">
+      <header class="sec" style="gap:6px"><h1 class="h1">${t.name}</h1><p class="intro">${t.intro}</p></header>
+      ${focus}
+      ${t.facts ? `<div class="grid facts">${t.facts.map(([n, what]) => `<div class="box fact"><b>${n}</b><span>${what}</span></div>`).join("")}</div>` : ""}
+      <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done this week" : ""}</span></div>
+        ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
+      </section>
+      <section class="sec"><h2 class="h2">Agents</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
+      ${t.jobs ? `<section class="sec"><h2 class="h2">Jobs this week</h2><div class="box tbl"><table class="jobs"><thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead><tbody>${t.jobs.map(([job, agent, st, due, lane]) => `<tr><td>${lane ? `<a href="#lane/${lane}">${job}</a>` : job}</td><td>${agent}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${due}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
+    </div></div>
+    <template class="chat-src" data-title="${t.name} chat" data-sub="${t.chatSub}" data-placeholder="Message ${t.name}">${t.chat}</template></div>`;
+  }
+
+  function drawLane(l) {
+    const v = $("#v-lane"), st = stateOf(l), t = topicOf(l), yes = decided(l);
+    let promoted = false;
+    const steps = l.steps.map(([kind, text, who]) => {
+      if (yes && kind === "now") kind = "ok";
+      else if (yes && kind === "todo" && !promoted) { kind = "now"; promoted = true; }
+      const mark = kind === "ok" ? '<svg class="i ok"><use href="#check"/></svg>' : kind === "todo" ? '<i class="dot hollow"></i>' : st === "new" ? '<i class="spin"></i>' : `<i class="dot ${yes ? "ok" : st}"></i>`;
+      return `<li${kind === "now" ? ' class="now"' : kind === "todo" ? ' class="todo"' : ""}>${mark}<span>${text}</span><small>${who}</small></li>`;
+    }).join("");
+    v.setAttribute("aria-label", "Lane: " + l.title);
+    v.innerHTML = `<div class="split"><div class="scroll"><article class="doc" style="gap:28px">
+      <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : STATES[st]}</span><i>·</i><span>${esc(l.lead)} leads</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
+      <section class="sec"><h2 class="label"><b>1</b>What you asked</h2><blockquote class="asked">${l.asked}</blockquote><p class="meta">${l.askedMeta}</p></section>
+      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
+      <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
+      ${l.made && l.made.length ? `<section class="sec"><h2 class="label"><b>4</b>What it made</h2><ul class="box list">${l.made.map(([icon, what, more, href]) => `<li><span class="lt"><svg class="i sm"><use href="#${icon}"/></svg></span><div><b>${what}</b><span>${more}</span></div>${href ? `<a class="btn quiet s" href="${href}">Open</a>` : '<button class="btn quiet s">Open</button>'}</li>`).join("")}</ul></section>` : ""}
+    </article></div>
+    <template class="chat-src" data-title="${esc(l.title)}" data-sub="You, the Manager and this lane's agents. Nothing else lives here." data-placeholder="Message this lane">${l.chat || ""}</template></div>`;
+  }
+
+  // What an address opens. #topic/<id> and #lane/<id> are drawn from the records; anything else is a fixed page.
+  function route(hash) {
+    const [name, arg] = String(hash).split("/");
+    if (PAGES.topics && (name === "topic" || name === "area")) {
+      const t = PAGES.topics.find(x => x.id === arg) || PAGES.topics[0];
+      drawTopic(t);
+      return { view: "area", nav: "topic/" + t.id, crumbs: [t.name, t.crumb] };
+    }
+    if (PAGES.lanes && name === "lane") {
+      const l = laneById(arg) || laneById(PAGES.firstLane);
+      drawLane(l);
+      const t = topicOf(l);
+      return { view: "lane", nav: "lane/" + l.id, crumbs: [t ? t.name : "Manager", l.title] };
+    }
     const view = CRUMBS[name] ? name : "brief";
-    $$(".view").forEach(v => (v.hidden = v.id !== "v-" + view));
-    $$("[data-nav]").forEach(a => (a.dataset.nav === view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
-    $("#crumb-a").textContent = CRUMBS[view][0];
-    $("#crumb-b").textContent = "/ " + CRUMBS[view][1];
-    document.title = CRUMBS[view][0] + " · Morndo";
-    pane.dataset.view = view;
-    // The tree shows where you are: the project of the page you opened unfolds.
-    const here = $('#tree .grp [data-nav="' + view + '"]');
+    return { view, nav: view, crumbs: CRUMBS[view] };
+  }
+  function markCurrent() {
+    $$("[data-nav]").forEach(a => (a.dataset.nav === pane.dataset.nav ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  }
+  // After a decision: the tree, the table and the open page follow, and the page keeps its place.
+  function refresh() {
+    drawTree();
+    if (!["area", "lane"].includes(pane.dataset.view)) return;
+    const box = $("#v-" + pane.dataset.view + " .scroll"), y = box ? box.scrollTop : 0;
+    route(pane.dataset.nav);
+    const again = $("#v-" + pane.dataset.view + " .scroll");
+    if (again) again.scrollTop = y;
+    markCurrent();
+  }
+
+  function show(hash) {
+    const r = route(hash);
+    $$(".view").forEach(v => (v.hidden = v.id !== "v-" + r.view));
+    pane.dataset.view = r.view;
+    pane.dataset.nav = r.nav;
+    markCurrent();
+    $("#crumb-a").textContent = r.crumbs[0];
+    $("#crumb-b").textContent = "/ " + r.crumbs[1];
+    document.title = r.crumbs[0] + " · Morndo";
+    // The tree shows where you are: the topic or project of the page you opened unfolds.
+    const here = $('#tree .grp [data-nav="' + r.nav + '"]');
     if (here) fold(here.closest(".grp"), true);
-    fillChat(view);
+    fillChat(r.view);
     pane.classList.toggle("chat-off", !sideChat());
     syncChat();
     closePalette();
@@ -1623,7 +1773,7 @@ try {
       });
     });
     if (!list.children.length) { const none = document.createElement("p"); none.textContent = "Everything that can be pinned is pinned."; list.append(none); }
-    if (pane.dataset.view) $$("#pins [data-nav]").forEach(a => (a.dataset.nav === pane.dataset.view ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+    if (pane.dataset.nav) markCurrent();
     count();
     if (save) try { localStorage.setItem(pinsKey, JSON.stringify(pins)); } catch (e) {}
   }
@@ -1665,6 +1815,7 @@ try {
     const text = raw.trim();
     if (!text) return;
     const route = ROUTES.find(r => r.re.test(text));
+    if (PAGES.lanes) return fileLane(text, route);
     const grp = route && $("#" + route.id);
     const kid = document.createElement("button");
     kid.className = "row kid fresh";
@@ -1679,6 +1830,38 @@ try {
     $(".rt", el).textContent = text;
     $(".rr", el).textContent = grp ? $("#tree h2").dataset.kind + ": " + $(".proj .grow", grp).textContent + " · " + route.lead + " leads" : "With the Manager, until it knows where this belongs";
     $("[data-unfile]", el).addEventListener("click", () => { kid.remove(); el.remove(); });
+    box.prepend(el);
+    while (box.children.length > 3) box.lastChild.remove();
+  }
+
+  // The same, for a module with lane records: the new lane is a record, so it has a page from the first second.
+  let filed = 0;
+  function fileLane(text, route) {
+    const t = route && PAGES.topics.find(x => "a-" + x.id === route.id), lead = t ? route.lead : "Manager";
+    const l = {
+      id: "new-" + ++filed, topic: t ? t.id : null, title: text, state: "new", lead, fresh: true, opened: "Opened just now",
+      next: "Within the hour", asked: esc(text),
+      askedMeta: "You to the Manager, just now<i>·</i>" + (t ? `The Manager filed it under ${t.name} and named ${lead} to lead.` : "The Manager keeps it until it knows where it belongs."),
+      status: t ? `${lead} is reading your ask and will set what done means before starting.` : "The Manager is working out which topic this belongs to. It asks you only if it cannot tell.",
+      steps: [["now", "What done means, set from your ask", lead + " · now"], ["todo", "The work itself", lead], ["todo", "Checked by someone other than " + lead, "Manager"], ["todo", "Reported back to you", "Manager"]],
+      doneNote: "These are the first steps. The lead replaces them with the real ones before it starts.",
+      agents: [[lead[0], lead, "new", "Leads", "Reading your ask", "", "Auto"]],
+      chat: `<p class="said">${esc(text)}</p><div class="msg"><span class="av">${lead[0]}</span><div class="who">${lead}<time>now</time></div><p>Got it. I will set what done means and start. You hear from me when it is done or when I need you.</p></div>`
+    };
+    PAGES.lanes.unshift(l);
+    drawTree();
+    if (t) fold($("#a-" + t.id), true);
+    const box = $("#receipts"), el = document.createElement("div");
+    el.className = "receipt";
+    el.innerHTML = `<div class="rh"><svg class="i sm ok"><use href="#check"/></svg><b>Filed as its own lane</b><button class="ib" data-dismiss aria-label="Dismiss"><svg class="i sm"><use href="#x"/></svg></button></div><p class="rt"></p><p class="rr"></p><div class="acts"><a class="btn quiet s" href="#lane/${l.id}">Open</a><button class="btn quiet s" data-dismiss>Move it</button><button class="btn quiet s" data-unfile>Undo</button></div>`;
+    $(".rt", el).textContent = text;
+    $(".rr", el).textContent = t ? $("#tree h2").dataset.kind + ": " + t.name + " · " + lead + " leads" : "With the Manager, until it knows where this belongs";
+    $("[data-unfile]", el).addEventListener("click", () => {
+      PAGES.lanes.splice(PAGES.lanes.indexOf(l), 1);
+      el.remove();
+      if (pane.dataset.nav === "lane/" + l.id) location.hash = t ? "#topic/" + t.id : "#manager";
+      drawTree();
+    });
     box.prepend(el);
     while (box.children.length > 3) box.lastChild.remove();
   }
@@ -1712,9 +1895,10 @@ try {
     else if (t.matches(".proj > button.grow")) fold(t.closest(".grp"), !t.closest(".grp").hasAttribute("data-unfolded"));
     else if (t.matches("[data-dismiss]")) t.closest(".receipt").remove();
     else if (t.matches("[data-file]")) { const inp = $("input", t.closest(".composer")); fileDirection(inp.value); inp.value = ""; }
-    else if (t.matches("[data-approve]")) { t.closest(".decision").classList.add("done"); count(true); }
-    else if (t.matches("[data-undo]")) { t.closest(".decision").classList.remove("done"); count(); }
-    else if (t.matches("[data-approve-id]")) { $("#" + t.dataset.approveId).classList.add("done"); count(true); }
+    else if (t.matches("[data-approve]")) { t.closest(".decision").classList.add("done"); count(true); refresh(); }
+    else if (t.matches("[data-undo]")) { t.closest(".decision").classList.remove("done"); count(); refresh(); }
+    else if (t.matches("[data-approve-id]")) { $("#" + t.dataset.approveId).classList.add("done"); count(true); refresh(); }
+    else if (t.matches("[data-undo-id]")) { $("#" + t.dataset.undoId).classList.remove("done"); count(); refresh(); }
     else if (t.matches("[data-undo-log]")) { const li = t.closest("li"); li.classList.toggle("undone"); t.textContent = li.classList.contains("undone") ? "Redo" : "Undo"; }
     else if (t.matches("[data-palette]")) openPalette();
     else if (t.matches("[data-close]")) closePalette();
@@ -1746,6 +1930,7 @@ try {
   });
 
   addEventListener("hashchange", () => show(location.hash.slice(1)));
+  drawTree();
   renderPins(false);
   show(location.hash.slice(1));
   count();

@@ -24,6 +24,8 @@ Both are built from one shell, so they differ only in what a module brings. The 
 | `icons/` | The UI icons as single SVGs, plus `sprite.svg`. |
 | `hero-art/` | The brief's artworks in web sizes (1536 and 960 WebP, 1536 JPEG) and `heroes.json` with titles and alt text. |
 
+The go-to-market module brings its topics and lanes as records (the `pages` block). The shell draws the sidebar tree, every topic page, every lane page and the Manager's table from them, so a decision approved anywhere shows everywhere, and a lane filed from ⌘K or the Manager gets its own page at once. Pages open at `#topic/<id>` and `#lane/<id>`. The development module still has fixed project and lane pages.
+
 Edit the source, never the built files. Rebuild:
 
 ```sh

@@ -1,35 +1,5 @@
 <!-- @@ tree -->
     <h2 data-kind="Topic">Topics</h2>
-    <div class="grp" id="a-content" data-unfolded>
-      <div class="row proj"><button class="tog" aria-expanded="true" aria-label="Content: show or hide its lanes"><svg class="i ic"><use href="#pen"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><a class="grow" href="#area" data-nav="area">Content</a><span class="word">Stuck</span><i class="dot bad"></i></div>
-      <div class="kids">
-        <a class="row kid" href="#area"><i class="dot bad"></i><span class="grow">Webinar on Thursday</span><span class="word"><span class="sr">Stuck. </span>Visuals leads</span></a>
-        <button class="row kid"><i class="dot warn"></i><span class="grow">Fenwick customer story</span><span class="word"><span class="sr">Needs you. </span>Writer leads</span></button>
-        <button class="row kid"><i class="dot ok"></i><span class="grow">Webinar recap post</span><span class="word"><span class="sr">Working. </span>Writer leads</span></button>
-      </div>
-    </div>
-    <div class="grp" id="a-outbound">
-      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="Outbound: show or hide its lanes"><svg class="i ic"><use href="#send"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">Outbound</button><span class="word">Needs you</span><i class="dot warn"></i></div>
-      <div class="kids">
-        <button class="row kid"><i class="dot warn"></i><span class="grow">Sequence B, fintech ops</span><span class="word"><span class="sr">Needs you. </span>Sender leads</span></button>
-      </div>
-    </div>
-    <div class="grp" id="a-paid">
-      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="Paid: show or hide its lanes"><svg class="i ic"><use href="#horn"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">Paid</button><span class="word">Needs you</span><i class="dot warn"></i></div>
-      <div class="kids">
-        <a class="row kid" href="#lane" data-nav="lane"><i class="dot warn"></i><span class="grow">Search budget shift</span><span class="word"><span class="sr">Needs you. </span>Paid buyer leads</span></a>
-      </div>
-    </div>
-    <div class="grp" id="a-seo">
-      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="SEO: show or hide its lanes"><svg class="i ic"><use href="#search"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">SEO</button><span class="word">Working</span></div>
-      <div class="kids">
-        <button class="row kid"><i class="dot ok"></i><span class="grow">Comparison pages</span><span class="word"><span class="sr">Working. </span>SEO writer leads</span></button>
-      </div>
-    </div>
-    <div class="grp" id="a-research">
-      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="Research: show or hide its lanes"><svg class="i ic"><use href="#target"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">Research</button><span class="word">Idle</span></div>
-      <div class="kids"></div>
-    </div>
 <!-- @@ me -->
   <a class="row me" href="#settings" data-nav="settings" aria-label="Settings and account: Mara Lind"><span class="av"><svg class="i sm"><use href="#user"/></svg></span><span class="grow" style="color:var(--text)">Mara Lind</span><svg class="i dim"><use href="#sliders"/></svg></a>
 <!-- @@ lede -->
@@ -58,7 +28,7 @@
                   <h3>Start sequence B for 180 fintech ops leads</h3>
                   <p>The pilot of 30 emails got 6 replies and 2 meetings. Sending stays at 60 a day.</p>
                 </div>
-                <div class="acts"><button class="btn quiet">Open brief</button><button class="btn ink" data-approve>Approve</button></div>
+                <div class="acts"><a class="btn quiet" href="#lane/sequence-b">Open lane</a><button class="btn ink" data-approve>Approve</button></div>
                 <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The first 60 emails go out at 10:00.<button class="link" data-undo>Undo</button></div>
               </article>
               <article class="item decision" id="d3" data-min="3">
@@ -67,7 +37,7 @@
                   <h3>Publish the Fenwick Freight customer story</h3>
                   <p>Fenwick signed off the quote. The claim of 38% fewer manual hand-offs still needs your OK.</p>
                 </div>
-                <div class="acts"><button class="btn quiet">Open brief</button><button class="btn ink" data-approve>Approve</button></div>
+                <div class="acts"><a class="btn quiet" href="#lane/fenwick">Open lane</a><button class="btn ink" data-approve>Approve</button></div>
                 <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The story is scheduled for Wednesday.<button class="link" data-undo>Undo</button></div>
               </article>
             </div>
@@ -86,7 +56,7 @@
                   <h3>The webinar promo visuals are stuck</h3>
                   <p>Visuals used its 3 feedback rounds. 4 of 6 images pass the brand check, 2 still fail.</p>
                 </div>
-                <div class="acts"><a class="btn quiet" href="#area">Go to Content<svg class="i sm"><use href="#go"/></svg></a></div>
+                <div class="acts"><a class="btn quiet" href="#topic/content">Go to Content<svg class="i sm"><use href="#go"/></svg></a></div>
               </article>
             </div>
           </section>
@@ -98,10 +68,10 @@
               <div class="num" aria-hidden="true"><svg class="i"><use href="#moon"/></svg><span>4</span></div>
             </header>
             <ul class="log">
-              <li><svg class="i ok"><use href="#check"/></svg><span><b>Research</b> rebuilt the customer profile from 212 won deals and saved it to memory.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:10</time></li>
-              <li><svg class="i ok"><use href="#check"/></svg><span><b>SEO</b> published the 2 comparison pages you approved on Friday.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:42</time></li>
-              <li><svg class="i ok"><use href="#check"/></svg><span><b>Outbound</b> stopped sequence A for the 14 people who replied.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:05</time></li>
-              <li><svg class="i ok"><use href="#check"/></svg><span><b>Paid</b> switched off 3 ads that fell below the click floor.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:30</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/customer-profile"><b>Research</b></a> rebuilt the customer profile from 212 won deals and saved it to memory.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:10</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/comparison-pages"><b>SEO</b></a> published the 2 comparison pages you approved on Friday.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:42</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/sequence-a"><b>Outbound</b></a> stopped sequence A for the 14 people who replied.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:05</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/click-floor"><b>Paid</b></a> switched off 3 ads that fell below the click floor.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:30</time></li>
             </ul>
           </section>
 
@@ -131,7 +101,7 @@
             <header class="sec">
               <div class="meta"><span class="chip">Paid</span><span><i class="dot warn"></i>Due today, 14:00</span><i>·</i><span>2 min to read</span><i>·</i><span>1 of 3</span></div>
               <h1 class="h1">Move €1,200 a week from LinkedIn to Google Search</h1>
-              <p class="meta">Part of the lane <a class="link" href="#lane">Search budget shift</a><i>·</i>written by Paid buyer<i>·</i>numbers checked by the Manager at 07:05</p>
+              <p class="meta">Part of the lane <a class="link" href="#lane/search-budget">Search budget shift</a><i>·</i>written by Paid buyer<i>·</i>numbers checked by the Manager at 07:05</p>
             </header>
 
             <section class="sec">
@@ -228,76 +198,8 @@
       </div>
     </section>
 
-    <!-- 3. Inside one topic -->
-    <section class="view" id="v-area" aria-label="Content topic" hidden>
-      <div class="split">
-        <div class="scroll">
-          <div class="doc wide" style="gap:28px">
-            <header class="sec" style="gap:6px">
-              <h1 class="h1">Content</h1>
-              <p class="intro">This week: the webinar promo, the recap post, one customer story and a carousel.</p>
-            </header>
-
-            <section class="box stuck">
-              <div class="top">
-                <span class="flame"><svg class="i lg"><use href="#flame"/></svg></span>
-                <div>
-                  <div class="meta">Stuck since 09:12 · the post goes out today at 16:00</div>
-                  <h2>The webinar promo visuals need your call</h2>
-                  <p>Visuals used its 3 feedback rounds. Images 3 and 6 still fail the brand check: the logo sits on a light photo and is hard to read.</p>
-                </div>
-              </div>
-              <div class="thumbs">
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 1</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 2</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 3</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 4</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 5</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 6</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
-              </div>
-              <div class="acts">
-                <button class="btn ink">Post with the 4 that pass</button>
-                <button class="btn quiet">Allow one more round</button>
-                <button class="btn quiet">Open in Adobe</button>
-                <small>One more round takes about 4 minutes and €0.60</small>
-              </div>
-            </section>
-
-            <section class="sec">
-              <h2 class="h2">Agents</h2>
-              <div class="grid agents">
-                <article class="box agent"><div class="top"><span class="av">W</span><h3>Writer</h3><span class="st"><i class="dot ok"></i>Working</span></div><p>Webinar recap post, draft 2 of 3</p><footer><span class="cmd">/linkedin-post</span><i>·</i><span>Claude</span></footer></article>
-                <article class="box agent"><div class="top"><span class="av">V</span><h3>Visuals</h3><span class="st"><svg class="i sm bad"><use href="#flame"/></svg>Stuck</span></div><p>Webinar promo, out of feedback rounds</p><footer><span class="cmd">/brand-visual</span><i>·</i><span>GPT Image</span></footer></article>
-                <article class="box agent"><div class="top"><span class="av">P</span><h3>Publisher</h3><span class="st"><i class="dot warn"></i>Waiting</span></div><p>Holding the 16:00 post for the visuals</p><footer><span class="cmd">/schedule-post</span><i>·</i><span>Asks first</span></footer></article>
-              </div>
-            </section>
-
-            <section class="sec">
-              <h2 class="h2">Jobs this week</h2>
-              <div class="box tbl">
-                <table class="jobs">
-                  <thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead>
-                  <tbody>
-                    <tr><td>Webinar promo post</td><td>Visuals</td><td><span class="st"><svg class="i sm bad"><use href="#flame"/></svg>Stuck</span></td><td>Today, 16:00</td></tr>
-                    <tr><td>Fenwick Freight customer story</td><td>Writer</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>Wed 18 Nov</td></tr>
-                    <tr><td>Webinar recap post</td><td>Writer</td><td><span class="st"><i class="dot ok"></i>Working</span></td><td>Thu 19 Nov</td></tr>
-                    <tr><td>Carousel: 5 signs of ops debt</td><td>Visuals</td><td><span class="st"><i class="dot hollow"></i>Next up</span></td><td>Fri 20 Nov</td></tr>
-                    <tr><td>Newsletter 46</td><td>Publisher</td><td><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Done</span></td><td>Sent today, 08:00</td></tr>
-                  </tbody>
-                </table>
-              </div>
-            </section>
-          </div>
-        </div>
-
-        <template class="chat-src" data-title="Content chat" data-sub="You, Writer, Visuals and Publisher. Nothing else lives here." data-placeholder="Message Content">
-          <div class="msg"><span class="av">V</span><div class="who">Visuals<time>09:12</time></div><p>Round 3 is done. 4 images pass. Images 3 and 6 fail: the logo sits on a light photo. I am out of rounds, so I stopped.</p></div>
-          <div class="msg"><span class="av">P</span><div class="who">Publisher<time>09:13</time></div><p>I am holding the 16:00 post until this is settled.</p></div>
-          <p class="said">Can you darken the photo behind the logo instead of moving it?</p>
-          <div class="msg"><span class="av">V</span><div class="who">Visuals<time>09:21</time></div><p>Yes. That is one more round, about 4 minutes and €0.60. It is over my limit of 3 rounds, so I need your OK.</p><div class="acts"><button class="btn ink s">Run one more round</button><button class="btn quiet s">Post the 4</button></div></div>
-        </template>
-      </div>
-    </section>
+    <!-- 3. Inside one topic: drawn from the records in the pages block -->
+    <section class="view" id="v-area" aria-label="Topic" hidden></section>
 
     <!-- 4. Skills and setup -->
     <section class="view scroll" id="v-skills" aria-label="Skills and setup" hidden>
@@ -374,27 +276,20 @@
           <p class="intro">Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane under the right topic and names who leads it. It comes back to you only for decisions.</p>
         </header>
         <section class="sec">
-          <div class="headrow"><h2 class="h2">Everything in motion</h2><span>6 lanes in 4 topics · 3 wait for you</span></div>
+          <div class="headrow"><h2 class="h2">Everything in motion</h2><span data-lanes-sum></span></div>
           <div class="box tbl">
             <table class="jobs">
               <thead><tr><th scope="col">Lane</th><th scope="col">Topic</th><th scope="col">Lead</th><th scope="col">State</th><th scope="col">Next report</th></tr></thead>
-              <tbody>
-                <tr><td><a href="#area">Webinar on Thursday</a></td><td>Content</td><td>Visuals</td><td><span class="st"><svg class="i sm bad"><use href="#flame"/></svg>Stuck</span></td><td>Now, needs your call</td></tr>
-                <tr><td><a href="#lane">Search budget shift</a></td><td>Paid</td><td>Paid buyer</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your decision</td></tr>
-                <tr><td>Sequence B, fintech ops</td><td>Outbound</td><td>Sender</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your decision</td></tr>
-                <tr><td>Fenwick customer story</td><td>Content</td><td>Writer</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your OK</td></tr>
-                <tr><td>Webinar recap post</td><td>Content</td><td>Writer</td><td><span class="st"><i class="dot ok"></i>Working</span></td><td>Thu 19 Nov</td></tr>
-                <tr><td>Comparison pages</td><td>SEO</td><td>SEO writer</td><td><span class="st"><i class="dot ok"></i>Working</span></td><td>Today, 15:00</td></tr>
-              </tbody>
+              <tbody data-lanes></tbody>
             </table>
           </div>
         </section>
         <section class="sec">
           <div class="headrow"><h2 class="h2">What you told it last</h2><span>and where each ask went</span></div>
           <ul class="box list asks">
-            <li><div><b>“LinkedIn leads cost too much. Find where the budget works best and propose a shift.”</b><span>Friday 10:20 · Paid · lane Search budget shift · Paid buyer leads</span></div><a class="btn quiet s" href="#lane">Open</a></li>
-            <li><div><b>“Get the webinar promo out on Monday.”</b><span>Thursday 17:40 · Content · lane Webinar on Thursday · Visuals leads</span></div><a class="btn quiet s" href="#area">Open</a></li>
-            <li><div><b>“Start writing to fintech ops people once the pilot shows it works.”</b><span>Wednesday 09:05 · Outbound · lane Sequence B, fintech ops · Sender leads</span></div></li>
+            <li><div><b>“LinkedIn leads cost too much. Find where the budget works best and propose a shift.”</b><span>Friday 10:20 · Paid · lane Search budget shift · Paid buyer leads</span></div><a class="btn quiet s" href="#lane/search-budget">Open</a></li>
+            <li><div><b>“Get the webinar promo out on Monday.”</b><span>Thursday 17:40 · Content · lane Webinar on Thursday · Visuals leads</span></div><a class="btn quiet s" href="#lane/webinar">Open</a></li>
+            <li><div><b>“Start writing to fintech ops people once the pilot shows it works.”</b><span>Wednesday 09:05 · Outbound · lane Sequence B, fintech ops · Sender leads</span></div><a class="btn quiet s" href="#lane/sequence-b">Open</a></li>
           </ul>
         </section>
       </div>
@@ -414,61 +309,8 @@
       </template>
     </section>
 
-    <!-- 7. One lane: where you check one piece of work -->
-    <section class="view" id="v-lane" aria-label="Lane: Search budget shift" hidden>
-      <div class="split">
-        <div class="scroll">
-          <article class="doc" style="gap:28px">
-            <header class="sec">
-              <div class="meta"><span class="chip">Paid</span><span><i class="dot warn"></i>Needs you</span><i>·</i><span>Paid buyer leads</span><i>·</i><span>Opened Friday</span></div>
-              <h1 class="h1">Search budget shift</h1>
-            </header>
-
-            <section class="sec">
-              <h2 class="label"><b>1</b>What you asked</h2>
-              <blockquote class="asked">LinkedIn leads cost too much. Find where the budget works best and propose a shift.</blockquote>
-              <p class="meta">You to the Manager, Friday 10:20<i>·</i>The Manager filed it under Paid and named Paid buyer to lead.</p>
-            </section>
-
-            <section class="sec">
-              <h2 class="label"><b>2</b>Where it stands</h2>
-              <div class="box wait"><i class="dot warn"></i><p><b>It waits for you.</b> The numbers favour Search. Moving €1,200 a week needs your OK, by 14:00 today.</p><a class="btn ink" href="#decision">Open the decision</a></div>
-              <ul class="steps">
-                <li><svg class="i ok"><use href="#check"/></svg><span>14 days of spend and leads, checked against the ad accounts</span><small>Analyst · Saturday</small></li>
-                <li><svg class="i ok"><use href="#check"/></svg><span>A decision brief with the best and the worst case</span><small>Paid buyer · today, 07:05</small></li>
-                <li class="now"><i class="dot warn"></i><span>Your OK for the shift</span><small>You · by 14:00</small></li>
-                <li class="todo"><i class="dot hollow"></i><span>Budget moved to the two Search campaigns</span><small>Paid buyer · today</small></li>
-                <li class="todo"><i class="dot hollow"></i><span>The result reported against the dream output</span><small>Manager · Mon 7 Dec</small></li>
-              </ul>
-              <p class="meta">Done means all five. The Manager set them when it opened the lane.</p>
-            </section>
-
-            <section class="sec">
-              <h2 class="label"><b>3</b>Who is on it</h2>
-              <div class="grid agents">
-                <article class="box agent"><div class="top"><span class="av">B</span><h3>Paid buyer</h3><span class="st"><i class="dot warn"></i>Leads</span></div><p>Holds the shift until you decide</p><footer><span class="cmd">/decision-brief</span><i>·</i><span>Claude</span></footer></article>
-                <article class="box agent"><div class="top"><span class="av">A</span><h3>Analyst</h3><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Done</span></div><p>Pulled 14 days of spend and leads</p><footer><span class="cmd">/weekly-summary</span><i>·</i><span>Claude</span></footer></article>
-                <article class="box agent"><div class="top"><span class="av">W</span><h3>Writer</h3><span class="st"><i class="dot hollow"></i>Up next</span></div><p>3 new Search ads, once you say yes</p><footer><span class="cmd">/ad-variants</span><i>·</i><span>GPT</span></footer></article>
-              </div>
-            </section>
-
-            <section class="sec">
-              <h2 class="label"><b>4</b>What it made</h2>
-              <ul class="box list">
-                <li><span class="lt"><svg class="i sm"><use href="#decide"/></svg></span><div><b>Decision brief</b><span>Move €1,200 a week from LinkedIn to Google Search · due today, 14:00</span></div><a class="btn quiet s" href="#decision">Open</a></li>
-                <li><span class="lt"><svg class="i sm"><use href="#file"/></svg></span><div><b>The 14-day numbers</b><span>24 leads on LinkedIn, 40 on Search</span></div><button class="btn quiet s">Open</button></li>
-                <li><span class="lt"><svg class="i sm"><use href="#file"/></svg></span><div><b>The 14 days before</b><span>For comparison: 22 leads on LinkedIn, 36 on Search</span></div><button class="btn quiet s">Open</button></li>
-              </ul>
-            </section>
-          </article>
-        </div>
-        <template class="chat-src" data-title="Search budget shift" data-sub="You, the Manager and this lane's agents. Nothing else lives here." data-placeholder="Message this lane">
-          <div class="msg"><span class="av">A</span><div class="who">Analyst<time>Sat 10:15</time></div><p>14 days are in: LinkedIn 24 leads for €4,800, Search 40 leads for €3,200. I matched both against the ad accounts.</p></div>
-          <p class="said">Is the Search number solid, or just two good weeks?</p>
-          <div class="msg"><span class="av">B</span><div class="who">Paid buyer<time>07:20</time></div><p>It holds. The 14 days before were 36 leads at €86 each, so Search has been cheaper for a month. I added that period to the lane.</p></div>
-        </template>
-      </div>
-    </section>
+    <!-- 7. One lane: where you check one piece of work, drawn from the records in the pages block -->
+    <section class="view" id="v-lane" aria-label="Lane" hidden></section>
 <!-- @@ palette_rows -->
       <h3>Models</h3>
       <button class="pr on" data-close><span class="lt ink"><svg class="i sm"><use href="#star"/></svg></span><b style="font-weight:600">Auto</b><span class="g" style="color:var(--text-2)">Morndo picks the model for each task</span><span class="st" style="color:var(--text-2)">Default</span><kbd style="background:var(--edge)">↵</kbd></button>
@@ -477,9 +319,11 @@
       <button class="pr" data-close><span class="lt">Ge</span><b>Gemini</b><span class="g">Google</span><span class="st" style="color:var(--text-2)">Add key</span></button>
       <button class="pr" data-close><span class="lt">Gr</span><b>Grok</b><span class="g">xAI</span><span class="st" style="color:var(--text-2)">Add key</span></button>
       <h3>Agents · talk to one topic only</h3>
-      <a class="pr" href="#area"><svg class="i" style="margin:0 3px"><use href="#pen"/></svg><b>Content</b><span class="g">Writer, Visuals, Publisher</span></a>
-      <button class="pr" data-close><svg class="i" style="margin:0 3px"><use href="#send"/></svg><b>Outbound</b><span class="g">Prospector, Sender</span></button>
-      <button class="pr" data-close><svg class="i" style="margin:0 3px"><use href="#horn"/></svg><b>Paid</b><span class="g">Buyer, Analyst</span></button>
+      <a class="pr" href="#topic/content"><svg class="i" style="margin:0 3px"><use href="#pen"/></svg><b>Content</b><span class="g">Writer, Visuals, Publisher</span></a>
+      <a class="pr" href="#topic/outbound"><svg class="i" style="margin:0 3px"><use href="#send"/></svg><b>Outbound</b><span class="g">Sender, Prospector, Replies</span></a>
+      <a class="pr" href="#topic/paid"><svg class="i" style="margin:0 3px"><use href="#horn"/></svg><b>Paid</b><span class="g">Paid buyer, Analyst</span></a>
+      <a class="pr" href="#topic/seo"><svg class="i" style="margin:0 3px"><use href="#search"/></svg><b>SEO</b><span class="g">SEO writer, Checker</span></a>
+      <a class="pr" href="#topic/research"><svg class="i" style="margin:0 3px"><use href="#target"/></svg><b>Research</b><span class="g">Researcher</span></a>
       <h3>Skills</h3>
       <button class="pr" data-close><span class="cmd">/weekly-summary</span><span class="g">Write the weekly update and put it in your drafts</span></button>
       <button class="pr" data-close><span class="cmd">/brand-visual</span><span class="g">Make images and check them against your brand rules</span></button>
@@ -490,16 +334,322 @@
     { id: "t-decide", kind: "Pages", label: "Decide", icon: "decide", href: "#decision", badge: true, pinned: true },
     { id: "t-drafts", kind: "Pages", label: "Drafts", icon: "mail", href: "#drafts", pinned: true },
     { id: "t-skills", kind: "Pages", label: "Skills", icon: "star", href: "#skills", pinned: true },
-    { id: "a-content", kind: "Topics", label: "Content", icon: "pen", href: "#area", pinned: true },
-    { id: "a-outbound", kind: "Topics", label: "Outbound", icon: "send" },
-    { id: "a-paid", kind: "Topics", label: "Paid", icon: "horn" },
-    { id: "a-seo", kind: "Topics", label: "SEO", icon: "search" },
-    { id: "a-research", kind: "Topics", label: "Research", icon: "target" },
+    { id: "a-content", kind: "Topics", label: "Content", icon: "pen", href: "#topic/content", pinned: true },
+    { id: "a-outbound", kind: "Topics", label: "Outbound", icon: "send", href: "#topic/outbound" },
+    { id: "a-paid", kind: "Topics", label: "Paid", icon: "horn", href: "#topic/paid" },
+    { id: "a-seo", kind: "Topics", label: "SEO", icon: "search", href: "#topic/seo" },
+    { id: "a-research", kind: "Topics", label: "Research", icon: "target", href: "#topic/research" },
     { id: "s-weekly", kind: "Skills, as one-click macros", label: "Weekly", name: "/weekly-summary", note: "Write the weekly update", icon: "play", run: "/weekly-summary", pinned: true },
     { id: "s-post", kind: "Skills, as one-click macros", label: "Post", name: "/linkedin-post", note: "A post in your voice", icon: "play", run: "/linkedin-post" },
     { id: "s-visual", kind: "Skills, as one-click macros", label: "Visuals", name: "/brand-visual", note: "Images in your brand", icon: "play", run: "/brand-visual" },
     { id: "s-ads", kind: "Skills, as one-click macros", label: "Ads", name: "/ad-variants", note: "6 ad variants", icon: "play", run: "/ad-variants" },
     { id: "s-profile", kind: "Skills, as one-click macros", label: "Profile", name: "/icp-refresh", note: "Rebuild the customer profile", icon: "play", run: "/icp-refresh" },
+<!-- @@ pages -->
+    firstLane: "search-budget",
+    topics: [
+      {
+        id: "content", name: "Content", icon: "pen", crumb: "This week", open: true,
+        intro: "This week: the webinar promo, the recap post, one customer story and a carousel.",
+        focus: `<section class="box stuck">
+              <div class="top">
+                <span class="flame"><svg class="i lg"><use href="#flame"/></svg></span>
+                <div>
+                  <div class="meta">Stuck since 09:12 · the post goes out today at 16:00</div>
+                  <h2>The webinar promo visuals need your call</h2>
+                  <p>Visuals used its 3 feedback rounds. Images 3 and 6 still fail the brand check: the logo sits on a light photo and is hard to read.</p>
+                </div>
+              </div>
+              <div class="thumbs">
+                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 1</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 2</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+                <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 3</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
+                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 4</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 5</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+                <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 6</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
+              </div>
+              <div class="acts">
+                <button class="btn ink">Post with the 4 that pass</button>
+                <button class="btn quiet">Allow one more round</button>
+                <a class="btn quiet" href="#lane/webinar">Open the lane</a>
+                <small>One more round takes about 4 minutes and €0.60</small>
+              </div>
+            </section>`,
+        facts: [["4", "posts this week"], ["1,840", "webinar page visits"], ["212", "sign-ups for Thursday"], ["2", "brand-check fails"]],
+        agents: [
+          ["W", "Writer", "ok", "Working", "Webinar recap post, draft 2 of 3", "/linkedin-post", "Claude"],
+          ["V", "Visuals", "bad", "Stuck", "Webinar promo, out of feedback rounds", "/brand-visual", "GPT Image"],
+          ["P", "Publisher", "warn", "Waiting", "Holding the 16:00 post for the visuals", "/schedule-post", "Asks first"],
+        ],
+        jobs: [
+          ["Webinar promo post", "Visuals", "bad", "Today, 16:00", "webinar"],
+          ["Fenwick Freight customer story", "Writer", "warn", "Wed 18 Nov", "fenwick"],
+          ["Webinar recap post", "Writer", "ok", "Thu 19 Nov", "recap"],
+          ["Carousel: 5 signs of ops debt", "Visuals", "next", "Fri 20 Nov"],
+          ["Newsletter 46", "Publisher", "done", "Sent today, 08:00"],
+        ],
+        chatSub: "You, Writer, Visuals and Publisher. Nothing else lives here.",
+        chat: `<div class="msg"><span class="av">V</span><div class="who">Visuals<time>09:12</time></div><p>Round 3 is done. 4 images pass. Images 3 and 6 fail: the logo sits on a light photo. I am out of rounds, so I stopped.</p></div>
+          <div class="msg"><span class="av">P</span><div class="who">Publisher<time>09:13</time></div><p>I am holding the 16:00 post until this is settled.</p></div>
+          <p class="said">Can you darken the photo behind the logo instead of moving it?</p>
+          <div class="msg"><span class="av">V</span><div class="who">Visuals<time>09:21</time></div><p>Yes. That is one more round, about 4 minutes and €0.60. It is over my limit of 3 rounds, so I need your OK.</p><div class="acts"><button class="btn ink s">Run one more round</button><button class="btn quiet s">Post the 4</button></div></div>`
+      },
+      {
+        id: "outbound", name: "Outbound", icon: "send", crumb: "Sequences",
+        intro: "Sequence A finished this morning. Sequence B waits for your OK. Sending never goes above 60 emails a day.",
+        focusLane: "sequence-b",
+        facts: [["1,140", "emails sent this month"], ["5.4%", "reply rate"], ["9", "meetings booked"], ["1.8%", "bounces, limit 4%"]],
+        agents: [
+          ["S", "Sender", "warn", "Waiting", "Holds sequence B for your OK", "/outbound-sequence", "Claude"],
+          ["P", "Prospector", "done", "Done", "Built the list of 180 fintech ops leads", "/icp-refresh", "Claude"],
+          ["R", "Replies", "ok", "Working", "Sorts replies and books meetings", "/reply-triage", "GPT"],
+        ],
+        jobs: [
+          ["Start sequence B, 180 leads", "Sender", "warn", "Tue 17 Nov", "sequence-b"],
+          ["Answer replies from sequence A", "Replies", "ok", "Every morning"],
+          ["Bounce check", "Sender", "done", "Today, 08:05"],
+          ["List for logistics ops, round 2", "Prospector", "next", "Thu 19 Nov"],
+        ],
+        chatSub: "You, Sender, Prospector and Replies. Nothing else lives here.",
+        chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>08:05</time></div><p>Sequence A is done. I stopped it for the 14 people who replied, so nobody gets a follow-up after answering.</p></div>
+          <div class="msg"><span class="av">R</span><div class="who">Replies<time>08:40</time></div><p>Of the 14 replies, 9 booked a meeting, 3 asked for later and 2 said no. The later ones get a note in January.</p></div>
+          <p class="said">Why only fintech ops for B?</p>
+          <div class="msg"><span class="av">P</span><div class="who">Prospector<time>08:52</time></div><p>The new customer profile says fintech ops teams close fastest: 41 of the 212 won deals, in 19 days on average. The list of 180 is built from that.</p></div>`
+      },
+      {
+        id: "paid", name: "Paid", icon: "horn", crumb: "Budget and ads",
+        intro: "€4,000 a week across LinkedIn and Google Search. One budget shift waits for you.",
+        focusLane: "search-budget",
+        facts: [["€3,640", "spent of €4,000 this week"], ["32", "leads this week"], ["€114", "average cost per lead"], ["3", "ads switched off today"]],
+        agents: [
+          ["B", "Paid buyer", "warn", "Waiting", "Holds the shift until you decide", "/decision-brief", "Claude"],
+          ["A", "Analyst", "done", "Done", "Checked 14 days of spend against the ad accounts", "/weekly-summary", "Claude"],
+          ["W", "Writer", "next", "Up next", "3 new Search ads, once you say yes", "/ad-variants", "GPT"],
+        ],
+        jobs: [
+          ["Move €1,200 a week to Search", "Paid buyer", "warn", "Today, 14:00", "search-budget"],
+          ["Switch off ads below the click floor", "Paid buyer", "done", "Today, 08:30", "click-floor"],
+          ["3 new Search ads", "Writer", "next", "After your decision"],
+          ["Weekly spend report", "Analyst", "next", "Mon 23 Nov"],
+        ],
+        chatSub: "You, Paid buyer, Analyst and Writer. Nothing else lives here.",
+        chat: `<div class="msg"><span class="av">B</span><div class="who">Paid buyer<time>08:30</time></div><p>I switched off 3 ads that fell below the click floor of 0.6%. Together they cost €140 last week and brought no lead.</p></div>
+          <p class="said">Will the shift hurt LinkedIn reach for the webinar?</p>
+          <div class="msg"><span class="av">B</span><div class="who">Paid buyer<time>09:02</time></div><p>No. The webinar campaign keeps its own €400. The shift only takes from the always-on lead campaign.</p></div>`
+      },
+      {
+        id: "seo", name: "SEO", icon: "search", crumb: "Pages and rankings",
+        intro: "Five comparison pages against the tools you lose deals to. Two went live this morning, three are being written.",
+        calm: "<b>Nothing needs you here.</b> You approved the outlines on Friday. The pages go live on their own once the checker passes them.",
+        facts: [["2,310", "visits from search this week"], ["+18%", "against last week"], ["41", "keywords in the top 10"], ["2 of 5", "comparison pages live"]],
+        agents: [
+          ["S", "SEO writer", "ok", "Working", "Page 3: Tidewell or Palletnook", "/seo-page", "Claude"],
+          ["C", "Checker", "next", "Up next", "Checks facts and links before a page goes live", "/fact-check", "GPT"],
+        ],
+        jobs: [
+          ["Comparison pages, 5 in all", "SEO writer", "ok", "Fri 20 Nov", "comparison-pages"],
+          ["Pages 1 and 2 published", "SEO writer", "done", "Today, 07:42", "comparison-pages"],
+          ["Ranking check", "Checker", "next", "Mon 30 Nov"],
+        ],
+        chatSub: "You, SEO writer and Checker. Nothing else lives here.",
+        chat: `<div class="msg"><span class="av">S</span><div class="who">SEO writer<time>07:42</time></div><p>Pages 1 and 2 are live. Page 3 is half written. I will show it to the checker at 15:00.</p></div>
+          <p class="said">Keep the tone fair. No cheap shots at them.</p>
+          <div class="msg"><span class="av">S</span><div class="who">SEO writer<time>07:50</time></div><p>Understood. Every claim about them links to their own public page, and the checker refuses any that does not.</p></div>`
+      },
+      {
+        id: "research", name: "Research", icon: "target", crumb: "Customers and market",
+        intro: "Nothing is open. The customer profile was rebuilt this morning; Outbound already works from it.",
+        calm: "<b>Idle.</b> Research works when you ask. Give it a question about your customers or your market.",
+        calmActs: '<button class="btn quiet" data-palette><svg class="i"><use href="#plus"/></svg>New lane</button>',
+        facts: [["212", "won deals in the profile"], ["4", "customer segments"], ["Today", "last refresh, 07:10"]],
+        agents: [
+          ["R", "Researcher", "idle", "Idle", "Rebuilt the customer profile this morning", "/icp-refresh", "Claude"],
+        ],
+        chatSub: "You and Researcher. Nothing else lives here.",
+        chat: `<div class="msg"><span class="av">R</span><div class="who">Researcher<time>07:10</time></div><p>The customer profile is rebuilt from 212 won deals. The biggest change: fintech ops teams close fastest, so I moved them to the top.</p></div>
+          <div class="sugg"><button>Who are we losing deals to?</button><button>Which segment grows fastest?</button></div>`
+      },
+    ],
+    lanes: [
+      {
+        id: "webinar", topic: "content", title: "Webinar on Thursday", state: "bad", lead: "Visuals", opened: "Opened Thursday", next: "Now, needs your call",
+        asked: "Get the webinar promo out on Monday.",
+        askedMeta: "You to the Manager, Thursday 17:40<i>·</i>The Manager filed it under Content and named Visuals to lead.",
+        status: "Visuals used its 3 feedback rounds. Images 3 and 6 still fail the brand check, and the post goes out at 16:00.",
+        acts: '<button class="btn ink">Post with the 4 that pass</button><button class="btn quiet">Allow one more round</button>',
+        steps: [
+          ["ok", "Promo text written and approved", "Writer · Friday"],
+          ["ok", "6 images made", "Visuals · Saturday"],
+          ["now", "Every image passes the brand check: 4 of 6 so far", "Visuals · stuck since 09:12"],
+          ["todo", "Post scheduled for 16:00", "Publisher · today"],
+          ["todo", "Sign-ups reported after the webinar", "Manager · Fri 20 Nov"],
+        ],
+        agents: [
+          ["V", "Visuals", "bad", "Leads · stuck", "Out of feedback rounds", "/brand-visual", "GPT Image"],
+          ["W", "Writer", "done", "Done", "Wrote the promo text", "/linkedin-post", "Claude"],
+          ["P", "Publisher", "warn", "Waiting", "Holds the 16:00 post", "/schedule-post", "Asks first"],
+        ],
+        made: [["file", "Promo text", "120 words, approved Friday"], ["image", "6 images", "4 pass the brand check, 2 fail", "#topic/content"]],
+        chat: `<div class="msg"><span class="av">V</span><div class="who">Visuals<time>09:12</time></div><p>Round 3 is done. 4 images pass. I am out of rounds, so I stopped and asked.</p></div>`
+      },
+      {
+        id: "fenwick", topic: "content", title: "Fenwick customer story", state: "warn", lead: "Writer", opened: "Opened Mon 9 Nov", decision: "d3",
+        next: "After your OK", afterNext: "Wed 18 Nov, when it is published",
+        asked: "Write a customer story with Fenwick Freight once they agree to be named.",
+        askedMeta: "You to the Manager, Monday 9 November<i>·</i>The Manager filed it under Content and named Writer to lead.",
+        status: "Fenwick signed off the quote. The claim of 38% fewer manual hand-offs comes from their own Q3 report and needs your OK. Due Wednesday.",
+        approve: "Approve the story", after: "The story is scheduled for Wednesday 09:00. Publisher shares it on LinkedIn the same morning.",
+        steps: [
+          ["ok", "Interview with Fenwick's ops lead, written up", "Writer · Tue 10 Nov"],
+          ["ok", "Draft signed off by Fenwick, quote included", "Fenwick · Friday"],
+          ["now", "Your OK on the 38% claim", "You · by Wednesday"],
+          ["todo", "Published on the site", "Publisher · Wed 18 Nov"],
+          ["todo", "Shared on LinkedIn and in the newsletter", "Publisher · Wed 18 Nov"],
+        ],
+        agents: [
+          ["W", "Writer", "warn", "Leads", "Waits for your OK on one number", "/customer-story", "Claude"],
+          ["P", "Publisher", "next", "Up next", "Publishes once you say yes", "/schedule-post", "Asks first"],
+        ],
+        made: [["file", "The story", "1,100 words, signed off by Fenwick"], ["mail", "Fenwick's sign-off", "From their ops lead, Friday 16:20", "#drafts"], ["file", "Source for the 38%", "Fenwick's Q3 ops report, page 4"]],
+        chat: `<div class="msg"><span class="av">W</span><div class="who">Writer<time>Fri 16:30</time></div><p>Fenwick signed off the text and the quote. One thing is left: the 38% number. It is theirs, from their Q3 report, but it is a claim we publish.</p></div>
+          <p class="said">Is the 38% before and after us, or just this year?</p>
+          <div class="msg"><span class="av">W</span><div class="who">Writer<time>Fri 16:41</time></div><p>Before and after: March, the month before they started, against September. The story says exactly that.</p></div>`
+      },
+      {
+        id: "recap", topic: "content", title: "Webinar recap post", state: "ok", lead: "Writer", opened: "Opened Friday", next: "Thu 19 Nov",
+        asked: "Turn the October webinar into a post people can read in two minutes.",
+        askedMeta: "You to the Manager, Friday 11:05<i>·</i>The Manager filed it under Content and named Writer to lead.",
+        status: "Draft 2 of 3 is being written. It reaches you only if it quotes a customer by name.",
+        steps: [
+          ["ok", "The 52-minute recording summed up in 8 points", "Writer · Saturday"],
+          ["now", "Draft 2 of 3, shorter and with one chart", "Writer · now"],
+          ["todo", "Checked against the recording", "Checker · Wed 18 Nov"],
+          ["todo", "Posted on LinkedIn", "Publisher · Thu 19 Nov"],
+        ],
+        agents: [
+          ["W", "Writer", "ok", "Leads", "Draft 2 of 3", "/linkedin-post", "Claude"],
+          ["C", "Checker", "next", "Up next", "Compares every quote with the recording", "/fact-check", "GPT"],
+        ],
+        made: [["file", "Summary in 8 points", "From the October recording"], ["file", "Draft 1", "Too long at 900 words; draft 2 aims at 350"]],
+        chat: `<div class="msg"><span class="av">W</span><div class="who">Writer<time>10:02</time></div><p>Draft 1 was too long. Draft 2 keeps the 3 points people asked about most in the Q&amp;A.</p></div>`
+      },
+      {
+        id: "sequence-b", topic: "outbound", title: "Sequence B, fintech ops", state: "warn", lead: "Sender", opened: "Opened Wednesday", decision: "d2",
+        next: "After your decision", afterNext: "Fri 20 Nov, after the first 180",
+        asked: "Start writing to fintech ops people once the pilot shows it works.",
+        askedMeta: "You to the Manager, Wednesday 09:05<i>·</i>The Manager filed it under Outbound and named Sender to lead.",
+        status: "The pilot of 30 emails got 6 replies and 2 meetings. Starting sends to 180 fintech ops leads at 60 a day. Due tomorrow.",
+        approve: "Start sequence B", after: "The first 60 emails go out at 10:00, then 60 a day. Sending pauses on its own at 4% bounces.",
+        steps: [
+          ["ok", "180 fintech ops leads, built from the new customer profile", "Prospector · Wednesday"],
+          ["ok", "Pilot of 30 emails: 6 replies, 2 meetings", "Sender · Friday"],
+          ["now", "Your OK to start", "You · by tomorrow"],
+          ["todo", "180 emails over 3 days, 60 a day", "Sender · from 10:00"],
+          ["todo", "Meetings booked and reported", "Manager · Fri 27 Nov"],
+        ],
+        agents: [
+          ["S", "Sender", "warn", "Leads", "Holds the sequence for your OK", "/outbound-sequence", "Claude"],
+          ["P", "Prospector", "done", "Done", "Built and checked the list", "/icp-refresh", "Claude"],
+          ["R", "Replies", "next", "Up next", "Answers replies and books meetings", "/reply-triage", "GPT"],
+        ],
+        made: [["file", "The 4 emails of sequence B", "Short, one question each, no attachments"], ["file", "List of 180 leads", "Fintech ops, 50 to 500 people"], ["file", "Pilot results", "30 sent, 6 replies, 2 meetings, 0 bounces"]],
+        chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>Fri 17:10</time></div><p>The pilot is done: 6 replies out of 30, 2 meetings booked, no bounces. The best subject line was the shortest one.</p></div>
+          <p class="said">What happens if it bounces a lot?</p>
+          <div class="msg"><span class="av">S</span><div class="who">Sender<time>Fri 17:14</time></div><p>I pause on my own at 4% and tell you. The pilot had none, so I do not expect it.</p></div>`
+      },
+      {
+        id: "sequence-a", topic: "outbound", title: "Sequence A, logistics ops", state: "done", lead: "Sender", opened: "Opened 26 Oct", closed: "closed today, 08:05",
+        asked: "Write to logistics ops leads about the ops-debt checklist.",
+        askedMeta: "You to the Manager, Monday 26 October<i>·</i>The Manager filed it under Outbound and named Sender to lead.",
+        status: "All 4 steps are done. 960 emails, 52 replies, 9 meetings. Sender stopped the follow-ups for the 14 people who replied this week.",
+        steps: [
+          ["ok", "Sequence written and approved", "You · 27 Oct"],
+          ["ok", "960 emails sent over 3 weeks", "Sender · 13 Nov"],
+          ["ok", "Follow-ups stopped for everyone who replied", "Sender · today, 08:05"],
+          ["ok", "Meetings reported: 9", "Manager · today"],
+        ],
+        doneNote: "Done means all four. Someone other than Sender checked each one: the Manager closed the lane at 08:05.",
+        agents: [
+          ["S", "Sender", "done", "Done", "Sent 960 emails", "/outbound-sequence", "Claude"],
+          ["R", "Replies", "ok", "Working", "Still answering the last replies", "/reply-triage", "GPT"],
+        ],
+        made: [["file", "Results", "960 sent, 52 replies, 9 meetings, 1.8% bounces"]],
+        chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>08:05</time></div><p>Done. I stopped the follow-ups for the 14 people who replied, so nobody hears from us twice.</p></div>`
+      },
+      {
+        id: "search-budget", topic: "paid", title: "Search budget shift", state: "warn", lead: "Paid buyer", opened: "Opened Friday", decision: "d1", decisionHref: "#decision",
+        next: "After your decision", afterNext: "Mon 7 Dec, with the result",
+        asked: "LinkedIn leads cost too much. Find where the budget works best and propose a shift.",
+        askedMeta: "You to the Manager, Friday 10:20<i>·</i>The Manager filed it under Paid and named Paid buyer to lead.",
+        status: "The numbers favour Search. Moving €1,200 a week needs your OK, by 14:00 today.",
+        approve: "Approve the shift", after: "Paid buyer moves €1,200 a week to the two Search campaigns now. The weekly budget stays at €4,000.",
+        steps: [
+          ["ok", "14 days of spend and leads, checked against the ad accounts", "Analyst · Saturday"],
+          ["ok", "A decision brief with the best and the worst case", "Paid buyer · today, 07:05"],
+          ["now", "Your OK for the shift", "You · by 14:00"],
+          ["todo", "Budget moved to the two Search campaigns", "Paid buyer · today"],
+          ["todo", "The result reported against the dream output", "Manager · Mon 7 Dec"],
+        ],
+        doneNote: "Done means all five. The Manager set them when it opened the lane.",
+        agents: [
+          ["B", "Paid buyer", "warn", "Leads", "Holds the shift until you decide", "/decision-brief", "Claude"],
+          ["A", "Analyst", "done", "Done", "Pulled 14 days of spend and leads", "/weekly-summary", "Claude"],
+          ["W", "Writer", "next", "Up next", "3 new Search ads, once you say yes", "/ad-variants", "GPT"],
+        ],
+        made: [["decide", "Decision brief", "Move €1,200 a week from LinkedIn to Google Search · due today, 14:00", "#decision"], ["file", "The 14-day numbers", "24 leads on LinkedIn, 40 on Search"], ["file", "The 14 days before", "For comparison: 22 leads on LinkedIn, 36 on Search"]],
+        chat: `<div class="msg"><span class="av">A</span><div class="who">Analyst<time>Sat 10:15</time></div><p>14 days are in: LinkedIn 24 leads for €4,800, Search 40 leads for €3,200. I matched both against the ad accounts.</p></div>
+          <p class="said">Is the Search number solid, or just two good weeks?</p>
+          <div class="msg"><span class="av">B</span><div class="who">Paid buyer<time>07:20</time></div><p>It holds. The 14 days before were 36 leads at €86 each, so Search has been cheaper for a month. I added that period to the lane.</p></div>`
+      },
+      {
+        id: "click-floor", topic: "paid", title: "Ads below the click floor", state: "done", lead: "Paid buyer", opened: "Opened today, 08:10", closed: "closed today, 08:30",
+        asked: "Keep the ads clean: switch off anything that stays below the click floor.",
+        askedMeta: "Your standing rule since October<i>·</i>The Manager opens this lane on its own each Monday.",
+        status: "3 ads were below 0.6% clicks after 1,000 views. Paid buyer switched them off. They cost €140 last week and brought no lead.",
+        steps: [
+          ["ok", "Every running ad checked against the floor", "Analyst · 08:10"],
+          ["ok", "3 ads switched off, inside your €500 guardrail", "Paid buyer · 08:30"],
+          ["ok", "Logged in the brief, with Undo", "Manager · 08:30"],
+        ],
+        doneNote: "Done means all three. You can undo it from the brief until tonight.",
+        agents: [["B", "Paid buyer", "done", "Done", "Switched off 3 ads", "/ad-variants", "Claude"]],
+        made: [["file", "The 3 ads", "LinkedIn: 2, Search: 1 · 0.31% to 0.52% clicks"]],
+        chat: `<div class="msg"><span class="av">B</span><div class="who">Paid buyer<time>08:30</time></div><p>3 ads off. If you want one back, undo it in the brief and I will turn it on again.</p></div>`
+      },
+      {
+        id: "comparison-pages", topic: "seo", title: "Comparison pages", state: "ok", lead: "SEO writer", opened: "Opened 2 Nov", next: "Today, 15:00",
+        asked: "Write comparison pages against the three tools we lose deals to. Fair, no cheap shots.",
+        askedMeta: "You to the Manager, Monday 2 November<i>·</i>The Manager filed it under SEO and named SEO writer to lead.",
+        status: "Pages 1 and 2 are live since 07:42. Page 3 is half written and goes to the checker at 15:00.",
+        steps: [
+          ["ok", "Outlines for 5 pages, approved by you", "You · Friday"],
+          ["ok", "Pages 1 and 2 live", "SEO writer · today, 07:42"],
+          ["now", "Page 3 written and checked", "SEO writer · today, 15:00"],
+          ["todo", "Pages 4 and 5 live", "SEO writer · Fri 20 Nov"],
+          ["todo", "Rankings checked after two weeks", "Checker · Mon 30 Nov"],
+        ],
+        agents: [
+          ["S", "SEO writer", "ok", "Leads", "Page 3 of 5", "/seo-page", "Claude"],
+          ["C", "Checker", "next", "Up next", "Checks every claim against a public source", "/fact-check", "GPT"],
+        ],
+        made: [["file", "Page 1: Tidewell or Quaywright", "Live since 07:42"], ["file", "Page 2: Tidewell or Dockmere", "Live since 07:42"], ["file", "Outlines for all 5", "Approved Friday"]],
+        chat: `<div class="msg"><span class="av">S</span><div class="who">SEO writer<time>07:42</time></div><p>Pages 1 and 2 are live. Each claim about the other tool links to their own public page.</p></div>`
+      },
+      {
+        id: "customer-profile", topic: "research", title: "Customer profile refresh", state: "done", lead: "Researcher", opened: "Opened today, 06:30", closed: "closed today, 07:10",
+        asked: "Rebuild the customer profile from what we actually won.",
+        askedMeta: "Pinned macro /icp-refresh, run by you on Sunday evening<i>·</i>The Manager filed it under Research.",
+        status: "The profile is rebuilt from 212 won deals and saved to memory. Outbound already works from it.",
+        steps: [
+          ["ok", "212 won deals read from Supabase, read only", "Researcher · 06:40"],
+          ["ok", "4 segments, ranked by how fast they close", "Researcher · 07:00"],
+          ["ok", "Saved to memory and checked by the Manager", "Manager · 07:10"],
+        ],
+        doneNote: "Done means all three. No customer data left Supabase: the guardrail keeps it away from other models.",
+        agents: [["R", "Researcher", "done", "Done", "Rebuilt the profile", "/icp-refresh", "Claude"]],
+        made: [["file", "Customer profile", "4 segments, fintech ops first"], ["file", "What changed", "Fintech ops moved up, retail moved down"]],
+        chat: `<div class="msg"><span class="av">R</span><div class="who">Researcher<time>07:10</time></div><p>Done. Fintech ops teams close in 19 days on average, the fastest of the 4 segments.</p></div>`
+      },
+    ],
 <!-- @@ crumbs -->
     brief: ["Brief", "Monday 16 November"],
     decision: ["Decide", "Move €1,200 a week to Google Search"],
@@ -511,7 +661,7 @@
     settings: ["Settings", "Workspace"],
 <!-- @@ routes -->
     { id: "a-content", lead: "Writer", re: /webinar|visual|promo|post|carousel|image|recap|fenwick|story|quote/i },
-    { id: "a-paid", lead: "Paid buyer", re: /search|budget|linkedin|\bads?\b|google|campaign/i },
+    { id: "a-paid", lead: "Paid buyer", re: /\bsearch\b|budget|linkedin|\bads?\b|google|campaign/i },
     { id: "a-outbound", lead: "Sender", re: /sequence|email|\bleads?\b|outbound|fintech/i },
     { id: "a-seo", lead: "SEO writer", re: /\bseo\b|keyword|comparison|ranking/i },
     { id: "a-research", lead: "Researcher", re: /research|profile|competitor/i },
