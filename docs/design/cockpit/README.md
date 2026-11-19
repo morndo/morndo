@@ -8,6 +8,7 @@ Open the mockups in any browser. Each is one self-contained file:
 |---|---|
 | [`mockups/dev-cockpit.html`](mockups/dev-cockpit.html) | The development module: projects, lanes, pull requests, release decisions with proof. |
 | [`mockups/gtm-cockpit.html`](mockups/gtm-cockpit.html) | The go-to-market module: topics (content, outbound, paid, SEO, research), drafts, decisions. |
+| [`mockups/gtm-sharing.html`](mockups/gtm-sharing.html) | Proposal, not decided: three ways to share a topic with teammates (a Share button, handing over a stage, a people table), and what each person then sees. |
 
 Both are built from one shell, so they differ only in what a module brings. The workspace menu and Settings switch between them. All names, projects and numbers in them are made up.
 
@@ -17,7 +18,8 @@ Both are built from one shell, so they differ only in what a module brings. The 
 |---|---|
 | `src/shell.html` | Everything the modules share: styles, icons, the sidebar frame, the brief's masthead, settings, behaviour. |
 | `src/gtm.blocks.html`, `src/dev.blocks.html` | What one module brings, as blocks. A line `<!-- @@ name -->` starts the block `name`, which fills `@@BLOCK:name@@` in the shell. |
-| `src/build.py` | Builds both mockups into `mockups/`. Fonts and artworks are inlined. |
+| `src/build.py` | Builds the mockups into `mockups/`. Fonts and artworks are inlined. |
+| `src/share.extra.html` | The sharing proposal: styles and behaviour laid over the go-to-market module (a variant in `build.py`). |
 | `src/heroes/`, `src/heroes.json` | The brief's artworks as the mockups embed them (1280 px). |
 | `src/glass.sh`, `src/glass/` | The small pre-blurred pictures behind the window frame (needs ImageMagick 7). |
 | `src/fonts/` | Newsreader and Schibsted Grotesk, with their OFL licences. |
@@ -29,7 +31,7 @@ The go-to-market module brings its topics and lanes as records (the `pages` bloc
 Edit the source, never the built files. Rebuild:
 
 ```sh
-python3 -I docs/design/cockpit/src/build.py          # both modules
+python3 -I docs/design/cockpit/src/build.py          # every module and variant
 python3 -I docs/design/cockpit/src/build.py dev      # one
 python3 -I docs/design/cockpit/src/build.py --out /some/preview/dir
 ```

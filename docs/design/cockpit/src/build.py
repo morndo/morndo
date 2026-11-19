@@ -9,6 +9,7 @@ A module file is a list of blocks. A line `<!-- @@ name -->` starts the block `n
 
 usage: python3 build.py            builds every module into ../mockups/
        python3 build.py dev        builds one
+       python3 build.py share      builds a variant (see VARIANTS)
 """
 import base64
 import json
@@ -22,6 +23,12 @@ MODULES = {
     # id: (name shown in the product, output file)
     "gtm": ("Go-to-market", "gtm-cockpit.html"),
     "dev": ("Development", "dev-cockpit.html"),
+}
+# A variant is a module's mockup with extra styles and behaviour on top, for trying a proposal without touching the
+# module. Its file holds the blocks `css` and `js`, which fill `@@EXTRA:css@@` and `@@EXTRA:js@@` in the shell.
+VARIANTS = {
+    # id: (module, output file, extra file)
+    "share": ("gtm", "gtm-sharing.html", "share.extra.html"),
 }
 FONTS = {
     "@@FONT_SERIF@@": "newsreader.woff2",
@@ -74,9 +81,15 @@ def heroes():
     return json.dumps(out, ensure_ascii=False).replace("</", "<\\/")
 
 
-def build(module):
-    name, filename = MODULES[module]
+def build(target):
+    module, filename, extra = (VARIANTS[target] if target in VARIANTS else (target, MODULES[target][1], None))
+    name = MODULES[module][0]
     html = read("shell.html")
+    more = blocks(read(extra)) if extra else {}
+    assert set(more) <= {"css", "js"}, f"{extra}: only css and js blocks"
+    for key in ("css", "js"):
+        assert html.count(f"@@EXTRA:{key}@@\n") == 1, key
+        html = html.replace(f"@@EXTRA:{key}@@\n", more[key] + "\n" if key in more else "")
     parts = blocks(read(module + ".blocks.html"))
     wanted = re.findall(r"^@@BLOCK:([a-z_]+)@@$", html, re.M)
     assert sorted(wanted) == sorted(parts), f"{module}: blocks differ from the shell: {sorted(set(wanted) ^ set(parts))}"
@@ -104,5 +117,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "--out":
         OUT = sys.argv[2]
         del sys.argv[1:3]
-    for m in sys.argv[1:] or MODULES:
+    for m in sys.argv[1:] or [*MODULES, *VARIANTS]:
         build(m)

@@ -666,6 +666,7 @@ input[type=range]:disabled{opacity:.4;cursor:default}
   .log li{grid-template-columns:16px minmax(0,1fr) auto}.log .btn{display:none}
   .steps li{grid-template-columns:16px minmax(0,1fr);padding:5px 0}.steps small{grid-column:2;white-space:normal}
 }
+@@EXTRA:css@@
 </style>
 <script>
 try {
@@ -1531,6 +1532,7 @@ try {
     else if (e.key === "Escape" && !sideChat()) { pane.classList.add("chat-off"); syncChat(); }
   });
 
+@@EXTRA:js@@
   addEventListener("hashchange", () => show(location.hash.slice(1)));
   drawTree();
   renderPins(false);
