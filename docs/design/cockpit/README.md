@@ -42,6 +42,7 @@ These are the parts a native app has to keep. The mockups are the reference for 
 
 ### The window
 
+- The page sits flush with the window, as Dia's does: no inset, no border, no corner. A hairline under the 48 px toolbar is the only line. The breadcrumb names the place above in a quiet grey, then the page itself, brighter.
 - The window frame and the sidebar never move. Only content areas scroll, and there is no rubber-band bounce.
 - Page layout follows the room the page has (container queries), not the window width.
 - The left sidebar can be resized by its edge (224 to 380 px). Double-click resets it; arrow keys move it.
@@ -67,13 +68,35 @@ These are the parts a native app has to keep. The mockups are the reference for 
 
 ### Chat
 
+- The composer is a field of its own, as Dia's: the words on top and a row of tools under them (Add files or links, the model, Send). Send stays grey until there is something to send.
 - Two modes, chosen in the chat's header or in Settings. **Floating** (default): closed until you press Chat, then a card at the bottom right (440 by 720 px, a bottom sheet on a phone) that does not push the page; Escape, the X or changing page closes it. **Sidebar**: always open at full height, resizable by its edge (320 to 640 px), with no Chat button and no close button.
 - A page brings its own thread; pages without one share a general thread.
 - ⌘K opens the palette: new lane, skills, engines.
 
+### Pages: Dia's way of reading
+
+Measured from Dia's own pages (brief, search popover, new tab), not guessed:
+
+- **One card at most.** A page has at most one box: the brief's first section, a topic's glance. Every other section stands on the page itself, separated by space (56 px between the brief's sections), never by lines. Cards have no outline.
+- **Type does the work.** Section names are serif italic (28 px on the brief, 21 px on a page), led by a faint mono number (01, 02). Item titles are 18 px semibold in white. Reading text is 16 px at a 1.75 line height in a warm grey (#a39e95), the one warm tone in the neutral page. Where an item comes from is named in serif italic.
+- **Neutral greys.** The page is #111, a card #1d1d1d, a field #2b2b2b. Quiet buttons and hover are a light laid over the surface (white at 7.5% and 12%), so they show on any surface.
+- **Popovers and the palette** are raised (#262626) with a faint light rim (white at 8%), 36 px rows, 14 px text, 12 px quiet section labels, and no line under the search field.
+
+### Design tokens
+
+Every colour, size, radius, space, shadow and duration is a token, defined once at the top of `src/shell.html`, in three layers:
+
+| Layer | What | Examples |
+|---|---|---|
+| Primitives | Raw values: the neutral grey ramp, the frame's cool slate, the status hues | `--grey-100` #111, `--grey-200` #1d1d1d, `--paper-grey` #a39e95, `--teal` |
+| Semantic | What a value is for. Rules use only these and the scales. | `--bg`, `--surface`, `--raised`, `--field`, `--fill`, `--line`, `--rim`, `--text-hi`, `--text`, `--prose`, `--muted`, `--faint`, `--ok` |
+| Scales | Type, line height, space (4 px grid), radius, control sizes, shadow, motion | `--fs-md`, `--lh-read`, `--sp-6`, `--r-lg`, `--h-ctl`, `--sh-pop`, `--ease` |
+
+A colour theme overrides semantic tokens only, so the web app and the native app can take the whole look over by token names. Text tokens keep at least 4.5:1 on every surface they sit on (lowest: muted on a quiet button, 4.83:1). `--faint` (2.5:1) is for decoration only, never for words that carry meaning. The sidebar keeps its own cool greys (`--cool-*`) over the frame and the glass, so its measured contrast below still holds.
+
 ### Colour and glass
 
-- Dark only for now. Colour belongs to the workspace: Ink (monochrome) plus seven presets (Ember, Sand, Moss, Tide, Sky, Iris, Rose) and a strength slider (default 55). Each preset keeps Ink's lightness steps in its own hue (OKLCH), so contrast holds. There is no free colour picker.
+- Dark only for now. Colour belongs to the workspace: Ink (neutral greys, as Dia's page) plus seven presets (Ember, Sand, Moss, Tide, Sky, Iris, Rose) and a strength slider (default 55). Each preset keeps Ink's lightness steps in its own hue (OKLCH), so contrast holds. There is no free colour picker.
 - Glass is one slider from 0 (off) to 100, next to the colour choice. Default 25 for Ink and 50 for the colour themes; a point under each slider marks the default.
 - Glass is cheap by construction: a 64 by 42 px pre-blurred picture of the day's artwork, stretched by the browser, under a veil of the frame colour. No blur filter, no `backdrop-filter`, no running animation.
 - Contrast is safe by construction, not by tuning: the veil only moves the frame toward its plain colour, the glass pictures have a fixed lightest tone, and the sidebar's grey text is a step lighter on glass. Any new sidebar text or surface must keep at least 4.5:1 on the lightest spot. Measured across 8 themes, 3 colour strengths, glass full, half and off, and all 14 artworks: lowest 5.10:1.
