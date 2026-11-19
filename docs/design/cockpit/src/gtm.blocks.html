@@ -3,7 +3,7 @@
 <!-- @@ me -->
   <a class="row me" href="#settings" data-nav="settings" aria-label="Settings and account: Mara Lind"><span class="av"><svg class="i sm"><use href="#user"/></svg></span><span class="grow" style="color:var(--text)">Mara Lind</span><svg class="i dim"><use href="#sliders"/></svg></a>
 <!-- @@ lede -->
-          <p class="lede">Three decisions need you and one thing is stuck. Everything else moved on its own while you slept.</p>
+          <p class="lede">Four decisions need you and one thing is stuck. Everything else moved on its own while you slept.</p>
 <!-- @@ cards -->
 
           <section class="card" style="--n:0">
@@ -40,6 +40,15 @@
                 <div class="acts"><a class="btn quiet" href="#lane/fenwick">Open lane</a><button class="btn ink" data-approve>Approve</button></div>
                 <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The story is scheduled for Wednesday.<button class="link" data-undo>Undo</button></div>
               </article>
+              <article class="item decision" id="d4" data-min="3">
+                <div class="txt">
+                  <div class="meta"><b>Partnerships</b><i>·</i><span>Due Thursday</span><i>·</i><span>3 min</span></div>
+                  <h3>Send the referral offer to Halden Freight Network</h3>
+                  <p>Halden wants a deal for its 2,400 business customers: 15% of first-year revenue for 12 months. Jonas drafted it from the template.</p>
+                </div>
+                <div class="acts"><a class="btn quiet" href="#lane/halden-offer">Open lane</a><button class="btn ink" data-approve>Approve</button></div>
+                <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The offer goes out tomorrow at 09:00.<button class="link" data-undo>Undo</button></div>
+              </article>
             </div>
           </section>
 
@@ -65,10 +74,11 @@
             <header>
               <h2>Done while you slept</h2>
               <p class="sub">Since yesterday 18:00, all inside your guardrails</p>
-              <div class="num" aria-hidden="true"><svg class="i"><use href="#moon"/></svg><span>4</span></div>
+              <div class="num" aria-hidden="true"><svg class="i"><use href="#moon"/></svg><span>5</span></div>
             </header>
             <ul class="log">
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/customer-profile"><b>Research</b></a> rebuilt the customer profile from 212 won deals and saved it to memory.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:10</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><a href="#topic/partnerships"><b>Partnerships</b></a> added 32 brands from Clay, found 58 contacts in Apollo and drafted 24 emails for Lea to check.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:30</time></li>
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/comparison-pages"><b>SEO</b></a> published the 2 comparison pages you approved on Friday.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:42</time></li>
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/sequence-a"><b>Outbound</b></a> stopped sequence A for the 14 people who replied.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:05</time></li>
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/click-floor"><b>Paid</b></a> switched off 3 ads that fell below the click floor.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:30</time></li>
@@ -287,6 +297,7 @@
         <section class="sec">
           <div class="headrow"><h2 class="h2">What you told it last</h2><span>and where each ask went</span></div>
           <ul class="box list asks">
+            <li><div><b>“Tom wants partnerships with big brands. Set it up; I lead it, Lea and Jonas help.”</b><span>Monday 19 October · Partnerships · a topic of its own · you lead</span></div><a class="btn quiet s" href="#topic/partnerships">Open</a></li>
             <li><div><b>“LinkedIn leads cost too much. Find where the budget works best and propose a shift.”</b><span>Friday 10:20 · Paid · lane Search budget shift · Paid buyer leads</span></div><a class="btn quiet s" href="#lane/search-budget">Open</a></li>
             <li><div><b>“Get the webinar promo out on Monday.”</b><span>Thursday 17:40 · Content · lane Webinar on Thursday · Visuals leads</span></div><a class="btn quiet s" href="#lane/webinar">Open</a></li>
             <li><div><b>“Start writing to fintech ops people once the pilot shows it works.”</b><span>Wednesday 09:05 · Outbound · lane Sequence B, fintech ops · Sender leads</span></div><a class="btn quiet s" href="#lane/sequence-b">Open</a></li>
@@ -319,6 +330,7 @@
       <button class="pr" data-close><span class="lt">Ge</span><b>Gemini</b><span class="g">Google</span><span class="st" style="color:var(--text-2)">Add key</span></button>
       <button class="pr" data-close><span class="lt">Gr</span><b>Grok</b><span class="g">xAI</span><span class="st" style="color:var(--text-2)">Add key</span></button>
       <h3>Agents · talk to one topic only</h3>
+      <a class="pr" href="#topic/partnerships"><svg class="i" style="margin:0 3px"><use href="#partner"/></svg><b>Partnerships</b><span class="g">Brand scout, Contact finder, Sender, Call prep</span></a>
       <a class="pr" href="#topic/content"><svg class="i" style="margin:0 3px"><use href="#pen"/></svg><b>Content</b><span class="g">Writer, Visuals, Publisher</span></a>
       <a class="pr" href="#topic/outbound"><svg class="i" style="margin:0 3px"><use href="#send"/></svg><b>Outbound</b><span class="g">Sender, Prospector, Replies</span></a>
       <a class="pr" href="#topic/paid"><svg class="i" style="margin:0 3px"><use href="#horn"/></svg><b>Paid</b><span class="g">Paid buyer, Analyst</span></a>
@@ -334,6 +346,7 @@
     { id: "t-decide", kind: "Pages", label: "Decide", icon: "decide", href: "#decision", badge: true, pinned: true },
     { id: "t-drafts", kind: "Pages", label: "Drafts", icon: "mail", href: "#drafts", pinned: true },
     { id: "t-skills", kind: "Pages", label: "Skills", icon: "star", href: "#skills", pinned: true },
+    { id: "a-partnerships", kind: "Topics", label: "Partners", name: "Partnerships", icon: "partner", href: "#topic/partnerships", pinned: true },
     { id: "a-content", kind: "Topics", label: "Content", icon: "pen", href: "#topic/content", pinned: true },
     { id: "a-outbound", kind: "Topics", label: "Outbound", icon: "send", href: "#topic/outbound" },
     { id: "a-paid", kind: "Topics", label: "Paid", icon: "horn", href: "#topic/paid" },
@@ -348,7 +361,60 @@
     firstLane: "search-budget",
     topics: [
       {
-        id: "content", name: "Content", icon: "pen", crumb: "This week", open: true,
+        id: "partnerships", name: "Partnerships", icon: "partner", crumb: "Big-brand partners", open: true,
+        meta: "<b>Asked by Tom Ahrens, CEO</b><i>·</i><span>You own it</span><i>·</i><span>with Lea Brandt and Jonas Falk</span>",
+        intro: "Partnerships with big brands that bring us customers we cannot reach alone. You do the calls and the deals; Lea and Jonas run the rest; agents do the list work around the clock.",
+        plan: {
+          title: "Week 5 of 15", when: "on track", goal: "0 of 3 partners signed · 5 calls booked",
+          stages: [
+            ["Strategy", "done", 100, "Done 23 Oct"],
+            ["Stack", "done", 100, "Clay, Apollo, HubSpot"],
+            ["Brand list", "now", 80, "160 of 200 brands"],
+            ["Outreach", "wait", 45, "Wave 2 waits for Lea"],
+            ["Calls", "now", 40, "2 of 5 held"],
+            ["Offers", "wait", 15, "1 waits for you", { d: "d4", st: "now", pct: 35, sub: "1 sent to Halden" }],
+            ["Signed", "next", 0, "Goal: 3 by 31 Jan"],
+          ],
+          now: [
+            ["M", "You", "p", "call with Brightmoor Retail", "today 15:00", null, "#lane/partner-calls"],
+            ["L", "Lea", "p", "checks 24 emails for wave 2", "by 11:00", null, "#lane/outreach-wave-2"],
+            ["J", "Jonas", "p", "partner contract template, with legal", "Wed", null, "#lane/halden-offer"],
+            ["B", "Brand scout", "a", "finds brands in Clay", "160 of 200", 80, "#lane/brand-list"],
+            ["C", "Contact finder", "a", "finds decision-makers in Apollo", "96 of 160", 60, "#lane/contact-data"],
+            ["S", "Sender", "a", "follows up on wave 1", "38 of 52", 73, "#lane/outreach-wave-1"],
+            ["P", "Call prep", "a", "writes the Brightmoor brief", "ready 13:00", null, "#lane/partner-calls"],
+          ],
+          next: [
+            ["M", "You", "p", "approve the offer to Halden", "Thu", null, "#lane/halden-offer", { d: "d4", text: "approved the offer to Halden", when: "goes out 09:00" }],
+            ["L", "Lea", "p", "OKs wave 2: 40 retail brands", "after 11:00", null, "#lane/outreach-wave-2"],
+            ["N", "Notetaker", "a", "notes and follow-up draft after the call", "today 16:00", null, "#lane/partner-calls"],
+            ["M", "You", "p", "calls with Northvale Bank and Corvane ERP", "Wed, Thu", null, "#lane/partner-calls"],
+            ["R", "Reporter", "a", "partner report for the CEO, as a draft", "Fri 08:00", null, "#drafts"],
+          ],
+          night: "Overnight the agents added 32 brands, found 58 contacts and drafted 24 emails for wave 2. Nothing was sent: Lea checks them at 09:00.",
+        },
+        focusLane: "halden-offer",
+        facts: [["200", "brands to find"], ["64", "fit the partner profile"], ["52", "contacted"], ["11", "replied"], ["5", "calls booked"]],
+        agents: [
+          ["M", "Mara Lind, you", "ok", "Owns it", "The calls, every offer, the goal with the CEO", "", "Head of GTM", "p"],
+          ["L", "Lea Brandt", "warn", "Review due", "Checks every list and email before it goes out", "", "GTM associate", "p"],
+          ["J", "Jonas Falk", "ok", "Working", "Tools, the CRM and the contract template", "", "Partner operations", "p"],
+          ["B", "Brand scout", "ok", "Working", "Finds brands that fit the partner profile", "/find-brands", "Clay"],
+          ["C", "Contact finder", "ok", "Working", "The person who decides, with a checked email", "/find-contacts", "Apollo"],
+          ["S", "Sender", "ok", "Working", "Personal emails from your mail, and follow-ups", "/outbound-sequence", "Claude"],
+          ["P", "Call prep", "ok", "Working", "One page on the brand before every call", "/call-brief", "Claude"],
+          ["N", "Notetaker", "next", "Up next", "Notes, next steps and the follow-up draft", "/call-notes", "Claude"],
+          ["R", "Reporter", "next", "Up next", "The weekly partner report for the CEO", "/weekly-summary", "Claude"],
+        ],
+        chatSub: "You, Lea, Jonas and the partnership agents. Nothing else lives here.",
+        chat: `<div class="msg"><span class="av">B</span><div class="who">Brand scout<time>05:40</time></div><p>Batch 4 is in: 32 new brands from Clay, 9 of them fit the profile. Lea, they are in HubSpot for your check.</p></div>
+          <div class="msg"><span class="av person">L</span><div class="who">Lea<time>08:12</time></div><p>Thanks. I take the wave 2 emails first, then batch 4. Done by 11.</p></div>
+          <div class="msg"><span class="av person">J</span><div class="who">Jonas<time>08:30</time></div><p>Halden offer is drafted from the template. Mara, it is in Decide for you.</p></div>
+          <p class="said">Call prep, what do I need to know for Brightmoor at 15:00?</p>
+          <div class="msg"><span class="av">P</span><div class="who">Call prep<time>08:41</time></div><p>Brightmoor sells to 9,000 small retailers. Their head of partnerships joined in May from a bank and launched two referral programmes there. The full brief is ready at 13:00.</p></div>`
+      },
+      {
+        id: "content", name: "Content", icon: "pen", crumb: "This week",
         intro: "This week: the webinar promo, the recap post, one customer story and a carousel.",
         focus: `<section class="box stuck">
               <div class="top">
@@ -470,6 +536,137 @@
       },
     ],
     lanes: [
+      {
+        id: "partner-strategy", topic: "partnerships", title: "Partner strategy", state: "done", lead: "You", opened: "Opened 19 Oct", closed: "closed 23 Oct",
+        asked: "Get partnerships with big brands going this quarter. They should bring us customers we cannot reach alone.",
+        askedMeta: "Tom Ahrens, CEO, to you, Monday 19 October<i>·</i>You took it to the Manager, which set it up as the topic Partnerships.",
+        status: "Who fits and what we offer are set: brands whose business customers fight messy operations; for them a share of first-year revenue, for their customers an integration.",
+        steps: [
+          ["ok", "Market map: 40 kinds of partner, ranked", "Researcher · 20 Oct"],
+          ["ok", "Partner profile: who fits and why", "You · 21 Oct"],
+          ["ok", "The offer: 15% of first-year revenue, co-marketing", "You · 22 Oct"],
+          ["ok", "Goal agreed with the CEO: 3 signed partners by 31 Jan", "Tom Ahrens · 23 Oct"],
+        ],
+        doneNote: "Done means all four. The CEO signed off the goal; the Manager closed the lane.",
+        agents: [["M", "Mara Lind, you", "done", "Led it", "Wrote the profile and the offer", "", "Head of GTM", "p"], ["R", "Researcher", "done", "Done", "Mapped 40 kinds of partner", "/market-map", "Claude"]],
+        made: [["file", "Partner profile", "Freight networks, business banks, ERP vendors first"], ["file", "Partner offer, one page", "15% of first-year revenue, joint webinar, integration"], ["file", "Market map", "40 kinds of partner, ranked by reach and fit"]],
+        chat: `<div class="msg"><span class="av">R</span><div class="who">Researcher<time>20 Oct</time></div><p>Freight networks and business banks reach the most of our kind of customer. ERP vendors are slower to sign but stay longest.</p></div>`
+      },
+      {
+        id: "partner-stack", topic: "partnerships", title: "Tools for partner outreach", state: "done", lead: "Jonas", opened: "Opened 23 Oct", closed: "closed 30 Oct",
+        asked: "Pick the tools for finding brands and people, and set them up so the agents can use them safely.",
+        askedMeta: "You to Jonas and the Manager, 23 October<i>·</i>Jonas leads; the Manager gave the agents their access.",
+        status: "Clay finds brands, Apollo finds people, HubSpot keeps the pipeline. Agents read and write there, but nothing is sent without Lea or you.",
+        steps: [
+          ["ok", "4 setups compared on data, price and what agents can drive", "Jonas · 26 Oct"],
+          ["ok", "Your choice: Clay, Apollo and HubSpot", "You · 27 Oct"],
+          ["ok", "Keys added, agents connected, test run of 10 brands", "Jonas · 29 Oct"],
+          ["ok", "Guardrail: no email leaves without a person's OK", "Manager · 30 Oct"],
+        ],
+        doneNote: "Done means all four. The test run passed, so the Manager closed the lane.",
+        agents: [["J", "Jonas Falk", "done", "Led it", "Compared, set up and tested", "", "Partner operations", "p"]],
+        made: [["file", "Tool comparison", "Clay, Apollo, HubSpot against 3 other setups"], ["file", "Setup notes", "Which agent may do what, in which tool"]],
+        chat: `<div class="msg"><span class="av person">J</span><div class="who">Jonas<time>29 Oct</time></div><p>Test run done: 10 brands found in Clay, 9 contacts in Apollo, all landed in HubSpot. Agents can't send anything from there.</p></div>`
+      },
+      {
+        id: "brand-list", topic: "partnerships", title: "200 brands that fit", state: "ok", lead: "Brand scout", opened: "Opened 30 Oct", next: "Today, 18:00",
+        asked: "Find 200 brands that fit the partner profile.",
+        askedMeta: "Lea to the Manager, 30 October<i>·</i>The Manager filed it under Partnerships and named Brand scout to lead. Lea checks every batch.",
+        status: "160 of 200 found in Clay, 64 fit the profile so far. Lea checks each batch of 40 before it moves on to Contact finder.",
+        steps: [
+          ["ok", "Batches 1 to 3: 120 brands, checked by Lea", "Lea · Friday"],
+          ["now", "Batch 4: 40 brands, 32 of them added overnight", "Brand scout · now"],
+          ["todo", "Batch 5: the last 40", "Brand scout · Wed"],
+          ["todo", "Lea checks batches 4 and 5", "Lea · Thu"],
+        ],
+        agents: [["B", "Brand scout", "ok", "Leads", "Batch 4 in Clay", "/find-brands", "Clay"], ["L", "Lea Brandt", "warn", "Checks", "Batch 4 after the wave 2 emails", "", "GTM associate", "p"]],
+        made: [["file", "Brand list in HubSpot", "160 brands, 64 marked as a fit"], ["file", "Why each brand fits", "One line per brand, from the partner profile"]],
+        chat: `<div class="msg"><span class="av">B</span><div class="who">Brand scout<time>05:40</time></div><p>32 new brands overnight. I skipped 6 that already work with a competitor.</p></div>`
+      },
+      {
+        id: "contact-data", topic: "partnerships", title: "Who decides at each brand", state: "ok", lead: "Contact finder", opened: "Opened 2 Nov", next: "Tomorrow, 08:00",
+        asked: "Find the person who decides on partnerships at each brand, with an email we can trust.",
+        askedMeta: "Lea to the Manager, 2 November<i>·</i>The Manager filed it under Partnerships and named Contact finder to lead.",
+        status: "96 of 160 brands have a named decision-maker and a checked email. Apollo had nobody for 11; Contact finder looks for those on the brands' own pages.",
+        steps: [
+          ["ok", "Contacts for batches 1 to 3", "Contact finder · Friday"],
+          ["now", "Contacts for batch 4: 58 found overnight", "Contact finder · now"],
+          ["todo", "The 11 brands Apollo did not know", "Contact finder · Wed"],
+          ["todo", "Every email checked before it is used", "Contact finder · Thu"],
+        ],
+        agents: [["C", "Contact finder", "ok", "Leads", "Batch 4 in Apollo", "/find-contacts", "Apollo"]],
+        made: [["file", "Contacts in HubSpot", "96 decision-makers, 92 emails checked"]],
+        chat: `<div class="msg"><span class="av">C</span><div class="who">Contact finder<time>06:10</time></div><p>58 contacts found overnight. 4 emails bounced the check, so I left them out.</p></div>`
+      },
+      {
+        id: "outreach-wave-1", topic: "partnerships", title: "Outreach, wave 1", state: "ok", lead: "Sender", opened: "Opened 6 Nov", next: "Wed 18 Nov",
+        asked: "Write to the first 52 brands. Personal, from Mara's mail, no templates you can smell.",
+        askedMeta: "You to the Manager, 6 November<i>·</i>Sender leads; Lea approved every email before it went out.",
+        status: "52 sent, 11 replies, 5 calls booked. Follow-ups are going out to the rest: 38 of 52 done.",
+        steps: [
+          ["ok", "52 personal emails, approved by Lea", "Lea · 9 Nov"],
+          ["ok", "Sent from your mail, 20 a day", "Sender · 11 Nov"],
+          ["now", "One follow-up to everyone without a reply", "Sender · 38 of 52"],
+          ["todo", "Replies turned into calls", "Sender · Wed"],
+        ],
+        agents: [["S", "Sender", "ok", "Leads", "Follow-ups", "/outbound-sequence", "Claude"], ["L", "Lea Brandt", "done", "Approved", "All 52 emails", "", "GTM associate", "p"]],
+        made: [["file", "The 52 emails", "Each with one line about the brand"], ["file", "Replies", "11: 5 calls, 4 later, 2 no"]],
+        chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>07:00</time></div><p>Halden and Brightmoor came from this wave. 4 others asked to talk in January; I put a reminder in HubSpot.</p></div>`
+      },
+      {
+        id: "outreach-wave-2", topic: "partnerships", title: "Outreach, wave 2: retail", state: "warn", lead: "Sender", waits: "Lea", opened: "Opened today, 02:10", next: "After Lea's check",
+        asked: "Once batch 3 is checked, write to the retail brands.",
+        askedMeta: "You to the Manager, Friday 17:30<i>·</i>Sender leads; Lea checks the emails first.",
+        status: "24 personal emails to retail brands were drafted overnight. Lea checks them at 09:00; then they go out at 20 a day.",
+        acts: '<button class="btn quiet">Remind Lea</button>',
+        steps: [
+          ["ok", "40 retail brands picked from the checked list", "Brand scout · 02:10"],
+          ["ok", "24 emails drafted, one line each about the brand", "Sender · 04:30"],
+          ["now", "Lea checks the 24 emails", "Lea · by 11:00"],
+          ["todo", "Sent from your mail, 20 a day", "Sender · from today"],
+          ["todo", "The other 16 drafted once their contacts are in", "Sender · Thu"],
+        ],
+        agents: [["S", "Sender", "warn", "Leads", "Waits for Lea's check", "/outbound-sequence", "Claude"], ["L", "Lea Brandt", "warn", "Review due", "24 emails, by 11:00", "", "GTM associate", "p"]],
+        made: [["file", "24 drafted emails", "Retail brands, from your mail"]],
+        chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>04:30</time></div><p>24 drafts ready for Lea. I kept them under 90 words and named one thing each brand did this year.</p></div>
+          <div class="msg"><span class="av person">L</span><div class="who">Lea<time>08:12</time></div><p>On it after coffee.</p></div>`
+      },
+      {
+        id: "partner-calls", topic: "partnerships", title: "Partnership calls", state: "ok", lead: "You", opened: "Opened 10 Nov", next: "Today, 16:00",
+        asked: "Book me calls with the brands that reply. Brief me before, take the notes after.",
+        askedMeta: "You to the Manager, 10 November<i>·</i>You lead; Call prep and Notetaker work around each call.",
+        status: "5 calls booked, 2 held. Next: Brightmoor Retail today at 15:00; the brief is ready at 13:00.",
+        steps: [
+          ["ok", "Call 1, Kestrel Parcel: not before spring", "You · 12 Nov"],
+          ["ok", "Call 2, Halden Freight Network: they want an offer", "You · 13 Nov"],
+          ["now", "Call 3, Brightmoor Retail", "You · today 15:00"],
+          ["todo", "Call 4, Northvale Bank", "You · Wed"],
+          ["todo", "Call 5, Corvane ERP", "You · Thu"],
+        ],
+        doneNote: "Every call gets a brief before and notes after. You only talk; the agents do the rest.",
+        agents: [["M", "Mara Lind, you", "ok", "Leads", "Brightmoor at 15:00", "", "Head of GTM", "p"], ["P", "Call prep", "ok", "Working", "Brightmoor brief, ready 13:00", "/call-brief", "Claude"], ["N", "Notetaker", "next", "Up next", "Notes and follow-up after 15:00", "/call-notes", "Claude"]],
+        made: [["file", "Brief: Brightmoor Retail", "Ready 13:00"], ["file", "Notes: Halden Freight Network", "They want a referral deal for 2,400 customers"], ["file", "Notes: Kestrel Parcel", "Budget frozen until spring"]],
+        chat: `<div class="msg"><span class="av">N</span><div class="who">Notetaker<time>13 Nov</time></div><p>Halden call: they want a referral deal and a joint webinar. Next step is an offer this week. I opened a lane for it and named Jonas.</p></div>`
+      },
+      {
+        id: "halden-offer", topic: "partnerships", title: "Offer for Halden Freight Network", state: "warn", lead: "Jonas", opened: "Opened 13 Nov", decision: "d4",
+        next: "After your OK", afterNext: "Mon 23 Nov, Jonas follows up",
+        asked: "Send Halden a referral offer this week, while they are warm.",
+        askedMeta: "You to the Manager after the call, Friday 13 November<i>·</i>The Manager filed it under Partnerships and named Jonas to lead.",
+        status: "Halden wants a deal for its 2,400 business customers. Jonas drafted it from the template: 15% of first-year revenue for 12 months and a joint webinar in January. Due Thursday.",
+        approve: "Send the offer", after: "The offer goes out from your mail tomorrow at 09:00. Jonas follows up on Monday if there is no answer.",
+        steps: [
+          ["ok", "Call notes with what Halden asked for", "Notetaker · 13 Nov"],
+          ["ok", "Offer drafted from the partner template", "Jonas · today, 08:30"],
+          ["ok", "Numbers checked: 2,400 customers, about 4% take it up", "Call prep · today"],
+          ["now", "Your OK to send", "You · by Thursday"],
+          ["todo", "Sent from your mail", "Sender · after your OK"],
+          ["todo", "Halden signs", "Halden · goal: December"],
+        ],
+        agents: [["J", "Jonas Falk", "warn", "Leads", "Waits for your OK", "", "Partner operations", "p"], ["N", "Notetaker", "done", "Done", "Wrote up the call", "/call-notes", "Claude"], ["P", "Call prep", "done", "Done", "Checked the numbers", "/call-brief", "Claude"]],
+        made: [["file", "The offer", "2 pages, from the partner template"], ["file", "Halden call notes", "13 November, 34 minutes"], ["mail", "Cover email", "In your drafts, not sent", "#drafts"]],
+        chat: `<div class="msg"><span class="av person">J</span><div class="who">Jonas<time>08:30</time></div><p>Offer is ready. I kept the template's 15% and added the webinar they asked for. Legal saw the template last week, so no new review needed.</p></div>`
+      },
       {
         id: "webinar", topic: "content", title: "Webinar on Thursday", state: "bad", lead: "Visuals", opened: "Opened Thursday", next: "Now, needs your call",
         asked: "Get the webinar promo out on Monday.",
@@ -660,6 +857,7 @@
     drafts: ["Drafts", "4 waiting in your mail"],
     settings: ["Settings", "Workspace"],
 <!-- @@ routes -->
+    { id: "a-partnerships", lead: "Brand scout", re: /partner|clay|apollo|halden|brightmoor|northvale|corvane/i },
     { id: "a-content", lead: "Writer", re: /webinar|visual|promo|post|carousel|image|recap|fenwick|story|quote/i },
     { id: "a-paid", lead: "Paid buyer", re: /\bsearch\b|budget|linkedin|\bads?\b|google|campaign/i },
     { id: "a-outbound", lead: "Sender", re: /sequence|email|\bleads?\b|outbound|fintech/i },

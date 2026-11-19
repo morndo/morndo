@@ -357,6 +357,34 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .fact b{font:400 26px/1.1 var(--serif);letter-spacing:-.01em;color:var(--text)}.fact span{font-size:12px;color:var(--muted)}
 .list li>div b a:hover,.jobs td a:hover{text-decoration:underline;text-underline-offset:3px}
 .wait>.i{flex:none}.wait .acts{flex-wrap:wrap}
+/* A topic's plan: where the work stands at a glance. One bar per stage (green while it is worked on, amber while it
+   waits for a person, plain when done), then who does what now and next. People are round, agents are square. */
+.plan{display:flex;flex-direction:column;gap:16px;padding:16px 18px 14px}
+.plan .ph{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;font-size:12.5px;color:var(--muted)}
+.plan .ph b{font-size:13.5px;font-weight:600;color:var(--text)}
+.plan .ph .goal{margin-left:auto;color:var(--text-2)}
+.plan .legend{display:flex;align-items:center;gap:5px}.plan .legend .av{width:11px;height:11px;border-radius:3px;margin-left:7px}.plan .legend .av.person{border-radius:50%}
+.stages{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:6px;margin:0;padding:0;list-style:none}
+.stage{display:flex;flex-direction:column;gap:5px;min-width:0}
+.stage .bar{height:5px;border-radius:3px;background:var(--fill);overflow:hidden}
+.stage .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+.stage.s-done .bar i{background:var(--text-2)}.stage.s-wait .bar i{background:var(--warn)}
+.stage b{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage.s-now b,.stage.s-wait b{color:var(--text);font-weight:600}.stage.s-next b{color:var(--muted)}
+.stage span{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:6px 28px;padding-top:12px;border-top:1px solid var(--line)}
+.flow h3{padding:0 0 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.flow li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:9px;align-items:center;min-height:30px;font-size:13px}
+.flow .t{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text-2)}
+.flow .t b{font-weight:600;color:var(--text)}
+.flow a.t:hover{color:var(--text)}
+.flow small{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);white-space:nowrap}
+.flow li.did .t{color:var(--muted)}
+.mini{width:44px;height:4px;border-radius:2px;background:var(--fill);overflow:hidden}.mini i{display:block;height:100%;background:var(--ok)}
+.av.sm{width:20px;height:20px;border-radius:7px;font-size:9.5px}
+.av.person{border-radius:50%;background:var(--raised);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-2,var(--line))}
+.night{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2)}.night .i{color:var(--muted);flex:none}
+@container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:12px}.plan .ph .goal{margin-left:0}}
 .sw{position:relative;width:34px;height:20px;border-radius:10px;background:var(--tile-on);flex:none;transition:background .18s}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .18s,background .18s}
 .sw[aria-checked="true"]{background:var(--ink)}.sw[aria-checked="true"]::after{transform:translateX(14px);background:var(--ink-fg)}
@@ -639,6 +667,7 @@ try {
   <symbol id="send" viewBox="0 0 24 24"><path d="M21 3 3.500 10.200l6.900 3.400 3.400 6.900z"/><path fill="currentColor" d="M21 3 10.400 13.600l3.400 6.900z"/></symbol>
   <symbol id="horn" viewBox="0 0 24 24"><path d="M7 9.500 19 5v14L7 14.500"/><path fill="currentColor" d="M3.500 9.500H7v5H3.500z"/><path d="M9.500 15.400v2.400a2 2 0 0 0 4 0v-.9"/></symbol>
   <symbol id="search" viewBox="0 0 24 24"><circle cx="10.500" cy="10.500" r="6.500"/><path d="M15.400 15.400 20.500 20.500"/><circle fill="currentColor" cx="10.500" cy="10.500" r="1.600"/></symbol>
+  <symbol id="partner" viewBox="0 0 24 24"><circle cx="9" cy="10" r="5"/><circle cx="15" cy="14" r="5"/><path fill="currentColor" d="M13.920 9.120a5 5 0 0 1-3.840 5.760 5 5 0 0 1 3.840-5.760z"/></symbol>
   <symbol id="target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.800"/><path d="M12 2v3.200M12 18.800V22M2 12h3.200M18.800 12H22"/><circle fill="currentColor" cx="12" cy="12" r="1.800"/></symbol>
   <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="chat" viewBox="0 0 24 24"><path d="M5.500 4h13A2.500 2.500 0 0 1 21 6.500v8a2.500 2.500 0 0 1-2.500 2.500H10.500L6 20.500V17h-.500A2.500 2.500 0 0 1 3 14.500v-8A2.500 2.500 0 0 1 5.500 4z"/><circle fill="currentColor" stroke="none" cx="8.200" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="12" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="15.800" cy="10.500" r="1.350"/></symbol>
@@ -724,7 +753,7 @@ try {
         <div class="rail r" aria-hidden="true"><span>07:15 AM</span></div>
 
         <div class="under">
-          <p class="lede">Three decisions need you and one thing is stuck. Everything else moved on its own while you slept.</p>
+          <p class="lede">Four decisions need you and one thing is stuck. Everything else moved on its own while you slept.</p>
           <p class="credit"><span id="hero-title"></span><br><span id="hero-manner"></span></p>
         </div>
 
@@ -764,6 +793,15 @@ try {
                 <div class="acts"><a class="btn quiet" href="#lane/fenwick">Open lane</a><button class="btn ink" data-approve>Approve</button></div>
                 <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The story is scheduled for Wednesday.<button class="link" data-undo>Undo</button></div>
               </article>
+              <article class="item decision" id="d4" data-min="3">
+                <div class="txt">
+                  <div class="meta"><b>Partnerships</b><i>·</i><span>Due Thursday</span><i>·</i><span>3 min</span></div>
+                  <h3>Send the referral offer to Halden Freight Network</h3>
+                  <p>Halden wants a deal for its 2,400 business customers: 15% of first-year revenue for 12 months. Jonas drafted it from the template.</p>
+                </div>
+                <div class="acts"><a class="btn quiet" href="#lane/halden-offer">Open lane</a><button class="btn ink" data-approve>Approve</button></div>
+                <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The offer goes out tomorrow at 09:00.<button class="link" data-undo>Undo</button></div>
+              </article>
             </div>
           </section>
 
@@ -789,10 +827,11 @@ try {
             <header>
               <h2>Done while you slept</h2>
               <p class="sub">Since yesterday 18:00, all inside your guardrails</p>
-              <div class="num" aria-hidden="true"><svg class="i"><use href="#moon"/></svg><span>4</span></div>
+              <div class="num" aria-hidden="true"><svg class="i"><use href="#moon"/></svg><span>5</span></div>
             </header>
             <ul class="log">
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/customer-profile"><b>Research</b></a> rebuilt the customer profile from 212 won deals and saved it to memory.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:10</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><a href="#topic/partnerships"><b>Partnerships</b></a> added 32 brands from Clay, found 58 contacts in Apollo and drafted 24 emails for Lea to check.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:30</time></li>
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/comparison-pages"><b>SEO</b></a> published the 2 comparison pages you approved on Friday.</span><button class="btn quiet s" data-undo-log>Undo</button><time>07:42</time></li>
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/sequence-a"><b>Outbound</b></a> stopped sequence A for the 14 people who replied.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:05</time></li>
               <li><svg class="i ok"><use href="#check"/></svg><span><a href="#lane/click-floor"><b>Paid</b></a> switched off 3 ads that fell below the click floor.</span><button class="btn quiet s" data-undo-log>Undo</button><time>08:30</time></li>
@@ -1021,6 +1060,7 @@ try {
         <section class="sec">
           <div class="headrow"><h2 class="h2">What you told it last</h2><span>and where each ask went</span></div>
           <ul class="box list asks">
+            <li><div><b>“Tom wants partnerships with big brands. Set it up; I lead it, Lea and Jonas help.”</b><span>Monday 19 October · Partnerships · a topic of its own · you lead</span></div><a class="btn quiet s" href="#topic/partnerships">Open</a></li>
             <li><div><b>“LinkedIn leads cost too much. Find where the budget works best and propose a shift.”</b><span>Friday 10:20 · Paid · lane Search budget shift · Paid buyer leads</span></div><a class="btn quiet s" href="#lane/search-budget">Open</a></li>
             <li><div><b>“Get the webinar promo out on Monday.”</b><span>Thursday 17:40 · Content · lane Webinar on Thursday · Visuals leads</span></div><a class="btn quiet s" href="#lane/webinar">Open</a></li>
             <li><div><b>“Start writing to fintech ops people once the pilot shows it works.”</b><span>Wednesday 09:05 · Outbound · lane Sequence B, fintech ops · Sender leads</span></div><a class="btn quiet s" href="#lane/sequence-b">Open</a></li>
@@ -1161,6 +1201,7 @@ try {
       <button class="pr" data-close><span class="lt">Ge</span><b>Gemini</b><span class="g">Google</span><span class="st" style="color:var(--text-2)">Add key</span></button>
       <button class="pr" data-close><span class="lt">Gr</span><b>Grok</b><span class="g">xAI</span><span class="st" style="color:var(--text-2)">Add key</span></button>
       <h3>Agents · talk to one topic only</h3>
+      <a class="pr" href="#topic/partnerships"><svg class="i" style="margin:0 3px"><use href="#partner"/></svg><b>Partnerships</b><span class="g">Brand scout, Contact finder, Sender, Call prep</span></a>
       <a class="pr" href="#topic/content"><svg class="i" style="margin:0 3px"><use href="#pen"/></svg><b>Content</b><span class="g">Writer, Visuals, Publisher</span></a>
       <a class="pr" href="#topic/outbound"><svg class="i" style="margin:0 3px"><use href="#send"/></svg><b>Outbound</b><span class="g">Sender, Prospector, Replies</span></a>
       <a class="pr" href="#topic/paid"><svg class="i" style="margin:0 3px"><use href="#horn"/></svg><b>Paid</b><span class="g">Paid buyer, Analyst</span></a>
@@ -1278,7 +1319,60 @@ try {
     firstLane: "search-budget",
     topics: [
       {
-        id: "content", name: "Content", icon: "pen", crumb: "This week", open: true,
+        id: "partnerships", name: "Partnerships", icon: "partner", crumb: "Big-brand partners", open: true,
+        meta: "<b>Asked by Tom Ahrens, CEO</b><i>·</i><span>You own it</span><i>·</i><span>with Lea Brandt and Jonas Falk</span>",
+        intro: "Partnerships with big brands that bring us customers we cannot reach alone. You do the calls and the deals; Lea and Jonas run the rest; agents do the list work around the clock.",
+        plan: {
+          title: "Week 5 of 15", when: "on track", goal: "0 of 3 partners signed · 5 calls booked",
+          stages: [
+            ["Strategy", "done", 100, "Done 23 Oct"],
+            ["Stack", "done", 100, "Clay, Apollo, HubSpot"],
+            ["Brand list", "now", 80, "160 of 200 brands"],
+            ["Outreach", "wait", 45, "Wave 2 waits for Lea"],
+            ["Calls", "now", 40, "2 of 5 held"],
+            ["Offers", "wait", 15, "1 waits for you", { d: "d4", st: "now", pct: 35, sub: "1 sent to Halden" }],
+            ["Signed", "next", 0, "Goal: 3 by 31 Jan"],
+          ],
+          now: [
+            ["M", "You", "p", "call with Brightmoor Retail", "today 15:00", null, "#lane/partner-calls"],
+            ["L", "Lea", "p", "checks 24 emails for wave 2", "by 11:00", null, "#lane/outreach-wave-2"],
+            ["J", "Jonas", "p", "partner contract template, with legal", "Wed", null, "#lane/halden-offer"],
+            ["B", "Brand scout", "a", "finds brands in Clay", "160 of 200", 80, "#lane/brand-list"],
+            ["C", "Contact finder", "a", "finds decision-makers in Apollo", "96 of 160", 60, "#lane/contact-data"],
+            ["S", "Sender", "a", "follows up on wave 1", "38 of 52", 73, "#lane/outreach-wave-1"],
+            ["P", "Call prep", "a", "writes the Brightmoor brief", "ready 13:00", null, "#lane/partner-calls"],
+          ],
+          next: [
+            ["M", "You", "p", "approve the offer to Halden", "Thu", null, "#lane/halden-offer", { d: "d4", text: "approved the offer to Halden", when: "goes out 09:00" }],
+            ["L", "Lea", "p", "OKs wave 2: 40 retail brands", "after 11:00", null, "#lane/outreach-wave-2"],
+            ["N", "Notetaker", "a", "notes and follow-up draft after the call", "today 16:00", null, "#lane/partner-calls"],
+            ["M", "You", "p", "calls with Northvale Bank and Corvane ERP", "Wed, Thu", null, "#lane/partner-calls"],
+            ["R", "Reporter", "a", "partner report for the CEO, as a draft", "Fri 08:00", null, "#drafts"],
+          ],
+          night: "Overnight the agents added 32 brands, found 58 contacts and drafted 24 emails for wave 2. Nothing was sent: Lea checks them at 09:00.",
+        },
+        focusLane: "halden-offer",
+        facts: [["200", "brands to find"], ["64", "fit the partner profile"], ["52", "contacted"], ["11", "replied"], ["5", "calls booked"]],
+        agents: [
+          ["M", "Mara Lind, you", "ok", "Owns it", "The calls, every offer, the goal with the CEO", "", "Head of GTM", "p"],
+          ["L", "Lea Brandt", "warn", "Review due", "Checks every list and email before it goes out", "", "GTM associate", "p"],
+          ["J", "Jonas Falk", "ok", "Working", "Tools, the CRM and the contract template", "", "Partner operations", "p"],
+          ["B", "Brand scout", "ok", "Working", "Finds brands that fit the partner profile", "/find-brands", "Clay"],
+          ["C", "Contact finder", "ok", "Working", "The person who decides, with a checked email", "/find-contacts", "Apollo"],
+          ["S", "Sender", "ok", "Working", "Personal emails from your mail, and follow-ups", "/outbound-sequence", "Claude"],
+          ["P", "Call prep", "ok", "Working", "One page on the brand before every call", "/call-brief", "Claude"],
+          ["N", "Notetaker", "next", "Up next", "Notes, next steps and the follow-up draft", "/call-notes", "Claude"],
+          ["R", "Reporter", "next", "Up next", "The weekly partner report for the CEO", "/weekly-summary", "Claude"],
+        ],
+        chatSub: "You, Lea, Jonas and the partnership agents. Nothing else lives here.",
+        chat: `<div class="msg"><span class="av">B</span><div class="who">Brand scout<time>05:40</time></div><p>Batch 4 is in: 32 new brands from Clay, 9 of them fit the profile. Lea, they are in HubSpot for your check.</p></div>
+          <div class="msg"><span class="av person">L</span><div class="who">Lea<time>08:12</time></div><p>Thanks. I take the wave 2 emails first, then batch 4. Done by 11.</p></div>
+          <div class="msg"><span class="av person">J</span><div class="who">Jonas<time>08:30</time></div><p>Halden offer is drafted from the template. Mara, it is in Decide for you.</p></div>
+          <p class="said">Call prep, what do I need to know for Brightmoor at 15:00?</p>
+          <div class="msg"><span class="av">P</span><div class="who">Call prep<time>08:41</time></div><p>Brightmoor sells to 9,000 small retailers. Their head of partnerships joined in May from a bank and launched two referral programmes there. The full brief is ready at 13:00.</p></div>`
+      },
+      {
+        id: "content", name: "Content", icon: "pen", crumb: "This week",
         intro: "This week: the webinar promo, the recap post, one customer story and a carousel.",
         focus: `<section class="box stuck">
               <div class="top">
@@ -1400,6 +1494,137 @@ try {
       },
     ],
     lanes: [
+      {
+        id: "partner-strategy", topic: "partnerships", title: "Partner strategy", state: "done", lead: "You", opened: "Opened 19 Oct", closed: "closed 23 Oct",
+        asked: "Get partnerships with big brands going this quarter. They should bring us customers we cannot reach alone.",
+        askedMeta: "Tom Ahrens, CEO, to you, Monday 19 October<i>·</i>You took it to the Manager, which set it up as the topic Partnerships.",
+        status: "Who fits and what we offer are set: brands whose business customers fight messy operations; for them a share of first-year revenue, for their customers an integration.",
+        steps: [
+          ["ok", "Market map: 40 kinds of partner, ranked", "Researcher · 20 Oct"],
+          ["ok", "Partner profile: who fits and why", "You · 21 Oct"],
+          ["ok", "The offer: 15% of first-year revenue, co-marketing", "You · 22 Oct"],
+          ["ok", "Goal agreed with the CEO: 3 signed partners by 31 Jan", "Tom Ahrens · 23 Oct"],
+        ],
+        doneNote: "Done means all four. The CEO signed off the goal; the Manager closed the lane.",
+        agents: [["M", "Mara Lind, you", "done", "Led it", "Wrote the profile and the offer", "", "Head of GTM", "p"], ["R", "Researcher", "done", "Done", "Mapped 40 kinds of partner", "/market-map", "Claude"]],
+        made: [["file", "Partner profile", "Freight networks, business banks, ERP vendors first"], ["file", "Partner offer, one page", "15% of first-year revenue, joint webinar, integration"], ["file", "Market map", "40 kinds of partner, ranked by reach and fit"]],
+        chat: `<div class="msg"><span class="av">R</span><div class="who">Researcher<time>20 Oct</time></div><p>Freight networks and business banks reach the most of our kind of customer. ERP vendors are slower to sign but stay longest.</p></div>`
+      },
+      {
+        id: "partner-stack", topic: "partnerships", title: "Tools for partner outreach", state: "done", lead: "Jonas", opened: "Opened 23 Oct", closed: "closed 30 Oct",
+        asked: "Pick the tools for finding brands and people, and set them up so the agents can use them safely.",
+        askedMeta: "You to Jonas and the Manager, 23 October<i>·</i>Jonas leads; the Manager gave the agents their access.",
+        status: "Clay finds brands, Apollo finds people, HubSpot keeps the pipeline. Agents read and write there, but nothing is sent without Lea or you.",
+        steps: [
+          ["ok", "4 setups compared on data, price and what agents can drive", "Jonas · 26 Oct"],
+          ["ok", "Your choice: Clay, Apollo and HubSpot", "You · 27 Oct"],
+          ["ok", "Keys added, agents connected, test run of 10 brands", "Jonas · 29 Oct"],
+          ["ok", "Guardrail: no email leaves without a person's OK", "Manager · 30 Oct"],
+        ],
+        doneNote: "Done means all four. The test run passed, so the Manager closed the lane.",
+        agents: [["J", "Jonas Falk", "done", "Led it", "Compared, set up and tested", "", "Partner operations", "p"]],
+        made: [["file", "Tool comparison", "Clay, Apollo, HubSpot against 3 other setups"], ["file", "Setup notes", "Which agent may do what, in which tool"]],
+        chat: `<div class="msg"><span class="av person">J</span><div class="who">Jonas<time>29 Oct</time></div><p>Test run done: 10 brands found in Clay, 9 contacts in Apollo, all landed in HubSpot. Agents can't send anything from there.</p></div>`
+      },
+      {
+        id: "brand-list", topic: "partnerships", title: "200 brands that fit", state: "ok", lead: "Brand scout", opened: "Opened 30 Oct", next: "Today, 18:00",
+        asked: "Find 200 brands that fit the partner profile.",
+        askedMeta: "Lea to the Manager, 30 October<i>·</i>The Manager filed it under Partnerships and named Brand scout to lead. Lea checks every batch.",
+        status: "160 of 200 found in Clay, 64 fit the profile so far. Lea checks each batch of 40 before it moves on to Contact finder.",
+        steps: [
+          ["ok", "Batches 1 to 3: 120 brands, checked by Lea", "Lea · Friday"],
+          ["now", "Batch 4: 40 brands, 32 of them added overnight", "Brand scout · now"],
+          ["todo", "Batch 5: the last 40", "Brand scout · Wed"],
+          ["todo", "Lea checks batches 4 and 5", "Lea · Thu"],
+        ],
+        agents: [["B", "Brand scout", "ok", "Leads", "Batch 4 in Clay", "/find-brands", "Clay"], ["L", "Lea Brandt", "warn", "Checks", "Batch 4 after the wave 2 emails", "", "GTM associate", "p"]],
+        made: [["file", "Brand list in HubSpot", "160 brands, 64 marked as a fit"], ["file", "Why each brand fits", "One line per brand, from the partner profile"]],
+        chat: `<div class="msg"><span class="av">B</span><div class="who">Brand scout<time>05:40</time></div><p>32 new brands overnight. I skipped 6 that already work with a competitor.</p></div>`
+      },
+      {
+        id: "contact-data", topic: "partnerships", title: "Who decides at each brand", state: "ok", lead: "Contact finder", opened: "Opened 2 Nov", next: "Tomorrow, 08:00",
+        asked: "Find the person who decides on partnerships at each brand, with an email we can trust.",
+        askedMeta: "Lea to the Manager, 2 November<i>·</i>The Manager filed it under Partnerships and named Contact finder to lead.",
+        status: "96 of 160 brands have a named decision-maker and a checked email. Apollo had nobody for 11; Contact finder looks for those on the brands' own pages.",
+        steps: [
+          ["ok", "Contacts for batches 1 to 3", "Contact finder · Friday"],
+          ["now", "Contacts for batch 4: 58 found overnight", "Contact finder · now"],
+          ["todo", "The 11 brands Apollo did not know", "Contact finder · Wed"],
+          ["todo", "Every email checked before it is used", "Contact finder · Thu"],
+        ],
+        agents: [["C", "Contact finder", "ok", "Leads", "Batch 4 in Apollo", "/find-contacts", "Apollo"]],
+        made: [["file", "Contacts in HubSpot", "96 decision-makers, 92 emails checked"]],
+        chat: `<div class="msg"><span class="av">C</span><div class="who">Contact finder<time>06:10</time></div><p>58 contacts found overnight. 4 emails bounced the check, so I left them out.</p></div>`
+      },
+      {
+        id: "outreach-wave-1", topic: "partnerships", title: "Outreach, wave 1", state: "ok", lead: "Sender", opened: "Opened 6 Nov", next: "Wed 18 Nov",
+        asked: "Write to the first 52 brands. Personal, from Mara's mail, no templates you can smell.",
+        askedMeta: "You to the Manager, 6 November<i>·</i>Sender leads; Lea approved every email before it went out.",
+        status: "52 sent, 11 replies, 5 calls booked. Follow-ups are going out to the rest: 38 of 52 done.",
+        steps: [
+          ["ok", "52 personal emails, approved by Lea", "Lea · 9 Nov"],
+          ["ok", "Sent from your mail, 20 a day", "Sender · 11 Nov"],
+          ["now", "One follow-up to everyone without a reply", "Sender · 38 of 52"],
+          ["todo", "Replies turned into calls", "Sender · Wed"],
+        ],
+        agents: [["S", "Sender", "ok", "Leads", "Follow-ups", "/outbound-sequence", "Claude"], ["L", "Lea Brandt", "done", "Approved", "All 52 emails", "", "GTM associate", "p"]],
+        made: [["file", "The 52 emails", "Each with one line about the brand"], ["file", "Replies", "11: 5 calls, 4 later, 2 no"]],
+        chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>07:00</time></div><p>Halden and Brightmoor came from this wave. 4 others asked to talk in January; I put a reminder in HubSpot.</p></div>`
+      },
+      {
+        id: "outreach-wave-2", topic: "partnerships", title: "Outreach, wave 2: retail", state: "warn", lead: "Sender", waits: "Lea", opened: "Opened today, 02:10", next: "After Lea's check",
+        asked: "Once batch 3 is checked, write to the retail brands.",
+        askedMeta: "You to the Manager, Friday 17:30<i>·</i>Sender leads; Lea checks the emails first.",
+        status: "24 personal emails to retail brands were drafted overnight. Lea checks them at 09:00; then they go out at 20 a day.",
+        acts: '<button class="btn quiet">Remind Lea</button>',
+        steps: [
+          ["ok", "40 retail brands picked from the checked list", "Brand scout · 02:10"],
+          ["ok", "24 emails drafted, one line each about the brand", "Sender · 04:30"],
+          ["now", "Lea checks the 24 emails", "Lea · by 11:00"],
+          ["todo", "Sent from your mail, 20 a day", "Sender · from today"],
+          ["todo", "The other 16 drafted once their contacts are in", "Sender · Thu"],
+        ],
+        agents: [["S", "Sender", "warn", "Leads", "Waits for Lea's check", "/outbound-sequence", "Claude"], ["L", "Lea Brandt", "warn", "Review due", "24 emails, by 11:00", "", "GTM associate", "p"]],
+        made: [["file", "24 drafted emails", "Retail brands, from your mail"]],
+        chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>04:30</time></div><p>24 drafts ready for Lea. I kept them under 90 words and named one thing each brand did this year.</p></div>
+          <div class="msg"><span class="av person">L</span><div class="who">Lea<time>08:12</time></div><p>On it after coffee.</p></div>`
+      },
+      {
+        id: "partner-calls", topic: "partnerships", title: "Partnership calls", state: "ok", lead: "You", opened: "Opened 10 Nov", next: "Today, 16:00",
+        asked: "Book me calls with the brands that reply. Brief me before, take the notes after.",
+        askedMeta: "You to the Manager, 10 November<i>·</i>You lead; Call prep and Notetaker work around each call.",
+        status: "5 calls booked, 2 held. Next: Brightmoor Retail today at 15:00; the brief is ready at 13:00.",
+        steps: [
+          ["ok", "Call 1, Kestrel Parcel: not before spring", "You · 12 Nov"],
+          ["ok", "Call 2, Halden Freight Network: they want an offer", "You · 13 Nov"],
+          ["now", "Call 3, Brightmoor Retail", "You · today 15:00"],
+          ["todo", "Call 4, Northvale Bank", "You · Wed"],
+          ["todo", "Call 5, Corvane ERP", "You · Thu"],
+        ],
+        doneNote: "Every call gets a brief before and notes after. You only talk; the agents do the rest.",
+        agents: [["M", "Mara Lind, you", "ok", "Leads", "Brightmoor at 15:00", "", "Head of GTM", "p"], ["P", "Call prep", "ok", "Working", "Brightmoor brief, ready 13:00", "/call-brief", "Claude"], ["N", "Notetaker", "next", "Up next", "Notes and follow-up after 15:00", "/call-notes", "Claude"]],
+        made: [["file", "Brief: Brightmoor Retail", "Ready 13:00"], ["file", "Notes: Halden Freight Network", "They want a referral deal for 2,400 customers"], ["file", "Notes: Kestrel Parcel", "Budget frozen until spring"]],
+        chat: `<div class="msg"><span class="av">N</span><div class="who">Notetaker<time>13 Nov</time></div><p>Halden call: they want a referral deal and a joint webinar. Next step is an offer this week. I opened a lane for it and named Jonas.</p></div>`
+      },
+      {
+        id: "halden-offer", topic: "partnerships", title: "Offer for Halden Freight Network", state: "warn", lead: "Jonas", opened: "Opened 13 Nov", decision: "d4",
+        next: "After your OK", afterNext: "Mon 23 Nov, Jonas follows up",
+        asked: "Send Halden a referral offer this week, while they are warm.",
+        askedMeta: "You to the Manager after the call, Friday 13 November<i>·</i>The Manager filed it under Partnerships and named Jonas to lead.",
+        status: "Halden wants a deal for its 2,400 business customers. Jonas drafted it from the template: 15% of first-year revenue for 12 months and a joint webinar in January. Due Thursday.",
+        approve: "Send the offer", after: "The offer goes out from your mail tomorrow at 09:00. Jonas follows up on Monday if there is no answer.",
+        steps: [
+          ["ok", "Call notes with what Halden asked for", "Notetaker · 13 Nov"],
+          ["ok", "Offer drafted from the partner template", "Jonas · today, 08:30"],
+          ["ok", "Numbers checked: 2,400 customers, about 4% take it up", "Call prep · today"],
+          ["now", "Your OK to send", "You · by Thursday"],
+          ["todo", "Sent from your mail", "Sender · after your OK"],
+          ["todo", "Halden signs", "Halden · goal: December"],
+        ],
+        agents: [["J", "Jonas Falk", "warn", "Leads", "Waits for your OK", "", "Partner operations", "p"], ["N", "Notetaker", "done", "Done", "Wrote up the call", "/call-notes", "Claude"], ["P", "Call prep", "done", "Done", "Checked the numbers", "/call-brief", "Claude"]],
+        made: [["file", "The offer", "2 pages, from the partner template"], ["file", "Halden call notes", "13 November, 34 minutes"], ["mail", "Cover email", "In your drafts, not sent", "#drafts"]],
+        chat: `<div class="msg"><span class="av person">J</span><div class="who">Jonas<time>08:30</time></div><p>Offer is ready. I kept the template's 15% and added the webinar they asked for. Legal saw the template last week, so no new review needed.</p></div>`
+      },
       {
         id: "webinar", topic: "content", title: "Webinar on Thursday", state: "bad", lead: "Visuals", opened: "Opened Thursday", next: "Now, needs your call",
         asked: "Get the webinar promo out on Monday.",
@@ -1595,12 +1820,36 @@ try {
     : st === "new" ? '<i class="spin"></i>'
     : st === "idle" || st === "next" ? '<i class="dot hollow"></i>'
     : '<i class="dot ' + st + '"></i>';
+  // A lane that waits for someone on your team says who; "Needs you" is only for you.
+  const word = l => (stateOf(l) === "warn" && l.waits ? "Waits for " + l.waits : STATES[stateOf(l)]);
+  const leads = l => (l.lead === "You" ? "You lead" : esc(l.lead) + " leads");
+  const isDone = id => !!($("#" + id) && $("#" + id).classList.contains("done"));
   const kidRow = l => {
     const st = stateOf(l), dot = st === "new" ? '<i class="spin"></i>' : '<i class="dot ' + st + '"></i>';
-    return `<a class="row kid${l.fresh ? " fresh" : ""}" href="#lane/${l.id}" data-nav="lane/${l.id}">${dot}<span class="grow">${esc(l.title)}</span><span class="word"><span class="sr">${STATES[st]}. </span>${esc(l.lead)} leads</span></a>`;
+    return `<a class="row kid${l.fresh ? " fresh" : ""}" href="#lane/${l.id}" data-nav="lane/${l.id}">${dot}<span class="grow">${esc(l.title)}</span><span class="word"><span class="sr">${word(l)}. </span>${leads(l)}</span></a>`;
   };
-  const agentCard = ([av, name, st, word, text, cmd, engine]) =>
-    `<article class="box agent"><div class="top"><span class="av">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p><footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
+  const agentCard = ([av, name, st, word, text, cmd, engine, kind]) =>
+    `<article class="box agent"><div class="top"><span class="av${kind === "p" ? " person" : ""}">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p><footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
+
+  // A topic's plan. A stage or a row can name a decision: once it is approved, it shows what happens instead.
+  function planBox(p) {
+    const stage = ([name, st, pct, sub, alt]) => {
+      if (alt && isDone(alt.d)) ({ st, pct, sub } = { st: alt.st || st, pct: alt.pct, sub: alt.sub });
+      return `<li class="stage s-${st}"><div class="bar"><i style="width:${pct}%"></i></div><b>${st === "done" ? '<svg class="i sm"><use href="#check"/></svg>' : ""}${name}</b><span>${sub}</span></li>`;
+    };
+    const row = ([av, who, kind, text, when, pct, href, alt]) => {
+      const did = alt && isDone(alt.d);
+      if (did) ({ text, when, pct } = { text: alt.text, when: alt.when, pct: null });
+      const t = `<b>${who}</b> ${text}`;
+      return `<li${did ? ' class="did"' : ""}><span class="av sm${kind === "p" ? " person" : ""}" title="${kind === "p" ? "Person" : "Agent"}">${av}</span>${href ? `<a class="t" href="${href}">${t}</a>` : `<span class="t">${t}</span>`}<small>${pct != null ? `<span class="mini"><i style="width:${pct}%"></i></span>` : ""}${did ? '<svg class="i sm ok"><use href="#check"/></svg>' : ""}${when}</small></li>`;
+    };
+    return `<section class="box plan" aria-label="Where it stands">
+      <div class="ph"><b>${p.title}</b><span>${p.when}</span><span class="goal">${p.goal}</span><span class="legend"><span class="av person"></span>people<span class="av"></span>agents</span></div>
+      <ol class="stages" style="--n:${p.stages.length}">${p.stages.map(stage).join("")}</ol>
+      <div class="flow"><div><h3>Now</h3><ul>${p.now.map(row).join("")}</ul></div><div><h3>Next</h3><ul>${p.next.map(row).join("")}</ul></div></div>
+      ${p.night ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>${p.night}</span></p>` : ""}
+    </section>`;
+  }
 
   function drawTree() {
     if (!PAGES.topics) return;
@@ -1625,9 +1874,9 @@ try {
       const open = PAGES.lanes.filter(l => stateOf(l) !== "done").sort(byRank);
       body.innerHTML = open.map(l => {
         const st = stateOf(l), t = topicOf(l);
-        return `<tr><td><a href="#lane/${l.id}">${esc(l.title)}</a></td><td>${t ? `<a href="#topic/${t.id}">${esc(t.name)}</a>` : "Manager"}</td><td>${esc(l.lead)}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${decided(l) ? l.afterNext : l.next}</td></tr>`;
+        return `<tr><td><a href="#lane/${l.id}">${esc(l.title)}</a></td><td>${t ? `<a href="#topic/${t.id}">${esc(t.name)}</a>` : "Manager"}</td><td>${esc(l.lead)}</td><td><span class="st">${sign(st)}${word(l)}</span></td><td>${decided(l) ? l.afterNext : l.next}</td></tr>`;
       }).join("");
-      const topics = new Set(open.map(l => l.topic).filter(Boolean)).size, waiting = open.filter(l => ["warn", "bad"].includes(stateOf(l))).length;
+      const topics = new Set(open.map(l => l.topic).filter(Boolean)).size, waiting = open.filter(l => ["warn", "bad"].includes(stateOf(l)) && !l.waits).length;
       $("[data-lanes-sum]").textContent = `${open.length} lanes in ${topics} topics · ${waiting ? waiting + " wait for you" : "none waits for you"}`;
     }
     markCurrent();
@@ -1636,7 +1885,7 @@ try {
   // Where a lane stands, in one box: what it waits for, and the buttons that settle it.
   function standing(l, withLink) {
     const st = stateOf(l), yes = decided(l);
-    const lead = yes ? "You approved it." : { bad: "It is stuck.", warn: "It waits for you.", ok: "It is working.", done: "Done.", new: "Starting." }[st];
+    const lead = yes ? "You approved it." : st === "warn" && l.waits ? `It waits for ${l.waits}.` : { bad: "It is stuck.", warn: "It waits for you.", ok: "It is working.", done: "Done.", new: "Starting." }[st];
     const icon = st === "bad" ? '<svg class="i bad"><use href="#flame"/></svg>' : st === "done" || yes ? '<svg class="i ok"><use href="#check"/></svg>' : st === "new" ? '<i class="spin"></i>' : `<i class="dot ${st}"></i>`;
     let acts = "";
     if (yes) acts = `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`;
@@ -1652,17 +1901,18 @@ try {
     const focus = t.focus || (t.focusLane ? standing(laneById(t.focusLane), true) : t.calm ? `<div class="box wait"><svg class="i ok"><use href="#check"/></svg><p>${t.calm}</p>${t.calmActs ? `<div class="acts">${t.calmActs}</div>` : ""}</div>` : "");
     const li = l => {
       const st = stateOf(l);
-      return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${esc(l.lead)} leads · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${STATES[st]}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
+      return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${leads(l)} · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${word(l)}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
     };
     v.setAttribute("aria-label", t.name + " topic");
     v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide" style="gap:28px">
-      <header class="sec" style="gap:6px"><h1 class="h1">${t.name}</h1><p class="intro">${t.intro}</p></header>
+      <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1">${t.name}</h1><p class="intro">${t.intro}</p></header>
+      ${t.plan ? planBox(t.plan) : ""}
       ${focus}
       ${t.facts ? `<div class="grid facts">${t.facts.map(([n, what]) => `<div class="box fact"><b>${n}</b><span>${what}</span></div>`).join("")}</div>` : ""}
       <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done this week" : ""}</span></div>
         ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
       </section>
-      <section class="sec"><h2 class="h2">Agents</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
+      <section class="sec"><h2 class="h2">${t.agents.some(a => a[7] === "p") ? "People and agents" : "Agents"}</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
       ${t.jobs ? `<section class="sec"><h2 class="h2">Jobs this week</h2><div class="box tbl"><table class="jobs"><thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead><tbody>${t.jobs.map(([job, agent, st, due, lane]) => `<tr><td>${lane ? `<a href="#lane/${lane}">${job}</a>` : job}</td><td>${agent}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${due}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
     </div></div>
     <template class="chat-src" data-title="${t.name} chat" data-sub="${t.chatSub}" data-placeholder="Message ${t.name}">${t.chat}</template></div>`;
@@ -1679,7 +1929,7 @@ try {
     }).join("");
     v.setAttribute("aria-label", "Lane: " + l.title);
     v.innerHTML = `<div class="split"><div class="scroll"><article class="doc" style="gap:28px">
-      <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : STATES[st]}</span><i>·</i><span>${esc(l.lead)} leads</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
+      <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : word(l)}</span><i>·</i><span>${leads(l)}</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
       <section class="sec"><h2 class="label"><b>1</b>What you asked</h2><blockquote class="asked">${l.asked}</blockquote><p class="meta">${l.askedMeta}</p></section>
       <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
       <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
@@ -1846,6 +2096,7 @@ try {
     { id: "t-decide", kind: "Pages", label: "Decide", icon: "decide", href: "#decision", badge: true, pinned: true },
     { id: "t-drafts", kind: "Pages", label: "Drafts", icon: "mail", href: "#drafts", pinned: true },
     { id: "t-skills", kind: "Pages", label: "Skills", icon: "star", href: "#skills", pinned: true },
+    { id: "a-partnerships", kind: "Topics", label: "Partners", name: "Partnerships", icon: "partner", href: "#topic/partnerships", pinned: true },
     { id: "a-content", kind: "Topics", label: "Content", icon: "pen", href: "#topic/content", pinned: true },
     { id: "a-outbound", kind: "Topics", label: "Outbound", icon: "send", href: "#topic/outbound" },
     { id: "a-paid", kind: "Topics", label: "Paid", icon: "horn", href: "#topic/paid" },
@@ -1932,6 +2183,7 @@ try {
 
   // A stand-in for the manager's intake: in the product it reads the message and the lanes that are open.
   const ROUTES = [
+    { id: "a-partnerships", lead: "Brand scout", re: /partner|clay|apollo|halden|brightmoor|northvale|corvane/i },
     { id: "a-content", lead: "Writer", re: /webinar|visual|promo|post|carousel|image|recap|fenwick|story|quote/i },
     { id: "a-paid", lead: "Paid buyer", re: /\bsearch\b|budget|linkedin|\bads?\b|google|campaign/i },
     { id: "a-outbound", lead: "Sender", re: /sequence|email|\bleads?\b|outbound|fintech/i },

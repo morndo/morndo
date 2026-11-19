@@ -357,6 +357,34 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .fact b{font:400 26px/1.1 var(--serif);letter-spacing:-.01em;color:var(--text)}.fact span{font-size:12px;color:var(--muted)}
 .list li>div b a:hover,.jobs td a:hover{text-decoration:underline;text-underline-offset:3px}
 .wait>.i{flex:none}.wait .acts{flex-wrap:wrap}
+/* A topic's plan: where the work stands at a glance. One bar per stage (green while it is worked on, amber while it
+   waits for a person, plain when done), then who does what now and next. People are round, agents are square. */
+.plan{display:flex;flex-direction:column;gap:16px;padding:16px 18px 14px}
+.plan .ph{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;font-size:12.5px;color:var(--muted)}
+.plan .ph b{font-size:13.5px;font-weight:600;color:var(--text)}
+.plan .ph .goal{margin-left:auto;color:var(--text-2)}
+.plan .legend{display:flex;align-items:center;gap:5px}.plan .legend .av{width:11px;height:11px;border-radius:3px;margin-left:7px}.plan .legend .av.person{border-radius:50%}
+.stages{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:6px;margin:0;padding:0;list-style:none}
+.stage{display:flex;flex-direction:column;gap:5px;min-width:0}
+.stage .bar{height:5px;border-radius:3px;background:var(--fill);overflow:hidden}
+.stage .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+.stage.s-done .bar i{background:var(--text-2)}.stage.s-wait .bar i{background:var(--warn)}
+.stage b{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage.s-now b,.stage.s-wait b{color:var(--text);font-weight:600}.stage.s-next b{color:var(--muted)}
+.stage span{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:6px 28px;padding-top:12px;border-top:1px solid var(--line)}
+.flow h3{padding:0 0 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
+.flow li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:9px;align-items:center;min-height:30px;font-size:13px}
+.flow .t{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text-2)}
+.flow .t b{font-weight:600;color:var(--text)}
+.flow a.t:hover{color:var(--text)}
+.flow small{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);white-space:nowrap}
+.flow li.did .t{color:var(--muted)}
+.mini{width:44px;height:4px;border-radius:2px;background:var(--fill);overflow:hidden}.mini i{display:block;height:100%;background:var(--ok)}
+.av.sm{width:20px;height:20px;border-radius:7px;font-size:9.5px}
+.av.person{border-radius:50%;background:var(--raised);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-2,var(--line))}
+.night{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2)}.night .i{color:var(--muted);flex:none}
+@container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:12px}.plan .ph .goal{margin-left:0}}
 .sw{position:relative;width:34px;height:20px;border-radius:10px;background:var(--tile-on);flex:none;transition:background .18s}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .18s,background .18s}
 .sw[aria-checked="true"]{background:var(--ink)}.sw[aria-checked="true"]::after{transform:translateX(14px);background:var(--ink-fg)}
@@ -639,6 +667,7 @@ try {
   <symbol id="send" viewBox="0 0 24 24"><path d="M21 3 3.500 10.200l6.900 3.400 3.400 6.900z"/><path fill="currentColor" d="M21 3 10.400 13.600l3.400 6.900z"/></symbol>
   <symbol id="horn" viewBox="0 0 24 24"><path d="M7 9.500 19 5v14L7 14.500"/><path fill="currentColor" d="M3.500 9.500H7v5H3.500z"/><path d="M9.500 15.400v2.400a2 2 0 0 0 4 0v-.9"/></symbol>
   <symbol id="search" viewBox="0 0 24 24"><circle cx="10.500" cy="10.500" r="6.500"/><path d="M15.400 15.400 20.500 20.500"/><circle fill="currentColor" cx="10.500" cy="10.500" r="1.600"/></symbol>
+  <symbol id="partner" viewBox="0 0 24 24"><circle cx="9" cy="10" r="5"/><circle cx="15" cy="14" r="5"/><path fill="currentColor" d="M13.920 9.120a5 5 0 0 1-3.840 5.760 5 5 0 0 1 3.840-5.760z"/></symbol>
   <symbol id="target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.800"/><path d="M12 2v3.200M12 18.800V22M2 12h3.200M18.800 12H22"/><circle fill="currentColor" cx="12" cy="12" r="1.800"/></symbol>
   <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
   <symbol id="chat" viewBox="0 0 24 24"><path d="M5.500 4h13A2.500 2.500 0 0 1 21 6.500v8a2.500 2.500 0 0 1-2.500 2.500H10.500L6 20.500V17h-.500A2.500 2.500 0 0 1 3 14.500v-8A2.500 2.500 0 0 1 5.500 4z"/><circle fill="currentColor" stroke="none" cx="8.200" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="12" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="15.800" cy="10.500" r="1.350"/></symbol>
@@ -967,12 +996,36 @@ try {
     : st === "new" ? '<i class="spin"></i>'
     : st === "idle" || st === "next" ? '<i class="dot hollow"></i>'
     : '<i class="dot ' + st + '"></i>';
+  // A lane that waits for someone on your team says who; "Needs you" is only for you.
+  const word = l => (stateOf(l) === "warn" && l.waits ? "Waits for " + l.waits : STATES[stateOf(l)]);
+  const leads = l => (l.lead === "You" ? "You lead" : esc(l.lead) + " leads");
+  const isDone = id => !!($("#" + id) && $("#" + id).classList.contains("done"));
   const kidRow = l => {
     const st = stateOf(l), dot = st === "new" ? '<i class="spin"></i>' : '<i class="dot ' + st + '"></i>';
-    return `<a class="row kid${l.fresh ? " fresh" : ""}" href="#lane/${l.id}" data-nav="lane/${l.id}">${dot}<span class="grow">${esc(l.title)}</span><span class="word"><span class="sr">${STATES[st]}. </span>${esc(l.lead)} leads</span></a>`;
+    return `<a class="row kid${l.fresh ? " fresh" : ""}" href="#lane/${l.id}" data-nav="lane/${l.id}">${dot}<span class="grow">${esc(l.title)}</span><span class="word"><span class="sr">${word(l)}. </span>${leads(l)}</span></a>`;
   };
-  const agentCard = ([av, name, st, word, text, cmd, engine]) =>
-    `<article class="box agent"><div class="top"><span class="av">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p><footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
+  const agentCard = ([av, name, st, word, text, cmd, engine, kind]) =>
+    `<article class="box agent"><div class="top"><span class="av${kind === "p" ? " person" : ""}">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p><footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
+
+  // A topic's plan. A stage or a row can name a decision: once it is approved, it shows what happens instead.
+  function planBox(p) {
+    const stage = ([name, st, pct, sub, alt]) => {
+      if (alt && isDone(alt.d)) ({ st, pct, sub } = { st: alt.st || st, pct: alt.pct, sub: alt.sub });
+      return `<li class="stage s-${st}"><div class="bar"><i style="width:${pct}%"></i></div><b>${st === "done" ? '<svg class="i sm"><use href="#check"/></svg>' : ""}${name}</b><span>${sub}</span></li>`;
+    };
+    const row = ([av, who, kind, text, when, pct, href, alt]) => {
+      const did = alt && isDone(alt.d);
+      if (did) ({ text, when, pct } = { text: alt.text, when: alt.when, pct: null });
+      const t = `<b>${who}</b> ${text}`;
+      return `<li${did ? ' class="did"' : ""}><span class="av sm${kind === "p" ? " person" : ""}" title="${kind === "p" ? "Person" : "Agent"}">${av}</span>${href ? `<a class="t" href="${href}">${t}</a>` : `<span class="t">${t}</span>`}<small>${pct != null ? `<span class="mini"><i style="width:${pct}%"></i></span>` : ""}${did ? '<svg class="i sm ok"><use href="#check"/></svg>' : ""}${when}</small></li>`;
+    };
+    return `<section class="box plan" aria-label="Where it stands">
+      <div class="ph"><b>${p.title}</b><span>${p.when}</span><span class="goal">${p.goal}</span><span class="legend"><span class="av person"></span>people<span class="av"></span>agents</span></div>
+      <ol class="stages" style="--n:${p.stages.length}">${p.stages.map(stage).join("")}</ol>
+      <div class="flow"><div><h3>Now</h3><ul>${p.now.map(row).join("")}</ul></div><div><h3>Next</h3><ul>${p.next.map(row).join("")}</ul></div></div>
+      ${p.night ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>${p.night}</span></p>` : ""}
+    </section>`;
+  }
 
   function drawTree() {
     if (!PAGES.topics) return;
@@ -997,9 +1050,9 @@ try {
       const open = PAGES.lanes.filter(l => stateOf(l) !== "done").sort(byRank);
       body.innerHTML = open.map(l => {
         const st = stateOf(l), t = topicOf(l);
-        return `<tr><td><a href="#lane/${l.id}">${esc(l.title)}</a></td><td>${t ? `<a href="#topic/${t.id}">${esc(t.name)}</a>` : "Manager"}</td><td>${esc(l.lead)}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${decided(l) ? l.afterNext : l.next}</td></tr>`;
+        return `<tr><td><a href="#lane/${l.id}">${esc(l.title)}</a></td><td>${t ? `<a href="#topic/${t.id}">${esc(t.name)}</a>` : "Manager"}</td><td>${esc(l.lead)}</td><td><span class="st">${sign(st)}${word(l)}</span></td><td>${decided(l) ? l.afterNext : l.next}</td></tr>`;
       }).join("");
-      const topics = new Set(open.map(l => l.topic).filter(Boolean)).size, waiting = open.filter(l => ["warn", "bad"].includes(stateOf(l))).length;
+      const topics = new Set(open.map(l => l.topic).filter(Boolean)).size, waiting = open.filter(l => ["warn", "bad"].includes(stateOf(l)) && !l.waits).length;
       $("[data-lanes-sum]").textContent = `${open.length} lanes in ${topics} topics · ${waiting ? waiting + " wait for you" : "none waits for you"}`;
     }
     markCurrent();
@@ -1008,7 +1061,7 @@ try {
   // Where a lane stands, in one box: what it waits for, and the buttons that settle it.
   function standing(l, withLink) {
     const st = stateOf(l), yes = decided(l);
-    const lead = yes ? "You approved it." : { bad: "It is stuck.", warn: "It waits for you.", ok: "It is working.", done: "Done.", new: "Starting." }[st];
+    const lead = yes ? "You approved it." : st === "warn" && l.waits ? `It waits for ${l.waits}.` : { bad: "It is stuck.", warn: "It waits for you.", ok: "It is working.", done: "Done.", new: "Starting." }[st];
     const icon = st === "bad" ? '<svg class="i bad"><use href="#flame"/></svg>' : st === "done" || yes ? '<svg class="i ok"><use href="#check"/></svg>' : st === "new" ? '<i class="spin"></i>' : `<i class="dot ${st}"></i>`;
     let acts = "";
     if (yes) acts = `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`;
@@ -1024,17 +1077,18 @@ try {
     const focus = t.focus || (t.focusLane ? standing(laneById(t.focusLane), true) : t.calm ? `<div class="box wait"><svg class="i ok"><use href="#check"/></svg><p>${t.calm}</p>${t.calmActs ? `<div class="acts">${t.calmActs}</div>` : ""}</div>` : "");
     const li = l => {
       const st = stateOf(l);
-      return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${esc(l.lead)} leads · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${STATES[st]}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
+      return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${leads(l)} · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${word(l)}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
     };
     v.setAttribute("aria-label", t.name + " topic");
     v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide" style="gap:28px">
-      <header class="sec" style="gap:6px"><h1 class="h1">${t.name}</h1><p class="intro">${t.intro}</p></header>
+      <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1">${t.name}</h1><p class="intro">${t.intro}</p></header>
+      ${t.plan ? planBox(t.plan) : ""}
       ${focus}
       ${t.facts ? `<div class="grid facts">${t.facts.map(([n, what]) => `<div class="box fact"><b>${n}</b><span>${what}</span></div>`).join("")}</div>` : ""}
       <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done this week" : ""}</span></div>
         ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
       </section>
-      <section class="sec"><h2 class="h2">Agents</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
+      <section class="sec"><h2 class="h2">${t.agents.some(a => a[7] === "p") ? "People and agents" : "Agents"}</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
       ${t.jobs ? `<section class="sec"><h2 class="h2">Jobs this week</h2><div class="box tbl"><table class="jobs"><thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead><tbody>${t.jobs.map(([job, agent, st, due, lane]) => `<tr><td>${lane ? `<a href="#lane/${lane}">${job}</a>` : job}</td><td>${agent}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${due}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
     </div></div>
     <template class="chat-src" data-title="${t.name} chat" data-sub="${t.chatSub}" data-placeholder="Message ${t.name}">${t.chat}</template></div>`;
@@ -1051,7 +1105,7 @@ try {
     }).join("");
     v.setAttribute("aria-label", "Lane: " + l.title);
     v.innerHTML = `<div class="split"><div class="scroll"><article class="doc" style="gap:28px">
-      <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : STATES[st]}</span><i>·</i><span>${esc(l.lead)} leads</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
+      <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : word(l)}</span><i>·</i><span>${leads(l)}</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
       <section class="sec"><h2 class="label"><b>1</b>What you asked</h2><blockquote class="asked">${l.asked}</blockquote><p class="meta">${l.askedMeta}</p></section>
       <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
       <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
