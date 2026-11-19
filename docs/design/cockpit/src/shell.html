@@ -62,7 +62,7 @@
   --sans:"Schibsted Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
   --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
   --fs-3xs:10px;--fs-2xs:11.5px;--fs-xs:12px;--fs-sm:12.5px;--fs-ui:13px;--fs-md:14px;--fs-lg:16px;--fs-title:18px;
-  --fs-xl:21px;--fs-2xl:28px;--fs-3xl:34px;--fs-4xl:40px;--fs-5xl:44px;
+  --fs-xl:21px;--fs-2xl:28px;--fs-3xl:34px;--fs-4xl:40px;--fs-5xl:44px;--fs-6xl:64px;
   --lh-tight:1.15;--lh-snug:1.3;--lh-ui:1.45;--lh-body:1.55;--lh-read:1.75;
   /* Space, on a 4 px grid */
   --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-7:32px;--sp-8:40px;--sp-9:56px;--sp-10:72px;
@@ -508,15 +508,22 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 /* A topic that brings a forecast is read the way its owner is asked about it: will we make it, what needs you, what
    moved, who does what today. Every number names what it counts and over which time. */
 .doc.topic .h1.sm{font-size:var(--fs-3xl)}
-.status{display:flex;flex-direction:column;gap:var(--sp-3)}
-.st-row{display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--sp-4) var(--sp-8)}
-.st-grp{display:flex;flex-direction:column;gap:var(--sp-2)}
-.st-grp>small{font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
-.st-grp.fc{padding-left:var(--sp-6);border-left:1px solid var(--line)}
-.st-kpis{display:flex;gap:var(--sp-7)}
-.st-row .health{margin-left:auto}
-.asof{font-size:var(--fs-xs);color:var(--muted)}
-.fc-why{max-width:var(--w-read);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose);text-wrap:pretty}
+/* The goal's overview: the verdict and three numbers first, then the trajectory, the deals beside what needs you, and
+   the funnel as one strip. What happened is set upright, what is forecast in italic. */
+.gh{display:flex;flex-direction:column;gap:var(--sp-2)}
+.gh-eye{font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.gh-verdict{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font:400 var(--fs-4xl)/1.1 var(--serif);letter-spacing:-.02em;color:var(--text-hi)}
+.gh-verdict .dot{width:12px;height:12px}
+.gh-verdict small{font:600 var(--fs-md)/1 var(--sans);letter-spacing:0;color:var(--warn)}
+.gh-nums{display:flex;flex-wrap:wrap;gap:var(--sp-4) var(--sp-8);margin-top:var(--sp-4)}
+.gn{display:flex;flex-direction:column;gap:6px}
+.gn b{font:400 var(--fs-6xl)/.9 var(--serif);letter-spacing:-.03em;color:var(--text-hi);font-variant-numeric:lining-nums}
+.gn b small{font-size:.5em;color:var(--muted);letter-spacing:0}
+.gn.fc b{font-style:italic;color:var(--text-2)}
+.gn.first{padding-left:var(--sp-8);border-left:1px solid var(--line)}
+.gn span{font-size:var(--fs-sm);color:var(--muted)}
+.gc{display:flex;flex-direction:column;gap:var(--sp-2)}
+.gc .gc-in{font-size:var(--fs-md);color:var(--text-2)}
 .traj{position:relative;margin:var(--sp-2) 0 0;display:flex;flex-direction:column;gap:var(--sp-2)}
 .traj svg{display:block;width:100%;height:auto;overflow:visible}
 .traj .ct{font-size:var(--fs-2xs)}.traj .cv{font-size:var(--fs-sm)}
@@ -527,54 +534,59 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .legend .tr-k-act{background:var(--text-2)}.legend .tr-k-fc{height:8px;background:color-mix(in srgb,var(--best) 30%,transparent);box-shadow:inset 0 -2px 0 var(--best),inset 0 2px 0 transparent}
 .tr-tip{position:absolute;top:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--r-sm);background:var(--raised);border:1px solid var(--rim);box-shadow:var(--sh-pop);font-size:var(--fs-xs);color:var(--text-2);pointer-events:none;white-space:nowrap}
 .tr-tip b{color:var(--text-hi);font-weight:600}
-/* A deal at its last fact: a milestone track, never a percentage, so a first call never looks like a signature. */
-.deals{display:flex;flex-direction:column}
-.deals>li+li{border-top:1px solid var(--line)}
-.deals a{display:grid;grid-template-columns:minmax(150px,200px) 150px minmax(0,1fr);gap:var(--sp-2) var(--sp-5);align-items:start;padding:var(--sp-3) 0}
-.deals a:hover b{text-decoration:underline;text-underline-offset:3px}
-.deals .who b{display:block;font-weight:600;color:var(--text-hi)}
-.deals .who small{font-size:var(--fs-xs);color:var(--muted)}.deals .cf-likely{color:var(--text-2)}
+.g2{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:var(--sp-7);align-items:start}
+/* A deal: its name and next step, a track of factual milestones, and its forecast in a word. */
+.dl{display:flex;flex-direction:column}
+.dl>li+li{border-top:1px solid var(--line)}
+.dl a{display:grid;grid-template-columns:minmax(0,1fr) auto 84px;gap:var(--sp-4);align-items:center;padding:10px 0}
+.dn b{display:block;font-weight:600;color:var(--text-hi)}.dn small{font-size:var(--fs-sm);color:var(--muted)}
+.dl a:hover .dn b{text-decoration:underline;text-underline-offset:3px}
+.cf{justify-self:end;display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:600;white-space:nowrap}
+.cf-likely{background:var(--ink);color:var(--ink-fg)}.cf-possible{box-shadow:inset 0 0 0 1px var(--edge-2);color:var(--text)}.cf-early{color:var(--muted)}
 .ms{display:flex;flex-direction:column;gap:6px;padding-top:5px}.ms small{font-size:var(--fs-xs);color:var(--text-2)}
 .ms ol{display:flex;align-items:center;margin:0;padding:0;list-style:none}
 .ms li{position:relative;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--edge-2);flex:none}
 .ms li+li{margin-left:14px}.ms li+li::before{content:"";position:absolute;right:calc(100% + 1.5px);top:50%;width:14px;height:1.5px;margin-top:-.75px;background:var(--edge)}
 .ms li.done{background:var(--text-2);border-color:var(--text-2)}.ms li.done+li::before{background:var(--text-2)}
 .ms li.now{border-color:var(--text-hi);box-shadow:0 0 0 3px color-mix(in srgb,var(--text) 18%,transparent)}
-.ev{display:flex;flex-direction:column;gap:2px;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}.ev .nx{color:var(--text-2)}
+.ms.dots{padding:0}.ms.dots li{width:8px;height:8px}.ms.dots li+li{margin-left:9px}.ms.dots li+li::before{width:9px}
+/* What needs you: the one card on the page. The decision in a row, then the team's blockers, two at most. */
+.ny{display:flex;flex-direction:column;gap:var(--sp-4);padding:var(--sp-5)}
+.ny-h{font:italic 400 var(--fs-xl)/1.1 var(--serif);color:var(--text)}
+.ny-dec{display:grid;grid-template-columns:14px minmax(0,1fr);gap:var(--sp-2) var(--sp-3);align-items:start}
+.ny-dec>.dot{margin-top:7px}.ny-dec>.i{margin-top:2px}
+.ny-dec b{display:block;font-size:var(--fs-lg);font-weight:600;color:var(--text-hi)}.ny-dec span{font-size:var(--fs-sm);color:var(--muted)}
+.ny-dec .acts{grid-column:2;flex-wrap:wrap}
+.ny-bl{display:flex;flex-direction:column;gap:6px;padding-top:var(--sp-4);border-top:1px solid var(--line)}
+.ny-h2{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);font-weight:600;color:var(--text-2)}
+.ny-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-2xs)}
+.ny-bl li a{display:flex;flex-wrap:wrap;gap:0 8px;padding:3px 0;font-size:var(--fs-md)}.ny-bl li b{font-weight:600;color:var(--text-hi)}.ny-bl li span{color:var(--text-2)}
+.ny-bl li a:hover span{color:var(--text)}
+.ny-more{font-size:var(--fs-sm);color:var(--muted)}.ny-more:hover{color:var(--text)}
+/* The funnel in one strip: each step's bar is its share of the first, the count, this week's change, and its rate
+   against the plan where there is one. */
+.fn{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:var(--sp-3);margin:0;padding:0;list-style:none}
+.fn li{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fn i{display:block;height:6px;margin-bottom:6px;border-radius:var(--r-pill);background:var(--edge-2)}
+.fn .warn i{background:var(--warn)}
+.fn b{display:flex;align-items:baseline;gap:6px;font:400 var(--fs-2xl)/1 var(--serif);color:var(--text-hi);font-variant-numeric:lining-nums}
+.fn b em{font:600 var(--fs-xs)/1 var(--sans);font-style:normal;color:var(--ok)}
+.fn span{font-size:var(--fs-sm);color:var(--text-2)}
+.fn small{display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--muted)}.fn .warn small{color:var(--warn)}
 .deals-out{font-size:var(--fs-sm);color:var(--muted)}
 .gap{display:flex;flex-direction:column;gap:6px;margin-top:var(--sp-2);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
 .gap b{color:var(--text-hi);font-weight:600}
 .gap ol{margin:0;padding:0;list-style:none;counter-reset:g;display:flex;flex-direction:column;gap:4px}
 .gap li{display:grid;grid-template-columns:24px minmax(0,1fr);text-wrap:pretty}
 .gap li::before{counter-increment:g;content:counter(g,decimal-leading-zero);padding-top:4px;font:var(--fs-xs)/1 var(--mono);color:var(--faint)}
-.attn{display:flex;flex-direction:column}
-.attn li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:var(--sp-3);align-items:start;padding:var(--sp-2) 0}
-.attn li+li{border-top:1px solid var(--line)}
-.attn .lt{padding-top:5px;display:flex;justify-content:center}
-.attn b{display:block;font-weight:600;color:var(--text-hi)}.attn b a:hover{text-decoration:underline;text-underline-offset:3px}
-.attn div span{font-size:var(--fs-md);color:var(--prose)}
-.attn .st{padding-top:2px;font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap}
-.routine{display:flex;align-items:center;gap:var(--sp-2);font-size:var(--fs-sm);color:var(--muted)}
-.moved{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;font-size:var(--fs-sm);color:var(--muted)}
-.moved>b{font-weight:600;color:var(--text-2)}.moved span b{font-weight:600;color:var(--text)}
-/* The decision that waits for you comes with its recommendation and the cost of waiting. */
-.askline.rich{align-items:flex-start;padding:var(--sp-5) var(--sp-5) var(--sp-5) var(--sp-6);background:var(--surface)}
-.askline.rich>.dot{margin-top:7px}
-.al-body{flex:1 1 380px;display:flex;flex-direction:column;gap:var(--sp-2)}
-.al-body>p{flex:none;font-size:var(--fs-lg)}
+.evl{display:flex;flex-direction:column;gap:var(--sp-2)}
+.evl li{display:grid;grid-template-columns:minmax(140px,200px) minmax(0,1fr);gap:var(--sp-4);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.evl b{font-weight:600;color:var(--text-hi)}
+/* A decision's reasoning, on its lane: what we recommend and what waiting costs. */
 .rec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px var(--sp-3);margin:0;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
 .rec dt{color:var(--muted)}.rec dd{margin:0;text-wrap:pretty}
-.pl-steps{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:var(--sp-2);margin:0;padding:0;list-style:none}
-.pl-steps li{position:relative;display:flex;flex-direction:column;gap:2px;padding:2px 0 0}
-.pl-steps li+li{padding-left:var(--sp-3);border-left:1px solid var(--line)}
-.pl-steps b{font:400 var(--fs-2xl)/1.1 var(--serif);color:var(--text-hi);font-variant-numeric:lining-nums}
-.pl-steps b small{font-size:.6em;color:var(--muted)}
-.pl-steps span{font-size:var(--fs-sm);color:var(--text-2)}
-.pl-steps em{display:flex;align-items:center;gap:6px;margin-top:4px;font-size:var(--fs-xs);font-style:normal;color:var(--muted)}
-.pl-steps .up em{color:var(--ok)}.pl-steps .warn em{color:var(--warn)}
-.pl-steps a{display:flex;flex-direction:column;gap:2px}.pl-steps a:hover span{color:var(--text)}
-@container (max-width:760px){.deals a{grid-template-columns:minmax(0,1fr)}.st-grp.fc{padding-left:0;border-left:0}.st-row .health{margin-left:0}
-  .pl-steps{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:var(--sp-4)}.pl-steps li:nth-child(4n+1){padding-left:0;border-left:0}}
+@container (max-width:860px){.g2{grid-template-columns:minmax(0,1fr)}.g2 .ny{order:-1}.fn{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:var(--sp-5)}.evl li{grid-template-columns:minmax(0,1fr);gap:2px}}
+@container (max-width:560px){.gn.first{padding-left:0;border-left:0}.gn b{font-size:var(--fs-5xl)}}
 @container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr))}.gl-side{margin-left:0;justify-content:flex-start}}
 @container (max-width:760px){.hist>ul>li{grid-template-columns:38px 20px minmax(0,1fr) auto}.hist .end{display:none;grid-column:3/-1;justify-content:flex-start}.hist>ul>li:hover .end,.hist>ul>li:focus-within .end{display:flex}.hist>ul>li.subs{padding-left:79px}}
 .sw{position:relative;width:34px;height:20px;border-radius:var(--r-pill);background:var(--tile-on);flex:none;transition:background .18s}
@@ -1322,7 +1334,7 @@ try {
   }
 
   // The one thing on a topic that waits for you, in one line. A lane that waits for someone else is not shown here.
-  function askLine(l, rich) {
+  function askLine(l) {
     if (!l) return "";
     const st = stateOf(l), yes = decided(l);
     if (!yes && st !== "bad" && !(st === "warn" && !l.waits)) return "";
@@ -1330,9 +1342,8 @@ try {
     const acts = yes ? `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`
       : l.decision ? `<button class="btn ink" data-approve-id="${l.decision}"><svg class="i"><use href="#check"/></svg>${l.approve || "Approve"}</button>` : l.acts || "";
     const head = `<p><b>${esc(l.short || l.title)}${yes ? ": you approved it" : ""}</b><span>${yes ? l.shortAfter || "" : (st === "bad" ? "Stuck · " : "Waits for you · ") + (l.ask || "")}</span></p>`;
-    const go = `<a class="btn quiet" href="#lane/${l.id}">${l.rec ? "Open the offer" : "Details"}</a>`;
-    if (rich && l.rec && !yes) return `<div class="box askline rich">${icon}<div class="al-body">${head}<dl class="rec"><dt>We recommend</dt><dd>${l.rec}</dd><dt>If it waits</dt><dd>${l.delay}</dd></dl></div><div class="acts">${acts}${go}</div></div>`;
-    return `<div class="box askline${yes ? " done" : ""}${rich ? " rich" : ""}">${icon}${head}<div class="acts">${acts}${go}</div></div>`;
+    const go = `<a class="btn quiet" href="#lane/${l.id}">Details</a>`;
+    return `<div class="box askline${yes ? " done" : ""}">${icon}${head}<div class="acts">${acts}${go}</div></div>`;
   }
 
   // A topic's forecast, pipeline and team today. A slot, a step or a row can name a decision and show what changes once
@@ -1383,40 +1394,42 @@ try {
     tip.style.left = Math.min(px * k + 12, box.width - tip.offsetWidth) + "px";
   });
 
+  // The overview holds decisions and exceptions; evidence and explanations are one click away. Mostly numbers, a chart
+  // and short labels; a sentence only where a decision needs it.
   function goalGlance(t) {
-    const g = t.goal, deals = g.deals.map(pick);
+    const g = t.goal, deals = g.deals.map(pick), l = laneById(t.focusLane), yes = decided(l);
     const likely = deals.filter(x => x.conf === "Likely").length, open = g.target - g.signed - likely;
     trajData = g.trajectory;
-    const status = `<section class="status" aria-label="Are we going to make it">
-        <div class="st-row">
-          <div class="st-grp"><small>Signed</small><div class="kpi"><b>${g.signed}<small>/${g.target}</small></b><span>${g.targetWords}</span></div></div>
-          <div class="st-grp fc"><small>Forecast</small><div class="st-kpis"><div class="kpi"><b>${likely}</b><span>likely to close</span></div><div class="kpi"><b>${open}</b><span>not backed by a likely deal</span></div></div></div>
-          <span class="health"><i class="dot ${g.health[0]} still"></i>${g.health[1]}</span>
-        </div>
-        <p class="asof">${g.asOf}</p>
-        <p class="fc-why">${g.verdict}</p>
-        ${trajectory(g.trajectory)}
-      </section>`;
+    const head = `<header class="gh">
+        <p class="gh-eye">${t.name} · ${t.when} · ${g.asOf}</p>
+        <h1 class="gh-verdict"><span class="sr">${t.name}: </span><i class="dot ${g.health[0]} still"></i>${g.health[1]}<small>${g.action}</small></h1>
+        <div class="gh-nums">
+          <div class="gn"><b>${g.signed}<small>/${g.target}</small></b><span>Signed</span></div>
+          <div class="gn fc first"><b>${likely}</b><span>Likely, forecast</span></div>
+          <div class="gn fc"><b>${open}</b><span>Still unsecured</span></div>
+        </div></header>`;
+    const chart = `<section class="gc" aria-label="Forecast against the goal"><div class="headrow"><h2 class="h2">Forecast vs goal</h2><span class="gc-in">${g.insight}</span></div>${trajectory(g.trajectory)}</section>`;
     const MS = g.milestones;
     const deal = x => {
       const track = MS.map((m, i) => `<li class="${i < x.at ? "done" : i === x.at ? "now" : ""}" title="${m}"><span class="sr">${m}${i < x.at ? ": done" : i === x.at ? ": now" : ""}</span></li>`).join("");
-      return `<li><a href="${x.href}"><span class="who"><b>${x.name}</b><small class="cf-${x.conf.toLowerCase()}">${x.conf}${x.close ? " · " + x.close : ""}</small></span>
-        <span class="ms"><ol>${track}</ol><small>${x.stage}</small></span>
-        <span class="ev"><span>${x.evidence}</span><span class="nx">Next: ${x.next}</span></span></a></li>`;
+      return `<li><a href="${x.href}"><span class="dn"><b>${x.name}</b><small>${x.short}</small></span><span class="ms dots" aria-label="${x.stage}"><ol>${track}</ol></span><span class="cf cf-${x.conf.toLowerCase()}">${x.conf}</span></a></li>`;
     };
-    const path = `<section class="sec" aria-label="Path to the goal"><div class="headrow"><h2 class="h2">${g.pathTitle}</h2><span>Each deal at its last fact: ${MS.join(" → ")}</span></div>
-        <ul class="deals">${deals.map(deal).join("")}</ul>
-        ${g.out ? `<p class="deals-out">${g.out}</p>` : ""}
-        <div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div></section>`;
-    const att = x => `<li><span class="lt">${sign(x.st)}</span><div><b><a href="${x.href}">${x.what}</a></b><span>${x.why}</span></div><span class="st">${x.who}</span></li>`;
-    const attention = `<section class="sec" aria-label="Needs attention"><div class="headrow"><h2 class="h2">Needs attention</h2><span>Only what is blocked, late, or waits for someone</span></div>
-        <ul class="attn">${g.attention.map(att).join("")}</ul><p class="routine">${sign("ok")}<span>${g.routine}</span></p></section>`;
-    const fs = x => `<li class="${x.st || ""}"><b>${x.n}</b><span>${x.what}</span>${x.rate ? `<em>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</em>` : ""}</li>`;
+    const dealsBox = `<section class="sec" aria-label="Deals"><div class="headrow"><h2 class="h2">Deals</h2><span>Toward ${g.target} · ${MS[0].toLowerCase()} to ${MS[MS.length - 1].toLowerCase()}</span></div><ul class="dl">${deals.map(deal).join("")}</ul></section>`;
+    const d = g.decision, top = g.attention.slice(0, 2), more = g.attention.slice(2);
+    const needs = `<section class="box ny" aria-label="Needs you"><h2 class="ny-h">Needs you</h2>
+        <div class="ny-dec">${yes ? '<svg class="i ok"><use href="#check"/></svg>' : '<i class="dot warn still"></i>'}<div><b>${yes ? d.done : d.title}</b><span>${yes ? l.shortAfter : d.sub}</span></div>
+          <div class="acts">${yes ? `<button class="btn quiet s" data-undo-id="${l.decision}">Undo</button>` : `<button class="btn ink s" data-approve-id="${l.decision}"><svg class="i sm"><use href="#check"/></svg>${l.approve}</button>`}<a class="btn quiet s" href="#lane/${l.id}">Why</a></div></div>
+        <div class="ny-bl"><p class="ny-h2">Team blockers<span class="ny-n">${g.attention.length}</span></p>
+          <ul>${top.map(x => `<li><a href="${x.href}"><b>${x.who}</b><span>${x.short}</span></a></li>`).join("")}</ul>
+          ${more.length ? `<a class="ny-more" href="${more[0].href}">+${more.length} more</a>` : ""}</div></section>`;
+    const st = g.funnel.steps, max = Math.max(...st.map(x => +x.n));
     const funnel = `<section class="sec" aria-label="Funnel"><div class="headrow"><h2 class="h2">Funnel</h2><span>${g.funnel.since}</span></div>
-        <ol class="pl-steps" style="--n:${g.funnel.steps.length}">${g.funnel.steps.map(fs).join("")}</ol>
-        <p class="moved"><b>This week</b>${g.funnel.week.map(([n, w]) => `<span><b>${n}</b> ${w}</span>`).join("")}</p>
-        <p class="moved"><b>Waiting longest</b><span>${g.funnel.aging}</span></p></section>`;
-    return { status, path, attention, funnel };
+        <ol class="fn" style="--n:${st.length}">${st.map(x => `<li class="${x.st || ""}"><i style="width:${Math.max(3, Math.round(+x.n / max * 100))}%"></i><b>${x.n}${x.d ? `<em>${x.d}</em>` : ""}</b><span>${x.what}</span>${x.rate ? `<small>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</small>` : ""}</li>`).join("")}</ol></section>`;
+    const rk = "rp:" + t.id;
+    const recovery = `<details class="more" data-more="${rk}"${ui.more[rk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Recovery plan<small>${g.gap.steps.length} steps to reach ${g.target}, and what each forecast rests on</small></summary><div class="body">
+        <div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div>
+        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence} Next: ${x.next}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section></div></details>`;
+    return { head, body: chart + `<div class="g2">${dealsBox}${needs}</div>` + funnel + recovery };
   }
 
   function drawTopic(t) {
@@ -1438,15 +1451,15 @@ try {
     const plan = g && t.plan ? `<section class="sec"><div class="headrow"><h2 class="h2">Plan</h2><span>Stages and who works in each; click one</span></div><div class="box glance">${stagesBox(t)}</div></section>` : "";
     v.setAttribute("aria-label", t.name + " topic");
     v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide topic" style="gap:${g ? "var(--sp-7)" : "22px"}">
-      <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1${g ? " sm" : ""}">${t.name}</h1></header>
-      ${g ? g.status + (t.focusLane ? askLine(laneById(t.focusLane), true) : "") + g.path + g.attention + g.funnel : `<section class="box glance" aria-label="Where it stands">
+      ${g ? g.head : `<header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1">${t.name}</h1></header>`}
+      ${g ? g.body : `<section class="box glance" aria-label="Where it stands">
         <div class="gl-top">${nums}<div class="gl-side">${crew}<span class="health"><i class="dot ${hs === "idle" ? "hollow" : hs} still"></i>${hw}${t.when ? `<small>${t.when}</small>` : ""}</span></div></div>
         ${t.plan ? stagesBox(t) : ""}
         ${night}
       </section>
       ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}`}
       <details class="more" data-more="${t.id}"${ui.more[t.id] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Details<small>${lanes.length} lanes · ${people ? people + (people === 1 ? " person, " : " people, ") : ""}${agents} ${agents === 1 ? "agent" : "agents"}</small></summary><div class="body">
-        <p class="intro">${t.intro}</p>
+        ${g && t.meta ? `<div class="meta">${t.meta}</div>` : ""}<p class="intro">${t.intro}</p>
         ${plan}
         <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done" : ""}</span></div>
           ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
@@ -1472,7 +1485,7 @@ try {
     v.innerHTML = `<div class="split"><div class="scroll"><article class="doc" style="gap:28px">
       <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : word(l)}</span><i>·</i><span>${leads(l)}</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
       <section class="sec"><h2 class="label"><b>1</b>What you asked</h2><blockquote class="asked">${l.asked}</blockquote><p class="meta">${l.askedMeta}</p></section>
-      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}${l.extra || ""}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
+      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}${l.rec && !yes ? `<dl class="rec"><dt>We recommend</dt><dd>${l.rec}</dd><dt>If it waits</dt><dd>${l.delay}</dd></dl>` : ""}${l.extra || ""}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
       <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
       ${l.made && l.made.length ? `<section class="sec"><h2 class="label"><b>4</b>What it made</h2><ul class="box list">${l.made.map(([icon, what, more, href]) => `<li><span class="lt"><svg class="i sm"><use href="#${icon}"/></svg></span><div><b>${what}</b><span>${more}</span></div>${href ? `<a class="btn quiet s" href="${href}">Open</a>` : '<button class="btn quiet s">Open</button>'}</li>`).join("")}</ul></section>` : ""}
       ${t && t.history ? historyMore("h:" + l.id, t.history, l.id) : ""}
