@@ -357,34 +357,61 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .fact b{font:400 26px/1.1 var(--serif);letter-spacing:-.01em;color:var(--text)}.fact span{font-size:12px;color:var(--muted)}
 .list li>div b a:hover,.jobs td a:hover{text-decoration:underline;text-underline-offset:3px}
 .wait>.i{flex:none}.wait .acts{flex-wrap:wrap}
-/* A topic's plan: where the work stands at a glance. One bar per stage (green while it is worked on, amber while it
-   waits for a person, plain when done), then who does what now and next. People are round, agents are square. */
-.plan{display:flex;flex-direction:column;gap:16px;padding:16px 18px 14px}
-.plan .ph{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 12px;font-size:12.5px;color:var(--muted)}
-.plan .ph b{font-size:13.5px;font-weight:600;color:var(--text)}
-.plan .ph .goal{margin-left:auto;color:var(--text-2)}
-.plan .legend{display:flex;align-items:center;gap:5px}.plan .legend .av{width:11px;height:11px;border-radius:3px;margin-left:7px}.plan .legend .av.person{border-radius:50%}
-.stages{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:6px;margin:0;padding:0;list-style:none}
-.stage{display:flex;flex-direction:column;gap:5px;min-width:0}
-.stage .bar{height:5px;border-radius:3px;background:var(--fill);overflow:hidden}
+/* A topic at a glance: whether it is on track, the number that matters, each stage with who is in it, and the one
+   thing that waits for you. Words come only on a click: a stage opens who does what in it, Details opens the rest.
+   People are round, agents are square; the dot on an avatar is its state. */
+.doc.topic{max-width:980px}
+.glance{display:flex;flex-direction:column;gap:20px;padding:20px 22px 18px}
+.gl-top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 44px}
+.kpi{display:flex;flex-direction:column;gap:6px}
+.kpi b{font:400 38px/1 var(--serif);letter-spacing:-.015em;color:var(--text)}
+.kpi b small{font-size:.6em;color:var(--muted);letter-spacing:0}
+.kpi span{font-size:12px;color:var(--muted)}
+.gl-side{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px 14px;margin-left:auto}
+.health{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 12px;border-radius:14px;background:var(--fill);font-size:12.5px;font-weight:600;white-space:nowrap}
+.health small{font-size:12px;font-weight:400;color:var(--muted)}
+.dot.still::after{display:none}
+.crew{display:flex;flex-wrap:wrap;gap:7px;min-height:20px}
+.av.sm{position:relative}
+.av>i.dot{position:absolute;right:-3px;bottom:-3px;width:8px;height:8px;box-shadow:0 0 0 2px var(--surface)}
+.av>i.dot.hollow{background:var(--surface);border-width:1.5px}
+.stages{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:4px;margin:0 -8px;padding:0;list-style:none}
+.stage{display:flex;flex-direction:column;align-items:stretch;gap:8px;width:100%;min-width:0;padding:8px 8px 9px;border-radius:11px;text-align:left;transition:background .15s}
+.stage:hover,.stage[aria-expanded="true"]{background:var(--fill)}
+.stage .bar{display:block;padding:0;height:6px;border-radius:3px;background:color-mix(in srgb,var(--text) 9%,transparent);overflow:hidden}
 .stage .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
 .stage.s-done .bar i{background:var(--text-2)}.stage.s-wait .bar i{background:var(--warn)}
-.stage b{display:flex;align-items:center;gap:5px;margin-top:3px;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage b{display:flex;align-items:center;gap:5px;font-size:12.5px;font-weight:500;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .stage.s-now b,.stage.s-wait b{color:var(--text);font-weight:600}.stage.s-next b{color:var(--muted)}
-.stage span{font-size:11.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.flow{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(320px,100%),1fr));gap:6px 28px;padding-top:12px;border-top:1px solid var(--line)}
-.flow h3{padding:0 0 4px;font-size:11.5px;font-weight:600;color:var(--muted)}
-.flow li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:9px;align-items:center;min-height:30px;font-size:13px}
-.flow .t{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text-2)}
-.flow .t b{font-weight:600;color:var(--text)}
-.flow a.t:hover{color:var(--text)}
-.flow small{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);white-space:nowrap}
-.flow li.did .t{color:var(--muted)}
+.stage .crew{gap:6px}.stage .av.sm{width:22px;height:22px;font-size:10px}
+.tray{display:flex;flex-direction:column;gap:4px;padding-top:14px;border-top:1px solid var(--line)}
+.tray>p{padding-bottom:4px;font-size:12.5px;color:var(--muted)}.tray>p b{font-weight:600;color:var(--text)}
+.tray li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:11px;align-items:center;min-height:32px;font-size:13px}
+.tray .t{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text-2)}
+.tray .t b{font-weight:600;color:var(--text)}
+.tray a.t:hover{color:var(--text)}
+.tray small{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--muted);white-space:nowrap}
+.tray li.later .t,.tray li.did .t{color:var(--muted)}.tray li.later .t b{color:var(--text-2)}
 .mini{width:44px;height:4px;border-radius:2px;background:var(--fill);overflow:hidden}.mini i{display:block;height:100%;background:var(--ok)}
 .av.sm{width:20px;height:20px;border-radius:7px;font-size:9.5px}
 .av.person{border-radius:50%;background:var(--raised);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-2,var(--line))}
-.night{display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--text-2)}.night .i{color:var(--muted);flex:none}
-@container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:12px}.plan .ph .goal{margin-left:0}}
+.night{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;font-size:12.5px;color:var(--muted)}.night .i{flex:none;margin-right:-6px}
+.night b{margin-right:4px;font-weight:600;color:var(--text)}
+/* The one thing on a topic that waits for you: one line and its button. The full story is on the lane. */
+.askline{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:10px 10px 10px 18px}
+.askline>.i,.askline>.dot{flex:none}
+.askline p{flex:1 1 260px;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:14px}
+.askline p b{font-weight:600}.askline p span{font-size:12.5px;color:var(--muted)}
+.askline .acts{flex-wrap:wrap}.askline .btn{height:30px;padding:0 13px;border-radius:15px;font-size:12.5px}
+.askline.done p b{color:var(--text-2)}
+/* Everything else on a topic stays closed until asked for. */
+.more>summary{display:flex;align-items:center;gap:8px;width:max-content;max-width:100%;height:32px;margin-left:-4px;padding:0 13px 0 9px;border-radius:16px;font-size:13px;font-weight:500;color:var(--text-2);cursor:pointer;list-style:none}
+.more>summary::-webkit-details-marker{display:none}
+.more>summary:hover{background:var(--fill);color:var(--text)}
+.more>summary small{font-size:12px;font-weight:400;color:var(--muted)}
+.more>summary .i{transition:transform .15s}.more[open]>summary .i{transform:rotate(180deg)}
+.more .body{display:flex;flex-direction:column;gap:28px;margin-top:20px}
+@container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr))}.gl-side{margin-left:0;justify-content:flex-start}}
 .sw{position:relative;width:34px;height:20px;border-radius:10px;background:var(--tile-on);flex:none;transition:background .18s}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .18s,background .18s}
 .sw[aria-checked="true"]{background:var(--ink)}.sw[aria-checked="true"]::after{transform:translateX(14px);background:var(--ink-fg)}
@@ -1505,26 +1532,6 @@ try {
   const agentCard = ([av, name, st, word, text, cmd, engine, kind]) =>
     `<article class="box agent"><div class="top"><span class="av${kind === "p" ? " person" : ""}">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p><footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
 
-  // A topic's plan. A stage or a row can name a decision: once it is approved, it shows what happens instead.
-  function planBox(p) {
-    const stage = ([name, st, pct, sub, alt]) => {
-      if (alt && isDone(alt.d)) ({ st, pct, sub } = { st: alt.st || st, pct: alt.pct, sub: alt.sub });
-      return `<li class="stage s-${st}"><div class="bar"><i style="width:${pct}%"></i></div><b>${st === "done" ? '<svg class="i sm"><use href="#check"/></svg>' : ""}${name}</b><span>${sub}</span></li>`;
-    };
-    const row = ([av, who, kind, text, when, pct, href, alt]) => {
-      const did = alt && isDone(alt.d);
-      if (did) ({ text, when, pct } = { text: alt.text, when: alt.when, pct: null });
-      const t = `<b>${who}</b> ${text}`;
-      return `<li${did ? ' class="did"' : ""}><span class="av sm${kind === "p" ? " person" : ""}" title="${kind === "p" ? "Person" : "Agent"}">${av}</span>${href ? `<a class="t" href="${href}">${t}</a>` : `<span class="t">${t}</span>`}<small>${pct != null ? `<span class="mini"><i style="width:${pct}%"></i></span>` : ""}${did ? '<svg class="i sm ok"><use href="#check"/></svg>' : ""}${when}</small></li>`;
-    };
-    return `<section class="box plan" aria-label="Where it stands">
-      <div class="ph"><b>${p.title}</b><span>${p.when}</span><span class="goal">${p.goal}</span><span class="legend"><span class="av person"></span>people<span class="av"></span>agents</span></div>
-      <ol class="stages" style="--n:${p.stages.length}">${p.stages.map(stage).join("")}</ol>
-      <div class="flow"><div><h3>Now</h3><ul>${p.now.map(row).join("")}</ul></div><div><h3>Next</h3><ul>${p.next.map(row).join("")}</ul></div></div>
-      ${p.night ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>${p.night}</span></p>` : ""}
-    </section>`;
-  }
-
   function drawTree() {
     if (!PAGES.topics) return;
     const tree = $("#tree"), open = new Set($$("#tree .grp[data-unfolded]").map(g => g.id));
@@ -1569,25 +1576,78 @@ try {
     return `<div class="box wait">${icon}<p><b>${lead}</b> ${yes ? l.after : l.status}</p>${acts ? `<div class="acts">${acts}</div>` : ""}</div>`;
   }
 
+  // A topic's plan. A stage or a row can name a decision: once it is approved, it shows what happens instead.
+  const CHECK = '<svg class="i sm ok"><use href="#check"/></svg>';
+  const stageOf = ([name, st, pct, sub, rows, alt]) => (alt && isDone(alt.d) ? { name, st: alt.st || st, pct: alt.pct, sub: alt.sub, rows } : { name, st, pct, sub, rows });
+  const rowOf = ([av, who, kind, st, text, when, pct, href, alt]) => (alt && isDone(alt.d)
+    ? { av, who, kind, st: alt.st || "done", text: alt.text, when: alt.when, pct: null, href, did: true }
+    : { av, who, kind, st, text, when, pct, href });
+  // A person or an agent as one small mark. The dot is its state; the name and what it does are in the tooltip.
+  const avatar = (r, label) => `<span class="av sm${r.kind === "p" ? " person" : ""}" role="img" title="${esc(label)}" aria-label="${esc(label)}">${r.av}${r.st && r.st !== "done" ? `<i class="dot ${r.st === "next" || r.st === "idle" ? "hollow" : r.st} still"></i>` : ""}</span>`;
+  // Whoever works in a stage right now, once each.
+  const crewOf = rows => rows.filter(r => r.st !== "next" && r.st !== "done").filter((r, i, all) => all.findIndex(x => x.who === r.who) === i);
+  const ui = { stage: {}, more: {} };
+
+  function stagesBox(t) {
+    const p = t.plan, sel = ui.stage[t.id], stages = p.stages.map(stageOf);
+    const btn = (s, i) => {
+      const rows = (s.rows || []).map(rowOf);
+      return `<li><button class="stage s-${s.st}" data-stage="${t.id}/${i}" aria-expanded="${sel === i}" aria-controls="tray-${t.id}" aria-label="${esc(s.name + ": " + s.sub)}"><span class="bar"><i style="width:${s.pct}%"></i></span><b>${s.st === "done" ? '<svg class="i sm"><use href="#check"/></svg>' : ""}${s.name}</b><span class="crew">${crewOf(rows).map(r => avatar(r, r.who + ": " + r.text)).join("")}</span></button></li>`;
+    };
+    let tray = "";
+    if (sel != null && stages[sel]) {
+      const s = stages[sel], rows = (s.rows || []).map(rowOf);
+      const li = r => {
+        const t = `<b>${r.who}</b> ${r.text}`;
+        return `<li class="${r.st === "next" ? "later" : ""}${r.did ? " did" : ""}">${avatar(r, r.who)}${r.href ? `<a class="t" href="${r.href}">${t}</a>` : `<span class="t">${t}</span>`}<small>${r.pct != null ? `<span class="mini"><i style="width:${r.pct}%"></i></span>` : ""}${r.did ? CHECK : ""}${r.when}</small></li>`;
+      };
+      tray = `<div class="tray" id="tray-${t.id}"><p><b>${s.name}</b> · ${s.sub}</p>${rows.length ? `<ul>${rows.map(li).join("")}</ul>` : ""}</div>`;
+    }
+    return `<ol class="stages" style="--n:${stages.length}">${stages.map(btn).join("")}</ol>${tray}`;
+  }
+
+  // The one thing on a topic that waits for you, in one line. A lane that waits for someone else is not shown here.
+  function askLine(l) {
+    if (!l) return "";
+    const st = stateOf(l), yes = decided(l);
+    if (!yes && st !== "bad" && !(st === "warn" && !l.waits)) return "";
+    const icon = yes ? '<svg class="i ok"><use href="#check"/></svg>' : st === "bad" ? '<svg class="i bad"><use href="#flame"/></svg>' : '<i class="dot warn still"></i>';
+    const acts = yes ? `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`
+      : l.decision ? `<button class="btn ink" data-approve-id="${l.decision}"><svg class="i"><use href="#check"/></svg>${l.approve || "Approve"}</button>` : l.acts || "";
+    return `<div class="box askline${yes ? " done" : ""}">${icon}<p><b>${esc(l.short || l.title)}${yes ? ": you approved it" : ""}</b><span>${yes ? l.shortAfter || "" : (st === "bad" ? "Stuck · " : "Waits for you · ") + (l.ask || "")}</span></p><div class="acts">${acts}<a class="btn quiet" href="#lane/${l.id}">Details</a></div></div>`;
+  }
+
   function drawTopic(t) {
     const v = $("#v-area"), lanes = PAGES.lanes.filter(l => l.topic === t.id);
     const open = lanes.filter(l => stateOf(l) !== "done").sort(byRank), done = lanes.filter(l => stateOf(l) === "done");
-    const focus = t.focus || (t.focusLane ? standing(laneById(t.focusLane), true) : t.calm ? `<div class="box wait"><svg class="i ok"><use href="#check"/></svg><p>${t.calm}</p>${t.calmActs ? `<div class="acts">${t.calmActs}</div>` : ""}</div>` : "");
+    const [hs, hw] = t.health || (open.some(l => stateOf(l) === "bad") ? ["bad", "Stuck"] : open.length ? ["ok", "On track"] : ["idle", "Idle"]);
+    const nums = (t.numbers || (t.facts || []).slice(0, 3)).map(f => f.length === 3
+      ? `<div class="kpi"><b>${f[0]}<small>/${f[1]}</small></b><span>${f[2]}</span></div>`
+      : `<div class="kpi"><b>${f[0]}</b><span>${f[1]}</span></div>`).join("");
+    const people = t.agents.filter(a => a[7] === "p").length, agents = t.agents.length - people;
+    const crew = t.plan ? "" : `<span class="crew">${t.agents.map(([av, name, st, w, text, , , kind]) => avatar({ av, kind, st }, `${name} · ${w || STATES[st]} · ${text}`)).join("")}</span>`;
     const li = l => {
       const st = stateOf(l);
       return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${leads(l)} · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${word(l)}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
     };
+    const night = t.plan && t.plan.night ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>Overnight</span>${t.plan.night.map(([n, what]) => `<span><b>${n}</b>${what}</span>`).join("")}</p>` : "";
     v.setAttribute("aria-label", t.name + " topic");
-    v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide" style="gap:28px">
-      <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1">${t.name}</h1><p class="intro">${t.intro}</p></header>
-      ${t.plan ? planBox(t.plan) : ""}
-      ${focus}
-      ${t.facts ? `<div class="grid facts">${t.facts.map(([n, what]) => `<div class="box fact"><b>${n}</b><span>${what}</span></div>`).join("")}</div>` : ""}
-      <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done this week" : ""}</span></div>
-        ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
+    v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide topic" style="gap:22px">
+      <header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1">${t.name}</h1></header>
+      <section class="box glance" aria-label="Where it stands">
+        <div class="gl-top">${nums}<div class="gl-side">${crew}<span class="health"><i class="dot ${hs === "idle" ? "hollow" : hs} still"></i>${hw}${t.when ? `<small>${t.when}</small>` : ""}</span></div></div>
+        ${t.plan ? stagesBox(t) : ""}
+        ${night}
       </section>
-      <section class="sec"><h2 class="h2">${t.agents.some(a => a[7] === "p") ? "People and agents" : "Agents"}</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
-      ${t.jobs ? `<section class="sec"><h2 class="h2">Jobs this week</h2><div class="box tbl"><table class="jobs"><thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead><tbody>${t.jobs.map(([job, agent, st, due, lane]) => `<tr><td>${lane ? `<a href="#lane/${lane}">${job}</a>` : job}</td><td>${agent}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${due}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
+      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}
+      <details class="more" data-more="${t.id}"${ui.more[t.id] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Details<small>${lanes.length} lanes · ${people ? people + (people === 1 ? " person, " : " people, ") : ""}${agents} ${agents === 1 ? "agent" : "agents"}</small></summary><div class="body">
+        <p class="intro">${t.intro}</p>
+        <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done" : ""}</span></div>
+          ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
+        </section>
+        <section class="sec"><h2 class="h2">${people ? "People and agents" : "Agents"}</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
+        ${t.jobs ? `<section class="sec"><h2 class="h2">Jobs this week</h2><div class="box tbl"><table class="jobs"><thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead><tbody>${t.jobs.map(([job, agent, st, due, lane]) => `<tr><td>${lane ? `<a href="#lane/${lane}">${job}</a>` : job}</td><td>${agent}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${due}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
+      </div></details>
     </div></div>
     <template class="chat-src" data-title="${t.name} chat" data-sub="${t.chatSub}" data-placeholder="Message ${t.name}">${t.chat}</template></div>`;
   }
@@ -1605,7 +1665,7 @@ try {
     v.innerHTML = `<div class="split"><div class="scroll"><article class="doc" style="gap:28px">
       <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : word(l)}</span><i>·</i><span>${leads(l)}</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
       <section class="sec"><h2 class="label"><b>1</b>What you asked</h2><blockquote class="asked">${l.asked}</blockquote><p class="meta">${l.askedMeta}</p></section>
-      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
+      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}${l.extra || ""}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
       <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
       ${l.made && l.made.length ? `<section class="sec"><h2 class="label"><b>4</b>What it made</h2><ul class="box list">${l.made.map(([icon, what, more, href]) => `<li><span class="lt"><svg class="i sm"><use href="#${icon}"/></svg></span><div><b>${what}</b><span>${more}</span></div>${href ? `<a class="btn quiet s" href="${href}">Open</a>` : '<button class="btn quiet s">Open</button>'}</li>`).join("")}</ul></section>` : ""}
     </article></div>
@@ -1642,6 +1702,8 @@ try {
     if (again) again.scrollTop = y;
     markCurrent();
   }
+
+  document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("[data-more]")) ui.more[e.target.dataset.more] = e.target.open; }, true);
 
   function show(hash) {
     const r = route(hash);
@@ -1953,6 +2015,7 @@ try {
     else if (t.matches("[data-undo]")) { t.closest(".decision").classList.remove("done"); count(); refresh(); }
     else if (t.matches("[data-approve-id]")) { $("#" + t.dataset.approveId).classList.add("done"); count(true); refresh(); }
     else if (t.matches("[data-undo-id]")) { $("#" + t.dataset.undoId).classList.remove("done"); count(); refresh(); }
+    else if (t.matches("[data-stage]")) { const [id, i] = t.dataset.stage.split("/"); ui.stage[id] = ui.stage[id] === +i ? null : +i; refresh(); $(`[data-stage="${id}/${i}"]`).focus(); }
     else if (t.matches("[data-undo-log]")) { const li = t.closest("li"); li.classList.toggle("undone"); t.textContent = li.classList.contains("undone") ? "Redo" : "Undo"; }
     else if (t.matches("[data-palette]")) openPalette();
     else if (t.matches("[data-close]")) closePalette();

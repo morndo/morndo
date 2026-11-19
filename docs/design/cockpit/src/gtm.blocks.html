@@ -362,39 +362,42 @@
     topics: [
       {
         id: "partnerships", name: "Partnerships", icon: "partner", crumb: "Big-brand partners", open: true,
-        meta: "<b>Asked by Tom Ahrens, CEO</b><i>·</i><span>You own it</span><i>·</i><span>with Lea Brandt and Jonas Falk</span>",
+        meta: "<b>Asked by Tom Ahrens, CEO</b><i>·</i><span>You own it</span><i>·</i><span>Next report to Tom Fri 08:00</span>",
         intro: "Partnerships with big brands that bring us customers we cannot reach alone. You do the calls and the deals; Lea and Jonas run the rest; agents do the list work around the clock.",
+        health: ["ok", "On track"], when: "Week 5 of 15",
+        numbers: [["0", "3", "partners signed"], ["5", "calls booked"]],
+        // A stage: name, state, how far, one line, and who works in it. A row: avatar, who, person or agent, state,
+        // what, when, how far, where it lives. Either can name a decision and show what happens once it is approved.
         plan: {
-          title: "Week 5 of 15", when: "on track", goal: "0 of 3 partners signed · 5 calls booked",
           stages: [
-            ["Strategy", "done", 100, "Done 23 Oct"],
-            ["Stack", "done", 100, "Clay, Apollo, HubSpot"],
-            ["Brand list", "now", 80, "160 of 200 brands"],
-            ["Outreach", "wait", 45, "Wave 2 waits for Lea"],
-            ["Calls", "now", 40, "2 of 5 held"],
-            ["Offers", "wait", 15, "1 waits for you", { d: "d4", st: "now", pct: 35, sub: "1 sent to Halden" }],
-            ["Signed", "next", 0, "Goal: 3 by 31 Jan"],
+            ["Strategy", "done", 100, "Done 23 Oct: 3 partners by 31 January, from logistics, retail and finance."],
+            ["Stack", "done", 100, "Clay finds brands, Apollo finds the people, HubSpot keeps the deals. Set up by Jonas, 30 Oct."],
+            ["Brands", "now", 80, "160 of 200 brands found, 64 fit the partner profile.", [
+              ["B", "Brand scout", "a", "ok", "finds brands in Clay", "160 of 200", 80, "#lane/brand-list"],
+              ["C", "Contact finder", "a", "ok", "finds decision-makers in Apollo", "96 of 160", 60, "#lane/contact-data"],
+            ]],
+            ["Outreach", "wait", 45, "Wave 1 went to 52 brands, 11 replied. Wave 2 waits for Lea: nothing is sent before she checks it.", [
+              ["L", "Lea", "p", "warn", "checks 24 emails for wave 2", "by 11:00", null, "#lane/outreach-wave-2"],
+              ["S", "Sender", "a", "ok", "follows up on wave 1", "38 of 52", 73, "#lane/outreach-wave-1"],
+              ["S", "Sender", "a", "next", "sends wave 2, 20 a day", "after Lea", null, "#lane/outreach-wave-2"],
+            ]],
+            ["Calls", "now", 40, "2 of 5 calls held. Every call gets a brief before and notes after.", [
+              ["M", "You", "p", "ok", "call with Brightmoor Retail", "today 15:00", null, "#lane/partner-calls"],
+              ["P", "Call prep", "a", "ok", "writes the Brightmoor brief", "ready 13:00", null, "#lane/partner-calls"],
+              ["N", "Notetaker", "a", "next", "notes and the follow-up draft", "today 16:00", null, "#lane/partner-calls"],
+              ["M", "You", "p", "next", "calls with Northvale Bank and Corvane ERP", "Wed, Thu", null, "#lane/partner-calls"],
+            ]],
+            ["Offers", "wait", 15, "The offer to Halden waits for you.", [
+              ["M", "You", "p", "warn", "approve the offer to Halden", "due Thu", null, "#lane/halden-offer", { d: "d4", text: "approved the offer to Halden", when: "goes out 09:00" }],
+              ["J", "Jonas", "p", "ok", "partner contract template, with legal", "Wed", null, "#lane/halden-offer"],
+            ], { d: "d4", st: "now", pct: 35, sub: "The offer to Halden goes out tomorrow at 09:00." }],
+            ["Signed", "next", 0, "Goal: 3 partners by 31 January. Reporter drafts Tom's weekly report on Friday.", [
+              ["R", "Reporter", "a", "next", "weekly partner report for Tom, as a draft", "Fri 08:00", null, "#drafts"],
+            ]],
           ],
-          now: [
-            ["M", "You", "p", "call with Brightmoor Retail", "today 15:00", null, "#lane/partner-calls"],
-            ["L", "Lea", "p", "checks 24 emails for wave 2", "by 11:00", null, "#lane/outreach-wave-2"],
-            ["J", "Jonas", "p", "partner contract template, with legal", "Wed", null, "#lane/halden-offer"],
-            ["B", "Brand scout", "a", "finds brands in Clay", "160 of 200", 80, "#lane/brand-list"],
-            ["C", "Contact finder", "a", "finds decision-makers in Apollo", "96 of 160", 60, "#lane/contact-data"],
-            ["S", "Sender", "a", "follows up on wave 1", "38 of 52", 73, "#lane/outreach-wave-1"],
-            ["P", "Call prep", "a", "writes the Brightmoor brief", "ready 13:00", null, "#lane/partner-calls"],
-          ],
-          next: [
-            ["M", "You", "p", "approve the offer to Halden", "Thu", null, "#lane/halden-offer", { d: "d4", text: "approved the offer to Halden", when: "goes out 09:00" }],
-            ["L", "Lea", "p", "OKs wave 2: 40 retail brands", "after 11:00", null, "#lane/outreach-wave-2"],
-            ["N", "Notetaker", "a", "notes and follow-up draft after the call", "today 16:00", null, "#lane/partner-calls"],
-            ["M", "You", "p", "calls with Northvale Bank and Corvane ERP", "Wed, Thu", null, "#lane/partner-calls"],
-            ["R", "Reporter", "a", "partner report for the CEO, as a draft", "Fri 08:00", null, "#drafts"],
-          ],
-          night: "Overnight the agents added 32 brands, found 58 contacts and drafted 24 emails for wave 2. Nothing was sent: Lea checks them at 09:00.",
+          night: [["+32", "brands"], ["+58", "contacts"], ["24", "emails drafted"]],
         },
         focusLane: "halden-offer",
-        facts: [["200", "brands to find"], ["64", "fit the partner profile"], ["52", "contacted"], ["11", "replied"], ["5", "calls booked"]],
         agents: [
           ["M", "Mara Lind, you", "ok", "Owns it", "The calls, every offer, the goal with the CEO", "", "Head of GTM", "p"],
           ["L", "Lea Brandt", "warn", "Review due", "Checks every list and email before it goes out", "", "GTM associate", "p"],
@@ -416,30 +419,7 @@
       {
         id: "content", name: "Content", icon: "pen", crumb: "This week",
         intro: "This week: the webinar promo, the recap post, one customer story and a carousel.",
-        focus: `<section class="box stuck">
-              <div class="top">
-                <span class="flame"><svg class="i lg"><use href="#flame"/></svg></span>
-                <div>
-                  <div class="meta">Stuck since 09:12 · the post goes out today at 16:00</div>
-                  <h2>The webinar promo visuals need your call</h2>
-                  <p>Visuals used its 3 feedback rounds. Images 3 and 6 still fail the brand check: the logo sits on a light photo and is hard to read.</p>
-                </div>
-              </div>
-              <div class="thumbs">
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 1</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 2</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 3</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 4</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure><div><svg class="i lg"><use href="#image"/></svg>Image 5</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
-                <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 6</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
-              </div>
-              <div class="acts">
-                <button class="btn ink">Post with the 4 that pass</button>
-                <button class="btn quiet">Allow one more round</button>
-                <a class="btn quiet" href="#lane/webinar">Open the lane</a>
-                <small>One more round takes about 4 minutes and €0.60</small>
-              </div>
-            </section>`,
+        focusLane: "webinar",
         facts: [["4", "posts this week"], ["1,840", "webinar page visits"], ["212", "sign-ups for Thursday"], ["2", "brand-check fails"]],
         agents: [
           ["W", "Writer", "ok", "Working", "Webinar recap post, draft 2 of 3", "/linkedin-post", "Claude"],
@@ -505,7 +485,6 @@
       {
         id: "seo", name: "SEO", icon: "search", crumb: "Pages and rankings",
         intro: "Five comparison pages against the tools you lose deals to. Two went live this morning, three are being written.",
-        calm: "<b>Nothing needs you here.</b> You approved the outlines on Friday. The pages go live on their own once the checker passes them.",
         facts: [["2,310", "visits from search this week"], ["+18%", "against last week"], ["41", "keywords in the top 10"], ["2 of 5", "comparison pages live"]],
         agents: [
           ["S", "SEO writer", "ok", "Working", "Page 3: Tidewell or Palletnook", "/seo-page", "Claude"],
@@ -524,8 +503,6 @@
       {
         id: "research", name: "Research", icon: "target", crumb: "Customers and market",
         intro: "Nothing is open. The customer profile was rebuilt this morning; Outbound already works from it.",
-        calm: "<b>Idle.</b> Research works when you ask. Give it a question about your customers or your market.",
-        calmActs: '<button class="btn quiet" data-palette><svg class="i"><use href="#plus"/></svg>New lane</button>',
         facts: [["212", "won deals in the profile"], ["4", "customer segments"], ["Today", "last refresh, 07:10"]],
         agents: [
           ["R", "Researcher", "idle", "Idle", "Rebuilt the customer profile this morning", "/icp-refresh", "Claude"],
@@ -650,6 +627,7 @@
       },
       {
         id: "halden-offer", topic: "partnerships", title: "Offer for Halden Freight Network", state: "warn", lead: "Jonas", opened: "Opened 13 Nov", decision: "d4",
+        short: "Offer to Halden", ask: "15% of first-year revenue for 12 months · due Thu", shortAfter: "It goes out tomorrow at 09:00.",
         next: "After your OK", afterNext: "Mon 23 Nov, Jonas follows up",
         asked: "Send Halden a referral offer this week, while they are warm.",
         askedMeta: "You to the Manager after the call, Friday 13 November<i>·</i>The Manager filed it under Partnerships and named Jonas to lead.",
@@ -669,6 +647,15 @@
       },
       {
         id: "webinar", topic: "content", title: "Webinar on Thursday", state: "bad", lead: "Visuals", opened: "Opened Thursday", next: "Now, needs your call",
+        short: "Webinar promo", ask: "2 of 6 pictures fail the brand check · post at 16:00",
+        extra: `<div class="thumbs">
+          <figure><div><svg class="i lg"><use href="#image"/></svg>Image 1</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+          <figure><div><svg class="i lg"><use href="#image"/></svg>Image 2</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+          <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 3</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
+          <figure><div><svg class="i lg"><use href="#image"/></svg>Image 4</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+          <figure><div><svg class="i lg"><use href="#image"/></svg>Image 5</div><figcaption><svg class="i sm ok"><use href="#check"/></svg>Passes</figcaption></figure>
+          <figure class="fail"><div><svg class="i lg"><use href="#image"/></svg>Image 6</div><figcaption><svg class="i sm bad"><use href="#x"/></svg>Logo unclear</figcaption></figure>
+        </div>`,
         asked: "Get the webinar promo out on Monday.",
         askedMeta: "You to the Manager, Thursday 17:40<i>·</i>The Manager filed it under Content and named Visuals to lead.",
         status: "Visuals used its 3 feedback rounds. Images 3 and 6 still fail the brand check, and the post goes out at 16:00.",
@@ -731,6 +718,7 @@
       },
       {
         id: "sequence-b", topic: "outbound", title: "Sequence B, fintech ops", state: "warn", lead: "Sender", opened: "Opened Wednesday", decision: "d2",
+        short: "Sequence B", ask: "180 fintech ops leads at 60 a day · due tomorrow", shortAfter: "The first 60 go out at 10:00.",
         next: "After your decision", afterNext: "Fri 20 Nov, after the first 180",
         asked: "Start writing to fintech ops people once the pilot shows it works.",
         askedMeta: "You to the Manager, Wednesday 09:05<i>·</i>The Manager filed it under Outbound and named Sender to lead.",
@@ -774,6 +762,7 @@
       },
       {
         id: "search-budget", topic: "paid", title: "Search budget shift", state: "warn", lead: "Paid buyer", opened: "Opened Friday", decision: "d1", decisionHref: "#decision",
+        short: "Search budget shift", ask: "€1,200 a week from LinkedIn to Search · by 14:00", shortAfter: "Paid buyer moves it now.",
         next: "After your decision", afterNext: "Mon 7 Dec, with the result",
         asked: "LinkedIn leads cost too much. Find where the budget works best and propose a shift.",
         askedMeta: "You to the Manager, Friday 10:20<i>·</i>The Manager filed it under Paid and named Paid buyer to lead.",

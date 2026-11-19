@@ -57,7 +57,9 @@ These are the parts a native app has to keep. The mockups are the reference for 
 - A lane is one piece of work and has its own page: what was asked in the asker's words, where it stands with the done-means as a checklist, who leads and who helps, what it made, and its own chat.
 - The Manager's page lists every lane with its project, lead, state and next report, plus the recent asks and where each one went.
 - A new ask is filed under a project with a receipt naming the lead.
-- A topic can carry a plan, shown first on its page: one bar per stage (green while it is worked on, amber while it waits for a person, plain when done), then **Now** and **Next** with an owner on every row, and one line on what happened overnight. People and agents sit in the same lists; people are round, agents are square. A lane that waits for someone on the team says who ("Waits for Lea"); "Needs you" is only for the owner.
+- A topic page is read at a glance, the way a manager asks "where are we?": whether it is on track, one or two numbers that matter, and at most one line for the thing that waits for you, with its button. Nothing on it has to be read to know the state.
+- A topic can carry a plan: one bar per stage (green while it is worked on, amber while it waits for a person, plain when done), and under each stage the avatars of who works in it now. People are round, agents are square, and the dot on an avatar is its state. Clicking a stage opens who does what in it, now and next; one line counts what the agents did overnight.
+- Everything else on a topic (what it is for, its lanes, the people and agents, the jobs) stays closed under Details. A lane that waits for someone on the team says who ("Waits for Lea") and does not appear as yours; "Needs you" is only for the owner.
 
 ### Chat
 
