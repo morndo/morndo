@@ -133,7 +133,12 @@ html[data-as]:not([data-as="mara"]) #pins,html[data-as]:not([data-as="mara"]) .r
     const mine = lanesFor(who).find(l => MINE[l.id] && PAGES.lanes.find(o => o.id === l.id).waits === who);
     const [chatSub, chat] = a.kind === "all" ? [t.chatSub, t.chat] : CHATS[who] || ["You and Mara.", ""];
     const does = a.kind === "all" ? "You work on all of it" : a.kind === "stages" ? "You run " + scopeWords(who) : "You see the status";
-    return { ...t, meta: `<b>Shared by Mara Lind</b><i>·</i><span>${does}</span>`, plan: { ...t.plan, stages }, agents, focusLane: mine ? mine.id : null, chat, chatSub };
+    // The history follows the same scope: a stage's lanes only, and none for someone who sees the status.
+    const seen = new Set(lanesFor(who).map(l => l.id));
+    const history = a.kind === "all" ? t.history : a.kind === "stages" && t.history
+      ? { ...t.history, days: t.history.days.map(([d, rows]) => [d, rows.filter(r => r === "seen" || seen.has(r[5])).map(r => (r === "seen" ? r : [r[0], r[1], swap(r[2]), r[3], r[4].replace(/your mail/g, "Mara's mail"), ...r.slice(5)]))]) }
+      : null;
+    return { ...t, meta: `<b>Shared by Mara Lind</b><i>·</i><span>${does}</span>`, plan: { ...t.plan, stages }, agents, focusLane: mine ? mine.id : null, chat, chatSub, history };
   }
 
   // Who can see this topic, on the topic itself: a face for each, read-only for everyone but the owner.

@@ -398,6 +398,50 @@
           night: [["+32", "brands"], ["+58", "contacts"], ["24", "emails drafted"]],
         },
         focusLane: "halden-offer",
+        // What happened, newest first. A row: time, avatar, who, person or agent, what, lane, flags, how many, a few
+        // of the items, and a decision it waits for.
+        history: {
+          seen: "yesterday at 18:20", shown: 3, since: "That is everything since the topic began on 19 October. Nothing is dropped.",
+          days: [
+            ["Today", [
+              ["now", "M", "You", "p", "approved the offer to Halden. It goes out from your mail tomorrow at 09:00.", "halden-offer", "d", null, null, "d4"],
+              ["08:41", "P", "Call prep", "a", "answered your question on Brightmoor; the full brief is ready at 13:00", "partner-calls"],
+              ["08:30", "J", "Jonas", "p", "drafted the offer to Halden from the template and put it in Decide for you", "halden-offer"],
+              ["08:12", "L", "Lea", "p", "took on the check of the 24 wave 2 emails, by 11:00", "outreach-wave-2"],
+              ["08:00", "S", "Sender", "a", "sent 18 wave 1 follow-ups from your mail, 08:00 to 08:40", "outreach-wave-1", "o", 18,
+                ["Fernwood Outdoor · to the head of partnerships", "Tallis Logistics · to the VP business development", "Brookmere Foods · to the partnerships lead"]],
+              ["07:00", "S", "Sender", "a", "put 4 reminders in HubSpot for brands that want to talk in January", "outreach-wave-1", "u"],
+              ["06:10", "C", "Contact finder", "a", "found 58 contacts in Apollo and left out 4 whose email failed the check", "contact-data", "u", 58,
+                ["Larkfield Home · head of partnerships", "Osprey Cargo · VP business development", "Quillon Pay · partnerships lead"]],
+              ["05:40", "B", "Brand scout", "a", "added 32 brands from Clay, 9 of them fit; skipped 6 that work with a competitor", "brand-list", "u", 32,
+                ["Larkfield Home · fits: 40,000 small-business buyers", "Osprey Cargo · fits: sells to freight forwarders", "Marlow Kitchens · does not fit: consumers only"]],
+              ["04:30", "S", "Sender", "a", "drafted 24 emails for wave 2. Nothing is sent before Lea checks them.", "outreach-wave-2", "", 24,
+                ["Larkfield Home · 74 words", "Pell & Rowe · 81 words", "Southgate Supply · 69 words"]],
+              ["02:10", "B", "Brand scout", "a", "picked 40 retail brands from the checked list for wave 2", "outreach-wave-2", "u"],
+            ]],
+            ["Yesterday", [
+              ["21:40", "B", "Brand scout", "a", "started batch 4 in Clay", "brand-list"],
+              "seen",
+              ["17:10", "S", "Sender", "a", "sent 20 wave 1 follow-ups from your mail, 17:10 to 17:55", "outreach-wave-1", "o", 20,
+                ["Thornbury Tools · to the head of partnerships", "Ardent Wholesale · to the CEO", "Linden Pay · to the partnerships lead"]],
+              ["15:20", "J", "Jonas", "p", "sent the partner contract template to legal", "halden-offer"],
+              ["11:05", "S", "Sender", "a", "booked your call with Corvane ERP for Thursday and sent the invite", "partner-calls", "o"],
+              ["09:30", "M", "You", "p", "moved the Northvale Bank call to Wednesday", "partner-calls"],
+            ]],
+            ["Friday, 13 November", [
+              ["17:30", "M", "You", "p", "decided wave 2 goes to the retail brands first", "outreach-wave-2", "d"],
+              ["16:40", "L", "Lea", "p", "approved batch 3: 40 brands, took out 7", "brand-list", "d"],
+              ["14:05", "N", "Notetaker", "a", "wrote up the Halden call, opened a lane for the offer and named Jonas to lead", "halden-offer"],
+              ["13:00", "M", "You", "p", "held the call with Halden Freight Network, 34 minutes", "partner-calls"],
+              ["12:20", "P", "Call prep", "a", "wrote the brief for the Halden call", "partner-calls"],
+            ]],
+            ["Thursday, 12 November", [
+              ["16:00", "M", "You", "p", "held the call with Kestrel Parcel: not before spring", "partner-calls"],
+              ["10:00", "S", "Sender", "a", "sent the last 12 wave 1 emails from your mail", "outreach-wave-1", "o", 12,
+                ["Brightmoor Retail · to the head of partnerships", "Halden Freight Network · to the VP partnerships", "Northvale Bank · to the partnerships lead"]],
+            ]],
+          ],
+        },
         agents: [
           ["M", "Mara Lind, you", "ok", "Owns it", "The calls, every offer, the goal with the CEO", "", "Head of GTM", "p"],
           ["L", "Lea Brandt", "warn", "Review due", "Checks every list and email before it goes out", "", "GTM associate", "p"],

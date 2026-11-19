@@ -62,6 +62,8 @@ These are the parts a native app has to keep. The mockups are the reference for 
 - A topic page is read at a glance, the way a manager asks "where are we?": whether it is on track, one or two numbers that matter, and at most one line for the thing that waits for you, with its button. Nothing on it has to be read to know the state.
 - A topic can carry a plan: one bar per stage (green while it is worked on, amber while it waits for a person, plain when done), and under each stage the avatars of who works in it now. People are round, agents are square, and the dot on an avatar is its state. Clicking a stage opens who does what in it, now and next; one line counts what the agents did overnight.
 - Everything else on a topic (what it is for, its lanes, the people and agents, the jobs) stays closed under Details. A lane that waits for someone on the team says who ("Waits for Lea") and does not appear as yours; "Needs you" is only for the owner.
+- A topic has a History, closed under Details: who did what and when, from people and agents, newest first, by day. A person's action or decision is one line; an agent's batch is one line with its count, and the count opens a few of the items. A line marks where you last looked, and its summary says how many lines are new since then. Filters: People, Agents, Decisions, Sent outside. Every line opens the lane it happened in; what can be undone has Undo, and something already sent outside cannot be undone. A lane page shows the same history, only its own lines.
+- The history follows the sharing: someone who runs a stage sees that stage's lines, someone who sees the status sees none. It is kept for the whole life of a topic, so it needs its own storage; the fleet's 7 days of lane events are not enough.
 
 ### Chat
 

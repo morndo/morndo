@@ -411,7 +411,34 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .more>summary small{font-size:12px;font-weight:400;color:var(--muted)}
 .more>summary .i{transition:transform .15s}.more[open]>summary .i{transform:rotate(180deg)}
 .more .body{display:flex;flex-direction:column;gap:28px;margin-top:20px}
+/* History: who did what and when, newest first, closed until asked for. A person's action is a line; an agent's batch
+   is one line with its count. Each line opens the lane it happened in; what can be undone has Undo. */
+.more .body.hbody{gap:4px;margin-top:14px}
+.hist-f{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.hist-f button{height:28px;padding:0 12px;border-radius:14px;border:1px solid var(--line-2);font-size:12.5px;font-weight:500;color:var(--text-2)}
+.hist-f button:hover{background:var(--fill);color:var(--text)}
+.hist-f button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--ink-fg);font-weight:600}
+.hist h3{display:flex;align-items:center;gap:10px;margin:14px 0 4px;font-size:12px;font-weight:600;color:var(--muted)}
+.hist h3::after,.hist .seenmark::after{content:"";flex:1;height:1px;background:var(--line)}
+.hist ul{display:flex;flex-direction:column}
+.hist>ul>li{display:grid;grid-template-columns:44px 20px minmax(0,1fr) 64px 124px;gap:4px 11px;align-items:center;min-height:36px;margin:0 -10px;padding:4px 10px;border-radius:10px;font-size:13.5px;color:var(--text-2)}
+.hist>ul>li:hover{background:var(--fill)}
+.hist time{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+.hist .t{min-width:0}.hist .t b{font-weight:600;color:var(--text)}
+.hist .marks,.hist .end{display:flex;align-items:center;justify-content:flex-end;gap:8px;color:var(--muted)}
+.hist .hn{height:22px;min-width:30px;padding:0 9px;border-radius:11px;background:var(--fill);font-size:12px;font-weight:600;color:var(--text-2)}
+.hist>ul>li:hover .hn{background:var(--fill-hover)}.hist>ul>li .hn[aria-expanded="true"]{background:var(--ink);color:var(--ink-fg)}
+.hist .end .btn{opacity:0}.hist>ul>li:hover .btn,.hist>ul>li:focus-within .btn{opacity:1}
+.hist>ul>li.undone .t,.hist>ul>li.undone .t b{color:var(--muted);text-decoration:line-through}
+.hist>ul>li.subs{display:block;min-height:0;padding:0 10px 8px 85px;font-size:12.5px;color:var(--muted)}
+.hist>ul>li.subs:hover{background:none}
+.hist .subs li{padding:3px 0 3px 12px;border-left:1px solid var(--line-2)}
+.hist .subs a{text-decoration:underline;text-underline-offset:2px}
+.hist .seenmark{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:12px;font-weight:600;color:var(--sun)}
+.hist .seenmark::after{background:color-mix(in srgb,var(--sun) 40%,transparent)}
+.hist-end{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-top:12px;font-size:12.5px;color:var(--muted)}
 @container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr))}.gl-side{margin-left:0;justify-content:flex-start}}
+@container (max-width:760px){.hist>ul>li{grid-template-columns:38px 20px minmax(0,1fr) auto}.hist .end{display:none;grid-column:3/-1;justify-content:flex-start}.hist>ul>li:hover .end,.hist>ul>li:focus-within .end{display:flex}.hist>ul>li.subs{padding-left:79px}}
 .sw{position:relative;width:34px;height:20px;border-radius:10px;background:var(--tile-on);flex:none;transition:background .18s}
 .sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .18s,background .18s}
 .sw[aria-checked="true"]{background:var(--ink)}.sw[aria-checked="true"]::after{transform:translateX(14px);background:var(--ink-fg)}
@@ -1383,6 +1410,50 @@ try {
           night: [["+32", "brands"], ["+58", "contacts"], ["24", "emails drafted"]],
         },
         focusLane: "halden-offer",
+        // What happened, newest first. A row: time, avatar, who, person or agent, what, lane, flags, how many, a few
+        // of the items, and a decision it waits for.
+        history: {
+          seen: "yesterday at 18:20", shown: 3, since: "That is everything since the topic began on 19 October. Nothing is dropped.",
+          days: [
+            ["Today", [
+              ["now", "M", "You", "p", "approved the offer to Halden. It goes out from your mail tomorrow at 09:00.", "halden-offer", "d", null, null, "d4"],
+              ["08:41", "P", "Call prep", "a", "answered your question on Brightmoor; the full brief is ready at 13:00", "partner-calls"],
+              ["08:30", "J", "Jonas", "p", "drafted the offer to Halden from the template and put it in Decide for you", "halden-offer"],
+              ["08:12", "L", "Lea", "p", "took on the check of the 24 wave 2 emails, by 11:00", "outreach-wave-2"],
+              ["08:00", "S", "Sender", "a", "sent 18 wave 1 follow-ups from your mail, 08:00 to 08:40", "outreach-wave-1", "o", 18,
+                ["Fernwood Outdoor · to the head of partnerships", "Tallis Logistics · to the VP business development", "Brookmere Foods · to the partnerships lead"]],
+              ["07:00", "S", "Sender", "a", "put 4 reminders in HubSpot for brands that want to talk in January", "outreach-wave-1", "u"],
+              ["06:10", "C", "Contact finder", "a", "found 58 contacts in Apollo and left out 4 whose email failed the check", "contact-data", "u", 58,
+                ["Larkfield Home · head of partnerships", "Osprey Cargo · VP business development", "Quillon Pay · partnerships lead"]],
+              ["05:40", "B", "Brand scout", "a", "added 32 brands from Clay, 9 of them fit; skipped 6 that work with a competitor", "brand-list", "u", 32,
+                ["Larkfield Home · fits: 40,000 small-business buyers", "Osprey Cargo · fits: sells to freight forwarders", "Marlow Kitchens · does not fit: consumers only"]],
+              ["04:30", "S", "Sender", "a", "drafted 24 emails for wave 2. Nothing is sent before Lea checks them.", "outreach-wave-2", "", 24,
+                ["Larkfield Home · 74 words", "Pell & Rowe · 81 words", "Southgate Supply · 69 words"]],
+              ["02:10", "B", "Brand scout", "a", "picked 40 retail brands from the checked list for wave 2", "outreach-wave-2", "u"],
+            ]],
+            ["Yesterday", [
+              ["21:40", "B", "Brand scout", "a", "started batch 4 in Clay", "brand-list"],
+              "seen",
+              ["17:10", "S", "Sender", "a", "sent 20 wave 1 follow-ups from your mail, 17:10 to 17:55", "outreach-wave-1", "o", 20,
+                ["Thornbury Tools · to the head of partnerships", "Ardent Wholesale · to the CEO", "Linden Pay · to the partnerships lead"]],
+              ["15:20", "J", "Jonas", "p", "sent the partner contract template to legal", "halden-offer"],
+              ["11:05", "S", "Sender", "a", "booked your call with Corvane ERP for Thursday and sent the invite", "partner-calls", "o"],
+              ["09:30", "M", "You", "p", "moved the Northvale Bank call to Wednesday", "partner-calls"],
+            ]],
+            ["Friday, 13 November", [
+              ["17:30", "M", "You", "p", "decided wave 2 goes to the retail brands first", "outreach-wave-2", "d"],
+              ["16:40", "L", "Lea", "p", "approved batch 3: 40 brands, took out 7", "brand-list", "d"],
+              ["14:05", "N", "Notetaker", "a", "wrote up the Halden call, opened a lane for the offer and named Jonas to lead", "halden-offer"],
+              ["13:00", "M", "You", "p", "held the call with Halden Freight Network, 34 minutes", "partner-calls"],
+              ["12:20", "P", "Call prep", "a", "wrote the brief for the Halden call", "partner-calls"],
+            ]],
+            ["Thursday, 12 November", [
+              ["16:00", "M", "You", "p", "held the call with Kestrel Parcel: not before spring", "partner-calls"],
+              ["10:00", "S", "Sender", "a", "sent the last 12 wave 1 emails from your mail", "outreach-wave-1", "o", 12,
+                ["Brightmoor Retail · to the head of partnerships", "Halden Freight Network · to the VP partnerships", "Northvale Bank · to the partnerships lead"]],
+            ]],
+          ],
+        },
         agents: [
           ["M", "Mara Lind, you", "ok", "Owns it", "The calls, every offer, the goal with the CEO", "", "Head of GTM", "p"],
           ["L", "Lea Brandt", "warn", "Review due", "Checks every list and email before it goes out", "", "GTM associate", "p"],
@@ -1901,7 +1972,50 @@ try {
   const avatar = (r, label) => `<span class="av sm${r.kind === "p" ? " person" : ""}" role="img" title="${esc(label)}" aria-label="${esc(label)}">${r.av}${r.st && r.st !== "done" ? `<i class="dot ${r.st === "next" || r.st === "idle" ? "hollow" : r.st} still"></i>` : ""}</span>`;
   // Whoever works in a stage right now, once each.
   const crewOf = rows => rows.filter(r => r.st !== "next" && r.st !== "done").filter((r, i, all) => all.findIndex(x => x.who === r.who) === i);
-  const ui = { stage: {}, more: {} };
+  const ui = { stage: {}, more: {}, hf: {}, hopen: {}, hall: {}, undone: new Set() };
+
+  // A topic's history, newest first. A row: time, avatar, who, person or agent, what, its lane, flags (d: a decision,
+  // o: sent outside, u: can be undone), how many, a few of the single items, and a decision it waits for (the row
+  // shows once that is approved). "seen" marks where you last looked. A lane page shows only its own rows.
+  const HF = [["all", "All"], ["p", "People"], ["a", "Agents"], ["d", "Decisions"], ["o", "Sent outside"]];
+  const histDays = (h, lane, all) => h.days.slice(0, all ? h.days.length : h.shown).map(([day, rows], di) => [day, rows
+    .map((r, i) => (r === "seen" ? r : { id: di + "-" + i, at: r[0], av: r[1], who: r[2], kind: r[3], text: r[4], lane: r[5], flags: r[6] || "", n: r[7], sub: r[8], d: r[9] }))
+    .filter(r => r === "seen" || (!r.d || isDone(r.d)) && (!lane || r.lane === lane))]);
+  const histNew = (h, lane) => {
+    let n = 0;
+    for (const [, rows] of histDays(h, lane, true)) for (const r of rows) { if (r === "seen") return n; n++; }
+    return n;
+  };
+  function historyMore(key, h, lane) {
+    const f = ui.hf[key] || "all", all = !!ui.hall[key] || h.days.length <= h.shown, fresh = histNew(h, lane);
+    const keep = r => f === "all" || (f === "p" || f === "a" ? r.kind === f : r.flags.includes(f));
+    const icon = (id, label) => `<svg class="i sm" role="img" aria-label="${label}"><title>${label}</title><use href="#${id}"/></svg>`;
+    const row = r => {
+      const k = key + "|" + r.id, open = !!ui.hopen[k], off = ui.undone.has(k);
+      const tags = (r.flags.includes("o") ? icon("send", "Sent outside") : "") + (r.flags.includes("d") ? icon("decide", "A decision") : "");
+      const n = r.n ? `<button class="hn" data-hopen="${k}" aria-expanded="${open}" aria-label="${r.n} items, show some">${r.n}</button>` : "";
+      const undo = r.d ? `<button class="btn quiet s" data-undo-id="${r.d}">Undo</button>`
+        : r.flags.includes("u") ? `<button class="btn quiet s" data-hundo="${k}">${off ? "Redo" : "Undo"}</button>` : "";
+      const go = lane ? "" : `<a class="btn quiet s" href="#lane/${r.lane}">Open</a>`;
+      const sub = open && r.sub ? `<li class="subs"><ul>${r.sub.map(s => `<li>${s}</li>`).join("")}${r.n > r.sub.length ? `<li>and ${r.n - r.sub.length} more${lane ? "" : ` <a href="#lane/${r.lane}">in the lane</a>`}</li>` : ""}</ul></li>` : "";
+      return `<li${off ? ' class="undone"' : ""}><time>${r.at}</time>${avatar(r, r.who)}<span class="t"><b>${r.who}</b> ${r.text}</span><span class="marks">${tags}${n}</span><span class="end">${undo}${go}</span></li>${sub}`;
+    };
+    let body = "", shown = 0;
+    histDays(h, lane, all).forEach(([day, rows]) => {
+      const vis = rows.filter(r => r === "seen" || keep(r));
+      if (!vis.some(r => r !== "seen")) return;
+      body += `<h3>${day}</h3><ul>${vis.map(r => {
+        if (r !== "seen") { shown++; return row(r); }
+        return shown ? `<li class="seenmark">You last looked here, ${h.seen}</li>` : "";
+      }).join("")}</ul>`;
+    });
+    const count = histDays(h, lane, true).reduce((s, [, rows]) => s + rows.filter(r => r !== "seen").length, 0);
+    if (!count) return "";
+    const end = all ? `<p class="hist-end">${h.since}</p>` : `<p class="hist-end"><button class="btn quiet s" data-hall="${key}">Earlier days</button></p>`;
+    return `<details class="more" data-more="${key}"${ui.more[key] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>History<small>${fresh ? fresh + " new since " + h.seen : "Nothing new since " + h.seen}</small></summary><div class="body hbody">
+      <div class="hist-f" role="group" aria-label="Show in the history">${HF.map(([v, w]) => `<button data-hf="${key}|${v}" aria-pressed="${f === v}">${w}</button>`).join("")}</div>
+      <div class="hist">${body || '<p class="hist-end">Nothing of this kind in these days.</p>'}</div>${end}</div></details>`;
+  }
 
   function stagesBox(t) {
     const p = t.plan, sel = ui.stage[t.id], stages = p.stages.map(stageOf);
@@ -1963,6 +2077,7 @@ try {
         <section class="sec"><h2 class="h2">${people ? "People and agents" : "Agents"}</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
         ${t.jobs ? `<section class="sec"><h2 class="h2">Jobs this week</h2><div class="box tbl"><table class="jobs"><thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead><tbody>${t.jobs.map(([job, agent, st, due, lane]) => `<tr><td>${lane ? `<a href="#lane/${lane}">${job}</a>` : job}</td><td>${agent}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${due}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
       </div></details>
+      ${t.history ? historyMore("h:" + t.id, t.history) : ""}
     </div></div>
     <template class="chat-src" data-title="${t.name} chat" data-sub="${t.chatSub}" data-placeholder="Message ${t.name}">${t.chat}</template></div>`;
   }
@@ -1983,6 +2098,7 @@ try {
       <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}${l.extra || ""}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
       <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
       ${l.made && l.made.length ? `<section class="sec"><h2 class="label"><b>4</b>What it made</h2><ul class="box list">${l.made.map(([icon, what, more, href]) => `<li><span class="lt"><svg class="i sm"><use href="#${icon}"/></svg></span><div><b>${what}</b><span>${more}</span></div>${href ? `<a class="btn quiet s" href="${href}">Open</a>` : '<button class="btn quiet s">Open</button>'}</li>`).join("")}</ul></section>` : ""}
+      ${t && t.history ? historyMore("h:" + l.id, t.history, l.id) : ""}
     </article></div>
     <template class="chat-src" data-title="${esc(l.title)}" data-sub="You, the Manager and this lane's agents. Nothing else lives here." data-placeholder="Message this lane">${l.chat || ""}</template></div>`;
   }
@@ -2333,6 +2449,10 @@ try {
     else if (t.matches("[data-approve-id]")) { $("#" + t.dataset.approveId).classList.add("done"); count(true); refresh(); }
     else if (t.matches("[data-undo-id]")) { $("#" + t.dataset.undoId).classList.remove("done"); count(); refresh(); }
     else if (t.matches("[data-stage]")) { const [id, i] = t.dataset.stage.split("/"); ui.stage[id] = ui.stage[id] === +i ? null : +i; refresh(); $(`[data-stage="${id}/${i}"]`).focus(); }
+    else if (t.matches("[data-hf]")) { const [k, v] = t.dataset.hf.split("|"); ui.hf[k] = v; refresh(); $(`[data-hf="${t.dataset.hf}"]`).focus(); }
+    else if (t.matches("[data-hopen]")) { const k = t.dataset.hopen; ui.hopen[k] = !ui.hopen[k]; refresh(); $(`[data-hopen="${k}"]`).focus(); }
+    else if (t.matches("[data-hundo]")) { const k = t.dataset.hundo; if (!ui.undone.delete(k)) ui.undone.add(k); refresh(); $(`[data-hundo="${k}"]`).focus(); }
+    else if (t.matches("[data-hall]")) { ui.hall[t.dataset.hall] = true; refresh(); }
     else if (t.matches("[data-undo-log]")) { const li = t.closest("li"); li.classList.toggle("undone"); t.textContent = li.classList.contains("undone") ? "Redo" : "Undo"; }
     else if (t.matches("[data-palette]")) openPalette();
     else if (t.matches("[data-close]")) closePalette();
