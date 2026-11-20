@@ -678,14 +678,19 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .pop{position:fixed;z-index:60;left:12px;top:48px;width:272px;display:flex;flex-direction:column;gap:14px;padding:14px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-pop);animation:pop .18s cubic-bezier(.2,.9,.3,1.1)}
 /* Usage: the floating chat's card, smaller, rising from the account row. Subscriptions (a flat price, limits that reset)
    and API keys (billed by use, against a budget) are kept apart, and only accounts the workspace added appear. */
-.upop{position:fixed;z-index:60;left:12px;bottom:56px;width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 80px);overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:14px 16px 16px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-2xl);box-shadow:0 28px 80px rgba(0,0,0,.62),0 2px 12px rgba(0,0,0,.4);transform-origin:0 100%;animation:chatin .22s cubic-bezier(.2,.8,.2,1)}
-/* Its glass: what is behind shows through, blurred and darkened to half, under the card's surface at 72%. So text keeps
-   its contrast on anything; the lowest, small grey text over pure white, is 5:1, with the greys and the red a step
-   lighter here. It turns solid with the Glass slider at 0, under reduced transparency, or without backdrop-filter. */
-.upop{--muted:color-mix(in srgb,var(--grey-700) 40%,var(--grey-800));--bad:color-mix(in srgb,var(--coral) 55%,var(--white));background:color-mix(in srgb,var(--raised) 72%,transparent);-webkit-backdrop-filter:blur(28px) saturate(150%) brightness(.5);backdrop-filter:blur(28px) saturate(150%) brightness(.5);box-shadow:inset 0 1px 0 rgba(255,255,255,.07),0 28px 80px rgba(0,0,0,.62),0 2px 12px rgba(0,0,0,.4)}
-:root[data-glass="off"] .upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}
-@media (prefers-reduced-transparency:reduce){.upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}}
-@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.upop{background:var(--raised)}}
+.upop{position:fixed;z-index:60;left:12px;bottom:56px;width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 80px);display:flex;isolation:isolate;overflow:hidden;border:1px solid rgba(255,255,255,.14);border-radius:var(--r-2xl);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 28px 80px rgba(0,0,0,.55),0 2px 12px rgba(0,0,0,.35);transform-origin:0 100%;animation:chatin .22s cubic-bezier(.2,.8,.2,1)}
+.upop-in{flex:1;min-width:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:14px 16px 16px}
+/* Its glass, in two layers. Behind: what is under the card, blurred and darkened to 40%, showing through a fifth of it.
+   Above that: the day's artwork as the window frame shows it (the same pre-blurred picture, src/glass.sh) at 80%, under
+   a light veil of the card's surface and a faint sheen. The pictures are dark by construction (their lightest pixel has
+   a luminance of 0.038), so contrast holds by arithmetic, not by luck: even with pure white under the card, the small
+   grey text (a step lighter here, as on the sidebar's glass) keeps about 4.6:1. Solid with the Glass slider at 0,
+   under reduced transparency, or without backdrop-filter. */
+.upop{--muted:color-mix(in srgb,var(--grey-700) 40%,var(--grey-800));--bad:color-mix(in srgb,var(--coral) 55%,var(--white));--line:rgba(255,255,255,.1);-webkit-backdrop-filter:blur(10px) saturate(170%) brightness(.4);backdrop-filter:blur(10px) saturate(170%) brightness(.4)}
+.upop::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:.8;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 30%),linear-gradient(color-mix(in srgb,var(--raised) 35%,transparent),color-mix(in srgb,var(--raised) 35%,transparent)),var(--uglass,linear-gradient(var(--raised),var(--raised))) center/cover no-repeat}
+:root[data-glass="off"] .upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}:root[data-glass="off"] .upop::before{display:none}
+@media (prefers-reduced-transparency:reduce){.upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}.upop::before{display:none}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.upop{background:var(--raised)}.upop::before{display:none}}
 .upop header{display:flex;align-items:flex-start;gap:8px}
 .upop header div{flex:1;min-width:0}
 .upop header h2{font-size:var(--fs-ui);font-weight:600;line-height:28px}.upop header p{margin-top:-3px;font-size:var(--fs-xs);color:var(--muted)}
@@ -1500,7 +1505,7 @@ try {
 
 <!-- The workspace menu: its modules and its colour. Opens from the workspace name or a right-click on empty sidebar space. -->
 <!-- Usage: opens from the gauge on the account row. Drawn from the accounts the workspace added. -->
-<div class="upop" id="usagepop" role="dialog" aria-label="Usage" hidden></div>
+<div class="upop" id="usagepop" role="dialog" aria-label="Usage" hidden><div class="upop-in"></div></div>
 <div class="pop" id="themepop" role="dialog" aria-label="Workspace" hidden>
   <div class="ph"><svg class="mark"><use href="#mark"/></svg><div><b>Tidewell</b><span>Workspace colour: <span data-theme-name>Ink</span></span></div></div>
   <div class="mods"><h3>Modules</h3>
@@ -3349,13 +3354,18 @@ try {
       return `<div class="um${cls}"><span>${m.what}</span><b>${m.val}</b><i role="meter" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${m.used}" aria-label="${esc(m.what)}: ${esc(m.val)}"><em style="width:${Math.min(100, m.used * 100).toFixed(0)}%"></em></i>${m.note || m.used >= 0.8 ? `<small>${m.used >= 1 ? "Limit reached" : m.used >= 0.8 ? "Close" : ""}${m.note && m.used >= 0.8 ? " · " : ""}${m.note || ""}</small>` : ""}</div>`;
     };
     const acct = a => `<div class="uacct"><p><b>${a.name}</b><span>${a.lanes ? a.lanes + (a.lanes === 1 ? " lane" : " lanes") : "standing by"}</span></p><div class="ums">${a.meters.map(meter).join("")}</div>${a.note ? `<p class="unote">${a.note}</p>` : ""}</div>`;
-    usagePop.innerHTML = `<header><div><h2>Usage</h2><p>Only accounts you added · ${USAGE.asOf}</p></div><button class="ib" data-usage-close aria-label="Close usage"><svg class="i"><use href="#x"/></svg></button></header>
+    usagePop.firstElementChild.innerHTML = `<header><div><h2>Usage</h2><p>Only accounts you added · ${USAGE.asOf}</p></div><button class="ib" data-usage-close aria-label="Close usage"><svg class="i"><use href="#x"/></svg></button></header>
       <section aria-label="Subscriptions"><h3>Subscriptions<small>flat price · limits reset on their own</small></h3>${USAGE.subs.map(acct).join("")}</section>
       <section aria-label="API keys"><h3>API keys<small>your own keys · billed by use</small></h3>${USAGE.keys.map(acct).join("")}</section>
       <footer><span>Not added, so not shown: ${USAGE.missing.join(", ")}.</span><a class="btn quiet s" href="#skills" data-usage-close>Manage accounts</a></footer>`;
   }
   function setUsage(open) {
-    if (open) drawUsage();
+    if (open) {
+      drawUsage();
+      // The card's glass is the window frame's: the day's picture that is on now.
+      const on = $(".glass i.on");
+      usagePop.style.setProperty("--uglass", on && on.style.backgroundImage ? on.style.backgroundImage : "none");
+    }
     usagePop.hidden = !open;
     $$("[data-usage]").forEach(b => b.setAttribute("aria-expanded", String(open)));
   }
