@@ -44,10 +44,11 @@ context. No paragraphs on the first screen; a sentence is one line.
 | 3 | Deals | Where will the result come from? | One row per target slot, so the rows line up with the target (3 partners, 3 rows; candidates for the same slot share a row): name, the next step in a few words, a track of factual milestones, a confidence word | Each deal's lane; what each forecast rests on (in the recovery plan) |
 | 4 | Needs you | What needs me? | The one decision as a row: what, due, why it cannot wait (a few words), the button. Then team blockers: their count and the top two | The decision's reasoning ("Why", on its lane); the other blockers |
 | 5 | Funnel | Does the method work? | One strip: each step's count, this week's change, its rate against the plan, below-plan steps marked | - |
-| 6 | Recovery plan (closed) | How do we close the gap? | Its title and how many steps | The steps with dates, the assumptions, the evidence per deal, what is out of the goal |
-| 7 | Details and History (closed) | Everything else | Their titles and one count each | Purpose, plan stages, lanes, people and agents, jobs; the history |
+| 6 | Guardrails | What must reaching it not cost? | One line: each guardrail with its reading and its limit, and "all held" or how many are breached | A breached one is a blocker under Needs you, with its lane |
+| 7 | Recovery plan (closed) | How do we close the gap? | Its title and how many steps | The steps with dates, the assumptions, the evidence per deal, what is out of the goal, the forecast ladder and how its forecasts have scored |
+| 8 | Details and History (closed) | Everything else | Their titles and one count each | Purpose, plan stages, lanes, people and agents with their records, jobs; the history |
 
-A topic without a dated, measurable goal shows no parts 1, 2, 3, 5 or 6. The page says "No goal set", names what is
+A topic without a dated, measurable goal shows no parts 1, 2, 3, 5, 6 or 7. The page says "No goal set", names what is
 missing, shows what needs the owner, and offers to ask for a goal.
 
 ## Rules
@@ -99,6 +100,23 @@ missing, shows what needs the owner, and offers to ask for a goal.
 - **R19 Demote, never drop.** Every piece of evidence behind the first screen is reachable in one click: a deal's lane,
   the decision's reasoning, the recovery plan, Details, History.
 
+### Limits and learning
+
+These come from management research; [management-research.md](../orchestration/management-research.md) has the
+sources.
+
+- **R20 A goal comes with guardrails.** Name what reaching it must not cost (for outreach: bounces, people asking to
+  stop, anything sent unchecked, the lowest acceptable terms) and show them in one line. A breached guardrail becomes a
+  blocker under Needs you. A narrow goal without one invites shortcuts, and agents take them faster than people.
+- **R21 Forecasts are kept and scored.** Every forecast word is stored with the date it was given and, later, what
+  happened. The recovery plan says how the ladder has scored so far ("Likely signed 3 of 4 times"), or when the first
+  forecast can be scored. Until then the ladder is labelled as a guess (R6).
+- **R22 A decision says why it is the owner's.** Goes out in their name, hard to undo, or rests on what only they know
+  (Settings, Who decides). A decision that fits none of these is the agent's to take and report, not the owner's to
+  approve. Before anything goes outside, its lane shows the checks it passed.
+- **R23 An agent shows its record.** In Details, each agent says how often its work held when someone else checked it.
+  The owner's trust should follow what an agent has shown, not how sure it sounds.
+
 ## What the agent decides itself
 
 The form of each part (which chart, which indicators, which milestones make the ladder, which two blockers matter most),
@@ -114,6 +132,8 @@ pieces or the pipeline they bring; a paid goal, leads at a cost. The rules and t
 - **Lanes:** state, who leads, who waits for whom, deadlines.
 - **Open decisions** with the lead's recommendation, the reasoning, and the cost of waiting.
 - **Output waiting for review**, and for whom.
+- **The goal's guardrails** with their limits and today's readings (R20).
+- **Past forecasts** and what became of them (R21); each agent's checked work (R23).
 - **The reader's last visit**, for "changed since you last looked".
 
 What is missing is said on the page (R5, R7), not guessed.
@@ -128,6 +148,9 @@ What is missing is said on the page (R5, R7), not guessed.
 - [ ] The verdict compares against an explicit plan, or says "Forecast not established".
 - [ ] The decision is one row with its deadline and button; its reasoning is one click away.
 - [ ] At most two blockers are shown, with the count of all.
+- [ ] The guardrails are on the first screen in one line; a breached one is a blocker.
+- [ ] The recovery plan says how forecasts have scored, or when the first can be.
+- [ ] The decision says why it is the owner's.
 - [ ] Deal stages are milestones, not percentages.
 - [ ] Nothing was dropped to make room: every piece of evidence is one click away.
 - [ ] Nothing on the page is invented to fill a gap.

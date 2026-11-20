@@ -66,8 +66,20 @@ These are the parts a native app has to keep. The mockups are the reference for 
 - The stage plan of such a topic moves into Details. The sharing proposal keeps the stage view, because it shares a topic stage by stage.
 - A topic can carry a plan: one bar per stage (green while it is worked on, amber while it waits for a person, plain when done), and under each stage the avatars of who works in it now. People are round, agents are square, and the dot on an avatar is its state. Clicking a stage opens who does what in it, now and next; one line counts what the agents did overnight.
 - Everything else on a topic (what it is for, its lanes, the people and agents, the jobs) stays closed under Details. A lane that waits for someone on the team says who ("Waits for Lea") and does not appear as yours; "Needs you" is only for the owner.
+- A topic with a goal names its guardrails on the first screen, in one line: what reaching the goal must not cost. A breached guardrail becomes a blocker under Needs you.
 - A topic has a History, closed under Details: who did what and when, from people and agents, newest first, by day. A person's action or decision is one line; an agent's batch is one line with its count, and the count opens a few of the items. A line marks where you last looked, and its summary says how many lines are new since then. Filters: People, Agents, Decisions, Sent outside. Every line opens the lane it happened in; what can be undone has Undo, and something already sent outside cannot be undone. A lane page shows the same history, only its own lines.
 - The history follows the sharing: someone who runs a stage sees that stage's lines, someone who sees the status sees none. It is kept for the whole life of a topic, so it needs its own storage; the fleet's 7 days of lane events are not enough.
+
+### Attention and decision rights
+
+Taken from management research; [management-research.md](../orchestration/management-research.md) has the findings and the sources.
+
+- Reports wait for the next brief, three a day by default (Settings, Briefs). The brief says when the next one comes. Between briefs Morndo interrupts only for a decision due before the next brief, or for something stuck that puts a deadline at risk.
+- Settings says who decides what. The owner decides what goes out in their name, what is hard to undo, and what rests on something only they know; agents decide the rest inside the guardrails and report it in the next brief, with Undo. Each decision says why it is the owner's ("Yours: over €500"), and its lane says it in a sentence.
+- Before anything goes outside, its lane shows the checks it passed.
+- A handover (a restart, a fresh session, a new lead) is on the lane's page: where it stood, what is open, what could go wrong, what to do then, and the new session's read-back. A read-back that does not match the lane's record is corrected before the lane may send anything; that correction is a line in the History.
+- An agent's card shows its record: how often its work held when someone else checked it.
+- The Manager splits an ask into several lanes only where the parts can run side by side; steps that build on each other stay in one lane. Its page lists what lanes share (your mail, the CRM, the ad accounts) and how they take turns.
 
 ### Chat
 

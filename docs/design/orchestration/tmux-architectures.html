@@ -54,12 +54,13 @@ th{padding:10px 14px;text-align:left;font-size:var(--fs-xs);font-weight:600;colo
 td{padding:12px 14px;vertical-align:top;color:var(--prose);border-bottom:1px solid var(--line);line-height:1.5}
 td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
 td.best{color:var(--text-hi)}
-.layer{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:var(--sp-4);counter-reset:n;padding:0;list-style:none}
-.layer li{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-md);line-height:1.55;color:var(--prose)}
-.layer li::before{counter-increment:n;content:counter(n,decimal-leading-zero);font:var(--fs-xs)/1 var(--mono);color:var(--faint)}
-.layer b{font-weight:600;color:var(--text-hi)}
+.layer{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp-4);counter-reset:n;padding:0;list-style:none}
+.layer li{display:block;font-size:var(--fs-md);line-height:1.55;color:var(--prose)}
+.layer li::before{display:block;margin-bottom:6px;counter-increment:n;content:counter(n,decimal-leading-zero);font:var(--fs-xs)/1 var(--mono);color:var(--faint)}
+.layer b{display:block;margin-bottom:6px;font-weight:600;color:var(--text-hi)}
 .rec{display:flex;flex-direction:column;gap:var(--sp-3);padding:var(--sp-6);border-radius:var(--r-lg);background:var(--surface)}
 .rec p{max-width:780px;font-size:var(--fs-lg);line-height:1.7;color:var(--prose)}.rec p b{color:var(--text-hi);font-weight:600}
+.rec p a{color:var(--text-hi);text-decoration:underline;text-underline-offset:3px}
 .note{font-size:var(--fs-sm);color:var(--muted)}
 code{font:12.5px var(--mono);color:var(--text-2);white-space:nowrap}
 @media (max-width:820px){.facts,.layer{grid-template-columns:minmax(0,1fr)}.page{padding:var(--sp-6) var(--sp-4) var(--sp-8)}}
@@ -159,6 +160,8 @@ code{font:12.5px var(--mono);color:var(--text-2);white-space:nowrap}
       <li><b>Nobody types into a pane directly.</b> Every message passes the delivery queue: it waits for the turn to end and the input to be empty, pastes once, and confirms it in the transcript.</li>
       <li><b>Every turn reports.</b> Hooks mark each turn's end with a status; a lane silent too long is flagged; memory pressure stops new lanes on a node before it swaps.</li>
       <li><b>You can always look.</b> The cockpit's live terminal, or <code>tmux attach -r</code>, read-only, so watching never types into a lane by accident.</li>
+      <li><b>A handover is read back.</b> When a window is resumed, restarted or started fresh, it gets the lane's handover (where it stood, what is open, what could go wrong, what to do then) and first says it back. The hub compares the read-back with the lane's record; until they match, the lane sends nothing outside.</li>
+      <li><b>Shared things take turns.</b> Your mail, the CRM, a repo, the account pool: the hub gives lanes their turn, so a collision never becomes a manager's problem.</li>
     </ol>
   </section>
 
@@ -168,6 +171,10 @@ code{font:12.5px var(--mono);color:var(--text-2);white-space:nowrap}
       write" the way the cockpit already looks (each topic has its chat, and sharing is by topic), and it removes the
       waiting across topics without giving up long, attachable sessions. Keep C's idea for the chief later: work across
       topics is rare, so the chief can run in short runs once threads keep good records.</p>
+    <p>Research points the same way (<a href="management-research.md">management-research.md</a>): a coordinator that
+      checks work keeps errors from compounding (4.4× against 17.2× for agents working alone in one study), and
+      self-contained units cut what has to pass through the top. B keeps both: one manager checks each topic's lanes,
+      and topics do not wait on each other.</p>
     <p class="note">With an API key instead of a subscription, nothing above changes: a window runs the same Claude Code
       against the key. In C the manager runs can also be headless calls, with no window at all.</p>
   </section>

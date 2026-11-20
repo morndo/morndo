@@ -232,6 +232,7 @@ code,.cmd{font-family:var(--mono)}
 .masthead{position:absolute;z-index:1;left:0;right:0;top:6.5%;text-align:center;color:var(--sun);font:500 clamp(44px,8vw,104px)/.9 var(--serif);font-size:clamp(44px,11cqw,104px);letter-spacing:-.024em;text-shadow:0 2px 28px rgba(6,12,14,.5)}
 .masthead i{display:block;font-weight:400;font-size:.45em;line-height:1.05;letter-spacing:-.01em}
 .under{display:flex;justify-content:space-between;align-items:flex-start;gap:12px 32px;padding:12px 2px 0}
+.cadence{display:flex;align-items:center;gap:6px;margin-top:var(--sp-3);font-size:var(--fs-sm);color:var(--muted)}
 .lede{max-width:430px;font:italic 400 var(--fs-lg)/1.42 var(--serif);color:var(--prose);text-wrap:pretty}
 .credit{max-width:300px;font:var(--fs-2xs)/1.45 var(--mono);color:var(--muted);text-align:right}
 .minidate{display:none}
@@ -396,6 +397,8 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .agent .st{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-2)}
 .agent p{color:var(--text-2)}
 .agent footer{display:flex;flex-wrap:wrap;gap:6px;font-size:var(--fs-2xs);color:var(--muted)}.agent footer .cmd{color:var(--text-2)}
+/* An agent's record: how often its work held when someone else checked it, so trust follows what it has shown. */
+.agent .trk{font-size:var(--fs-xs);color:var(--text-2)}.agent .trk b{font-weight:500;color:var(--muted)}
 
 /* Skills and setup */
 .cols{display:flex;flex-wrap:wrap;align-items:flex-start;gap:28px}
@@ -417,6 +420,7 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .list li{display:flex;align-items:center;gap:11px;min-height:52px;padding:0 14px}
 .list li>div{flex:1;min-width:0}.list li>div b{display:block;font-weight:500}.list li>div span{font-size:var(--fs-xs);color:var(--muted)}
 .list .lt{width:28px;height:28px;border-radius:var(--r-sm);background:var(--fill);font-size:var(--fs-xs);font-weight:700;display:grid;place-items:center;flex:none}
+.list li>.seg{flex:none}
 .list .st{display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--text-2)}
 /* A topic's numbers: four at most, each one figure and what it counts. */
 .facts{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
@@ -586,6 +590,13 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 /* A decision's reasoning, on its lane: what we recommend and what waiting costs. */
 .rec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px var(--sp-3);margin:0;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
 .rec dt{color:var(--muted)}.rec dd{margin:0;text-wrap:pretty}
+/* The checks at a pause point, before something goes outside. */
+.pp{display:flex;flex-direction:column;gap:2px}.pp li{display:flex;align-items:baseline;gap:7px}.pp .i{flex:none;transform:translateY(2px)}
+/* What a goal must not cost: each guardrail with its reading and its limit, in one line. A breached one is a blocker. */
+.gd{display:flex;flex-wrap:wrap;gap:var(--sp-2) var(--sp-6);margin:0;padding:0;list-style:none}
+.gd li{display:flex;align-items:center;gap:6px;font-size:var(--fs-sm);color:var(--text-2)}
+.gd li b{font-weight:600;color:var(--text)}.gd li small{font-size:var(--fs-xs);color:var(--muted)}
+.gd .warn b{color:var(--warn)}
 @container (max-width:860px){.g2{grid-template-columns:minmax(0,1fr)}.g2 .ny{order:-1}
   .dl a{grid-template-columns:minmax(0,1fr) auto 84px;row-gap:2px}.dl .dx{grid-column:1;grid-row:2;font-size:var(--fs-sm)}.dl .ms,.dl .cf{grid-row:1/3}.fn{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:var(--sp-5)}.evl li{grid-template-columns:minmax(0,1fr);gap:2px}}
 @container (max-width:560px){.gn.first{padding-left:0;border-left:0}.gn b{font-size:var(--fs-5xl)}}
@@ -1021,7 +1032,10 @@ try {
         <div class="rail r" aria-hidden="true"><span>07:15 AM</span></div>
 
         <div class="under">
+          <div>
           <p class="lede">Four decisions need you and one thing is stuck. Everything else moved on its own while you slept.</p>
+          <p class="cadence"><svg class="i sm"><use href="#sun"/></svg>Next brief at 13:00. Until then you hear only about what cannot wait.</p>
+          </div>
           <p class="credit"><span id="hero-title"></span><br><span id="hero-manner"></span></p>
         </div>
 
@@ -1036,7 +1050,7 @@ try {
             <div>
               <article class="item decision" id="d1" data-min="2">
                 <div class="txt">
-                  <div class="meta"><b>Paid</b><i>·</i><span><i class="dot warn"></i>Due today, 14:00</span><i>·</i><span>2 min</span></div>
+                  <div class="meta"><b>Paid</b><i>·</i><span><i class="dot warn"></i>Due today, 14:00</span><i>·</i><span>Yours: over €500</span></div>
                   <h3>Move €1,200 a week from LinkedIn to Google Search</h3>
                   <p>A lead costs €200 on LinkedIn and €80 on Search. The weekly budget stays at €4,000.</p>
                 </div>
@@ -1045,7 +1059,7 @@ try {
               </article>
               <article class="item decision" id="d2" data-min="2">
                 <div class="txt">
-                  <div class="meta"><b>Outbound</b><i>·</i><span>Due tomorrow</span><i>·</i><span>2 min</span></div>
+                  <div class="meta"><b>Outbound</b><i>·</i><span>Due tomorrow</span><i>·</i><span>Yours: in your name</span></div>
                   <h3>Start sequence B for 180 fintech ops leads</h3>
                   <p>The pilot of 30 emails got 6 replies and 2 meetings. Sending stays at 60 a day.</p>
                 </div>
@@ -1054,7 +1068,7 @@ try {
               </article>
               <article class="item decision" id="d3" data-min="3">
                 <div class="txt">
-                  <div class="meta"><b>Content</b><i>·</i><span>Due Wednesday</span><i>·</i><span>3 min</span></div>
+                  <div class="meta"><b>Content</b><i>·</i><span>Due Wednesday</span><i>·</i><span>Yours: a public claim</span></div>
                   <h3>Publish the Fenwick Freight customer story</h3>
                   <p>Fenwick signed off the quote. The claim of 38% fewer manual hand-offs still needs your OK.</p>
                 </div>
@@ -1063,7 +1077,7 @@ try {
               </article>
               <article class="item decision" id="d4" data-min="3">
                 <div class="txt">
-                  <div class="meta"><b>Partnerships</b><i>·</i><span>Due Thursday</span><i>·</i><span>3 min</span></div>
+                  <div class="meta"><b>Partnerships</b><i>·</i><span>Due Thursday</span><i>·</i><span>Yours: binding terms</span></div>
                   <h3>Send the referral offer to Halden Freight Network</h3>
                   <p>Halden wants a deal for its 2,400 business customers: 15% of first-year revenue for 12 months. Jonas drafted it from the template.</p>
                 </div>
@@ -1094,7 +1108,7 @@ try {
           <section class="card" style="--n:2">
             <header>
               <h2>Done while you slept</h2>
-              <p class="sub">Since yesterday 18:00, all inside your guardrails</p>
+              <p class="sub">Decided by agents inside your rules, since 18:00</p>
               <div class="num" aria-hidden="true"><svg class="i"><use href="#moon"/></svg><span>5</span></div>
             </header>
             <ul class="log">
@@ -1314,7 +1328,7 @@ try {
       <div class="doc" style="gap:26px">
         <header class="sec" style="gap:6px">
           <h1 class="h1">Manager</h1>
-          <p class="intro">Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane under the right topic and names who leads it. It comes back to you only for decisions.</p>
+          <p class="intro">Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane under the right topic and names who leads it. It splits an ask into several lanes only where the parts can run side by side; steps that build on each other stay in one lane. It comes back to you only for decisions.</p>
         </header>
         <section class="sec">
           <div class="headrow"><h2 class="h2">Everything in motion</h2><span data-lanes-sum></span></div>
@@ -1324,6 +1338,14 @@ try {
               <tbody data-lanes></tbody>
             </table>
           </div>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">What lanes share</h2><span>Each gets its turn, so they never collide</span></div>
+          <ul class="box list">
+            <li><span class="lt"><svg class="i sm"><use href="#mail"/></svg></span><div><b>Your mail</b><span>Wave 1 follow-ups and wave 2 share 40 sends a day; wave 1 goes first</span></div><span class="st">2 lanes</span></li>
+            <li><span class="lt"><svg class="i sm"><use href="#partner"/></svg></span><div><b>HubSpot</b><span>Brand scout, Contact finder and Sender write to it, one at a time per brand</span></div><span class="st">3 lanes</span></li>
+            <li><span class="lt"><svg class="i sm"><use href="#horn"/></svg></span><div><b>The ad accounts</b><span>Only Paid buyer changes them; Analyst reads</span></div><span class="st">2 lanes</span></li>
+          </ul>
         </section>
         <section class="sec">
           <div class="headrow"><h2 class="h2">What you told it last</h2><span>and where each ask went</span></div>
@@ -1368,6 +1390,27 @@ try {
             <a class="box modcard" href="gtm-cockpit.html" data-module-link="gtm"><svg class="i lg"><use href="#horn"/></svg><div><b>Go-to-market</b><span>Content, outbound, paid, SEO and research</span></div><span class="st" data-here>Open</span></a>
             <a class="box modcard" href="dev-cockpit.html" data-module-link="dev"><svg class="i lg"><use href="#pr"/></svg><div><b>Development</b><span>Projects, pull requests, reviews and releases</span></div><span class="st" data-here>Open</span></a>
           </div>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Briefs</h2><span>When Morndo reports to you</span></div>
+          <div class="box setrow">
+            <div><b>How often</b><span>Reports wait for the next brief, so your day is not cut into pieces. Three a day suits most people.</span></div>
+            <div class="seg" role="group" data-pick aria-label="Briefs a day"><button aria-pressed="false">Once</button><button aria-pressed="false">Twice</button><button aria-pressed="true">3 times</button></div>
+          </div>
+          <div class="box setrow">
+            <div><b>Between briefs</b><span>Morndo interrupts you only for a decision due before the next brief, or for something stuck that puts a deadline at risk.</span></div>
+            <button class="sw" role="switch" aria-checked="true" aria-label="Interrupt only for what cannot wait"></button>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Who decides</h2><span>What agents decide alone, they tell you in the next brief, with Undo</span></div>
+          <ul class="box list">
+            <li><div><b>It goes out in your name</b><span>An email, an offer, a post, a release</span></div><div class="seg" role="group" data-pick aria-label="Who decides what goes out in your name"><button aria-pressed="true">You</button><button aria-pressed="false">The agent</button></div></li>
+            <li><div><b>It is hard to undo</b><span>A signed term, a published claim, a deleted record</span></div><div class="seg" role="group" data-pick aria-label="Who decides what is hard to undo"><button aria-pressed="true">You</button><button aria-pressed="false">The agent</button></div></li>
+            <li><div><b>It rests on what only you know</b><span>A call you held, a relationship, a promise</span></div><div class="seg" role="group" data-pick aria-label="Who decides what rests on what only you know"><button aria-pressed="true">You</button><button aria-pressed="false">The agent</button></div></li>
+            <li><div><b>It stays inside the guardrails and can be undone</b><span>A paused ad, a list, a draft, a reminder</span></div><div class="seg" role="group" data-pick aria-label="Who decides what stays inside the guardrails"><button aria-pressed="false">You</button><button aria-pressed="true">The agent</button></div></li>
+          </ul>
+          <p class="intro" style="font-size:13.5px">A decision is worth your time when you know something the agent does not, or when it cannot be taken back. One you would approve without reading is not: the agent takes it and you can undo it.</p>
         </section>
         <section class="sec">
           <div class="headrow"><h2 class="h2">Workspace colour</h2><span>Now: <span data-theme-name>Ink</span></span></div>
@@ -1657,6 +1700,18 @@ try {
             { name: "Northvale or Corvane", conf: "Early", close: "", at: 1, stage: "First calls Wednesday and Thursday", short: "Qualify this week", href: "#lane/partner-calls",
               evidence: "Northvale Bank and Corvane ERP both replied to wave 1. Nothing known yet about fit or budget.", next: "the first calls on Wednesday and Thursday; one of them has to qualify." },
           ],
+          // What the goal must not cost. A breached guardrail becomes a blocker under Needs you.
+          guards: {
+            sub: "What reaching 3 must not cost",
+            items: [
+              { what: "Bounces", val: "1.2%", limit: "limit 4%" },
+              { what: "Asked to stop", val: "0 of 52", limit: "limit 2%" },
+              { what: "Sent unchecked", val: "0", limit: "none allowed" },
+              { what: "Terms", val: "standard 15%", limit: "no discount without you" },
+            ],
+          },
+          ladder: [["Likely", "They asked for an offer."], ["Possible", "A call held or booked, with a named partner owner."], ["Early", "Only a reply, or a first call booked."]],
+          calib: "No forecast can be scored yet. The first is scored on 18 December; each is kept with what happened, so the ladder learns how often Likely signs.",
           out: "Out of this goal: Kestrel Parcel, budget frozen until spring (call on 12 November).",
           gap: {
             says: "To reach 3, two more deals must reach an offer in time:",
@@ -1697,17 +1752,20 @@ try {
               ["08:12", "L", "Lea", "p", "took on the check of the 24 wave 2 emails, by 11:00", "outreach-wave-2"],
               ["08:00", "S", "Sender", "a", "sent 18 wave 1 follow-ups from your mail, 08:00 to 08:40", "outreach-wave-1", "o", 18,
                 ["Fernwood Outdoor · to the head of partnerships", "Tallis Logistics · to the VP business development", "Brookmere Foods · to the partnerships lead"]],
+              ["07:20", "M", "Manager", "a", "spot-checked 5 brands of Lea's batch 3 at random: all 5 fit the profile", "brand-list"],
               ["07:00", "S", "Sender", "a", "put 4 reminders in HubSpot for brands that want to talk in January", "outreach-wave-1", "u"],
               ["06:10", "C", "Contact finder", "a", "found 58 contacts in Apollo and left out 4 whose email failed the check", "contact-data", "u", 58,
                 ["Larkfield Home · head of partnerships", "Osprey Cargo · VP business development", "Quillon Pay · partnerships lead"]],
               ["05:40", "B", "Brand scout", "a", "added 32 brands from Clay, 9 of them fit; skipped 6 that work with a competitor", "brand-list", "u", 32,
                 ["Larkfield Home · fits: 40,000 small-business buyers", "Osprey Cargo · fits: sells to freight forwarders", "Marlow Kitchens · does not fit: consumers only"]],
+              ["05:05", "M", "Manager", "a", "caught Sender's read-back after a restart: it left out Lea's check. Put the check back and held sending; nothing went out", "outreach-wave-2"],
               ["04:30", "S", "Sender", "a", "drafted 24 emails for wave 2. Nothing is sent before Lea checks them.", "outreach-wave-2", "", 24,
                 ["Larkfield Home · 74 words", "Pell & Rowe · 81 words", "Southgate Supply · 69 words"]],
               ["02:10", "B", "Brand scout", "a", "picked 40 retail brands from the checked list for wave 2", "outreach-wave-2", "u"],
             ]],
             ["Yesterday", [
               ["21:40", "B", "Brand scout", "a", "started batch 4 in Clay", "brand-list"],
+              ["21:10", "S", "Sender", "a", "started a fresh session and read the lane back; it matched the records", "outreach-wave-1"],
               "seen",
               ["17:10", "S", "Sender", "a", "sent 20 wave 1 follow-ups from your mail, 17:10 to 17:55", "outreach-wave-1", "o", 20,
                 ["Thornbury Tools · to the head of partnerships", "Ardent Wholesale · to the CEO", "Linden Pay · to the partnerships lead"]],
@@ -1733,12 +1791,12 @@ try {
           ["M", "Mara Lind, you", "ok", "Owns it", "The calls, every offer, the goal with the CEO", "", "Head of GTM", "p"],
           ["L", "Lea Brandt", "warn", "Review due", "Checks every list and email before it goes out", "", "GTM associate", "p"],
           ["J", "Jonas Falk", "ok", "Working", "Tools, the CRM and the contract template", "", "Partner operations", "p"],
-          ["B", "Brand scout", "ok", "Working", "Finds brands that fit the partner profile", "/find-brands", "Clay"],
-          ["C", "Contact finder", "ok", "Working", "The person who decides, with a checked email", "/find-contacts", "Apollo"],
-          ["S", "Sender", "ok", "Working", "Personal emails from your mail, and follow-ups", "/outbound-sequence", "Claude"],
-          ["P", "Call prep", "ok", "Working", "One page on the brand before every call", "/call-brief", "Claude"],
-          ["N", "Notetaker", "next", "Up next", "Notes, next steps and the follow-up draft", "/call-notes", "Claude"],
-          ["R", "Reporter", "next", "Up next", "The weekly partner report for the CEO", "/weekly-summary", "Claude"],
+          ["B", "Brand scout", "ok", "Working", "Finds brands that fit the partner profile", "/find-brands", "Clay", "", "3 of 3 batches passed Lea's check; she took out 7 brands"],
+          ["C", "Contact finder", "ok", "Working", "The person who decides, with a checked email", "/find-contacts", "Apollo", "", "92 of 96 emails held up; none bounced after the check"],
+          ["S", "Sender", "ok", "Working", "Personal emails from your mail, and follow-ups", "/outbound-sequence", "Claude", "", "51 of 52 emails passed Lea's check; 1 read-back corrected today"],
+          ["P", "Call prep", "ok", "Working", "One page on the brand before every call", "/call-brief", "Claude", "", "2 of 2 briefs held up on the call"],
+          ["N", "Notetaker", "next", "Up next", "Notes, next steps and the follow-up draft", "/call-notes", "Claude", "", "2 of 2 notes matched what you heard"],
+          ["R", "Reporter", "next", "Up next", "The weekly partner report for the CEO", "/weekly-summary", "Claude", "", "No report checked yet"],
         ],
         chatSub: "You, Lea, Jonas and the partnership agents. Nothing else lives here.",
         chat: `<div class="msg"><span class="av">B</span><div class="who">Brand scout<time>05:40</time></div><p>Batch 4 is in: 32 new brands from Clay, 9 of them fit the profile. Lea, they are in HubSpot for your check.</p></div>
@@ -1918,6 +1976,10 @@ try {
           ["todo", "Replies turned into calls", "Sender · Wed"],
         ],
         agents: [["S", "Sender", "ok", "Leads", "Follow-ups", "/outbound-sequence", "Claude"], ["L", "Lea Brandt", "done", "Approved", "All 52 emails", "", "GTM associate", "p"]],
+        handover: { when: "Yesterday 21:10", match: true, why: "Sender's conversation had grown long, so it started a fresh one.",
+          state: "52 sent, 11 replies, 5 calls booked; follow-ups 20 of 52 done.", open: "Follow-ups to the 32 brands without a reply; reminders for the 4 that want January.",
+          risk: "A brand that already replied gets a follow-up.", ifso: "Stop the sequence for that brand and apologise from your mail the same day.",
+          restated: "“Follow up the 32 without a reply, never one that replied; January reminders for 4.”" },
         made: [["file", "The 52 emails", "Each with one line about the brand"], ["file", "Replies", "11: 5 calls, 4 later, 2 no"]],
         chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>07:00</time></div><p>Halden and Brightmoor came from this wave. 4 others asked to talk in January; I put a reminder in HubSpot.</p></div>`
       },
@@ -1935,6 +1997,11 @@ try {
           ["todo", "The other 16 drafted once their contacts are in", "Sender · Thu"],
         ],
         agents: [["S", "Sender", "warn", "Leads", "Waits for Lea's check", "/outbound-sequence", "Claude"], ["L", "Lea Brandt", "warn", "Review due", "24 emails, by 11:00", "", "GTM associate", "p"]],
+        handover: { when: "Today 05:05", match: false, why: "Sender's session restarted after the machine updated overnight.",
+          state: "24 emails drafted for retail brands; none sent.", open: "Lea checks the 24 by 11:00; the other 16 wait for their contacts.",
+          risk: "Emails go out before Lea has checked them.", ifso: "Stop sending, tell Lea and you, and list every email that went out.",
+          restated: "“24 drafts are ready; send 20 a day from 09:00.”",
+          fixed: "Lea's check was missing. The Manager compared the read-back with the lane's records, put the check back as the next step and held sending. Nothing went out." },
         made: [["file", "24 drafted emails", "Retail brands, from your mail"]],
         chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>04:30</time></div><p>24 drafts ready for Lea. I kept them under 90 words and named one thing each brand did this year.</p></div>
           <div class="msg"><span class="av person">L</span><div class="who">Lea<time>08:12</time></div><p>On it after coffee.</p></div>`
@@ -1960,6 +2027,8 @@ try {
         id: "halden-offer", topic: "partnerships", title: "Offer for Halden Freight Network", state: "warn", lead: "Jonas", opened: "Opened 13 Nov", decision: "d4",
         short: "Offer to Halden", ask: "15% of first-year revenue for 12 months · due Thu", shortAfter: "It goes out tomorrow at 09:00.",
         rec: "Send it as drafted: our standard partner terms, already cleared by legal. About 96 new customers in the first year (2,400 at 4%).",
+        yours: "It commits us to terms for 12 months and goes out in your name.",
+        checks: ["Terms match the template legal cleared last week", "Customer numbers checked by Call prep: 2,400, about 4% take it up", "The cover email waits in your drafts and goes only from your mail"],
         delay: "Halden sets its partner budget on 1 December. After that, signing slips to February and the goal loses its only likely deal.",
         next: "After your OK", afterNext: "Mon 23 Nov, Jonas follows up",
         asked: "Send Halden a referral offer this week, while they are warm.",
@@ -2011,6 +2080,7 @@ try {
       {
         id: "fenwick", topic: "content", title: "Fenwick customer story", state: "warn", lead: "Writer", opened: "Opened Mon 9 Nov", decision: "d3",
         next: "After your OK", afterNext: "Wed 18 Nov, when it is published",
+        yours: "It publishes a number as our claim, and a published claim is hard to take back.",
         asked: "Write a customer story with Fenwick Freight once they agree to be named.",
         askedMeta: "You to the Manager, Monday 9 November<i>·</i>The Manager filed it under Content and named Writer to lead.",
         status: "Fenwick signed off the quote. The claim of 38% fewer manual hand-offs comes from their own Q3 report and needs your OK. Due Wednesday.",
@@ -2053,6 +2123,7 @@ try {
         id: "sequence-b", topic: "outbound", title: "Sequence B, fintech ops", state: "warn", lead: "Sender", opened: "Opened Wednesday", decision: "d2",
         short: "Sequence B", ask: "180 fintech ops leads at 60 a day · due tomorrow", shortAfter: "The first 60 go out at 10:00.",
         next: "After your decision", afterNext: "Fri 20 Nov, after the first 180",
+        yours: "180 emails go out in your name.",
         asked: "Start writing to fintech ops people once the pilot shows it works.",
         askedMeta: "You to the Manager, Wednesday 09:05<i>·</i>The Manager filed it under Outbound and named Sender to lead.",
         status: "The pilot of 30 emails got 6 replies and 2 meetings. Starting sends to 180 fintech ops leads at 60 a day. Due tomorrow.",
@@ -2097,6 +2168,7 @@ try {
         id: "search-budget", topic: "paid", title: "Search budget shift", state: "warn", lead: "Paid buyer", opened: "Opened Friday", decision: "d1", decisionHref: "#decision",
         short: "Search budget shift", ask: "€1,200 a week from LinkedIn to Search · by 14:00", shortAfter: "Paid buyer moves it now.",
         next: "After your decision", afterNext: "Mon 7 Dec, with the result",
+        yours: "It moves €1,200 a week, above your €500 limit per change.",
         asked: "LinkedIn leads cost too much. Find where the budget works best and propose a shift.",
         askedMeta: "You to the Manager, Friday 10:20<i>·</i>The Manager filed it under Paid and named Paid buyer to lead.",
         status: "The numbers favour Search. Moving €1,200 a week needs your OK, by 14:00 today.",
@@ -2192,8 +2264,9 @@ try {
     const st = stateOf(l), dot = st === "new" ? '<i class="spin"></i>' : '<i class="dot ' + st + '"></i>';
     return `<a class="row kid${l.fresh ? " fresh" : ""}" href="#lane/${l.id}" data-nav="lane/${l.id}">${dot}<span class="grow">${esc(l.title)}</span><span class="word"><span class="sr">${word(l)}. </span>${leads(l)}</span></a>`;
   };
-  const agentCard = ([av, name, st, word, text, cmd, engine, kind]) =>
-    `<article class="box agent"><div class="top"><span class="av${kind === "p" ? " person" : ""}">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p><footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
+  // An agent may carry its record: how often its work held when someone else checked it.
+  const agentCard = ([av, name, st, word, text, cmd, engine, kind, rec]) =>
+    `<article class="box agent"><div class="top"><span class="av${kind === "p" ? " person" : ""}">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p>${rec ? `<p class="trk"><b>Record</b> ${rec}</p>` : ""}<footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
 
   function drawTree() {
     if (!PAGES.topics) return;
@@ -2404,11 +2477,15 @@ try {
     const st = g.funnel.steps, max = Math.max(...st.map(x => +x.n));
     const funnel = `<section class="sec" aria-label="Funnel"><div class="headrow"><h2 class="h2">Funnel</h2><span>${g.funnel.since}</span></div>
         <ol class="fn" style="--n:${st.length}">${st.map(x => `<li class="${x.st || ""}"><i style="width:${Math.max(3, Math.round(+x.n / max * 100))}%"></i><b>${x.n}${x.d ? `<em>${x.d}</em>` : ""}</b><span>${x.what}</span>${x.rate ? `<small>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</small>` : ""}</li>`).join("")}</ol></section>`;
+    const gs = g.guards, bad = gs ? gs.items.filter(x => x.st === "warn").length : 0;
+    const guards = gs ? `<section class="sec" aria-label="Guardrails"><div class="headrow"><h2 class="h2">Guardrails</h2><span>${gs.sub} · ${bad ? bad + " breached" : "all held"}</span></div>
+        <ul class="gd">${gs.items.map(x => `<li class="${x.st || ""}">${x.st === "warn" ? '<i class="dot warn still"></i>' : CHECK}<b>${x.what} ${x.val}</b><small>${x.limit}</small></li>`).join("")}</ul></section>` : "";
     const rk = "rp:" + t.id;
     const recovery = `<details class="more" data-more="${rk}"${ui.more[rk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Recovery plan<small>${g.gap.steps.length} steps to reach ${g.target}, and what each forecast rests on</small></summary><div class="body">
         <div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div>
-        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence} Next: ${x.next}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section></div></details>`;
-    return { head, body: chart + `<div class="g2">${dealsBox}${needs}</div>` + funnel + recovery };
+        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence} Next: ${x.next}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section>
+        ${g.ladder ? `<section class="sec"><h3 class="h2">How a forecast is set</h3><ul class="evl">${g.ladder.map(([w, f]) => `<li><b>${w}</b><span>${f}</span></li>`).join("")}</ul>${g.calib ? `<p class="deals-out">${g.calib}</p>` : ""}</section>` : ""}</div></details>`;
+    return { head, body: chart + `<div class="g2">${dealsBox}${needs}</div>` + funnel + guards + recovery };
   }
 
   function drawTopic(t) {
@@ -2460,13 +2537,21 @@ try {
       const mark = kind === "ok" ? '<svg class="i ok"><use href="#check"/></svg>' : kind === "todo" ? '<i class="dot hollow"></i>' : st === "new" ? '<i class="spin"></i>' : `<i class="dot ${yes ? "ok" : st}"></i>`;
       return `<li${kind === "now" ? ' class="now"' : kind === "todo" ? ' class="todo"' : ""}>${mark}<span>${text}</span><small>${who}</small></li>`;
     }).join("");
+    // Why the decision is the owner's, and the checks at the pause point before anything goes outside.
+    const why = !yes && (l.rec || l.yours || l.checks) ? `<dl class="rec">${l.rec ? `<dt>We recommend</dt><dd>${l.rec}</dd>` : ""}${l.delay ? `<dt>If it waits</dt><dd>${l.delay}</dd>` : ""}${l.yours ? `<dt>Why it is yours</dt><dd>${l.yours}</dd>` : ""}${l.checks ? `<dt>Checked before it goes out</dt><dd><ul class="pp">${l.checks.map(c => `<li>${CHECK}<span>${c}</span></li>`).join("")}</ul></dd>` : ""}</dl>` : "";
+    // A handover (a restart, a fresh session, a new lead): what was handed over, and the new session's read-back of it,
+    // compared with the lane's records before it may act.
+    const ho = l.handover, hk = "ho:" + l.id;
+    const hand = ho ? `<details class="more" data-more="${hk}"${ui.more[hk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Handover<small>${ho.when} · ${ho.match ? "the read-back matched the records" : "the read-back missed something and was corrected"}</small></summary><div class="body"><dl class="rec">
+        <dt>Why</dt><dd>${ho.why}</dd><dt>Where it stood</dt><dd>${ho.state}</dd><dt>Still open</dt><dd>${ho.open}</dd><dt>What could go wrong</dt><dd>${ho.risk}</dd><dt>If it does</dt><dd>${ho.ifso}</dd><dt>Read back</dt><dd>${ho.restated}</dd>${ho.fixed ? `<dt>Corrected</dt><dd>${ho.fixed}</dd>` : ""}</dl></div></details>` : "";
     v.setAttribute("aria-label", "Lane: " + l.title);
     v.innerHTML = `<div class="split"><div class="scroll"><article class="doc" style="gap:28px">
       <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : word(l)}</span><i>·</i><span>${leads(l)}</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
       <section class="sec"><h2 class="label"><b>1</b>What you asked</h2><blockquote class="asked">${l.asked}</blockquote><p class="meta">${l.askedMeta}</p></section>
-      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}${l.rec && !yes ? `<dl class="rec"><dt>We recommend</dt><dd>${l.rec}</dd><dt>If it waits</dt><dd>${l.delay}</dd></dl>` : ""}${l.extra || ""}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
+      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}${why}${l.extra || ""}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
       <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
       ${l.made && l.made.length ? `<section class="sec"><h2 class="label"><b>4</b>What it made</h2><ul class="box list">${l.made.map(([icon, what, more, href]) => `<li><span class="lt"><svg class="i sm"><use href="#${icon}"/></svg></span><div><b>${what}</b><span>${more}</span></div>${href ? `<a class="btn quiet s" href="${href}">Open</a>` : '<button class="btn quiet s">Open</button>'}</li>`).join("")}</ul></section>` : ""}
+      ${hand}
       ${t && t.history ? historyMore("h:" + l.id, t.history, l.id) : ""}
     </article></div>
     <template class="chat-src" data-title="${esc(l.title)}" data-sub="You, the Manager and this lane's agents. Nothing else lives here." data-placeholder="Message this lane">${l.chat || ""}</template></div>`;
@@ -2773,7 +2858,9 @@ try {
     el.className = "receipt";
     el.innerHTML = `<div class="rh"><svg class="i sm ok"><use href="#check"/></svg><b>Filed as its own lane</b><button class="ib" data-dismiss aria-label="Dismiss"><svg class="i sm"><use href="#x"/></svg></button></div><p class="rt"></p><p class="rr"></p><div class="acts"><a class="btn quiet s" href="#lane/${l.id}">Open</a><button class="btn quiet s" data-dismiss>Move it</button><button class="btn quiet s" data-unfile>Undo</button></div>`;
     $(".rt", el).textContent = text;
-    $(".rr", el).textContent = t ? $("#tree h2").dataset.kind + ": " + t.name + " · " + lead + " leads" : "With the Manager, until it knows where this belongs";
+    // Work is split into lanes only where the parts can run side by side; steps that build on each other stay in one.
+    const chain = /\b(then|once|after|before)\b/i.test(text) ? " · one lane: the steps build on each other" : "";
+    $(".rr", el).textContent = (t ? $("#tree h2").dataset.kind + ": " + t.name + " · " + lead + " leads" : "With the Manager, until it knows where this belongs") + chain;
     $("[data-unfile]", el).addEventListener("click", () => {
       PAGES.lanes.splice(PAGES.lanes.indexOf(l), 1);
       el.remove();
@@ -2833,6 +2920,7 @@ try {
     else if (t.matches("[data-fwd]")) history.forward();
     else if (t.matches("[data-glass-default]")) { theme.g = null; applyTheme(true); }
     else if (t.matches("[data-strength-default]")) { theme.k = K_DEFAULT; applyTheme(true); }
+    else if (t.closest(".seg[data-pick]")) $$("button", t.closest(".seg")).forEach(b => b.setAttribute("aria-pressed", String(b === t)));
     else if (t.matches(".sw")) t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"));
   });
 
