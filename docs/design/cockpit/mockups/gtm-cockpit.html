@@ -548,6 +548,11 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .dl a:hover .dn{text-decoration:underline;text-underline-offset:3px}
 .cf{justify-self:end;display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:600;white-space:nowrap}
 .cf-likely{background:var(--ink);color:var(--ink-fg)}.cf-possible{box-shadow:inset 0 0 0 1px var(--edge-2);color:var(--text)}.cf-early{color:var(--muted)}
+.cf-done{color:var(--text-2)}.cf-n{padding:0;font-weight:500;color:var(--text-2)}
+.dv{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap}
+.gh-verdict small.calm{color:var(--text-2)}
+.ny-none{font-size:var(--fs-sm);color:var(--muted)}
+.nogoal p span{color:var(--text-2)}
 .ms{display:flex;flex-direction:column;gap:6px;padding-top:5px}.ms small{font-size:var(--fs-xs);color:var(--text-2)}
 .ms ol{display:flex;align-items:center;margin:0;padding:0;list-style:none}
 .ms li{position:relative;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--edge-2);flex:none}
@@ -1747,18 +1752,105 @@ try {
           <div class="msg"><span class="av">P</span><div class="who">Call prep<time>08:41</time></div><p>Brightmoor sells to 9,000 small retailers. Their head of partnerships joined in May from a bank and launched two referral programmes there. The full brief is ready at 13:00.</p></div>`
       },
       {
-        id: "content", name: "Content", icon: "pen", crumb: "This week",
-        intro: "This week: the webinar promo, the recap post, one customer story and a carousel.",
+        id: "content", name: "Content", icon: "pen", crumb: "Webinar on Thursday", when: "3 days to the webinar",
+        meta: "<b>Asked by you</b><i>·</i><span>Writer, Visuals and Publisher work on it</span><i>·</i><span>Sign-ups reported Fri 20 Nov</span>",
+        intro: "Everything we publish: the webinar on Thursday and its promo, the recap post, one customer story and a carousel. The goal this week is the webinar's sign-ups.",
         focusLane: "webinar",
-        facts: [["4", "posts this week"], ["1,840", "webinar page visits"], ["212", "sign-ups for Thursday"], ["2", "brand-check fails"]],
+        facts: [["212", "sign-ups for Thursday"], ["1,840", "webinar page visits"], ["4", "posts this week"], ["2", "brand-check fails"]],
+        goal: {
+          target: 300, signed: 212, likely: 55, labels: ["Signed up", "More expected, forecast", "Still missing"],
+          health: ["bad", "At risk"], action: "Your call by 16:00",
+          insight: "Today's promo post decides which end of the range we land on.",
+          decision: { title: "The promo visuals are stuck", sub: "Post at 16:00 · 2 of 6 images fail the brand check", why: "Details" },
+          asOf: "updated 09:20, forecast down 33 since yesterday",
+          trajectory: {
+            start: "2026-11-05", days: 14, now: 11, goal: 300, step: 100, unit: "Webinar sign-ups", key: "Signed up",
+            ticks: [[0, "5 Nov"], [11, "Today"], [14, "Thu 19 Nov"]],
+            plan: [[0, 0], [2, 40], [4, 90], [6, 130], [8, 170], [10, 205], [11, 220], [12, 250], [13, 280], [14, 300]],
+            actual: [[0, 0], [1, 22], [3, 64], [5, 101], [7, 138], [9, 171], [10, 190], [11, 212]],
+            expected: [[11, 212], [12, 226], [13, 252], [14, 267]],
+            low: [[11, 212], [12, 220], [13, 238], [14, 250]],
+            high: [[11, 212], [12, 240], [13, 275], [14, 302]],
+          },
+          rows: { title: "Where sign-ups come from", sub: "Each channel · written to live" },
+          milestones: ["Written", "Approved", "Scheduled", "Live"],
+          deals: [
+            { name: "Newsletter", conf: "Likely", at: 4, stage: "Two sends out, reminder scheduled", short: "118 so far; reminder Wed 09:00", href: "#lane/webinar-reminders",
+              evidence: "Two sends brought 118 sign-ups. The reminder goes to the 3,900 who opened but did not sign up; last webinar's reminder brought 31.", next: "the reminder, Wednesday 09:00." },
+            { name: "LinkedIn promo post", conf: "Possible", at: 1, stage: "Text approved, images stuck", short: "Stuck: 2 images fail", href: "#lane/webinar",
+              evidence: "Last webinar's promo post brought 41 sign-ups in 3 days. Nothing else reaches LinkedIn before Thursday.", next: "your call before 16:00: post the 4 images that pass, or allow one more round." },
+            { name: "Fenwick shares it", conf: "Early", at: 0, stage: "Promised, no date yet", short: "Their ops lead said yes", href: "#lane/fenwick",
+              evidence: "Fenwick's ops lead offered to share it in an email on Friday. There is no date in their calendar yet.", next: "Writer sends them the post text on Tuesday." },
+          ],
+          attention: [
+            { st: "bad", short: "holds the 16:00 post for the images", who: "Publisher", href: "#lane/webinar" },
+            { st: "warn", short: "recap quotes not checked yet; post due Thursday", who: "Checker", href: "#lane/recap" },
+          ],
+          funnel: {
+            since: "Since 5 November · change today · rate against the plan",
+            steps: [
+              { n: "4,200", what: "emails sent" },
+              { n: "1,890", what: "opened", rate: "45% · plan 40%" },
+              { n: "1,840", what: "page visits", d: "+310" },
+              { n: "212", what: "signed up", d: "+22", rate: "11.5% · plan 15%", st: "warn" },
+            ],
+          },
+          guards: {
+            sub: "What the sign-ups must not cost",
+            items: [
+              { what: "Off-brand posts", val: "0", limit: "none allowed" },
+              { what: "Newsletter sends", val: "2 this week", limit: "limit 2" },
+              { what: "Claims without a source", val: "0", limit: "none allowed" },
+            ],
+          },
+          gap: {
+            says: "To reach 300 by Thursday:",
+            steps: [
+              "Post today at 16:00, with the 4 images that pass if no round is allowed. Last time the promo post brought 41 in 3 days.",
+              "Send the reminder on Wednesday at 09:00 to the 3,900 who opened but did not sign up.",
+              "If we are below 260 on Wednesday evening, Paid moves €200 of the webinar's budget to a sign-up ad for one day.",
+            ],
+          },
+          ladder: [["Likely", "The channel already brought sign-ups at a known rate."], ["Possible", "Scheduled, but not live yet."], ["Early", "Promised, with no date."]],
+          calib: "Last webinar was forecast at 240 sign-ups three days out; it got 226.",
+        },
+        history: {
+          seen: "yesterday at 18:20", shown: 2, since: "That is everything since the webinar page went live on 5 November.",
+          days: [
+            ["Today", [
+              ["09:21", "V", "Visuals", "a", "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3", "webinar"],
+              ["09:13", "P", "Publisher", "a", "held the 16:00 promo post until the images are settled", "webinar"],
+              ["09:12", "V", "Visuals", "a", "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail", "webinar"],
+              ["08:00", "P", "Publisher", "a", "sent newsletter 46 to 4,200 readers, with the webinar on top", "webinar-reminders", "o"],
+              ["07:30", "W", "Writer", "a", "started draft 2 of the recap post, aiming at 350 words", "recap"],
+            ]],
+            ["Yesterday", [
+              ["17:00", "P", "Publisher", "a", "scheduled the reminder email for Wednesday 09:00", "webinar-reminders", "u"],
+              "seen",
+              ["11:40", "W", "Writer", "a", "wrote the post text for Fenwick to share", "fenwick"],
+            ]],
+            ["Friday, 13 November", [
+              ["16:41", "W", "Writer", "a", "answered your question: the 38% is March against September, before and after us", "fenwick"],
+              ["16:20", "W", "Writer", "a", "got Fenwick's sign-off on the story and the quote", "fenwick"],
+              ["11:05", "M", "You", "p", "asked for a recap of the October webinar people can read in two minutes", "recap", "d"],
+              ["10:00", "W", "Writer", "a", "wrote the promo text; you approved it at 10:40", "webinar"],
+            ]],
+            ["Thursday, 12 November", [
+              ["17:40", "M", "You", "p", "asked to get the webinar promo out on Monday", "webinar", "d"],
+              ["08:00", "P", "Publisher", "a", "sent the first webinar invite to 4,200 readers", "webinar-reminders", "o"],
+            ]],
+          ],
+        },
         agents: [
-          ["W", "Writer", "ok", "Working", "Webinar recap post, draft 2 of 3", "/linkedin-post", "Claude"],
-          ["V", "Visuals", "bad", "Stuck", "Webinar promo, out of feedback rounds", "/brand-visual", "GPT Image"],
-          ["P", "Publisher", "warn", "Waiting", "Holding the 16:00 post for the visuals", "/schedule-post", "Asks first"],
+          ["M", "Mara Lind, you", "warn", "Owns it", "Approves what goes public", "", "Head of GTM", "p"],
+          ["W", "Writer", "ok", "Working", "Webinar recap post, draft 2 of 3", "/linkedin-post", "Claude", "", "4 of 4 posts this month approved the first time"],
+          ["V", "Visuals", "bad", "Stuck", "Webinar promo, out of feedback rounds", "/brand-visual", "GPT Image", "", "22 of 26 images passed the brand check"],
+          ["P", "Publisher", "warn", "Waiting", "Holding the 16:00 post for the visuals", "/schedule-post", "Asks first", "", "31 of 31 posts went out on time"],
         ],
         jobs: [
           ["Webinar promo post", "Visuals", "bad", "Today, 16:00", "webinar"],
           ["Fenwick Freight customer story", "Writer", "warn", "Wed 18 Nov", "fenwick"],
+          ["Webinar reminder email", "Publisher", "ok", "Wed 18 Nov, 09:00", "webinar-reminders"],
           ["Webinar recap post", "Writer", "ok", "Thu 19 Nov", "recap"],
           ["Carousel: 5 signs of ops debt", "Visuals", "next", "Fri 20 Nov"],
           ["Newsletter 46", "Publisher", "done", "Sent today, 08:00"],
@@ -1770,39 +1862,218 @@ try {
           <div class="msg"><span class="av">V</span><div class="who">Visuals<time>09:21</time></div><p>Yes. That is one more round, about 4 minutes and €0.60. It is over my limit of 3 rounds, so I need your OK.</p><div class="acts"><button class="btn ink s">Run one more round</button><button class="btn quiet s">Post the 4</button></div></div>`
       },
       {
-        id: "outbound", name: "Outbound", icon: "send", crumb: "Sequences",
-        intro: "Sequence A finished this morning. Sequence B waits for your OK. Sending never goes above 60 emails a day.",
+        id: "outbound", name: "Outbound", icon: "send", crumb: "Meetings from email", when: "Week 4 of 8",
+        meta: "<b>Asked by you</b><i>·</i><span>Sender leads; Jonas takes the meetings</span><i>·</i><span>Next report Fri 20 Nov</span>",
+        intro: "Cold email to ops teams, from your mail, never more than 60 a day. The goal: 30 sales meetings by 18 December.",
         focusLane: "sequence-b",
-        facts: [["1,140", "emails sent this month"], ["5.4%", "reply rate"], ["9", "meetings booked"], ["1.8%", "bounces, limit 4%"]],
+        facts: [["990", "emails sent since 26 Oct"], ["5.9%", "reply rate"], ["11", "meetings booked"], ["1.8%", "bounces, limit 4%"]],
+        goal: {
+          target: 30, signed: 11, likely: 10, labels: ["Meetings booked", "Likely, forecast", "Still unsecured"],
+          health: ["ok", "Ahead of plan"], action: "Round 2 decides December",
+          insight: "Sequence B carries the forecast; round 2 has to bring the last 9.",
+          decision: { title: "Start sequence B", sub: "Due tomorrow · the list goes stale in 2 weeks", done: "Sequence B started" },
+          asOf: "updated 08:40, forecast up 2 since Friday",
+          trajectory: {
+            start: "2026-10-26", days: 53, now: 21, goal: 30, step: 10, unit: "Meetings booked", key: "Booked",
+            ticks: [[0, "26 Oct"], [21, "Today"], [35, "30 Nov"], [53, "18 Dec"]],
+            plan: [[0, 0], [7, 2], [14, 5], [21, 9], [28, 13], [35, 18], [42, 23], [49, 27], [53, 30]],
+            actual: [[0, 0], [6, 1], [9, 3], [13, 5], [16, 8], [19, 10], [21, 11]],
+            expected: [[21, 11], [25, 12], [29, 15], [33, 18], [37, 21], [53, 21]],
+            low: [[21, 11], [29, 13], [37, 16], [53, 16]],
+            high: [[21, 11], [29, 17], [37, 24], [53, 30]],
+          },
+          rows: { title: "Where the 30 come from", sub: "Each sequence · list to meetings" },
+          milestones: ["List built", "Pilot", "Approved", "Sending", "Meetings"],
+          deals: [
+            { name: "Sequence A, logistics ops", conf: "Done", at: 5, stage: "Finished today", short: "9 meetings; forecast was 8", href: "#lane/sequence-a",
+              evidence: "960 emails, 52 replies, 9 meetings. Its forecast at the start was 8." },
+            { name: "Sequence B, fintech ops", conf: "Likely", at: 2, stage: "Pilot done, waits for your OK", short: "Pilot booked 2; your OK tomorrow", href: "#lane/sequence-b",
+              evidence: "The pilot of 30 booked 2 meetings. The other 150 at that rate bring 10.", next: "your OK, then 60 a day from 10:00.",
+              alt: { d: "d2", at: 3, stage: "Sending, 60 a day", short: "First 60 go out at 10:00", next: "replies sorted every morning; meetings reported Friday." } },
+            { name: "Logistics ops, round 2", conf: "Early", at: 0, stage: "List being built", short: "List of 400 due Thursday", href: "#lane/logistics-round-2",
+              evidence: "Same segment as sequence A, which booked 9 from 960. 400 new leads at that rate bring about 4; the plan needs 9.", next: "the list on Thursday, then a pilot of 30 from Monday 23 November." },
+          ],
+          attention: [
+            { st: "warn", short: "2 people who said yes wait for a meeting time", who: "Jonas Falk", href: "#lane/reply-handling" },
+            { st: "warn", short: "step 3 replies at 1.1%, plan 2%", who: "Sender", href: "#lane/sequence-a" },
+          ],
+          funnel: {
+            since: "Since 26 October · change this week · rate against the plan",
+            steps: [
+              { n: "990", what: "emails sent", d: "+30" },
+              { n: "58", what: "replied", d: "+14", rate: "5.9% · plan 5%" },
+              { n: "21", what: "positive", d: "+5", rate: "36% · plan 40%", st: "warn" },
+              { n: "11", what: "meetings booked", d: "+3", rate: "52% · plan 50%" },
+              { n: "6", what: "meetings held", d: "+2" },
+            ],
+          },
+          guards: {
+            sub: "What the meetings must not cost",
+            items: [
+              { what: "Bounces", val: "1.8%", limit: "limit 4%" },
+              { what: "Asked to stop", val: "11 of 990", limit: "limit 2%" },
+              { what: "Sends a day", val: "60", limit: "limit 60" },
+              { what: "Spam complaints", val: "0", limit: "none allowed" },
+            ],
+          },
+          gap: {
+            says: "To reach 30 by 18 December, round 2 has to bring 9:",
+            steps: [
+              "Round 2's list of 400 by Thursday, and a pilot of 30 from Monday 23 November.",
+              "If the pilot books 2 or more, send the rest at 60 a day from 30 November: about 9 meetings by mid-December.",
+              "If it books fewer, move 200 of round 2's leads to sequence B's fintech copy, which books better.",
+            ],
+          },
+          ladder: [["Likely", "A pilot of the same sequence booked meetings; the forecast is its rate."], ["Possible", "A pilot is running."], ["Early", "Only a list, or a rate borrowed from another segment."]],
+          calib: "Sequence A was forecast at 8 meetings when it started; it booked 9. Scored forecasts so far: 1, and it held.",
+          out: "Out of this goal: the 3 people who asked to talk in January.",
+        },
+        history: {
+          seen: "yesterday at 18:20", shown: 2, since: "That is everything since the topic began on 26 October.",
+          days: [
+            ["Today", [
+              ["08:52", "P", "Prospector", "a", "answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days", "sequence-b"],
+              ["08:40", "R", "Replies", "a", "sorted 14 replies: 9 meetings, 3 later, 2 no", "sequence-a"],
+              ["08:20", "R", "Replies", "a", "asked Jonas for times for 2 people who said yes", "reply-handling"],
+              ["08:05", "S", "Sender", "a", "stopped sequence A for the 14 people who replied", "sequence-a", "u", 14,
+                ["Ostrand Haulage · ops lead", "Pinecrest Cold Chain · head of operations", "Velmont Freight · COO"]],
+            ]],
+            ["Yesterday", [
+              ["19:30", "P", "Prospector", "a", "started round 2: 400 logistics ops leads, 120 found so far", "logistics-round-2"],
+              "seen",
+              ["10:15", "S", "Sender", "a", "sent 60 sequence A follow-ups from your mail", "sequence-a", "o", 60,
+                ["Brennick Transport · ops lead", "Calder Yards · head of logistics", "Holmfield Carriers · COO"]],
+            ]],
+            ["Friday, 13 November", [
+              ["17:14", "S", "Sender", "a", "answered: sending pauses on its own at 4% bounces", "sequence-b"],
+              ["17:10", "S", "Sender", "a", "finished the sequence B pilot: 30 sent, 6 replies, 2 meetings, no bounces", "sequence-b", "o", 30,
+                ["Larchmont Pay · ops lead", "Quillon Pay · head of operations", "Tessaly Bank · ops manager"]],
+              ["15:00", "J", "Jonas", "p", "held 2 meetings from sequence A; both want a demo", "reply-handling"],
+            ]],
+            ["Wednesday, 11 November", [
+              ["09:05", "M", "You", "p", "asked to write to fintech ops people once the pilot shows it works", "sequence-b", "d"],
+              ["08:30", "P", "Prospector", "a", "built the list of 180 fintech ops leads from the new customer profile", "sequence-b"],
+            ]],
+          ],
+        },
         agents: [
-          ["S", "Sender", "warn", "Waiting", "Holds sequence B for your OK", "/outbound-sequence", "Claude"],
-          ["P", "Prospector", "done", "Done", "Built the list of 180 fintech ops leads", "/icp-refresh", "Claude"],
-          ["R", "Replies", "ok", "Working", "Sorts replies and books meetings", "/reply-triage", "GPT"],
+          ["M", "Mara Lind, you", "warn", "Owns it", "Approves every sequence before it starts", "", "Head of GTM", "p"],
+          ["J", "Jonas Falk", "warn", "2 waiting", "Takes the meetings", "", "Sales", "p"],
+          ["S", "Sender", "warn", "Waiting", "Holds sequence B for your OK", "/outbound-sequence", "Claude", "", "Sequence A forecast 8 meetings, booked 9"],
+          ["P", "Prospector", "ok", "Working", "Round 2 list: 120 of 400", "/icp-refresh", "Claude", "", "Pilot list: 0 bounces in 30"],
+          ["R", "Replies", "ok", "Working", "Sorts replies and books meetings", "/reply-triage", "GPT", "", "52 of 53 replies sorted right; Jonas moved 1"],
         ],
         jobs: [
           ["Start sequence B, 180 leads", "Sender", "warn", "Tue 17 Nov", "sequence-b"],
-          ["Answer replies from sequence A", "Replies", "ok", "Every morning"],
+          ["Meeting times for 2 yeses", "Replies", "warn", "Today", "reply-handling"],
+          ["List for logistics ops, round 2", "Prospector", "ok", "Thu 19 Nov", "logistics-round-2"],
+          ["Answer replies from sequence A", "Replies", "ok", "Every morning", "sequence-a"],
           ["Bounce check", "Sender", "done", "Today, 08:05"],
-          ["List for logistics ops, round 2", "Prospector", "next", "Thu 19 Nov"],
         ],
-        chatSub: "You, Sender, Prospector and Replies. Nothing else lives here.",
+        chatSub: "You, Jonas, Sender, Prospector and Replies. Nothing else lives here.",
         chat: `<div class="msg"><span class="av">S</span><div class="who">Sender<time>08:05</time></div><p>Sequence A is done. I stopped it for the 14 people who replied, so nobody gets a follow-up after answering.</p></div>
           <div class="msg"><span class="av">R</span><div class="who">Replies<time>08:40</time></div><p>Of the 14 replies, 9 booked a meeting, 3 asked for later and 2 said no. The later ones get a note in January.</p></div>
           <p class="said">Why only fintech ops for B?</p>
           <div class="msg"><span class="av">P</span><div class="who">Prospector<time>08:52</time></div><p>The new customer profile says fintech ops teams close fastest: 41 of the 212 won deals, in 19 days on average. The list of 180 is built from that.</p></div>`
       },
       {
-        id: "paid", name: "Paid", icon: "horn", crumb: "Budget and ads",
-        intro: "€4,000 a week across LinkedIn and Google Search. One budget shift waits for you.",
+        id: "paid", name: "Paid", icon: "horn", crumb: "Leads from ads", when: "Week 7 of 13",
+        meta: "<b>Asked by you</b><i>·</i><span>Paid buyer leads</span><i>·</i><span>€4,000 a week</span><i>·</i><span>Next report Mon 23 Nov</span>",
+        intro: "€4,000 a week across LinkedIn and Google Search. The goal: 450 leads this quarter, at €100 or less each.",
         focusLane: "search-budget",
         facts: [["€3,640", "spent of €4,000 this week"], ["32", "leads this week"], ["€114", "average cost per lead"], ["3", "ads switched off today"]],
+        goal: {
+          target: 450, signed: 214, likely: 216, labels: ["Leads since 1 October", "More forecast", "Still missing"],
+          health: ["warn", "Over cost"], action: "Decide by 14:00",
+          insight: "The count is on plan; the cost is not. Search brings a lead for €80, LinkedIn for €200.",
+          decision: { title: "Move €1,200 a week to Search", sub: "Due today, 14:00 · a lead costs more than its guardrail", done: "Shift approved" },
+          asOf: "updated 07:05, forecast unchanged since Friday",
+          trajectory: {
+            start: "2026-10-01", days: 91, now: 46, goal: 450, step: 100, unit: "Leads", key: "Leads",
+            ticks: [[0, "1 Oct"], [46, "Today"], [61, "1 Dec"], [91, "31 Dec"]],
+            plan: [[0, 0], [7, 35], [14, 70], [21, 105], [28, 140], [35, 175], [42, 210], [49, 245], [56, 280], [63, 315], [70, 350], [77, 385], [84, 420], [91, 450]],
+            actual: [[0, 0], [7, 30], [14, 62], [21, 95], [28, 128], [35, 160], [42, 190], [46, 214]],
+            expected: [[46, 214], [53, 247], [60, 280], [67, 313], [74, 346], [81, 379], [88, 412], [91, 430]],
+            low: [[46, 214], [60, 270], [74, 326], [91, 395]],
+            high: [[46, 214], [60, 290], [74, 370], [91, 470]],
+          },
+          rows: { title: "Where the leads come from", sub: "Each channel · last 14 days · cost per lead" },
+          deals: [
+            { name: "Google Search", conf: "€80 a lead", val: "40 leads", stage: "Two campaigns, €1,600 a week", short: "Cheapest; €1,200 more waits for you", href: "#lane/search-budget",
+              evidence: "40 leads for €3,200 in the last 14 days, and €86 a lead in the 14 days before. 35% of them took a sales call.", next: "your decision by 14:00.",
+              alt: { d: "d1", short: "Gets €1,200 more a week from today", stage: "Two campaigns, €2,800 a week" } },
+            { name: "LinkedIn, always on", conf: "€200 a lead", val: "24 leads", stage: "€2,400 a week", short: "Costly; the shift cuts it to retargeting", href: "#lane/search-budget",
+              evidence: "24 leads for €4,800 in the last 14 days. 25% took a sales call.", next: "cut to the retargeting audience, after your decision.",
+              alt: { d: "d1", short: "Cut to retargeting, €1,200 a week", stage: "€1,200 a week" } },
+            { name: "Webinar campaign", conf: "€36 a lead", val: "11 leads", stage: "Its own €400, ends Thursday", short: "Ends Thursday", href: "#lane/webinar-campaign",
+              evidence: "11 sign-ups counted as leads for €400 in 7 days. They are cheap because they are sign-ups, not sales leads; only 2 took a call last time." },
+          ],
+          attention: [
+            { st: "warn", short: "a lead costs €114 against the €100 guardrail", who: "Paid buyer", href: "#lane/search-budget" },
+            { st: "warn", short: "3 Search ads wait for the shift", who: "Writer", href: "#lane/search-budget" },
+          ],
+          funnel: {
+            since: "Since 1 October · change this week · rate against the plan",
+            steps: [
+              { n: "6,480", what: "clicks", d: "+910" },
+              { n: "214", what: "leads", d: "+32", rate: "3.3% · plan 3%" },
+              { n: "64", what: "took a call", d: "+10", rate: "30% · plan 30%" },
+              { n: "38", what: "qualified", d: "+6", rate: "59% · plan 60%" },
+              { n: "4", what: "won", rate: "plan 6 by 31 Dec", st: "warn" },
+            ],
+          },
+          guards: {
+            sub: "What the leads must not cost",
+            items: [
+              { what: "Cost per lead", val: "€114", limit: "limit €100", st: "warn" },
+              { what: "Weekly spend", val: "€3,640", limit: "limit €4,000" },
+              { what: "Changes over €500 without you", val: "0", limit: "none allowed" },
+              { what: "Customer data in ads", val: "none", limit: "never" },
+            ],
+          },
+          gap: {
+            says: "To bring a lead under €100 by December:",
+            steps: [
+              "Move €1,200 a week from LinkedIn to Search today. At the last 14 days' rates a lead then costs about €98.",
+              "Write 3 new Search ads for the extra budget by Tuesday.",
+              "If a Search lead costs more than €110 for 5 days in a row, Paid buyer moves the money back and tells you.",
+            ],
+          },
+          ladder: [["Forecast", "Each channel's last 14 days, held flat to 31 December."], ["Range", "A lead 15% cheaper or dearer than now."]],
+          calib: "October was forecast at 140 leads on 1 October; it came in at 132.",
+        },
+        history: {
+          seen: "yesterday at 18:20", shown: 2, since: "That is everything since the quarter began on 1 October.",
+          days: [
+            ["Today", [
+              ["08:30", "B", "Paid buyer", "a", "switched off 3 ads below the click floor of 0.6%; they cost €140 last week and brought no lead", "click-floor", "u", 3,
+                ["LinkedIn · Ops debt checklist, image 2 · 0.31%", "LinkedIn · Webinar teaser · 0.44%", "Search · Freight software, broad · 0.52%"]],
+              ["08:10", "A", "Analyst", "a", "checked every running ad against the click floor", "click-floor"],
+              ["07:20", "B", "Paid buyer", "a", "answered: Search has been cheaper for a month, €86 a lead the 14 days before", "search-budget"],
+              ["07:05", "B", "Paid buyer", "a", "wrote the decision brief with the best and the worst case and put it in Decide", "search-budget"],
+            ]],
+            ["Yesterday", [
+              ["18:30", "B", "Paid buyer", "a", "kept the webinar campaign at its own €400 for the last 4 days", "webinar-campaign"],
+              "seen",
+            ]],
+            ["Saturday, 14 November", [
+              ["10:15", "A", "Analyst", "a", "pulled 14 days of spend and leads and matched them against both ad accounts", "search-budget"],
+            ]],
+            ["Friday, 13 November", [
+              ["10:20", "M", "You", "p", "asked where the budget works best, and for a proposal to shift it", "search-budget", "d"],
+              ["09:00", "B", "Paid buyer", "a", "started the webinar sign-up campaign on LinkedIn, €400 in all", "webinar-campaign", "o"],
+            ]],
+          ],
+        },
         agents: [
-          ["B", "Paid buyer", "warn", "Waiting", "Holds the shift until you decide", "/decision-brief", "Claude"],
-          ["A", "Analyst", "done", "Done", "Checked 14 days of spend against the ad accounts", "/weekly-summary", "Claude"],
-          ["W", "Writer", "next", "Up next", "3 new Search ads, once you say yes", "/ad-variants", "GPT"],
+          ["M", "Mara Lind, you", "warn", "Owns it", "Decides any change over €500", "", "Head of GTM", "p"],
+          ["B", "Paid buyer", "warn", "Waiting", "Holds the shift until you decide", "/decision-brief", "Claude", "", "4 of 4 budget calls held up two weeks later"],
+          ["A", "Analyst", "done", "Done", "Checked 14 days of spend against the ad accounts", "/weekly-summary", "Claude", "", "Numbers matched the ad accounts 7 of 7 weeks"],
+          ["W", "Writer", "next", "Up next", "3 new Search ads, once you say yes", "/ad-variants", "GPT", "", "9 of 12 ads stayed above the click floor"],
         ],
         jobs: [
           ["Move €1,200 a week to Search", "Paid buyer", "warn", "Today, 14:00", "search-budget"],
+          ["Webinar sign-up campaign", "Paid buyer", "ok", "Ends Thu 19 Nov", "webinar-campaign"],
           ["Switch off ads below the click floor", "Paid buyer", "done", "Today, 08:30", "click-floor"],
           ["3 new Search ads", "Writer", "next", "After your decision"],
           ["Weekly spend report", "Analyst", "next", "Mon 23 Nov"],
@@ -1813,17 +2084,90 @@ try {
           <div class="msg"><span class="av">B</span><div class="who">Paid buyer<time>09:02</time></div><p>No. The webinar campaign keeps its own €400. The shift only takes from the always-on lead campaign.</p></div>`
       },
       {
-        id: "seo", name: "SEO", icon: "search", crumb: "Pages and rankings",
-        intro: "Five comparison pages against the tools you lose deals to. Two went live this morning, three are being written.",
+        id: "seo", name: "SEO", icon: "search", crumb: "Comparison pages", when: "Week 3 of 9",
+        meta: "<b>Asked by you</b><i>·</i><span>SEO writer leads; Checker checks every claim</span><i>·</i><span>First ranking check Mon 30 Nov</span>",
+        intro: "Five comparison pages against the tools we lose deals to. The goal: three of them in Google's top 10 by 31 December.",
+        focusLane: "comparison-pages",
         facts: [["2,310", "visits from search this week"], ["+18%", "against last week"], ["41", "keywords in the top 10"], ["2 of 5", "comparison pages live"]],
+        goal: {
+          target: 3, signed: 0, nums: [[0, 3], ["–"], [3]], labels: ["Pages in the top 10", "Forecast from 30 Nov", "Still to rank"],
+          health: ["idle", "Too early to tell"], action: "Nothing needed today",
+          insight: "Pages 1 and 2 went live this morning. Rankings settle in 2 to 4 weeks; the first reading is on 30 November.",
+          calm: "Nothing needs you", calmSub: "The first ranking check is Mon 30 Nov. You hear about it in that morning's brief.",
+          asOf: "updated 07:42",
+          trajectory: {
+            start: "2026-11-02", days: 59, now: 14, goal: 3, unit: "Pages in the top 10", key: "In the top 10", noForecast: "First reading 30 Nov",
+            ticks: [[0, "2 Nov"], [14, "Today"], [28, "30 Nov"], [59, "31 Dec"]],
+            plan: [[0, 0], [38, 1], [48, 2], [59, 3]],
+            actual: [[0, 0], [14, 0]],
+          },
+          rows: { title: "Pages", sub: "Five pages for three places · written to the top 10" },
+          milestones: ["Written", "Checked", "Live", "Indexed", "Top 10"],
+          deals: [
+            { name: "Tidewell or Quaywright", conf: "No rank yet", at: 3, stage: "Live since 07:42", short: "Live; waiting for Google", href: "#lane/comparison-pages",
+              evidence: "Live since this morning. Its keyword has 1,300 searches a month; the top 10 today are review sites and Quaywright itself." },
+            { name: "Tidewell or Dockmere", conf: "No rank yet", at: 3, stage: "Live since 07:42", short: "Live; waiting for Google", href: "#lane/comparison-pages",
+              evidence: "Live since this morning. 880 searches a month; two of the top 10 are thin pages we can beat." },
+            { name: "Tidewell or Palletnook", conf: "Not live", at: 0, stage: "Half written", short: "Checker reads it at 15:00", href: "#lane/comparison-pages",
+              evidence: "Half written. 720 searches a month." },
+            { name: "Tidewell or Harborline", conf: "Not live", at: 0, stage: "Outline approved", short: "Live Friday", href: "#lane/comparison-pages",
+              evidence: "Outline approved by you on Friday. 590 searches a month." },
+            { name: "Tidewell or Keelson", conf: "Not live", at: 0, stage: "Outline approved", short: "Live Friday", href: "#lane/comparison-pages",
+              evidence: "Outline approved by you on Friday. 410 searches a month." },
+          ],
+          attention: [],
+          funnel: {
+            title: "Signals", since: "Change against last week",
+            steps: [
+              { n: "2,310", what: "visits from search", d: "+18%" },
+              { n: "41", what: "keywords in the top 10", d: "+3" },
+              { n: "2", what: "pages live", d: "+2", rate: "plan 5 by 20 Nov" },
+              { n: "0", what: "pages in the top 10", rate: "plan 1 by 10 Dec" },
+            ],
+          },
+          guards: {
+            sub: "What ranking must not cost",
+            items: [
+              { what: "Claims without a public source", val: "0", limit: "none allowed" },
+              { what: "Pages live without your outline", val: "0", limit: "none allowed" },
+              { what: "Bought links", val: "0", limit: "never" },
+            ],
+          },
+          restSub: "Why there is no forecast yet, and what each page has going for it",
+          ladder: [["In the top 10", "Google's own Search Console position, read every Monday."], ["Forecast", "None until the first reading. A number before then would be invented."]],
+          calib: "Nothing to score yet.",
+        },
+        history: {
+          seen: "yesterday at 18:20", shown: 2, since: "That is everything since the topic began on 2 November.",
+          days: [
+            ["Today", [
+              ["07:50", "S", "SEO writer", "a", "agreed to keep the tone fair: every claim about another tool links to its own public page", "comparison-pages"],
+              ["07:42", "S", "SEO writer", "a", "published pages 1 and 2 and asked Google to index them", "comparison-pages", "o", 2,
+                ["Tidewell or Quaywright · 1,840 words", "Tidewell or Dockmere · 1,610 words"]],
+              ["07:30", "C", "Checker", "a", "passed pages 1 and 2: 34 claims, each with a public source", "comparison-pages"],
+            ]],
+            ["Yesterday", [
+              "seen",
+              ["16:00", "C", "Checker", "a", "sent back 3 claims on page 2 that had no public source", "comparison-pages"],
+            ]],
+            ["Friday, 13 November", [
+              ["14:30", "M", "You", "p", "approved the outlines for all 5 pages", "comparison-pages", "d"],
+            ]],
+            ["Wednesday, 4 November", [
+              ["11:00", "C", "Checker", "a", "mapped the keywords for the 5 tools we lose deals to", "keyword-map"],
+            ]],
+          ],
+        },
         agents: [
-          ["S", "SEO writer", "ok", "Working", "Page 3: Tidewell or Palletnook", "/seo-page", "Claude"],
-          ["C", "Checker", "next", "Up next", "Checks facts and links before a page goes live", "/fact-check", "GPT"],
+          ["M", "Mara Lind, you", "ok", "Owns it", "Approves every outline", "", "Head of GTM", "p"],
+          ["S", "SEO writer", "ok", "Working", "Page 3: Tidewell or Palletnook", "/seo-page", "Claude", "", "2 of 2 pages passed the checker on the second read"],
+          ["C", "Checker", "next", "Up next", "Checks facts and links before a page goes live", "/fact-check", "GPT", "", "Caught 3 claims without a source; none went live"],
         ],
         jobs: [
-          ["Comparison pages, 5 in all", "SEO writer", "ok", "Fri 20 Nov", "comparison-pages"],
+          ["Page 3 written and checked", "SEO writer", "ok", "Today, 15:00", "comparison-pages"],
+          ["Pages 4 and 5 live", "SEO writer", "next", "Fri 20 Nov", "comparison-pages"],
           ["Pages 1 and 2 published", "SEO writer", "done", "Today, 07:42", "comparison-pages"],
-          ["Ranking check", "Checker", "next", "Mon 30 Nov"],
+          ["First ranking check", "Checker", "next", "Mon 30 Nov"],
         ],
         chatSub: "You, SEO writer and Checker. Nothing else lives here.",
         chat: `<div class="msg"><span class="av">S</span><div class="who">SEO writer<time>07:42</time></div><p>Pages 1 and 2 are live. Page 3 is half written. I will show it to the checker at 15:00.</p></div>
@@ -1833,9 +2177,26 @@ try {
       {
         id: "research", name: "Research", icon: "target", crumb: "Customers and market",
         intro: "Nothing is open. The customer profile was rebuilt this morning; Outbound already works from it.",
+        noGoal: "Research answers asks from the other topics. A goal needs a measure and a date, for example: the profile refreshed every month.",
         facts: [["212", "won deals in the profile"], ["4", "customer segments"], ["Today", "last refresh, 07:10"]],
+        history: {
+          seen: "yesterday at 18:20", shown: 2, since: "That is everything since the topic began on 20 October.",
+          days: [
+            ["Today", [
+              ["07:10", "R", "Researcher", "a", "saved the rebuilt customer profile to memory; the Manager checked it against Supabase", "customer-profile", "u"],
+              ["06:40", "R", "Researcher", "a", "read 212 won deals from Supabase, read only", "customer-profile"],
+            ]],
+            ["Yesterday", [
+              ["21:30", "M", "You", "p", "ran /icp-refresh from your pins", "customer-profile", "d"],
+              "seen",
+            ]],
+            ["Thursday, 12 November", [
+              ["15:00", "R", "Researcher", "a", "finished the competitor watch: 2 price changes, 1 new feature at Quaywright", "competitor-watch"],
+            ]],
+          ],
+        },
         agents: [
-          ["R", "Researcher", "idle", "Idle", "Rebuilt the customer profile this morning", "/icp-refresh", "Claude"],
+          ["R", "Researcher", "idle", "Idle", "Rebuilt the customer profile this morning", "/icp-refresh", "Claude", "", "3 of 3 profiles matched won deals when the Manager checked"],
         ],
         chatSub: "You and Researcher. Nothing else lives here.",
         chat: `<div class="msg"><span class="av">R</span><div class="who">Researcher<time>07:10</time></div><p>The customer profile is rebuilt from 212 won deals. The biggest change: fintech ops teams close fastest, so I moved them to the top.</p></div>
@@ -2181,6 +2542,97 @@ try {
         made: [["file", "Customer profile", "4 segments, fintech ops first"], ["file", "What changed", "Fintech ops moved up, retail moved down"]],
         chat: `<div class="msg"><span class="av">R</span><div class="who">Researcher<time>07:10</time></div><p>Done. Fintech ops teams close in 19 days on average, the fastest of the 4 segments.</p></div>`
       },
+      {
+        id: "webinar-reminders", topic: "content", title: "Webinar invites and reminder", state: "ok", lead: "Publisher", opened: "Opened Thu 12 Nov", next: "Wed 18 Nov, 09:00",
+        asked: "Invite the newsletter readers to the webinar, and remind the ones who looked but did not sign up.",
+        askedMeta: "You to the Manager, Thursday 12 November<i>·</i>The Manager filed it under Content and named Publisher to lead.",
+        status: "Two sends are out and brought 118 sign-ups. The reminder goes on Wednesday at 09:00 to the 3,900 who opened but did not sign up.",
+        steps: [
+          ["ok", "Invite to 4,200 readers", "Publisher · Thu 12 Nov"],
+          ["ok", "Newsletter 46 with the webinar on top", "Publisher · today, 08:00"],
+          ["now", "Reminder to the 3,900 who opened, scheduled", "Publisher · Wed 09:00"],
+          ["todo", "Sign-ups from email reported", "Manager · Fri 20 Nov"],
+        ],
+        agents: [["P", "Publisher", "ok", "Leads", "Reminder scheduled for Wednesday", "/schedule-post", "Asks first", "", "31 of 31 posts went out on time"]],
+        made: [["mail", "Reminder email", "90 words, one link, scheduled", "#drafts"], ["file", "Sign-ups by source", "Newsletter 118, LinkedIn 61, partners 33"]],
+        chat: `<div class="msg"><span class="av">P</span><div class="who">Publisher<time>Sun 17:00</time></div><p>Reminder is scheduled for Wednesday 09:00. It only goes to people who opened and did not sign up, so nobody gets it twice.</p></div>`
+      },
+      {
+        id: "reply-handling", topic: "outbound", title: "Meetings from replies", state: "warn", lead: "Replies", waits: "Jonas", opened: "Opened 2 Nov", next: "Today, once Jonas answers",
+        asked: "When someone says yes, get them a meeting with Jonas within a day.",
+        askedMeta: "You to the Manager, Monday 2 November<i>·</i>Replies leads; Jonas takes the meetings.",
+        status: "2 people said yes this morning: an ops lead at Ostrand Haulage and the COO of Velmont Freight. Replies asked Jonas for times at 08:20; nothing is booked until he answers.",
+        acts: '<button class="btn quiet">Remind Jonas</button>',
+        steps: [
+          ["ok", "Every positive reply answered within a day: 19 of 19", "Replies · since 2 Nov"],
+          ["now", "Times from Jonas for Ostrand and Velmont", "Jonas · today"],
+          ["todo", "Invites sent from your mail", "Replies · after Jonas"],
+          ["todo", "Meetings reported", "Manager · Fri 20 Nov"],
+        ],
+        doneNote: "This lane runs as long as the sequences do. The Manager checks every Friday that no yes waited more than a day.",
+        agents: [["R", "Replies", "warn", "Leads", "Waits for Jonas's times", "/reply-triage", "GPT", "", "52 of 53 replies sorted right; Jonas moved 1"], ["J", "Jonas Falk", "warn", "Asked", "2 meeting times", "", "Sales", "p"]],
+        made: [["mail", "2 invite drafts", "In your drafts, times left open", "#drafts"]],
+        chat: `<div class="msg"><span class="av">R</span><div class="who">Replies<time>08:20</time></div><p>Jonas, two yeses this morning: Ostrand Haulage and Velmont Freight. Both asked for this week. Which slots can I offer?</p></div>`
+      },
+      {
+        id: "logistics-round-2", topic: "outbound", title: "Logistics ops, round 2", state: "ok", lead: "Prospector", opened: "Opened yesterday", next: "Thu 19 Nov",
+        asked: "Find 400 more logistics ops leads like the ones who booked in sequence A.",
+        askedMeta: "The Manager opened it on its own on Sunday, from the plan to reach 30 meetings<i>·</i>Prospector leads; you approve the pilot before anything is sent.",
+        status: "120 of 400 leads found. Prospector leaves out every company that was in sequence A.",
+        steps: [
+          ["now", "400 leads, none from sequence A", "Prospector · 120 of 400"],
+          ["todo", "Emails checked before use", "Prospector · Thu"],
+          ["todo", "Pilot of 30, after your OK", "Sender · Mon 23 Nov"],
+          ["todo", "The rest at 60 a day if the pilot books 2", "Sender · from 30 Nov"],
+        ],
+        agents: [["P", "Prospector", "ok", "Leads", "120 of 400 found", "/icp-refresh", "Claude", "", "Pilot list: 0 bounces in 30"]],
+        made: [["file", "Lead list, round 2", "120 so far, logistics ops, 50 to 500 people"]],
+        chat: `<div class="msg"><span class="av">P</span><div class="who">Prospector<time>Sun 19:30</time></div><p>Started round 2. I match the profile of the 9 who booked in sequence A: ops leads at carriers with 50 to 500 people.</p></div>`
+      },
+      {
+        id: "webinar-campaign", topic: "paid", title: "Webinar sign-up campaign", state: "ok", lead: "Paid buyer", opened: "Opened Fri 13 Nov", next: "Thu 19 Nov, when it ends",
+        asked: "Spend up to €400 to get more people to Thursday's webinar.",
+        askedMeta: "You to the Manager, Friday 13 November<i>·</i>The Manager filed it under Paid and named Paid buyer to lead.",
+        status: "€290 of €400 spent, 11 sign-ups. It ends on Thursday and keeps its own budget, apart from the always-on campaigns.",
+        steps: [
+          ["ok", "Campaign live on LinkedIn, €400 in all", "Paid buyer · Fri 13 Nov"],
+          ["now", "Running until Thursday", "Paid buyer · €290 of €400"],
+          ["todo", "Sign-ups and their cost reported", "Manager · Fri 20 Nov"],
+        ],
+        agents: [["B", "Paid buyer", "ok", "Leads", "€290 of €400 spent", "/ad-variants", "Claude", "", "4 of 4 budget calls held up two weeks later"]],
+        made: [["file", "2 ads", "The webinar title and one line from the agenda"]],
+        chat: `<div class="msg"><span class="av">B</span><div class="who">Paid buyer<time>Sun 18:30</time></div><p>11 sign-ups for €290 so far. I keep it at its own budget; it never takes from the lead campaigns.</p></div>`
+      },
+      {
+        id: "keyword-map", topic: "seo", title: "Keywords for the comparison pages", state: "done", lead: "Checker", opened: "Opened 2 Nov", closed: "closed 4 Nov",
+        asked: "Find out what people search when they compare us with the tools we lose deals to.",
+        askedMeta: "You to the Manager, Monday 2 November<i>·</i>The Manager filed it under SEO and named Checker to lead.",
+        status: "One keyword per page, with its searches a month and who ranks for it today.",
+        steps: [
+          ["ok", "The 5 tools we lose deals to, from the lost-deal notes", "Researcher · 2 Nov"],
+          ["ok", "Searches a month and today's top 10 for each", "Checker · 3 Nov"],
+          ["ok", "One keyword per page, approved by you", "You · 4 Nov"],
+        ],
+        doneNote: "Done means all three. You approved the keywords; the Manager closed the lane.",
+        agents: [["C", "Checker", "done", "Done", "Mapped the keywords", "/fact-check", "GPT"]],
+        made: [["file", "Keyword map", "5 pages, 410 to 1,300 searches a month each"]],
+        chat: `<div class="msg"><span class="av">C</span><div class="who">Checker<time>4 Nov</time></div><p>Quaywright is the biggest: 1,300 searches a month. Keelson the smallest at 410, but nobody good ranks for it yet.</p></div>`
+      },
+      {
+        id: "competitor-watch", topic: "research", title: "Competitor watch, November", state: "done", lead: "Researcher", opened: "Opened Mon 9 Nov", closed: "closed Thu 12 Nov",
+        asked: "Tell me what changed at the five tools we lose deals to this month.",
+        askedMeta: "Your standing ask, monthly<i>·</i>The Manager opens it on the second Monday of each month.",
+        status: "Two price changes and one new feature, at Quaywright. Nothing that changes our comparison pages.",
+        steps: [
+          ["ok", "Pricing pages of all 5 read and compared with October", "Researcher · 10 Nov"],
+          ["ok", "Release notes read", "Researcher · 11 Nov"],
+          ["ok", "Changes sent to SEO and Outbound", "Manager · 12 Nov"],
+        ],
+        doneNote: "Done means all three. Each change links to the public page it came from.",
+        agents: [["R", "Researcher", "done", "Done", "Read 5 pricing pages and their release notes", "/market-map", "Claude"]],
+        made: [["file", "What changed in November", "2 price changes, 1 feature, with sources"]],
+        chat: `<div class="msg"><span class="av">R</span><div class="who">Researcher<time>12 Nov</time></div><p>Quaywright raised its entry price by 12% and added route planning. Dockmere cut its annual plan by 10%.</p></div>`
+      },
     ],
   };
   const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
@@ -2352,22 +2804,27 @@ try {
   function trajectory(c) {
     const { W, H, L, R, T, B } = TG;
     const X = d => L + (d / c.days) * (W - L - R), Y = v => T + (1 - v / c.goal) * (H - T - B), f = n => n.toFixed(1);
+    const unit = c.unit || "Signed partners", key = c.key || "Signed", step = c.step || 1, fc = !!c.expected;
     const path = pts => steps(pts).map(([x, y], i) => `${i ? "L" : "M"}${f(X(x))} ${f(Y(y))}`).join("");
-    const band = steps(c.high).concat(steps(c.low).reverse()).map(([x, y]) => `${f(X(x))},${f(Y(y))}`).join(" ");
-    const grid = [...Array(c.goal + 1).keys()].map(v => `<line class="cg" x1="${L}" x2="${W - R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ct te" x="${L - 8}" y="${f(Y(v) + 3.5)}">${v}</text>`).join("");
+    const band = fc ? steps(c.high).concat(steps(c.low).reverse()).map(([x, y]) => `${f(X(x))},${f(Y(y))}`).join(" ") : "";
+    const grid = [...Array(Math.floor(c.goal / step) + 1).keys()].map(i => i * step).map(v => `<line class="cg" x1="${L}" x2="${W - R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ct te" x="${L - 8}" y="${f(Y(v) + 3.5)}">${v}</text>`).join("");
     const ticks = c.ticks.map(([d, w]) => `<text class="ct tm" x="${f(X(d))}" y="${H - 6}">${w}</text>`).join("");
-    const end = a => a[a.length - 1][1], lo = end(c.low), hi = end(c.high), ex = end(c.expected);
-    const table = c.ticks.map(([d, w]) => `<tr><th scope="row">${w}</th><td>${valAt(c.plan, d)}</td><td>${d <= c.now ? valAt(c.actual, d) : "–"}</td><td>${d < c.now ? "–" : `${valAt(c.expected, d)} (${valAt(c.low, d)} to ${valAt(c.high, d)})`}</td></tr>`).join("");
+    const end = a => a[a.length - 1][1], lo = fc && end(c.low), hi = fc && end(c.high), ex = fc && end(c.expected);
+    // The forecast's label moves below the plan's when the two would touch.
+    const yF = fc ? (Math.abs(Y(ex) - Y(c.goal)) < 18 ? Y(c.goal) + 22 : Y(ex) + 4) : 0;
+    const right = fc ? `<text class="cv" x="${W - R + 8}" y="${f(yF)}">Forecast ${ex}</text><text class="ct" x="${W - R + 8}" y="${f(yF + 14)}">range ${lo} to ${hi}</text>`
+      : `<text class="ct" x="${W - R + 8}" y="${f(Y(c.goal) + 22)}">${c.noForecast || "No forecast yet"}</text>`;
+    const table = c.ticks.map(([d, w]) => `<tr><th scope="row">${w}</th><td>${valAt(c.plan, d)}</td><td>${d <= c.now ? valAt(c.actual, d) : "–"}</td><td>${d < c.now || !fc ? "–" : `${valAt(c.expected, d)} (${valAt(c.low, d)} to ${valAt(c.high, d)})`}</td></tr>`).join("");
     return `<figure class="traj" data-traj>
-        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Signed partners against the plan: ${end(c.actual)} so far; forecast ${ex} by ${c.ticks[c.ticks.length - 1][1]}, range ${lo} to ${hi}; plan ${c.goal}.">
-          ${grid}<polygon class="tr-band" points="${band}"/><path class="cb" d="${path(c.plan)}"/><path class="cl tr-act" d="${path(c.actual)}"/><path class="cl tr-fc" d="${path(c.expected)}"/>
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${unit} against the plan: ${end(c.actual)} so far; ${fc ? `forecast ${ex} by ${c.ticks[c.ticks.length - 1][1]}, range ${lo} to ${hi}` : "no forecast yet"}; plan ${c.goal}.">
+          ${grid}${fc ? `<polygon class="tr-band" points="${band}"/>` : ""}<path class="cb" d="${path(c.plan)}"/><path class="cl tr-act" d="${path(c.actual)}"/>${fc ? `<path class="cl tr-fc" d="${path(c.expected)}"/>` : ""}
           <line class="tr-now" x1="${f(X(c.now))}" x2="${f(X(c.now))}" y1="${T}" y2="${H - B}"/><circle class="tr-dot" cx="${f(X(c.now))}" cy="${f(Y(end(c.actual)))}" r="4"/>
-          <text class="cv" x="${W - R + 8}" y="${f(Y(c.goal) + 4)}">Plan ${c.goal}</text><text class="cv" x="${W - R + 8}" y="${f(Y(ex) + 4)}">Forecast ${ex}</text><text class="ct" x="${W - R + 8}" y="${f(Y(ex) + 18)}">range ${lo} to ${hi}</text>
+          <text class="cv" x="${W - R + 8}" y="${f(Y(c.goal) + 4)}">Plan ${c.goal}</text>${right}
           ${ticks}<line class="tr-x" x1="0" x2="0" y1="${T}" y2="${H - B}" hidden/>
         </svg>
-        <figcaption class="legend"><span><i class="tr-k-act"></i>Signed</span><span><i class="d"></i>Plan</span><span><i class="tr-k-fc"></i>Forecast and its range</span></figcaption>
+        <figcaption class="legend"><span><i class="tr-k-act"></i>${key}</span><span><i class="d"></i>Plan</span>${fc ? '<span><i class="tr-k-fc"></i>Forecast and its range</span>' : ""}</figcaption>
         <div class="tr-tip" role="status" hidden></div>
-        <table class="sr"><caption>Signed partners: plan, actual and forecast</caption><thead><tr><th scope="col">Date</th><th scope="col">Plan</th><th scope="col">Signed</th><th scope="col">Forecast</th></tr></thead><tbody>${table}</tbody></table>
+        <table class="sr"><caption>${unit}: plan, actual and forecast</caption><thead><tr><th scope="col">Date</th><th scope="col">Plan</th><th scope="col">${key}</th><th scope="col">Forecast</th></tr></thead><tbody>${table}</tbody></table>
       </figure>`;
   }
   // Pointing at the trajectory shows that day: the plan, what was signed, and the forecast with its range.
@@ -2383,48 +2840,64 @@ try {
     const px = TG.L + (d / c.days) * span;
     x.removeAttribute("hidden"); x.setAttribute("x1", px); x.setAttribute("x2", px);
     tip.hidden = false;
-    tip.innerHTML = `<b>${dayOf(c.start, d)}</b><span>Plan ${valAt(c.plan, d)}</span>${d <= c.now ? `<span>Signed ${valAt(c.actual, d)}</span>` : `<span>Forecast ${valAt(c.expected, d)}, range ${valAt(c.low, d)} to ${valAt(c.high, d)}</span>`}`;
+    tip.innerHTML = `<b>${dayOf(c.start, d)}</b><span>Plan ${valAt(c.plan, d)}</span>${d <= c.now ? `<span>${c.key || "Signed"} ${valAt(c.actual, d)}</span>` : c.expected ? `<span>Forecast ${valAt(c.expected, d)}, range ${valAt(c.low, d)} to ${valAt(c.high, d)}</span>` : `<span>${c.noForecast || "No forecast yet"}</span>`}`;
     tip.style.left = Math.min(px * k + 12, box.width - tip.offsetWidth) + "px";
   });
 
   // The overview holds decisions and exceptions; evidence and explanations are one click away. Mostly numbers, a chart
   // and short labels; a sentence only where a decision needs it.
   function goalGlance(t) {
-    const g = t.goal, deals = g.deals.map(pick), l = laneById(t.focusLane), yes = decided(l);
-    const likely = deals.filter(x => x.conf === "Likely").length, open = g.target - g.signed - likely;
+    const g = t.goal, deals = g.deals.map(pick), l = t.focusLane ? laneById(t.focusLane) : null, yes = !!l && decided(l);
+    const likely = g.likely != null ? g.likely : deals.filter(x => x.conf === "Likely").length, open = Math.max(0, g.target - g.signed - likely);
+    const fmt = n => (typeof n === "number" ? n.toLocaleString("en-GB") : n);
+    const nums = g.nums || [[g.signed, g.target], [likely], [open]], NL = g.labels || ["Signed", "Likely, forecast", "Still unsecured"];
     trajData = g.trajectory;
     const head = `<header class="gh">
         <p class="gh-eye">${t.name} · ${t.when} · ${g.asOf}</p>
-        <h1 class="gh-verdict"><span class="sr">${t.name}: </span><i class="dot ${g.health[0]} still"></i>${g.health[1]}<small>${g.action}</small></h1>
+        <h1 class="gh-verdict"><span class="sr">${t.name}: </span><i class="dot ${g.health[0] === "idle" ? "hollow" : g.health[0]} still"></i>${g.health[1]}<small class="${g.health[0] === "warn" || g.health[0] === "bad" ? "" : "calm"}">${g.action}</small></h1>
         <div class="gh-nums">
-          <div class="gn"><b>${g.signed}<small>/${g.target}</small></b><span>Signed</span></div>
-          <div class="gn fc first"><b>${likely}</b><span>Likely, forecast</span></div>
-          <div class="gn fc"><b>${open}</b><span>Still unsecured</span></div>
+          <div class="gn"><b>${fmt(nums[0][0])}<small>/${fmt(nums[0][1])}</small></b><span>${NL[0]}</span></div>
+          <div class="gn fc first"><b>${fmt(nums[1][0])}</b><span>${NL[1]}</span></div>
+          <div class="gn fc"><b>${fmt(nums[2][0])}</b><span>${NL[2]}</span></div>
         </div></header>`;
-    const chart = `<section class="gc" aria-label="Forecast against the goal"><div class="headrow"><h2 class="h2">Forecast vs goal</h2><span class="gc-in">${g.insight}</span></div>${trajectory(g.trajectory)}</section>`;
+    const chart = `<section class="gc" aria-label="Forecast against the goal"><div class="headrow"><h2 class="h2">${g.trajectory.expected ? "Forecast vs goal" : "Progress vs plan"}</h2><span class="gc-in">${g.insight}</span></div>${trajectory(g.trajectory)}</section>`;
     const MS = g.milestones;
+    // A row is one place the result comes from: a deal, a sequence, a channel, a page. It shows a track of factual
+    // milestones, or a value when the topic has none, and its forecast in a neutral word.
+    const CF = ["likely", "possible", "early", "done"];
     const deal = x => {
-      const track = MS.map((m, i) => `<li class="${i < x.at ? "done" : i === x.at ? "now" : ""}" title="${m}"><span class="sr">${m}${i < x.at ? ": done" : i === x.at ? ": now" : ""}</span></li>`).join("");
-      return `<li><a href="${x.href}"><b class="dn">${x.name}</b><span class="dx">${x.short}</span><span class="ms dots" aria-label="${x.stage}"><ol>${track}</ol></span><span class="cf cf-${x.conf.toLowerCase()}">${x.conf}</span></a></li>`;
+      const track = MS && x.at != null ? `<span class="ms dots" aria-label="${esc(x.stage)}"><ol>${MS.map((m, i) => `<li class="${i < x.at ? "done" : i === x.at ? "now" : ""}" title="${m}"><span class="sr">${m}${i < x.at ? ": done" : i === x.at ? ": now" : ""}</span></li>`).join("")}</ol></span>` : `<span class="dv">${x.val || ""}</span>`;
+      const cf = CF.includes(x.conf.toLowerCase()) ? x.conf.toLowerCase() : "n";
+      return `<li><a href="${x.href}"><b class="dn">${x.name}</b><span class="dx">${x.short}</span>${track}<span class="cf cf-${cf}">${x.conf}</span></a></li>`;
     };
-    const dealsBox = `<section class="sec" aria-label="Deals"><div class="headrow"><h2 class="h2">Deals</h2><span>One for each of the ${g.target} · ${MS[0].toLowerCase()} to ${MS[MS.length - 1].toLowerCase()}</span></div><ul class="dl">${deals.map(deal).join("")}</ul></section>`;
-    const d = g.decision, top = g.attention.slice(0, 2), more = g.attention.slice(2);
-    const needs = `<section class="box ny" aria-label="Needs you"><h2 class="ny-h">Needs you</h2>
-        <div class="ny-dec">${yes ? '<svg class="i ok"><use href="#check"/></svg>' : '<i class="dot warn still"></i>'}<div><b>${yes ? d.done : d.title}</b><span>${yes ? l.shortAfter : d.sub}</span></div>
-          <div class="acts">${yes ? `<button class="btn quiet s" data-undo-id="${l.decision}">Undo</button>` : `<button class="btn ink s" data-approve-id="${l.decision}"><svg class="i sm"><use href="#check"/></svg>${l.approve}</button>`}<a class="btn quiet s" href="#lane/${l.id}">Why</a></div></div>
-        <div class="ny-bl"><p class="ny-h2">Team blockers<span class="ny-n">${g.attention.length}</span></p>
-          <ul>${top.map(x => `<li><a href="${x.href}"><b>${x.who}</b><span>${x.short}</span></a></li>`).join("")}</ul>
+    const RW = g.rows || { title: "Deals", sub: `One for each of the ${g.target} · ${MS[0].toLowerCase()} to ${MS[MS.length - 1].toLowerCase()}` };
+    const dealsBox = `<section class="sec" aria-label="${RW.title}"><div class="headrow"><h2 class="h2">${RW.title}</h2><span>${RW.sub}</span></div><ul class="dl">${deals.map(deal).join("")}</ul></section>`;
+    const d = g.decision, att = g.attention || [], top = att.slice(0, 2), more = att.slice(2);
+    let dec;
+    if (!d || !l) dec = `<div class="ny-dec"><svg class="i ok"><use href="#check"/></svg><div><b>${g.calm || "Nothing needs you"}</b><span>${g.calmSub || ""}</span></div></div>`;
+    else {
+      const stuck = !yes && stateOf(l) === "bad";
+      const icon = yes ? '<svg class="i ok"><use href="#check"/></svg>' : stuck ? '<svg class="i bad"><use href="#flame"/></svg>' : '<i class="dot warn still"></i>';
+      const acts = yes ? `<button class="btn quiet s" data-undo-id="${l.decision}">Undo</button>`
+        : l.decision ? `<button class="btn ink s" data-approve-id="${l.decision}"><svg class="i sm"><use href="#check"/></svg>${l.approve}</button>` : (l.acts || "").replace(/class="btn (ink|quiet)"/g, 'class="btn $1 s"');
+      dec = `<div class="ny-dec">${icon}<div><b>${yes ? d.done : d.title}</b><span>${yes ? l.shortAfter : d.sub}</span></div>
+          <div class="acts">${acts}<a class="btn quiet s" href="#lane/${l.id}">${d.why || "Why"}</a></div></div>`;
+    }
+    const needs = `<section class="box ny" aria-label="Needs you"><h2 class="ny-h">Needs you</h2>${dec}
+        <div class="ny-bl"><p class="ny-h2">Team blockers<span class="ny-n">${att.length}</span></p>
+          ${att.length ? `<ul>${top.map(x => `<li><a href="${x.href}"><b>${x.who}</b><span>${x.short}</span></a></li>`).join("")}</ul>` : `<p class="ny-none">None. Everything else is on schedule.</p>`}
           ${more.length ? `<a class="ny-more" href="${more[0].href}">+${more.length} more</a>` : ""}</div></section>`;
-    const st = g.funnel.steps, max = Math.max(...st.map(x => +x.n));
-    const funnel = `<section class="sec" aria-label="Funnel"><div class="headrow"><h2 class="h2">Funnel</h2><span>${g.funnel.since}</span></div>
-        <ol class="fn" style="--n:${st.length}">${st.map(x => `<li class="${x.st || ""}"><i style="width:${Math.max(3, Math.round(+x.n / max * 100))}%"></i><b>${x.n}${x.d ? `<em>${x.d}</em>` : ""}</b><span>${x.what}</span>${x.rate ? `<small>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</small>` : ""}</li>`).join("")}</ol></section>`;
+    const num = v => +String(v).replace(/[^\d.]/g, "");
+    const st = g.funnel.steps, max = Math.max(...st.map(x => num(x.n)));
+    const funnel = `<section class="sec" aria-label="${g.funnel.title || "Funnel"}"><div class="headrow"><h2 class="h2">${g.funnel.title || "Funnel"}</h2><span>${g.funnel.since}</span></div>
+        <ol class="fn" style="--n:${st.length}">${st.map(x => `<li class="${x.st || ""}"><i style="width:${Math.max(3, Math.round(num(x.n) / max * 100))}%"></i><b>${x.n}${x.d ? `<em>${x.d}</em>` : ""}</b><span>${x.what}</span>${x.rate ? `<small>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</small>` : ""}</li>`).join("")}</ol></section>`;
     const gs = g.guards, bad = gs ? gs.items.filter(x => x.st === "warn").length : 0;
     const guards = gs ? `<section class="sec" aria-label="Guardrails"><div class="headrow"><h2 class="h2">Guardrails</h2><span>${gs.sub} · ${bad ? bad + " breached" : "all held"}</span></div>
         <ul class="gd">${gs.items.map(x => `<li class="${x.st || ""}">${x.st === "warn" ? '<i class="dot warn still"></i>' : CHECK}<b>${x.what} ${x.val}</b><small>${x.limit}</small></li>`).join("")}</ul></section>` : "";
     const rk = "rp:" + t.id;
-    const recovery = `<details class="more" data-more="${rk}"${ui.more[rk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Recovery plan<small>${g.gap.steps.length} steps to reach ${g.target}, and what each forecast rests on</small></summary><div class="body">
-        <div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div>
-        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence} Next: ${x.next}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section>
+    const recovery = `<details class="more" data-more="${rk}"${ui.more[rk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>${g.gap ? "Recovery plan" : "What the forecast rests on"}<small>${g.gap ? `${g.gap.steps.length} steps to reach ${fmt(g.target)}, and what each forecast rests on` : g.restSub || "The evidence behind each row"}</small></summary><div class="body">
+        ${g.gap ? `<div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div>` : ""}
+        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence}${x.next ? " Next: " + x.next : ""}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section>
         ${g.ladder ? `<section class="sec"><h3 class="h2">How a forecast is set</h3><ul class="evl">${g.ladder.map(([w, f]) => `<li><b>${w}</b><span>${f}</span></li>`).join("")}</ul>${g.calib ? `<p class="deals-out">${g.calib}</p>` : ""}</section>` : ""}</div></details>`;
     return { head, body: chart + `<div class="g2">${dealsBox}${needs}</div>` + funnel + guards + recovery };
   }
@@ -2454,7 +2927,8 @@ try {
         ${t.plan ? stagesBox(t) : ""}
         ${night}
       </section>
-      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}`}
+      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}
+      ${t.noGoal ? `<div class="box askline nogoal"><i class="dot hollow still"></i><p><b>No goal set</b><span>${t.noGoal}</span></p><div class="acts"><button class="btn quiet" data-ask-goal="${t.id}">Ask for a goal</button></div></div>` : ""}`}
       <details class="more" data-more="${t.id}"${ui.more[t.id] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Details<small>${lanes.length} lanes · ${people ? people + (people === 1 ? " person, " : " people, ") : ""}${agents} ${agents === 1 ? "agent" : "agents"}</small></summary><div class="body">
         ${g && t.meta ? `<div class="meta">${t.meta}</div>` : ""}<p class="intro">${t.intro}</p>
         ${plan}
@@ -2861,6 +3335,7 @@ try {
     else if (t.matches("[data-fwd]")) history.forward();
     else if (t.matches("[data-glass-default]")) { theme.g = null; applyTheme(true); }
     else if (t.matches("[data-strength-default]")) { theme.k = K_DEFAULT; applyTheme(true); }
+    else if (t.matches("[data-ask-goal]")) { const x = PAGES.topics.find(y => y.id === t.dataset.askGoal); fileDirection(`Propose a goal for ${x.name.toLowerCase()} with a measure and a date`); }
     else if (t.closest(".seg[data-pick]")) $$("button", t.closest(".seg")).forEach(b => b.setAttribute("aria-pressed", String(b === t)));
     else if (t.matches(".sw")) t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"));
   });

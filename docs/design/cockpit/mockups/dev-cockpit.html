@@ -548,6 +548,11 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .dl a:hover .dn{text-decoration:underline;text-underline-offset:3px}
 .cf{justify-self:end;display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:600;white-space:nowrap}
 .cf-likely{background:var(--ink);color:var(--ink-fg)}.cf-possible{box-shadow:inset 0 0 0 1px var(--edge-2);color:var(--text)}.cf-early{color:var(--muted)}
+.cf-done{color:var(--text-2)}.cf-n{padding:0;font-weight:500;color:var(--text-2)}
+.dv{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap}
+.gh-verdict small.calm{color:var(--text-2)}
+.ny-none{font-size:var(--fs-sm);color:var(--muted)}
+.nogoal p span{color:var(--text-2)}
 .ms{display:flex;flex-direction:column;gap:6px;padding-top:5px}.ms small{font-size:var(--fs-xs);color:var(--text-2)}
 .ms ol{display:flex;align-items:center;margin:0;padding:0;list-style:none}
 .ms li{position:relative;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--edge-2);flex:none}
@@ -1894,22 +1899,27 @@ try {
   function trajectory(c) {
     const { W, H, L, R, T, B } = TG;
     const X = d => L + (d / c.days) * (W - L - R), Y = v => T + (1 - v / c.goal) * (H - T - B), f = n => n.toFixed(1);
+    const unit = c.unit || "Signed partners", key = c.key || "Signed", step = c.step || 1, fc = !!c.expected;
     const path = pts => steps(pts).map(([x, y], i) => `${i ? "L" : "M"}${f(X(x))} ${f(Y(y))}`).join("");
-    const band = steps(c.high).concat(steps(c.low).reverse()).map(([x, y]) => `${f(X(x))},${f(Y(y))}`).join(" ");
-    const grid = [...Array(c.goal + 1).keys()].map(v => `<line class="cg" x1="${L}" x2="${W - R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ct te" x="${L - 8}" y="${f(Y(v) + 3.5)}">${v}</text>`).join("");
+    const band = fc ? steps(c.high).concat(steps(c.low).reverse()).map(([x, y]) => `${f(X(x))},${f(Y(y))}`).join(" ") : "";
+    const grid = [...Array(Math.floor(c.goal / step) + 1).keys()].map(i => i * step).map(v => `<line class="cg" x1="${L}" x2="${W - R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ct te" x="${L - 8}" y="${f(Y(v) + 3.5)}">${v}</text>`).join("");
     const ticks = c.ticks.map(([d, w]) => `<text class="ct tm" x="${f(X(d))}" y="${H - 6}">${w}</text>`).join("");
-    const end = a => a[a.length - 1][1], lo = end(c.low), hi = end(c.high), ex = end(c.expected);
-    const table = c.ticks.map(([d, w]) => `<tr><th scope="row">${w}</th><td>${valAt(c.plan, d)}</td><td>${d <= c.now ? valAt(c.actual, d) : "–"}</td><td>${d < c.now ? "–" : `${valAt(c.expected, d)} (${valAt(c.low, d)} to ${valAt(c.high, d)})`}</td></tr>`).join("");
+    const end = a => a[a.length - 1][1], lo = fc && end(c.low), hi = fc && end(c.high), ex = fc && end(c.expected);
+    // The forecast's label moves below the plan's when the two would touch.
+    const yF = fc ? (Math.abs(Y(ex) - Y(c.goal)) < 18 ? Y(c.goal) + 22 : Y(ex) + 4) : 0;
+    const right = fc ? `<text class="cv" x="${W - R + 8}" y="${f(yF)}">Forecast ${ex}</text><text class="ct" x="${W - R + 8}" y="${f(yF + 14)}">range ${lo} to ${hi}</text>`
+      : `<text class="ct" x="${W - R + 8}" y="${f(Y(c.goal) + 22)}">${c.noForecast || "No forecast yet"}</text>`;
+    const table = c.ticks.map(([d, w]) => `<tr><th scope="row">${w}</th><td>${valAt(c.plan, d)}</td><td>${d <= c.now ? valAt(c.actual, d) : "–"}</td><td>${d < c.now || !fc ? "–" : `${valAt(c.expected, d)} (${valAt(c.low, d)} to ${valAt(c.high, d)})`}</td></tr>`).join("");
     return `<figure class="traj" data-traj>
-        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Signed partners against the plan: ${end(c.actual)} so far; forecast ${ex} by ${c.ticks[c.ticks.length - 1][1]}, range ${lo} to ${hi}; plan ${c.goal}.">
-          ${grid}<polygon class="tr-band" points="${band}"/><path class="cb" d="${path(c.plan)}"/><path class="cl tr-act" d="${path(c.actual)}"/><path class="cl tr-fc" d="${path(c.expected)}"/>
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${unit} against the plan: ${end(c.actual)} so far; ${fc ? `forecast ${ex} by ${c.ticks[c.ticks.length - 1][1]}, range ${lo} to ${hi}` : "no forecast yet"}; plan ${c.goal}.">
+          ${grid}${fc ? `<polygon class="tr-band" points="${band}"/>` : ""}<path class="cb" d="${path(c.plan)}"/><path class="cl tr-act" d="${path(c.actual)}"/>${fc ? `<path class="cl tr-fc" d="${path(c.expected)}"/>` : ""}
           <line class="tr-now" x1="${f(X(c.now))}" x2="${f(X(c.now))}" y1="${T}" y2="${H - B}"/><circle class="tr-dot" cx="${f(X(c.now))}" cy="${f(Y(end(c.actual)))}" r="4"/>
-          <text class="cv" x="${W - R + 8}" y="${f(Y(c.goal) + 4)}">Plan ${c.goal}</text><text class="cv" x="${W - R + 8}" y="${f(Y(ex) + 4)}">Forecast ${ex}</text><text class="ct" x="${W - R + 8}" y="${f(Y(ex) + 18)}">range ${lo} to ${hi}</text>
+          <text class="cv" x="${W - R + 8}" y="${f(Y(c.goal) + 4)}">Plan ${c.goal}</text>${right}
           ${ticks}<line class="tr-x" x1="0" x2="0" y1="${T}" y2="${H - B}" hidden/>
         </svg>
-        <figcaption class="legend"><span><i class="tr-k-act"></i>Signed</span><span><i class="d"></i>Plan</span><span><i class="tr-k-fc"></i>Forecast and its range</span></figcaption>
+        <figcaption class="legend"><span><i class="tr-k-act"></i>${key}</span><span><i class="d"></i>Plan</span>${fc ? '<span><i class="tr-k-fc"></i>Forecast and its range</span>' : ""}</figcaption>
         <div class="tr-tip" role="status" hidden></div>
-        <table class="sr"><caption>Signed partners: plan, actual and forecast</caption><thead><tr><th scope="col">Date</th><th scope="col">Plan</th><th scope="col">Signed</th><th scope="col">Forecast</th></tr></thead><tbody>${table}</tbody></table>
+        <table class="sr"><caption>${unit}: plan, actual and forecast</caption><thead><tr><th scope="col">Date</th><th scope="col">Plan</th><th scope="col">${key}</th><th scope="col">Forecast</th></tr></thead><tbody>${table}</tbody></table>
       </figure>`;
   }
   // Pointing at the trajectory shows that day: the plan, what was signed, and the forecast with its range.
@@ -1925,48 +1935,64 @@ try {
     const px = TG.L + (d / c.days) * span;
     x.removeAttribute("hidden"); x.setAttribute("x1", px); x.setAttribute("x2", px);
     tip.hidden = false;
-    tip.innerHTML = `<b>${dayOf(c.start, d)}</b><span>Plan ${valAt(c.plan, d)}</span>${d <= c.now ? `<span>Signed ${valAt(c.actual, d)}</span>` : `<span>Forecast ${valAt(c.expected, d)}, range ${valAt(c.low, d)} to ${valAt(c.high, d)}</span>`}`;
+    tip.innerHTML = `<b>${dayOf(c.start, d)}</b><span>Plan ${valAt(c.plan, d)}</span>${d <= c.now ? `<span>${c.key || "Signed"} ${valAt(c.actual, d)}</span>` : c.expected ? `<span>Forecast ${valAt(c.expected, d)}, range ${valAt(c.low, d)} to ${valAt(c.high, d)}</span>` : `<span>${c.noForecast || "No forecast yet"}</span>`}`;
     tip.style.left = Math.min(px * k + 12, box.width - tip.offsetWidth) + "px";
   });
 
   // The overview holds decisions and exceptions; evidence and explanations are one click away. Mostly numbers, a chart
   // and short labels; a sentence only where a decision needs it.
   function goalGlance(t) {
-    const g = t.goal, deals = g.deals.map(pick), l = laneById(t.focusLane), yes = decided(l);
-    const likely = deals.filter(x => x.conf === "Likely").length, open = g.target - g.signed - likely;
+    const g = t.goal, deals = g.deals.map(pick), l = t.focusLane ? laneById(t.focusLane) : null, yes = !!l && decided(l);
+    const likely = g.likely != null ? g.likely : deals.filter(x => x.conf === "Likely").length, open = Math.max(0, g.target - g.signed - likely);
+    const fmt = n => (typeof n === "number" ? n.toLocaleString("en-GB") : n);
+    const nums = g.nums || [[g.signed, g.target], [likely], [open]], NL = g.labels || ["Signed", "Likely, forecast", "Still unsecured"];
     trajData = g.trajectory;
     const head = `<header class="gh">
         <p class="gh-eye">${t.name} · ${t.when} · ${g.asOf}</p>
-        <h1 class="gh-verdict"><span class="sr">${t.name}: </span><i class="dot ${g.health[0]} still"></i>${g.health[1]}<small>${g.action}</small></h1>
+        <h1 class="gh-verdict"><span class="sr">${t.name}: </span><i class="dot ${g.health[0] === "idle" ? "hollow" : g.health[0]} still"></i>${g.health[1]}<small class="${g.health[0] === "warn" || g.health[0] === "bad" ? "" : "calm"}">${g.action}</small></h1>
         <div class="gh-nums">
-          <div class="gn"><b>${g.signed}<small>/${g.target}</small></b><span>Signed</span></div>
-          <div class="gn fc first"><b>${likely}</b><span>Likely, forecast</span></div>
-          <div class="gn fc"><b>${open}</b><span>Still unsecured</span></div>
+          <div class="gn"><b>${fmt(nums[0][0])}<small>/${fmt(nums[0][1])}</small></b><span>${NL[0]}</span></div>
+          <div class="gn fc first"><b>${fmt(nums[1][0])}</b><span>${NL[1]}</span></div>
+          <div class="gn fc"><b>${fmt(nums[2][0])}</b><span>${NL[2]}</span></div>
         </div></header>`;
-    const chart = `<section class="gc" aria-label="Forecast against the goal"><div class="headrow"><h2 class="h2">Forecast vs goal</h2><span class="gc-in">${g.insight}</span></div>${trajectory(g.trajectory)}</section>`;
+    const chart = `<section class="gc" aria-label="Forecast against the goal"><div class="headrow"><h2 class="h2">${g.trajectory.expected ? "Forecast vs goal" : "Progress vs plan"}</h2><span class="gc-in">${g.insight}</span></div>${trajectory(g.trajectory)}</section>`;
     const MS = g.milestones;
+    // A row is one place the result comes from: a deal, a sequence, a channel, a page. It shows a track of factual
+    // milestones, or a value when the topic has none, and its forecast in a neutral word.
+    const CF = ["likely", "possible", "early", "done"];
     const deal = x => {
-      const track = MS.map((m, i) => `<li class="${i < x.at ? "done" : i === x.at ? "now" : ""}" title="${m}"><span class="sr">${m}${i < x.at ? ": done" : i === x.at ? ": now" : ""}</span></li>`).join("");
-      return `<li><a href="${x.href}"><b class="dn">${x.name}</b><span class="dx">${x.short}</span><span class="ms dots" aria-label="${x.stage}"><ol>${track}</ol></span><span class="cf cf-${x.conf.toLowerCase()}">${x.conf}</span></a></li>`;
+      const track = MS && x.at != null ? `<span class="ms dots" aria-label="${esc(x.stage)}"><ol>${MS.map((m, i) => `<li class="${i < x.at ? "done" : i === x.at ? "now" : ""}" title="${m}"><span class="sr">${m}${i < x.at ? ": done" : i === x.at ? ": now" : ""}</span></li>`).join("")}</ol></span>` : `<span class="dv">${x.val || ""}</span>`;
+      const cf = CF.includes(x.conf.toLowerCase()) ? x.conf.toLowerCase() : "n";
+      return `<li><a href="${x.href}"><b class="dn">${x.name}</b><span class="dx">${x.short}</span>${track}<span class="cf cf-${cf}">${x.conf}</span></a></li>`;
     };
-    const dealsBox = `<section class="sec" aria-label="Deals"><div class="headrow"><h2 class="h2">Deals</h2><span>One for each of the ${g.target} · ${MS[0].toLowerCase()} to ${MS[MS.length - 1].toLowerCase()}</span></div><ul class="dl">${deals.map(deal).join("")}</ul></section>`;
-    const d = g.decision, top = g.attention.slice(0, 2), more = g.attention.slice(2);
-    const needs = `<section class="box ny" aria-label="Needs you"><h2 class="ny-h">Needs you</h2>
-        <div class="ny-dec">${yes ? '<svg class="i ok"><use href="#check"/></svg>' : '<i class="dot warn still"></i>'}<div><b>${yes ? d.done : d.title}</b><span>${yes ? l.shortAfter : d.sub}</span></div>
-          <div class="acts">${yes ? `<button class="btn quiet s" data-undo-id="${l.decision}">Undo</button>` : `<button class="btn ink s" data-approve-id="${l.decision}"><svg class="i sm"><use href="#check"/></svg>${l.approve}</button>`}<a class="btn quiet s" href="#lane/${l.id}">Why</a></div></div>
-        <div class="ny-bl"><p class="ny-h2">Team blockers<span class="ny-n">${g.attention.length}</span></p>
-          <ul>${top.map(x => `<li><a href="${x.href}"><b>${x.who}</b><span>${x.short}</span></a></li>`).join("")}</ul>
+    const RW = g.rows || { title: "Deals", sub: `One for each of the ${g.target} · ${MS[0].toLowerCase()} to ${MS[MS.length - 1].toLowerCase()}` };
+    const dealsBox = `<section class="sec" aria-label="${RW.title}"><div class="headrow"><h2 class="h2">${RW.title}</h2><span>${RW.sub}</span></div><ul class="dl">${deals.map(deal).join("")}</ul></section>`;
+    const d = g.decision, att = g.attention || [], top = att.slice(0, 2), more = att.slice(2);
+    let dec;
+    if (!d || !l) dec = `<div class="ny-dec"><svg class="i ok"><use href="#check"/></svg><div><b>${g.calm || "Nothing needs you"}</b><span>${g.calmSub || ""}</span></div></div>`;
+    else {
+      const stuck = !yes && stateOf(l) === "bad";
+      const icon = yes ? '<svg class="i ok"><use href="#check"/></svg>' : stuck ? '<svg class="i bad"><use href="#flame"/></svg>' : '<i class="dot warn still"></i>';
+      const acts = yes ? `<button class="btn quiet s" data-undo-id="${l.decision}">Undo</button>`
+        : l.decision ? `<button class="btn ink s" data-approve-id="${l.decision}"><svg class="i sm"><use href="#check"/></svg>${l.approve}</button>` : (l.acts || "").replace(/class="btn (ink|quiet)"/g, 'class="btn $1 s"');
+      dec = `<div class="ny-dec">${icon}<div><b>${yes ? d.done : d.title}</b><span>${yes ? l.shortAfter : d.sub}</span></div>
+          <div class="acts">${acts}<a class="btn quiet s" href="#lane/${l.id}">${d.why || "Why"}</a></div></div>`;
+    }
+    const needs = `<section class="box ny" aria-label="Needs you"><h2 class="ny-h">Needs you</h2>${dec}
+        <div class="ny-bl"><p class="ny-h2">Team blockers<span class="ny-n">${att.length}</span></p>
+          ${att.length ? `<ul>${top.map(x => `<li><a href="${x.href}"><b>${x.who}</b><span>${x.short}</span></a></li>`).join("")}</ul>` : `<p class="ny-none">None. Everything else is on schedule.</p>`}
           ${more.length ? `<a class="ny-more" href="${more[0].href}">+${more.length} more</a>` : ""}</div></section>`;
-    const st = g.funnel.steps, max = Math.max(...st.map(x => +x.n));
-    const funnel = `<section class="sec" aria-label="Funnel"><div class="headrow"><h2 class="h2">Funnel</h2><span>${g.funnel.since}</span></div>
-        <ol class="fn" style="--n:${st.length}">${st.map(x => `<li class="${x.st || ""}"><i style="width:${Math.max(3, Math.round(+x.n / max * 100))}%"></i><b>${x.n}${x.d ? `<em>${x.d}</em>` : ""}</b><span>${x.what}</span>${x.rate ? `<small>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</small>` : ""}</li>`).join("")}</ol></section>`;
+    const num = v => +String(v).replace(/[^\d.]/g, "");
+    const st = g.funnel.steps, max = Math.max(...st.map(x => num(x.n)));
+    const funnel = `<section class="sec" aria-label="${g.funnel.title || "Funnel"}"><div class="headrow"><h2 class="h2">${g.funnel.title || "Funnel"}</h2><span>${g.funnel.since}</span></div>
+        <ol class="fn" style="--n:${st.length}">${st.map(x => `<li class="${x.st || ""}"><i style="width:${Math.max(3, Math.round(num(x.n) / max * 100))}%"></i><b>${x.n}${x.d ? `<em>${x.d}</em>` : ""}</b><span>${x.what}</span>${x.rate ? `<small>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</small>` : ""}</li>`).join("")}</ol></section>`;
     const gs = g.guards, bad = gs ? gs.items.filter(x => x.st === "warn").length : 0;
     const guards = gs ? `<section class="sec" aria-label="Guardrails"><div class="headrow"><h2 class="h2">Guardrails</h2><span>${gs.sub} · ${bad ? bad + " breached" : "all held"}</span></div>
         <ul class="gd">${gs.items.map(x => `<li class="${x.st || ""}">${x.st === "warn" ? '<i class="dot warn still"></i>' : CHECK}<b>${x.what} ${x.val}</b><small>${x.limit}</small></li>`).join("")}</ul></section>` : "";
     const rk = "rp:" + t.id;
-    const recovery = `<details class="more" data-more="${rk}"${ui.more[rk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Recovery plan<small>${g.gap.steps.length} steps to reach ${g.target}, and what each forecast rests on</small></summary><div class="body">
-        <div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div>
-        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence} Next: ${x.next}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section>
+    const recovery = `<details class="more" data-more="${rk}"${ui.more[rk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>${g.gap ? "Recovery plan" : "What the forecast rests on"}<small>${g.gap ? `${g.gap.steps.length} steps to reach ${fmt(g.target)}, and what each forecast rests on` : g.restSub || "The evidence behind each row"}</small></summary><div class="body">
+        ${g.gap ? `<div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div>` : ""}
+        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence}${x.next ? " Next: " + x.next : ""}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section>
         ${g.ladder ? `<section class="sec"><h3 class="h2">How a forecast is set</h3><ul class="evl">${g.ladder.map(([w, f]) => `<li><b>${w}</b><span>${f}</span></li>`).join("")}</ul>${g.calib ? `<p class="deals-out">${g.calib}</p>` : ""}</section>` : ""}</div></details>`;
     return { head, body: chart + `<div class="g2">${dealsBox}${needs}</div>` + funnel + guards + recovery };
   }
@@ -1996,7 +2022,8 @@ try {
         ${t.plan ? stagesBox(t) : ""}
         ${night}
       </section>
-      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}`}
+      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}
+      ${t.noGoal ? `<div class="box askline nogoal"><i class="dot hollow still"></i><p><b>No goal set</b><span>${t.noGoal}</span></p><div class="acts"><button class="btn quiet" data-ask-goal="${t.id}">Ask for a goal</button></div></div>` : ""}`}
       <details class="more" data-more="${t.id}"${ui.more[t.id] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Details<small>${lanes.length} lanes · ${people ? people + (people === 1 ? " person, " : " people, ") : ""}${agents} ${agents === 1 ? "agent" : "agents"}</small></summary><div class="body">
         ${g && t.meta ? `<div class="meta">${t.meta}</div>` : ""}<p class="intro">${t.intro}</p>
         ${plan}
@@ -2401,6 +2428,7 @@ try {
     else if (t.matches("[data-fwd]")) history.forward();
     else if (t.matches("[data-glass-default]")) { theme.g = null; applyTheme(true); }
     else if (t.matches("[data-strength-default]")) { theme.k = K_DEFAULT; applyTheme(true); }
+    else if (t.matches("[data-ask-goal]")) { const x = PAGES.topics.find(y => y.id === t.dataset.askGoal); fileDirection(`Propose a goal for ${x.name.toLowerCase()} with a measure and a date`); }
     else if (t.closest(".seg[data-pick]")) $$("button", t.closest(".seg")).forEach(b => b.setAttribute("aria-pressed", String(b === t)));
     else if (t.matches(".sw")) t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"));
   });
