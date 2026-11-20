@@ -680,14 +680,14 @@ td .st{display:inline-flex;align-items:center;gap:7px}
    and API keys (billed by use, against a budget) are kept apart, and only accounts the workspace added appear. */
 .upop{position:fixed;z-index:60;left:12px;bottom:56px;width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 80px);display:flex;isolation:isolate;overflow:hidden;border:1px solid rgba(255,255,255,.14);border-radius:var(--r-2xl);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 28px 80px rgba(0,0,0,.55),0 2px 12px rgba(0,0,0,.35);transform-origin:0 100%;animation:chatin .22s cubic-bezier(.2,.8,.2,1)}
 .upop-in{flex:1;min-width:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:14px 16px 16px}
-/* Its glass, in two layers. Behind: what is under the card, blurred and darkened to 40%, showing through a fifth of it.
-   Above that: the day's artwork as the window frame shows it (the same pre-blurred picture, src/glass.sh) at 80%, under
-   a light veil of the card's surface and a faint sheen. The pictures are dark by construction (their lightest pixel has
-   a luminance of 0.038), so contrast holds by arithmetic, not by luck: even with pure white under the card, the small
-   grey text (a step lighter here, as on the sidebar's glass) keeps about 4.6:1. Solid with the Glass slider at 0,
-   under reduced transparency, or without backdrop-filter. */
-.upop{--muted:color-mix(in srgb,var(--grey-700) 40%,var(--grey-800));--bad:color-mix(in srgb,var(--coral) 55%,var(--white));--line:rgba(255,255,255,.1);-webkit-backdrop-filter:blur(10px) saturate(170%) brightness(.4);backdrop-filter:blur(10px) saturate(170%) brightness(.4)}
-.upop::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;opacity:.8;background:linear-gradient(180deg,rgba(255,255,255,.05),rgba(255,255,255,0) 30%),linear-gradient(color-mix(in srgb,var(--raised) 35%,transparent),color-mix(in srgb,var(--raised) 35%,transparent)),var(--uglass,linear-gradient(var(--raised),var(--raised))) center/cover no-repeat}
+/* Its glass is real: what is under the card (the sidebar, the page) shows through, lightly blurred so it stays
+   recognisable, and darkened to 42% under the card's surface at 42%. Contrast holds on anything by arithmetic: with
+   pure white underneath the card can reach only #4e4e4e, and every text on it is at least #c4c4c4 (a step lighter
+   here, as on the sidebar's glass), which is 4.8:1. Measured on the rendered card: 5.9:1 at the lowest on a wide
+   window, 5.2:1 on a narrow one with page text under it, 6.8:1 on a phone. Solid with the Glass slider at 0, under reduced transparency, or
+   without backdrop-filter. */
+.upop{--muted:var(--grey-800);--text-2:color-mix(in srgb,var(--grey-800) 50%,var(--grey-900));--bad:color-mix(in srgb,var(--coral) 55%,var(--white));--line:rgba(255,255,255,.12);background:color-mix(in srgb,var(--raised) 42%,transparent);-webkit-backdrop-filter:blur(6px) saturate(170%) brightness(.42);backdrop-filter:blur(6px) saturate(170%) brightness(.42)}
+.upop::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,0) 30%)}
 :root[data-glass="off"] .upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}:root[data-glass="off"] .upop::before{display:none}
 @media (prefers-reduced-transparency:reduce){.upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}.upop::before{display:none}}
 @supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.upop{background:var(--raised)}.upop::before{display:none}}
@@ -3362,9 +3362,6 @@ try {
   function setUsage(open) {
     if (open) {
       drawUsage();
-      // The card's glass is the window frame's: the day's picture that is on now.
-      const on = $(".glass i.on");
-      usagePop.style.setProperty("--uglass", on && on.style.backgroundImage ? on.style.backgroundImage : "none");
     }
     usagePop.hidden = !open;
     $$("[data-usage]").forEach(b => b.setAttribute("aria-expanded", String(open)));
