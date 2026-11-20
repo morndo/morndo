@@ -161,6 +161,11 @@ code,.cmd{font-family:var(--mono)}
 .badge{position:absolute;top:3px;right:2px;min-width:15px;height:15px;padding:0 4px;border-radius:var(--r-sm);background:var(--ink);color:var(--ink-fg);font-size:var(--fs-3xs);font-weight:700;line-height:15px;text-align:center}
 .side h2{padding:0 8px 4px;font-size:var(--fs-2xs);font-weight:600;color:var(--muted)}
 .side .group{display:flex;flex-direction:column;gap:2px}
+/* The workspace name and the pins stay at the top and the account row at the bottom; only the tree between them
+   scrolls. Its own padding keeps focus rings from being clipped. */
+.side{overflow:hidden}
+#tree{flex:1 1 auto;min-height:0;overflow:hidden auto;overscroll-behavior:contain;margin:0 calc(-1*var(--sp-1));padding:2px var(--sp-1)}
+.me{flex:none}
 /* The sidebar is for finding your way, not for reading status: a row is one icon and one name. A colour mark appears
    only where you are needed (red: stuck, amber: waiting for you) or where work is running (green). The word for a
    row's state is there for screen readers and shows when you point at the row. */
