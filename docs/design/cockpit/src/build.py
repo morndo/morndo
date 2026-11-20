@@ -29,6 +29,7 @@ MODULES = {
 VARIANTS = {
     # id: (module, output file, extra file)
     "share": ("gtm", "gtm-sharing.html", "share.extra.html"),
+    "v2": ("gtm", "gtm-cockpit-v2.html", "v2.extra.html"),
 }
 FONTS = {
     "@@FONT_SERIF@@": "newsreader.woff2",

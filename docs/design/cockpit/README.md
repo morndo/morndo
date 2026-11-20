@@ -8,6 +8,7 @@ Open the mockups in any browser. Each is one self-contained file:
 |---|---|
 | [`mockups/dev-cockpit.html`](mockups/dev-cockpit.html) | The development module: projects, lanes, pull requests, release decisions with proof. |
 | [`mockups/gtm-cockpit.html`](mockups/gtm-cockpit.html) | The go-to-market module: topics (content, outbound, paid, SEO, research), drafts, decisions. |
+| [`mockups/gtm-cockpit-v2.html`](mockups/gtm-cockpit-v2.html) | Proposal, not decided: the go-to-market mockup with a product review's fixes on top. What agents cost per topic, every topic's verdict on the brief, Decide as a queue, the stuck promo's choices working, decision rights in one place with a limit before anything risky is handed over, and a phone layout that puts the decisions first. |
 | [`mockups/gtm-sharing.html`](mockups/gtm-sharing.html) | Proposal, not decided: three ways to share a topic with teammates (a Share button, handing over a stage, a people table), and what each person then sees. |
 
 Both are built from one shell, so they differ only in what a module brings. The workspace menu and Settings switch between them. All names, projects and numbers in them are made up.
@@ -21,6 +22,7 @@ Both are built from one shell, so they differ only in what a module brings. The 
 | `src/build.py` | Builds the mockups into `mockups/`. Fonts and artworks are inlined. |
 | `topic-status-framework.md` | The guard rails an agent follows when it writes a topic's status page. |
 | `src/share.extra.html` | The sharing proposal: styles and behaviour laid over the go-to-market module (a variant in `build.py`). |
+| `src/v2.extra.html` | The review's fixes, laid over the go-to-market module the same way (variant `v2`). |
 | `src/heroes/`, `src/heroes.json` | The brief's artworks as the mockups embed them (1280 px). |
 | `src/glass.sh`, `src/glass/` | The small pre-blurred pictures behind the window frame (needs ImageMagick 7). |
 | `src/fonts/` | Newsreader and Schibsted Grotesk, with their OFL licences. |
