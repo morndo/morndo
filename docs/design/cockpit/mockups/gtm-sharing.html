@@ -169,7 +169,9 @@ code,.cmd{font-family:var(--mono)}
 .side kbd{padding:0;background:none;font-weight:400;color:var(--muted)}
 /* A pointed-at row is a little lighter than what is around it, so the small text on it steps up as well. */
 .side .row:hover kbd,.side .row:hover>.mark{color:var(--text-2)}
-.me{margin-top:auto;height:40px}
+.me{margin-top:auto;height:40px;display:flex;align-items:center;gap:2px}
+.me>.row{flex:1;min-width:0;height:40px}
+.me>.ib[aria-expanded="true"]{background:var(--row-on);color:var(--text)}
 .me .av{width:24px;height:24px;border-radius:var(--r-sm);background:var(--tile-on);display:grid;place-items:center;flex:none}
 
 /* The page sits flush with the window, as Dia's does: no inset, no border, no corner. Where the frame ends and the page
@@ -669,6 +671,28 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 
 /* Workspace colour: the quick picker and the settings page */
 .pop{position:fixed;z-index:60;left:12px;top:48px;width:272px;display:flex;flex-direction:column;gap:14px;padding:14px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-pop);animation:pop .18s cubic-bezier(.2,.9,.3,1.1)}
+/* Usage: the floating chat's card, smaller, rising from the account row. Subscriptions (a flat price, limits that reset)
+   and API keys (billed by use, against a budget) are kept apart, and only accounts the workspace added appear. */
+.upop{position:fixed;z-index:60;left:12px;bottom:56px;width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 80px);overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:14px 16px 16px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-2xl);box-shadow:0 28px 80px rgba(0,0,0,.62),0 2px 12px rgba(0,0,0,.4);transform-origin:0 100%;animation:chatin .22s cubic-bezier(.2,.8,.2,1)}
+.upop header{display:flex;align-items:flex-start;gap:8px}
+.upop header div{flex:1;min-width:0}
+.upop header h2{font-size:var(--fs-ui);font-weight:600;line-height:28px}.upop header p{margin-top:-3px;font-size:var(--fs-xs);color:var(--muted)}
+.upop section{display:flex;flex-direction:column;gap:var(--sp-3)}
+.ums{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:var(--sp-2) var(--sp-4)}
+.uacct>p.unote{font-size:var(--fs-xs);color:var(--muted)}
+.upop h3{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:var(--fs-xs);font-weight:600;color:var(--text-2)}
+.upop h3 small{font-weight:400;color:var(--muted)}
+.uacct{display:flex;flex-direction:column;gap:var(--sp-2);padding-top:var(--sp-3);border-top:1px solid var(--line)}
+.uacct>p{display:flex;align-items:baseline;gap:8px}
+.uacct>p b{flex:1;min-width:0;font-weight:600;color:var(--text-hi)}.uacct>p span{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.um{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;font-size:var(--fs-sm)}
+.um>span{color:var(--text-2)}.um>b{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+.um>i{grid-column:1/-1;position:relative;display:block;height:5px;border-radius:var(--r-pill);background:var(--fill)}
+.um>i>em{position:absolute;left:0;top:0;bottom:0;border-radius:var(--r-pill);background:var(--text-2)}
+.um>small{grid-column:1/-1;font-size:var(--fs-xs);color:var(--muted)}
+.um.near>b,.um.near>small{color:var(--warn)}.um.near>i>em{background:var(--warn)}
+.um.full>b,.um.full>small{color:var(--bad)}.um.full>i>em{background:var(--bad)}
+.upop footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;font-size:var(--fs-xs);color:var(--muted)}
 .pop .ph{display:flex;align-items:center;gap:10px}
 .pop .ph .mark{width:26px;height:26px;border-radius:var(--r-sm)}
 .pop .ph b{display:block;font-weight:600}.pop .ph span{font-size:var(--fs-xs);color:var(--muted)}
@@ -991,6 +1015,7 @@ try {
   <symbol id="moon" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></symbol>
   <symbol id="done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path d="m8.200 12.300 2.700 2.700 4.900-5.400"/></symbol>
   <symbol id="sliders" viewBox="0 0 24 24"><path d="M4 8h3.200M12.800 8H20M4 16h7.200M16.800 16H20"/><circle fill="currentColor" cx="10" cy="8" r="1.900"/><circle fill="currentColor" cx="14" cy="16" r="1.900"/></symbol>
+  <symbol id="usage" viewBox="0 0 24 24"><path d="M4.500 16.500a7.500 7.500 0 0 1 15 0"/><path d="m12 16.500 3.400-4.900"/><circle fill="currentColor" cx="12" cy="16.500" r="1.900"/></symbol>
   <symbol id="user" viewBox="0 0 24 24"><circle fill="currentColor" cx="12" cy="8" r="2.800"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
 </svg>
 
@@ -1018,7 +1043,7 @@ try {
     <h2 data-kind="Topic">Topics</h2>
   </div>
 
-  <a class="row me" href="#settings" data-nav="settings" aria-label="Settings and account: Mara Lind"><span class="av"><svg class="i sm"><use href="#user"/></svg></span><span class="grow" style="color:var(--text)">Mara Lind</span><svg class="i dim"><use href="#sliders"/></svg></a>
+  <div class="me"><a class="row" href="#settings" data-nav="settings" aria-label="Settings and account: Mara Lind"><span class="av"><svg class="i sm"><use href="#user"/></svg></span><span class="grow" style="color:var(--text)">Mara Lind</span></a><button class="ib" data-usage aria-expanded="false" aria-controls="usagepop" aria-label="Usage" title="Usage"><svg class="i"><use href="#usage"/></svg></button></div>
 </nav>
 
 <main class="pane chat-off" id="pane">
@@ -1486,6 +1511,8 @@ try {
 </div>
 
 <!-- The workspace menu: its modules and its colour. Opens from the workspace name or a right-click on empty sidebar space. -->
+<!-- Usage: opens from the gauge on the account row. Drawn from the accounts the workspace added. -->
+<div class="upop" id="usagepop" role="dialog" aria-label="Usage" hidden></div>
 <div class="pop" id="themepop" role="dialog" aria-label="Workspace" hidden>
   <div class="ph"><svg class="mark"><use href="#mark"/></svg><div><b>Tidewell</b><span>Workspace colour: <span data-theme-name>Ink</span></span></div></div>
   <div class="mods"><h3>Modules</h3>
@@ -3304,6 +3331,47 @@ try {
     { id: "a-research", lead: "Researcher", re: /research|profile|competitor/i },
   ];
 
+  // Usage. Two kinds of account, never mixed: a subscription (Claude, Codex, Cursor) has a flat price and limits that
+  // reset, so it shows how much of each window is used and when it resets; an API key (your own, billed by use) shows
+  // what was spent against the budget you set. Only accounts the workspace added appear; the rest are named once.
+  const USAGE = {
+    asOf: "09:20",
+    subs: [
+      { name: "Claude Max", lanes: 6, note: "At its limit, lanes move to your Anthropic key.", meters: [
+        { what: "5 hours", used: 0.86, val: "86%", note: "resets 14:20" },
+        { what: "Week", used: 0.41, val: "41%", note: "resets Mon" }] },
+      { name: "ChatGPT Pro · Codex", lanes: 3, meters: [
+        { what: "5 hours", used: 0.18, val: "18%", note: "resets 12:05" },
+        { what: "Week", used: 0.33, val: "33%", note: "resets Thu" }] },
+      { name: "Cursor Pro", lanes: 1, meters: [
+        { what: "Requests this month", used: 0.62, val: "312 of 500", note: "resets 1 Dec" }] },
+    ],
+    keys: [
+      { name: "Anthropic API", lanes: 0, note: "Takes over when Claude Max is at its limit.", meters: [
+        { what: "This month", used: 0.64, val: "€96 of €150" }] },
+      { name: "OpenAI API", lanes: 4, meters: [
+        { what: "This month", used: 0.71, val: "€212 of €300", note: "GPT agents and GPT Image" }] },
+    ],
+    missing: ["Gemini", "Grok", "Seedance"],
+  };
+  const usagePop = $("#usagepop");
+  function drawUsage() {
+    const meter = m => {
+      const cls = m.used >= 1 ? " full" : m.used >= 0.8 ? " near" : "";
+      return `<div class="um${cls}"><span>${m.what}</span><b>${m.val}</b><i role="meter" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${m.used}" aria-label="${esc(m.what)}: ${esc(m.val)}"><em style="width:${Math.min(100, m.used * 100).toFixed(0)}%"></em></i>${m.note || m.used >= 0.8 ? `<small>${m.used >= 1 ? "Limit reached" : m.used >= 0.8 ? "Close" : ""}${m.note && m.used >= 0.8 ? " · " : ""}${m.note || ""}</small>` : ""}</div>`;
+    };
+    const acct = a => `<div class="uacct"><p><b>${a.name}</b><span>${a.lanes ? a.lanes + (a.lanes === 1 ? " lane" : " lanes") : "standing by"}</span></p><div class="ums">${a.meters.map(meter).join("")}</div>${a.note ? `<p class="unote">${a.note}</p>` : ""}</div>`;
+    usagePop.innerHTML = `<header><div><h2>Usage</h2><p>Only accounts you added · ${USAGE.asOf}</p></div><button class="ib" data-usage-close aria-label="Close usage"><svg class="i"><use href="#x"/></svg></button></header>
+      <section aria-label="Subscriptions"><h3>Subscriptions<small>flat price · limits reset on their own</small></h3>${USAGE.subs.map(acct).join("")}</section>
+      <section aria-label="API keys"><h3>API keys<small>your own keys · billed by use</small></h3>${USAGE.keys.map(acct).join("")}</section>
+      <footer><span>Not added, so not shown: ${USAGE.missing.join(", ")}.</span><a class="btn quiet s" href="#skills" data-usage-close>Manage accounts</a></footer>`;
+  }
+  function setUsage(open) {
+    if (open) drawUsage();
+    usagePop.hidden = !open;
+    $$("[data-usage]").forEach(b => b.setAttribute("aria-expanded", String(open)));
+  }
+
   // One message in, one lane out: the manager puts it in a project and names who leads, with a receipt the owner
   // can correct. What fits no project stays with the manager until it knows where it belongs.
   function fileDirection(raw) {
@@ -3368,6 +3436,9 @@ try {
     if (!e.target.closest("#themepop,[data-wsmenu]")) pop.hidden = true;
     if (!e.target.closest("#pinpop,[data-pin-add]")) closePins();
     if (!e.target.closest("#pinmenu")) closePinMenu();
+    if (!usagePop.hidden && !e.target.closest("#usagepop,[data-usage]")) setUsage(false);
+    if (t && t.matches("[data-usage]")) { setUsage(usagePop.hidden); return; }
+    if (t && t.matches("[data-usage-close]")) setUsage(false);
     if (!t) { if (e.target === overlay) closePalette(); return; }
     if (t.matches("[data-wsmenu]")) { pop.style.left = pop.style.top = ""; pop.hidden = !pop.hidden; }
     else if (t.matches("[data-theme-set]")) { theme.id = t.dataset.themeSet; applyTheme(true); }
@@ -3430,6 +3501,7 @@ try {
     else if (e.key === "Escape" && !pinmenu.hidden) closePinMenu();
     else if (e.key === "Escape" && !pinpop.hidden) closePins();
     else if (e.key === "Escape" && !pop.hidden) pop.hidden = true;
+    else if (e.key === "Escape" && !usagePop.hidden) { setUsage(false); $("[data-usage]").focus(); }
     else if (e.key === "Escape" && !sideChat()) { pane.classList.add("chat-off"); syncChat(); }
   });
 
