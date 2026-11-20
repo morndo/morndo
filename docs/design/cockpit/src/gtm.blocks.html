@@ -442,8 +442,8 @@
           guards: {
             sub: "What reaching 3 must not cost",
             items: [
-              { what: "Bounces", val: "1.2%", limit: "limit 4%" },
-              { what: "Asked to stop", val: "0 of 52", limit: "limit 2%" },
+              { what: "Bounces", val: "1.2%", limit: "limit 4%", p: 0.3 },
+              { what: "Asked to stop", val: "0 of 52", limit: "limit 2%", p: 0 },
               { what: "Sent unchecked", val: "0", limit: "none allowed" },
               { what: "Terms", val: "standard 15%", limit: "no discount without you" },
             ],
@@ -591,7 +591,7 @@
             sub: "What the sign-ups must not cost",
             items: [
               { what: "Off-brand posts", val: "0", limit: "none allowed" },
-              { what: "Newsletter sends", val: "2 this week", limit: "limit 2" },
+              { what: "Newsletter sends", val: "2 this week", limit: "limit 2", p: 1 },
               { what: "Claims without a source", val: "0", limit: "none allowed" },
             ],
           },
@@ -702,9 +702,9 @@
           guards: {
             sub: "What the meetings must not cost",
             items: [
-              { what: "Bounces", val: "1.8%", limit: "limit 4%" },
-              { what: "Asked to stop", val: "11 of 990", limit: "limit 2%" },
-              { what: "Sends a day", val: "60", limit: "limit 60" },
+              { what: "Bounces", val: "1.8%", limit: "limit 4%", p: 0.45 },
+              { what: "Asked to stop", val: "1.1%", limit: "11 of 990 · limit 2%", p: 0.56 },
+              { what: "Sends a day", val: "60", limit: "limit 60", p: 1 },
               { what: "Spam complaints", val: "0", limit: "none allowed" },
             ],
           },
@@ -817,8 +817,8 @@
           guards: {
             sub: "What the leads must not cost",
             items: [
-              { what: "Cost per lead", val: "€114", limit: "limit €100", st: "warn" },
-              { what: "Weekly spend", val: "€3,640", limit: "limit €4,000" },
+              { what: "Cost per lead", val: "€114", limit: "limit €100", p: 1.14 },
+              { what: "Weekly spend", val: "€3,640", limit: "limit €4,000", p: 0.91 },
               { what: "Changes over €500 without you", val: "0", limit: "none allowed" },
               { what: "Customer data in ads", val: "none", limit: "never" },
             ],

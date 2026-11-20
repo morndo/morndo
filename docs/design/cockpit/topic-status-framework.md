@@ -44,7 +44,7 @@ context. No paragraphs on the first screen; a sentence is one line.
 | 3 | Deals | Where will the result come from? | One row per target slot, so the rows line up with the target (3 partners, 3 rows; candidates for the same slot share a row): name, the next step in a few words, a track of factual milestones, a confidence word | Each deal's lane; what each forecast rests on (in the recovery plan) |
 | 4 | Needs you | What needs me? | The one decision as a row: what, due, why it cannot wait (a few words), the button. Then team blockers: their count and the top two | The decision's reasoning ("Why", on its lane); the other blockers |
 | 5 | Funnel | Does the method work? | One strip: each step's count, this week's change, its rate against the plan, below-plan steps marked | - |
-| 6 | Guardrails | What must reaching it not cost? | One line: each guardrail with its reading and its limit, and "all held" or how many are breached | A breached one is a blocker under Needs you, with its lane |
+| 6 | Guardrails | What must reaching it not cost? | One row of small meters: each reading against its marked limit (a breach runs past the mark in amber); a yes-or-no rule says Held or Breached; breached ones first | A breached one is a blocker under Needs you, with its lane |
 | 7 | Recovery plan (closed) | How do we close the gap? | Its title and how many steps | The steps with dates, the assumptions, the evidence per deal, what is out of the goal, the forecast ladder and how its forecasts have scored |
 | 8 | Details and History (closed) | Everything else | Their titles and one count each | Purpose, plan stages, lanes, people and agents with their records, jobs; the history |
 
@@ -106,7 +106,7 @@ These come from management research; [management-research.md](../orchestration/m
 sources.
 
 - **R20 A goal comes with guardrails.** Name what reaching it must not cost (for outreach: bounces, people asking to
-  stop, anything sent unchecked, the lowest acceptable terms) and show them in one line. A breached guardrail becomes a
+  stop, anything sent unchecked, the lowest acceptable terms) and show them as one row of meters against their limits. A breached guardrail becomes a
   blocker under Needs you. A narrow goal without one invites shortcuts, and agents take them faster than people.
 - **R21 Forecasts are kept and scored.** Every forecast word is stored with the date it was given and, later, what
   happened. The recovery plan says how the ladder has scored so far ("Likely signed 3 of 4 times"), or when the first
@@ -148,7 +148,7 @@ What is missing is said on the page (R5, R7), not guessed.
 - [ ] The verdict compares against an explicit plan, or says "Forecast not established".
 - [ ] The decision is one row with its deadline and button; its reasoning is one click away.
 - [ ] At most two blockers are shown, with the count of all.
-- [ ] The guardrails are on the first screen in one line; a breached one is a blocker.
+- [ ] The guardrails are on the first screen as one row of meters; a breached one is a blocker.
 - [ ] The recovery plan says how forecasts have scored, or when the first can be.
 - [ ] The decision says why it is the owner's.
 - [ ] Deal stages are milestones, not percentages.

@@ -46,7 +46,7 @@
     const [v, c] = SPEND[t.id] || [0, 0];
     if (!t.goal) return;
     t.goal.asOf += ` · agents €${v} of €${c} this week`;
-    (t.goal.guards = t.goal.guards || { sub: "What the goal must not cost", items: [] }).items.push({ what: "Agents this week", val: `€${v}`, limit: `cap €${c}, then they pause and ask`, st: v > c ? "warn" : "" });
+    (t.goal.guards = t.goal.guards || { sub: "What the goal must not cost", items: [] }).items.push({ what: "Agents this week", val: `€${v}`, limit: `cap €${c}, then they pause and ask`, p: c ? v / c : 0 });
   });
   $("#v-brief .cadence").insertAdjacentHTML("afterend", `<p class="cadence"><svg class="i sm"><use href="#card"/></svg>Agents spent €21 overnight · €${week} of €${cap} this week</p>`);
 
