@@ -146,13 +146,10 @@ function compare(released: Contract, current: Contract): string[] {
       }
     }
     if (next.additionalProperties === false && old.additionalProperties !== false) fail(path, "additional properties disallowed");
-    // The release baseline predates the HTTPS-only attachment rule.
-    const attachmentHardening = path === "AttachmentInput.url" && !old.pattern
-      && next.pattern === "^https://" && next.maxLength === 2048;
-    if (old.pattern !== next.pattern && !attachmentHardening && (old.pattern !== undefined || input)) fail(path, "pattern changed");
+    if (old.pattern !== next.pattern && (old.pattern !== undefined || input)) fail(path, "pattern changed");
     if (input) {
       for (const key of minimums) if ((next[key] ?? -Infinity) > (old[key] ?? -Infinity)) fail(path, `${key} increased`);
-      for (const key of maximums) if (!(attachmentHardening && key === "maxLength") && (next[key] ?? Infinity) < (old[key] ?? Infinity)) fail(path, `${key} decreased`);
+      for (const key of maximums) if ((next[key] ?? Infinity) < (old[key] ?? Infinity)) fail(path, `${key} decreased`);
       for (const field of next.required ?? []) if (!old.required?.includes(field)) fail(`${path}.${field}`, "new required input");
     } else {
       for (const field of old.required ?? []) if (!next.required?.includes(field)) fail(`${path}.${field}`, "response field became optional");
