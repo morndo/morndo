@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 
 interface Shape {
   $ref?: string;
+  $comment?: string;
   type?: string | string[];
   format?: string;
   const?: unknown;
@@ -156,6 +157,13 @@ function compare(released: Contract, current: Contract, routes: OpenApi): string
           fail(path, `removed value ${JSON.stringify(value)}`);
         }
       }
+      if (!input && old.$comment !== "cockpit-reader:enum") {
+        for (const value of next.enum) {
+          if (!old.enum.some(candidate => JSON.stringify(candidate) === JSON.stringify(value))) {
+            fail(path, `added value ${JSON.stringify(value)} without a reader fallback`);
+          }
+        }
+      }
     }
     if (next.additionalProperties === false && old.additionalProperties !== false) fail(path, "additional properties disallowed");
     if (old.pattern !== next.pattern && (old.pattern !== undefined || input)) fail(path, "pattern changed");
@@ -181,8 +189,10 @@ function compare(released: Contract, current: Contract, routes: OpenApi): string
         const enumValue = added.const !== undefined && previous.length > 0 && previous.every(part =>
           part.const !== undefined ? typeof part.const === typeof added.const
             : Boolean(part.enum?.length && part.enum.every(value => typeof value === typeof added.const)));
+        const taggedFallback = old.$comment?.startsWith("cockpit-reader:tag:") ?? false;
         const allowed = (name === "oneOf" || name === "anyOf")
-          && ((tag && previous.some(part => branchKey(part).startsWith("tag:"))) || enumValue);
+          && ((tag && (input || taggedFallback) && previous.some(part => branchKey(part).startsWith("tag:")))
+            || (enumValue && (input || old.$comment === "cockpit-reader:enum")));
         if (!allowed) fail(path, `added ${name} member ${branchKey(added)} changes the type`);
       }
       for (const branch of previous) {

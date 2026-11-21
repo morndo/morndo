@@ -6,7 +6,7 @@ import { expect, it } from "vitest";
 
 interface Shape {
   type?: string;
-  enum?: string[];
+  enum?: (string | number)[];
   properties?: Record<string, Shape>;
   required?: string[];
   maxLength?: number;
@@ -32,6 +32,12 @@ it("allows an added response value and refuses a removed value or a widened prop
     const lane = required("LaneState");
     lane.enum?.push("paused");
     expect(check().status).toBe(0);
+    const limit = required("DailyLimit");
+    limit.enum?.push(100);
+    const closed = check();
+    expect(closed.status).toBe(1);
+    expect(closed.stderr).toContain("DailyLimit: added value 100 without a reader fallback");
+    limit.enum?.pop();
     lane.enum = lane.enum?.filter(value => value !== "warn") ?? [];
     expect(check().stderr).toContain('removed value "warn"');
     const view = required("LaneView");
