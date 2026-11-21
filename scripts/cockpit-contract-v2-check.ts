@@ -443,9 +443,34 @@ async function dev() {
   } finally { child.kill(); }
 }
 
+// every choice a lane lists is accepted (each on a fresh stand-in, so one choice cannot hide another)
+async function everyChoiceWorks(module: string) {
+  const lanes: { id: string; acts: string[] }[] = [];
+  {
+    const { child, url } = await start(module);
+    try {
+      for (const g of (await get(url, "/sidebar")).body?.groups ?? []) for (const l of g.lanes ?? []) {
+        const lane = (await get(url, `/lanes/${l.id}`)).body;
+        lanes.push({ id: l.id, acts: (lane?.acts ?? []).map((x: any) => x.id) });
+      }
+    } finally { child.kill(); }
+  }
+  const refused: string[] = [];
+  for (const lane of lanes) for (const choice of lane.acts) {
+    const { child, url } = await start(module);
+    try {
+      const r = await act(url, { type: "lane.act", laneId: lane.id, act: choice });
+      if (r.status !== 200) refused.push(`${lane.id}/${choice} → ${r.status}`);
+    } finally { child.kill(); }
+  }
+  ok(lanes.some(l => l.acts.length) && refused.length === 0, `${module}: every choice a lane lists is accepted${refused.length ? " — refused: " + refused.slice(0, 6).join(", ") : ""}`);
+}
+
 try {
   await gtm();
   await dev();
+  await everyChoiceWorks("gtm");
+  await everyChoiceWorks("dev");
 } catch (e) {
   fatal(String((e as Error)?.message ?? e));
 }
