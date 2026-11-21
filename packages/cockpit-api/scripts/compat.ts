@@ -110,11 +110,9 @@ function checkBaseline(ref: string, path: string, current: URL): void {
   if (revision.status !== 0) throw new Error("Could not read baseline revision");
   const tracked = git(["ls-tree", "--name-only", revision.stdout.trim(), "--", path]);
   if (tracked.status !== 0) throw new Error("Could not inspect baseline revision");
-  // Protect the first version even when a branch has no usable previous push revision.
-  const history = git(["log", "--format=%H", "--diff-filter=A", "--reverse", "HEAD", "--", path]);
-  if (history.status !== 0) throw new Error("Could not inspect release history");
-  const first = history.stdout.trim().split("\n")[0];
-  const references = new Set([...(tracked.stdout.trim() ? [revision.stdout.trim()] : []), ...(first ? [first] : [])]);
+  // A baseline is released once the base revision (the PR's base, or the previous push) holds it; before that it may
+  // still be rewritten on its branch. A released baseline never changes within its major version.
+  const references = new Set(tracked.stdout.trim() ? [revision.stdout.trim()] : []);
   const bytes = readFileSync(current, "utf8");
   for (const version of references) {
     const previous = git(["show", `${version}:${path}`]);

@@ -295,10 +295,13 @@ jobs:
         env:
           COCKPIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
         run: |
-          if git rev-parse --verify "${COCKPIT_BASE}^{commit}" >/dev/null 2>&1; then
-            node packages/cockpit-api/scripts/compat.ts --base-ref "$COCKPIT_BASE"
+          # The checkout is shallow: fetch the base revision, or main when a push has none (a new branch).
+          if [ -n "$COCKPIT_BASE" ] && [ "$COCKPIT_BASE" != "0000000000000000000000000000000000000000" ] \
+            && git fetch --no-tags --depth=1 origin "$COCKPIT_BASE"; then
+            node packages/cockpit-api/scripts/compat.ts --base-ref FETCH_HEAD
           else
-            node packages/cockpit-api/scripts/compat.ts --base-ref HEAD
+            git fetch --no-tags --depth=1 origin main
+            node packages/cockpit-api/scripts/compat.ts --base-ref FETCH_HEAD
           fi
 
       - run: node scripts/cockpit-contract-v2-check.ts
