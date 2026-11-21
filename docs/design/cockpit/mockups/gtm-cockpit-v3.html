@@ -999,6 +999,39 @@ input[type=range]:disabled{opacity:.4;cursor:default}
 .to{display:inline-flex;gap:2px;margin-top:8px;padding:2px;border-radius:var(--r-pill);background:var(--fill)}
 .to button{height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:500;color:var(--text-2)}
 .to button[aria-pressed="true"]{background:var(--ink);color:var(--ink-fg);font-weight:600}
+/* The command center (21 November): one field to find, ask, start or run. It lives at the top of the sidebar, where a
+   mouse user looks anyway, and opens out of it over the page; ⌘K and ⌘N open the same panel. */
+.cmdrow{display:flex;align-items:center;gap:8px;height:32px;margin:0 2px;padding:0 10px;border-radius:var(--r-md);background:var(--tile);color:var(--muted);font-size:var(--fs-ui);text-align:left;flex:none}
+.cmdrow:hover{background:var(--tile-on);color:var(--text-2)}
+.cmdrow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmdrow kbd{padding:0;background:none;font-size:var(--fs-2xs);color:var(--muted)}
+.cmdrow[aria-expanded="true"]{background:var(--tile-on);color:var(--text)}
+#tree>button.row[data-palette]{display:none}
+.cmd{font:var(--fs-md)/1.45 var(--sans);color:var(--text);position:fixed;z-index:70;left:10px;top:52px;width:min(580px,calc(100vw - 20px));max-height:min(620px,calc(100vh - 70px));display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-float,0 24px 70px rgba(0,0,0,.6));overflow:hidden;transform-origin:20px 0;animation:pop .18s cubic-bezier(.2,.9,.3,1.1)}
+.cmd-in{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px}
+.cmd button,.cmd input{font:inherit;color:inherit}
+.cmd-in input{flex:1;min-width:0;height:46px;background:none;border:0;outline:0;color:var(--text-hi);font:inherit;font-size:var(--fs-lg)}
+.cmd-in input::placeholder{color:var(--muted)}
+.cmd .scope,.cmd .att{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-xs);font-weight:600;color:var(--text-2);white-space:nowrap}
+.cmd .scope button{display:grid;place-items:center;width:14px;height:14px;margin-right:-3px;color:var(--muted)}
+.cmd-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:4px 6px 8px}
+.cmd-list h3{padding:10px 10px 4px;font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.cr{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;min-height:36px;padding:4px 10px;border-radius:var(--r-md);text-align:left;font-size:var(--fs-md);color:var(--text)}
+.cr[aria-selected="true"]{background:var(--fill-hover)}
+.cr .ci{display:grid;place-items:center;color:var(--muted)}
+.cr .ct2{min-width:0}.cr .ct2 b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr .ct2 small{display:block;font-size:var(--fs-xs);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr .ch{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.cr.start .ct2 b{color:var(--text-hi)}
+.cans{margin:6px 6px 2px;padding:12px 14px;border-radius:var(--r-lg);background:var(--fill)}
+.cans p{font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.cans p b{color:var(--text-hi);font-weight:600}
+.cans small{display:block;margin-top:4px;font-size:var(--fs-xs);color:var(--muted)}
+.cmd-foot{display:flex;flex-wrap:wrap;gap:4px 16px;padding:8px 14px;border-top:1px solid var(--line);font-size:var(--fs-xs);color:var(--muted)}
+.cmd-foot kbd{margin-right:5px}
+.cmd-none{padding:18px 16px;font-size:var(--fs-sm);color:var(--muted)}
+#tree .grp.drop>.row{background:var(--row-on);box-shadow:inset 0 0 0 1.5px var(--ok)}
+#pinmenu [data-cmd-here]{display:flex;align-items:center;gap:8px}
 </style>
 <script>
 try {
@@ -3896,6 +3929,246 @@ try {
     toMgr = b.dataset.to === "mgr";
     fillChat(pane.dataset.view);
     $("#chat-input").focus();
+  });
+
+  // ---- The command center: find, ask, start or run, from one field. ----
+  // A quiet field at the top of the sidebar replaces "New lane"; ⌘K opens the same panel, ⌘N (⌥N in a browser) opens
+  // it ready to start something. It answers from the records, and before anything is started it says where it goes.
+  const sideEl = $("#side");
+  $(".row.ws", sideEl).insertAdjacentHTML("afterend", '<button class="cmdrow" data-cmd aria-haspopup="dialog" aria-expanded="false" aria-controls="cmd"><svg class="i sm"><use href="#search"/></svg><span>Find, ask or start…</span><kbd>⌘K</kbd></button>');
+  document.body.insertAdjacentHTML("beforeend", `<div class="cmd" id="cmd" role="dialog" aria-label="Find, ask or start" hidden>
+    <div class="cmd-in"><svg class="i dim"><use href="#search"/></svg><span class="att" hidden></span><span class="scope" hidden></span><label class="sr" for="cmd-q">Find, ask or start</label><input id="cmd-q" autocomplete="off" spellcheck="false" role="combobox" aria-controls="cmd-list" aria-expanded="true"></div>
+    <div class="cmd-list" id="cmd-list" role="listbox"></div>
+    <div class="cmd-foot"><span><kbd>↵</kbd>Open or start</span><span><kbd>Tab</kbd>Another topic</span><span><kbd>/</kbd>Skills</span><span><kbd>Esc</kbd>Close</span></div></div>`);
+  const cmdEl = $("#cmd"), cq = $("#cmd-q"), clist = $("#cmd-list");
+  const C = { scope: null, start: false, att: null, sel: 0, items: [], target: undefined, recent: [] };
+
+  // Where you have been, for the empty panel.
+  const showCmd = show;
+  show = hash => {
+    showCmd(hash);
+    const h = "#" + (hash || "brief"), deep = /\//.test(pane.dataset.nav || "");
+    const label = $("#crumb-a").textContent + (deep ? " · " + $("#crumb-b").textContent : "");
+    C.recent = [{ h, label, nav: pane.dataset.nav }].concat(C.recent.filter(r => r.h !== h)).slice(0, 6);
+  };
+
+  // What the panel can find.
+  const peopleAll = () => {
+    const m = new Map();
+    PAGES.topics.forEach(t => (t.agents || []).filter(a => a[7] === "p").forEach(a => {
+      const n = a[1].replace(", you", "");
+      if (!m.has(n)) m.set(n, { name: n, role: a[6], topics: [] });
+      m.get(n).topics.push(t);
+    }));
+    return [...m.values()];
+  };
+  const skillsAll = () => $$("#v-skills .skill").filter(s => $("h3", s)).map(s => ({ name: $("h3", s).textContent, what: $("p", s) ? $("p", s).textContent : "" }));
+  const waiting = () => $$("#v-brief .decision:not(.done)").map(d => {
+    const a = $(".acts a", d);
+    return { title: $("h3", d).textContent, topic: $(".meta b", d) ? $(".meta b", d).textContent : "", href: d.id === "d1" ? "#decision" : a ? a.getAttribute("href") : "#decision" };
+  });
+  const STOP = new Set(["with", "that", "this", "from", "have", "will", "them", "they", "what", "when", "next", "week", "more", "into", "about", "please", "their"]);
+  // Who would lead it: the topic's agent whose work is closest to the words, or the topic's usual lead.
+  const leadFor = (t, text) => {
+    const words = (text.toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !STOP.has(w));
+    let best = null, score = 0;
+    (t.agents || []).filter(a => a[7] !== "p").forEach(a => {
+      const hay = (a[1] + " " + a[4] + " " + (a[5] || "")).toLowerCase();
+      const s = words.filter(w => hay.includes(w.slice(0, 4))).length;
+      if (s > score) { score = s; best = a[1]; }
+    });
+    const r = ROUTES.find(x => x.id === "a-" + t.id);
+    return best || (r ? r.lead : "Manager");
+  };
+  const isQuestion = s => /\?\s*$/.test(s) || /^(where|what|how|who|when|why|which|is|are|does|did|do|can|should)\b/i.test(s);
+  // An answer from the records: a deal, a lane, or a topic's goal; nothing if no record knows.
+  function answerTo(s, scopeT) {
+    const lc = s.toLowerCase();
+    for (const t of PAGES.topics) for (const d0 of (t.goal ? t.goal.deals : [])) {
+      const key = d0.name.split(/[ ,]/)[0].toLowerCase();
+      if (key.length > 3 && lc.includes(key)) {
+        const d = pick(d0);
+        return { text: `<b>${esc(d.name)}</b>: ${esc(d.stage)}. ${d.next ? "Next: " + esc(d.next) : esc(d.short)}`, src: `${t.name} · ${d.conf}`, href: d.href };
+      }
+    }
+    const ln = PAGES.lanes.find(l => l.title.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 4).some(w => lc.includes(w)));
+    if (ln) return { text: `<b>${esc(ln.title)}</b>: ${esc(word(ln))}. ${esc(ln.status)}`, src: `${(topicOf(ln) || { name: "Manager" }).name} · lane`, href: "#lane/" + ln.id };
+    const t = PAGES.topics.find(x => lc.includes(x.name.toLowerCase())) || scopeT;
+    if (t && t.goal) return { text: `<b>${esc(t.name)}</b>: ${esc(t.goal.health[1])}. ${esc(t.goal.insight)}`, src: `${t.name} · ${t.goal.asOf}`, href: "#topic/" + t.id };
+    return null;
+  }
+  // Where new work would go, before it goes: the topic you chose with Tab, the one you are in, or the one the words name.
+  const targetFor = s => {
+    if (C.target !== undefined) return C.target;
+    if (C.scope) return C.scope;
+    const r = ROUTES.find(x => x.re.test(s));
+    return r ? PAGES.topics.find(t => "a-" + t.id === r.id) || null : null;
+  };
+
+  const crow = it => `<button class="cr${it.kind === "start" ? " start" : ""}" role="option" data-ci="${it.i}" aria-selected="false"><span class="ci"><svg class="i sm"><use href="#${it.icon}"/></svg></span><span class="ct2"><b>${esc(it.title)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ""}</span><span class="ch">${it.hint || ""}</span></button>`;
+  function buildCmd() {
+    const s = cq.value.trim(), lc = s.toLowerCase(), scopeT = C.scope, out = [];
+    let html = "", sec = null;
+    const add = (name, it) => { if (name !== sec) { html += `<h3>${name}</h3>`; sec = name; } it.i = out.length; out.push(it); html += crow(it); };
+    const has = txt => String(txt || "").toLowerCase().includes(lc);
+    const inScope = l => !scopeT || l.topic === scopeT.id;
+    const startRow = () => {
+      const t = targetFor(s), text = s + (C.att ? ` (with ${C.att})` : "");
+      add("Start", { kind: "start", icon: "plus", topic: t, title: `Start “${s}”`, sub: t ? `New lane under ${t.name} · ${leadFor(t, text)} leads · Tab for another topic` : "With the Manager, until it knows where it belongs · Tab for a topic", hint: "↵" });
+    };
+    if (!s) {
+      if (C.start || C.att) {
+        if (C.att) html += `<div class="cans"><p>Say what should happen with <b>${esc(C.att)}</b>${scopeT ? ` in ${esc(scopeT.name)}` : ""}, and press ↵.</p></div>`;
+        skillsAll().forEach(k => add("Start from a skill", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+      } else {
+        waiting().filter(d => !scopeT || d.topic === scopeT.name).forEach(d => add("Waiting for you", { kind: "go", icon: "decide", title: d.title, sub: d.topic, href: d.href, hint: "Open" }));
+        PAGES.lanes.filter(l => stateOf(l) === "bad" && inScope(l)).forEach(l => add("Waiting for you", { kind: "go", icon: "flame", title: l.title, sub: `${(topicOf(l) || { name: "Manager" }).name} · stuck`, href: "#lane/" + l.id, hint: "Open" }));
+        C.recent.filter(r => r.nav !== pane.dataset.nav).slice(0, 4).forEach(r => add("Recent", { kind: "go", icon: "go", title: r.label, href: r.h }));
+        skillsAll().slice(0, 3).forEach(k => add("Skills", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+      }
+    } else if (/^\/\S*$/.test(s)) {
+      skillsAll().filter(k => k.name.includes(lc)).forEach(k => add("Skills", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+    } else {
+      if (isQuestion(s) && !C.att) {
+        const a = answerTo(s, scopeT);
+        html += a ? `<div class="cans"><p>${a.text}</p><small>From the record · ${esc(a.src)}</small></div>` : `<div class="cans"><p>No record answers that yet.</p></div>`;
+        if (a) add("Answer", { kind: "go", icon: "go", title: "Open it", sub: a.src, href: a.href, hint: "↵" });
+        add("Answer", { kind: "ask", icon: "chat", title: "Ask the Manager instead", sub: "in the chat, with your question" });
+      } else if (/\s/.test(s)) startRow();
+      // A single word is most likely a name: the matches come first, starting it as work comes last.
+      const word1 = !isQuestion(s) && !/\s/.test(s);
+      if (!scopeT) PAGES.topics.filter(t => has(t.name)).forEach(t => add("Topics", { kind: "go", icon: t.icon, title: t.name, sub: t.goal ? t.goal.health[1] : "No goal set", href: "#topic/" + t.id, hint: "Open" }));
+      PAGES.lanes.filter(l => inScope(l) && (has(l.title) || has(l.lead))).slice(0, 5).forEach(l => add("Lanes", { kind: "go", icon: "elbow", title: l.title, sub: `${(topicOf(l) || { name: "Manager" }).name} · ${word(l)} · ${l.lead === "You" ? "you lead" : l.lead + " leads"}`, href: "#lane/" + l.id, hint: "Open" }));
+      peopleAll().filter(p => has(p.name) && (!scopeT || p.topics.includes(scopeT))).forEach(p => add("People", { kind: "go", icon: "user", title: p.name, sub: `${p.role} · ${p.topics.map(t => t.name).join(", ")}`, href: "#topic/" + p.topics[0].id, hint: "Open" }));
+      waiting().filter(d => has(d.title) || has(d.topic)).forEach(d => add("Waiting for you", { kind: "go", icon: "decide", title: d.title, sub: d.topic, href: d.href, hint: "Open" }));
+      skillsAll().filter(k => has(k.name) || has(k.what)).slice(0, 3).forEach(k => add("Skills", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+      if (word1) startRow();
+    }
+    clist.innerHTML = html || '<p class="cmd-none">Nothing yet. Type what you are looking for, ask a question, or say what should be done.</p>';
+    C.items = out;
+    C.sel = Math.max(0, Math.min(C.sel, out.length - 1));
+    markCmd();
+  }
+  function markCmd() {
+    $$(".cr", clist).forEach(b => {
+      const on = +b.dataset.ci === C.sel;
+      b.setAttribute("aria-selected", String(on));
+      if (on) { b.scrollIntoView({ block: "nearest" }); cq.setAttribute("aria-activedescendant", b.id = "cr-" + C.sel); }
+    });
+  }
+  function chips() {
+    const sc = $(".scope", cmdEl), at = $(".att", cmdEl);
+    sc.hidden = !C.scope;
+    sc.innerHTML = C.scope ? `in ${esc(C.scope.name)}<button data-cmd-unscope aria-label="Search everywhere" title="Search everywhere"><svg class="i sm"><use href="#x"/></svg></button>` : "";
+    at.hidden = !C.att;
+    at.innerHTML = C.att ? `<svg class="i sm"><use href="#file"/></svg>${esc(C.att)}` : "";
+    cq.placeholder = C.att ? "What should happen with this?" : C.start ? "What should we start?" : C.scope ? `Find, ask or start in ${C.scope.name}` : "Find, ask or start";
+  }
+  function openCmd(o = {}) {
+    C.scope = o.scope !== undefined ? o.scope : topicNow();
+    C.start = !!o.start; C.att = o.att || null; C.target = undefined; C.sel = 0;
+    cq.value = "";
+    chips();
+    const row = $(".cmdrow"), r = row.getBoundingClientRect(), shown = r.width && r.left >= 0 && r.right <= innerWidth && getComputedStyle(sideEl).visibility !== "hidden";
+    if (shown) { cmdEl.style.left = Math.max(8, r.left - 2) + "px"; cmdEl.style.top = r.top - 2 + "px"; }
+    else { cmdEl.style.left = Math.max(10, (innerWidth - 580) / 2) + "px"; cmdEl.style.top = "60px"; }
+    cmdEl.hidden = false;
+    row.setAttribute("aria-expanded", "true");
+    buildCmd();
+    cq.focus();
+  }
+  function closeCmd() { cmdEl.hidden = true; $(".cmdrow").setAttribute("aria-expanded", "false"); }
+  function actCmd(it) {
+    const s = cq.value.trim();
+    if (!it) { if (s) actCmd({ kind: "start", topic: targetFor(s) }); return; }
+    if (it.kind === "go") { closeCmd(); location.hash = it.href; }
+    else if (it.kind === "start") {
+      const t = it.topic, text = s + (C.att ? ` (with ${C.att})` : "");
+      closeCmd();
+      fileLane(text, t ? { id: "a-" + t.id, lead: leadFor(t, text) } : null);
+    } else if (it.kind === "run") { cq.value = it.title + " "; C.start = true; chips(); buildCmd(); cq.focus(); }
+    else if (it.kind === "ask") {
+      closeCmd();
+      toMgr = true;
+      pane.classList.remove("chat-off"); syncChat(); fillChat(pane.dataset.view);
+      $("#chat-input").value = s; $("#chat-input").focus();
+    }
+  }
+
+  cq.addEventListener("input", () => { C.sel = 0; buildCmd(); });
+  cq.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); C.sel = Math.min(C.items.length - 1, C.sel + 1); markCmd(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); C.sel = Math.max(0, C.sel - 1); markCmd(); }
+    else if (e.key === "Enter") { e.preventDefault(); actCmd(C.items[C.sel]); }
+    else if (e.key === "Escape") { e.preventDefault(); closeCmd(); $(".cmdrow").focus(); }
+    else if (e.key === "Tab" && C.items.some(x => x.kind === "start")) {
+      e.preventDefault();
+      const order = [null, ...PAGES.topics], cur = targetFor(cq.value.trim());
+      C.target = order[(order.indexOf(cur) + (e.shiftKey ? order.length - 1 : 1)) % order.length];
+      buildCmd();
+    } else if (e.key === "Backspace" && !cq.value && (C.scope || C.att)) { if (C.att) C.att = null; else { C.scope = null; C.target = undefined; } chips(); buildCmd(); }
+  });
+  clist.addEventListener("mousemove", e => { const b = e.target.closest(".cr"); if (b && +b.dataset.ci !== C.sel) { C.sel = +b.dataset.ci; markCmd(); } });
+  clist.addEventListener("click", e => { const b = e.target.closest(".cr"); if (b) actCmd(C.items[+b.dataset.ci]); });
+  // ⌘K anywhere; ⌘N to start something (⌥N in a browser, which keeps ⌘N for itself).
+  addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && k === "k") { e.preventDefault(); e.stopPropagation(); cmdEl.hidden ? openCmd() : closeCmd(); }
+    else if (((e.metaKey || e.ctrlKey) && k === "n") || (e.altKey && e.code === "KeyN")) { e.preventDefault(); e.stopPropagation(); openCmd({ start: true }); }
+  }, true);
+  document.addEventListener("click", e => {
+    if (!cmdEl.hidden && !e.target.closest("#cmd,[data-cmd],#pinmenu")) closeCmd();
+    const b = e.target.closest && e.target.closest("button");
+    if (!b) return;
+    if (b.matches("[data-cmd]")) cmdEl.hidden ? openCmd() : closeCmd();
+    else if (b.matches("[data-cmd-unscope]")) { C.scope = null; C.target = undefined; chips(); buildCmd(); cq.focus(); }
+    else if (b.matches("[data-cmd-here]")) { closePinMenu(); openCmd({ scope: menuTopic }); }
+  });
+
+  // Right-click a topic or a lane in the tree: "Start something here…", in that topic.
+  const pinMenuEl = $("#pinmenu");
+  pinMenuEl.insertAdjacentHTML("beforeend", '<button role="menuitem" data-cmd-here><svg class="i"><use href="#plus"/></svg><span>Start something here…</span></button>');
+  let menuTopic = null;
+  const openPinMenuBefore = openPinMenu;
+  openPinMenu = (id, x, y) => {
+    menuTopic = PAGES.topics.find(t => "a-" + t.id === id) || null;
+    $("[data-pin-toggle]", pinMenuEl).hidden = false;
+    $("[data-cmd-here]", pinMenuEl).hidden = !menuTopic;
+    openPinMenuBefore(id, x, y);
+  };
+  sideEl.addEventListener("contextmenu", e => {
+    const kid = e.target.closest && e.target.closest("#tree a.kid");
+    const l = kid && laneById((kid.dataset.nav || "").split("/")[1]), t = l && topicOf(l);
+    if (!t) return;
+    e.preventDefault(); e.stopPropagation();
+    menuTopic = t;
+    $("[data-pin-toggle]", pinMenuEl).hidden = true;
+    $("[data-cmd-here]", pinMenuEl).hidden = false;
+    closePins();
+    pinMenuEl.hidden = false;
+    pinMenuEl.style.left = Math.max(8, Math.min(e.clientX, innerWidth - pinMenuEl.offsetWidth - 8)) + "px";
+    pinMenuEl.style.top = Math.max(8, Math.min(e.clientY, innerHeight - pinMenuEl.offsetHeight - 8)) + "px";
+    $("[data-cmd-here]", pinMenuEl).focus({ preventScroll: true });
+  }, true);
+
+  // Drop a file or a link on a topic in the tree: the panel opens with it attached, in that topic.
+  const treeEl = $("#tree");
+  treeEl.addEventListener("dragover", e => {
+    const g = e.target.closest(".grp");
+    if (!g) return;
+    e.preventDefault();
+    $$("#tree .grp.drop").forEach(x => x !== g && x.classList.remove("drop"));
+    g.classList.add("drop");
+  });
+  treeEl.addEventListener("dragleave", e => { const g = e.target.closest(".grp"); if (g && !g.contains(e.relatedTarget)) g.classList.remove("drop"); });
+  treeEl.addEventListener("drop", e => {
+    const g = e.target.closest(".grp");
+    if (!g) return;
+    e.preventDefault();
+    g.classList.remove("drop");
+    const t = PAGES.topics.find(x => "a-" + x.id === g.id), f = e.dataTransfer.files[0];
+    const u = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "").split("\n")[0];
+    openCmd({ scope: t, att: f ? f.name : u.replace(/^https?:\/\//, "").slice(0, 60) || "a file" });
   });
   addEventListener("hashchange", () => show(location.hash.slice(1)));
   drawTree();
