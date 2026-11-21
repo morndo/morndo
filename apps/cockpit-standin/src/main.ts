@@ -3,10 +3,11 @@ import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { validate, type ValidationResult } from "@morndo/cockpit-api";
 import { WebSocket, WebSocketServer } from "ws";
-import type { Command } from "./model.ts";
+import type { Command } from "@morndo/cockpit-api";
 import { World } from "./world.ts";
 
 const BASE = "/api/cockpit";
+const MAX_BODY = 1024 * 1024;
 
 function arg(name: string, fallback: string): string {
   const index = process.argv.indexOf(name);
@@ -14,12 +15,31 @@ function arg(name: string, fallback: string): string {
   return value ?? fallback;
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage, limit: number): Promise<string | undefined> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", reject);
+    let size = 0;
+    let settled = false;
+    const finish = (value: string | undefined) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
+    req.on("data", (chunk: Buffer) => {
+      size += chunk.length;
+      if (size > limit) {
+        req.destroy();
+        finish(undefined);
+        return;
+      }
+      chunks.push(chunk);
+    });
+    req.on("end", () => finish(Buffer.concat(chunks).toString("utf8")));
+    req.on("error", (err: Error) => {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    });
   });
 }
 
@@ -38,6 +58,7 @@ function checked(def: string, body: unknown): ValidationResult<unknown> {
 
 export async function start(module: "gtm" | "dev", port: number): Promise<{ port: number; close: () => Promise<void> }> {
   const world = new World(module);
+  const bound = { port };
   const server = createServer((req, res) => {
     void handle(world, req, res, (event) => {
       const encoded = JSON.stringify(event);
@@ -46,13 +67,18 @@ export async function start(module: "gtm" | "dev", port: number): Promise<{ port
       }
     });
   });
-  const feed = new WebSocketServer({ server, path: `${BASE}/feed` });
+  const feed = new WebSocketServer({
+    server,
+    path: `${BASE}/feed`,
+    verifyClient: (info: { req: IncomingMessage }) => allowedOrigin(headerValue(info.req.headers.origin), bound.port),
+  });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", () => resolve());
   });
   const address = server.address();
   const actual = typeof address === "object" && address ? address.port : port;
+  bound.port = actual;
   console.log(`cockpit-standin listening on http://127.0.0.1:${actual}`);
   return {
     port: actual,
@@ -104,8 +130,37 @@ function decodePath(pathname: string): string | undefined {
   }
 }
 
+function headerValue(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
+}
+
+function mediaType(req: IncomingMessage): string {
+  return (headerValue(req.headers["content-type"]) ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
+}
+
+function allowedOrigin(origin: string | undefined, port: number): boolean {
+  if (!origin) return true;
+  return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
+}
+
 async function postAction(world: World, req: IncomingMessage, res: ServerResponse, broadcast: (event: unknown) => void): Promise<void> {
-  const raw = await readBody(req);
+  if (mediaType(req) !== "application/json") {
+    req.resume();
+    respond(res, 415, "ApiError", refusal("unsupported_media_type", "Content-Type must be application/json."));
+    return;
+  }
+  const declared = Number(req.headers["content-length"]);
+  if (Number.isFinite(declared) && declared > MAX_BODY) {
+    req.resume();
+    respond(res, 413, "ApiError", refusal("payload_too_large", "The body is larger than 1 MiB."));
+    return;
+  }
+  const raw = await readBody(req, MAX_BODY);
+  if (raw === undefined) {
+    if (!res.headersSent) respond(res, 413, "ApiError", refusal("payload_too_large", "The body is larger than 1 MiB."));
+    return;
+  }
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw) as unknown;

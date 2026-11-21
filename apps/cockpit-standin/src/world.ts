@@ -1,5 +1,6 @@
 import { loadFixtures } from "@morndo/cockpit-api";
-import type { Access, Actor, Ask, Brief, Command, Decision, LabelKind, Lane, Manager, Message, Outcome, Pin, Queue, Settings, Sidebar, Skills, Theme, Thread, Topic, Workspace } from "./model.ts";
+import type { AccessView as Access, Actor, Ask, BriefView as Brief, Command, DecisionRule, DecisionView as Decision, Decider, LabelKind, LaneView as Lane, ManagerView as Manager, Message, Pin, DecisionQueueView as Queue, SettingsView as Settings, SidebarView as Sidebar, SkillsView as Skills, Theme, ThemePatch, ThreadView as Thread, TopicView as Topic, WorkspaceView as Workspace } from "@morndo/cockpit-api";
+import type { Outcome } from "./model.ts";
 import { DEV_ROUTES, GTM_ROUTES, type Route } from "./routes.ts";
 import { answerTo, isQuestion, routePreview, searchResults } from "./search.ts";
 
@@ -235,7 +236,7 @@ export class World {
       case "prefs.set":
         return this.prefs(command);
       case "decisionRight.set":
-        return this.decisionRight(command.rule, command.who, "dailyLimit" in command ? command.dailyLimit : undefined);
+        return this.decisionRight(command.rule, command.who, command.dailyLimit);
       case "skill.run":
         return this.skills.skills.some((skill) => skill.name === command.skill) ? done([]) : missing("skill");
       case "access.set":
@@ -668,24 +669,26 @@ export class World {
   private prefs(command: Extract<Command, { type: "prefs.set" }>): Outcome {
     if (command.theme) applyTheme(this.workspace.workspace.theme, command.theme);
     if (command.theme) applyTheme(this.settings.theme, command.theme);
-    if (command.layout?.sidebarWidth !== undefined) {
-      this.workspace.layout.sidebarWidth = command.layout.sidebarWidth;
-      this.settings.layout.sidebarWidth = command.layout.sidebarWidth;
+    const sidebarWidth = command.layout?.sidebarWidth;
+    if (typeof sidebarWidth === "number") {
+      this.workspace.layout.sidebarWidth = sidebarWidth;
+      this.settings.layout.sidebarWidth = sidebarWidth;
     }
-    if (command.layout?.chatWidth !== undefined) {
-      this.workspace.layout.chatWidth = command.layout.chatWidth;
-      this.settings.layout.chatWidth = command.layout.chatWidth;
+    const chatWidth = command.layout?.chatWidth;
+    if (typeof chatWidth === "number") {
+      this.workspace.layout.chatWidth = chatWidth;
+      this.settings.layout.chatWidth = chatWidth;
     }
     if (command.chatMode) {
       this.workspace.chatMode = command.chatMode;
       this.settings.chatMode = command.chatMode;
     }
-    if (command.briefsPerDay !== undefined) this.settings.briefsPerDay = command.briefsPerDay;
-    if (command.interruptOnlyUrgent !== undefined) this.settings.interruptOnlyUrgent = command.interruptOnlyUrgent;
+    if (typeof command.briefsPerDay === "number") this.settings.briefsPerDay = command.briefsPerDay;
+    if (typeof command.interruptOnlyUrgent === "boolean") this.settings.interruptOnlyUrgent = command.interruptOnlyUrgent;
     return done([{ type: "prefs.changed" }]);
   }
 
-  private decisionRight(rule: string, who: "you" | "agent", dailyLimit: number | undefined): Outcome {
+  private decisionRight(rule: DecisionRule, who: Decider, dailyLimit: number | null | undefined): Outcome {
     const right = this.settings.decisionRights.find((item) => item.rule === rule);
     if (!right) return missing("rule");
     right.who = who;
@@ -748,14 +751,14 @@ function briefOf(decision: Decision): Brief["decisions"][number] {
   };
 }
 
-function applyTheme(theme: Theme, patch: { id?: string; strength?: number; glass?: number }): void {
+function applyTheme(theme: Theme, patch: ThemePatch): void {
   if (patch.id) {
     theme.id = patch.id;
     const name = THEME_NAMES[patch.id];
     if (name) theme.name = name;
   }
-  if (patch.strength !== undefined) theme.strength = patch.strength;
-  if (patch.glass !== undefined) theme.glass = patch.glass;
+  if (typeof patch.strength === "number") theme.strength = patch.strength;
+  if (typeof patch.glass === "number") theme.glass = patch.glass;
 }
 
 function userMessage(id: string, me: Actor, text: string, time: string, kind: LabelKind | null): Message {

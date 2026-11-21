@@ -1,6 +1,6 @@
 /** Routing words copied from the mockups (gtm.blocks.html routes, dev.blocks.html routes). */
 
-import type { Actor } from "./model.ts";
+import type { Actor } from "@morndo/cockpit-api";
 
 export interface Route {
   topicId: string;

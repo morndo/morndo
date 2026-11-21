@@ -1,19 +1,5 @@
-import type { Actor, Deal, Lane, Skill, Topic } from "./model.ts";
+import type { Actor, Answer, Deal, LaneView as Lane, SearchResult, Skill, TopicView as Topic } from "@morndo/cockpit-api";
 import { leadFor, type Route } from "./routes.ts";
-
-export interface SearchResult {
-  kind: "topic" | "lane" | "person" | "decision" | "skill";
-  id: string;
-  title: string;
-  sub: string | null;
-  href: string;
-}
-
-export interface Answer {
-  text: string;
-  source: string;
-  href: string | null;
-}
 
 const QUESTION = /^(where|what|how|who|when|why|which|is|are)\b/i;
 
