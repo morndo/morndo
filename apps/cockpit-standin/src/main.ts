@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { validate, type ValidationResult } from "@morndo/cockpit-api";
+import { commandErrors, validate, type ValidationResult } from "@morndo/cockpit-api";
 import { WebSocket, WebSocketServer } from "ws";
 import type { Command } from "@morndo/cockpit-api";
 import { World } from "./world.ts";
@@ -170,7 +170,9 @@ async function postAction(world: World, req: IncomingMessage, res: ServerRespons
   }
   const command = validate<Command>("Command", parsed);
   if (!command.ok) {
-    respond(res, 400, "ApiError", refusal("invalid_command", command.errors.join("; ") || "The command was refused."));
+    const specific = commandErrors(parsed);
+    const message = (specific.length > 0 ? specific : command.errors).join("; ") || "The command was refused.";
+    respond(res, 400, "ApiError", refusal("invalid_command", message));
     return;
   }
   const outcome = world.act(command.value);

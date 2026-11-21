@@ -20,8 +20,14 @@ interface NumberFormat {
 
 interface Ajv2020 {
   addSchema(schema: unknown, key?: string): void;
+  compile(schema: unknown): ValidateFn;
   getSchema(key: string): ValidateFn | undefined;
   addFormat(name: string, format: NumberFormat): void;
+}
+
+interface CommandVariant {
+  properties?: { type?: { const?: unknown } };
+  [key: string]: unknown;
 }
 
 type AjvCtor = new (options: { allErrors: boolean; strict: boolean }) => Ajv2020;
@@ -80,11 +86,40 @@ export interface ValidationErr {
 
 export type ValidationResult<T> = ValidationOk<T> | ValidationErr;
 
+function formatErrors(errors: SchemaError[] | null | undefined): string[] {
+  return (errors ?? []).map((error) => `${error.instancePath ?? ""} ${error.message ?? "invalid"}`.trim());
+}
+
+const variantChecks = new Map<string, ValidateFn>();
+
+function commandCheck(type: string): ValidateFn | undefined {
+  const cached = variantChecks.get(type);
+  if (cached) return cached;
+  const root = schema as { $defs?: { Command?: { oneOf?: CommandVariant[] } } };
+  const variant = root.$defs?.Command?.oneOf?.find((item) => item.properties?.type?.const === type);
+  if (!variant) return undefined;
+  const check = ajv.compile({ $defs: root.$defs, ...variant });
+  variantChecks.set(type, check);
+  return check;
+}
+
 /** Validate `value` against one `$defs` entry of the cockpit schema. */
 export function validate<T = unknown>(def: string, value: unknown): ValidationResult<T> {
   const check = ajv.getSchema(`cockpit#/$defs/${def}`);
   if (!check) return { ok: false, errors: [`no definition ${def}`] };
   if (check(value)) return { ok: true, value: value as T };
-  const errors = (check.errors ?? []).map((error) => `${error.instancePath ?? ""} ${error.message ?? "invalid"}`.trim());
-  return { ok: false, errors };
+  return { ok: false, errors: formatErrors(check.errors) };
+}
+
+/**
+ * Failures for one command.
+ * An unknown `type` is a single sentence. A known `type` reports only that variant.
+ */
+export function commandErrors(value: unknown): string[] {
+  const type = value && typeof value === "object" && "type" in value ? (value as { type: unknown }).type : undefined;
+  if (typeof type !== "string") return ['unknown command type ""'];
+  const check = commandCheck(type);
+  if (!check) return [`unknown command type "${type}"`];
+  if (check(value)) return [];
+  return formatErrors(check.errors);
 }
