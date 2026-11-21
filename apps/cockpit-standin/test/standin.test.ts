@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { WebSocket as NodeSocket } from "ws";
 import { World } from "../src/world.ts";
 
 const BASE = "/api/cockpit";
@@ -41,6 +42,25 @@ async function boot(module: "gtm" | "dev"): Promise<{ url: string; stop: () => P
 async function get(url: string, path: string): Promise<{ status: number; body: Record<string, unknown> }> {
   const response = await fetch(url + BASE + path);
   return { status: response.status, body: await response.json() as Record<string, unknown> };
+}
+
+function feedOutcome(target: string, origin?: string): Promise<"open" | "refused"> {
+  return new Promise((resolve) => {
+    const socket = origin ? new NodeSocket(target, { headers: { origin } }) : new NodeSocket(target);
+    const timer = setTimeout(() => {
+      socket.terminate();
+      resolve("refused");
+    }, 2000);
+    socket.once("open", () => {
+      clearTimeout(timer);
+      socket.close();
+      resolve("open");
+    });
+    socket.once("error", () => {
+      clearTimeout(timer);
+      resolve("refused");
+    });
+  });
 }
 
 async function act(url: string, command: unknown): Promise<{ status: number; body: Record<string, unknown> }> {
@@ -198,6 +218,45 @@ describe("cockpit stand-in", () => {
       expect(body.error.code).toBe("not_found");
       expect(body.error.message.length).toBeGreaterThan(0);
       expect((await get(url, "/decisions/missing-decision")).status).toBe(404);
+    } finally {
+      await stop();
+    }
+  });
+
+  it("refuses a non-JSON action, an oversized body, and a foreign feed origin", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const plain = await fetch(`${url}${BASE}/actions`, {
+        method: "POST",
+        headers: { "content-type": "text/plain" },
+        body: JSON.stringify({ type: "decision.approve", decisionId: "d1" }),
+      });
+      expect(plain.status).toBe(415);
+      expect((await plain.json() as { error: { code: string } }).error.code).toBe("unsupported_media_type");
+
+      const charset = await fetch(`${url}${BASE}/actions`, {
+        method: "POST",
+        headers: { "content-type": "application/json; charset=utf-8" },
+        body: "{}",
+      });
+      expect(charset.status).toBe(400);
+
+      const huge = await fetch(`${url}${BASE}/actions`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ type: "decision.approve", decisionId: "d1", pad: "x".repeat(1024 * 1024) }),
+      });
+      expect(huge.status).toBe(413);
+      expect((await huge.json() as { error: { code: string } }).error.code).toBe("payload_too_large");
+
+      expect((await act(url, { type: "decision.approve", decisionId: "d1" })).status).toBe(200);
+
+      const port = new URL(url).port;
+      const feed = `${url.replace("http", "ws")}${BASE}/feed`;
+      expect(await feedOutcome(feed)).toBe("open");
+      expect(await feedOutcome(feed, `http://127.0.0.1:${port}`)).toBe("open");
+      expect(await feedOutcome(feed, `http://localhost:${port}`)).toBe("open");
+      expect(await feedOutcome(feed, "http://evil.example")).toBe("refused");
     } finally {
       await stop();
     }
