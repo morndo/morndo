@@ -17,40 +17,40 @@ pub struct Attachment {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase")]
+#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
 pub enum Command {
-    #[serde(rename = "decision.approve", deny_unknown_fields)]
+    #[serde(rename = "decision.approve")]
     DecisionApprove {
         #[serde(rename = "decisionId")]
         decision_id: String,
     },
-    #[serde(rename = "decision.decline", deny_unknown_fields)]
+    #[serde(rename = "decision.decline")]
     DecisionDecline {
         #[serde(rename = "decisionId")]
         decision_id: String,
     },
-    #[serde(rename = "decision.undo", deny_unknown_fields)]
+    #[serde(rename = "decision.undo")]
     DecisionUndo {
         #[serde(rename = "decisionId")]
         decision_id: String,
     },
-    #[serde(rename = "decision.change", deny_unknown_fields)]
+    #[serde(rename = "decision.change")]
     DecisionChange {
         #[serde(rename = "decisionId")]
         decision_id: String,
         text: String,
     },
-    #[serde(rename = "agentAction.undo", deny_unknown_fields)]
+    #[serde(rename = "agentAction.undo")]
     AgentActionUndo {
         #[serde(rename = "actionId")]
         action_id: String,
     },
-    #[serde(rename = "agentAction.redo", deny_unknown_fields)]
+    #[serde(rename = "agentAction.redo")]
     AgentActionRedo {
         #[serde(rename = "actionId")]
         action_id: String,
     },
-    #[serde(rename = "lane.file", deny_unknown_fields)]
+    #[serde(rename = "lane.file")]
     LaneFile {
         text: String,
         #[serde(rename = "topicId", default)]
@@ -60,65 +60,65 @@ pub enum Command {
         #[serde(default)]
         attachment: Option<Attachment>,
     },
-    #[serde(rename = "lane.move", deny_unknown_fields)]
+    #[serde(rename = "lane.move")]
     LaneMove {
         #[serde(rename = "laneId")]
         lane_id: String,
         #[serde(rename = "topicId")]
         topic_id: String,
     },
-    #[serde(rename = "lane.undoFile", deny_unknown_fields)]
+    #[serde(rename = "lane.undoFile")]
     LaneUndoFile {
         #[serde(rename = "laneId")]
         lane_id: String,
     },
-    #[serde(rename = "lane.act", deny_unknown_fields)]
+    #[serde(rename = "lane.act")]
     LaneAct {
         #[serde(rename = "laneId")]
         lane_id: String,
         act: String,
     },
-    #[serde(rename = "person.remind", deny_unknown_fields)]
+    #[serde(rename = "person.remind")]
     PersonRemind {
         #[serde(rename = "laneId")]
         lane_id: String,
         #[serde(rename = "personId")]
         person_id: String,
     },
-    #[serde(rename = "goal.ask", deny_unknown_fields)]
+    #[serde(rename = "goal.ask")]
     GoalAsk {
         #[serde(rename = "topicId")]
         topic_id: String,
     },
-    #[serde(rename = "message.send", deny_unknown_fields)]
+    #[serde(rename = "message.send")]
     MessageSend {
         #[serde(rename = "threadId")]
         thread_id: String,
         text: String,
     },
-    #[serde(rename = "message.relabel", deny_unknown_fields)]
+    #[serde(rename = "message.relabel")]
     MessageRelabel {
         #[serde(rename = "messageId")]
         message_id: String,
         label: LabelKind,
     },
-    #[serde(rename = "since.edit", deny_unknown_fields)]
+    #[serde(rename = "since.edit")]
     SinceEdit {
         #[serde(rename = "threadId")]
         thread_id: String,
         lines: Vec<String>,
     },
-    #[serde(rename = "pin.add", deny_unknown_fields)]
+    #[serde(rename = "pin.add")]
     PinAdd {
         #[serde(rename = "pinId")]
         pin_id: String,
     },
-    #[serde(rename = "pin.remove", deny_unknown_fields)]
+    #[serde(rename = "pin.remove")]
     PinRemove {
         #[serde(rename = "pinId")]
         pin_id: String,
     },
-    #[serde(rename = "prefs.set", deny_unknown_fields)]
+    #[serde(rename = "prefs.set")]
     PrefsSet {
         #[serde(default)]
         theme: Option<ThemePatch>,
@@ -131,19 +131,19 @@ pub enum Command {
         #[serde(rename = "interruptOnlyUrgent", default)]
         interrupt_only_urgent: Option<bool>,
     },
-    #[serde(rename = "decisionRight.set", deny_unknown_fields)]
+    #[serde(rename = "decisionRight.set")]
     DecisionRightSet {
         rule: DecisionRule,
         who: Decider,
         #[serde(rename = "dailyLimit", default)]
         daily_limit: Option<i64>,
     },
-    #[serde(rename = "skill.run", deny_unknown_fields)]
+    #[serde(rename = "skill.run")]
     SkillRun {
         skill: String,
         text: String,
     },
-    #[serde(rename = "access.set", deny_unknown_fields)]
+    #[serde(rename = "access.set")]
     AccessSet {
         #[serde(rename = "topicId")]
         topic_id: String,
@@ -151,7 +151,7 @@ pub enum Command {
         person_id: String,
         access: AccessGrant,
     },
-    #[serde(rename = "access.invite", deny_unknown_fields)]
+    #[serde(rename = "access.invite")]
     AccessInvite {
         #[serde(rename = "topicId")]
         topic_id: String,

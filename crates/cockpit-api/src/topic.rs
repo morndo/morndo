@@ -296,22 +296,22 @@ pub struct Plan {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(tag = "kind", rename_all = "camelCase", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum HistoryEntry {
     #[serde(rename = "seen")]
     Seen,
     #[serde(rename = "event")]
     Event {
-        pub time: String,
-        pub actor: Actor,
-        pub text: String,
-        pub lane_id: Present<String>,
-        pub decision: bool,
-        pub sent_outside: bool,
-        pub undoable: bool,
-        pub count: Present<i64>,
-        pub samples: Vec<String>,
-        pub decision_id: Present<String>,
+        time: String,
+        actor: Actor,
+        text: String,
+        lane_id: Present<String>,
+        decision: bool,
+        sent_outside: bool,
+        undoable: bool,
+        count: Present<i64>,
+        samples: Vec<String>,
+        decision_id: Present<String>,
     },
 }
 
