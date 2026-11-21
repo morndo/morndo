@@ -6,6 +6,7 @@ use crate::present::Present;
 /// Theme id for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ThemeId {
     Ink,
     Ember,
@@ -16,32 +17,38 @@ pub enum ThemeId {
     Iris,
     Rose,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Chat mode for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ChatMode {
     Floating,
     Sidebar,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Decider for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum Decider {
     You,
     Agent,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Decision rule for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum DecisionRule {
     InYourName,
     HardToUndo,
@@ -49,6 +56,7 @@ pub enum DecisionRule {
     InsideGuardrails,
     OverWeeklyCap,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

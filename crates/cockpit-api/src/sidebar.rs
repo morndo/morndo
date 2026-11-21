@@ -9,22 +9,26 @@ use crate::present::Present;
 /// Group kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum GroupKind {
     Topic,
     Project,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Pin kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum PinKind {
     Page,
     Topic,
     Project,
     Skill,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

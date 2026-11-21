@@ -8,6 +8,7 @@ use crate::present::Present;
 /// Search kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum SearchKind {
     Topic,
     Lane,
@@ -15,6 +16,7 @@ pub enum SearchKind {
     Decision,
     Skill,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -71,6 +73,7 @@ pub struct SearchView {
 /// Status of a result, interpreted in the context of its kind.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum SearchState {
     Open,
     Approved,
@@ -85,5 +88,6 @@ pub enum SearchState {
     Next,
     Parked,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }

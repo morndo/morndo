@@ -9,6 +9,7 @@ use crate::present::Present;
 /// Lane state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum LaneState {
     New,
     Ok,
@@ -19,17 +20,20 @@ pub enum LaneState {
     Next,
     Parked,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Step kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum StepKind {
     Ok,
     Now,
     Todo,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -217,10 +221,12 @@ pub struct LaneView {
 /// Visual treatment of an action button.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ActionTone {
     Ink,
     Quiet,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

@@ -64,6 +64,7 @@ function reachable(defs: Contract["$defs"], root: string): Set<string> {
 
 interface Operation {
   parameters?: { name: string; in: string; required?: boolean; schema: Shape }[];
+  requestBody?: { required?: boolean; content: Record<string, { schema?: Shape }> };
   responses: Record<string, { content?: Record<string, { schema?: Shape }> }>;
 }
 interface OpenApi {
@@ -90,6 +91,15 @@ function compareRoutes(released: OpenApi, current: OpenApi): string[] {
       for (const next of params) {
         if (next.required && !before.parameters?.some(item => item.name === next.name && item.in === next.in && item.required)) {
           failures.push(`${label}: new required parameter ${next.name}`);
+        }
+      }
+      if (after.requestBody?.required && !before.requestBody?.required) {
+        failures.push(`${label}: new required request body`);
+      }
+      for (const [media, body] of Object.entries(before.requestBody?.content ?? {})) {
+        const candidate = after.requestBody?.content[media];
+        if (!candidate || JSON.stringify(candidate.schema) !== JSON.stringify(body.schema)) {
+          failures.push(`${label}: removed or changed request body ${media}`);
         }
       }
       for (const [status, response] of Object.entries(before.responses)) {
@@ -122,10 +132,14 @@ function checkBaseline(ref: string, path: string, current: URL): void {
   }
 }
 
-function compare(released: Contract, current: Contract): string[] {
+function compare(released: Contract, current: Contract, routes: OpenApi): string[] {
   const issues: string[] = [];
   const fail = (path: string, detail: string) => issues.push(`${path}: ${detail}`);
-  const inputs = reachable(released.$defs, "Command");
+  const requestRoots = Object.values(routes.paths).flatMap(operations => Object.values(operations)).flatMap(operation => {
+    const body = JSON.stringify(operation.requestBody ?? {});
+    return Array.from(body.matchAll(/"#\/components\/schemas\/([^"]+)"/g), match => match[1] ?? "");
+  });
+  const inputs = new Set(["Command", ...requestRoots].flatMap(name => [...reachable(released.$defs, name)]));
   const outputRoots = Object.keys(released.$defs).filter(name => !inputs.has(name) || name.endsWith("View"));
   const outputs = new Set(outputRoots.flatMap(root => [...reachable(released.$defs, root)]));
   if (released.$id !== current.$id) fail("$id", "changed within a major version");
@@ -215,9 +229,10 @@ try {
   }
   const baseline = read(baselineUrl);
   const readRoutes = (path: string | URL) => JSON.parse(readFileSync(path, "utf8")) as OpenApi;
+  const releasedRoutes = readRoutes(baselineRoutes);
   const issues = [
-    ...compare(baseline, current),
-    ...compareRoutes(readRoutes(baselineRoutes), readRoutes(options.get("--current-openapi") ?? new URL("../schema/cockpit.openapi.json", import.meta.url))),
+    ...compare(baseline, current, releasedRoutes),
+    ...compareRoutes(releasedRoutes, readRoutes(options.get("--current-openapi") ?? new URL("../schema/cockpit.openapi.json", import.meta.url))),
   ];
   if (issues.length) {
     console.error(issues.join("\n"));

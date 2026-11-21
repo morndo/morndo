@@ -64,12 +64,10 @@ function double(value: number): boolean {
 }
 
 const schemaPath = join(dirname(fileURLToPath(import.meta.url)), "../schema/cockpit.schema.json");
-const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as { "x-contract-version": string };
+export const cockpitSchema = JSON.parse(readFileSync(schemaPath, "utf8")) as { "x-contract-version": string };
 
-export const contractVersion = schema["x-contract-version"];
-const ajv = new Ajv2020({ allErrors: false, strict: true });
+export const contractVersion = cockpitSchema["x-contract-version"];
 const addFormats = require("ajv-formats") as FormatsPlugin;
-addFormats(ajv as Parameters<FormatsPlugin>[0], ["date-time", "uri"]);
 const formats: readonly (readonly [string, (value: number) => boolean])[] = [
   ["int32", int32],
   ["uint32", uint32],
@@ -79,9 +77,16 @@ const formats: readonly (readonly [string, (value: number) => boolean])[] = [
   ["uint64", uint64],
   ["double", double],
 ];
-for (const [name, check] of formats) ajv.addFormat(name, { type: "number", validate: check });
-ajv.addKeyword("x-contract-version");
-ajv.addSchema(schema, "cockpit");
+export function createValidator(schema: unknown): Ajv2020 {
+  const validator = new Ajv2020({ allErrors: false, strict: true });
+  addFormats(validator as Parameters<FormatsPlugin>[0], ["date-time", "uri"]);
+  for (const [name, check] of formats) validator.addFormat(name, { type: "number", validate: check });
+  validator.addKeyword("x-contract-version");
+  validator.addSchema(schema, "cockpit");
+  return validator;
+}
+
+const ajv = createValidator(cockpitSchema);
 
 export interface ValidationOk<T> {
   ok: true;
@@ -104,7 +109,7 @@ const variantChecks = new Map<string, ValidateFn>();
 function commandCheck(type: string): ValidateFn | undefined {
   const cached = variantChecks.get(type);
   if (cached) return cached;
-  const root = schema as { $defs?: { Command?: { oneOf?: CommandVariant[] } } };
+  const root = cockpitSchema as { $defs?: { Command?: { oneOf?: CommandVariant[] } } };
   const variant = root.$defs?.Command?.oneOf?.find((item) => item.properties?.type?.const === type);
   if (!variant) return undefined;
   const check = ajv.compile({ $defs: root.$defs, ...variant });
@@ -114,7 +119,11 @@ function commandCheck(type: string): ValidateFn | undefined {
 
 /** Validate `value` against one `$defs` entry of the cockpit schema. */
 export function validate<T = unknown>(def: string, value: unknown): ValidationResult<T> {
-  const check = ajv.getSchema(`cockpit#/$defs/${def}`);
+  return validateWith<T>(ajv, def, value);
+}
+
+export function validateWith<T = unknown>(validator: Ajv2020, def: string, value: unknown): ValidationResult<T> {
+  const check = validator.getSchema(`cockpit#/$defs/${def}`);
   if (!check) return { ok: false, errors: [`no definition ${def}`] };
   if (check(value)) return { ok: true, value: value as T };
   return { ok: false, errors: formatErrors(check.errors) };

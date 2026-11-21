@@ -10,6 +10,7 @@ use crate::thread::Message;
 /// A change notification delivered to cockpit readers.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "type", rename_all_fields = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:tag:type"))]
 pub enum Event {
     #[serde(rename = "decision.changed")]
     DecisionChanged {
@@ -96,11 +97,13 @@ pub enum Event {
     #[serde(rename = "feed.reset")]
     FeedReset {},
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// A sequenced event on the resumable workspace feed.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[schemars(extend("$comment" = "cockpit-reader:tag:type"))]
 pub struct FeedEvent {
     /// Monotonically increasing sequence number on this hub.
     pub seq: u64,

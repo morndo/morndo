@@ -8,10 +8,12 @@ use crate::present::Present;
 /// Actor kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ActorKind {
     Person,
     Agent,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

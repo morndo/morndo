@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 /// Stable application code for a failed request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ErrorCode {
     BadRequest,
     NotFound,
@@ -17,6 +18,7 @@ pub enum ErrorCode {
     Internal,
     IdempotencyKeyReused,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

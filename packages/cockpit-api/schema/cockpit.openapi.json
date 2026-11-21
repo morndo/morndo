@@ -45,13 +45,13 @@
         "type": "object"
       },
       "AccessKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Access kind for the cockpit.",
         "enum": [
           "all",
           "stages",
           "view",
-          "none",
-          "unknown"
+          "none"
         ],
         "type": "string"
       },
@@ -143,11 +143,11 @@
         "type": "string"
       },
       "ActionTone": {
+        "$comment": "cockpit-reader:enum",
         "description": "Visual treatment of an action button.",
         "enum": [
           "ink",
-          "quiet",
-          "unknown"
+          "quiet"
         ],
         "type": "string"
       },
@@ -276,11 +276,11 @@
         "type": "object"
       },
       "ActorKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Actor kind for the cockpit.",
         "enum": [
           "person",
-          "agent",
-          "unknown"
+          "agent"
         ],
         "type": "string"
       },
@@ -1008,11 +1008,11 @@
         "type": "object"
       },
       "ChatMode": {
+        "$comment": "cockpit-reader:enum",
         "description": "Chat mode for the cockpit.",
         "enum": [
           "floating",
-          "sidebar",
-          "unknown"
+          "sidebar"
         ],
         "type": "string"
       },
@@ -2049,13 +2049,13 @@
         "type": "string"
       },
       "ConnectionState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Connection state for the cockpit.",
         "enum": [
           "connected",
           "signedIn",
           "addKey",
-          "signIn",
-          "unknown"
+          "signIn"
         ],
         "type": "string"
       },
@@ -2229,11 +2229,11 @@
         "type": "object"
       },
       "Decider": {
+        "$comment": "cockpit-reader:enum",
         "description": "Decider for the cockpit.",
         "enum": [
           "you",
-          "agent",
-          "unknown"
+          "agent"
         ],
         "type": "string"
       },
@@ -2354,25 +2354,25 @@
         "type": "object"
       },
       "DecisionRule": {
+        "$comment": "cockpit-reader:enum",
         "description": "Decision rule for the cockpit.",
         "enum": [
           "inYourName",
           "hardToUndo",
           "onlyYouKnow",
           "insideGuardrails",
-          "overWeeklyCap",
-          "unknown"
+          "overWeeklyCap"
         ],
         "type": "string"
       },
       "DecisionState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Decision state for the cockpit.",
         "enum": [
           "open",
           "approved",
           "declined",
-          "expired",
-          "unknown"
+          "expired"
         ],
         "type": "string"
       },
@@ -2753,6 +2753,7 @@
         "type": "object"
       },
       "ErrorCode": {
+        "$comment": "cockpit-reader:enum",
         "description": "Stable application code for a failed request.",
         "enum": [
           "badRequest",
@@ -2765,12 +2766,12 @@
           "payloadTooLarge",
           "methodNotAllowed",
           "internal",
-          "idempotencyKeyReused",
-          "unknown"
+          "idempotencyKeyReused"
         ],
         "type": "string"
       },
       "Event": {
+        "$comment": "cockpit-reader:tag:type",
         "description": "A change notification delivered to cockpit readers.",
         "oneOf": [
           {
@@ -3192,18 +3193,6 @@
               "type"
             ],
             "type": "object"
-          },
-          {
-            "properties": {
-              "type": {
-                "const": "Unknown",
-                "type": "string"
-              }
-            },
-            "required": [
-              "type"
-            ],
-            "type": "object"
           }
         ]
       },
@@ -3266,6 +3255,7 @@
         "type": "object"
       },
       "FeedEvent": {
+        "$comment": "cockpit-reader:tag:type",
         "description": "A sequenced event on the resumable workspace feed.",
         "oneOf": [
           {
@@ -3687,18 +3677,6 @@
               "type"
             ],
             "type": "object"
-          },
-          {
-            "properties": {
-              "type": {
-                "const": "Unknown",
-                "type": "string"
-              }
-            },
-            "required": [
-              "type"
-            ],
-            "type": "object"
           }
         ],
         "properties": {
@@ -3953,14 +3931,14 @@
         "type": "object"
       },
       "GateState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Gate state for the cockpit.",
         "enum": [
           "pass",
           "running",
           "todo",
           "fail",
-          "skipped",
-          "unknown"
+          "skipped"
         ],
         "type": "string"
       },
@@ -4391,21 +4369,21 @@
         "type": "object"
       },
       "GoalField": {
+        "$comment": "cockpit-reader:enum",
         "description": "Goal field being edited.",
         "enum": [
           "target",
           "deadline",
-          "unit",
-          "unknown"
+          "unit"
         ],
         "type": "string"
       },
       "GroupKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Group kind for the cockpit.",
         "enum": [
           "topic",
-          "project",
-          "unknown"
+          "project"
         ],
         "type": "string"
       },
@@ -4451,12 +4429,12 @@
         "type": "object"
       },
       "GuardrailState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Evaluation of a guardrail at the current reading.",
         "enum": [
           "held",
           "near",
-          "breached",
-          "unknown"
+          "breached"
         ],
         "type": "string"
       },
@@ -4595,13 +4573,13 @@
         "type": "object"
       },
       "HealthState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Health state for the cockpit.",
         "enum": [
           "ok",
           "warn",
           "bad",
-          "idle",
-          "unknown"
+          "idle"
         ],
         "type": "string"
       },
@@ -4627,6 +4605,7 @@
         "type": "object"
       },
       "HistoryEntry": {
+        "$comment": "cockpit-reader:tag:kind",
         "description": "History entry for the cockpit.\nHistory entry for the cockpit.",
         "oneOf": [
           {
@@ -4735,18 +4714,6 @@
               "count",
               "samples",
               "decisionId"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "kind": {
-                "const": "unknown",
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind"
             ],
             "type": "object"
           }
@@ -4880,11 +4847,11 @@
         "type": "string"
       },
       "InvitationState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Progress of an invitation.",
         "enum": [
           "pending",
-          "accepted",
-          "unknown"
+          "accepted"
         ],
         "type": "string"
       },
@@ -4929,6 +4896,7 @@
         "type": "object"
       },
       "KnownAccessKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Access kind for the cockpit.",
         "enum": [
           "all",
@@ -4939,6 +4907,7 @@
         "type": "string"
       },
       "KnownChatMode": {
+        "$comment": "cockpit-reader:enum",
         "description": "Chat mode for the cockpit.",
         "enum": [
           "floating",
@@ -4947,6 +4916,7 @@
         "type": "string"
       },
       "KnownDecider": {
+        "$comment": "cockpit-reader:enum",
         "description": "Decider for the cockpit.",
         "enum": [
           "you",
@@ -4955,6 +4925,7 @@
         "type": "string"
       },
       "KnownDecisionRule": {
+        "$comment": "cockpit-reader:enum",
         "description": "Decision rule for the cockpit.",
         "enum": [
           "inYourName",
@@ -4966,6 +4937,7 @@
         "type": "string"
       },
       "KnownLabelKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Label kind for the cockpit.",
         "enum": [
           "question",
@@ -4977,6 +4949,7 @@
         "type": "string"
       },
       "KnownModuleId": {
+        "$comment": "cockpit-reader:enum",
         "description": "Available cockpit modules.",
         "enum": [
           "gtm",
@@ -4985,6 +4958,7 @@
         "type": "string"
       },
       "KnownTargetKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Destination category for navigation within the cockpit.",
         "enum": [
           "topic",
@@ -5004,6 +4978,7 @@
         "type": "string"
       },
       "KnownThemeId": {
+        "$comment": "cockpit-reader:enum",
         "description": "Theme id for the cockpit.",
         "enum": [
           "ink",
@@ -5018,14 +4993,14 @@
         "type": "string"
       },
       "LabelKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Label kind for the cockpit.",
         "enum": [
           "question",
           "request",
           "done",
           "decision",
-          "goalChange",
-          "unknown"
+          "goalChange"
         ],
         "type": "string"
       },
@@ -5100,6 +5075,7 @@
         "type": "string"
       },
       "LaneState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Lane state for the cockpit.",
         "enum": [
           "new",
@@ -5109,8 +5085,7 @@
           "done",
           "idle",
           "next",
-          "parked",
-          "unknown"
+          "parked"
         ],
         "type": "string"
       },
@@ -5817,6 +5792,7 @@
         "type": "object"
       },
       "MessageAudience": {
+        "$comment": "cockpit-reader:tag:kind",
         "description": "Audience allowed to receive a message in a topic.",
         "oneOf": [
           {
@@ -5847,18 +5823,6 @@
             "required": [
               "kind",
               "stage"
-            ],
-            "type": "object"
-          },
-          {
-            "properties": {
-              "kind": {
-                "const": "unknown",
-                "type": "string"
-              }
-            },
-            "required": [
-              "kind"
             ],
             "type": "object"
           }
@@ -6027,12 +5991,12 @@
         "type": "string"
       },
       "ModelState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Availability of an engine in the model picker.",
         "oneOf": [
           {
             "enum": [
-              "signedIn",
-              "unknown"
+              "signedIn"
             ],
             "type": "string"
           },
@@ -6103,11 +6067,11 @@
         "type": "object"
       },
       "ModuleId": {
+        "$comment": "cockpit-reader:enum",
         "description": "Available cockpit modules.",
         "enum": [
           "gtm",
-          "dev",
-          "unknown"
+          "dev"
         ],
         "type": "string"
       },
@@ -6434,25 +6398,25 @@
         "type": "string"
       },
       "PinKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Pin kind for the cockpit.",
         "enum": [
           "page",
           "topic",
           "project",
-          "skill",
-          "unknown"
+          "skill"
         ],
         "type": "string"
       },
       "PinState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Pin state for the cockpit.",
         "enum": [
           "waiting",
           "approved",
           "declined",
           "expired",
-          "stuck",
-          "unknown"
+          "stuck"
         ],
         "type": "string"
       },
@@ -6746,6 +6710,7 @@
         "type": "object"
       },
       "PullState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Position of a pull request in the review and release flow.",
         "enum": [
           "ready",
@@ -6754,8 +6719,7 @@
           "autoMerge",
           "releasing",
           "released",
-          "held",
-          "unknown"
+          "held"
         ],
         "type": "string"
       },
@@ -7005,6 +6969,7 @@
         "type": "object"
       },
       "ReleaseStage": {
+        "$comment": "cockpit-reader:enum",
         "description": "Rollout lifecycle for a release decision.",
         "enum": [
           "scheduled",
@@ -7012,8 +6977,7 @@
           "watching",
           "done",
           "held",
-          "rolledBack",
-          "unknown"
+          "rolledBack"
         ],
         "type": "string"
       },
@@ -7242,23 +7206,23 @@
         "type": "object"
       },
       "ScenarioKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Which side of the forecast the chart describes.",
         "enum": [
           "opportunity",
-          "risk",
-          "unknown"
+          "risk"
         ],
         "type": "string"
       },
       "SearchKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Search kind for the cockpit.",
         "enum": [
           "topic",
           "lane",
           "person",
           "decision",
-          "skill",
-          "unknown"
+          "skill"
         ],
         "type": "string"
       },
@@ -7335,6 +7299,7 @@
         "type": "object"
       },
       "SearchState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Status of a result, interpreted in the context of its kind.",
         "enum": [
           "open",
@@ -7348,8 +7313,7 @@
           "done",
           "idle",
           "next",
-          "parked",
-          "unknown"
+          "parked"
         ],
         "type": "string"
       },
@@ -8024,12 +7988,12 @@
         "type": "object"
       },
       "StageAccess": {
+        "$comment": "cockpit-reader:enum",
         "description": "Access a reader has to one stage.",
         "enum": [
           "work",
           "view",
-          "locked",
-          "unknown"
+          "locked"
         ],
         "type": "string"
       },
@@ -8171,13 +8135,13 @@
         "type": "object"
       },
       "StageState": {
+        "$comment": "cockpit-reader:enum",
         "description": "Progress of a stage in a topic plan.",
         "enum": [
           "done",
           "next",
           "now",
-          "wait",
-          "unknown"
+          "wait"
         ],
         "type": "string"
       },
@@ -8303,12 +8267,12 @@
         "type": "object"
       },
       "StepKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Step kind for the cockpit.",
         "enum": [
           "ok",
           "now",
-          "todo",
-          "unknown"
+          "todo"
         ],
         "type": "string"
       },
@@ -8502,6 +8466,7 @@
         "type": "object"
       },
       "TargetKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Destination category for navigation within the cockpit.",
         "enum": [
           "topic",
@@ -8516,8 +8481,7 @@
           "brief",
           "drafts",
           "skills",
-          "settings",
-          "unknown"
+          "settings"
         ],
         "type": "string"
       },
@@ -8625,6 +8589,7 @@
         "type": "object"
       },
       "ThemeId": {
+        "$comment": "cockpit-reader:enum",
         "description": "Theme id for the cockpit.",
         "enum": [
           "ink",
@@ -8634,8 +8599,7 @@
           "tide",
           "sky",
           "iris",
-          "rose",
-          "unknown"
+          "rose"
         ],
         "type": "string"
       },
@@ -8898,11 +8862,11 @@
         "type": "string"
       },
       "TopicKind": {
+        "$comment": "cockpit-reader:enum",
         "description": "Topic kind for the cockpit.",
         "enum": [
           "topic",
-          "project",
-          "unknown"
+          "project"
         ],
         "type": "string"
       },
@@ -9504,13 +9468,13 @@
         "type": "object"
       },
       "UsageState": {
+        "$comment": "cockpit-reader:enum",
         "description": "How close a usage account is to its current limit.",
         "enum": [
           "ok",
           "near",
           "limit",
-          "standingBy",
-          "unknown"
+          "standingBy"
         ],
         "type": "string"
       },
@@ -9587,13 +9551,13 @@
         "type": "object"
       },
       "ViewerRole": {
+        "$comment": "cockpit-reader:enum",
         "description": "Access level applied to a topic view.",
         "enum": [
           "owner",
           "all",
           "stages",
-          "view",
-          "unknown"
+          "view"
         ],
         "type": "string"
       },

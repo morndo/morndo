@@ -9,12 +9,14 @@ use crate::{InvitationId, Present, Timestamp};
 /// Access kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum AccessKind {
     All,
     Stages,
     View,
     None,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -99,10 +101,12 @@ pub struct Invitation {
 /// Progress of an invitation.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum InvitationState {
     Pending,
     Accepted,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -132,12 +136,14 @@ pub struct TopicViewer {
 /// Access level applied to a topic view.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ViewerRole {
     Owner,
     All,
     Stages,
     View,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -156,11 +162,13 @@ pub struct ViewerStage {
 /// Access a reader has to one stage.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum StageAccess {
     Work,
     View,
     Locked,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

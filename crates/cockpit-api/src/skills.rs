@@ -6,12 +6,14 @@ use crate::present::Present;
 /// Connection state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ConnectionState {
     Connected,
     SignedIn,
     AddKey,
     SignIn,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

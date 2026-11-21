@@ -5,14 +5,14 @@
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AccessKind".
  */
-export type AccessKind = "all" | "stages" | "view" | "none" | "unknown";
+export type AccessKind = "all" | "stages" | "view" | "none";
 /**
  * Lane state for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LaneState".
  */
-export type LaneState = "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+export type LaneState = "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
 /**
  * Identifier of an action recorded in history.
  *
@@ -26,14 +26,14 @@ export type ActionId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ActionTone".
  */
-export type ActionTone = "ink" | "quiet" | "unknown";
+export type ActionTone = "ink" | "quiet";
 /**
  * Actor kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ActorKind".
  */
-export type ActorKind = "person" | "agent" | "unknown";
+export type ActorKind = "person" | "agent";
 /**
  * A point in time with an RFC 3339 UTC offset.
  *
@@ -54,8 +54,7 @@ export type LaneId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionRule".
  */
-export type DecisionRule =
-  "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap" | "unknown";
+export type DecisionRule = "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap";
 /**
  * Identifier of a topic or project.
  *
@@ -69,7 +68,7 @@ export type TopicId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ChatMode".
  */
-export type ChatMode = "floating" | "sidebar" | "unknown";
+export type ChatMode = "floating" | "sidebar";
 /**
  * A user request accepted by the cockpit.
  *
@@ -501,7 +500,7 @@ export type FeedEvent1 =
       /**
        * Current state of the record.
        */
-      state: "open" | "approved" | "declined" | "expired" | "unknown";
+      state: "open" | "approved" | "declined" | "expired";
       type: "decision.changed";
     }
   | {
@@ -617,9 +616,6 @@ export type FeedEvent1 =
     }
   | {
       type: "feed.reset";
-    }
-  | {
-      type: "Unknown";
     };
 /**
  * Identifier of a decision.
@@ -655,7 +651,7 @@ export type PullId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModuleId".
  */
-export type ModuleId = "gtm" | "dev" | "unknown";
+export type ModuleId = "gtm" | "dev";
 /**
  * Identifier of a service connection.
  *
@@ -669,21 +665,21 @@ export type ConnectionId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ConnectionState".
  */
-export type ConnectionState = "connected" | "signedIn" | "addKey" | "signIn" | "unknown";
+export type ConnectionState = "connected" | "signedIn" | "addKey" | "signIn";
 /**
  * Decider for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Decider".
  */
-export type Decider = "you" | "agent" | "unknown";
+export type Decider = "you" | "agent";
 /**
  * Decision state for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionState".
  */
-export type DecisionState = "open" | "approved" | "declined" | "expired" | "unknown";
+export type DecisionState = "open" | "approved" | "declined" | "expired";
 /**
  * Identifier of a draft.
  *
@@ -708,8 +704,7 @@ export type ErrorCode =
   | "payloadTooLarge"
   | "methodNotAllowed"
   | "internal"
-  | "idempotencyKeyReused"
-  | "unknown";
+  | "idempotencyKeyReused";
 /**
  * A change notification delivered to cockpit readers.
  *
@@ -725,7 +720,7 @@ export type Event =
       /**
        * Current state of the record.
        */
-      state: "open" | "approved" | "declined" | "expired" | "unknown";
+      state: "open" | "approved" | "declined" | "expired";
       type: "decision.changed";
     }
   | {
@@ -841,9 +836,6 @@ export type Event =
     }
   | {
       type: "feed.reset";
-    }
-  | {
-      type: "Unknown";
     };
 /**
  * A change event or an unsequenced control message on the feed.
@@ -877,7 +869,7 @@ export type FeedEvent2 = {
       /**
        * Current state of the record.
        */
-      state: "open" | "approved" | "declined" | "expired" | "unknown";
+      state: "open" | "approved" | "declined" | "expired";
       type: "decision.changed";
     }
   | {
@@ -994,9 +986,6 @@ export type FeedEvent2 = {
   | {
       type: "feed.reset";
     }
-  | {
-      type: "Unknown";
-    }
 );
 /**
  * A feed control message without a sequence number; the reader should fetch fresh views.
@@ -1013,35 +1002,35 @@ export type FeedResetSignal = {
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "HealthState".
  */
-export type HealthState = "ok" | "warn" | "bad" | "idle" | "unknown";
+export type HealthState = "ok" | "warn" | "bad" | "idle";
 /**
  * Gate state for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GateState".
  */
-export type GateState = "pass" | "running" | "todo" | "fail" | "skipped" | "unknown";
+export type GateState = "pass" | "running" | "todo" | "fail" | "skipped";
 /**
  * Goal field being edited.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GoalField".
  */
-export type GoalField = "target" | "deadline" | "unit" | "unknown";
+export type GoalField = "target" | "deadline" | "unit";
 /**
  * Group kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GroupKind".
  */
-export type GroupKind = "topic" | "project" | "unknown";
+export type GroupKind = "topic" | "project";
 /**
  * Evaluation of a guardrail at the current reading.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GuardrailState".
  */
-export type GuardrailState = "held" | "near" | "breached" | "unknown";
+export type GuardrailState = "held" | "near" | "breached";
 /**
  * History entry for the cockpit.
  * History entry for the cockpit.
@@ -1100,9 +1089,6 @@ export type HistoryEntry =
        * Undone for this record.
        */
       undone: boolean;
-    }
-  | {
-      kind: "unknown";
     };
 /**
  * Identifier of a sharing invitation.
@@ -1117,7 +1103,7 @@ export type InvitationId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "InvitationState".
  */
-export type InvitationState = "pending" | "accepted" | "unknown";
+export type InvitationState = "pending" | "accepted";
 /**
  * Access kind for the cockpit.
  *
@@ -1179,7 +1165,7 @@ export type KnownTargetKind =
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LabelKind".
  */
-export type LabelKind = "question" | "request" | "done" | "decision" | "goalChange" | "unknown";
+export type LabelKind = "question" | "request" | "done" | "decision" | "goalChange";
 /**
  * Audience allowed to receive a message in a topic.
  *
@@ -1196,9 +1182,6 @@ export type MessageAudience =
        * Name of the stage in the topic.
        */
       stage: string;
-    }
-  | {
-      kind: "unknown";
     };
 /**
  * Identifier of a message.
@@ -1213,56 +1196,56 @@ export type MessageId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModelState".
  */
-export type ModelState = ("signedIn" | "unknown") | "default" | "connected" | "addKey" | "signIn";
+export type ModelState = "signedIn" | "default" | "connected" | "addKey" | "signIn";
 /**
  * Pin kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PinKind".
  */
-export type PinKind = "page" | "topic" | "project" | "skill" | "unknown";
+export type PinKind = "page" | "topic" | "project" | "skill";
 /**
  * Pin state for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PinState".
  */
-export type PinState = "waiting" | "approved" | "declined" | "expired" | "stuck" | "unknown";
+export type PinState = "waiting" | "approved" | "declined" | "expired" | "stuck";
 /**
  * Progress of a stage in a topic plan.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageState".
  */
-export type StageState = "done" | "next" | "now" | "wait" | "unknown";
+export type StageState = "done" | "next" | "now" | "wait";
 /**
  * Position of a pull request in the review and release flow.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PullState".
  */
-export type PullState = "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held" | "unknown";
+export type PullState = "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held";
 /**
  * Rollout lifecycle for a release decision.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ReleaseStage".
  */
-export type ReleaseStage = "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack" | "unknown";
+export type ReleaseStage = "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack";
 /**
  * Which side of the forecast the chart describes.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ScenarioKind".
  */
-export type ScenarioKind = "opportunity" | "risk" | "unknown";
+export type ScenarioKind = "opportunity" | "risk";
 /**
  * Search kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SearchKind".
  */
-export type SearchKind = "topic" | "lane" | "person" | "decision" | "skill" | "unknown";
+export type SearchKind = "topic" | "lane" | "person" | "decision" | "skill";
 /**
  * Status of a result, interpreted in the context of its kind.
  *
@@ -1270,19 +1253,7 @@ export type SearchKind = "topic" | "lane" | "person" | "decision" | "skill" | "u
  * via the `definition` "SearchState".
  */
 export type SearchState =
-  | "open"
-  | "approved"
-  | "declined"
-  | "expired"
-  | "new"
-  | "ok"
-  | "warn"
-  | "bad"
-  | "done"
-  | "idle"
-  | "next"
-  | "parked"
-  | "unknown";
+  "open" | "approved" | "declined" | "expired" | "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
 /**
  * Identifier of a runnable skill.
  *
@@ -1296,14 +1267,14 @@ export type SkillId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageAccess".
  */
-export type StageAccess = "work" | "view" | "locked" | "unknown";
+export type StageAccess = "work" | "view" | "locked";
 /**
  * Step kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StepKind".
  */
-export type StepKind = "ok" | "now" | "todo" | "unknown";
+export type StepKind = "ok" | "now" | "todo";
 /**
  * Destination category for navigation within the cockpit.
  *
@@ -1323,36 +1294,35 @@ export type TargetKind =
   | "brief"
   | "drafts"
   | "skills"
-  | "settings"
-  | "unknown";
+  | "settings";
 /**
  * Theme id for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ThemeId".
  */
-export type ThemeId = "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose" | "unknown";
+export type ThemeId = "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose";
 /**
  * Topic kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicKind".
  */
-export type TopicKind = "topic" | "project" | "unknown";
+export type TopicKind = "topic" | "project";
 /**
  * How close a usage account is to its current limit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "UsageState".
  */
-export type UsageState = "ok" | "near" | "limit" | "standingBy" | "unknown";
+export type UsageState = "ok" | "near" | "limit" | "standingBy";
 /**
  * Access level applied to a topic view.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ViewerRole".
  */
-export type ViewerRole = "owner" | "all" | "stages" | "view" | "unknown";
+export type ViewerRole = "owner" | "all" | "stages" | "view";
 
 /**
  * Access grant for the cockpit.
@@ -1364,7 +1334,7 @@ export interface AccessGrant {
   /**
    * Kind for this record.
    */
-  kind: "all" | "stages" | "view" | "none" | "unknown";
+  kind: "all" | "stages" | "view" | "none";
   /**
    * Stage names the person can work. Empty unless `kind` is `stages`.
    */
@@ -1415,7 +1385,7 @@ export interface AccessGrant1 {
   /**
    * Kind for this record.
    */
-  kind: "all" | "stages" | "view" | "none" | "unknown";
+  kind: "all" | "stages" | "view" | "none";
   /**
    * Stage names the person can work. Empty unless `kind` is `stages`.
    */
@@ -1431,7 +1401,7 @@ export interface OtherTopicAccess {
   /**
    * Access for this record.
    */
-  access: "all" | "stages" | "view" | "none" | "unknown";
+  access: "all" | "stages" | "view" | "none";
   /**
    * Identifier of the associated topic.
    */
@@ -1456,7 +1426,7 @@ export interface Actor {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Name shown to the reader.
    */
@@ -1540,7 +1510,7 @@ export interface Invitation {
   /**
    * Current state of the record.
    */
-  state: "pending" | "accepted" | "unknown";
+  state: "pending" | "accepted";
 }
 /**
  * A link showing status without names, lanes or chat.
@@ -1581,7 +1551,7 @@ export interface Actor1 {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Name shown to the reader.
    */
@@ -1748,8 +1718,7 @@ export interface Target {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * An RFC 9457 problem details response.
@@ -1772,8 +1741,7 @@ export interface ApiError {
     | "payloadTooLarge"
     | "methodNotAllowed"
     | "internal"
-    | "idempotencyKeyReused"
-    | "unknown";
+    | "idempotencyKeyReused";
   /**
    * Explanation specific to this request.
    */
@@ -1908,8 +1876,7 @@ export interface Target1 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Asked meta for the cockpit.
@@ -1977,7 +1944,7 @@ export interface Blocker {
   /**
    * Current state of the record.
    */
-  state: "ok" | "warn" | "bad" | "idle" | "unknown";
+  state: "ok" | "warn" | "bad" | "idle";
   target: Target2;
   /**
    * What for this record.
@@ -2016,8 +1983,7 @@ export interface Target2 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Brief decision for the cockpit.
@@ -2057,7 +2023,7 @@ export interface BriefDecision {
   /**
    * Current state of the record.
    */
-  state: "open" | "approved" | "declined" | "expired" | "unknown";
+  state: "open" | "approved" | "declined" | "expired";
   /**
    * Title displayed above the record.
    */
@@ -2098,7 +2064,7 @@ export interface BriefTopic {
   /**
    * Current state of the record.
    */
-  state: "ok" | "warn" | "bad" | "idle" | "unknown";
+  state: "ok" | "warn" | "bad" | "idle";
   /**
    * Verdict for this record.
    */
@@ -2301,8 +2267,7 @@ export interface Target3 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Drafts for this record.
@@ -2370,8 +2335,7 @@ export interface Target4 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Overnight action for the cockpit.
@@ -2470,8 +2434,7 @@ export interface Target5 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Aggregate progress without lanes, names, or private commentary.
@@ -2519,7 +2482,7 @@ export interface Health {
   /**
    * Current state of the record.
    */
-  state: "ok" | "warn" | "bad" | "idle" | "unknown";
+  state: "ok" | "warn" | "bad" | "idle";
   /**
    * Word for this record.
    */
@@ -2785,9 +2748,6 @@ export interface Message {
          * Name of the stage in the topic.
          */
         stage: string;
-      }
-    | {
-        kind: "unknown";
       };
   author: Actor2;
   /**
@@ -2866,7 +2826,7 @@ export interface Actor2 {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Name shown to the reader.
    */
@@ -2914,7 +2874,7 @@ export interface MessageLabel {
   /**
    * Kind for this record.
    */
-  kind: "question" | "request" | "done" | "decision" | "goalChange" | "unknown";
+  kind: "question" | "request" | "done" | "decision" | "goalChange";
   /**
    * Pinned for this record.
    */
@@ -2996,9 +2956,6 @@ export interface Message1 {
          * Name of the stage in the topic.
          */
         stage: string;
-      }
-    | {
-        kind: "unknown";
       };
   author: Actor2;
   /**
@@ -3082,7 +3039,7 @@ export interface Actor3 {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Name shown to the reader.
    */
@@ -3142,7 +3099,7 @@ export interface Connection {
   /**
    * Current state of the record.
    */
-  state: "connected" | "signedIn" | "addKey" | "signIn" | "unknown";
+  state: "connected" | "signedIn" | "addKey" | "signIn";
 }
 /**
  * Deal for the cockpit.
@@ -3245,8 +3202,7 @@ export interface Target6 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Position within the decision queue as seen by this reader.
@@ -3306,7 +3262,7 @@ export interface QueueItem {
   /**
    * Current state of the record.
    */
-  state: "open" | "approved" | "declined" | "expired" | "unknown";
+  state: "open" | "approved" | "declined" | "expired";
   target: Target7;
   /**
    * Title displayed above the record.
@@ -3335,7 +3291,7 @@ export interface GoalChange {
   /**
    * Field for this record.
    */
-  field: "target" | "deadline" | "unit" | "unknown";
+  field: "target" | "deadline" | "unit";
   /**
    * From for this record.
    */
@@ -3385,8 +3341,7 @@ export interface Target7 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Decision right for the cockpit.
@@ -3414,7 +3369,7 @@ export interface DecisionRight {
   /**
    * Decision rule for the cockpit.
    */
-  rule: "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap" | "unknown";
+  rule: "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap";
   /**
    * Title displayed above the record.
    */
@@ -3422,7 +3377,7 @@ export interface DecisionRight {
   /**
    * Who for this record.
    */
-  who: "you" | "agent" | "unknown";
+  who: "you" | "agent";
 }
 /**
  * The evidence, consequences and next steps for a decision.
@@ -3523,7 +3478,7 @@ export interface DecisionView {
   /**
    * Current state of the record.
    */
-  state: "open" | "approved" | "declined" | "expired" | "unknown";
+  state: "open" | "approved" | "declined" | "expired";
   /**
    * Suggestion for this record.
    */
@@ -3643,7 +3598,7 @@ export interface Scenario {
   /**
    * Kind for this record.
    */
-  kind: "opportunity" | "risk" | "unknown";
+  kind: "opportunity" | "risk";
   /**
    * Label for this record.
    */
@@ -3760,7 +3715,7 @@ export interface Release {
   /**
    * Stage for this record.
    */
-  stage: "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack" | "unknown";
+  stage: "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack";
   /**
    * Time associated with started.
    */
@@ -3879,9 +3834,6 @@ export interface Message2 {
          * Name of the stage in the topic.
          */
         stage: string;
-      }
-    | {
-        kind: "unknown";
       };
   author: Actor2;
   /**
@@ -4087,7 +4039,7 @@ export interface Gate {
   /**
    * Current state of the record.
    */
-  state: "pass" | "running" | "todo" | "fail" | "skipped" | "unknown";
+  state: "pass" | "running" | "todo" | "fail" | "skipped";
 }
 /**
  * Goal for the cockpit.
@@ -4269,7 +4221,7 @@ export interface GuardrailItem {
   /**
    * Current state of the record.
    */
-  state: "held" | "near" | "breached" | "unknown";
+  state: "held" | "near" | "breached";
   /**
    * Value for this record.
    */
@@ -4419,7 +4371,7 @@ export interface Verdict {
   /**
    * Health state for the cockpit.
    */
-  state: "ok" | "warn" | "bad" | "idle" | "unknown";
+  state: "ok" | "warn" | "bad" | "idle";
   /**
    * Text shown to the reader.
    */
@@ -4532,7 +4484,7 @@ export interface Actor4 {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Name shown to the reader.
    */
@@ -4630,7 +4582,7 @@ export interface Job {
   /**
    * Lane state for the cockpit.
    */
-  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
 }
 /**
  * Lane act for the cockpit.
@@ -4658,7 +4610,7 @@ export interface LaneAct {
   /**
    * Tone for this record.
    */
-  tone: "ink" | "quiet" | "unknown";
+  tone: "ink" | "quiet";
 }
 /**
  * A work item and its record of progress.
@@ -4773,7 +4725,7 @@ export interface LaneView {
   /**
    * Lane state for the cockpit.
    */
-  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
   /**
    * State word for this record.
    */
@@ -4840,7 +4792,7 @@ export interface Actor5 {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Name shown to the reader.
    */
@@ -4937,7 +4889,7 @@ export interface Step {
   /**
    * Kind for this record.
    */
-  kind: "ok" | "now" | "todo" | "unknown";
+  kind: "ok" | "now" | "todo";
   /**
    * Text shown to the reader.
    */
@@ -5009,7 +4961,7 @@ export interface ManagerLane {
   /**
    * Lane state for the cockpit.
    */
-  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
   /**
    * State word for this record.
    */
@@ -5153,7 +5105,7 @@ export interface Model {
   /**
    * Current availability.
    */
-  state: ("signedIn" | "unknown") | "default" | "connected" | "addKey" | "signIn";
+  state: "signedIn" | "default" | "connected" | "addKey" | "signIn";
   /**
    * Engine vendor.
    */
@@ -5209,7 +5161,7 @@ export interface ModuleInfo {
   /**
    * Available cockpit modules.
    */
-  id: "gtm" | "dev" | "unknown";
+  id: "gtm" | "dev";
   /**
    * Kind word for this record.
    */
@@ -5261,7 +5213,7 @@ export interface Pin {
   /**
    * Kind for this record.
    */
-  kind: "page" | "topic" | "project" | "skill" | "unknown";
+  kind: "page" | "topic" | "project" | "skill";
   /**
    * Label for this record.
    */
@@ -5313,7 +5265,7 @@ export interface PinnedDecision {
   /**
    * Current state of the record.
    */
-  state: "waiting" | "approved" | "declined" | "expired" | "stuck" | "unknown";
+  state: "waiting" | "approved" | "declined" | "expired" | "stuck";
   /**
    * Title displayed above the record.
    */
@@ -5361,7 +5313,7 @@ export interface Stage {
   /**
    * Progress of a stage in a topic plan.
    */
-  state: "done" | "next" | "now" | "wait" | "unknown";
+  state: "done" | "next" | "now" | "wait";
   /**
    * Summary for this record.
    */
@@ -5409,7 +5361,7 @@ export interface StageRow {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Identifier of the associated lane.
    */
@@ -5421,7 +5373,7 @@ export interface StageRow {
   /**
    * Lane state for the cockpit.
    */
-  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
   /**
    * Destination to open in the cockpit.
    */
@@ -5517,7 +5469,7 @@ export interface PullRequest {
   /**
    * Current state of the record.
    */
-  state: "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held" | "unknown";
+  state: "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held";
   /**
    * Summary for this record.
    */
@@ -5600,8 +5552,7 @@ export interface Target8 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * Recent pages for the current reader, newest first.
@@ -5659,7 +5610,7 @@ export interface SearchResult {
   /**
    * Kind for this record.
    */
-  kind: "topic" | "lane" | "person" | "decision" | "skill" | "unknown";
+  kind: "topic" | "lane" | "person" | "decision" | "skill";
   /**
    * Lead for this record.
    */
@@ -5706,8 +5657,7 @@ export interface Target9 {
     | "brief"
     | "drafts"
     | "skills"
-    | "settings"
-    | "unknown";
+    | "settings";
 }
 /**
  * A page of records matching the query and an optional answer.
@@ -5763,7 +5713,7 @@ export interface SettingsView {
   /**
    * Chat mode for this record.
    */
-  chatMode: "floating" | "sidebar" | "unknown";
+  chatMode: "floating" | "sidebar";
   /**
    * Decision rights for this record.
    */
@@ -5807,7 +5757,7 @@ export interface Theme {
   /**
    * Stable identifier for this record.
    */
-  id: "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose" | "unknown";
+  id: "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose";
   /**
    * Name shown to the reader.
    */
@@ -5835,7 +5785,7 @@ export interface SidebarGroup {
   /**
    * Kind for this record.
    */
-  kind: "topic" | "project" | "unknown";
+  kind: "topic" | "project";
   /**
    * Lanes for this record.
    */
@@ -5879,7 +5829,7 @@ export interface SidebarLane {
   /**
    * Lane state for the cockpit.
    */
-  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
   /**
    * State word for this record.
    */
@@ -6083,7 +6033,7 @@ export interface StuckAction {
   /**
    * Tone for this record.
    */
-  tone: "ink" | "quiet" | "unknown";
+  tone: "ink" | "quiet";
 }
 /**
  * Stuck report for the cockpit.
@@ -6151,7 +6101,7 @@ export interface TaskRow {
   /**
    * Lane state for the cockpit.
    */
-  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
   /**
    * State word for this record.
    */
@@ -6179,7 +6129,7 @@ export interface Theme1 {
   /**
    * Stable identifier for this record.
    */
-  id: "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose" | "unknown";
+  id: "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose";
   /**
    * Name shown to the reader.
    */
@@ -6267,7 +6217,7 @@ export interface TopicLane {
   /**
    * Lane state for the cockpit.
    */
-  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
+  state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
   /**
    * State word for this record.
    */
@@ -6375,7 +6325,7 @@ export interface TopicView {
   /**
    * Kind for this record.
    */
-  kind: "topic" | "project" | "unknown";
+  kind: "topic" | "project";
   /**
    * Lanes for this record.
    */
@@ -6436,7 +6386,7 @@ export interface ViewerStage {
   /**
    * Access for this record.
    */
-  access: "work" | "view" | "locked" | "unknown";
+  access: "work" | "view" | "locked";
   /**
    * Name shown to the reader.
    */
@@ -6453,7 +6403,7 @@ export interface TopicViewer {
   /**
    * Role for this record.
    */
-  role: "owner" | "all" | "stages" | "view" | "unknown";
+  role: "owner" | "all" | "stages" | "view";
   /**
    * Shared by for this record.
    */
@@ -6473,7 +6423,7 @@ export interface TopicViewer1 {
   /**
    * Role for this record.
    */
-  role: "owner" | "all" | "stages" | "view" | "unknown";
+  role: "owner" | "all" | "stages" | "view";
   /**
    * Shared by for this record.
    */
@@ -6597,7 +6547,7 @@ export interface UsageAccount {
   /**
    * Current state of the record.
    */
-  state: "ok" | "near" | "limit" | "standingBy" | "unknown";
+  state: "ok" | "near" | "limit" | "standingBy";
 }
 /**
  * Provider usage and capacity for the workspace.
@@ -6637,7 +6587,7 @@ export interface Verdict1 {
   /**
    * Health state for the cockpit.
    */
-  state: "ok" | "warn" | "bad" | "idle" | "unknown";
+  state: "ok" | "warn" | "bad" | "idle";
   /**
    * Text shown to the reader.
    */
@@ -6679,7 +6629,7 @@ export interface Theme2 {
   /**
    * Stable identifier for this record.
    */
-  id: "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose" | "unknown";
+  id: "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose";
   /**
    * Name shown to the reader.
    */
@@ -6699,7 +6649,7 @@ export interface WorkspaceView {
   /**
    * Chat mode for this record.
    */
-  chatMode: "floating" | "sidebar" | "unknown";
+  chatMode: "floating" | "sidebar";
   /**
    * Version of the contract served by the hub.
    */
@@ -6750,7 +6700,7 @@ export interface Actor6 {
   /**
    * Kind for this record.
    */
-  kind: "person" | "agent" | "unknown";
+  kind: "person" | "agent";
   /**
    * Name shown to the reader.
    */
@@ -6795,7 +6745,7 @@ export interface ModuleInfo1 {
   /**
    * Available cockpit modules.
    */
-  id: "gtm" | "dev" | "unknown";
+  id: "gtm" | "dev";
   /**
    * Kind word for this record.
    */

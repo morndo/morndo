@@ -143,6 +143,7 @@ pub struct Money {
 /// Destination category for navigation within the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum TargetKind {
     Topic,
     Lane,
@@ -158,6 +159,7 @@ pub enum TargetKind {
     Skills,
     Settings,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

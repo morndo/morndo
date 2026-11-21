@@ -60,12 +60,14 @@ pub struct UsageView {
 /// How close a usage account is to its current limit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum UsageState {
     Ok,
     Near,
     Limit,
     StandingBy,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

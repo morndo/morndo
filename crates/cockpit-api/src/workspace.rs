@@ -7,10 +7,12 @@ use crate::settings::{ChatMode, Layout, Theme};
 /// Available cockpit modules.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ModuleId {
     Gtm,
     Dev,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

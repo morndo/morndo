@@ -6,6 +6,7 @@ use crate::ModelId;
 /// Availability of an engine in the model picker.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ModelState {
     /// Selected automatically by the hub.
     Default,
@@ -17,6 +18,7 @@ pub enum ModelState {
     /// Requires sign-in.
     SignIn,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

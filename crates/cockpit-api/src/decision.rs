@@ -8,12 +8,14 @@ use crate::present::Present;
 /// Decision state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum DecisionState {
     Open,
     Approved,
     Declined,
     Expired,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -202,10 +204,12 @@ pub struct DecisionView {
 /// Which side of the forecast the chart describes.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ScenarioKind {
     Opportunity,
     Risk,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -268,17 +272,20 @@ pub struct GoalChange {
 /// Goal field being edited.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum GoalField {
     Target,
     Deadline,
     Unit,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Rollout lifecycle for a release decision.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum ReleaseStage {
     Scheduled,
     Rolling,
@@ -287,6 +294,7 @@ pub enum ReleaseStage {
     Held,
     RolledBack,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

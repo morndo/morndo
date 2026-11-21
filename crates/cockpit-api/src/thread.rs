@@ -9,6 +9,7 @@ use crate::present::Present;
 /// Label kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum LabelKind {
     Question,
     Request,
@@ -16,6 +17,7 @@ pub enum LabelKind {
     Decision,
     GoalChange,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -116,6 +118,7 @@ pub struct SinceSummary {
 /// Pin state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum PinState {
     Waiting,
     Approved,
@@ -123,6 +126,7 @@ pub enum PinState {
     Expired,
     Stuck,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -203,6 +207,7 @@ pub struct ThreadView {
 /// Audience allowed to receive a message in a topic.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:tag:kind"))]
 pub enum MessageAudience {
     /// Everyone who can read the topic conversation.
     Topic,
@@ -212,5 +217,6 @@ pub enum MessageAudience {
         stage: String,
     },
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }

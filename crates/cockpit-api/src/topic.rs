@@ -10,22 +10,26 @@ use crate::present::Present;
 /// Topic kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum TopicKind {
     Topic,
     Project,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Health state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum HealthState {
     Ok,
     Warn,
     Bad,
     Idle,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -483,6 +487,7 @@ pub struct Plan {
     rename_all_fields = "camelCase"
 )]
 /// History entry for the cockpit.
+#[schemars(extend("$comment" = "cockpit-reader:tag:kind"))]
 pub enum HistoryEntry {
     #[serde(rename = "seen")]
     Seen,
@@ -514,6 +519,7 @@ pub enum HistoryEntry {
         decision_id: Present<DecisionId>,
     },
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -733,23 +739,27 @@ pub struct SeenMarker {
 /// Progress of a stage in a topic plan.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum StageState {
     Done,
     Next,
     Now,
     Wait,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
 /// Evaluation of a guardrail at the current reading.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum GuardrailState {
     Held,
     Near,
     Breached,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 

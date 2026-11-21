@@ -8,6 +8,7 @@ use crate::present::Present;
 /// Gate state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum GateState {
     Pass,
     Running,
@@ -15,6 +16,7 @@ pub enum GateState {
     Fail,
     Skipped,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
 
@@ -85,6 +87,7 @@ pub struct PullsView {
 /// Position of a pull request in the review and release flow.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
 pub enum PullState {
     Ready,
     Blocked,
@@ -94,5 +97,6 @@ pub enum PullState {
     Released,
     Held,
     #[serde(other)]
+    #[schemars(skip)]
     Unknown,
 }
