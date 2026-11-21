@@ -370,6 +370,17 @@ async function gtm() {
     ok(asLea.status === 200 && asLea.body?.viewer?.role === "stages", "Lea sees partnerships through her stages");
     const stages = asLea.body?.stages ?? [];
     ok(stages.length >= 2 && stages.every((s: any) => ["work", "view", "locked"].includes(s.access)) && stages.some((s: any) => s.name === "Outreach" && s.access === "work"), "each stage tells Lea whether she can work, view or not see it");
+    // the chat follows the role (share.extra.html:158): Lea gets the Outreach thread, not the owner's
+    const leaThread = (await get(url, "/threads/topic:partnerships?as=lea-brandt&limit=100")).body;
+    ok(Array.isArray(leaThread?.messages) && !leaThread.messages.some((m: any) => /halden/i.test(m.text ?? "")), "Lea's thread holds no message from a stage she does not work on");
+    ok((leaThread?.messages ?? []).every((m: any) => m.audience?.kind === "stage" && m.audience?.stage === "Outreach" || m.audience?.kind === "topic"), "every message she sees names its audience (her stage, or the whole topic)");
+    const leaPost = await http(url, "/actions?as=lea-brandt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "message.send", threadId: "topic:partnerships", text: "Wave 2 is checked, it can go" }) });
+    ok(leaPost.status === 200 && leaPost.body?.message?.audience?.stage === "Outreach", "Lea can post in her stage's thread");
+    ok(((await get(url, "/threads/topic:partnerships?limit=100")).body?.messages ?? []).some((m: any) => m.text === "Wave 2 is checked, it can go"), "the owner sees Lea's message");
+    const leaBrief = (await get(url, "/brief?as=lea-brandt")).body;
+    let leaMoney = 0;
+    walk(leaBrief, "brief", (k) => { if (k === "currency") leaMoney++; });
+    ok(leaBrief && leaMoney === 0, "a person with stage access sees no money in the brief");
     const acc0 = (await get(url, "/topics/partnerships/access")).body;
     await act(url, { type: "access.invite", topicId: "partnerships", nameOrEmail: "sam@example.test" });
     await act(url, { type: "access.invite", topicId: "partnerships", nameOrEmail: "sam@example.test" });
