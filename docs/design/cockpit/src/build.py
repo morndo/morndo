@@ -25,12 +25,17 @@ MODULES = {
     "dev": ("Development", "dev-cockpit.html"),
 }
 # A variant is a module's mockup with extra styles and behaviour on top, for trying a proposal without touching the
-# module. Its file holds the blocks `css` and `js`, which fill `@@EXTRA:css@@` and `@@EXTRA:js@@` in the shell.
+# module. Its file holds the blocks `css` and `js`, which fill `@@EXTRA:css@@` and `@@EXTRA:js@@` in the shell. A variant
+# can stack several extra files, in order, so a later proposal builds on an earlier one.
 VARIANTS = {
-    # id: (module, output file, extra file)
+    # id: (module, output file, extra file or files)
     "share": ("gtm", "gtm-sharing.html", "share.extra.html"),
     "v2": ("gtm", "gtm-cockpit-v2.html", "v2.extra.html"),
+    "v3": ("gtm", "gtm-cockpit-v3.html", ["v2.extra.html", "v3.extra.html"]),
 }
+# A frozen variant is kept as it was built: a plain build skips it, so later changes to the shell cannot alter it.
+# Naming it (python3 build.py v2) still rebuilds it, on purpose.
+FROZEN = {"v2"}
 FONTS = {
     "@@FONT_SERIF@@": "newsreader.woff2",
     "@@FONT_SERIF_ITALIC@@": "newsreader-italic.woff2",
@@ -86,8 +91,12 @@ def build(target):
     module, filename, extra = (VARIANTS[target] if target in VARIANTS else (target, MODULES[target][1], None))
     name = MODULES[module][0]
     html = read("shell.html")
-    more = blocks(read(extra)) if extra else {}
-    assert set(more) <= {"css", "js"}, f"{extra}: only css and js blocks"
+    more = {}
+    for part in ([extra] if isinstance(extra, str) else extra or []):
+        got = blocks(read(part))
+        assert set(got) <= {"css", "js"}, f"{part}: only css and js blocks"
+        for key, text in got.items():
+            more[key] = more[key] + "\n" + text if key in more else text
     for key in ("css", "js"):
         assert html.count(f"@@EXTRA:{key}@@\n") == 1, key
         html = html.replace(f"@@EXTRA:{key}@@\n", more[key] + "\n" if key in more else "")
@@ -118,5 +127,5 @@ if __name__ == "__main__":
     if len(sys.argv) > 2 and sys.argv[1] == "--out":
         OUT = sys.argv[2]
         del sys.argv[1:3]
-    for m in sys.argv[1:] or [*MODULES, *VARIANTS]:
+    for m in sys.argv[1:] or [*MODULES, *(v for v in VARIANTS if v not in FROZEN)]:
         build(m)
