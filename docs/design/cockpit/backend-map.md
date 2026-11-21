@@ -75,6 +75,7 @@ to order work, not to cut it.
 | C22 | **Drafts**: drafts written into the user's mail, never sent, linked to the lane that made them | Drafts page, What it made | none (needs C10) | M |
 | C23 | **Sharing**: access per topic down to a stage, invites, status-only viewers, an org-only status link, every view, chat and history cut by the hub to what the role covers | sharing proposal | none (needs C1) | L |
 | C24 | **Development module**: PR cards with their gates (tests, fresh review by another engine, QA by hand, checks), red-main details with the failing test, auto-merge of docs-only changes with Hold, release decisions with proof, staged rollout with a watch window and automatic rollback, backup before a migration, try limits | dev brief, PRs, project page, release decision | GitHub checks, proof refs (ADR-0035), merge watch, jobs | L |
+| C26 | **Lane runtime**: the node agent owns each lane's terminal directly (a PTY per lane, our own screen model from a terminal parser, scrollback kept) instead of polling tmux screens; a structured channel per engine next to it (Claude Code hooks and transcript, Codex app-server, Cursor stream-json); typing only when the screen model says the input is free; any client attaches read-only or to steer. See section 8 | reliability of every lane, the Mac app's native terminal, the clean lane chat | tmux per node, `pane.capture`/`pane.frame` polling, the delivery queue with its waiting reasons, turn-end hooks | L |
 | C25 | **Mac app core (Rust)**: hub client over HTTP and the live feed, types generated from the protocol package's schemas, a local mirror for instant start and offline reading, the terminal stream for a native terminal view; the Swift UI on top | the whole app | the web app's API and feed | L |
 
 ## 4. Mapping, surface by surface
@@ -244,11 +245,15 @@ merged into this order rather than run beside it.
 
 ## 6. Decisions needed before code
 
+Decided by the owner on 21 November: **D1 yes** (team), **D2 yes** (the hub stores history and chat text), **D3**
+headless runs or lanes in a terminal, whichever fits the job, with a more reliable lane runtime of our own (C26,
+section 8). D4-D7 are open.
+
 | # | Question | Why it matters | My recommendation |
 |---|---|---|---|
-| D1 | Is Morndo a team product in V1? | The design has people in chats, waits for a person, sharing. The 13 November decisions said "still one person, sharing by links". | Yes, as the design shows. It changes C1, C3, C4 and C23 from the start, so it must be settled first. |
-| D2 | May the hub store chat text and the full history? | ADR-0006 says the hub stores no message text; the design needs labels, threads, read-backs and a life-long history. | Yes, in the hub's own store, encrypted at rest, with export and delete. A new ADR replaces ADR-0006 as a whole. |
-| D3 | Where do the hub's model calls run? | Sorting, answers, briefs and status pages need a model. | Headless runs on nodes (`engine.run`), so keys stay on nodes and subscriptions are used; the hub only sends typed requests and checks answers against a schema. ⌘K answers come from search first, so they stay instant. |
+| D1 | Is Morndo a team product in V1? **Decided: yes.** | The design has people in chats, waits for a person, sharing. The 13 November decisions said "still one person, sharing by links". | Yes, as the design shows. It changes C1, C3, C4 and C23 from the start, so it must be settled first. |
+| D2 | May the hub store chat text and the full history? **Decided: yes.** | ADR-0006 says the hub stores no message text; the design needs labels, threads, read-backs and a life-long history. | Yes, in the hub's own store, encrypted at rest, with export and delete. A new ADR replaces ADR-0006 as a whole. |
+| D3 | Where do the hub's model calls run? **Decided: headless or in a terminal lane.** | Sorting, answers, briefs and status pages need a model. | Short typed requests run headless on nodes (`engine.run`); long work stays in lanes. ⌘K answers come from search first, so they stay instant. The subscription question in section 8 decides which account a headless Claude run uses. |
 | D4 | Connectors: own adapters, or the agent CLIs' MCP connectors? | Guardrails, Undo, quotas and metrics only work if the hub sees every outward action. | Own adapters behind the action gateway for every write; MCP tools may read. |
 | D5 | Which outside tools in V1? | Each is real work (auth, scopes, write and undo). | The ones the mockups name: one mail provider for drafts, HubSpot, Google and LinkedIn ads, LinkedIn posting, Supabase read, an image model, Seedance; for dev GitHub, Sentry and one deploy target. You confirm the list and the deploy target. |
 | D6 | How does the Mac app sign in? | The web relies on a `__Host-` cookie and an Origin check. | Platform passkeys plus a session token in the Keychain, bound to the device, with the same step-up rules. |
@@ -259,3 +264,42 @@ merged into this order rather than run beside it.
 The fleet (nodes, tmux lanes, typed ops, delivery queue, lane events, jobs), the board with waits and the proof gate,
 decision briefs, usage windows and pools, key pools and the vault, sign-in from the app, memory synced as skills, push,
 the updater and its rollouts, passkey access. None of it is thrown away; the cockpit's components sit on top of it.
+
+## 8. Lane runtime: the terminal and a clean UI together (C26, proposal)
+
+Why: lanes are agent TUIs in tmux, and Morndo reaches them by reading screens (`pane.capture`) and typing keys. Most
+failures are the gap between what the screen shows and what Morndo believes: the delivery queue already names them
+(`menu_open`, `draft_present`, `no_input_box`, `busy`, `no_pane`, `no_session`). Before building, count how often each
+happens on the fleet, so the new runtime is judged against a number.
+
+The idea, in three layers:
+
+1. **A structured channel per engine, where one exists.** Codex has `codex app-server`, JSON-RPC over stdio made for
+   rich clients: `thread/start`, `turn/start`, `turn/steer`, `turn/interrupt`, approvals as server requests, streamed
+   events (`item/agentMessage/delta`, `turn/completed`). Cursor's CLI has `--print --output-format stream-json`. Claude
+   Code has hooks and its transcript for the interactive TUI, and `claude -p --output-format stream-json` (and
+   `--input-format stream-json`) for headless runs. The clean lane chat in the app is drawn from these events, not
+   from the screen.
+2. **Our own terminal host instead of tmux.** The node agent owns one PTY per lane, feeds the output through a terminal
+   parser to keep an exact screen model (cursor, input line, open menus), keeps scrollback, survives the agent's own
+   restart, and types only when the model says the input is free. Clients attach read-only or to steer; the Mac app
+   draws the same stream in a native terminal view. Candidates for the parser: libghostty-vt (reported 1.0 with a stable
+   C ABI in November 2026, to confirm on the official site) or a Rust crate such as `alacritty_terminal`; to be chosen
+   in the ADR against official docs.
+3. **A cheaper first step, if wanted:** keep tmux but drive it in control mode (`tmux -C`), which streams each pane's
+   output as `%output` notifications instead of polling screens. iTerm2 is built on it.
+
+In the app this is one lane with two faces: the chat view (structured events, labels, read-backs) and, one tab away,
+the live terminal of the same lane. Nobody has to open tmux to see or steer a lane.
+
+**Open question before Claude runs headless on subscriptions.** Anthropic's Agent SDK page says: "Unless previously
+approved, Anthropic does not allow third party developers to offer claude.ai login or rate limits for their products,
+including agents built on the Claude Agent SDK." `claude -p` is documented as the Agent SDK's CLI, and `--bare` (to
+become the default for `-p`) never reads the subscription login. Running the user's own interactive Claude Code in a
+terminal is not that case. So until this is cleared with Anthropic, headless Claude runs use an API key, and
+subscription work stays in terminal lanes. Codex and Cursor need the same check against their terms.
+
+Sources: Claude Code headless (https://code.claude.com/docs/en/headless), Agent SDK overview
+(https://code.claude.com/docs/en/agent-sdk/overview), Codex app-server (https://learn.chatgpt.com/docs/app-server),
+Cursor CLI output format (https://cursor.com/docs/cli/reference/output-format), tmux control mode
+(https://github.com/tmux/tmux/wiki/Control-Mode). Read 21 November 2026.
