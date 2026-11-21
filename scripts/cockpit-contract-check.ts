@@ -123,7 +123,7 @@ async function gtm() {
 
     const b = await view(url, "/brief", "BriefView");
     ok((b?.decisions ?? []).map((d: any) => d.id).join(",") === "d1,d2,d3,d4", "brief lists decisions d1-d4");
-    ok(b?.nextBriefAt === "13:00", "next brief at 13:00");
+    ok(typeof b?.nextBriefAt === "string" && new Date(b.nextBriefAt).toLocaleTimeString("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit" }) === "13:00", "next brief at 13:00 Berlin time");
     ok((b?.overnight ?? []).length === 5, "five things done while you slept");
     ok(b?.drafts?.count === 4, "four drafts waiting");
     ok((b?.topics ?? []).length === 6, "the strip shows six topics");
