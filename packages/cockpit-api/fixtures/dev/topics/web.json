@@ -206,7 +206,7 @@
       "stateWord": "Done",
       "next": "Merged today, 03:05",
       "reason": null,
-      "laneId": null
+      "laneId": "dependency-updates"
     }
   ],
   "viewer": {

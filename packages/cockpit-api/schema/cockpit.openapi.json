@@ -2323,7 +2323,7 @@
                 "type": "null"
               }
             ],
-            "description": "Person explicitly authorized to exercise this decision right."
+            "description": "Person explicitly granted this decision right. Topic work access by itself does not grant it."
           },
           "risky": {
             "description": "Risky for this record.",
@@ -3046,6 +3046,7 @@
             "type": "object"
           },
           {
+            "description": "Work that cannot wait for the next brief, including due decisions and stuck lanes with deadlines.",
             "properties": {
               "reason": {
                 "type": "string"
@@ -3540,6 +3541,7 @@
             "type": "object"
           },
           {
+            "description": "Work that cannot wait for the next brief, including due decisions and stuck lanes with deadlines.",
             "properties": {
               "reason": {
                 "type": "string"
@@ -4782,7 +4784,7 @@
             "description": "Seen for this record."
           },
           "shown": {
-            "description": "Shown for this record.",
+            "description": "Number of activity rows in this page.",
             "format": "int64",
             "type": "integer"
           },
@@ -6333,6 +6335,19 @@
             "description": "Badge for this record.",
             "type": "boolean"
           },
+          "badgeCount": {
+            "anyOf": [
+              {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Current open decision count for the Decide pin."
+          },
           "icon": {
             "description": "Icon for this record.",
             "type": "string"
@@ -6399,6 +6414,7 @@
           }
         },
         "required": [
+          "badgeCount",
           "id",
           "kind",
           "label",

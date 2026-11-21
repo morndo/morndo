@@ -3404,7 +3404,7 @@ export interface DecisionRight {
    */
   detail: string;
   /**
-   * Person explicitly authorized to exercise this decision right.
+   * Person explicitly granted this decision right. Topic work access by itself does not grant it.
    */
   personId: PersonId | null;
   /**
@@ -4587,7 +4587,7 @@ export interface HistoryPage {
   nextCursor: string | null;
   seen: SeenMarker1;
   /**
-   * Shown for this record.
+   * Number of activity rows in this page.
    */
   shown: number;
   /**
@@ -5246,6 +5246,10 @@ export interface Pin {
    * Badge for this record.
    */
   badge: boolean;
+  /**
+   * Current open decision count for the Decide pin.
+   */
+  badgeCount: number | null;
   /**
    * Icon for this record.
    */

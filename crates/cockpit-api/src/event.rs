@@ -70,6 +70,7 @@ pub enum Event {
     BriefChanged {},
     #[serde(rename = "brief.published")]
     BriefPublished {},
+    /// Work that cannot wait for the next brief, including due decisions and stuck lanes with deadlines.
     #[serde(rename = "attention.raised")]
     AttentionRaised {
         target: crate::Target,

@@ -1,15 +1,17 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { commandErrors, contractVersion, validate, type Command, type CommandResult } from "@morndo/cockpit-api";
+import { commandErrors, contractVersion, validate, type Command, type UploadInput } from "@morndo/cockpit-api";
 import { WebSocketServer } from "ws";
 import { image } from "./artwork.ts";
 import { Feed } from "./feed.ts";
-import { definitionFor, matchRoute, missing, Problem } from "./protocol.ts";
+import { Idempotency } from "./idempotency.ts";
+import { Uploads } from "./uploads.ts";
+import { BASE, definitionFor, matchRoute, missing, Problem } from "./protocol.ts";
 import { DEMO_AT, World, type Module } from "./world.ts";
 
 const MAX_BODY = 1024 * 1024;
-const DAY_MS = 24 * 60 * 60 * 1000;
+
 
 function parseUrl(req: IncomingMessage): URL {
   return new URL(req.url ?? "/", "http://localhost");
@@ -42,7 +44,7 @@ function readBody(req: IncomingMessage): Promise<string | null> {
   });
 }
 
-async function readCommand(req: IncomingMessage): Promise<Command> {
+async function readJson(req: IncomingMessage): Promise<unknown> {
   const type = header(req.headers["content-type"])?.split(";")[0]?.trim().toLowerCase();
   if (type !== "application/json") {
     req.resume();
@@ -60,6 +62,11 @@ async function readCommand(req: IncomingMessage): Promise<Command> {
   } catch {
     throw new Problem("badRequest", "The body is not JSON.");
   }
+  return data;
+}
+
+async function readCommand(req: IncomingMessage): Promise<Command> {
+  const data = await readJson(req);
   const result = validate<Command>("Command", data);
   if (!result.ok) {
     const errors = commandErrors(data).map(message => {
@@ -111,16 +118,27 @@ export async function start(module: Module, port: number, clock?: () => string):
     return world;
   };
   const feed = new Feed();
-  const idempotency = new Map<string, { expires: number; result: CommandResult }>();
+  const idempotency = new Idempotency();
+  const uploads = new Uploads();
   const tick = (world: World) => {
     const at = now();
     const events = world.advance(at);
     if (events.length) feed.publish(world, events, at);
   };
+  const requireLocal = (req: IncomingMessage) => {
+    const address = server.address();
+    const bound = typeof address === "object" && address ? address.port : port;
+    const local = [`127.0.0.1:${bound}`, `localhost:${bound}`];
+    if (!local.includes(req.headers.host?.toLowerCase() ?? "")
+      || (req.headers.origin !== undefined && !local.some(value => req.headers.origin === `http://${value}`))) {
+      throw new Problem("forbidden", "This cockpit accepts requests from its local origin.");
+    }
+  };
   const ws = new WebSocketServer({ noServer: true, maxPayload: 1024 });
   ws.on("headers", headers => headers.push(`cockpit-contract: ${contractVersion}`));
   const server = createServer((req, res) => {
     void (async () => {
+      requireLocal(req);
       const url = parseUrl(req);
       const route = matchRoute(url.pathname);
       if (!route) throw missing("route");
@@ -139,29 +157,28 @@ export async function start(module: Module, port: number, clock?: () => string):
       if (method === "post" && definition === "CommandResult") {
         const command = await readCommand(req);
         const key = header(req.headers["idempotency-key"]);
-        if (key !== undefined && (key.length === 0 || key.length > 200)) throw new Problem("badRequest", "Invalid Idempotency-Key.");
-        const cacheKey = key === undefined ? undefined : JSON.stringify([reader ?? "default", key]);
-        const wall = Date.now();
-        if (cacheKey !== undefined) {
-          const saved = idempotency.get(cacheKey);
-          if (saved && saved.expires > wall) {
-            respond(res, 200, definition, saved.result);
-            return;
-          }
-        }
-        const effect = world.act(command, viewer);
-        const privateTo = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit" ? viewer.id : undefined;
-        const events = feed.publish(world, effect.events, now(), privateTo, frames => {
-          const check = validate(definition, { ...effect, events: frames });
-          if (!check.ok) throw new Error(`Invalid ${definition}: ${check.errors.join(", ")}`);
+        const result = idempotency.run(viewer.id === world.owner.id ? "owner" : viewer.id, key, command, () => {
+          const effect = world.act(command, viewer);
+          const privateTo = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit" ? viewer.id : undefined;
+          const events = feed.publish(world, effect.events, now(), privateTo, frames => {
+            const check = validate(definition, { ...effect, events: frames });
+            if (!check.ok) throw new Error(`Invalid ${definition}: ${check.errors.join(", ")}`);
+          });
+          if (command.type === "module.switch") active = command.moduleId;
+          return { ...effect, events };
         });
-        const result: CommandResult = { ...effect, events };
-        if (command.type === "module.switch") active = command.moduleId;
-        if (cacheKey !== undefined) {
-          for (const [id, entry] of idempotency) if (entry.expires <= wall) idempotency.delete(id);
-          idempotency.set(cacheKey, { expires: wall + DAY_MS, result: structuredClone(result) });
-        }
         respond(res, 200, definition, result);
+      } else if (method === "post" && route.path === `${BASE}/uploads`) {
+        const result = validate<UploadInput>("UploadInput", await readJson(req));
+        if (!result.ok) throw new Problem("badRequest", result.errors.join(", "));
+        respond(res, 200, "Attachment", uploads.add(result.value, viewer.id));
+      } else if (route.path === `${BASE}/uploads/{id}`) {
+        const file = uploads.get(route.parameters[0] ?? "", viewer.id, viewer.id === world.owner.id);
+        res.writeHead(200, {
+          "content-type": "application/octet-stream", "content-disposition": "attachment",
+          "x-content-type-options": "nosniff", "cockpit-contract": contractVersion,
+        });
+        res.end(file.bytes);
       } else if (definition) {
         respond(res, 200, definition, world.read(definition, route.parameters[0], url.searchParams, viewer));
       } else {
@@ -181,21 +198,16 @@ export async function start(module: Module, port: number, clock?: () => string):
   });
   server.on("upgrade", (req, socket, head) => {
     try {
+      requireLocal(req);
       const url = parseUrl(req);
       if (!matchRoute(url.pathname)?.operations.get?.["x-websocket-message"]) throw missing("route");
-      const address = server.address();
-      const bound = typeof address === "object" && address ? address.port : port;
-      const origin = req.headers.origin;
-      if (origin && origin !== `http://127.0.0.1:${bound}` && origin !== `http://localhost:${bound}`) {
-        throw new Problem("forbidden", "The feed is restricted to the local cockpit.");
-      }
       const world = worldOf();
       const id = url.searchParams.get("as");
       const viewer = world.viewer(id);
       const after = afterParam(url.searchParams);
       tick(world);
       ws.handleUpgrade(req, socket, head, client => {
-        feed.subscribe(client, { world: id ? () => world : worldOf, viewer: id ? () => viewer.id : () => worldOf().owner.id }, after, now());
+        feed.subscribe(client, { world: id ? () => world : worldOf, viewer: id ? () => viewer.id : () => worldOf().owner.id }, after);
       });
     } catch (error) {
       const problem = refused(error).body;
@@ -216,6 +228,10 @@ export async function start(module: Module, port: number, clock?: () => string):
   const updates = setInterval(() => {
     for (const world of worlds.values()) tick(world);
   }, 1000);
+  const cleanup = setInterval(() => {
+    idempotency.sweep();
+    uploads.sweep();
+  }, 60000);
   const address = server.address();
   const bound = typeof address === "object" && address ? address.port : port;
   console.log(`cockpit-standin listening on http://127.0.0.1:${bound}`);
@@ -224,6 +240,7 @@ export async function start(module: Module, port: number, clock?: () => string):
     close: () => new Promise((resolve, reject) => {
       clearInterval(ping);
       clearInterval(updates);
+      clearInterval(cleanup);
       feed.close();
       ws.close();
       server.close(error => error ? reject(error) : resolve());

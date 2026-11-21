@@ -89,6 +89,68 @@
   "suggestions": [],
   "messages": [
     {
+      "audience": {
+        "kind": "stage",
+        "stage": "Outreach"
+      },
+      "id": "m9001",
+      "at": "2026-11-16T02:10:00+01:00",
+      "author": {
+        "id": "sender",
+        "name": "Sender",
+        "shortName": "Sender",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": "ok",
+        "word": "Working",
+        "text": "Personal emails from your mail, and follow-ups",
+        "skill": "/outbound-sequence",
+        "engine": "Claude",
+        "record": "51 of 52 emails passed Lea's check; 1 read-back corrected today"
+      },
+      "text": "24 emails for wave 2 are drafted, one per brand. Nothing goes out before you check them.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
+    },
+    {
+      "audience": {
+        "kind": "stage",
+        "stage": "Outreach"
+      },
+      "id": "m9002",
+      "at": "2026-11-16T08:05:00+01:00",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Lea, you run Outreach from here. Ask me only if a brand wants a call.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
+    },
+    {
       "id": "m47",
       "author": {
         "id": "lea-brandt",
@@ -201,6 +263,37 @@
         "kind": "stage",
         "stage": "Outreach"
       }
+    },
+    {
+      "audience": {
+        "kind": "stage",
+        "stage": "Offers"
+      },
+      "id": "m9003",
+      "at": "2026-11-16T08:31:00+01:00",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Thanks for the Halden draft. I send it once legal is happy with the template.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
       "id": "m50",

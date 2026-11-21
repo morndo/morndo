@@ -537,7 +537,7 @@ pub struct HistoryPage {
     pub seen: SeenMarker,
     /// Opaque cursor for the following page, or null at the end.
     pub next_cursor: Present<String>,
-    /// Shown for this record.
+    /// Number of activity rows in this page.
     pub shown: i64,
     /// Since for this record.
     pub since: String,

@@ -3,8 +3,8 @@ import { loadFixtures } from "@morndo/cockpit-api";
 import type {
   AccessView, Actor, ApiError, Ask, Attachment, BriefView, Command, DailyLimit,
   DecisionQueueView, DecisionView, DraftsView, Event, HistoryEntry, HistoryPage, LabelKind, LaneAct,
-  LaneView, ManagerView, Message, ModelId, ModelsView, Pin, PullsView, Receipt,
-  SearchView, SettingsView, SidebarView, SkillsView, Target, Theme, ThemePatch, ThreadView,
+  LaneView, ManagerView, Message, MessageAudience, ModelId, ModelsView, Pin, PullsView, Receipt,
+  RecentView, SearchView, SettingsView, SidebarView, SkillsView, Target, Theme, ThemePatch, ThreadView,
   TopicView, UsageView, WorkspaceView,
 } from "@morndo/cockpit-api";
 import { artwork } from "./artwork.ts";
@@ -24,6 +24,22 @@ const WORDS: Record<LaneView["state"], string> = {
   bad: "Stuck", warn: "Needs you", ok: "Working", done: "Done", new: "Starting",
   idle: "Idle", next: "Up next", parked: "Parked", unknown: "Unknown",
 };
+
+
+const WEBINAR_SETTLEMENTS = {
+  "post-passing": {
+    history: "posted the promo with the 4 images that pass; 3 and 6 stay out",
+    status: "The promo goes out at 16:00 with the 4 images that pass. Images 3 and 6 stay out.",
+    step: "4 images pass the brand check; 2 left out",
+    receipt: "The promo goes out at 16:00 with 4 images",
+  },
+  "one-more-round": {
+    history: "allowed one more image round, €0.60",
+    status: "Visuals runs round 4: the photo behind the logo gets darker. You see the 6 images at 09:30; the post still goes out at 16:00.",
+    step: "Round 4 of the images, allowed by you",
+    receipt: "Visuals runs one more round, €0.60",
+  },
+} as const;
 
 type HistoryRow = Extract<HistoryEntry, { kind: "event" }>;
 type TopicRole = TopicView["viewer"]["role"] | "none";
@@ -98,6 +114,11 @@ export class World {
   private readonly usage: UsageView;
   private readonly drafts: DraftsView;
   private readonly skills: SkillsView;
+  private readonly modelPicker: ModelsView;
+  private readonly recent = new Map<string, RecentView["items"]>();
+  private readonly settlements = new Map<string, BriefView["settledBurns"][number]>();
+  private readonly alerted = new Set<string>();
+  private readonly releasePause = new Map<string, number>();
   private readonly pulls: PullsView;
   private readonly topics = new Map<string, TopicView>();
   private readonly lanes = new Map<string, LaneView>();
@@ -137,6 +158,7 @@ export class World {
     this.usage = take("usage.json");
     this.drafts = take("drafts.json");
     this.skills = take("skills.json");
+    this.modelPicker = take("models.json");
     this.pulls = take("pulls.json");
     for (const { definition, value } of files) {
       switch (definition) {
@@ -167,6 +189,13 @@ export class World {
           for (const message of thread.messages) this.messageSerial = Math.max(this.messageSerial, Number(message.id.slice(1)));
           break;
         }
+      }
+    }
+    for (const thread of this.threads.values()) {
+      if (!thread.id.startsWith("topic:")) continue;
+      for (const message of thread.messages) {
+        const decisionThread = message.decisionId && this.threads.get(`decision:${message.decisionId}`);
+        if (decisionThread && !byId(decisionThread.messages, message.id)) decisionThread.messages.push(message);
       }
     }
     for (const topic of this.topics.values()) {
@@ -228,16 +257,20 @@ export class World {
       case "LaneView": return this.visibleLane(key, viewer);
       case "ManagerView": this.requireOwner(viewer); return this.manager(viewer);
       case "DraftsView": this.requireOwner(viewer); return this.draftsView();
-      case "SkillsView": return this.skills;
-      case "SettingsView": return { ...this.settings, ...this.prefsOf(viewer, query.get("deviceId")) };
-      case "PullsView": this.requireOwner(viewer); return this.pulls;
-      case "ModelsView": return this.models();
+      case "SkillsView": this.requireOwner(viewer); return this.skills;
+      case "SettingsView": return { ...this.settings, decisionRights: viewer.id === this.owner.id ? this.settings.decisionRights : [],
+        ...this.prefsOf(viewer, query.get("deviceId")) };
+      case "PullsView": this.requireOwner(viewer); return this.pullsView();
+      case "ModelsView": return this.modelPicker;
+      case "RecentView": return { items: (this.recent.get(viewer.id) ?? []).filter(item => this.recentTitle(item.target, viewer)) } satisfies RecentView;
       case "ThreadView": return this.threadView(key, viewer, query);
       case "SearchView": return this.search(query, viewer);
       case "RoutePreview": {
         const text = query.get("text") ?? "";
         this.checkText(text);
         const topics = new Map([...this.topics].filter(([id]) => this.fullTopic(id, viewer)));
+        const topic = query.get("topic");
+        if (topic && topic !== "manager" && !topics.has(topic.replace(/^[ap]-/, ""))) throw missing("topic");
         return routePreview(text, query.get("topic"), topics, this.routes);
       }
       default: throw missing("route");
@@ -282,7 +315,8 @@ export class World {
       case "pin.remove": return this.pin(command.pinId, viewer, "remove");
       case "pin.move": return this.pin(command.pinId, viewer, "move", command.to);
       case "prefs.set": return this.setPrefs(command, viewer);
-      case "decisionRight.set": return this.decisionRight(command.rule, command.who, command.dailyLimit, viewer);
+      case "decisionRight.set": return this.decisionRight(command.rule, command.who, command.dailyLimit, command.personId ?? null, viewer);
+      case "recent.visit": return this.visitPage(command.target, viewer);
       case "skill.run": return this.runSkill(command.skill, command.text, command.model, viewer);
       case "skill.create": return this.createSkill(command.description, viewer);
       case "access.set": return this.setAccess(command.topicId, command.personId, command.access.kind, command.access.stages ?? [], viewer);
@@ -329,14 +363,56 @@ export class World {
     throw new Problem("forbidden", "This reader cannot change that work.");
   }
 
+  private laneStage(lane: LaneView): string | undefined {
+    const topic = this.topics.get(lane.topicId ?? "");
+    return topic?.plan?.stages.find(stage => stage.rows.some(row => row.laneId === lane.id))?.name;
+  }
+
   private sharedLane(lane: LaneView, viewer: Actor): boolean {
     if (!lane.topicId) return viewer.id === this.owner.id;
     if (this.fullTopic(lane.topicId, viewer)) return true;
     const entry = this.accessEntry(lane.topicId, viewer);
-    if (entry?.access.kind !== "stages") return false;
-    const topic = this.topics.get(lane.topicId);
-    const stage = topic?.plan?.stages.find(item => item.rows.some(row => row.laneId === lane.id))?.name;
-    return stage ? (entry.access.stages ?? []).includes(stage) : lane.waitsFor?.id === viewer.id;
+    const stage = this.laneStage(lane);
+    return Boolean(entry?.access.kind === "stages" && stage && entry.access.stages?.includes(stage));
+  }
+
+  private hasDecisionRight(decision: DecisionView, viewer: Actor): boolean {
+    if (viewer.id === this.owner.id) return true;
+    return this.fullTopic(decision.topicId, viewer) &&
+      this.settings.decisionRights.some(right => right.rule === decision.rule && right.who === "agent" && right.personId === viewer.id);
+  }
+
+  private requireDecisionRight(decision: DecisionView, viewer: Actor): void {
+    if (!this.hasDecisionRight(decision, viewer)) {
+      throw new Problem("forbidden", "This decision belongs to the owner or the person named by its decision right.");
+    }
+  }
+
+  private projectLane(lane: LaneView, viewer: Actor): LaneView {
+    if (viewer.id === this.owner.id) return lane;
+    const decision = lane.decisionId ? this.decisions.get(lane.decisionId) : undefined;
+    if (decision && !this.hasDecisionRight(decision, viewer)) {
+      lane.decisionId = null;
+      lane.approveLabel = null;
+      lane.yours = null;
+      lane.acts = lane.acts.filter(action => action.id !== "undo" && action.id !== "approve" && action.target?.kind !== "decision");
+      if (decision.state === "open") {
+        lane.waitsFor = this.owner;
+        lane.stateWord = `Waits for ${this.owner.shortName}`;
+        lane.standing = { headline: `It waits for ${this.owner.shortName}.`, detail: `${this.owner.shortName} has the decision.` };
+      }
+    }
+    if (lane.waitsFor?.id === viewer.id) {
+      lane.stateWord = "Waits for you";
+      lane.standing.headline = "It waits for you.";
+      lane.acts = lane.acts.filter(action => action.personId !== viewer.id);
+      if (lane.id === "outreach-wave-2") {
+        lane.short = "Wave 2: 24 emails";
+        lane.ask = "check them before they go out · by 11:00";
+        lane.acts.push({ id: "send-wave-2", label: "Send wave 2", tone: "ink", personId: viewer.id, target: null });
+      }
+    }
+    return lane;
   }
 
   private lane(id: string): LaneView | undefined {
@@ -358,22 +434,43 @@ export class World {
     if (decision && decision.state !== "open") {
       lane.acts = decision.state === "expired" ? [] : [{ id: "undo", label: "Undo", tone: "quiet", target: null, personId: null }];
       if (decision.state === "approved" && !held) {
-        lane.state = "ok";
-        lane.stateWord = "Working";
-        lane.next = lane.afterNext ?? lane.next;
-        lane.standing = { headline: "You approved it.", detail: lane.after ?? lane.status };
-        let promoted = false;
-        lane.steps = lane.steps.map(step => {
-          if (step.kind === "now") return { ...step, kind: "ok" };
-          if (step.kind === "todo" && !promoted) {
-            promoted = true;
-            return { ...step, kind: "now" };
-          }
-          return step;
-        });
+        const release = decision.release;
+        lane.yours = null;
+        lane.waitsFor = null;
+        lane.state = release?.stage === "done" ? "done" : "ok";
+        lane.stateWord = release?.stage === "scheduled" ? "Scheduled" : WORDS[lane.state];
+        if (release) {
+          const done = release.stage === "done";
+          lane.next = done ? "Report the rollout result" : release.stage === "scheduled" ? "Rollout is scheduled" : "Watch export failures during rollout";
+          lane.standing = { headline: "You approved it.", detail: done ? "The rollout is complete." : decision.doneNote };
+          lane.lead = { ...lane.lead, state: lane.state, word: lane.stateWord };
+          lane.crew = lane.crew.map(member => member.id === lane.lead.id ? lane.lead : member);
+          lane.steps = lane.steps.map(step => !done ? step : { ...step, kind: "ok" });
+        } else {
+          lane.next = lane.afterNext ?? lane.next;
+          lane.standing = { headline: "You approved it.", detail: lane.after ?? lane.status };
+          let promoted = false;
+          lane.steps = lane.steps.map(step => {
+            if (step.kind === "now") return { ...step, kind: "ok" };
+            if (step.kind === "todo" && !promoted) {
+              promoted = true;
+              return { ...step, kind: "now" };
+            }
+            return step;
+          });
+        }
       } else {
         const headline = held ? "The pull request is held." : decision.state === "declined" ? "You declined it." : "The decision expired.";
-        lane.standing = { headline, detail: decision.ifNoAnswer ?? lane.status };
+        if (!held) {
+          lane.state = "parked";
+          lane.stateWord = decision.state === "declined" ? "Declined" : "Expired";
+          lane.yours = null;
+          lane.waitsFor = null;
+          lane.next = null;
+          lane.approveLabel = null;
+          lane.steps = lane.steps.map(step => step.kind === "now" ? { ...step, kind: "todo" } : step);
+        }
+        lane.standing = { headline, detail: decision.ifNoAnswer ?? headline };
       }
     }
     return lane;
@@ -382,20 +479,24 @@ export class World {
   private visibleLane(id: string, viewer: Actor): LaneView {
     const lane = requireRecord(this.lane(id), "lane");
     if (!this.sharedLane(lane, viewer)) throw new Problem("forbidden", "That lane is outside this reader’s access.");
-    return lane;
+    return this.projectLane(lane, viewer);
   }
 
   private allLanes(viewer: Actor): LaneView[] {
     return [...this.lanes.keys()].flatMap(id => {
       const lane = this.lane(id);
-      return lane && this.sharedLane(lane, viewer) ? [lane] : [];
+      return lane && this.sharedLane(lane, viewer) ? [this.projectLane(lane, viewer)] : [];
     });
   }
 
   private sidebar(viewer: Actor): SidebarView {
     const lanes = this.allLanes(viewer).filter(lane => lane.state !== "done").sort(sortLanes);
     const pinIds = this.pinsOf(viewer);
-    const pinnable = this.sidebarBase.pinnable.filter(pin => this.pinVisible(pin, viewer)).map(pin => ({ ...pin, pinned: pinIds.includes(pin.id) }));
+    const open = this.queue(viewer).open;
+    const pinnable = this.sidebarBase.pinnable.filter(pin => this.pinVisible(pin, viewer)).map(pin => ({
+      ...pin, pinned: pinIds.includes(pin.id), badge: pin.id === "t-decide" ? open > 0 : pin.badge,
+      badgeCount: pin.id === "t-decide" ? open : null,
+    }));
     const summarize = (lane: LaneView) => ({
       id: lane.id, title: lane.title, state: lane.state, stateWord: lane.stateWord, leadName: labelFor(lane, viewer), fresh: lane.fresh,
     });
@@ -434,7 +535,7 @@ export class World {
     const view = structuredClone(this.briefBase);
     view.decisions = [...this.decisions.values()].filter(d => this.fullTopic(d.topicId, viewer)).map(d => ({
       id: d.id, topicId: d.topicId, topicName: d.topicName, title: d.title, dueAt: d.dueAt, whyYours: d.whyYours ?? "",
-      context: d.cardContext, minutes: d.minutes, doneNote: d.doneNote, laneId: d.laneId, state: d.state,
+      context: d.cardContext, minutes: d.minutes, doneNote: d.doneNote, laneId: d.laneId, state: d.state, rule: d.rule,
     }));
     view.openCount = view.decisions.filter(d => d.state === "open").length;
     view.minutes = view.decisions.filter(d => d.state === "open").reduce((total, d) => total + d.minutes, 0);
@@ -446,7 +547,7 @@ export class World {
     });
     view.overnight = view.overnight.filter(item => viewer.id === this.owner.id || (item.topicId && this.fullTopic(item.topicId, viewer)))
       .map(item => ({ ...item, undone: this.history.get(this.overnightAliases.get(item.id) ?? item.id)?.row.undone ?? false }));
-    view.topics = view.topics.filter(topic => this.role(topic.id, viewer) !== "none").map(item => {
+    view.topics = view.topics.filter(topic => this.fullTopic(topic.id, viewer)).map(item => {
       const topic = this.topicView(item.id, viewer, new URLSearchParams());
       const original = this.topics.get(item.id)?.goal;
       const progress = topic.goal && original && topic.goal.target !== original.target
@@ -454,13 +555,18 @@ export class World {
       return { ...item, progress, verdict: topic.goal?.verdict.word ?? topic.health?.word ?? item.verdict,
         state: topic.goal?.verdict.state ?? topic.health?.state ?? item.state };
     });
+    view.settledBurns = [...this.settlements.values()].filter(item => {
+      const lane = this.lane(item.laneId);
+      return lane && this.sharedLane(lane, viewer) && viewer.id === this.owner.id;
+    });
+    if (view.settledBurns.length && view.burns.length === 0) view.burnsSub = "Nothing else is stuck.";
     const key = (["no", "one", "two", "three", "four"] as const)[view.openCount] ?? String(view.openCount);
     const burns = view.burns.length === 0 ? "" : view.burns.length === 1
       ? this.module === "dev" ? " and main is red in the web app" : " and one thing is stuck" : ` and ${view.burns.length} things are stuck`;
     const decisions = `${key[0]?.toUpperCase() ?? ""}${key.slice(1)} ${view.openCount === 1 ? "decision needs" : "decisions need"} you`;
     view.lede = `${decisions}${burns}. ${this.module === "dev" ? "Everything else was built, reviewed and shipped while you slept." : "Everything else moved on its own while you slept."}`;
     view.nextBriefAt = this.nextBrief(prefs.briefsPerDay);
-    view.cadence = prefs.interruptOnlyUrgent ? "Between briefs, you hear only about what cannot wait." : "Between briefs, you hear about changes as they happen.";
+    view.cadence = prefs.interruptOnlyUrgent ? "Until then you hear only about what cannot wait." : "Until then you hear about changes as they happen.";
     if (viewer.id === this.owner.id) {
       const drafts = this.draftsView();
       if (view.drafts.count !== drafts.count) {
@@ -475,9 +581,21 @@ export class World {
         };
       }
     } else {
+      view.sharedTopics = [...this.topics.keys()].flatMap(id => {
+        if (this.role(id, viewer) === "none") return [];
+        const view = this.topicView(id, viewer, new URLSearchParams());
+        return view.status ? [view.status] : [];
+      });
+      view.topics = [];
+      if (!view.burns.length) view.burnsSub = null;
+      view.decisions = [];
+      view.openCount = 0;
+      view.minutes = 0;
+      view.overnight = [];
       view.spend = null;
       view.drafts = { count: 0, text: "", detail: "" };
       view.inWorks = null;
+      view.lede = "Your brief covers the work shared with you.";
     }
     return view;
   }
@@ -574,10 +692,9 @@ export class World {
     }
     if (view.goal) {
       const goal = view.goal;
-      const latest = [...this.decisions.values()].findLast(item => item.topicId === id && item.goalChange && item.state === "approved")?.goalChange;
-      if (latest) {
-        goal.target = latest.to;
-        goal.trajectory.goal = latest.to;
+      const changes = [...this.decisions.values()].filter(item => item.topicId === id && item.goalChange && item.state === "approved");
+      for (const item of changes) {
+        if (item.goalChange) this.projectGoalChange(goal, item.goalChange);
       }
       const decision = goal.decision?.decisionId && this.decisions.get(goal.decision.decisionId);
       if (goal.decision && decision && decision.state === "approved") {
@@ -585,6 +702,7 @@ export class World {
         const lane = goal.decision.laneId && this.lane(goal.decision.laneId);
         if (lane && lane.shortAfter) goal.decision.detail = lane.shortAfter;
       }
+      if (decision && (decision.state === "declined" || decision.state === "expired")) goal.decision = null;
       for (const deal of goal.deals) {
         const alt = deal.alt;
         if (alt && approved(alt.decisionId)) {
@@ -606,6 +724,11 @@ export class World {
           ...goal.verdict, action: "Work resumed", text: goal.calmSub,
           state: goal.verdict.state === "bad" ? "warn" : goal.verdict.state,
         };
+        if (this.settlements.has("webinar") && id === "content") {
+          goal.decision = null;
+          goal.calm = "The promo is settled";
+          goal.verdict = { ...goal.verdict, state: "warn", word: "Behind plan", action: "Reminder Wednesday", text: null };
+        }
       }
       if (goal.guardrails && view.spend && view.spend.cap.amountMinor > 0) {
         const ratio = view.spend.spent.amountMinor / view.spend.cap.amountMinor;
@@ -615,16 +738,31 @@ export class World {
         });
       }
     }
+    if (viewer.id !== this.owner.id) {
+      const dash = role === "all" ? "You work on all of it" : role === "stages" ? `You run ${stages.join(", ")}` : "You see the status";
+      view.meta = { askedBy: null, ownerLine: null, nextReport: null, parts: [`Shared by ${this.owner.name}`, dash] };
+      if (role === "view" && id === "partnerships") view.meta.nextReport = "The weekly report comes on Friday at 08:00.";
+      const goal = view.goal;
+      const health = goal ? { state: goal.verdict.state, word: goal.verdict.word } : view.health;
+      view.status = {
+        topicId: id, name: view.name,
+        signed: goal?.signed ?? null, goal: goal?.target ?? null, unit: goal?.unit ?? null, health,
+        nextReportAt: id === "partnerships" ? "2026-11-20T08:00:00+01:00" : null,
+      };
+      view.health = health;
+    }
     if (role === "view" || role === "stages") {
+      const team = new Set(lanes.flatMap(lane => [lane.lead.id, ...lane.crew.map(actor => actor.id)]));
+      const workers = new Set((view.plan?.stages ?? []).filter(stage => stages.includes(stage.name)).flatMap(stage => stage.rows.map(row => row.who)));
       view.goal = null;
       view.spend = null;
-      view.meta = null;
-      view.crew = [];
-      view.jobs = [];
-      view.tasks = [];
+      view.crew = role === "view" ? [] : view.crew.filter(actor =>
+        actor.id === viewer.id || actor.id === this.owner.id || team.has(actor.id) || workers.has(actor.name) || workers.has(actor.shortName));
+      view.jobs = view.jobs.filter(job => job.laneId && byId(lanes, job.laneId));
+      view.tasks = view.tasks.filter(task => task.laneId && byId(lanes, task.laneId));
       view.facts = [];
       view.stuck = null;
-      view.focusLaneId = null;
+      view.focusLaneId = lanes.find(lane => lane.waitsFor?.id === viewer.id)?.id ?? null;
       view.noGoal = null;
       view.intro = "";
       view.chatSub = role === "view" ? "" : `${stages.join(", ")} chat`;
@@ -639,19 +777,24 @@ export class World {
     const role = this.role(id, viewer);
     if (role !== "owner" && role !== "all" && role !== "stages") throw new Problem("forbidden", "The topic’s history is outside this reader’s access.");
     const base = topic.history;
+    const laneId = query.get("laneId");
+    if (laneId && this.visibleLane(laneId, viewer).topicId !== id) throw missing("lane");
     const canSee = (entry: HistoryRow) => {
-      if (entry.decisionId && this.decisions.get(entry.decisionId)?.state !== "approved") return false;
+      if (laneId && entry.laneId !== laneId) return false;
+      if (entry.decisionId && !this.history.has(entry.id)
+        && (this.decisions.get(entry.decisionId)?.state !== "approved" || this.history.has(`decision-${entry.decisionId}`))) return false;
       if (role !== "stages") return true;
       const lane = entry.laneId && this.lanes.get(entry.laneId);
-      return Boolean(lane && this.sharedLane(lane, viewer));
+      return Boolean(lane && lane.topicId === id && this.sharedLane(lane, viewer));
     };
     const existing = (base?.days ?? []).flatMap(day => day.entries.flatMap(entry => {
       if (entry.kind !== "event" || !canSee(entry)) return [];
       return [{ label: day.label, entry: this.history.get(entry.id)?.row ?? entry }];
     }));
     const added = [...this.history.values()].filter(action => action.topicId === id && !this.fixtureActions.has(action.row.id) && canSee(action.row)).reverse()
-      .map(action => ({ label: Date.parse(action.row.at) < Date.parse(hour("00:00")) ? "Sunday 15 November" : "Monday 16 November", entry: action.row }));
-    const { items, nextCursor } = page([...added, ...existing], item => item.entry.id, `history:${id}:${viewer.id}`, query);
+      .map(action => ({ label: Date.parse(action.row.at) < Date.parse(hour("00:00")) ? "Yesterday" : "Today", entry: action.row }));
+    const records = [...added, ...existing].sort((a, b) => Date.parse(b.entry.at) - Date.parse(a.entry.at));
+    const { items, nextCursor } = page(records, item => item.entry.id, `history:${id}:${viewer.id}:${laneId ?? ""}`, query);
     const days: HistoryPage["days"] = [];
     const seenAt = this.seen.get(`${viewer.id}:${id}`) ?? (role === "owner" ? base?.seen.at : null) ?? null;
     let seenAdded = false;
@@ -665,9 +808,10 @@ export class World {
         day.entries.push({ kind: "seen" });
         seenAdded = true;
       }
-      day.entries.push(entry);
+      day.entries.push(role === "stages" ? { ...entry, text: entry.text.replaceAll("your mail", `${this.owner.shortName}'s mail`) } : entry);
     }
-    return { seen: { at: seenAt }, shown: items.length, since: base?.since ?? "", days, nextCursor };
+    const newSince = records.filter(item => !seenAt || Date.parse(item.entry.at) > Date.parse(seenAt)).length;
+    return { seen: { at: seenAt }, shown: items.length, newSince, since: base?.since ?? "", days, nextCursor };
   }
 
   private threadTopic(id: string): string | null {
@@ -687,6 +831,13 @@ export class World {
     }
     const topicId = this.threadTopic(id);
     return topicId ? this.fullTopic(topicId, viewer) || (scope.kind === "topic" && this.role(topicId, viewer) === "stages") : viewer.id === this.owner.id;
+  }
+
+  private seesAudience(topicId: string, audience: MessageAudience, viewer: Actor): boolean {
+    if (this.fullTopic(topicId, viewer)) return true;
+    const access = this.accessEntry(topicId, viewer)?.access;
+    return access?.kind === "stages" && (audience.kind === "topic" ||
+      (audience.kind === "stage" && Boolean(access.stages?.includes(audience.stage))));
   }
 
   private writableThread(id: string, viewer: Actor): ThreadView {
@@ -714,9 +865,17 @@ export class World {
       view.agents = null;
       view.pinned = null;
       view.suggestions = [];
-      view.messages = view.messages.filter(message => {
-        const lane = message.threadCard && this.lanes.get(message.threadCard.laneId);
-        return Boolean(lane && this.sharedLane(lane, viewer));
+      view.messages = view.messages.filter(message => this.seesAudience(associatedTopic, message.audience, viewer)).map(message => {
+        const visible = (id: string) => {
+          const lane = this.lanes.get(id);
+          return Boolean(lane && this.sharedLane(lane, viewer));
+        };
+        return {
+          ...message,
+          decisionId: null,
+          threadCard: message.threadCard && visible(message.threadCard.laneId) ? message.threadCard : null,
+          actions: message.actions.filter(action => visible(action.laneId)),
+        };
       });
     } else if (associatedTopic) {
       const seen = this.seen.get(`${viewer.id}:${associatedTopic}`);
@@ -777,6 +936,7 @@ export class World {
     if (command.briefsPerDay != null) prefs.briefsPerDay = command.briefsPerDay;
     if (command.layout) {
       const device = command.deviceId ?? null;
+      if (device !== null && (!device.length || device.length > 200)) throw new Problem("badRequest", "deviceId must be 1 to 200 characters.");
       const layout = { ...this.prefsOf(viewer, device).layout };
       if (command.layout.sidebarWidth != null) layout.sidebarWidth = command.layout.sidebarWidth;
       if (command.layout.chatWidth != null) layout.chatWidth = command.layout.chatWidth;
@@ -787,11 +947,14 @@ export class World {
     return done([{ type: "prefs.changed" }, ...(command.briefsPerDay != null ? [{ type: "brief.published" } as const] : [])]);
   }
 
-  private decisionRight(rule: string, who: "you" | "agent", dailyLimit: DailyLimit | null | undefined, viewer: Actor): Effect {
+  private decisionRight(rule: string, who: "you" | "agent", dailyLimit: DailyLimit | null | undefined, personId: string | null, viewer: Actor): Effect {
     this.requireOwner(viewer);
     const setting = requireRecord(this.settings.decisionRights.find(item => item.rule === rule), "decision right");
     if (setting.risky && who === "agent" && dailyLimit == null) throw new Problem("badRequest", "Delegating this decision right requires a daily limit.");
+    if (personId && who !== "agent") throw new Problem("badRequest", "Name a person only when delegating the right.");
+    if (personId) requireRecord(this.people.get(personId), "person");
     setting.who = who;
+    setting.personId = personId;
     setting.dailyLimit = who === "you" ? null : dailyLimit ?? null;
     return done([{ type: "prefs.changed" }]);
   }
@@ -864,7 +1027,8 @@ export class World {
     for (const stage of topic.stages) {
       if (stage.runBy?.id === personId && !(kind === "all" || grant.stages.includes(stage.name))) stage.runBy = null;
     }
-    return done([{ type: "access.changed", topicId: id }]);
+    return done([...this.access.values()].filter(view => view.topicId === id || view.people.some(item => item.person.id === personId))
+      .map(view => ({ type: "access.changed", topicId: view.topicId })));
   }
 
   private assign(id: string, stageName: string, personId: string, viewer: Actor): Effect {
@@ -892,12 +1056,48 @@ export class World {
     return done([{ type: "access.changed", topicId: id }, { type: "topic.changed", topicId: id }]);
   }
 
+  private recentTitle(page: Target, viewer: Actor): string | undefined {
+    const id = page.id ?? "";
+    switch (page.kind) {
+      case "topic": return this.role(id, viewer) === "none" ? undefined : this.topics.get(id)?.name;
+      case "lane": {
+        const lane = this.lane(id);
+        return lane && this.sharedLane(lane, viewer) ? lane.title : undefined;
+      }
+      case "decision": {
+        const decision = this.decisions.get(id);
+        return decision && this.fullTopic(decision.topicId, viewer) ? decision.title : undefined;
+      }
+      case "thread": return this.canReadThread(id, viewer) ? this.threads.get(id)?.title : undefined;
+      case "person": return (viewer.id === this.owner.id || id === viewer.id) ? this.people.get(id)?.name : undefined;
+      case "draft": return viewer.id === this.owner.id ? byId(this.draftsView().items, id)?.subject : undefined;
+      case "skill": return viewer.id === this.owner.id ? byId(this.skills.skills, id)?.name : undefined;
+      case "pull": return viewer.id === this.owner.id ? byId(this.pulls.items, id)?.title ?? (page.id === null ? "Pull requests" : undefined) : undefined;
+      case "manager": return viewer.id === this.owner.id ? "Manager" : undefined;
+      case "drafts": return viewer.id === this.owner.id ? "Drafts" : undefined;
+      case "skills": return viewer.id === this.owner.id ? "Skills" : undefined;
+      case "brief": return "Brief";
+      case "settings": return "Settings";
+      case "unknown": return undefined;
+    }
+  }
+
+  private visitPage(destination: Target, viewer: Actor): Effect {
+    const title = this.recentTitle(destination, viewer);
+    if (!title) throw missing("page");
+    const previous = this.recent.get(viewer.id) ?? [];
+    const items = previous.filter(item => item.target.kind !== destination.kind || item.target.id !== destination.id);
+    this.recent.set(viewer.id, [{ title, target: destination, at: this.now }, ...items].slice(0, 6));
+    return done();
+  }
+
   private invite(id: string, nameOrEmail: string, viewer: Actor): Effect {
     this.requireOwner(viewer);
     const access = requireRecord(this.access.get(id), "topic");
     const name = nameOrEmail.trim();
     if (!name) throw new Problem("badRequest", "Enter a name or email address.");
-    if (access.invitations.some(item => item.nameOrEmail.toLowerCase() === name.toLowerCase())) return done();
+    if (access.people.some(item => item.person.name.toLowerCase() === name.toLowerCase())
+      || access.invitations.some(item => item.nameOrEmail.toLowerCase() === name.toLowerCase())) return done();
     access.invitations.push({ id: `invite-${++this.serial}`, nameOrEmail: name, state: "pending", invitedAt: this.now });
     return done([{ type: "access.changed", topicId: id }]);
   }
@@ -953,7 +1153,9 @@ export class World {
   private undo(id: string, undone: boolean, viewer: Actor): Effect {
     const action = requireRecord(this.history.get(this.overnightAliases.get(id) ?? id), "action");
     const lane = action.row.laneId ? this.lanes.get(action.row.laneId) : undefined;
-    if (action.topicId) this.writableTopic(action.topicId, viewer, lane);
+    const decision = action.record.startsWith("decision-") ? this.decisions.get(action.record.slice("decision-".length)) : undefined;
+    if (decision) this.requireDecisionRight(decision, viewer);
+    else if (action.topicId) this.writableTopic(action.topicId, viewer, lane);
     else this.requireOwner(viewer);
     if (action.row.undone === undone) return done();
     const actions = [...this.history.values()].filter(item => item.record === action.record);
@@ -979,11 +1181,12 @@ export class World {
     const source = options.fromChat && topic ? `In the ${topic.name} chat` : "You to the Manager";
     const note = topic ? `Filed under ${topic.name}. ${lead.name} leads.` : "The Manager keeps it until it knows where it belongs.";
     const status = topic ? `${lead.name} is reading your ask and will set what done means before starting.` : note;
+    const askText = options.attachment ? `${text} (with ${options.attachment.name})` : text;
     const lane: LaneView = {
       id, topicId, title: text, state: "new", stateWord: "Starting", lead, waitsFor: null,
       openedAt: this.now, closedAt: null, next: "Within the hour", afterNext: null, decisionId: null,
       short: null, ask: null, shortAfter: null, recommendation: null, yours: null, checks: [], delay: null,
-      approveLabel: null, after: null, asked: text, askedMeta: { source, note }, status,
+      approveLabel: null, after: null, asked: askText, askedMeta: { source, note }, status,
       standing: { headline: "Just opened.", detail: status },
       acts: [{ id: "undo-file", label: "Undo", tone: "quiet", personId: null, target: null }],
       thumbs: [], steps: [
@@ -995,7 +1198,8 @@ export class World {
       attachment: options.attachment ?? null, model: model?.id ?? null, chain, reminder: null,
     };
     const receipt: Receipt = {
-      text: options.attachment ? `${text} (with file)` : text, filedUnder: topicId ? target("topic", topicId) : target("manager"),
+      actionId: `file-${id}`,
+      text: askText, filedUnder: topicId ? target("topic", topicId) : target("manager"),
       lead, chain, laneId: id,
     };
     const message = this.message(lead, `Filed it. ${note}`, null);
@@ -1053,10 +1257,22 @@ export class World {
     if (lane.decisionId && actionId === "approve" && lane.approveLabel) return this.setDecision(lane.decisionId, "approved", viewer);
     if (!action) throw new Problem("badRequest", "That choice is not available on this lane.");
     if (action.target) return done([], id);
+    if (id === "webinar" && (actionId === "post-passing" || actionId === "one-more-round")) {
+      return this.settleWebinar(lane, actionId, viewer);
+    }
+    if (id === "outreach-wave-2" && actionId === "send-wave-2" && lane.waitsFor?.id === viewer.id) {
+      const base = requireRecord(this.lanes.get(id), "lane");
+      const status = "Wave 2 goes out at 20 a day. Mara sees it in her brief.";
+      const prior = { waitsFor: base.waitsFor, state: base.state, stateWord: base.stateWord, status: base.status, standing: base.standing, acts: base.acts };
+      const apply = (undone: boolean): Event[] => {
+        Object.assign(base, undone ? prior : { waitsFor: null, state: "ok", stateWord: "Working", status, standing: { headline: "Wave 2 is scheduled.", detail: status }, acts: [] });
+        return [...laneUpdate(id, base.topicId), { type: "thread.changed", threadId: "topic:partnerships" }, { type: "brief.changed" }];
+      };
+      const record = this.remember(base.topicId, id, status, viewer, apply, id);
+      return done([...apply(false), { type: "agentAction.changed", actionId: record.row.id }], id);
+    }
     if (action.personId) return this.remind(id, action.personId, viewer);
     const replies: Record<string, string> = {
-      "post-passing": "Publisher uses the four images that pass the brand check for the 16:00 post.",
-      "one-more-round": "Visuals gets one more round on the two images that failed the brand check.",
       "pin-the-old-session-library": "Builder pins the old session library and reruns the checks.",
       "allow-one-more-try": "Builder gets one more run to fix the failing sign-in test.",
     };
@@ -1076,11 +1292,39 @@ export class World {
     return done([...apply(false), { type: "agentAction.changed", actionId: record.row.id }]);
   }
 
+  private settleWebinar(lane: LaneView, choice: keyof typeof WEBINAR_SETTLEMENTS, viewer: Actor): Effect {
+    if (lane.state !== "bad") throw new Problem("conflict", "The promo is already settled.");
+    const values = WEBINAR_SETTLEMENTS[choice];
+    const base = requireRecord(this.lanes.get(lane.id), "lane");
+    const topicId = requireRecord(base.topicId, "topic");
+    const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, standing: base.standing, steps: base.steps, acts: base.acts };
+    const id = `action-${++this.serial}`;
+    const settlement = {
+      laneId: lane.id, actionId: id, title: values.receipt, stateWord: "Settled by you",
+      detail: "Nothing else is stuck.", target: target("topic", topicId),
+    };
+    const apply = (undone: boolean): Event[] => {
+      if (undone) this.settlements.delete(lane.id);
+      else this.settlements.set(lane.id, settlement);
+      Object.assign(base, undone ? previous : {
+        state: "ok", stateWord: "Working", status: values.status, next: values.status, acts: [],
+        standing: { headline: "The promo is settled.", detail: values.status },
+        steps: previous.steps.map(step => step.kind === "now" ? { kind: "ok", text: values.step, who: "You · now" } : step),
+      });
+      return [...laneUpdate(lane.id, topicId), { type: "thread.changed", threadId: `topic:${topicId}` }, { type: "brief.changed" }];
+    };
+    const record = this.remember(topicId, lane.id, values.history, viewer, apply, lane.id, id);
+    return done([...apply(false), { type: "agentAction.changed", actionId: id }], lane.id, null, {
+      actionId: record.row.id, text: values.receipt, laneId: lane.id, filedUnder: target("topic", topicId), lead: lane.lead, chain: false,
+    });
+  }
+
   private remind(id: string, personId: string, viewer: Actor): Effect {
     const lane = this.visibleLane(id, viewer);
     if (lane.topicId) this.writableTopic(lane.topicId, viewer, lane);
     const recipient = lane.waitsFor?.id === personId ? lane.waitsFor : byId(lane.crew, personId);
     if (!recipient || recipient.kind !== "person") throw missing("person");
+    if (recipient.id === viewer.id) throw new Problem("badRequest", "Choose someone else to remind.");
     const base = requireRecord(this.lanes.get(id), "lane");
     const previous = base.reminder;
     const reminder = { personId, at: this.now };
@@ -1096,7 +1340,8 @@ export class World {
     const lane = this.visibleLane(id, viewer);
     if (lane.topicId) this.writableTopic(lane.topicId, viewer, lane);
     const record = requireRecord(this.lanes.get(id), "lane");
-    const handover = requireRecord(record.handover, "handover");
+    const handover = record.handover;
+    if (!handover) throw new Problem("conflict", "There is no handover to confirm.");
     if (handover.confirmedAt) return done();
     const match = handover.match;
     const confirmedAt = this.now;
@@ -1123,7 +1368,7 @@ export class World {
 
   private setDecision(id: string, state: "approved" | "declined" | "open", viewer: Actor): Effect {
     const decision = requireRecord(this.decisions.get(id), "decision");
-    this.writableTopic(decision.topicId, viewer);
+    this.requireDecisionRight(decision, viewer);
     if (decision.state === state) return done();
     if (decision.state === "expired" || (state !== "open" && decision.state !== "open")) {
       throw new Problem("conflict", "The decision is already settled.");
@@ -1133,7 +1378,6 @@ export class World {
       if (decision.release?.stage === "done") throw new Problem("conflict", "The rollout has already finished.");
       return this.undo(actionId, true, viewer);
     }
-    const releaseStart = this.now;
     const pull = this.pulls.items.find(item => item.decisionId === id);
     if (state === "approved" && pull?.held) throw new Problem("conflict", "The pull request is held.");
     const initialPullState = pull?.state;
@@ -1144,8 +1388,9 @@ export class World {
       decision.state = undone ? "open" : state;
       const events = this.decisionEvents(decision);
       if (decision.release && state === "approved") {
-        decision.release.stage = undone ? "scheduled" : "rolling";
-        decision.release.startedAt = undone ? null : releaseStart;
+        decision.release.stage = "scheduled";
+        decision.release.startedAt = null;
+        this.releasePause.delete(decision.release.pullId);
         events.push({ type: "release.changed", decisionId: id });
       }
       if (pull && state === "approved" && !pull.held) {
@@ -1154,7 +1399,9 @@ export class World {
       }
       return events;
     };
-    this.remember(decision.topicId, actionId, `${state === "approved" ? "Approved" : "Declined"}: ${decision.title}`, viewer, apply, decision.laneId, actionId);
+    const record = this.remember(decision.topicId, actionId, `${state === "approved" ? "Approved" : "Declined"}: ${decision.title}`, viewer, apply, decision.laneId, actionId);
+    record.row.decision = true;
+    record.row.decisionId = id;
     return done(apply(false));
   }
 
@@ -1167,9 +1414,9 @@ export class World {
     return `From the record: ${answer?.text ?? topic.goal?.insight ?? topic.intro}`;
   }
 
-  private message(author: Actor, text: string, kind: LabelKind | null): Message {
+  private message(author: Actor, text: string, kind: LabelKind | null, audience: MessageAudience = { kind: "topic" }): Message {
     return {
-      id: `m${++this.messageSerial}`, at: this.now, author, text,
+      id: `m${++this.messageSerial}`, at: this.now, author, text, audience,
       label: kind ? { kind, corrected: false, pinned: kind === "decision" } : null,
       threadCard: null, readBack: null, actions: [], decisionId: null, attachment: null, model: null, page: null,
     };
@@ -1177,11 +1424,26 @@ export class World {
 
   private send(command: Extract<Command, { type: "message.send" }>, viewer: Actor): Effect {
     const { threadId, text } = command;
-    const thread = this.writableThread(threadId, viewer);
     const scope = requireRecord(threadScope(threadId), "thread");
     const topicId = this.threadTopic(threadId);
+    if (scope.kind === "topic" && topicId && (this.role(topicId, viewer) === "stages" || command.stage)) {
+      const topic = requireRecord(this.topics.get(topicId), "topic");
+      const stages = this.fullTopic(topicId, viewer) ? topic.stages.map(stage => stage.name) : this.accessEntry(topicId, viewer)?.access.stages ?? [];
+      const stage = command.stage ?? (stages.length === 1 ? stages[0] : undefined);
+      if (!stage) throw new Problem("badRequest", "Choose a stage for this message.");
+      if (!stages.includes(stage)) throw new Problem("forbidden", "This reader cannot post in that stage.");
+      const thread = requireRecord(this.threads.get(threadId), "thread");
+      const message = this.message(viewer, text, classify(text), { kind: "stage", stage });
+      message.attachment = command.attachment ?? null;
+      message.model = this.model(command.model)?.id ?? null;
+      thread.messages.push(message);
+      return done([{ type: "message.posted", threadId, message }], null, message);
+    }
+    if (command.stage) throw new Problem("badRequest", "Choose a topic conversation to post in a stage.");
+    const thread = this.writableThread(threadId, viewer);
     const topic = topicId ? this.topicView(topicId, viewer, new URLSearchParams()) : null;
-    const kind = scope.kind === "topic" || scope.kind === "manager" || scope.kind === "general" ? classify(text) : null;
+    const kind = scope.kind === "topic" || scope.kind === "manager" || scope.kind === "general"
+      ? command.page && /^(sum up|summari[sz]e)\b/i.test(text) ? "question" : classify(text) : null;
     const model = this.model(command.model);
     const sent = this.message(viewer, text, kind);
     sent.attachment = command.attachment ?? null;
@@ -1202,7 +1464,18 @@ export class World {
       const lane = this.visibleLane(scope.id, viewer);
       reply = this.message(lane.lead, "Got it. I add it to this lane and tell you here when it is done.", null);
     } else if (kind === "question" && topic) {
-      reply = this.message(blankActor(`${topic.name} manager`), this.questionReply(topic, text), null);
+      const answer = answerTo(text, topic.id, [topic], this.allLanes(viewer).filter(lane => lane.topicId === topic.id));
+      const source = answer?.target?.kind === "lane" ? this.lanes.get(answer.target.id ?? "") : undefined;
+      const stage = source ? this.laneStage(source) : undefined;
+      if (stage) sent.audience = { kind: "stage", stage };
+      reply = this.message(blankActor(`${topic.name} manager`), this.questionReply(topic, text), null, sent.audience);
+    } else if (kind === "question" && (scope.kind === "manager" || scope.kind === "general")) {
+      const page = command.page;
+      const named = page ? this.recentTitle(page, viewer) : undefined;
+      const brief = this.brief(viewer);
+      const detail = named && page?.kind === "lane" ? this.lane(page.id ?? "")?.status
+        : named && page?.kind === "topic" ? this.topics.get(page.id ?? "")?.goal?.insight : undefined;
+      reply = this.message(blankActor("Manager"), detail ? `From the record: ${detail}` : brief.lede, null);
     } else if (kind === "goalChange" && topic?.goal) {
       const decision = this.proposeGoal(topic, text, sent);
       reply = this.message(blankActor(`${topic.name} manager`), "I put the goal change in Decide. The goal stays as it is until you approve it.", null);
@@ -1223,11 +1496,69 @@ export class World {
     return done(events, filed?.lane.id ?? null, sent, filed?.receipt ?? null);
   }
 
+  private projectGoalChange(goal: NonNullable<TopicView["goal"]>, change: NonNullable<DecisionView["goalChange"]>): void {
+    const priorTarget = goal.target;
+    const unit = change.unit ?? goal.unit.split(/\s+by\s+/i)[0] ?? goal.unit;
+    goal.target = change.to;
+    goal.trajectory.goal = change.to;
+    if (change.deadlineAt) goal.deadlineAt = change.deadlineAt;
+    if (change.unit || change.deadlineAt) {
+      const date = goal.deadlineAt ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", timeZone: "Europe/Berlin" }).format(new Date(goal.deadlineAt)) : null;
+      goal.unit = date ? `${unit} by ${date}` : unit;
+      if (goal.trajectory.unit) goal.trajectory.unit = unit;
+    }
+    const targetFigure = goal.figures.find(figure => figure.of === String(priorTarget));
+    if (targetFigure) targetFigure.of = String(change.to);
+    const gap = Math.max(0, goal.target - goal.signed - (goal.likely ?? 0));
+    const unsecured = goal.figures.find(figure => /still (unsecured|missing)/i.test(figure.label));
+    if (unsecured) unsecured.value = String(gap);
+    if (goal.gap) {
+      goal.gap.says = gap === 0 ? `The current forecast reaches the goal of ${goal.target}.` : `To reach ${goal.target}, the forecast still needs ${gap} more ${unit}.`;
+    }
+    const trajectory = goal.trajectory;
+    const end = change.deadlineAt ? Math.round((Date.parse(change.deadlineAt.slice(0, 10)) - Date.parse(trajectory.start)) / 86400000) : null;
+    if (end !== null && end > trajectory.now) {
+      trajectory.days = end;
+      const label = new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "short", timeZone: "UTC" }).format(new Date(change.deadlineAt ?? ""));
+      trajectory.ticks = [...trajectory.ticks.filter(tick => tick.day < end), { day: end, label }];
+      trajectory.plan = [...trajectory.plan.filter(point => point.day < end), { day: end, value: change.to }];
+    } else if (priorTarget !== change.to) {
+      const last = trajectory.plan.at(-1);
+      if (last) last.value = change.to;
+    }
+  }
+
+  private proposalDeadline(text: string, current: string | null): string | null {
+    const base = new Date(this.now);
+    const date = /\b(?:by|to)\s+(?:the\s+)?(\d{1,2})\s+(January|February|March|April|May|June|July|August|September|October|November|December)(?:\s+(20\d{2}))?\b/i.exec(text);
+    if (date?.[1] && date[2]) {
+      const month = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].findIndex(name => name.toLowerCase() === date[2]?.toLowerCase());
+      const year = date[3] ? Number(date[3]) : current ? Number(current.slice(0, 4)) : base.getUTCFullYear();
+      const day = Number(date[1]);
+      let result = new Date(Date.UTC(year, month, day, 16));
+      if (!date[3] && result <= base) result = new Date(Date.UTC(year + 1, month, day, 16));
+      if (result.getUTCDate() !== day || result.getUTCMonth() !== month || result <= base) throw new Problem("badRequest", "Choose a valid future goal deadline.");
+      return result.toISOString();
+    }
+    if (/\bby (?:the )?end of the quarter\b/i.test(text)) {
+      const lastMonth = (Math.floor(base.getUTCMonth() / 3) + 1) * 3;
+      return new Date(Date.UTC(base.getUTCFullYear(), lastMonth, 0, 16)).toISOString();
+    }
+    return null;
+  }
+
   private proposeGoal(topic: TopicView, text: string, message: Message): DecisionView {
     const goal = requireRecord(topic.goal, "goal");
-    const number = /\b(?:to|target is|goal is)\s+(\d+)\b/i.exec(text)?.[1];
-    const to = number ? Number(number) : NaN;
-    if (!Number.isSafeInteger(to) || to <= 0) throw new Problem("badRequest", "Include the new numeric target after ‘to’.");
+    const deadlineAt = this.proposalDeadline(text, goal.deadlineAt);
+    const dateOnly = /\b(?:deadline|end date|due date)\b/i.test(text) && !/\b(?:target|from)\b/i.test(text);
+    const match = dateOnly ? null : /\b(?:to|target is|goal is)\s+(\d+)\b(?:\s+([a-z][a-z -]*?))?(?=\s+by\b|[.!?,]|$)/i.exec(text);
+    const to = match?.[1] ? Number(match[1]) : goal.target;
+    const currentUnit = goal.unit.split(/\s+by\s+/i)[0] ?? goal.unit;
+    const namedUnit = match?.[2]?.trim() ?? /\bunit to ([a-z][a-z -]{0,199}?)(?=\s+by\b|[.!?,]|$)/i.exec(text)?.[1]?.trim();
+    const unit = namedUnit && namedUnit.toLowerCase() !== currentUnit.toLowerCase() ? namedUnit : null;
+    if (!Number.isSafeInteger(to) || to <= 0 || (match === null && !deadlineAt && !unit)) {
+      throw new Problem("badRequest", "Include the new target, units or deadline for this goal.");
+    }
     const id = `dc-${++this.serial}`;
     const changesPaid = topic.id === "partnerships" && this.topics.has("paid");
     const detail = changesPaid ? "Paid’s partner budget and the Friday report follow the new goal." : "The new target applies to this topic’s plan.";
@@ -1237,7 +1568,12 @@ export class World {
       doneNote: "Approved. The goal is changed on record.", laneId: null, approveLabel: "Approve",
       provenance: null, context: detail, numbers: [], proof: null, opportunity: null, risk: null, suggestion: null,
       guardrail: null, nextSteps: [], ifNoAnswer: "Nothing changes without your answer.", position: { index: 0, of: 0, open: 0 },
-      changeRequest: null, release: null, goalChange: { topicId: topic.id, field: "target", from: goal.target, to, affectedTopics: changesPaid ? ["paid"] : [] },
+      changeRequest: null, release: null, rule: "hardToUndo",
+      goalChange: {
+        topicId: topic.id, field: to !== goal.target ? "target" : deadlineAt ? "deadline" : "unit",
+        from: goal.target, to, affectedTopics: changesPaid ? ["paid"] : [],
+        deadlineAt, previousDeadlineAt: goal.deadlineAt, unit, previousUnit: currentUnit,
+      },
     };
     this.decisions.set(id, decision);
     message.decisionId = id;
@@ -1254,6 +1590,11 @@ export class World {
     const message = requireRecord(byId(thread.messages, id), "message");
     if (kind === "decision" && !message.decisionId) message.decisionId = thread.pinned?.decisionId ?? null;
     message.label = { kind, corrected: true, pinned: kind === "decision" };
+    const decision = message.decisionId && this.threads.get(`decision:${message.decisionId}`);
+    if (kind === "decision" && decision && !containing.includes(decision)) {
+      decision.messages.push(message);
+      containing.push(decision);
+    }
     return done(containing.map(item => ({ type: "thread.changed", threadId: item.id })), null, message);
   }
 
@@ -1262,21 +1603,9 @@ export class World {
     return { ...this.drafts, items, count: items.length };
   }
 
-  private models(): ModelsView {
-    return {
-      items: [
-        { id: "auto", name: "Auto", vendor: "Morndo", state: "default" },
-        ...this.skills.connections.map(c => ({
-          id: c.id, name: c.name, vendor: c.name,
-          state: c.state === "signIn" || c.state === "addKey" ? c.state : "connected" as const,
-        })),
-      ],
-    };
-  }
-
   private model(id: string | null | undefined) {
     if (!id) return null;
-    const model = byId(this.models().items, id);
+    const model = byId(this.modelPicker.items, id);
     if (!model) throw new Problem("badRequest", "Choose a model from the model picker.");
     if (model.state === "addKey" || model.state === "signIn") throw new Problem("conflict", "Connect this model before using it.");
     return model;
@@ -1312,12 +1641,16 @@ export class World {
 
   private connect(id: string, viewer: Actor): Effect {
     this.requireOwner(viewer);
-    const connection = requireRecord(byId(this.skills.connections, id), "connection");
-    if (connection.state === "connected" || connection.state === "signedIn") return done();
-    connection.state = connection.state === "signIn" ? "signedIn" : "connected";
+    const connection = byId(this.skills.connections, id);
+    const model = byId(this.modelPicker.items, id);
+    if (!connection && !model) throw missing("connection");
+    if (model?.state === "addKey") model.state = "connected";
+    if (model?.state === "signIn") model.state = "signedIn";
+    if (connection?.state === "addKey") connection.state = "connected";
+    if (connection?.state === "signIn") connection.state = "signedIn";
     this.skills.connected = this.skills.connections.filter(item => item.state === "connected" || item.state === "signedIn").length;
     for (const skill of this.skills.skills) {
-      if (skill.needsKey && [connection.id, slug(connection.name)].includes(slug(skill.needsKey))) skill.enabled = true;
+      if (skill.needsKey && slug(skill.needsKey) === id) skill.enabled = true;
     }
     this.usage.missing = this.usage.missing.filter(name => slug(name) !== id);
     return done([{ type: "skills.changed" }, { type: "usage.changed" }]);
@@ -1350,8 +1683,9 @@ export class World {
       const events: Event[] = [{ type: "pull.changed", pullId: id }];
       if (release && priorStage && pull.decisionId) {
         if (undone && release.startedAt) {
-          const resumption = Date.parse(release.startedAt) + Date.parse(this.now) - heldAt;
-          release.startedAt = new Date(resumption).toISOString();
+          this.releasePause.set(id, (this.releasePause.get(id) ?? 0) + Date.parse(this.now) - heldAt);
+        } else if (undone && Date.parse(release.scheduledAt) < Date.parse(this.now)) {
+          release.scheduledAt = this.now;
         }
         if (!undone) heldAt = Date.parse(this.now);
         release.stage = undone ? priorStage : "held";
@@ -1383,18 +1717,31 @@ export class World {
       }
     }
     if (this.resetUsage(now)) events.push({ type: "usage.changed" });
+    for (const burn of this.briefBase.burns) {
+      if (burn.dueAt && Date.parse(burn.dueAt) > now && this.lane(burn.laneId)?.state === "bad") {
+        this.alertOnce(events, target("lane", burn.laneId), "This stuck lane has a deadline.");
+      }
+    }
     for (const decision of this.decisions.values()) {
+      if (decision.state === "open" && Date.parse(decision.dueAt) > now && Date.parse(decision.dueAt) < Date.parse(this.nextBrief(this.prefsOf(this.owner).briefsPerDay))) {
+        this.alertOnce(events, target("decision", decision.id), "This decision is due before the next brief.");
+      }
       if (decision.state === "open" && Date.parse(decision.dueAt) <= now) {
         decision.state = "expired";
         events.push({ type: "decision.expired", decisionId: decision.id }, ...this.decisionEvents(decision));
       }
       const release = decision.release;
+      if (release?.stage === "scheduled" && decision.state === "approved" && Date.parse(release.scheduledAt) <= now) {
+        release.stage = "rolling";
+        release.startedAt = release.scheduledAt;
+        events.push({ type: "release.changed", decisionId: decision.id }, ...(decision.laneId ? laneUpdate(decision.laneId, decision.topicId) : []));
+      }
       if (release?.startedAt && (release.stage === "rolling" || release.stage === "watching")) {
-        const elapsed = now - Date.parse(release.startedAt);
+        const elapsed = now - Date.parse(release.startedAt) - (this.releasePause.get(release.pullId) ?? 0);
         const stage = elapsed >= release.watchMinutes * 60000 ? "done" : elapsed >= 60000 ? "watching" : "rolling";
         if (stage === release.stage) continue;
         release.stage = stage;
-        events.push({ type: "release.changed", decisionId: decision.id });
+        events.push({ type: "release.changed", decisionId: decision.id }, ...(decision.laneId ? laneUpdate(decision.laneId, decision.topicId) : []));
         const pull = byId(this.pulls.items, release.pullId);
         if (stage === "done" && pull && !pull.held) {
           release.percent = 100;
@@ -1411,6 +1758,28 @@ export class World {
     return events;
   }
 
+  private alertOnce(events: Event[], destination: Target, reason: string): void {
+    const key = `${destination.kind}:${destination.id}`;
+    if (!this.alerted.has(key)) {
+      events.push({ type: "attention.raised", target: destination, reason });
+      this.alerted.add(key);
+    }
+  }
+
+  private pullsView(): PullsView {
+    const items = this.pulls.items.map(pull => {
+      const release = pull.decisionId ? this.decisions.get(pull.decisionId)?.release : undefined;
+      const verdict = pull.state === "held" ? "Held by you" : pull.state === "released" ? "Released" :
+        pull.state === "releasing" ? release?.stage === "scheduled" ? "Approved, rollout scheduled" : "Rollout in progress" : pull.verdict;
+      return { ...pull, verdict };
+    });
+    const active = items.filter(pull => pull.state !== "released");
+    const ready = active.filter(pull => pull.state === "ready").length;
+    const review = active.filter(pull => pull.state === "inReview" || pull.state === "blocked").length;
+    const auto = active.filter(pull => pull.state === "autoMerge").length;
+    return { ...this.pulls, items, summary: `${active.length} open · ${ready} ready · ${review} in review · ${auto} auto-merge` };
+  }
+
   private resetUsage(now: number): boolean {
     let changed = false;
     for (const account of [...this.usage.subscriptions, ...this.usage.keys]) {
@@ -1419,6 +1788,7 @@ export class World {
         if (meter.resetsAt === null || Date.parse(meter.resetsAt) > now) continue;
         meter.used = 0;
         if (meter.spend) meter.spend.amountMinor = 0;
+        if (meter.count) meter.count.used = 0;
         meter.resetsAt = null;
         reset = true;
       }
@@ -1440,9 +1810,16 @@ export class World {
     if ("threadId" in event) {
       if (!this.canReadThread(event.threadId, viewer)) return false;
       const topicId = this.threadTopic(event.threadId);
-      if (event.type === "message.posted" && topicId && !this.fullTopic(topicId, viewer) && threadScope(event.threadId)?.kind === "topic") {
-        const lane = event.message.threadCard && this.lanes.get(event.message.threadCard.laneId);
-        return Boolean(lane && this.sharedLane(lane, viewer));
+      if (event.type === "message.posted" && topicId) {
+        if (!this.seesAudience(topicId, event.message.audience, viewer)) return false;
+        if (!this.fullTopic(topicId, viewer)) {
+          if (event.message.decisionId || event.message.page) return false;
+          const ids = [...event.message.actions.map(action => action.laneId), ...(event.message.threadCard ? [event.message.threadCard.laneId] : [])];
+          if (ids.some(id => {
+            const lane = this.lanes.get(id);
+            return !lane || !this.sharedLane(lane, viewer);
+          })) return false;
+        }
       }
       return true;
     }
@@ -1456,6 +1833,10 @@ export class World {
     }
     if (event.type === "attention.raised") {
       if (event.target.kind === "topic") return this.fullTopic(event.target.id ?? "", viewer);
+      if (event.target.kind === "lane") {
+        const lane = this.lanes.get(event.target.id ?? "");
+        return Boolean(lane && this.sharedLane(lane, viewer));
+      }
       if (event.target.kind === "decision") {
         const decision = this.decisions.get(event.target.id ?? "");
         return Boolean(decision && this.fullTopic(decision.topicId, viewer));

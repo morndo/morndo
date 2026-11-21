@@ -210,7 +210,8 @@
       "target": {
         "kind": "brief",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -225,7 +226,8 @@
       "target": {
         "kind": "decision",
         "id": "d1"
-      }
+      },
+      "badgeCount": 4
     },
     {
       "id": "t-drafts",
@@ -240,7 +242,8 @@
       "target": {
         "kind": "drafts",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -255,7 +258,8 @@
       "target": {
         "kind": "skills",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-weekly",
@@ -270,7 +274,8 @@
       "target": {
         "kind": "skill",
         "id": "weekly-summary"
-      }
+      },
+      "badgeCount": null
     }
   ],
   "pinnable": [
@@ -287,7 +292,8 @@
       "target": {
         "kind": "brief",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -302,7 +308,8 @@
       "target": {
         "kind": "decision",
         "id": "d1"
-      }
+      },
+      "badgeCount": 4
     },
     {
       "id": "t-drafts",
@@ -317,7 +324,8 @@
       "target": {
         "kind": "drafts",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -332,7 +340,8 @@
       "target": {
         "kind": "skills",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "a-partnerships",
@@ -347,7 +356,8 @@
       "target": {
         "kind": "topic",
         "id": "partnerships"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "a-content",
@@ -362,7 +372,8 @@
       "target": {
         "kind": "topic",
         "id": "content"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "a-outbound",
@@ -377,7 +388,8 @@
       "target": {
         "kind": "topic",
         "id": "outbound"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "a-paid",
@@ -392,7 +404,8 @@
       "target": {
         "kind": "topic",
         "id": "paid"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "a-seo",
@@ -407,7 +420,8 @@
       "target": {
         "kind": "topic",
         "id": "seo"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "a-research",
@@ -422,7 +436,8 @@
       "target": {
         "kind": "topic",
         "id": "research"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-weekly",
@@ -437,7 +452,8 @@
       "target": {
         "kind": "skill",
         "id": "weekly-summary"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-post",
@@ -452,7 +468,8 @@
       "target": {
         "kind": "skill",
         "id": "linkedin-post"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-visual",
@@ -467,7 +484,8 @@
       "target": {
         "kind": "skill",
         "id": "brand-visual"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-ads",
@@ -482,7 +500,8 @@
       "target": {
         "kind": "skill",
         "id": "ad-variants"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-profile",
@@ -497,7 +516,8 @@
       "target": {
         "kind": "skill",
         "id": "icp-refresh"
-      }
+      },
+      "badgeCount": null
     }
   ],
   "pinLimit": 12

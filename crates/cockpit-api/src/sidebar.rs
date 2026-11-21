@@ -72,6 +72,8 @@ pub struct SidebarGroup {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Pin {
+    /// Current open decision count for the Decide pin.
+    pub badge_count: Present<u64>,
     /// Stable identifier for this record.
     pub id: PinId,
     /// Kind for this record.

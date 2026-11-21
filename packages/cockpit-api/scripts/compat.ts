@@ -70,7 +70,7 @@ interface OpenApi {
   paths: Record<string, Record<string, Operation>>;
 }
 
-export function compareRoutes(released: OpenApi, current: OpenApi): string[] {
+function compareRoutes(released: OpenApi, current: OpenApi): string[] {
   const failures: string[] = [];
   for (const [path, operations] of Object.entries(released.paths)) {
     for (const [method, before] of Object.entries(operations)) {
@@ -106,17 +106,21 @@ export function compareRoutes(released: OpenApi, current: OpenApi): string[] {
 
 function checkBaseline(ref: string, path: string, current: URL): void {
   const git = (args: string[]) => spawnSync("git", args, { encoding: "utf8" });
-  const revision = git(["rev-parse", "--verify", ref + "^{commit}"]);
+  const revision = git(["rev-parse", "--verify", "--end-of-options", ref + "^{commit}"]);
   if (revision.status !== 0) throw new Error("Could not read baseline revision");
   const tracked = git(["ls-tree", "--name-only", revision.stdout.trim(), "--", path]);
   if (tracked.status !== 0) throw new Error("Could not inspect baseline revision");
-  // On the first PR that ships this major, compare with its first committed baseline if present.
-  const first = tracked.stdout.trim() ? revision.stdout.trim()
-    : git(["log", "--format=%H", "--diff-filter=A", "--reverse", "HEAD", "--", path]).stdout.trim().split("\n")[0];
-  if (!first) return;
-  const previous = git(["show", `${first}:${path}`]);
-  if (previous.status !== 0 || previous.stdout !== readFileSync(current, "utf8")) {
-    throw new Error(`${path} changed within its major version`);
+  // Protect the first version even when a branch has no usable previous push revision.
+  const history = git(["log", "--format=%H", "--diff-filter=A", "--reverse", "HEAD", "--", path]);
+  if (history.status !== 0) throw new Error("Could not inspect release history");
+  const first = history.stdout.trim().split("\n")[0];
+  const references = new Set([...(tracked.stdout.trim() ? [revision.stdout.trim()] : []), ...(first ? [first] : [])]);
+  const bytes = readFileSync(current, "utf8");
+  for (const version of references) {
+    const previous = git(["show", `${version}:${path}`]);
+    if (previous.status !== 0 || previous.stdout !== bytes) {
+      throw new Error(`${path} changed within its major version`);
+    }
   }
 }
 
@@ -142,6 +146,7 @@ function compare(released: Contract, current: Contract): string[] {
       }
     }
     if (next.additionalProperties === false && old.additionalProperties !== false) fail(path, "additional properties disallowed");
+    // The release baseline predates the HTTPS-only attachment rule.
     const attachmentHardening = path === "AttachmentInput.url" && !old.pattern
       && next.pattern === "^https://" && next.maxLength === 2048;
     if (old.pattern !== next.pattern && !attachmentHardening && (old.pattern !== undefined || input)) fail(path, "pattern changed");
@@ -165,7 +170,8 @@ function compare(released: Contract, current: Contract): string[] {
       for (const added of parts.filter(part => !previous.some(branch => branchKey(branch) === branchKey(part)))) {
         const tag = branchKey(added).startsWith("tag:");
         const enumValue = added.const !== undefined && previous.length > 0 && previous.every(part =>
-          part.const !== undefined || (part.enum?.length && part.enum.every(value => typeof value === typeof added.const)));
+          part.const !== undefined ? typeof part.const === typeof added.const
+            : Boolean(part.enum?.length && part.enum.every(value => typeof value === typeof added.const)));
         const allowed = (name === "oneOf" || name === "anyOf")
           && ((tag && previous.some(part => branchKey(part).startsWith("tag:"))) || enumValue);
         if (!allowed) fail(path, `added ${name} member ${branchKey(added)} changes the type`);

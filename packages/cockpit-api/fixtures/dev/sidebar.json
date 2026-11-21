@@ -135,7 +135,8 @@
       "target": {
         "kind": "brief",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -150,7 +151,8 @@
       "target": {
         "kind": "decision",
         "id": "d1"
-      }
+      },
+      "badgeCount": 3
     },
     {
       "id": "t-pulls",
@@ -165,7 +167,8 @@
       "target": {
         "kind": "pull",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -180,7 +183,8 @@
       "target": {
         "kind": "skills",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "p-web",
@@ -195,7 +199,8 @@
       "target": {
         "kind": "topic",
         "id": "web"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-review",
@@ -210,7 +215,8 @@
       "target": {
         "kind": "skill",
         "id": "review"
-      }
+      },
+      "badgeCount": null
     }
   ],
   "pinnable": [
@@ -227,7 +233,8 @@
       "target": {
         "kind": "brief",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -242,7 +249,8 @@
       "target": {
         "kind": "decision",
         "id": "d1"
-      }
+      },
+      "badgeCount": 3
     },
     {
       "id": "t-pulls",
@@ -257,7 +265,8 @@
       "target": {
         "kind": "pull",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -272,7 +281,8 @@
       "target": {
         "kind": "skills",
         "id": null
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "p-web",
@@ -287,7 +297,8 @@
       "target": {
         "kind": "topic",
         "id": "web"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "p-api",
@@ -302,7 +313,8 @@
       "target": {
         "kind": "topic",
         "id": "api"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "p-billing",
@@ -317,7 +329,8 @@
       "target": {
         "kind": "topic",
         "id": "billing"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "p-mobile",
@@ -332,7 +345,8 @@
       "target": {
         "kind": "topic",
         "id": "mobile"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "p-infra",
@@ -347,7 +361,8 @@
       "target": {
         "kind": "topic",
         "id": "infra"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-review",
@@ -362,7 +377,8 @@
       "target": {
         "kind": "skill",
         "id": "review"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-red-main",
@@ -377,7 +393,8 @@
       "target": {
         "kind": "skill",
         "id": "red-main"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-release",
@@ -392,7 +409,8 @@
       "target": {
         "kind": "skill",
         "id": "release"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-qa",
@@ -407,7 +425,8 @@
       "target": {
         "kind": "skill",
         "id": "qa-by-hand"
-      }
+      },
+      "badgeCount": null
     },
     {
       "id": "s-upgrade",
@@ -422,7 +441,8 @@
       "target": {
         "kind": "skill",
         "id": "upgrade"
-      }
+      },
+      "badgeCount": null
     }
   ],
   "pinLimit": 12

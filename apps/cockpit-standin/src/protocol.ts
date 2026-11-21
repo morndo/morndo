@@ -13,6 +13,7 @@ const document = JSON.parse(readFileSync(new URL("../../../packages/cockpit-api/
 };
 
 const routes = Object.entries(document.paths).map(([path, operations]) => ({
+  path,
   pattern: new RegExp(`^${path.replace(/\{[^}]+\}/g, "([^/]+)")}$`),
   operations,
 }));
@@ -20,7 +21,7 @@ const routes = Object.entries(document.paths).map(([path, operations]) => ({
 export function matchRoute(path: string) {
   for (const route of routes) {
     const matches = route.pattern.exec(path);
-    if (matches) return { parameters: matches.slice(1).map(decodeURIComponent), operations: route.operations };
+    if (matches) return { path: route.path, parameters: matches.slice(1).map(decodeURIComponent), operations: route.operations };
   }
   return undefined;
 }
@@ -39,6 +40,7 @@ const problems = {
   unsupportedMediaType: [415, "Unsupported media type"],
   payloadTooLarge: [413, "Payload too large"],
   methodNotAllowed: [405, "Method not allowed"],
+  idempotencyKeyReused: [422, "Idempotency key reused"],
   internal: [500, "Internal error"],
 } as const satisfies Partial<Record<ErrorCode, readonly [number, string]>>;
 

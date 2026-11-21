@@ -154,7 +154,7 @@
         "kind": "lane",
         "id": "webinar"
       },
-      "stuckAt": "2026-11-15T09:12:00+01:00",
+      "stuckAt": "2026-11-16T08:44:50+01:00",
       "laneId": "webinar",
       "blocks": "The webinar promo goes out today.",
       "dueAt": "2026-11-16T16:00:00+01:00"

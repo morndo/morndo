@@ -101,7 +101,7 @@ pub struct ModuleCard {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionRight {
-    /// Person explicitly authorized to exercise this decision right.
+    /// Person explicitly granted this decision right. Topic work access by itself does not grant it.
     pub person_id: Present<crate::PersonId>,
     /// Rule for this record.
     pub rule: DecisionRule,
