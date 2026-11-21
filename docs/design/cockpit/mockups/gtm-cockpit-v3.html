@@ -999,15 +999,16 @@ input[type=range]:disabled{opacity:.4;cursor:default}
 .to{display:inline-flex;gap:2px;margin-top:8px;padding:2px;border-radius:var(--r-pill);background:var(--fill)}
 .to button{height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:500;color:var(--text-2)}
 .to button[aria-pressed="true"]{background:var(--ink);color:var(--ink-fg);font-weight:600}
-/* The command center (21 November): one field to find, ask, start or run. It lives at the top of the sidebar, where a
-   mouse user looks anyway, and opens out of it over the page; ⌘K and ⌘N open the same panel. */
+/* The command center (21 November): one field to find, ask, start or run. Its entry lives at the top of the sidebar,
+   where a mouse user looks anyway; a click, ⌘K and ⌘N all open the same modal, centred over the dimmed page as ⌘K always did. */
 .cmdrow{display:flex;align-items:center;gap:8px;height:32px;margin:0 2px;padding:0 10px;border-radius:var(--r-md);background:var(--tile);color:var(--muted);font-size:var(--fs-ui);text-align:left;flex:none}
 .cmdrow:hover{background:var(--tile-on);color:var(--text-2)}
 .cmdrow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cmdrow kbd{padding:0;background:none;font-size:var(--fs-2xs);color:var(--muted)}
 .cmdrow[aria-expanded="true"]{background:var(--tile-on);color:var(--text)}
 #tree>button.row[data-palette]{display:none}
-.cmd{font:var(--fs-md)/1.45 var(--sans);color:var(--text);position:fixed;z-index:70;left:10px;top:52px;width:min(580px,calc(100vw - 20px));max-height:min(620px,calc(100vh - 70px));display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-float,0 24px 70px rgba(0,0,0,.6));overflow:hidden;transform-origin:20px 0;animation:pop .18s cubic-bezier(.2,.9,.3,1.1)}
+.cmd-scrim{position:fixed;inset:0;z-index:69;background:rgba(0,0,0,.55);animation:fade .16s ease-out}
+.cmd{font:var(--fs-md)/1.45 var(--sans);color:var(--text);position:fixed;z-index:70;left:0;right:0;margin:0 auto;top:11vh;width:min(640px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 11vh - 16px));display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-float,0 24px 70px rgba(0,0,0,.6));overflow:hidden;animation:pop .2s var(--ease-pop)}
 .cmd-in{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px}
 .cmd button,.cmd input{font:inherit;color:inherit}
 .cmd-in input{flex:1;min-width:0;height:46px;background:none;border:0;outline:0;color:var(--text-hi);font:inherit;font-size:var(--fs-lg)}
@@ -3936,11 +3937,11 @@ try {
   // it ready to start something. It answers from the records, and before anything is started it says where it goes.
   const sideEl = $("#side");
   $(".row.ws", sideEl).insertAdjacentHTML("afterend", '<button class="cmdrow" data-cmd aria-haspopup="dialog" aria-expanded="false" aria-controls="cmd"><svg class="i sm"><use href="#search"/></svg><span>Find, ask or start…</span><kbd>⌘K</kbd></button>');
-  document.body.insertAdjacentHTML("beforeend", `<div class="cmd" id="cmd" role="dialog" aria-label="Find, ask or start" hidden>
+  document.body.insertAdjacentHTML("beforeend", `<div class="cmd-scrim" hidden></div><div class="cmd" id="cmd" aria-modal="true" role="dialog" aria-label="Find, ask or start" hidden>
     <div class="cmd-in"><svg class="i dim"><use href="#search"/></svg><span class="att" hidden></span><span class="scope" hidden></span><label class="sr" for="cmd-q">Find, ask or start</label><input id="cmd-q" autocomplete="off" spellcheck="false" role="combobox" aria-controls="cmd-list" aria-expanded="true"></div>
     <div class="cmd-list" id="cmd-list" role="listbox"></div>
     <div class="cmd-foot"><span><kbd>↵</kbd>Open or start</span><span><kbd>Tab</kbd>Another topic</span><span><kbd>/</kbd>Skills</span><span><kbd>Esc</kbd>Close</span></div></div>`);
-  const cmdEl = $("#cmd"), cq = $("#cmd-q"), clist = $("#cmd-list");
+  const cmdEl = $("#cmd"), cq = $("#cmd-q"), clist = $("#cmd-list"), scrim = $(".cmd-scrim");
   const C = { scope: null, start: false, att: null, sel: 0, items: [], target: undefined, recent: [] };
 
   // Where you have been, for the empty panel.
@@ -4069,15 +4070,14 @@ try {
     C.start = !!o.start; C.att = o.att || null; C.target = undefined; C.sel = 0;
     cq.value = "";
     chips();
-    const row = $(".cmdrow"), r = row.getBoundingClientRect(), shown = r.width && r.left >= 0 && r.right <= innerWidth && getComputedStyle(sideEl).visibility !== "hidden";
-    if (shown) { cmdEl.style.left = Math.max(8, r.left - 2) + "px"; cmdEl.style.top = r.top - 2 + "px"; }
-    else { cmdEl.style.left = Math.max(10, (innerWidth - 580) / 2) + "px"; cmdEl.style.top = "60px"; }
-    cmdEl.hidden = false;
+    const row = $(".cmdrow");
+    closePalette();
+    scrim.hidden = cmdEl.hidden = false;
     row.setAttribute("aria-expanded", "true");
     buildCmd();
     cq.focus();
   }
-  function closeCmd() { cmdEl.hidden = true; $(".cmdrow").setAttribute("aria-expanded", "false"); }
+  function closeCmd() { scrim.hidden = cmdEl.hidden = true; $(".cmdrow").setAttribute("aria-expanded", "false"); }
   function actCmd(it) {
     const s = cq.value.trim();
     if (!it) { if (s) actCmd({ kind: "start", topic: targetFor(s) }); return; }
