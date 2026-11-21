@@ -247,17 +247,20 @@ merged into this order rather than run beside it.
 
 Decided by the owner on 21 November: **D1 yes** (team), **D2 yes** (the hub stores history and chat text), **D3**
 headless runs or lanes in a terminal, whichever fits the job, with a more reliable lane runtime of our own (C26,
-section 8). D4-D7 are open.
+section 8). Also decided on 21 November: **D4** own connectors for every write, **D5** every tool the mockups name
+(the mail provider and the deploy target still to be named), **D6** both ways to sign the Mac in (a passkey with the
+token in the Keychain, and pairing by QR from a signed-in device), **D7** the Rust types are the source and the
+TypeScript types and runtime checks are generated from them.
 
 | # | Question | Why it matters | My recommendation |
 |---|---|---|---|
 | D1 | Is Morndo a team product in V1? **Decided: yes.** | The design has people in chats, waits for a person, sharing. The 13 November decisions said "still one person, sharing by links". | Yes, as the design shows. It changes C1, C3, C4 and C23 from the start, so it must be settled first. |
 | D2 | May the hub store chat text and the full history? **Decided: yes.** | ADR-0006 says the hub stores no message text; the design needs labels, threads, read-backs and a life-long history. | Yes, in the hub's own store, encrypted at rest, with export and delete. A new ADR replaces ADR-0006 as a whole. |
 | D3 | Where do the hub's model calls run? **Decided: headless or in a terminal lane.** | Sorting, answers, briefs and status pages need a model. | Short typed requests run headless on nodes (`engine.run`); long work stays in lanes. ⌘K answers come from search first, so they stay instant. The subscription question in section 8 decides which account a headless Claude run uses. |
-| D4 | Connectors: own adapters, or the agent CLIs' MCP connectors? | Guardrails, Undo, quotas and metrics only work if the hub sees every outward action. | Own adapters behind the action gateway for every write; MCP tools may read. |
-| D5 | Which outside tools in V1? | Each is real work (auth, scopes, write and undo). | The ones the mockups name: one mail provider for drafts, HubSpot, Google and LinkedIn ads, LinkedIn posting, Supabase read, an image model, Seedance; for dev GitHub, Sentry and one deploy target. You confirm the list and the deploy target. |
-| D6 | How does the Mac app sign in? | The web relies on a `__Host-` cookie and an Origin check. | Platform passkeys plus a session token in the Keychain, bound to the device, with the same step-up rules. |
-| D7 | Protocol for the Rust core | One source of truth for web and Mac. | Schemas in `packages/protocol` → JSON Schema → generated Rust types. The tooling is checked against its official docs when the work starts. |
+| D4 | Connectors: own adapters, or the agent CLIs' MCP connectors? **Decided: own adapters.** | Guardrails, Undo, quotas and metrics only work if the hub sees every outward action. | Own adapters behind the action gateway for every write; MCP tools may read. |
+| D5 | Which outside tools in V1? **Decided: all the mockups name.** | Each is real work (auth, scopes, write and undo). | The ones the mockups name: one mail provider for drafts, HubSpot, Google and LinkedIn ads, LinkedIn posting, Supabase read, an image model, Seedance; for dev GitHub, Sentry and one deploy target. You confirm the list and the deploy target. |
+| D6 | How does the Mac app sign in? **Decided: both, passkey and QR pairing.** | The web relies on a `__Host-` cookie and an Origin check. | Platform passkeys plus a session token in the Keychain, bound to the device, with the same step-up rules. |
+| D7 | Protocol for the Rust core **Decided: Rust is the source.** | One source of truth for web and Mac. | Schemas in `packages/protocol` → JSON Schema → generated Rust types. The tooling is checked against its official docs when the work starts. |
 
 ## 7. What exists and carries over
 
