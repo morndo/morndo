@@ -377,6 +377,8 @@ async function gtm() {
     const leaPost = await http(url, "/actions?as=lea-brandt", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "message.send", threadId: "topic:partnerships", text: "Wave 2 is checked, it can go" }) });
     ok(leaPost.status === 200 && leaPost.body?.message?.audience?.stage === "Outreach", "Lea can post in her stage's thread");
     ok(((await get(url, "/threads/topic:partnerships?limit=100")).body?.messages ?? []).some((m: any) => m.text === "Wave 2 is checked, it can go"), "the owner sees Lea's message");
+    await act(url, { type: "message.send", threadId: "topic:partnerships", text: "Between us: Halden may want a discount" });
+    ok(!((await get(url, "/threads/topic:partnerships?as=lea-brandt&limit=100")).body?.messages ?? []).some((m: any) => m.text === "Between us: Halden may want a discount"), "the owner's own post stays out of Lea's stage thread");
     const leaBrief = (await get(url, "/brief?as=lea-brandt")).body;
     let leaMoney = 0;
     walk(leaBrief, "brief", (k) => { if (k === "currency") leaMoney++; });
