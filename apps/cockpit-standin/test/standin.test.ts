@@ -136,6 +136,28 @@ describe("cockpit stand-in", () => {
     }
   });
 
+  it("moves a lane on the manager view with the rest of the state", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const moved = await act(url, { type: "lane.move", laneId: "webinar", topicId: "partnerships" });
+      expect(moved.status).toBe(200);
+      expect((await get(url, "/lanes/webinar")).body.topicId).toBe("partnerships");
+      const manager = await get(url, "/manager");
+      const row = (manager.body.lanes as { id: string; topicId: string | null; topicName: string }[]).find((lane) => lane.id === "webinar");
+      expect(row).toMatchObject({ topicId: "partnerships", topicName: "Partnerships" });
+      const content = await get(url, "/topics/content");
+      expect((content.body.lanes as { id: string }[]).some((lane) => lane.id === "webinar")).toBe(false);
+      const partnerships = await get(url, "/topics/partnerships");
+      expect((partnerships.body.lanes as { id: string }[]).some((lane) => lane.id === "webinar")).toBe(true);
+      const sidebar = await get(url, "/sidebar");
+      const groups = sidebar.body.groups as { id: string; lanes: { id: string }[] }[];
+      expect(groups.find((group) => group.id === "content")?.lanes.some((lane) => lane.id === "webinar")).toBe(false);
+      expect(groups.find((group) => group.id === "partnerships")?.lanes.some((lane) => lane.id === "webinar")).toBe(true);
+    } finally {
+      await stop();
+    }
+  });
+
   it("serves the development module", async () => {
     const { url, stop } = await boot("dev");
     try {

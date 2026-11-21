@@ -356,21 +356,7 @@ export class World {
 
   private manager(): Manager {
     const base = this.managerBase;
-    const allowed = new Set(base.lanes.map((lane) => lane.id));
-    for (const id of this.extraLanes.keys()) allowed.add(id);
-    for (const id of this.removed) allowed.delete(id);
-    let changed = this.extraLanes.size > 0 || this.removed.size > 0 || this.extraAsks.length > 0;
-    if (!changed) {
-      for (const row of base.lanes) {
-        const live = this.lane(row.id);
-        if (!live || live.state !== row.state || live.stateWord !== row.stateWord) {
-          changed = true;
-          break;
-        }
-      }
-    }
-    if (!changed) return clone(base);
-    const lanes = this.allLanes().filter((lane) => lane.state !== "done" && allowed.has(lane.id)).sort(byRank);
+    const lanes = this.allLanes().filter((lane) => lane.state !== "done").sort(byRank);
     const topics = new Set(lanes.map((lane) => lane.topicId).filter((id): id is string => Boolean(id)));
     const waiting = lanes.filter((lane) => (lane.state === "warn" || lane.state === "bad") && !lane.waitsFor).length;
     const noun = this.module === "dev" ? "projects" : "topics";
