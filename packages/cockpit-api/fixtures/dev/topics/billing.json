@@ -1,0 +1,52 @@
+{
+  "id": "billing",
+  "name": "Billing",
+  "kind": "project",
+  "icon": "card",
+  "crumb": "Tax rates",
+  "open": false,
+  "meta": null,
+  "intro": "Invoices, tax rates and migrations.",
+  "when": null,
+  "health": {
+    "state": "warn",
+    "word": "Needs you"
+  },
+  "goal": null,
+  "noGoal": null,
+  "facts": [],
+  "plan": null,
+  "focusLaneId": null,
+  "history": null,
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "warn",
+      "word": "Needs you",
+      "text": "The tax migration waits",
+      "skill": "/fix-with-proof",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "jobs": [],
+  "chatSub": "You and Builder.",
+  "lanes": [
+    {
+      "id": "tax-rates",
+      "title": "Tax rates per country",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "leadName": "Builder",
+      "next": "After your decision"
+    }
+  ],
+  "spend": null,
+  "stuck": null,
+  "tasks": []
+}

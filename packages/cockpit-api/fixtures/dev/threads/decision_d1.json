@@ -1,0 +1,64 @@
+{
+  "id": "decision:d1",
+  "title": "Release the fix for exports that time out",
+  "sub": null,
+  "placeholder": "Ask about this decision",
+  "reading": "Reading this decision and its proof",
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [
+    "Show what changed",
+    "Release to Fenwick only first"
+  ],
+  "messages": [
+    {
+      "id": "decision_d1-0",
+      "author": {
+        "id": "timo-varga",
+        "name": "Timo Varga",
+        "shortName": "Timo",
+        "kind": "person",
+        "avatar": "T",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "What happens to exports that are running during the release?",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "decision_d1-1",
+      "author": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "They finish on the old version. The rollout replaces one server at a time and waits for running exports, up to 5 minutes each.\nChecked on staging: 3 exports ran through a rollout and all 3 files were complete.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

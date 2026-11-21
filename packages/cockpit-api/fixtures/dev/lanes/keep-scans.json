@@ -1,0 +1,80 @@
+{
+  "id": "keep-scans",
+  "topicId": "mobile",
+  "title": "Keep scans without a signal",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "ok",
+    "word": "Working",
+    "text": "Scans wait for a signal, then send",
+    "skill": "/build-feature",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened today, 06:10",
+  "closed": null,
+  "next": "Today, 15:00",
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Keep scans made without a signal.",
+  "askedMeta": {
+    "source": "You to the Manager, today 06:10",
+    "note": "The Manager filed it under Mobile and named Builder to lead."
+  },
+  "status": "Scans are stored on the phone and sent when it is online again.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "Scans are stored on the phone and sent when it is online again."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "now",
+      "text": "Fresh review, round 1",
+      "who": "Reviewer · today"
+    },
+    {
+      "kind": "todo",
+      "text": "QA by hand",
+      "who": "QA"
+    }
+  ],
+  "doneNote": "Done means all 2. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Scans wait for a signal, then send",
+      "skill": "/build-feature",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false
+}

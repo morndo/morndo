@@ -1,0 +1,898 @@
+{
+  "id": "outbound",
+  "name": "Outbound",
+  "kind": "topic",
+  "icon": "send",
+  "crumb": "Meetings from email",
+  "open": false,
+  "meta": {
+    "askedBy": "Asked by you",
+    "ownerLine": "Sender leads; Jonas takes the meetings",
+    "nextReport": "Next report Fri 20 Nov",
+    "parts": [
+      "Asked by you",
+      "Sender leads; Jonas takes the meetings",
+      "Next report Fri 20 Nov"
+    ]
+  },
+  "intro": "Cold email to ops teams, from your mail, never more than 60 a day. The goal: 30 sales meetings by 18 December.",
+  "when": "Week 4 of 8",
+  "health": null,
+  "goal": {
+    "target": 30,
+    "signed": 11,
+    "likely": 10,
+    "unit": "Meetings booked",
+    "verdict": {
+      "state": "ok",
+      "word": "Ahead of plan",
+      "action": "Round 2 decides December",
+      "text": "Sequence B carries the forecast; round 2 has to bring the last 9."
+    },
+    "insight": "Sequence B carries the forecast; round 2 has to bring the last 9.",
+    "asOf": "updated 08:40, forecast up 2 since Friday · agents €17 of €40 this week",
+    "decision": {
+      "title": "Start sequence B",
+      "detail": "Due tomorrow · the list goes stale in 2 weeks",
+      "done": "Sequence B started",
+      "why": null,
+      "decisionId": "d2",
+      "laneId": "sequence-b",
+      "approveLabel": "Start sequence B"
+    },
+    "calm": null,
+    "calmSub": null,
+    "trajectory": {
+      "start": "2026-10-26",
+      "days": 53,
+      "now": 21,
+      "goal": 30,
+      "step": 10,
+      "unit": "Meetings booked",
+      "key": "Booked",
+      "ticks": [
+        {
+          "day": 0,
+          "label": "26 Oct"
+        },
+        {
+          "day": 21,
+          "label": "Today"
+        },
+        {
+          "day": 35,
+          "label": "30 Nov"
+        },
+        {
+          "day": 53,
+          "label": "18 Dec"
+        }
+      ],
+      "plan": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 7,
+          "value": 2
+        },
+        {
+          "day": 14,
+          "value": 5
+        },
+        {
+          "day": 21,
+          "value": 9
+        },
+        {
+          "day": 28,
+          "value": 13
+        },
+        {
+          "day": 35,
+          "value": 18
+        },
+        {
+          "day": 42,
+          "value": 23
+        },
+        {
+          "day": 49,
+          "value": 27
+        },
+        {
+          "day": 53,
+          "value": 30
+        }
+      ],
+      "actual": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 6,
+          "value": 1
+        },
+        {
+          "day": 9,
+          "value": 3
+        },
+        {
+          "day": 13,
+          "value": 5
+        },
+        {
+          "day": 16,
+          "value": 8
+        },
+        {
+          "day": 19,
+          "value": 10
+        },
+        {
+          "day": 21,
+          "value": 11
+        }
+      ],
+      "expected": [
+        {
+          "day": 21,
+          "value": 11
+        },
+        {
+          "day": 25,
+          "value": 12
+        },
+        {
+          "day": 29,
+          "value": 15
+        },
+        {
+          "day": 33,
+          "value": 18
+        },
+        {
+          "day": 37,
+          "value": 21
+        },
+        {
+          "day": 53,
+          "value": 21
+        }
+      ],
+      "low": [
+        {
+          "day": 21,
+          "value": 11
+        },
+        {
+          "day": 29,
+          "value": 13
+        },
+        {
+          "day": 37,
+          "value": 16
+        },
+        {
+          "day": 53,
+          "value": 16
+        }
+      ],
+      "high": [
+        {
+          "day": 21,
+          "value": 11
+        },
+        {
+          "day": 29,
+          "value": 17
+        },
+        {
+          "day": 37,
+          "value": 24
+        },
+        {
+          "day": 53,
+          "value": 30
+        }
+      ],
+      "noForecast": null,
+      "title": "Forecast vs goal"
+    },
+    "milestones": [
+      "List built",
+      "Pilot",
+      "Approved",
+      "Sending",
+      "Meetings"
+    ],
+    "rows": {
+      "title": "Where the 30 come from",
+      "sub": "Each sequence · list to meetings"
+    },
+    "deals": [
+      {
+        "name": "Sequence A, logistics ops",
+        "confidence": "Done",
+        "close": null,
+        "at": 5,
+        "stage": "Finished today",
+        "short": "9 meetings; forecast was 8",
+        "laneId": "sequence-a",
+        "href": "#lane/sequence-a",
+        "evidence": "960 emails, 52 replies, 9 meetings. Its forecast at the start was 8.",
+        "next": null,
+        "value": null,
+        "alt": null
+      },
+      {
+        "name": "Sequence B, fintech ops",
+        "confidence": "Likely",
+        "close": null,
+        "at": 2,
+        "stage": "Pilot done, waits for your OK",
+        "short": "Pilot booked 2; your OK tomorrow",
+        "laneId": "sequence-b",
+        "href": "#lane/sequence-b",
+        "evidence": "The pilot of 30 booked 2 meetings. The other 150 at that rate bring 10.",
+        "next": "your OK, then 60 a day from 10:00.",
+        "value": null,
+        "alt": {
+          "decisionId": "d2",
+          "stage": "Sending, 60 a day",
+          "short": "First 60 go out at 10:00",
+          "next": "replies sorted every morning; meetings reported Friday."
+        }
+      },
+      {
+        "name": "Logistics ops, round 2",
+        "confidence": "Early",
+        "close": null,
+        "at": 0,
+        "stage": "List being built",
+        "short": "List of 400 due Thursday",
+        "laneId": "logistics-round-2",
+        "href": "#lane/logistics-round-2",
+        "evidence": "Same segment as sequence A, which booked 9 from 960. 400 new leads at that rate bring about 4; the plan needs 9.",
+        "next": "the list on Thursday, then a pilot of 30 from Monday 23 November.",
+        "value": null,
+        "alt": null
+      }
+    ],
+    "guardrails": {
+      "sub": "What the meetings must not cost",
+      "items": [
+        {
+          "what": "Bounces",
+          "value": "1.8%",
+          "limit": "limit 4%",
+          "ratio": 0.45
+        },
+        {
+          "what": "Asked to stop",
+          "value": "1.1%",
+          "limit": "11 of 990 · limit 2%",
+          "ratio": 0.56
+        },
+        {
+          "what": "Sends a day",
+          "value": "60",
+          "limit": "limit 60",
+          "ratio": 1
+        },
+        {
+          "what": "Spam complaints",
+          "value": "0",
+          "limit": "none allowed",
+          "ratio": null
+        }
+      ]
+    },
+    "ladder": [
+      {
+        "word": "Likely",
+        "fact": "A pilot of the same sequence booked meetings; the forecast is its rate."
+      },
+      {
+        "word": "Possible",
+        "fact": "A pilot is running."
+      },
+      {
+        "word": "Early",
+        "fact": "Only a list, or a rate borrowed from another segment."
+      }
+    ],
+    "calibration": "Sequence A was forecast at 8 meetings when it started; it booked 9. Scored forecasts so far: 1, and it held.",
+    "outside": "Out of this goal: the 3 people who asked to talk in January.",
+    "gap": {
+      "says": "To reach 30 by 18 December, round 2 has to bring 9:",
+      "steps": [
+        "Round 2's list of 400 by Thursday, and a pilot of 30 from Monday 23 November.",
+        "If the pilot books 2 or more, send the rest at 60 a day from 30 November: about 9 meetings by mid-December.",
+        "If it books fewer, move 200 of round 2's leads to sequence B's fintech copy, which books better."
+      ]
+    },
+    "blockers": [
+      {
+        "state": "warn",
+        "short": "2 people who said yes wait for a meeting time",
+        "what": null,
+        "why": null,
+        "who": "Jonas Falk",
+        "href": "#lane/reply-handling",
+        "laneId": "reply-handling"
+      },
+      {
+        "state": "warn",
+        "short": "step 3 replies at 1.1%, plan 2%",
+        "what": null,
+        "why": null,
+        "who": "Sender",
+        "href": "#lane/sequence-a",
+        "laneId": "sequence-a"
+      }
+    ],
+    "routine": null,
+    "funnel": {
+      "title": "Funnel",
+      "since": "Since 26 October · change this week · rate against the plan",
+      "steps": [
+        {
+          "count": "990",
+          "what": "emails sent",
+          "change": "+30",
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": "58",
+          "what": "replied",
+          "change": "+14",
+          "rate": "5.9% · plan 5%",
+          "state": null
+        },
+        {
+          "count": "21",
+          "what": "positive",
+          "change": "+5",
+          "rate": "36% · plan 40%",
+          "state": "warn"
+        },
+        {
+          "count": "11",
+          "what": "meetings booked",
+          "change": "+3",
+          "rate": "52% · plan 50%",
+          "state": null
+        },
+        {
+          "count": "6",
+          "what": "meetings held",
+          "change": "+2",
+          "rate": null,
+          "state": null
+        }
+      ]
+    },
+    "restSub": null,
+    "figures": [
+      {
+        "value": "11",
+        "of": "30",
+        "label": "Meetings booked"
+      },
+      {
+        "value": "10",
+        "of": null,
+        "label": "Likely, forecast"
+      },
+      {
+        "value": "9",
+        "of": null,
+        "label": "Still unsecured"
+      }
+    ],
+    "pathTitle": null
+  },
+  "noGoal": null,
+  "facts": [
+    {
+      "value": "990",
+      "label": "emails sent since 26 Oct"
+    },
+    {
+      "value": "5.9%",
+      "label": "reply rate"
+    },
+    {
+      "value": "11",
+      "label": "meetings booked"
+    },
+    {
+      "value": "1.8%",
+      "label": "bounces, limit 4%"
+    }
+  ],
+  "plan": null,
+  "focusLaneId": "sequence-b",
+  "history": {
+    "seen": "yesterday at 18:20",
+    "shown": 2,
+    "since": "That is everything since the topic began on 26 October.",
+    "days": [
+      {
+        "label": "Today",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "08:52",
+            "actor": {
+              "id": "prospector",
+              "name": "Prospector",
+              "shortName": "Prospector",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days",
+            "laneId": "sequence-b",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:40",
+            "actor": {
+              "id": "replies",
+              "name": "Replies",
+              "shortName": "Replies",
+              "kind": "agent",
+              "avatar": "R",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sorted 14 replies: 9 meetings, 3 later, 2 no",
+            "laneId": "sequence-a",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:20",
+            "actor": {
+              "id": "replies",
+              "name": "Replies",
+              "shortName": "Replies",
+              "kind": "agent",
+              "avatar": "R",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "asked Jonas for times for 2 people who said yes",
+            "laneId": "reply-handling",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:05",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "stopped sequence A for the 14 people who replied",
+            "laneId": "sequence-a",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": 14,
+            "samples": [
+              "Ostrand Haulage · ops lead",
+              "Pinecrest Cold Chain · head of operations",
+              "Velmont Freight · COO"
+            ],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Yesterday",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "19:30",
+            "actor": {
+              "id": "prospector",
+              "name": "Prospector",
+              "shortName": "Prospector",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "started round 2: 400 logistics ops leads, 120 found so far",
+            "laneId": "logistics-round-2",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "seen"
+          },
+          {
+            "kind": "event",
+            "time": "10:15",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent 60 sequence A follow-ups from your mail",
+            "laneId": "sequence-a",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": 60,
+            "samples": [
+              "Brennick Transport · ops lead",
+              "Calder Yards · head of logistics",
+              "Holmfield Carriers · COO"
+            ],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Friday, 13 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "17:14",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "answered: sending pauses on its own at 4% bounces",
+            "laneId": "sequence-b",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "17:10",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "finished the sequence B pilot: 30 sent, 6 replies, 2 meetings, no bounces",
+            "laneId": "sequence-b",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": 30,
+            "samples": [
+              "Larchmont Pay · ops lead",
+              "Quillon Pay · head of operations",
+              "Tessaly Bank · ops manager"
+            ],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "15:00",
+            "actor": {
+              "id": "jonas-falk",
+              "name": "Jonas Falk",
+              "shortName": "Jonas",
+              "kind": "person",
+              "avatar": "J",
+              "role": "Partner operations",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "held 2 meetings from sequence A; both want a demo",
+            "laneId": "reply-handling",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Wednesday, 11 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "09:05",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "asked to write to fintech ops people once the pilot shows it works",
+            "laneId": "sequence-b",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:30",
+            "actor": {
+              "id": "prospector",
+              "name": "Prospector",
+              "shortName": "Prospector",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "built the list of 180 fintech ops leads from the new customer profile",
+            "laneId": "sequence-b",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      }
+    ]
+  },
+  "crew": [
+    {
+      "id": "mara-lind",
+      "name": "Mara Lind",
+      "shortName": "Mara",
+      "kind": "person",
+      "avatar": "M",
+      "role": "Head of GTM",
+      "state": "warn",
+      "word": "Owns it",
+      "text": "Approves every sequence before it starts",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "jonas-falk",
+      "name": "Jonas Falk",
+      "shortName": "Jonas",
+      "kind": "person",
+      "avatar": "J",
+      "role": "Partner operations",
+      "state": "warn",
+      "word": "2 waiting",
+      "text": "Takes the meetings",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "sender",
+      "name": "Sender",
+      "shortName": "Sender",
+      "kind": "agent",
+      "avatar": "S",
+      "role": null,
+      "state": "warn",
+      "word": "Waiting",
+      "text": "Holds sequence B for your OK",
+      "skill": "/outbound-sequence",
+      "engine": "Claude",
+      "record": "Sequence A forecast 8 meetings, booked 9"
+    },
+    {
+      "id": "prospector",
+      "name": "Prospector",
+      "shortName": "Prospector",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Round 2 list: 120 of 400",
+      "skill": "/icp-refresh",
+      "engine": "Claude",
+      "record": "Pilot list: 0 bounces in 30"
+    },
+    {
+      "id": "replies",
+      "name": "Replies",
+      "shortName": "Replies",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Sorts replies and books meetings",
+      "skill": "/reply-triage",
+      "engine": "GPT",
+      "record": "52 of 53 replies sorted right; Jonas moved 1"
+    }
+  ],
+  "jobs": [
+    {
+      "job": "Start sequence B, 180 leads",
+      "agent": "Sender",
+      "state": "warn",
+      "due": "Tue 17 Nov",
+      "laneId": "sequence-b"
+    },
+    {
+      "job": "Meeting times for 2 yeses",
+      "agent": "Replies",
+      "state": "warn",
+      "due": "Today",
+      "laneId": "reply-handling"
+    },
+    {
+      "job": "List for logistics ops, round 2",
+      "agent": "Prospector",
+      "state": "ok",
+      "due": "Thu 19 Nov",
+      "laneId": "logistics-round-2"
+    },
+    {
+      "job": "Answer replies from sequence A",
+      "agent": "Replies",
+      "state": "ok",
+      "due": "Every morning",
+      "laneId": "sequence-a"
+    },
+    {
+      "job": "Bounce check",
+      "agent": "Sender",
+      "state": "done",
+      "due": "Today, 08:05",
+      "laneId": null
+    }
+  ],
+  "chatSub": "Mara, Jonas and 3 agents · the Manager reads it, it is not in it",
+  "lanes": [
+    {
+      "id": "sequence-b",
+      "title": "Sequence B, fintech ops",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "leadName": "Sender",
+      "next": "After your decision"
+    },
+    {
+      "id": "reply-handling",
+      "title": "Meetings from replies",
+      "state": "warn",
+      "stateWord": "Waits for Jonas",
+      "leadName": "Replies",
+      "next": "Today, once Jonas answers"
+    },
+    {
+      "id": "logistics-round-2",
+      "title": "Logistics ops, round 2",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Prospector",
+      "next": "Thu 19 Nov"
+    },
+    {
+      "id": "sequence-a",
+      "title": "Sequence A, logistics ops",
+      "state": "done",
+      "stateWord": "Done",
+      "leadName": "Sender",
+      "next": "closed today, 08:05"
+    }
+  ],
+  "spend": {
+    "spent": 17,
+    "cap": 40
+  },
+  "stuck": null,
+  "tasks": []
+}

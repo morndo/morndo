@@ -1,0 +1,91 @@
+{
+  "id": "d1",
+  "title": "Move €1,200 a week from LinkedIn to Google Search",
+  "state": "open",
+  "topicId": "paid",
+  "topicName": "Paid",
+  "due": "Due today, 14:00",
+  "whyYours": "Yours: over €500",
+  "minutes": 2,
+  "contextLine": "Paid · Due today, 14:00 · 2 min to read",
+  "cardContext": "A lead costs €200 on LinkedIn and €80 on Search. The weekly budget stays at €4,000.",
+  "doneNote": "Approved. The Paid agent starts now.",
+  "laneId": "search-budget",
+  "approveLabel": "Approve the shift",
+  "provenance": {
+    "laneId": "search-budget",
+    "laneTitle": "Search budget shift",
+    "writtenBy": "Paid buyer",
+    "checkedBy": "the Manager",
+    "checkedAt": "07:05"
+  },
+  "context": "In the last 14 days LinkedIn brought 24 leads and Google Search brought 40, for less money. Search leads also take a sales call more often. The weekly budget is €4,000: €2,400 on LinkedIn and €1,600 on Search.",
+  "numbers": [
+    {
+      "label": "Cost per lead, LinkedIn",
+      "value": "€200",
+      "sub": "24 leads for €4,800"
+    },
+    {
+      "label": "Cost per lead, Search",
+      "value": "€80",
+      "sub": "40 leads for €3,200"
+    },
+    {
+      "label": "Leads that take a call",
+      "value": "25% · 35%",
+      "sub": "LinkedIn · Search"
+    },
+    {
+      "label": "Sales calls a week",
+      "value": "10",
+      "sub": "20 in the last 14 days"
+    }
+  ],
+  "proof": null,
+  "opportunity": {
+    "kind": "opportunity",
+    "label": "Opportunity · the dream output",
+    "headline": "14 sales calls a week by week 4",
+    "condition": "If a Search lead keeps costing €80.",
+    "summary": "With the shift, sales calls a week rise from 10 now to 14 in week 4. With no change they stay at 10."
+  },
+  "risk": {
+    "kind": "risk",
+    "label": "Risk · the worst case",
+    "headline": "9 calls a week for two weeks",
+    "condition": "If a Search lead rises to €130. Then the shift is undone.",
+    "summary": "In the worst case sales calls a week drop from 10 to 9 in weeks 1 and 2, then return to 10 in week 3 when the shift is undone."
+  },
+  "suggestion": "Approve the shift for 3 weeks. Search gets €2,800 a week and LinkedIn keeps €1,200 for people who already know you.",
+  "guardrail": "Guardrail: if a Search lead costs more than €110 for 5 days in a row, the Paid agent moves the money back and tells you. The most this can cost is about 2 sales calls.",
+  "nextSteps": [
+    {
+      "step": "Move €1,200 a week to the two Search campaigns",
+      "who": "Paid agent",
+      "by": "Today, after your OK"
+    },
+    {
+      "step": "Cut LinkedIn down to the retargeting audience",
+      "who": "Paid agent",
+      "by": "Today"
+    },
+    {
+      "step": "Write 3 new Search ads for the extra budget",
+      "who": "Content agent",
+      "by": "Tue 17 Nov"
+    },
+    {
+      "step": "Check with sales that the new leads are good",
+      "who": "Jonas, sales",
+      "by": "Fri 20 Nov"
+    },
+    {
+      "step": "Report the result against the dream output",
+      "who": "Manager",
+      "by": "Mon 7 Dec"
+    }
+  ],
+  "ifNoAnswer": "If you do not answer by 14:00, nothing changes.",
+  "position": "1 of 4 · 4 open"
+}

@@ -1,0 +1,151 @@
+{
+  "id": "search-budget",
+  "topicId": "paid",
+  "title": "Search budget shift",
+  "state": "warn",
+  "stateWord": "Needs you",
+  "lead": {
+    "id": "paid-buyer",
+    "name": "Paid buyer",
+    "shortName": "Paid",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "warn",
+    "word": "Leads",
+    "text": "Holds the shift until you decide",
+    "skill": "/decision-brief",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened Friday",
+  "closed": null,
+  "next": "After your decision",
+  "afterNext": "Mon 7 Dec, with the result",
+  "decisionId": "d1",
+  "short": "Search budget shift",
+  "ask": "€1,200 a week from LinkedIn to Search · by 14:00",
+  "shortAfter": "Paid buyer moves it now.",
+  "recommendation": null,
+  "yours": "It moves €1,200 a week, above your €500 limit per change.",
+  "checks": [],
+  "delay": null,
+  "approveLabel": "Approve the shift",
+  "after": "Paid buyer moves €1,200 a week to the two Search campaigns now. The weekly budget stays at €4,000.",
+  "asked": "LinkedIn leads cost too much. Find where the budget works best and propose a shift.",
+  "askedMeta": {
+    "source": "You to the Manager, Friday 10:20",
+    "note": "The Manager filed it under Paid and named Paid buyer to lead."
+  },
+  "status": "The numbers favour Search. Moving €1,200 a week needs your OK, by 14:00 today.",
+  "standing": {
+    "headline": "It waits for you.",
+    "detail": "The numbers favour Search. Moving €1,200 a week needs your OK, by 14:00 today."
+  },
+  "acts": [
+    {
+      "label": "Open the decision",
+      "tone": "quiet"
+    },
+    {
+      "label": "Approve the shift",
+      "tone": "ink"
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "14 days of spend and leads, checked against the ad accounts",
+      "who": "Analyst · Saturday"
+    },
+    {
+      "kind": "ok",
+      "text": "A decision brief with the best and the worst case",
+      "who": "Paid buyer · today, 07:05"
+    },
+    {
+      "kind": "now",
+      "text": "Your OK for the shift",
+      "who": "You · by 14:00"
+    },
+    {
+      "kind": "todo",
+      "text": "Budget moved to the two Search campaigns",
+      "who": "Paid buyer · today"
+    },
+    {
+      "kind": "todo",
+      "text": "The result reported against the dream output",
+      "who": "Manager · Mon 7 Dec"
+    }
+  ],
+  "doneNote": "Done means all five. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "paid-buyer",
+      "name": "Paid buyer",
+      "shortName": "Paid",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "warn",
+      "word": "Leads",
+      "text": "Holds the shift until you decide",
+      "skill": "/decision-brief",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "analyst",
+      "name": "Analyst",
+      "shortName": "Analyst",
+      "kind": "agent",
+      "avatar": "A",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Pulled 14 days of spend and leads",
+      "skill": "/weekly-summary",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "writer",
+      "name": "Writer",
+      "shortName": "Writer",
+      "kind": "agent",
+      "avatar": "W",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "3 new Search ads, once you say yes",
+      "skill": "/ad-variants",
+      "engine": "GPT",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "decide",
+      "title": "Decision brief",
+      "detail": "Move €1,200 a week from LinkedIn to Google Search · due today, 14:00",
+      "href": "#decision"
+    },
+    {
+      "icon": "file",
+      "title": "The 14-day numbers",
+      "detail": "24 leads on LinkedIn, 40 on Search",
+      "href": null
+    },
+    {
+      "icon": "file",
+      "title": "The 14 days before",
+      "detail": "For comparison: 22 leads on LinkedIn, 36 on Search",
+      "href": null
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

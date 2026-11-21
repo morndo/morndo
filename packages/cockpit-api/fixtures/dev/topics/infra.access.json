@@ -1,0 +1,28 @@
+{
+  "topicId": "infra",
+  "topicName": "Infra",
+  "people": [
+    {
+      "person": {
+        "id": "timo-varga",
+        "name": "Timo Varga",
+        "shortName": "Timo",
+        "kind": "person",
+        "avatar": "T",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "access": {
+        "kind": "all",
+        "stages": []
+      },
+      "scope": "Owner",
+      "otherTopics": []
+    }
+  ]
+}

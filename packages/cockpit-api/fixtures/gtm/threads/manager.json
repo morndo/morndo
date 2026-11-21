@@ -1,0 +1,71 @@
+{
+  "id": "manager",
+  "title": "Manager",
+  "sub": "Your chief of staff. It knows every topic and every lane.",
+  "placeholder": "Tell the Manager",
+  "reading": null,
+  "since": {
+    "seen": "from the topics' records",
+    "lines": [
+      "Partnerships: 1 instruction (wave 2 to retail first), 1 question answered in the topic.",
+      "Content: the promo is stuck; you decide in the topic.",
+      "No goal or priority changes wait for you."
+    ]
+  },
+  "pinned": null,
+  "agents": null,
+  "suggestions": [
+    "Show what waits for me",
+    "What is stuck, and why?"
+  ],
+  "messages": [
+    {
+      "id": "manager-0",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "What is still open on the budget shift?",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "manager-1",
+      "author": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "One thing: your OK. The numbers for 14 days are checked and the decision brief is written.\nIt is the lane Search budget shift, in Paid. Paid buyer leads it. Without your answer by 14:00 nothing changes.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

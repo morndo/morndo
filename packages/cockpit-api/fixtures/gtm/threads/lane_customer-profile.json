@@ -1,0 +1,37 @@
+{
+  "id": "lane:customer-profile",
+  "title": "Customer profile refresh",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "lane_customer-profile-0",
+      "author": {
+        "id": "researcher",
+        "name": "Researcher",
+        "shortName": "Researcher",
+        "kind": "agent",
+        "avatar": "R",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "07:10",
+      "text": "Done. Fintech ops teams close in 19 days on average, the fastest of the 4 segments.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

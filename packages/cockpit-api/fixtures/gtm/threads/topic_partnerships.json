@@ -1,0 +1,224 @@
+{
+  "id": "topic:partnerships",
+  "title": "Partnerships",
+  "sub": "Mara, Lea, Jonas and 6 agents · the Manager reads it, it is not in it",
+  "placeholder": "Message Partnerships · its manager sorts it",
+  "reading": null,
+  "since": {
+    "seen": "yesterday at 18:20",
+    "lines": [
+      "32 brands and 58 contacts came in overnight; 9 brands fit.",
+      "Lea asks whether wave 2 goes to retail or finance first.",
+      "Jonas drafted the Halden offer; it waits for you."
+    ]
+  },
+  "pinned": {
+    "title": "Offer to Halden",
+    "detail": "Waits for you · 15% of first-year revenue for 12 months · due Thu",
+    "state": "waiting",
+    "decisionId": "d4",
+    "laneId": "halden-offer",
+    "approveLabel": "Send the offer"
+  },
+  "agents": {
+    "seen": "yesterday at 18:20",
+    "count": 11,
+    "summary": "Agents · 11 updates since yesterday at 18:20, nothing needs you",
+    "items": [
+      {
+        "time": "08:41",
+        "name": "Call prep",
+        "text": "answered your question on Brightmoor; the full brief is ready at 13:00"
+      },
+      {
+        "time": "08:00",
+        "name": "Sender",
+        "text": "sent 18 wave 1 follow-ups from your mail, 08:00 to 08:40"
+      },
+      {
+        "time": "07:20",
+        "name": "Manager",
+        "text": "spot-checked 5 brands of Lea's batch 3 at random: all 5 fit the profile"
+      },
+      {
+        "time": "07:00",
+        "name": "Sender",
+        "text": "put 4 reminders in HubSpot for brands that want to talk in January"
+      },
+      {
+        "time": "06:10",
+        "name": "Contact finder",
+        "text": "found 58 contacts in Apollo and left out 4 whose email failed the check"
+      },
+      {
+        "time": "05:40",
+        "name": "Brand scout",
+        "text": "added 32 brands from Clay, 9 of them fit; skipped 6 that work with a competitor"
+      },
+      {
+        "time": "05:05",
+        "name": "Manager",
+        "text": "caught Sender's read-back after a restart: it left out Lea's check. Put the check back and held sending; nothing went out"
+      },
+      {
+        "time": "04:30",
+        "name": "Sender",
+        "text": "drafted 24 emails for wave 2. Nothing is sent before Lea checks them."
+      },
+      {
+        "time": "02:10",
+        "name": "Brand scout",
+        "text": "picked 40 retail brands from the checked list for wave 2"
+      },
+      {
+        "time": "21:40",
+        "name": "Brand scout",
+        "text": "started batch 4 in Clay"
+      },
+      {
+        "time": "21:10",
+        "name": "Sender",
+        "text": "started a fresh session and read the lane back; it matched the records"
+      }
+    ]
+  },
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "topic_partnerships-0",
+      "author": {
+        "id": "lea-brandt",
+        "name": "Lea Brandt",
+        "shortName": "Lea",
+        "kind": "person",
+        "avatar": "L",
+        "role": "GTM associate",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "08:12",
+      "text": "Wave 2: retail first or finance first? I check the 24 drafts by 11 either way.",
+      "own": false,
+      "label": {
+        "kind": "question",
+        "corrected": false
+      },
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_partnerships-1",
+      "author": {
+        "id": "jonas-falk",
+        "name": "Jonas Falk",
+        "shortName": "Jonas",
+        "kind": "person",
+        "avatar": "J",
+        "role": "Partner operations",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "08:30",
+      "text": "The Halden offer is drafted from the template. Mara, it needs your OK.",
+      "own": false,
+      "label": {
+        "kind": "decision",
+        "corrected": false
+      },
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_partnerships-2",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "Retail first. Send wave 2 to the retail brands first.",
+      "own": true,
+      "label": {
+        "kind": "request",
+        "corrected": false
+      },
+      "threadCard": null,
+      "readBack": {
+        "owner": "Sender",
+        "quote": "Retail first, 20 a day from 11:00, after Lea's check.",
+        "time": "08:31"
+      },
+      "actions": []
+    },
+    {
+      "id": "topic_partnerships-3",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "Call prep, what do I need to know for Brightmoor at 15:00?",
+      "own": true,
+      "label": {
+        "kind": "question",
+        "corrected": false
+      },
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_partnerships-4",
+      "author": {
+        "id": "call-prep",
+        "name": "Call prep",
+        "shortName": "Call",
+        "kind": "agent",
+        "avatar": "P",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "08:41",
+      "text": "Brightmoor sells to 9,000 small retailers. Their head of partnerships joined in May from a bank and launched two referral programmes there. The full brief is ready at 13:00.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

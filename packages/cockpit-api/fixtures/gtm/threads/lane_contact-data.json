@@ -1,0 +1,37 @@
+{
+  "id": "lane:contact-data",
+  "title": "Who decides at each brand",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "lane_contact-data-0",
+      "author": {
+        "id": "contact-finder",
+        "name": "Contact finder",
+        "shortName": "Contact",
+        "kind": "agent",
+        "avatar": "C",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "06:10",
+      "text": "58 contacts found overnight. 4 emails bounced the check, so I left them out.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

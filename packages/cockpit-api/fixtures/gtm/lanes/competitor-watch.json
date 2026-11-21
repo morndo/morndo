@@ -1,0 +1,92 @@
+{
+  "id": "competitor-watch",
+  "topicId": "research",
+  "title": "Competitor watch, November",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "researcher",
+    "name": "Researcher",
+    "shortName": "Researcher",
+    "kind": "agent",
+    "avatar": "R",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Read 5 pricing pages and their release notes",
+    "skill": "/market-map",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened Mon 9 Nov",
+  "closed": "closed Thu 12 Nov",
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Tell me what changed at the five tools we lose deals to this month.",
+  "askedMeta": {
+    "source": "Your standing ask, monthly",
+    "note": "The Manager opens it on the second Monday of each month."
+  },
+  "status": "Two price changes and one new feature, at Quaywright. Nothing that changes our comparison pages.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "Two price changes and one new feature, at Quaywright. Nothing that changes our comparison pages."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Pricing pages of all 5 read and compared with October",
+      "who": "Researcher · 10 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Release notes read",
+      "who": "Researcher · 11 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Changes sent to SEO and Outbound",
+      "who": "Manager · 12 Nov"
+    }
+  ],
+  "doneNote": "Done means all three. Each change links to the public page it came from.",
+  "crew": [
+    {
+      "id": "researcher",
+      "name": "Researcher",
+      "shortName": "Researcher",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Read 5 pricing pages and their release notes",
+      "skill": "/market-map",
+      "engine": "Claude",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "What changed in November",
+      "detail": "2 price changes, 1 feature, with sources",
+      "href": null
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

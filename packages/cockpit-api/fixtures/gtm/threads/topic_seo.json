@@ -1,0 +1,111 @@
+{
+  "id": "topic:seo",
+  "title": "SEO",
+  "sub": "Mara and 2 agents · the Manager reads it, it is not in it",
+  "placeholder": "Message SEO · its manager sorts it",
+  "reading": null,
+  "since": {
+    "seen": "yesterday at 18:20",
+    "lines": [
+      "Agents: 3 updates, the latest: SEO agreed to keep the tone fair: every claim about another tool links to its own public page."
+    ]
+  },
+  "pinned": null,
+  "agents": {
+    "seen": "yesterday at 18:20",
+    "count": 3,
+    "summary": "Agents · 3 updates since yesterday at 18:20, nothing needs you",
+    "items": [
+      {
+        "time": "07:50",
+        "name": "SEO writer",
+        "text": "agreed to keep the tone fair: every claim about another tool links to its own public page"
+      },
+      {
+        "time": "07:42",
+        "name": "SEO writer",
+        "text": "published pages 1 and 2 and asked Google to index them"
+      },
+      {
+        "time": "07:30",
+        "name": "Checker",
+        "text": "passed pages 1 and 2: 34 claims, each with a public source"
+      }
+    ]
+  },
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "topic_seo-0",
+      "author": {
+        "id": "seo-writer",
+        "name": "SEO writer",
+        "shortName": "SEO",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "07:42",
+      "text": "Pages 1 and 2 are live. Page 3 is half written. I will show it to the checker at 15:00.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_seo-1",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "Keep the tone fair. No cheap shots at them.",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_seo-2",
+      "author": {
+        "id": "seo-writer",
+        "name": "SEO writer",
+        "shortName": "SEO",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "07:50",
+      "text": "Understood. Every claim about them links to their own public page, and the checker refuses any that does not.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "id": "keyword-map",
+  "topicId": "seo",
+  "title": "Keywords for the comparison pages",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "checker",
+    "name": "Checker",
+    "shortName": "Checker",
+    "kind": "agent",
+    "avatar": "C",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Mapped the keywords",
+    "skill": "/fact-check",
+    "engine": "GPT",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened 2 Nov",
+  "closed": "closed 4 Nov",
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Find out what people search when they compare us with the tools we lose deals to.",
+  "askedMeta": {
+    "source": "You to the Manager, Monday 2 November",
+    "note": "The Manager filed it under SEO and named Checker to lead."
+  },
+  "status": "One keyword per page, with its searches a month and who ranks for it today.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "One keyword per page, with its searches a month and who ranks for it today."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "The 5 tools we lose deals to, from the lost-deal notes",
+      "who": "Researcher · 2 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Searches a month and today's top 10 for each",
+      "who": "Checker · 3 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "One keyword per page, approved by you",
+      "who": "You · 4 Nov"
+    }
+  ],
+  "doneNote": "Done means all three. You approved the keywords; the Manager closed the lane.",
+  "crew": [
+    {
+      "id": "checker",
+      "name": "Checker",
+      "shortName": "Checker",
+      "kind": "agent",
+      "avatar": "C",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Mapped the keywords",
+      "skill": "/fact-check",
+      "engine": "GPT",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Keyword map",
+      "detail": "5 pages, 410 to 1,300 searches a month each",
+      "href": null
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

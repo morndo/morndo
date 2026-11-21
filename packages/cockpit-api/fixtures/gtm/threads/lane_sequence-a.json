@@ -1,0 +1,37 @@
+{
+  "id": "lane:sequence-a",
+  "title": "Sequence A, logistics ops",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "lane_sequence-a-0",
+      "author": {
+        "id": "sender",
+        "name": "Sender",
+        "shortName": "Sender",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "08:05",
+      "text": "Done. I stopped the follow-ups for the 14 people who replied, so nobody hears from us twice.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

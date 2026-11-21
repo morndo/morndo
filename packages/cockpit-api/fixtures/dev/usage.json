@@ -1,0 +1,89 @@
+{
+  "asOf": "09:20",
+  "subscriptions": [
+    {
+      "name": "Claude Max",
+      "lanes": 6,
+      "note": "At its limit, lanes move to your Anthropic key.",
+      "meters": [
+        {
+          "what": "5 hours",
+          "used": 0.86,
+          "value": "86%",
+          "note": "resets 14:20"
+        },
+        {
+          "what": "Week",
+          "used": 0.41,
+          "value": "41%",
+          "note": "resets Mon"
+        }
+      ]
+    },
+    {
+      "name": "ChatGPT Pro · Codex",
+      "lanes": 3,
+      "note": null,
+      "meters": [
+        {
+          "what": "5 hours",
+          "used": 0.18,
+          "value": "18%",
+          "note": "resets 12:05"
+        },
+        {
+          "what": "Week",
+          "used": 0.33,
+          "value": "33%",
+          "note": "resets Thu"
+        }
+      ]
+    },
+    {
+      "name": "Cursor Pro",
+      "lanes": 1,
+      "note": null,
+      "meters": [
+        {
+          "what": "Requests this month",
+          "used": 0.62,
+          "value": "312 of 500",
+          "note": "resets 1 Dec"
+        }
+      ]
+    }
+  ],
+  "keys": [
+    {
+      "name": "Anthropic API",
+      "lanes": 0,
+      "note": "Takes over when Claude Max is at its limit.",
+      "meters": [
+        {
+          "what": "This month",
+          "used": 0.64,
+          "value": "€96 of €150",
+          "note": null
+        }
+      ]
+    },
+    {
+      "name": "OpenAI API",
+      "lanes": 4,
+      "note": null,
+      "meters": [
+        {
+          "what": "This month",
+          "used": 0.71,
+          "value": "€212 of €300",
+          "note": "GPT agents and GPT Image"
+        }
+      ]
+    }
+  ],
+  "missing": [
+    "Gemini",
+    "Grok",
+    "Seedance"
+  ]
+}

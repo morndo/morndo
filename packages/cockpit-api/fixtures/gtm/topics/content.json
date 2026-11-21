@@ -1,0 +1,908 @@
+{
+  "id": "content",
+  "name": "Content",
+  "kind": "topic",
+  "icon": "pen",
+  "crumb": "Webinar on Thursday",
+  "open": false,
+  "meta": {
+    "askedBy": "Asked by you",
+    "ownerLine": "Writer, Visuals and Publisher work on it",
+    "nextReport": "Sign-ups reported Fri 20 Nov",
+    "parts": [
+      "Asked by you",
+      "Writer, Visuals and Publisher work on it",
+      "Sign-ups reported Fri 20 Nov"
+    ]
+  },
+  "intro": "Everything we publish: the webinar on Thursday and its promo, the recap post, one customer story and a carousel. The goal this week is the webinar's sign-ups.",
+  "when": "3 days to the webinar",
+  "health": null,
+  "goal": {
+    "target": 300,
+    "signed": 212,
+    "likely": 55,
+    "unit": "Webinar sign-ups",
+    "verdict": {
+      "state": "bad",
+      "word": "At risk",
+      "action": "Your call by 16:00",
+      "text": "Today's promo post decides which end of the range we land on."
+    },
+    "insight": "Today's promo post decides which end of the range we land on.",
+    "asOf": "updated 09:20, forecast down 33 since yesterday · agents €36 of €40 this week",
+    "decision": {
+      "title": "The promo visuals are stuck",
+      "detail": "Post at 16:00 · 2 of 6 images fail the brand check",
+      "done": "",
+      "why": "Details",
+      "decisionId": null,
+      "laneId": "webinar",
+      "approveLabel": null
+    },
+    "calm": null,
+    "calmSub": null,
+    "trajectory": {
+      "start": "2026-11-05",
+      "days": 14,
+      "now": 11,
+      "goal": 300,
+      "step": 100,
+      "unit": "Webinar sign-ups",
+      "key": "Signed up",
+      "ticks": [
+        {
+          "day": 0,
+          "label": "5 Nov"
+        },
+        {
+          "day": 11,
+          "label": "Today"
+        },
+        {
+          "day": 14,
+          "label": "Thu 19 Nov"
+        }
+      ],
+      "plan": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 2,
+          "value": 40
+        },
+        {
+          "day": 4,
+          "value": 90
+        },
+        {
+          "day": 6,
+          "value": 130
+        },
+        {
+          "day": 8,
+          "value": 170
+        },
+        {
+          "day": 10,
+          "value": 205
+        },
+        {
+          "day": 11,
+          "value": 220
+        },
+        {
+          "day": 12,
+          "value": 250
+        },
+        {
+          "day": 13,
+          "value": 280
+        },
+        {
+          "day": 14,
+          "value": 300
+        }
+      ],
+      "actual": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 1,
+          "value": 22
+        },
+        {
+          "day": 3,
+          "value": 64
+        },
+        {
+          "day": 5,
+          "value": 101
+        },
+        {
+          "day": 7,
+          "value": 138
+        },
+        {
+          "day": 9,
+          "value": 171
+        },
+        {
+          "day": 10,
+          "value": 190
+        },
+        {
+          "day": 11,
+          "value": 212
+        }
+      ],
+      "expected": [
+        {
+          "day": 11,
+          "value": 212
+        },
+        {
+          "day": 12,
+          "value": 226
+        },
+        {
+          "day": 13,
+          "value": 252
+        },
+        {
+          "day": 14,
+          "value": 267
+        }
+      ],
+      "low": [
+        {
+          "day": 11,
+          "value": 212
+        },
+        {
+          "day": 12,
+          "value": 220
+        },
+        {
+          "day": 13,
+          "value": 238
+        },
+        {
+          "day": 14,
+          "value": 250
+        }
+      ],
+      "high": [
+        {
+          "day": 11,
+          "value": 212
+        },
+        {
+          "day": 12,
+          "value": 240
+        },
+        {
+          "day": 13,
+          "value": 275
+        },
+        {
+          "day": 14,
+          "value": 302
+        }
+      ],
+      "noForecast": null,
+      "title": "Forecast vs goal"
+    },
+    "milestones": [
+      "Written",
+      "Approved",
+      "Scheduled",
+      "Live"
+    ],
+    "rows": {
+      "title": "Where sign-ups come from",
+      "sub": "Each channel · written to live"
+    },
+    "deals": [
+      {
+        "name": "Newsletter",
+        "confidence": "Likely",
+        "close": null,
+        "at": 4,
+        "stage": "Two sends out, reminder scheduled",
+        "short": "118 so far; reminder Wed 09:00",
+        "laneId": "webinar-reminders",
+        "href": "#lane/webinar-reminders",
+        "evidence": "Two sends brought 118 sign-ups. The reminder goes to the 3,900 who opened but did not sign up; last webinar's reminder brought 31.",
+        "next": "the reminder, Wednesday 09:00.",
+        "value": null,
+        "alt": null
+      },
+      {
+        "name": "LinkedIn promo post",
+        "confidence": "Possible",
+        "close": null,
+        "at": 1,
+        "stage": "Text approved, images stuck",
+        "short": "Stuck: 2 images fail",
+        "laneId": "webinar",
+        "href": "#lane/webinar",
+        "evidence": "Last webinar's promo post brought 41 sign-ups in 3 days. Nothing else reaches LinkedIn before Thursday.",
+        "next": "your call before 16:00: post the 4 images that pass, or allow one more round.",
+        "value": null,
+        "alt": null
+      },
+      {
+        "name": "Fenwick shares it",
+        "confidence": "Early",
+        "close": null,
+        "at": 0,
+        "stage": "Promised, no date yet",
+        "short": "Their ops lead said yes",
+        "laneId": "fenwick",
+        "href": "#lane/fenwick",
+        "evidence": "Fenwick's ops lead offered to share it in an email on Friday. There is no date in their calendar yet.",
+        "next": "Writer sends them the post text on Tuesday.",
+        "value": null,
+        "alt": null
+      }
+    ],
+    "guardrails": {
+      "sub": "What the sign-ups must not cost",
+      "items": [
+        {
+          "what": "Off-brand posts",
+          "value": "0",
+          "limit": "none allowed",
+          "ratio": null
+        },
+        {
+          "what": "Newsletter sends",
+          "value": "2 this week",
+          "limit": "limit 2",
+          "ratio": 1
+        },
+        {
+          "what": "Claims without a source",
+          "value": "0",
+          "limit": "none allowed",
+          "ratio": null
+        }
+      ]
+    },
+    "ladder": [
+      {
+        "word": "Likely",
+        "fact": "The channel already brought sign-ups at a known rate."
+      },
+      {
+        "word": "Possible",
+        "fact": "Scheduled, but not live yet."
+      },
+      {
+        "word": "Early",
+        "fact": "Promised, with no date."
+      }
+    ],
+    "calibration": "Last webinar was forecast at 240 sign-ups three days out; it got 226.",
+    "outside": null,
+    "gap": {
+      "says": "To reach 300 by Thursday:",
+      "steps": [
+        "Post today at 16:00, with the 4 images that pass if no round is allowed. Last time the promo post brought 41 in 3 days.",
+        "Send the reminder on Wednesday at 09:00 to the 3,900 who opened but did not sign up.",
+        "If we are below 260 on Wednesday evening, Paid moves €200 of the webinar's budget to a sign-up ad for one day."
+      ]
+    },
+    "blockers": [
+      {
+        "state": "bad",
+        "short": "holds the 16:00 post for the images",
+        "what": null,
+        "why": null,
+        "who": "Publisher",
+        "href": "#lane/webinar",
+        "laneId": "webinar"
+      },
+      {
+        "state": "warn",
+        "short": "recap quotes not checked yet; post due Thursday",
+        "what": null,
+        "why": null,
+        "who": "Checker",
+        "href": "#lane/recap",
+        "laneId": "recap"
+      }
+    ],
+    "routine": null,
+    "funnel": {
+      "title": "Funnel",
+      "since": "Since 5 November · change today · rate against the plan",
+      "steps": [
+        {
+          "count": "4,200",
+          "what": "emails sent",
+          "change": null,
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": "1,890",
+          "what": "opened",
+          "change": null,
+          "rate": "45% · plan 40%",
+          "state": null
+        },
+        {
+          "count": "1,840",
+          "what": "page visits",
+          "change": "+310",
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": "212",
+          "what": "signed up",
+          "change": "+22",
+          "rate": "11.5% · plan 15%",
+          "state": "warn"
+        }
+      ]
+    },
+    "restSub": null,
+    "figures": [
+      {
+        "value": "212",
+        "of": "300",
+        "label": "Signed up"
+      },
+      {
+        "value": "55",
+        "of": null,
+        "label": "More expected, forecast"
+      },
+      {
+        "value": "33",
+        "of": null,
+        "label": "Still missing"
+      }
+    ],
+    "pathTitle": null
+  },
+  "noGoal": null,
+  "facts": [
+    {
+      "value": "212",
+      "label": "sign-ups for Thursday"
+    },
+    {
+      "value": "1,840",
+      "label": "webinar page visits"
+    },
+    {
+      "value": "4",
+      "label": "posts this week"
+    },
+    {
+      "value": "2",
+      "label": "brand-check fails"
+    }
+  ],
+  "plan": null,
+  "focusLaneId": "webinar",
+  "history": {
+    "seen": "yesterday at 18:20",
+    "shown": 2,
+    "since": "That is everything since the webinar page went live on 5 November.",
+    "days": [
+      {
+        "label": "Today",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "09:21",
+            "actor": {
+              "id": "visuals",
+              "name": "Visuals",
+              "shortName": "Visuals",
+              "kind": "agent",
+              "avatar": "V",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3",
+            "laneId": "webinar",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "09:13",
+            "actor": {
+              "id": "publisher",
+              "name": "Publisher",
+              "shortName": "Publisher",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "held the 16:00 promo post until the images are settled",
+            "laneId": "webinar",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "09:12",
+            "actor": {
+              "id": "visuals",
+              "name": "Visuals",
+              "shortName": "Visuals",
+              "kind": "agent",
+              "avatar": "V",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail",
+            "laneId": "webinar",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:00",
+            "actor": {
+              "id": "publisher",
+              "name": "Publisher",
+              "shortName": "Publisher",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent newsletter 46 to 4,200 readers, with the webinar on top",
+            "laneId": "webinar-reminders",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "07:30",
+            "actor": {
+              "id": "writer",
+              "name": "Writer",
+              "shortName": "Writer",
+              "kind": "agent",
+              "avatar": "W",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "started draft 2 of the recap post, aiming at 350 words",
+            "laneId": "recap",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Yesterday",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "17:00",
+            "actor": {
+              "id": "publisher",
+              "name": "Publisher",
+              "shortName": "Publisher",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "scheduled the reminder email for Wednesday 09:00",
+            "laneId": "webinar-reminders",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "seen"
+          },
+          {
+            "kind": "event",
+            "time": "11:40",
+            "actor": {
+              "id": "writer",
+              "name": "Writer",
+              "shortName": "Writer",
+              "kind": "agent",
+              "avatar": "W",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "wrote the post text for Fenwick to share",
+            "laneId": "fenwick",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Friday, 13 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "16:41",
+            "actor": {
+              "id": "writer",
+              "name": "Writer",
+              "shortName": "Writer",
+              "kind": "agent",
+              "avatar": "W",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "answered your question: the 38% is March against September, before and after us",
+            "laneId": "fenwick",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "16:20",
+            "actor": {
+              "id": "writer",
+              "name": "Writer",
+              "shortName": "Writer",
+              "kind": "agent",
+              "avatar": "W",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "got Fenwick's sign-off on the story and the quote",
+            "laneId": "fenwick",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "11:05",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "asked for a recap of the October webinar people can read in two minutes",
+            "laneId": "recap",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "10:00",
+            "actor": {
+              "id": "writer",
+              "name": "Writer",
+              "shortName": "Writer",
+              "kind": "agent",
+              "avatar": "W",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "wrote the promo text; you approved it at 10:40",
+            "laneId": "webinar",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Thursday, 12 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "17:40",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "asked to get the webinar promo out on Monday",
+            "laneId": "webinar",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:00",
+            "actor": {
+              "id": "publisher",
+              "name": "Publisher",
+              "shortName": "Publisher",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent the first webinar invite to 4,200 readers",
+            "laneId": "webinar-reminders",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      }
+    ]
+  },
+  "crew": [
+    {
+      "id": "mara-lind",
+      "name": "Mara Lind",
+      "shortName": "Mara",
+      "kind": "person",
+      "avatar": "M",
+      "role": "Head of GTM",
+      "state": "warn",
+      "word": "Owns it",
+      "text": "Approves what goes public",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "writer",
+      "name": "Writer",
+      "shortName": "Writer",
+      "kind": "agent",
+      "avatar": "W",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Webinar recap post, draft 2 of 3",
+      "skill": "/linkedin-post",
+      "engine": "Claude",
+      "record": "4 of 4 posts this month approved the first time"
+    },
+    {
+      "id": "visuals",
+      "name": "Visuals",
+      "shortName": "Visuals",
+      "kind": "agent",
+      "avatar": "V",
+      "role": null,
+      "state": "bad",
+      "word": "Stuck",
+      "text": "Webinar promo, out of feedback rounds",
+      "skill": "/brand-visual",
+      "engine": "GPT Image",
+      "record": "22 of 26 images passed the brand check"
+    },
+    {
+      "id": "publisher",
+      "name": "Publisher",
+      "shortName": "Publisher",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "warn",
+      "word": "Waiting",
+      "text": "Holding the 16:00 post for the visuals",
+      "skill": "/schedule-post",
+      "engine": "Asks first",
+      "record": "31 of 31 posts went out on time"
+    }
+  ],
+  "jobs": [
+    {
+      "job": "Webinar promo post",
+      "agent": "Visuals",
+      "state": "bad",
+      "due": "Today, 16:00",
+      "laneId": "webinar"
+    },
+    {
+      "job": "Fenwick Freight customer story",
+      "agent": "Writer",
+      "state": "warn",
+      "due": "Wed 18 Nov",
+      "laneId": "fenwick"
+    },
+    {
+      "job": "Webinar reminder email",
+      "agent": "Publisher",
+      "state": "ok",
+      "due": "Wed 18 Nov, 09:00",
+      "laneId": "webinar-reminders"
+    },
+    {
+      "job": "Webinar recap post",
+      "agent": "Writer",
+      "state": "ok",
+      "due": "Thu 19 Nov",
+      "laneId": "recap"
+    },
+    {
+      "job": "Carousel: 5 signs of ops debt",
+      "agent": "Visuals",
+      "state": "next",
+      "due": "Fri 20 Nov",
+      "laneId": null
+    },
+    {
+      "job": "Newsletter 46",
+      "agent": "Publisher",
+      "state": "done",
+      "due": "Sent today, 08:00",
+      "laneId": null
+    }
+  ],
+  "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",
+  "lanes": [
+    {
+      "id": "webinar",
+      "title": "Webinar on Thursday",
+      "state": "bad",
+      "stateWord": "Stuck",
+      "leadName": "Visuals",
+      "next": "Now, needs your call"
+    },
+    {
+      "id": "fenwick",
+      "title": "Fenwick customer story",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "leadName": "Writer",
+      "next": "After your OK"
+    },
+    {
+      "id": "recap",
+      "title": "Webinar recap post",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Writer",
+      "next": "Thu 19 Nov"
+    },
+    {
+      "id": "webinar-reminders",
+      "title": "Webinar invites and reminder",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Publisher",
+      "next": "Wed 18 Nov, 09:00"
+    }
+  ],
+  "spend": {
+    "spent": 36,
+    "cap": 40
+  },
+  "stuck": null,
+  "tasks": []
+}

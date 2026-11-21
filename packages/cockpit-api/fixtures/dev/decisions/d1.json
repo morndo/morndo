@@ -1,0 +1,105 @@
+{
+  "id": "d1",
+  "title": "Release the fix for exports that time out",
+  "state": "open",
+  "topicId": "api",
+  "topicName": "API",
+  "due": "Due today, 14:00",
+  "whyYours": null,
+  "minutes": 3,
+  "contextLine": "API · Due today, 14:00 · 3 min to read",
+  "cardContext": "Exports fail for the 14 largest accounts. The fix passed its tests, a fresh review and a run on staging. Rolling back takes 2 minutes.",
+  "doneNote": "Approved. The Release lane rolls out at 22:00 and watches for 30 minutes.",
+  "laneId": "export-for-big-accounts",
+  "approveLabel": "Approve the release",
+  "provenance": {
+    "laneId": "export-for-big-accounts",
+    "laneTitle": "Export for big accounts",
+    "writtenBy": "Release",
+    "checkedBy": "the Manager",
+    "checkedAt": "07:05"
+  },
+  "context": "Exports for accounts with more than 200,000 shipments stop after 30 seconds. Fenwick Freight reported it on Thursday. 14 accounts are affected, and 23 of about 580 exports failed yesterday. The fix writes the file in chunks of 5,000 rows instead of building it in memory.",
+  "numbers": [],
+  "proof": {
+    "items": [
+      {
+        "label": "Tests",
+        "value": "214 pass",
+        "sub": "6 are new and failed before the fix"
+      },
+      {
+        "label": "Fresh review",
+        "value": "2 rounds",
+        "sub": "3 findings, all fixed"
+      },
+      {
+        "label": "Run on staging",
+        "value": "48 s",
+        "sub": "Fenwick's 1.2 GB export, a timeout before"
+      },
+      {
+        "label": "Checks",
+        "value": "5 of 5",
+        "sub": "Green on the version to release"
+      }
+    ],
+    "meta": [
+      "#412",
+      "9 files, +312 −87",
+      "No database change",
+      "Rollback tried on staging: 2 minutes"
+    ],
+    "unchecked": "exports larger than 5 GB. The largest account today has 1.2 GB."
+  },
+  "opportunity": {
+    "kind": "opportunity",
+    "label": "Opportunity · the dream output",
+    "headline": "No failed exports from Tuesday",
+    "condition": "Failed exports a day, if the fix holds on live data as it did on staging.",
+    "summary": "With the release, failed exports a day fall from 23 today to 0 from Tuesday. With no change they stay at 23."
+  },
+  "risk": {
+    "kind": "risk",
+    "label": "Risk · the worst case",
+    "headline": "1 in 7 exports fails for 2 minutes",
+    "condition": "Share of exports failing, if the new code breaks on live data. Only the first 10% of accounts get it.",
+    "summary": "In the worst case the share of exports that fail rises from 4% to 14% for two minutes after the rollout starts, then returns to 4% when the release is rolled back."
+  },
+  "suggestion": "Release tonight at 22:00, when few exports run. The first 10% of accounts get it for 30 minutes, then everyone.",
+  "guardrail": "Guardrail: if exports fail more often than today during the watch, the Release lane rolls back on its own and tells you. Rolling back takes about 2 minutes and loses no data.",
+  "nextSteps": [
+    {
+      "step": "Merge pull request 412",
+      "who": "Release lane",
+      "by": "Today, after your OK"
+    },
+    {
+      "step": "Roll out to 10% of accounts and watch for 30 minutes",
+      "who": "Release lane",
+      "by": "Today, 22:00"
+    },
+    {
+      "step": "Roll out to everyone",
+      "who": "Release lane",
+      "by": "Today, 22:30"
+    },
+    {
+      "step": "Run Fenwick's export on production and compare the file",
+      "who": "QA lane",
+      "by": "Today, 22:45"
+    },
+    {
+      "step": "Draft the \"it is fixed\" note to Fenwick Freight",
+      "who": "Writer, go-to-market",
+      "by": "Tue 17 Nov"
+    },
+    {
+      "step": "Report the result against the dream output",
+      "who": "Manager",
+      "by": "Tue 17 Nov, 09:00"
+    }
+  ],
+  "ifNoAnswer": "If you do not answer by 14:00, nothing is released.",
+  "position": "1 of 3 · 3 open"
+}

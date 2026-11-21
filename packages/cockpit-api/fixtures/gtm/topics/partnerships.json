@@ -1,0 +1,1517 @@
+{
+  "id": "partnerships",
+  "name": "Partnerships",
+  "kind": "topic",
+  "icon": "partner",
+  "crumb": "Big-brand partners",
+  "open": true,
+  "meta": {
+    "askedBy": "Asked by Tom Ahrens, CEO",
+    "ownerLine": "You own it",
+    "nextReport": "Next report to Tom Fri 08:00",
+    "parts": [
+      "Asked by Tom Ahrens, CEO",
+      "You own it",
+      "Next report to Tom Fri 08:00"
+    ]
+  },
+  "intro": "Partnerships with big brands that bring us customers we cannot reach alone. You do the calls and the deals; Lea and Jonas run the rest; agents do the list work around the clock.",
+  "when": "Week 5 of 15",
+  "health": {
+    "state": "ok",
+    "word": "On track"
+  },
+  "goal": {
+    "target": 3,
+    "signed": 0,
+    "likely": null,
+    "unit": "partners by 31 January",
+    "verdict": {
+      "state": "warn",
+      "word": "Behind plan",
+      "action": "Action needed",
+      "text": "The forecast reaches 1 signed partner by 31 January, 0 to 2 at the edges; the plan needs 3. Halden is the only likely deal, and nothing else has reached a qualified call yet."
+    },
+    "insight": "Only Halden is likely. Two more deals need an offer by early January.",
+    "asOf": "updated 07:45, forecast unchanged since yesterday · agents €38 of €60 this week",
+    "decision": {
+      "title": "Approve the Halden offer",
+      "detail": "Due Thursday · their budget is set on 1 December",
+      "done": "Halden offer approved",
+      "why": null,
+      "decisionId": "d4",
+      "laneId": "halden-offer",
+      "approveLabel": "Send the offer"
+    },
+    "calm": null,
+    "calmSub": null,
+    "trajectory": {
+      "start": "2026-10-19",
+      "days": 104,
+      "now": 29,
+      "goal": 3,
+      "step": null,
+      "unit": null,
+      "key": null,
+      "ticks": [
+        {
+          "day": 0,
+          "label": "19 Oct"
+        },
+        {
+          "day": 29,
+          "label": "Today"
+        },
+        {
+          "day": 60,
+          "label": "18 Dec"
+        },
+        {
+          "day": 88,
+          "label": "15 Jan"
+        },
+        {
+          "day": 104,
+          "label": "31 Jan"
+        }
+      ],
+      "plan": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 60,
+          "value": 1
+        },
+        {
+          "day": 88,
+          "value": 2
+        },
+        {
+          "day": 104,
+          "value": 3
+        }
+      ],
+      "actual": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 29,
+          "value": 0
+        }
+      ],
+      "expected": [
+        {
+          "day": 29,
+          "value": 0
+        },
+        {
+          "day": 56,
+          "value": 1
+        },
+        {
+          "day": 104,
+          "value": 1
+        }
+      ],
+      "low": [
+        {
+          "day": 29,
+          "value": 0
+        },
+        {
+          "day": 104,
+          "value": 0
+        }
+      ],
+      "high": [
+        {
+          "day": 29,
+          "value": 0
+        },
+        {
+          "day": 50,
+          "value": 1
+        },
+        {
+          "day": 95,
+          "value": 2
+        },
+        {
+          "day": 104,
+          "value": 2
+        }
+      ],
+      "noForecast": null,
+      "title": "Forecast vs goal"
+    },
+    "milestones": [
+      "Replied",
+      "Call held",
+      "Qualified",
+      "Offer sent",
+      "Signed"
+    ],
+    "rows": null,
+    "deals": [
+      {
+        "name": "Halden Freight Network",
+        "confidence": "Likely",
+        "close": "December",
+        "at": 3,
+        "stage": "Offer drafted, not sent",
+        "short": "Your OK on the offer",
+        "laneId": "halden-offer",
+        "href": "#lane/halden-offer",
+        "evidence": "They asked for an offer on the 13 November call and named their budget date, 1 December.",
+        "next": "your OK on the offer (due Thursday), then their budget on 1 December.",
+        "value": null,
+        "alt": {
+          "decisionId": "d4",
+          "stage": "Offer goes out tomorrow",
+          "short": "Offer out tomorrow",
+          "next": "their budget is set on 1 December; Jonas follows up on 23 November."
+        }
+      },
+      {
+        "name": "Brightmoor Retail",
+        "confidence": "Possible",
+        "close": "January at best",
+        "at": 1,
+        "stage": "First call today, 15:00",
+        "short": "First call today, 15:00",
+        "laneId": "partner-calls",
+        "href": "#lane/partner-calls",
+        "evidence": "Replied to wave 1 and booked a call. No partner owner or budget known yet.",
+        "next": "today's call must name the partner owner and their budget date.",
+        "value": null,
+        "alt": null
+      },
+      {
+        "name": "Northvale or Corvane",
+        "confidence": "Early",
+        "close": null,
+        "at": 1,
+        "stage": "First calls Wednesday and Thursday",
+        "short": "Qualify this week",
+        "laneId": "partner-calls",
+        "href": "#lane/partner-calls",
+        "evidence": "Northvale Bank and Corvane ERP both replied to wave 1. Nothing known yet about fit or budget.",
+        "next": "the first calls on Wednesday and Thursday; one of them has to qualify.",
+        "value": null,
+        "alt": null
+      }
+    ],
+    "guardrails": {
+      "sub": "What reaching 3 must not cost",
+      "items": [
+        {
+          "what": "Bounces",
+          "value": "1.2%",
+          "limit": "limit 4%",
+          "ratio": 0.3
+        },
+        {
+          "what": "Asked to stop",
+          "value": "0 of 52",
+          "limit": "limit 2%",
+          "ratio": 0
+        },
+        {
+          "what": "Sent unchecked",
+          "value": "0",
+          "limit": "none allowed",
+          "ratio": null
+        },
+        {
+          "what": "Terms",
+          "value": "standard 15%",
+          "limit": "no discount without you",
+          "ratio": null
+        }
+      ]
+    },
+    "ladder": [
+      {
+        "word": "Likely",
+        "fact": "They asked for an offer."
+      },
+      {
+        "word": "Possible",
+        "fact": "A call held or booked, with a named partner owner."
+      },
+      {
+        "word": "Early",
+        "fact": "Only a reply, or a first call booked."
+      }
+    ],
+    "calibration": "No forecast can be scored yet. The first is scored on 18 December; each is kept with what happened, so the ladder learns how often Likely signs.",
+    "outside": "Out of this goal: Kestrel Parcel, budget frozen until spring (call on 12 November).",
+    "gap": {
+      "says": "To reach 3, two more deals must reach an offer in time:",
+      "steps": [
+        "Brightmoor to an offer by 11 December. We assume 4 to 6 weeks from offer to signature; that is a guess until Halden signs.",
+        "Northvale or Corvane to an offer by 8 January, after this week's calls.",
+        "If neither call qualifies by Friday, send wave 2 at once. At wave 1's rates its 40 retail brands bring about 8 replies and 4 calls by mid-December."
+      ]
+    },
+    "blockers": [
+      {
+        "state": "warn",
+        "short": "24 emails wait for her review; wave 2 is blocked",
+        "what": "Wave 2 is blocked on Lea's review",
+        "why": "24 emails drafted at 04:30. Sender sends nothing until she checks them. Due 11:00.",
+        "who": "Lea Brandt",
+        "href": "#lane/outreach-wave-2",
+        "laneId": "outreach-wave-2"
+      },
+      {
+        "state": "warn",
+        "short": "calls booked below plan, 45% against 50%",
+        "what": "Calls booked are below plan",
+        "why": "45% of replies booked a call, against 50%. 4 brands asked to wait until January; Sender's follow-ups go out today.",
+        "who": "Sender",
+        "href": "#lane/outreach-wave-1",
+        "laneId": "outreach-wave-1"
+      },
+      {
+        "state": "warn",
+        "short": "9 new brands wait for her check",
+        "what": "9 new brands wait for Lea's check",
+        "why": "Contact finder holds batch 4 until they are checked. Due Thursday.",
+        "who": "Lea Brandt",
+        "href": "#lane/brand-list",
+        "laneId": "brand-list"
+      }
+    ],
+    "routine": "On schedule: Jonas, partner contract template with legal (Wed) · you, Brightmoor call at 15:00, brief ready at 13:00 · 4 agents working, none stuck.",
+    "funnel": {
+      "title": "Funnel",
+      "since": "Since 6 November · change this week · rate against the plan",
+      "steps": [
+        {
+          "count": "64",
+          "what": "brands fit",
+          "change": "+9",
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": "52",
+          "what": "written to",
+          "change": null,
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": "11",
+          "what": "replied",
+          "change": "+2",
+          "rate": "21% · plan 15%",
+          "state": null
+        },
+        {
+          "count": "5",
+          "what": "calls booked",
+          "change": "+1",
+          "rate": "45% · plan 50%",
+          "state": "warn"
+        },
+        {
+          "count": "2",
+          "what": "calls held",
+          "change": null,
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": "1",
+          "what": "offer",
+          "change": "+1",
+          "rate": "plan 2 by 30 Nov",
+          "state": "warn"
+        },
+        {
+          "count": "0",
+          "what": "signed",
+          "change": null,
+          "rate": "plan 1 by 18 Dec",
+          "state": null
+        }
+      ]
+    },
+    "restSub": null,
+    "figures": [
+      {
+        "value": "0",
+        "of": "3",
+        "label": "Signed"
+      },
+      {
+        "value": "1",
+        "of": null,
+        "label": "Likely, forecast"
+      },
+      {
+        "value": "2",
+        "of": null,
+        "label": "Still unsecured"
+      }
+    ],
+    "pathTitle": "Path to three"
+  },
+  "noGoal": null,
+  "facts": [
+    {
+      "value": "0/3",
+      "label": "partners signed"
+    },
+    {
+      "value": "5",
+      "label": "calls booked"
+    }
+  ],
+  "plan": {
+    "stages": [
+      {
+        "name": "Strategy",
+        "state": "done",
+        "percent": 100,
+        "summary": "Done 23 Oct: 3 partners by 31 January, from logistics, retail and finance.",
+        "rows": [],
+        "alt": null
+      },
+      {
+        "name": "Stack",
+        "state": "done",
+        "percent": 100,
+        "summary": "Clay finds brands, Apollo finds the people, HubSpot keeps the deals. Set up by Jonas, 30 Oct.",
+        "rows": [],
+        "alt": null
+      },
+      {
+        "name": "Brands",
+        "state": "now",
+        "percent": 80,
+        "summary": "160 of 200 brands found, 64 fit the partner profile.",
+        "rows": [
+          {
+            "avatar": "B",
+            "who": "Brand scout",
+            "kind": "agent",
+            "state": "ok",
+            "text": "finds brands in Clay",
+            "when": "160 of 200",
+            "percent": 80,
+            "href": "#lane/brand-list",
+            "laneId": "brand-list",
+            "alt": null
+          },
+          {
+            "avatar": "C",
+            "who": "Contact finder",
+            "kind": "agent",
+            "state": "ok",
+            "text": "finds decision-makers in Apollo",
+            "when": "96 of 160",
+            "percent": 60,
+            "href": "#lane/contact-data",
+            "laneId": "contact-data",
+            "alt": null
+          }
+        ],
+        "alt": null
+      },
+      {
+        "name": "Outreach",
+        "state": "wait",
+        "percent": 45,
+        "summary": "Wave 1 went to 52 brands, 11 replied. Wave 2 waits for Lea: nothing is sent before she checks it.",
+        "rows": [
+          {
+            "avatar": "L",
+            "who": "Lea",
+            "kind": "person",
+            "state": "warn",
+            "text": "checks 24 emails for wave 2",
+            "when": "by 11:00",
+            "percent": null,
+            "href": "#lane/outreach-wave-2",
+            "laneId": "outreach-wave-2",
+            "alt": null
+          },
+          {
+            "avatar": "S",
+            "who": "Sender",
+            "kind": "agent",
+            "state": "ok",
+            "text": "follows up on wave 1",
+            "when": "38 of 52",
+            "percent": 73,
+            "href": "#lane/outreach-wave-1",
+            "laneId": "outreach-wave-1",
+            "alt": null
+          },
+          {
+            "avatar": "S",
+            "who": "Sender",
+            "kind": "agent",
+            "state": "next",
+            "text": "sends wave 2, 20 a day",
+            "when": "after Lea",
+            "percent": null,
+            "href": "#lane/outreach-wave-2",
+            "laneId": "outreach-wave-2",
+            "alt": null
+          }
+        ],
+        "alt": null
+      },
+      {
+        "name": "Calls",
+        "state": "now",
+        "percent": 40,
+        "summary": "2 of 5 calls held. Every call gets a brief before and notes after.",
+        "rows": [
+          {
+            "avatar": "M",
+            "who": "You",
+            "kind": "person",
+            "state": "ok",
+            "text": "call with Brightmoor Retail",
+            "when": "today 15:00",
+            "percent": null,
+            "href": "#lane/partner-calls",
+            "laneId": "partner-calls",
+            "alt": null
+          },
+          {
+            "avatar": "P",
+            "who": "Call prep",
+            "kind": "agent",
+            "state": "ok",
+            "text": "writes the Brightmoor brief",
+            "when": "ready 13:00",
+            "percent": null,
+            "href": "#lane/partner-calls",
+            "laneId": "partner-calls",
+            "alt": null
+          },
+          {
+            "avatar": "N",
+            "who": "Notetaker",
+            "kind": "agent",
+            "state": "next",
+            "text": "notes and the follow-up draft",
+            "when": "today 16:00",
+            "percent": null,
+            "href": "#lane/partner-calls",
+            "laneId": "partner-calls",
+            "alt": null
+          },
+          {
+            "avatar": "M",
+            "who": "You",
+            "kind": "person",
+            "state": "next",
+            "text": "calls with Northvale Bank and Corvane ERP",
+            "when": "Wed, Thu",
+            "percent": null,
+            "href": "#lane/partner-calls",
+            "laneId": "partner-calls",
+            "alt": null
+          }
+        ],
+        "alt": null
+      },
+      {
+        "name": "Offers",
+        "state": "wait",
+        "percent": 15,
+        "summary": "The offer to Halden waits for you.",
+        "rows": [
+          {
+            "avatar": "M",
+            "who": "You",
+            "kind": "person",
+            "state": "warn",
+            "text": "approve the offer to Halden",
+            "when": "due Thu",
+            "percent": null,
+            "href": "#lane/halden-offer",
+            "laneId": "halden-offer",
+            "alt": {
+              "decisionId": "d4",
+              "text": "approved the offer to Halden",
+              "when": "goes out 09:00",
+              "state": null
+            }
+          },
+          {
+            "avatar": "J",
+            "who": "Jonas",
+            "kind": "person",
+            "state": "ok",
+            "text": "partner contract template, with legal",
+            "when": "Wed",
+            "percent": null,
+            "href": "#lane/halden-offer",
+            "laneId": "halden-offer",
+            "alt": null
+          }
+        ],
+        "alt": {
+          "decisionId": "d4",
+          "state": "now",
+          "percent": 35,
+          "summary": "The offer to Halden goes out tomorrow at 09:00."
+        }
+      },
+      {
+        "name": "Signed",
+        "state": "next",
+        "percent": 0,
+        "summary": "Goal: 3 partners by 31 January. Reporter drafts Tom's weekly report on Friday.",
+        "rows": [
+          {
+            "avatar": "R",
+            "who": "Reporter",
+            "kind": "agent",
+            "state": "next",
+            "text": "weekly partner report for Tom, as a draft",
+            "when": "Fri 08:00",
+            "percent": null,
+            "href": "#drafts",
+            "laneId": null,
+            "alt": null
+          }
+        ],
+        "alt": null
+      }
+    ],
+    "night": [
+      {
+        "value": "+32",
+        "label": "brands"
+      },
+      {
+        "value": "+58",
+        "label": "contacts"
+      },
+      {
+        "value": "24",
+        "label": "emails drafted"
+      }
+    ]
+  },
+  "focusLaneId": "halden-offer",
+  "history": {
+    "seen": "yesterday at 18:20",
+    "shown": 3,
+    "since": "That is everything since the topic began on 19 October. Nothing is dropped.",
+    "days": [
+      {
+        "label": "Today",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "now",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "approved the offer to Halden. It goes out from your mail tomorrow at 09:00.",
+            "laneId": "halden-offer",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": "d4"
+          },
+          {
+            "kind": "event",
+            "time": "08:41",
+            "actor": {
+              "id": "call-prep",
+              "name": "Call prep",
+              "shortName": "Call",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "answered your question on Brightmoor; the full brief is ready at 13:00",
+            "laneId": "partner-calls",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:30",
+            "actor": {
+              "id": "jonas-falk",
+              "name": "Jonas Falk",
+              "shortName": "Jonas",
+              "kind": "person",
+              "avatar": "J",
+              "role": "Partner operations",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "drafted the offer to Halden from the template and put it in Decide for you",
+            "laneId": "halden-offer",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:12",
+            "actor": {
+              "id": "lea-brandt",
+              "name": "Lea Brandt",
+              "shortName": "Lea",
+              "kind": "person",
+              "avatar": "L",
+              "role": "GTM associate",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "took on the check of the 24 wave 2 emails, by 11:00",
+            "laneId": "outreach-wave-2",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:00",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent 18 wave 1 follow-ups from your mail, 08:00 to 08:40",
+            "laneId": "outreach-wave-1",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": 18,
+            "samples": [
+              "Fernwood Outdoor · to the head of partnerships",
+              "Tallis Logistics · to the VP business development",
+              "Brookmere Foods · to the partnerships lead"
+            ],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "07:20",
+            "actor": {
+              "id": "manager",
+              "name": "Manager",
+              "shortName": "Manager",
+              "kind": "agent",
+              "avatar": "M",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "spot-checked 5 brands of Lea's batch 3 at random: all 5 fit the profile",
+            "laneId": "brand-list",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "07:00",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "put 4 reminders in HubSpot for brands that want to talk in January",
+            "laneId": "outreach-wave-1",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "06:10",
+            "actor": {
+              "id": "contact-finder",
+              "name": "Contact finder",
+              "shortName": "Contact",
+              "kind": "agent",
+              "avatar": "C",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "found 58 contacts in Apollo and left out 4 whose email failed the check",
+            "laneId": "contact-data",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": 58,
+            "samples": [
+              "Larkfield Home · head of partnerships",
+              "Osprey Cargo · VP business development",
+              "Quillon Pay · partnerships lead"
+            ],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "05:40",
+            "actor": {
+              "id": "brand-scout",
+              "name": "Brand scout",
+              "shortName": "Brand",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "added 32 brands from Clay, 9 of them fit; skipped 6 that work with a competitor",
+            "laneId": "brand-list",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": 32,
+            "samples": [
+              "Larkfield Home · fits: 40,000 small-business buyers",
+              "Osprey Cargo · fits: sells to freight forwarders",
+              "Marlow Kitchens · does not fit: consumers only"
+            ],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "05:05",
+            "actor": {
+              "id": "manager",
+              "name": "Manager",
+              "shortName": "Manager",
+              "kind": "agent",
+              "avatar": "M",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "caught Sender's read-back after a restart: it left out Lea's check. Put the check back and held sending; nothing went out",
+            "laneId": "outreach-wave-2",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "04:30",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "drafted 24 emails for wave 2. Nothing is sent before Lea checks them.",
+            "laneId": "outreach-wave-2",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": 24,
+            "samples": [
+              "Larkfield Home · 74 words",
+              "Pell & Rowe · 81 words",
+              "Southgate Supply · 69 words"
+            ],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "02:10",
+            "actor": {
+              "id": "brand-scout",
+              "name": "Brand scout",
+              "shortName": "Brand",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "picked 40 retail brands from the checked list for wave 2",
+            "laneId": "outreach-wave-2",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Yesterday",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "21:40",
+            "actor": {
+              "id": "brand-scout",
+              "name": "Brand scout",
+              "shortName": "Brand",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "started batch 4 in Clay",
+            "laneId": "brand-list",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "21:10",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "started a fresh session and read the lane back; it matched the records",
+            "laneId": "outreach-wave-1",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "seen"
+          },
+          {
+            "kind": "event",
+            "time": "17:10",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent 20 wave 1 follow-ups from your mail, 17:10 to 17:55",
+            "laneId": "outreach-wave-1",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": 20,
+            "samples": [
+              "Thornbury Tools · to the head of partnerships",
+              "Ardent Wholesale · to the CEO",
+              "Linden Pay · to the partnerships lead"
+            ],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "15:20",
+            "actor": {
+              "id": "jonas-falk",
+              "name": "Jonas Falk",
+              "shortName": "Jonas",
+              "kind": "person",
+              "avatar": "J",
+              "role": "Partner operations",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent the partner contract template to legal",
+            "laneId": "halden-offer",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "11:05",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "booked your call with Corvane ERP for Thursday and sent the invite",
+            "laneId": "partner-calls",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "09:30",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "moved the Northvale Bank call to Wednesday",
+            "laneId": "partner-calls",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Friday, 13 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "17:30",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "decided wave 2 goes to the retail brands first",
+            "laneId": "outreach-wave-2",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "16:40",
+            "actor": {
+              "id": "lea-brandt",
+              "name": "Lea Brandt",
+              "shortName": "Lea",
+              "kind": "person",
+              "avatar": "L",
+              "role": "GTM associate",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "approved batch 3: 40 brands, took out 7",
+            "laneId": "brand-list",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "14:05",
+            "actor": {
+              "id": "notetaker",
+              "name": "Notetaker",
+              "shortName": "Notetaker",
+              "kind": "agent",
+              "avatar": "N",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "wrote up the Halden call, opened a lane for the offer and named Jonas to lead",
+            "laneId": "halden-offer",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "13:00",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "held the call with Halden Freight Network, 34 minutes",
+            "laneId": "partner-calls",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "12:20",
+            "actor": {
+              "id": "call-prep",
+              "name": "Call prep",
+              "shortName": "Call",
+              "kind": "agent",
+              "avatar": "P",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "wrote the brief for the Halden call",
+            "laneId": "partner-calls",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Thursday, 12 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "16:00",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "held the call with Kestrel Parcel: not before spring",
+            "laneId": "partner-calls",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "10:00",
+            "actor": {
+              "id": "sender",
+              "name": "Sender",
+              "shortName": "Sender",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent the last 12 wave 1 emails from your mail",
+            "laneId": "outreach-wave-1",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": 12,
+            "samples": [
+              "Brightmoor Retail · to the head of partnerships",
+              "Halden Freight Network · to the VP partnerships",
+              "Northvale Bank · to the partnerships lead"
+            ],
+            "decisionId": null
+          }
+        ]
+      }
+    ]
+  },
+  "crew": [
+    {
+      "id": "mara-lind",
+      "name": "Mara Lind",
+      "shortName": "Mara",
+      "kind": "person",
+      "avatar": "M",
+      "role": "Head of GTM",
+      "state": "ok",
+      "word": "Owns it",
+      "text": "The calls, every offer, the goal with the CEO",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "lea-brandt",
+      "name": "Lea Brandt",
+      "shortName": "Lea",
+      "kind": "person",
+      "avatar": "L",
+      "role": "GTM associate",
+      "state": "warn",
+      "word": "Review due",
+      "text": "Checks every list and email before it goes out",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "jonas-falk",
+      "name": "Jonas Falk",
+      "shortName": "Jonas",
+      "kind": "person",
+      "avatar": "J",
+      "role": "Partner operations",
+      "state": "ok",
+      "word": "Working",
+      "text": "Tools, the CRM and the contract template",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "brand-scout",
+      "name": "Brand scout",
+      "shortName": "Brand",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Finds brands that fit the partner profile",
+      "skill": "/find-brands",
+      "engine": "Clay",
+      "record": "3 of 3 batches passed Lea's check; she took out 7 brands"
+    },
+    {
+      "id": "contact-finder",
+      "name": "Contact finder",
+      "shortName": "Contact",
+      "kind": "agent",
+      "avatar": "C",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "The person who decides, with a checked email",
+      "skill": "/find-contacts",
+      "engine": "Apollo",
+      "record": "92 of 96 emails held up; none bounced after the check"
+    },
+    {
+      "id": "sender",
+      "name": "Sender",
+      "shortName": "Sender",
+      "kind": "agent",
+      "avatar": "S",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Personal emails from your mail, and follow-ups",
+      "skill": "/outbound-sequence",
+      "engine": "Claude",
+      "record": "51 of 52 emails passed Lea's check; 1 read-back corrected today"
+    },
+    {
+      "id": "call-prep",
+      "name": "Call prep",
+      "shortName": "Call",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "One page on the brand before every call",
+      "skill": "/call-brief",
+      "engine": "Claude",
+      "record": "2 of 2 briefs held up on the call"
+    },
+    {
+      "id": "notetaker",
+      "name": "Notetaker",
+      "shortName": "Notetaker",
+      "kind": "agent",
+      "avatar": "N",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Notes, next steps and the follow-up draft",
+      "skill": "/call-notes",
+      "engine": "Claude",
+      "record": "2 of 2 notes matched what you heard"
+    },
+    {
+      "id": "reporter",
+      "name": "Reporter",
+      "shortName": "Reporter",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "The weekly partner report for the CEO",
+      "skill": "/weekly-summary",
+      "engine": "Claude",
+      "record": "No report checked yet"
+    }
+  ],
+  "jobs": [],
+  "chatSub": "Mara, Lea, Jonas and 6 agents · the Manager reads it, it is not in it",
+  "lanes": [
+    {
+      "id": "outreach-wave-2",
+      "title": "Outreach, wave 2: retail",
+      "state": "warn",
+      "stateWord": "Waits for Lea",
+      "leadName": "Sender",
+      "next": "After Lea's check"
+    },
+    {
+      "id": "halden-offer",
+      "title": "Offer for Halden Freight Network",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "leadName": "Jonas",
+      "next": "After your OK"
+    },
+    {
+      "id": "brand-list",
+      "title": "200 brands that fit",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Brand scout",
+      "next": "Today, 18:00"
+    },
+    {
+      "id": "contact-data",
+      "title": "Who decides at each brand",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Contact finder",
+      "next": "Tomorrow, 08:00"
+    },
+    {
+      "id": "outreach-wave-1",
+      "title": "Outreach, wave 1",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Sender",
+      "next": "Wed 18 Nov"
+    },
+    {
+      "id": "partner-calls",
+      "title": "Partnership calls",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "You",
+      "next": "Today, 16:00"
+    },
+    {
+      "id": "partner-strategy",
+      "title": "Partner strategy",
+      "state": "done",
+      "stateWord": "Done",
+      "leadName": "You",
+      "next": "closed 23 Oct"
+    },
+    {
+      "id": "partner-stack",
+      "title": "Tools for partner outreach",
+      "state": "done",
+      "stateWord": "Done",
+      "leadName": "Jonas",
+      "next": "closed 30 Oct"
+    }
+  ],
+  "spend": {
+    "spent": 38,
+    "cap": 60
+  },
+  "stuck": null,
+  "tasks": []
+}

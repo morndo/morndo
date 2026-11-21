@@ -1,0 +1,37 @@
+{
+  "id": "lane:partner-calls",
+  "title": "Partnership calls",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "lane_partner-calls-0",
+      "author": {
+        "id": "notetaker",
+        "name": "Notetaker",
+        "shortName": "Notetaker",
+        "kind": "agent",
+        "avatar": "N",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "13 Nov",
+      "text": "Halden call: they want a referral deal and a joint webinar. Next step is an offer this week. I opened a lane for it and named Jonas.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "id": "webinar-campaign",
+  "topicId": "paid",
+  "title": "Webinar sign-up campaign",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "paid-buyer",
+    "name": "Paid buyer",
+    "shortName": "Paid",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "€290 of €400 spent",
+    "skill": "/ad-variants",
+    "engine": "Claude",
+    "record": "4 of 4 budget calls held up two weeks later"
+  },
+  "waitsFor": null,
+  "opened": "Opened Fri 13 Nov",
+  "closed": null,
+  "next": "Thu 19 Nov, when it ends",
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Spend up to €400 to get more people to Thursday's webinar.",
+  "askedMeta": {
+    "source": "You to the Manager, Friday 13 November",
+    "note": "The Manager filed it under Paid and named Paid buyer to lead."
+  },
+  "status": "€290 of €400 spent, 11 sign-ups. It ends on Thursday and keeps its own budget, apart from the always-on campaigns.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "€290 of €400 spent, 11 sign-ups. It ends on Thursday and keeps its own budget, apart from the always-on campaigns."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Campaign live on LinkedIn, €400 in all",
+      "who": "Paid buyer · Fri 13 Nov"
+    },
+    {
+      "kind": "now",
+      "text": "Running until Thursday",
+      "who": "Paid buyer · €290 of €400"
+    },
+    {
+      "kind": "todo",
+      "text": "Sign-ups and their cost reported",
+      "who": "Manager · Fri 20 Nov"
+    }
+  ],
+  "doneNote": "Done means all 3. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "paid-buyer",
+      "name": "Paid buyer",
+      "shortName": "Paid",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "€290 of €400 spent",
+      "skill": "/ad-variants",
+      "engine": "Claude",
+      "record": "4 of 4 budget calls held up two weeks later"
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "2 ads",
+      "detail": "The webinar title and one line from the agenda",
+      "href": null
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

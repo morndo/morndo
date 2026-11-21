@@ -1,0 +1,37 @@
+{
+  "workspace": {
+    "id": "tidewell",
+    "name": "Tidewell",
+    "theme": {
+      "id": "ink",
+      "name": "Ink",
+      "strength": 55,
+      "glass": 25
+    }
+  },
+  "module": {
+    "id": "dev",
+    "name": "Development",
+    "icon": "pr",
+    "kindWord": "Project"
+  },
+  "me": {
+    "id": "timo-varga",
+    "name": "Timo Varga",
+    "shortName": "Timo",
+    "kind": "person",
+    "avatar": "T",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "layout": {
+    "sidebarWidth": 236,
+    "chatWidth": 380
+  },
+  "chatMode": "floating"
+}

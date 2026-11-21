@@ -1,0 +1,195 @@
+{
+  "id": "web",
+  "name": "Web app",
+  "kind": "project",
+  "icon": "window",
+  "crumb": "This week",
+  "open": true,
+  "meta": null,
+  "intro": "This week: the shipment filters, the new sign-in and the dependency updates.",
+  "when": null,
+  "health": {
+    "state": "bad",
+    "word": "Stuck"
+  },
+  "goal": null,
+  "noGoal": null,
+  "facts": [],
+  "plan": null,
+  "focusLaneId": null,
+  "history": null,
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "bad",
+      "word": "Stuck",
+      "text": "Red main, out of tries",
+      "skill": "/red-main",
+      "engine": "Claude Code",
+      "record": null
+    },
+    {
+      "id": "reviewer",
+      "name": "Reviewer",
+      "shortName": "Reviewer",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Shipment filters, review round 2",
+      "skill": "/review",
+      "engine": "Codex",
+      "record": null
+    },
+    {
+      "id": "qa",
+      "name": "QA",
+      "shortName": "QA",
+      "kind": "agent",
+      "avatar": "Q",
+      "role": null,
+      "state": "warn",
+      "word": "Waiting",
+      "text": "Holding the filters walk-through for a green main",
+      "skill": "/qa-by-hand",
+      "engine": "Cursor",
+      "record": null
+    }
+  ],
+  "jobs": [],
+  "chatSub": "You, Builder, Reviewer and QA. Nothing else lives here.",
+  "lanes": [
+    {
+      "id": "red-main",
+      "title": "Red main",
+      "state": "bad",
+      "stateWord": "Stuck",
+      "leadName": "Builder",
+      "next": "Now, needs your call"
+    },
+    {
+      "id": "new-sign-in",
+      "title": "New sign-in",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "leadName": "Builder",
+      "next": "After your pick"
+    },
+    {
+      "id": "shipment-filters",
+      "title": "Shipment filters",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Reviewer",
+      "next": "Today, 11:30"
+    },
+    {
+      "id": "upgrade-node-24",
+      "title": "Upgrade to Node 24",
+      "state": "parked",
+      "stateWord": "Parked until Thu",
+      "leadName": "Builder",
+      "next": "Thu 19 Nov"
+    }
+  ],
+  "spend": null,
+  "stuck": {
+    "since": "Red since 06:40",
+    "title": "Main is red and needs your call",
+    "detail": "The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit: the new session library signs cookies differently, so saved sessions are refused.",
+    "blocks": "blocks the shipment filters",
+    "checks": [
+      {
+        "name": "Build",
+        "passed": true
+      },
+      {
+        "name": "Types",
+        "passed": true
+      },
+      {
+        "name": "Unit tests",
+        "passed": true
+      },
+      {
+        "name": "Checkout, end to end",
+        "passed": true
+      },
+      {
+        "name": "Sign-in, end to end",
+        "passed": false
+      }
+    ],
+    "log": {
+      "name": "sign-in › keeps a saved session after a restart",
+      "expected": "status 200",
+      "got": "401",
+      "location": "tests/e2e/sign-in.spec.ts:48",
+      "runs": 3,
+      "failures": 3
+    },
+    "actions": [
+      {
+        "label": "Pin the old session library",
+        "tone": "ink"
+      },
+      {
+        "label": "Allow one more try",
+        "tone": "quiet"
+      },
+      {
+        "label": "Open the run",
+        "tone": "quiet"
+      }
+    ],
+    "note": "Pinning takes about 3 minutes and turns main green"
+  },
+  "tasks": [
+    {
+      "task": "Fix red main",
+      "lane": "Builder",
+      "state": "bad",
+      "stateWord": "Stuck",
+      "next": "Now, needs your call",
+      "reason": null
+    },
+    {
+      "task": "New sign-in",
+      "lane": "Builder",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your pick",
+      "reason": null
+    },
+    {
+      "task": "Shipment filters",
+      "lane": "Reviewer",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Today, 11:30",
+      "reason": null
+    },
+    {
+      "task": "Upgrade to Node 24",
+      "lane": "Builder",
+      "state": "parked",
+      "stateWord": "Parked",
+      "next": "Thu 19 Nov",
+      "reason": "Parked: the session library supports Node 24 from Thursday's release."
+    },
+    {
+      "task": "Dependency updates",
+      "lane": "Builder",
+      "state": "done",
+      "stateWord": "Done",
+      "next": "Merged today, 03:05",
+      "reason": null
+    }
+  ]
+}

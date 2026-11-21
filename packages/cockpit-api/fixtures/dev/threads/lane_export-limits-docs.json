@@ -1,0 +1,12 @@
+{
+  "id": "lane:export-limits-docs",
+  "title": "Export limits in the docs",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": []
+}
