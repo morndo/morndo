@@ -28,21 +28,6 @@
     "summary": "Agents · 6 updates since yesterday at 18:20, nothing needs you",
     "items": [
       {
-        "name": "Visuals",
-        "text": "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3",
-        "at": "2026-11-16T09:21:00+01:00"
-      },
-      {
-        "name": "Publisher",
-        "text": "held the 16:00 promo post until the images are settled",
-        "at": "2026-11-16T09:13:00+01:00"
-      },
-      {
-        "name": "Visuals",
-        "text": "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail",
-        "at": "2026-11-16T09:12:00+01:00"
-      },
-      {
         "name": "Publisher",
         "text": "sent newsletter 46 to 4,200 readers, with the webinar on top",
         "at": "2026-11-16T08:00:00+01:00"
@@ -55,7 +40,22 @@
       {
         "name": "Publisher",
         "text": "scheduled the reminder email for Wednesday 09:00",
-        "at": "2026-11-16T17:00:00+01:00"
+        "at": "2026-11-15T17:00:00+01:00"
+      },
+      {
+        "name": "Visuals",
+        "text": "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3",
+        "at": "2026-11-15T09:21:00+01:00"
+      },
+      {
+        "name": "Publisher",
+        "text": "held the 16:00 promo post until the images are settled",
+        "at": "2026-11-15T09:13:00+01:00"
+      },
+      {
+        "name": "Visuals",
+        "text": "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail",
+        "at": "2026-11-15T09:12:00+01:00"
       }
     ]
   },
@@ -82,11 +82,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T09:12:00+01:00",
+      "at": "2026-11-16T08:44:57+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m37",
@@ -109,11 +112,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T09:13:00+01:00",
+      "at": "2026-11-16T08:44:58+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m38",
@@ -136,11 +142,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00",
+      "at": "2026-11-16T08:44:59+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m39",
@@ -176,11 +185,14 @@
           "personId": null
         }
       ],
-      "at": "2026-11-16T09:21:00+01:00",
+      "at": "2026-11-16T08:45:00+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
   ],
   "nextCursor": null,

@@ -30,5 +30,6 @@
   "shortTitle": "Send the Halden offer",
   "goalChange": null,
   "release": null,
-  "changeRequest": null
+  "changeRequest": null,
+  "rule": "hardToUndo"
 }

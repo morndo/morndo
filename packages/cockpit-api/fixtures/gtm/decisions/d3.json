@@ -30,5 +30,6 @@
   "shortTitle": "Publish the Fenwick story",
   "goalChange": null,
   "release": null,
-  "changeRequest": null
+  "changeRequest": null,
+  "rule": "inYourName"
 }

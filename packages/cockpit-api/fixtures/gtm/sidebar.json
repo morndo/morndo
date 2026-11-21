@@ -267,7 +267,10 @@
       "run": "/weekly-summary",
       "badge": false,
       "pinned": true,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "weekly-summary"
+      }
     }
   ],
   "pinnable": [
@@ -431,7 +434,10 @@
       "run": "/weekly-summary",
       "badge": false,
       "pinned": true,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "weekly-summary"
+      }
     },
     {
       "id": "s-post",
@@ -443,7 +449,10 @@
       "run": "/linkedin-post",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "linkedin-post"
+      }
     },
     {
       "id": "s-visual",
@@ -455,7 +464,10 @@
       "run": "/brand-visual",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "brand-visual"
+      }
     },
     {
       "id": "s-ads",
@@ -467,7 +479,10 @@
       "run": "/ad-variants",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "ad-variants"
+      }
     },
     {
       "id": "s-profile",
@@ -479,7 +494,10 @@
       "run": "/icp-refresh",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "icp-refresh"
+      }
     }
   ],
   "pinLimit": 12

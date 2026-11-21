@@ -11,7 +11,8 @@
           "note": null,
           "resetsAt": "2026-11-16T14:20:00+01:00",
           "spend": null,
-          "cap": null
+          "cap": null,
+          "count": null
         },
         {
           "what": "Week",
@@ -19,7 +20,8 @@
           "note": null,
           "resetsAt": "2026-11-16T17:00:00+01:00",
           "spend": null,
-          "cap": null
+          "cap": null,
+          "count": null
         }
       ],
       "state": "near",
@@ -36,7 +38,8 @@
           "note": null,
           "resetsAt": "2026-11-16T12:05:00+01:00",
           "spend": null,
-          "cap": null
+          "cap": null,
+          "count": null
         },
         {
           "what": "Week",
@@ -44,7 +47,8 @@
           "note": null,
           "resetsAt": "2026-11-19T17:00:00+01:00",
           "spend": null,
-          "cap": null
+          "cap": null,
+          "count": null
         }
       ],
       "state": "ok",
@@ -61,7 +65,11 @@
           "note": null,
           "resetsAt": "2026-12-01T17:00:00+01:00",
           "spend": null,
-          "cap": null
+          "cap": null,
+          "count": {
+            "used": 312,
+            "of": 500
+          }
         }
       ],
       "state": "ok",
@@ -86,7 +94,8 @@
           "cap": {
             "amountMinor": 15000,
             "currency": "EUR"
-          }
+          },
+          "count": null
         }
       ],
       "state": "standingBy",
@@ -109,7 +118,8 @@
           "cap": {
             "amountMinor": 30000,
             "currency": "EUR"
-          }
+          },
+          "count": null
         }
       ],
       "state": "ok",

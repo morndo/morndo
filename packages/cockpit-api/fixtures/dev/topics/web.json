@@ -170,7 +170,7 @@
       "stateWord": "Stuck",
       "next": "Now, needs your call",
       "reason": null,
-      "laneId": null
+      "laneId": "red-main"
     },
     {
       "task": "New sign-in",
@@ -179,7 +179,7 @@
       "stateWord": "Needs you",
       "next": "After your pick",
       "reason": null,
-      "laneId": null
+      "laneId": "new-sign-in"
     },
     {
       "task": "Shipment filters",
@@ -188,7 +188,7 @@
       "stateWord": "Working",
       "next": "Today, 11:30",
       "reason": null,
-      "laneId": null
+      "laneId": "shipment-filters"
     },
     {
       "task": "Upgrade to Node 24",
@@ -197,7 +197,7 @@
       "stateWord": "Parked",
       "next": "Thu 19 Nov",
       "reason": "Parked: the session library supports Node 24 from Thursday's release.",
-      "laneId": null
+      "laneId": "upgrade-node-24"
     },
     {
       "task": "Dependency updates",
@@ -214,5 +214,6 @@
     "stages": [],
     "sharedBy": null
   },
-  "stages": []
+  "stages": [],
+  "status": null
 }

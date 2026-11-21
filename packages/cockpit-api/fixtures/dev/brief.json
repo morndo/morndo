@@ -1,7 +1,7 @@
 {
   "title": "The Monday Brief",
   "lede": "Three decisions need you and main is red in the web app. Everything else was built, reviewed and shipped while you slept.",
-  "cadence": "Next brief at 13:00. Until then you hear only about what cannot wait.",
+  "cadence": "Until then you hear only about what cannot wait.",
   "spend": null,
   "topics": [
     {
@@ -72,7 +72,8 @@
       "doneNote": "Approved. The Release lane rolls out at 22:00 and watches for 30 minutes.",
       "laneId": "export-for-big-accounts",
       "state": "open",
-      "dueAt": "2026-11-16T14:00:00+01:00"
+      "dueAt": "2026-11-16T14:00:00+01:00",
+      "rule": "hardToUndo"
     },
     {
       "id": "d2",
@@ -85,7 +86,8 @@
       "doneNote": "Approved. The migration runs tonight at 23:00, after the backup.",
       "laneId": "tax-rates",
       "state": "open",
-      "dueAt": "2026-11-17T17:00:00+01:00"
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "rule": "hardToUndo"
     },
     {
       "id": "d3",
@@ -98,7 +100,8 @@
       "doneNote": "Approved. Passkeys go to staging today, with the email link as the fallback.",
       "laneId": "new-sign-in",
       "state": "open",
-      "dueAt": "2026-11-18T17:00:00+01:00"
+      "dueAt": "2026-11-18T17:00:00+01:00",
+      "rule": "onlyYouKnow"
     }
   ],
   "openCount": 3,
@@ -115,7 +118,7 @@
       },
       "stuckAt": "2026-11-16T06:40:00+01:00",
       "laneId": "red-main",
-      "blocks": "Blocks 2 merges",
+      "blocks": "Blocks the shipment filters",
       "dueAt": null
     }
   ],
@@ -128,7 +131,7 @@
       "text": "API released the rate-limit fix after its review. The check on production passed.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T23:12:00+01:00",
+      "at": "2026-11-15T23:12:00+01:00",
       "undoUntilAt": null
     },
     {
@@ -205,5 +208,7 @@
     }
   },
   "overnightSinceAt": "2026-11-15T18:00:00+01:00",
-  "burnsSub": "One thing stops the rest."
+  "burnsSub": "One thing an agent could not fix on its own",
+  "settledBurns": [],
+  "sharedTopics": []
 }

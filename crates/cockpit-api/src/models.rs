@@ -11,6 +11,7 @@ pub enum ModelState {
     Default,
     /// Available for work.
     Connected,
+    SignedIn,
     /// Requires a connection.
     AddKey,
     /// Requires sign-in.

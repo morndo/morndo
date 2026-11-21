@@ -34,7 +34,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
   ],
   "nextCursor": null,

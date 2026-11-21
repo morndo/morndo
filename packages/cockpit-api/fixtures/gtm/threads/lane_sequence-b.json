@@ -34,7 +34,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m29",
@@ -57,11 +60,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00",
+      "at": "2026-11-13T17:13:59+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m30",
@@ -88,7 +94,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
   ],
   "nextCursor": null,

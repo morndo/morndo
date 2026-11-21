@@ -34,7 +34,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m5",
@@ -61,7 +64,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m6",
@@ -84,11 +90,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00",
+      "at": "2026-11-16T07:11:59+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m7",
@@ -115,7 +124,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
   ],
   "nextCursor": null,

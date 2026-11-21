@@ -77,12 +77,12 @@
       {
         "name": "Brand scout",
         "text": "started batch 4 in Clay",
-        "at": "2026-11-16T21:40:00+01:00"
+        "at": "2026-11-15T21:40:00+01:00"
       },
       {
         "name": "Sender",
         "text": "started a fresh session and read the lane back; it matched the records",
-        "at": "2026-11-16T21:10:00+01:00"
+        "at": "2026-11-15T21:10:00+01:00"
       }
     ]
   },
@@ -117,7 +117,11 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "stage",
+        "stage": "Outreach"
+      }
     },
     {
       "id": "m48",
@@ -141,19 +145,18 @@
         "corrected": false,
         "pinned": true
       },
-      "threadCard": {
-        "title": "Outreach, wave 2: retail",
-        "owner": "Sender",
-        "stateWord": "waits for Lea's check",
-        "laneId": "outreach-wave-2"
-      },
+      "threadCard": null,
       "readBack": null,
       "actions": [],
       "at": "2026-11-16T08:30:00+01:00",
-      "decisionId": null,
+      "decisionId": "d4",
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "stage",
+        "stage": "Offers"
+      }
     },
     {
       "id": "m49",
@@ -177,18 +180,27 @@
         "corrected": false,
         "pinned": false
       },
-      "threadCard": null,
+      "threadCard": {
+        "title": "Outreach, wave 2: retail",
+        "owner": "Sender",
+        "stateWord": "waits for Lea's check",
+        "laneId": "outreach-wave-2"
+      },
       "readBack": {
         "owner": "Sender",
         "quote": "Retail first, 20 a day from 11:00, after Lea's check.",
         "at": "2026-11-16T08:31:00+01:00"
       },
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00",
+      "at": "2026-11-16T08:30:59+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "stage",
+        "stage": "Outreach"
+      }
     },
     {
       "id": "m50",
@@ -215,11 +227,15 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00",
+      "at": "2026-11-16T08:40:59+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "stage",
+        "stage": "Calls"
+      }
     },
     {
       "id": "m51",
@@ -246,7 +262,11 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "stage",
+        "stage": "Calls"
+      }
     }
   ],
   "nextCursor": null,

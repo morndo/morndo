@@ -131,6 +131,19 @@ pub const ROUTES: &[Route] = &[
         query("topic", reference("TopicId"))
     ),
     read!("/models", ModelsView),
+    read!("/recent", RecentView),
+    Route {
+        method: "post",
+        path: "/uploads",
+        response: "Attachment",
+        errors: WRITE,
+        parameters: Vec::new,
+    },
+    read!(
+        "/uploads/{id}",
+        Attachment,
+        parameter("id", "path", json!({"type": "string"}))
+    ),
     Route {
         method: "post",
         path: "/actions",
@@ -167,6 +180,12 @@ pub fn openapi_paths() -> Value {
                 "description": "Upgraded to a WebSocket carrying sequenced cockpit events.",
                 "headers": response_headers(false)
             });
+        } else if route.path == "/uploads/{id}" {
+            responses["200"] = json!({
+                "description": "Downloaded file",
+                "content": {"application/octet-stream": {}},
+                "headers": response_headers(false)
+            });
         } else if route.path == "/brief/artwork/{index}/{variant}" {
             responses["200"] = json!({
                 "description": "Brief artwork image",
@@ -194,7 +213,7 @@ pub fn openapi_paths() -> Value {
         if route.method == "post" {
             operation["requestBody"] = json!({
                 "required": true,
-                "content": {"application/json": {"schema": reference("Command")}}
+                "content": {"application/json": {"schema": reference(if route.path == "/uploads" { "UploadInput" } else { "Command" })}}
             });
         }
         paths[format!("{BASE}{}", route.path)] = json!({ route.method: operation });

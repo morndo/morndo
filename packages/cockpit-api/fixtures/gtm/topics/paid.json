@@ -442,7 +442,8 @@
       }
     ],
     "pathTitle": null,
-    "forecastLog": []
+    "forecastLog": [],
+    "deadlineAt": null
   },
   "noGoal": null,
   "facts": [
@@ -724,7 +725,8 @@
         ]
       }
     ],
-    "nextCursor": null
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -865,5 +867,6 @@
     "stages": [],
     "sharedBy": null
   },
-  "stages": []
+  "stages": [],
+  "status": null
 }

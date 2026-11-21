@@ -33,11 +33,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00",
+      "at": "2026-11-16T08:44:59+01:00",
       "decisionId": "d1",
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m2",
@@ -64,7 +67,10 @@
       "decisionId": "d1",
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
   ],
   "nextCursor": null,

@@ -47,6 +47,10 @@ pub struct Proof {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Scenario {
+    /// Legend for the projected series.
+    pub series_label: String,
+    /// Legend for the unchanged comparison.
+    pub baseline_label: String,
     /// Series for this record.
     pub series: Vec<ChartPoint>,
     /// Baseline for this record.
@@ -73,6 +77,8 @@ pub struct Scenario {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NextStep {
+    /// Module to open when the next step crosses into another module.
+    pub module_id: Present<crate::ModuleId>,
     /// Destination to open in the cockpit.
     pub target: Present<Target>,
     /// Step for this record.
@@ -133,6 +139,8 @@ pub struct DecisionQueueView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionView {
+    /// Decision right that governs approval, decline and Undo.
+    pub rule: Present<crate::DecisionRule>,
     /// Short title for this record.
     pub short_title: String,
     /// Goal change for this record.
@@ -237,6 +245,14 @@ pub struct DecisionPosition {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GoalChange {
+    /// Desired deadline, when it changes.
+    pub deadline_at: Present<Timestamp>,
+    /// Original deadline when this proposal was written.
+    pub previous_deadline_at: Present<Timestamp>,
+    /// Desired unit, when it changes.
+    pub unit: Present<String>,
+    /// Original unit when this proposal was written.
+    pub previous_unit: Present<String>,
     /// Identifier of the associated topic.
     pub topic_id: TopicId,
     /// Field for this record.
@@ -254,6 +270,8 @@ pub struct GoalChange {
 #[serde(rename_all = "camelCase")]
 pub enum GoalField {
     Target,
+    Deadline,
+    Unit,
     #[serde(other)]
     Unknown,
 }
@@ -276,6 +294,8 @@ pub enum ReleaseStage {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Release {
+    /// Scheduled start of an approved rollout.
+    pub scheduled_at: Timestamp,
     /// Identifier of the associated pull.
     pub pull_id: crate::PullId,
     /// Stage for this record.

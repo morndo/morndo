@@ -64,6 +64,8 @@ pub struct BriefTopic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BriefDecision {
+    /// Decision right that governs this request.
+    pub rule: Present<crate::DecisionRule>,
     /// Stable identifier for this record.
     pub id: DecisionId,
     /// Identifier of the associated topic.
@@ -152,6 +154,10 @@ pub struct DraftsSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BriefView {
+    /// Settled items retained for the reader’s receipt and Undo.
+    pub settled_burns: Vec<SettledBurn>,
+    /// Shared progress visible without topic spending or private records.
+    pub shared_topics: Vec<crate::topic::SharedTopicStatus>,
     /// In works for this record.
     pub in_works: Present<InWorks>,
     /// Time associated with overnight since.
@@ -201,5 +207,23 @@ pub struct InWorks {
     /// Time associated with auto merge.
     pub auto_merge_at: Present<Timestamp>,
     /// Destination to open in the cockpit.
+    pub target: Target,
+}
+
+/// A burn resolved by the reader during this edition.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SettledBurn {
+    /// Lane where the stuck work was settled.
+    pub lane_id: crate::LaneId,
+    /// Action recorded in the topic’s history for Undo.
+    pub action_id: crate::ActionId,
+    /// Resolution text shown in the brief and in the receipt.
+    pub title: String,
+    /// Status of the resolved burn.
+    pub state_word: String,
+    /// Whether anything still needs attention.
+    pub detail: String,
+    /// Topic to open from the settled row.
     pub target: Target,
 }

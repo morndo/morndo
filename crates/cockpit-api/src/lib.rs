@@ -76,3 +76,5 @@ pub mod models;
 pub use models::{Model, ModelState, ModelsView};
 
 pub mod input;
+
+pub mod extras;

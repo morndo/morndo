@@ -384,7 +384,8 @@
       }
     ],
     "pathTitle": "Path to three",
-    "forecastLog": []
+    "forecastLog": [],
+    "deadlineAt": "2027-01-31T17:00:00+01:00"
   },
   "noGoal": null,
   "facts": [
@@ -1422,7 +1423,8 @@
         ]
       }
     ],
-    "nextCursor": null
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -1699,5 +1701,6 @@
       "access": "work",
       "runBy": null
     }
-  ]
+  ],
+  "status": null
 }

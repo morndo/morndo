@@ -51,7 +51,8 @@
       "target": {
         "kind": "lane",
         "id": "new-sign-in"
-      }
+      },
+      "moduleId": null
     }
   ],
   "ifNoAnswer": "The lane waits for your pick.",
@@ -64,5 +65,6 @@
   "shortTitle": "Choose the new sign-in",
   "goalChange": null,
   "release": null,
-  "changeRequest": null
+  "changeRequest": null,
+  "rule": "onlyYouKnow"
 }

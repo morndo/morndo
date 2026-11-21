@@ -28,11 +28,6 @@
     "summary": "Agents · 5 updates since yesterday at 18:20, nothing needs you",
     "items": [
       {
-        "name": "Prospector",
-        "text": "answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days",
-        "at": "2026-11-16T08:52:00+01:00"
-      },
-      {
         "name": "Replies",
         "text": "sorted 14 replies: 9 meetings, 3 later, 2 no",
         "at": "2026-11-16T08:40:00+01:00"
@@ -50,7 +45,12 @@
       {
         "name": "Prospector",
         "text": "started round 2: 400 logistics ops leads, 120 found so far",
-        "at": "2026-11-16T19:30:00+01:00"
+        "at": "2026-11-15T19:30:00+01:00"
+      },
+      {
+        "name": "Prospector",
+        "text": "answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days",
+        "at": "2026-11-15T08:52:00+01:00"
       }
     ]
   },
@@ -81,7 +81,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m41",
@@ -108,7 +111,10 @@
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m42",
@@ -131,11 +137,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00",
+      "at": "2026-11-16T08:44:59+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
       "id": "m43",
@@ -158,11 +167,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:52:00+01:00",
+      "at": "2026-11-16T08:45:00+01:00",
       "decisionId": null,
       "attachment": null,
       "model": null,
-      "page": null
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
   ],
   "nextCursor": null,

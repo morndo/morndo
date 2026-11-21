@@ -66,6 +66,8 @@ pub enum Event {
     TopicChanged { topic_id: TopicId },
     #[serde(rename = "drafts.changed")]
     DraftsChanged {},
+    #[serde(rename = "brief.changed")]
+    BriefChanged {},
     #[serde(rename = "brief.published")]
     BriefPublished {},
     #[serde(rename = "attention.raised")]

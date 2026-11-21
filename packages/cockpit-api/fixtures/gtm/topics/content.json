@@ -390,7 +390,8 @@
       }
     ],
     "pathTitle": null,
-    "forecastLog": []
+    "forecastLog": [],
+    "deadlineAt": "2026-11-19T17:00:00+01:00"
   },
   "noGoal": null,
   "facts": [
@@ -808,7 +809,8 @@
         ]
       }
     ],
-    "nextCursor": null
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -964,5 +966,6 @@
     "stages": [],
     "sharedBy": null
   },
-  "stages": []
+  "stages": [],
+  "status": null
 }

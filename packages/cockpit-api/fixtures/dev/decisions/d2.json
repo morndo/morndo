@@ -51,7 +51,8 @@
       "target": {
         "kind": "lane",
         "id": "tax-rates"
-      }
+      },
+      "moduleId": null
     },
     {
       "step": "Run the tax-rate migration",
@@ -60,7 +61,8 @@
       "target": {
         "kind": "lane",
         "id": "tax-rates"
-      }
+      },
+      "moduleId": null
     }
   ],
   "ifNoAnswer": "The migration waits for your OK.",
@@ -73,5 +75,6 @@
   "shortTitle": "Run the tax migration",
   "goalChange": null,
   "release": null,
-  "changeRequest": null
+  "changeRequest": null,
+  "rule": "hardToUndo"
 }

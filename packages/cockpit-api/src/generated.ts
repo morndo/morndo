@@ -49,6 +49,14 @@ export type Timestamp = string;
  */
 export type LaneId = string;
 /**
+ * Decision rule for the cockpit.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "DecisionRule".
+ */
+export type DecisionRule =
+  "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap" | "unknown";
+/**
  * Identifier of a topic or project.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -203,6 +211,10 @@ export type Command =
        */
       page?: TargetInput | null;
       /**
+       * Stage to post in when the thread covers several stages.
+       */
+      stage?: string | null;
+      /**
        * Text shown to the reader.
        */
       text: string;
@@ -280,6 +292,10 @@ export type Command =
        * Daily limit for this record.
        */
       dailyLimit?: DailyLimit | null;
+      /**
+       * Person authorized to exercise the decision right.
+       */
+      personId?: PersonId | null;
       /**
        * Rule for this record.
        */
@@ -420,6 +436,10 @@ export type Command =
        */
       laneId: string;
       type: "handover.confirm";
+    }
+  | {
+      target: TargetInput1;
+      type: "recent.visit";
     };
 /**
  * Identifier of an actor, whether a person or an agent.
@@ -558,6 +578,9 @@ export type FeedEvent1 =
       type: "drafts.changed";
     }
   | {
+      type: "brief.changed";
+    }
+  | {
       type: "brief.published";
     }
   | {
@@ -654,14 +677,6 @@ export type ConnectionState = "connected" | "signedIn" | "addKey" | "signIn" | "
  * via the `definition` "Decider".
  */
 export type Decider = "you" | "agent" | "unknown";
-/**
- * Decision rule for the cockpit.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "DecisionRule".
- */
-export type DecisionRule =
-  "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap" | "unknown";
 /**
  * Decision state for the cockpit.
  *
@@ -762,7 +777,7 @@ export type Event =
     }
   | {
       /**
-       * Identifier of the associated action.
+       * Identifier of an action recorded in history.
        */
       actionId: string;
       type: "agentAction.changed";
@@ -785,6 +800,9 @@ export type Event =
     }
   | {
       type: "drafts.changed";
+    }
+  | {
+      type: "brief.changed";
     }
   | {
       type: "brief.published";
@@ -936,6 +954,9 @@ export type FeedEvent2 = {
       type: "drafts.changed";
     }
   | {
+      type: "brief.changed";
+    }
+  | {
       type: "brief.published";
     }
   | {
@@ -1006,7 +1027,7 @@ export type GateState = "pass" | "running" | "todo" | "fail" | "skipped" | "unkn
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GoalField".
  */
-export type GoalField = "target" | "unknown";
+export type GoalField = "target" | "deadline" | "unit" | "unknown";
 /**
  * Group kind for the cockpit.
  *
@@ -1051,7 +1072,7 @@ export type HistoryEntry =
        */
       decisionId: DecisionId | null;
       /**
-       * Stable identifier for this record.
+       * Identifier of an action recorded in history.
        */
       id: string;
       kind: "event";
@@ -1160,6 +1181,26 @@ export type KnownTargetKind =
  */
 export type LabelKind = "question" | "request" | "done" | "decision" | "goalChange" | "unknown";
 /**
+ * Audience allowed to receive a message in a topic.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MessageAudience".
+ */
+export type MessageAudience =
+  | {
+      kind: "topic";
+    }
+  | {
+      kind: "stage";
+      /**
+       * Name of the stage in the topic.
+       */
+      stage: string;
+    }
+  | {
+      kind: "unknown";
+    };
+/**
  * Identifier of a message.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -1172,7 +1213,7 @@ export type MessageId = string;
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModelState".
  */
-export type ModelState = "unknown" | "default" | "connected" | "addKey" | "signIn";
+export type ModelState = ("signedIn" | "unknown") | "default" | "connected" | "addKey" | "signIn";
 /**
  * Pin kind for the cockpit.
  *
@@ -2010,6 +2051,10 @@ export interface BriefDecision {
    */
   minutes: number;
   /**
+   * Decision right that governs this request.
+   */
+  rule: DecisionRule | null;
+  /**
    * Current state of the record.
    */
   state: "open" | "approved" | "declined" | "expired" | "unknown";
@@ -2129,6 +2174,14 @@ export interface BriefView {
    * A point in time with an RFC 3339 UTC offset.
    */
   overnightSinceAt: string;
+  /**
+   * Settled items retained for the reader’s receipt and Undo.
+   */
+  settledBurns: SettledBurn[];
+  /**
+   * Shared progress visible without topic spending or private records.
+   */
+  sharedTopics: SharedTopicStatus[];
   /**
    * Spend for this record.
    */
@@ -2365,6 +2418,114 @@ export interface OvernightAction {
   undone: boolean;
 }
 /**
+ * A burn resolved by the reader during this edition.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "SettledBurn".
+ */
+export interface SettledBurn {
+  /**
+   * Action recorded in the topic’s history for Undo.
+   */
+  actionId: string;
+  /**
+   * Whether anything still needs attention.
+   */
+  detail: string;
+  /**
+   * Identifier of a lane.
+   */
+  laneId: string;
+  /**
+   * Status of the resolved burn.
+   */
+  stateWord: string;
+  target: Target5;
+  /**
+   * Resolution text shown in the brief and in the receipt.
+   */
+  title: string;
+}
+/**
+ * An internal link resolved by the client.
+ */
+export interface Target5 {
+  /**
+   * Destination record identifier, or null for a top-level surface.
+   */
+  id: string | null;
+  /**
+   * Surface or record type to open.
+   */
+  kind:
+    | "topic"
+    | "lane"
+    | "decision"
+    | "thread"
+    | "person"
+    | "draft"
+    | "skill"
+    | "pull"
+    | "manager"
+    | "brief"
+    | "drafts"
+    | "skills"
+    | "settings"
+    | "unknown";
+}
+/**
+ * Aggregate progress without lanes, names, or private commentary.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "SharedTopicStatus".
+ */
+export interface SharedTopicStatus {
+  /**
+   * Quantity needed to reach the goal.
+   */
+  goal: number | null;
+  /**
+   * Whether the topic is on track.
+   */
+  health: Health | null;
+  /**
+   * Topic heading visible to the reader.
+   */
+  name: string;
+  /**
+   * Time of the next status report.
+   */
+  nextReportAt: Timestamp | null;
+  /**
+   * Current progress toward the goal.
+   */
+  signed: number | null;
+  /**
+   * Identifier of a topic or project.
+   */
+  topicId: string;
+  /**
+   * Units used for the goal.
+   */
+  unit: string | null;
+}
+/**
+ * Health for the cockpit.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "Health".
+ */
+export interface Health {
+  /**
+   * Current state of the record.
+   */
+  state: "ok" | "warn" | "bad" | "idle" | "unknown";
+  /**
+   * Word for this record.
+   */
+  word: string;
+}
+/**
  * Spend line for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -2542,6 +2703,32 @@ export interface AccessGrantInput1 {
   stages?: string[];
 }
 /**
+ * Context supplied by a composer when sending a message.
+ */
+export interface TargetInput1 {
+  /**
+   * Stable identifier for this record.
+   */
+  id: string | null;
+  /**
+   * Kind for this record.
+   */
+  kind:
+    | "topic"
+    | "lane"
+    | "decision"
+    | "thread"
+    | "person"
+    | "draft"
+    | "skill"
+    | "pull"
+    | "manager"
+    | "brief"
+    | "drafts"
+    | "skills"
+    | "settings";
+}
+/**
  * Receipt and sequenced updates produced by an accepted command.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -2585,6 +2772,23 @@ export interface Message {
    * Attachment for this record.
    */
   attachment: Attachment | null;
+  /**
+   * Topic-wide or stage-only distribution for this message.
+   */
+  audience:
+    | {
+        kind: "topic";
+      }
+    | {
+        kind: "stage";
+        /**
+         * Name of the stage in the topic.
+         */
+        stage: string;
+      }
+    | {
+        kind: "unknown";
+      };
   author: Actor2;
   /**
    * Identifier of the associated decision.
@@ -2779,6 +2983,23 @@ export interface Message1 {
    * Attachment for this record.
    */
   attachment: Attachment | null;
+  /**
+   * Topic-wide or stage-only distribution for this message.
+   */
+  audience:
+    | {
+        kind: "topic";
+      }
+    | {
+        kind: "stage";
+        /**
+         * Name of the stage in the topic.
+         */
+        stage: string;
+      }
+    | {
+        kind: "unknown";
+      };
   author: Actor2;
   /**
    * Identifier of the associated decision.
@@ -2820,6 +3041,10 @@ export interface Message1 {
  * via the `definition` "Receipt".
  */
 export interface Receipt {
+  /**
+   * Action addressable by Undo, when this receipt records a reversible action.
+   */
+  actionId: ActionId | null;
   /**
    * Chain for this record.
    */
@@ -2966,7 +3191,7 @@ export interface Deal {
    * Stage for this record.
    */
   stage: string;
-  target: Target5;
+  target: Target6;
   /**
    * Value for this record.
    */
@@ -2999,7 +3224,7 @@ export interface DealAlt {
 /**
  * An internal link resolved by the client.
  */
-export interface Target5 {
+export interface Target6 {
   /**
    * Destination record identifier, or null for a top-level surface.
    */
@@ -3082,7 +3307,7 @@ export interface QueueItem {
    * Current state of the record.
    */
   state: "open" | "approved" | "declined" | "expired" | "unknown";
-  target: Target6;
+  target: Target7;
   /**
    * Title displayed above the record.
    */
@@ -3104,13 +3329,25 @@ export interface GoalChange {
    */
   affectedTopics: TopicId[];
   /**
+   * Desired deadline, when it changes.
+   */
+  deadlineAt: Timestamp | null;
+  /**
    * Field for this record.
    */
-  field: "target" | "unknown";
+  field: "target" | "deadline" | "unit" | "unknown";
   /**
    * From for this record.
    */
   from: number;
+  /**
+   * Original deadline when this proposal was written.
+   */
+  previousDeadlineAt: Timestamp | null;
+  /**
+   * Original unit when this proposal was written.
+   */
+  previousUnit: string | null;
   /**
    * To for this record.
    */
@@ -3119,11 +3356,15 @@ export interface GoalChange {
    * Identifier of a topic or project.
    */
   topicId: string;
+  /**
+   * Desired unit, when it changes.
+   */
+  unit: string | null;
 }
 /**
  * An internal link resolved by the client.
  */
-export interface Target6 {
+export interface Target7 {
   /**
    * Destination record identifier, or null for a top-level surface.
    */
@@ -3163,11 +3404,15 @@ export interface DecisionRight {
    */
   detail: string;
   /**
+   * Person explicitly authorized to exercise this decision right.
+   */
+  personId: PersonId | null;
+  /**
    * Risky for this record.
    */
   risky: boolean;
   /**
-   * Rule for this record.
+   * Decision rule for the cockpit.
    */
   rule: "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap" | "unknown";
   /**
@@ -3268,6 +3513,10 @@ export interface DecisionView {
    */
   risk: Scenario | null;
   /**
+   * Decision right that governs approval, decline and Undo.
+   */
+  rule: DecisionRule | null;
+  /**
    * Short title for this record.
    */
   shortTitle: string;
@@ -3307,6 +3556,10 @@ export interface NextStep {
    * Time an answer or action is due.
    */
   dueAt: Timestamp | null;
+  /**
+   * Module to open when the next step crosses into another module.
+   */
+  moduleId: ModuleId | null;
   /**
    * Step for this record.
    */
@@ -3376,6 +3629,10 @@ export interface Scenario {
    */
   baseline: ChartPoint[];
   /**
+   * Legend for the unchanged comparison.
+   */
+  baselineLabel: string;
+  /**
    * Condition for this record.
    */
   condition: string;
@@ -3399,6 +3656,10 @@ export interface Scenario {
    * Series for this record.
    */
   series: ChartPoint[];
+  /**
+   * Legend for the projected series.
+   */
+  seriesLabel: string;
   /**
    * Summary for this record.
    */
@@ -3492,6 +3753,10 @@ export interface Release {
    * Rollback trigger for this record.
    */
   rollbackTrigger: string;
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  scheduledAt: string;
   /**
    * Stage for this record.
    */
@@ -3601,6 +3866,23 @@ export interface Message2 {
    * Attachment for this record.
    */
   attachment: Attachment | null;
+  /**
+   * Topic-wide or stage-only distribution for this message.
+   */
+  audience:
+    | {
+        kind: "topic";
+      }
+    | {
+        kind: "stage";
+        /**
+         * Name of the stage in the topic.
+         */
+        stage: string;
+      }
+    | {
+        kind: "unknown";
+      };
   author: Actor2;
   /**
    * Identifier of the associated decision.
@@ -3835,6 +4117,10 @@ export interface Goal {
    */
   calmSub: string | null;
   /**
+   * Deadline for reaching the goal.
+   */
+  deadlineAt: Timestamp | null;
+  /**
    * Deals for this record.
    */
   deals: Deal[];
@@ -3903,7 +4189,7 @@ export interface Goal {
    */
   signed: number;
   /**
-   * Destination to open in the cockpit.
+   * Quantity the topic aims to achieve by its deadline.
    */
   target: number;
   trajectory: Trajectory;
@@ -4212,22 +4498,6 @@ export interface Handover {
   why: string;
 }
 /**
- * Health for the cockpit.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "Health".
- */
-export interface Health {
-  /**
-   * Health state for the cockpit.
-   */
-  state: "ok" | "warn" | "bad" | "idle" | "unknown";
-  /**
-   * Word for this record.
-   */
-  word: string;
-}
-/**
  * History day for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -4308,6 +4578,10 @@ export interface HistoryPage {
    */
   days: HistoryDay[];
   /**
+   * Number of matching rows newer than the reader’s last visit, across all pages.
+   */
+  newSince: number;
+  /**
    * Opaque cursor for the following page, or null at the end.
    */
   nextCursor: string | null;
@@ -4366,7 +4640,7 @@ export interface Job {
  */
 export interface LaneAct {
   /**
-   * Stable identifier for this record.
+   * Identifier of an action recorded in history.
    */
   id: string;
   /**
@@ -4821,7 +5095,10 @@ export interface Meter {
    */
   cap: Money6 | null;
   /**
-   * Value for this record.
+   * Exact counts for meters measured in requests.
+   */
+  count: MeterCount | null;
+  /**
    * Note for this record.
    */
   note: string | null;
@@ -4843,6 +5120,22 @@ export interface Meter {
   what: string;
 }
 /**
+ * Used and allowed requests in the current window.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MeterCount".
+ */
+export interface MeterCount {
+  /**
+   * Request allowance.
+   */
+  of: number;
+  /**
+   * Requests used.
+   */
+  used: number;
+}
+/**
  * Model offered by the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -4860,7 +5153,7 @@ export interface Model {
   /**
    * Current availability.
    */
-  state: "unknown" | "default" | "connected" | "addKey" | "signIn";
+  state: ("signedIn" | "unknown") | "default" | "connected" | "addKey" | "signIn";
   /**
    * Engine vendor.
    */
@@ -5263,6 +5556,64 @@ export interface PullsView {
   summary: string | null;
 }
 /**
+ * A page the reader opened recently.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "RecentPage".
+ */
+export interface RecentPage {
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  at: string;
+  target: Target8;
+  /**
+   * Display label for the page.
+   */
+  title: string;
+}
+/**
+ * An internal link resolved by the client.
+ */
+export interface Target8 {
+  /**
+   * Destination record identifier, or null for a top-level surface.
+   */
+  id: string | null;
+  /**
+   * Surface or record type to open.
+   */
+  kind:
+    | "topic"
+    | "lane"
+    | "decision"
+    | "thread"
+    | "person"
+    | "draft"
+    | "skill"
+    | "pull"
+    | "manager"
+    | "brief"
+    | "drafts"
+    | "skills"
+    | "settings"
+    | "unknown";
+}
+/**
+ * Recent pages for the current reader, newest first.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "RecentView".
+ */
+export interface RecentView {
+  /**
+   * Last six distinct pages.
+   *
+   * @maxItems 6
+   */
+  items: RecentPage[];
+}
+/**
  * Route preview for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -5317,7 +5668,7 @@ export interface SearchResult {
    * Sub for this record.
    */
   sub: string | null;
-  target: Target7;
+  target: Target9;
   /**
    * Title displayed above the record.
    */
@@ -5330,7 +5681,7 @@ export interface SearchResult {
 /**
  * An internal link resolved by the client.
  */
-export interface Target7 {
+export interface Target9 {
   /**
    * Destination record identifier, or null for a top-level surface.
    */
@@ -5710,7 +6061,7 @@ export interface Standing1 {
  */
 export interface StuckAction {
   /**
-   * Stable identifier for this record.
+   * Identifier of an action recorded in history.
    */
   id: string;
   /**
@@ -6054,6 +6405,10 @@ export interface TopicView {
    */
   stages: ViewerStage[];
   /**
+   * Progress shared with a status-only reader.
+   */
+  status: SharedTopicStatus | null;
+  /**
    * Stuck for this record.
    */
   stuck: StuckReport | null;
@@ -6191,6 +6546,22 @@ export interface Trajectory1 {
    * Unit for this record.
    */
   unit: string | null;
+}
+/**
+ * Binary data and display name supplied by the composer.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "UploadInput".
+ */
+export interface UploadInput {
+  /**
+   * Base64 file bytes, capped at 512 KiB decoded.
+   */
+  data: string;
+  /**
+   * File name to show on the attachment.
+   */
+  name: string;
 }
 /**
  * Usage account for the cockpit.

@@ -22,6 +22,8 @@ export function definitionFor(rel: string): string | undefined {
       return "WorkspaceView";
     case "sidebar.json":
       return "SidebarView";
+    case "models.json":
+      return "ModelsView";
     case "usage.json":
       return "UsageView";
     case "brief.json":

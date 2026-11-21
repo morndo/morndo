@@ -327,9 +327,11 @@ pub struct GoalDecision {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Goal {
+    /// Deadline for reaching the goal.
+    pub deadline_at: Present<Timestamp>,
     /// Forecast log for this record.
     pub forecast_log: Vec<Forecast>,
-    /// Destination to open in the cockpit.
+    /// Quantity the topic aims to achieve by its deadline.
     pub target: i64,
     /// Signed for this record.
     pub signed: i64,
@@ -529,6 +531,8 @@ pub struct HistoryDay {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct HistoryPage {
+    /// Number of matching rows newer than the reader’s last visit, across all pages.
+    pub new_since: u64,
     /// Seen for this record.
     pub seen: SeenMarker,
     /// Opaque cursor for the following page, or null at the end.
@@ -665,6 +669,8 @@ pub struct TaskRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicView {
+    /// Progress shared with a status-only reader.
+    pub status: Present<SharedTopicStatus>,
     /// Viewer for this record.
     pub viewer: crate::access::TopicViewer,
     /// Stages for this record.
@@ -757,4 +763,24 @@ pub struct Forecast {
     pub given_at: Timestamp,
     /// Outcome for this record.
     pub outcome: String,
+}
+
+/// Aggregate progress without lanes, names, or private commentary.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SharedTopicStatus {
+    /// Topic whose status is shared.
+    pub topic_id: TopicId,
+    /// Topic heading visible to the reader.
+    pub name: String,
+    /// Current progress toward the goal.
+    pub signed: Present<i64>,
+    /// Quantity needed to reach the goal.
+    pub goal: Present<i64>,
+    /// Units used for the goal.
+    pub unit: Present<String>,
+    /// Whether the topic is on track.
+    pub health: Present<Health>,
+    /// Time of the next status report.
+    pub next_report_at: Present<Timestamp>,
 }

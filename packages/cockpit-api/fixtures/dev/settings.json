@@ -8,7 +8,8 @@
       "detail": "An email, an offer, a post, a release",
       "who": "you",
       "dailyLimit": null,
-      "risky": true
+      "risky": true,
+      "personId": null
     },
     {
       "rule": "hardToUndo",
@@ -16,7 +17,8 @@
       "detail": "A signed term, a published claim, a deleted record",
       "who": "you",
       "dailyLimit": null,
-      "risky": true
+      "risky": true,
+      "personId": null
     },
     {
       "rule": "onlyYouKnow",
@@ -24,7 +26,8 @@
       "detail": "A call you held, a relationship, a promise",
       "who": "you",
       "dailyLimit": null,
-      "risky": true
+      "risky": true,
+      "personId": null
     },
     {
       "rule": "insideGuardrails",
@@ -32,14 +35,15 @@
       "detail": "A paused ad, a list, a draft, a reminder",
       "who": "agent",
       "dailyLimit": null,
-      "risky": false
+      "risky": false,
+      "personId": null
     }
   ],
   "theme": {
     "id": "ink",
     "name": "Ink",
     "strength": 55,
-    "glass": 25,
+    "glass": null,
     "effectiveGlass": 25
   },
   "chatMode": "floating",

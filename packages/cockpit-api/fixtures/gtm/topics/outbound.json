@@ -414,7 +414,8 @@
       }
     ],
     "pathTitle": null,
-    "forecastLog": []
+    "forecastLog": [],
+    "deadlineAt": null
   },
   "noGoal": null,
   "facts": [
@@ -704,7 +705,7 @@
               "shortName": "Jonas",
               "kind": "person",
               "avatar": "J",
-              "role": "Partner operations",
+              "role": "Sales",
               "state": null,
               "word": null,
               "text": null,
@@ -788,7 +789,8 @@
         ]
       }
     ],
-    "nextCursor": null
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -811,7 +813,7 @@
       "shortName": "Jonas",
       "kind": "person",
       "avatar": "J",
-      "role": "Partner operations",
+      "role": "Sales",
       "state": "warn",
       "word": "2 waiting",
       "text": "Takes the meetings",
@@ -951,5 +953,6 @@
     "stages": [],
     "sharedBy": null
   },
-  "stages": []
+  "stages": [],
+  "status": null
 }

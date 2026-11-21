@@ -9,6 +9,8 @@ use crate::present::Present;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Meter {
+    /// Exact counts for meters measured in requests.
+    pub count: Present<MeterCount>,
     /// Spend for this record.
     pub spend: Present<crate::Money>,
     /// Cap for this record.
@@ -19,8 +21,6 @@ pub struct Meter {
     pub resets_at: Present<Timestamp>,
     /// Used for this record.
     pub used: f64,
-    /// Value for this record.
-
     /// Note for this record.
     pub note: Present<String>,
 }
@@ -67,4 +67,14 @@ pub enum UsageState {
     StandingBy,
     #[serde(other)]
     Unknown,
+}
+
+/// Used and allowed requests in the current window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MeterCount {
+    /// Requests used.
+    pub used: u64,
+    /// Request allowance.
+    pub of: u64,
 }

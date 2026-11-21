@@ -102,6 +102,8 @@ fn export() -> Value {
         Event,
         FeedEvent,
         cockpit_api::event::FeedFrame,
+        cockpit_api::extras::RecentView,
+        cockpit_api::extras::UploadInput,
         cockpit_api::access::TopicStatusView,
         ApiError,
     );

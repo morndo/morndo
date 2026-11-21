@@ -6,7 +6,7 @@
       "id": "ink",
       "name": "Ink",
       "strength": 55,
-      "glass": 25,
+      "glass": null,
       "effectiveGlass": 25
     }
   },

@@ -117,7 +117,9 @@
       14
     ],
     "unit": "sales calls a week",
-    "marker": null
+    "marker": null,
+    "baselineLabel": "No change",
+    "seriesLabel": "With the shift"
   },
   "risk": {
     "kind": "risk",
@@ -178,7 +180,9 @@
     "marker": {
       "x": "Wk 3",
       "label": "shift undone"
-    }
+    },
+    "baselineLabel": "No change",
+    "seriesLabel": "Worst case"
   },
   "suggestion": "Approve the shift for 3 weeks. Search gets €2,800 a week and LinkedIn keeps €1,200 for people who already know you.",
   "guardrail": "Guardrail: if a Search lead costs more than €110 for 5 days in a row, the Paid agent moves the money back and tells you. The most this can cost is about 2 sales calls.",
@@ -190,7 +194,8 @@
       "target": {
         "kind": "lane",
         "id": "search-budget"
-      }
+      },
+      "moduleId": null
     },
     {
       "step": "Cut LinkedIn down to the retargeting audience",
@@ -199,7 +204,8 @@
       "target": {
         "kind": "lane",
         "id": "search-budget"
-      }
+      },
+      "moduleId": null
     },
     {
       "step": "Write 3 new Search ads for the extra budget",
@@ -208,7 +214,8 @@
       "target": {
         "kind": "lane",
         "id": "search-budget"
-      }
+      },
+      "moduleId": null
     },
     {
       "step": "Check with sales that the new leads are good",
@@ -217,7 +224,8 @@
       "target": {
         "kind": "lane",
         "id": "search-budget"
-      }
+      },
+      "moduleId": null
     },
     {
       "step": "Report the result against the dream output",
@@ -226,7 +234,8 @@
       "target": {
         "kind": "lane",
         "id": "search-budget"
-      }
+      },
+      "moduleId": null
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing changes.",
@@ -236,8 +245,9 @@
     "open": 4
   },
   "dueAt": "2026-11-16T14:00:00+01:00",
-  "shortTitle": "Move budget to Search",
+  "shortTitle": "Move €1,200 a week to Google Search",
   "goalChange": null,
   "release": null,
-  "changeRequest": null
+  "changeRequest": null,
+  "rule": "overWeeklyCap"
 }

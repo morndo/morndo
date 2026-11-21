@@ -672,6 +672,17 @@
           "format": "int64",
           "type": "integer"
         },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DecisionRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Decision right that governs this request."
+        },
         "state": {
           "$ref": "#/$defs/DecisionState",
           "description": "Current state of the record."
@@ -694,6 +705,7 @@
         }
       },
       "required": [
+        "rule",
         "id",
         "topicId",
         "topicName",
@@ -830,6 +842,20 @@
           "$ref": "#/$defs/Timestamp",
           "description": "Time associated with overnight since."
         },
+        "settledBurns": {
+          "description": "Settled items retained for the reader’s receipt and Undo.",
+          "items": {
+            "$ref": "#/$defs/SettledBurn"
+          },
+          "type": "array"
+        },
+        "sharedTopics": {
+          "description": "Shared progress visible without topic spending or private records.",
+          "items": {
+            "$ref": "#/$defs/SharedTopicStatus"
+          },
+          "type": "array"
+        },
         "spend": {
           "anyOf": [
             {
@@ -854,6 +880,8 @@
         }
       },
       "required": [
+        "settledBurns",
+        "sharedTopics",
         "inWorks",
         "overnightSinceAt",
         "burnsSub",
@@ -1340,6 +1368,16 @@
               "default": null,
               "description": "Page for this record."
             },
+            "stage": {
+              "default": null,
+              "description": "Stage to post in when the thread covers several stages.",
+              "maxLength": 200,
+              "minLength": 1,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "text": {
               "description": "Text shown to the reader.",
               "maxLength": 4000,
@@ -1537,6 +1575,18 @@
               ],
               "default": null,
               "description": "Daily limit for this record."
+            },
+            "personId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PersonId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null,
+              "description": "Person authorized to exercise the decision right."
             },
             "rule": {
               "$ref": "#/$defs/KnownDecisionRule",
@@ -1872,6 +1922,24 @@
           "required": [
             "type",
             "laneId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "target": {
+              "$ref": "#/$defs/TargetInput",
+              "description": "Page the reader just opened."
+            },
+            "type": {
+              "const": "recent.visit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "target"
           ],
           "type": "object"
         }
@@ -2245,6 +2313,17 @@
           "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
+        "personId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PersonId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Person explicitly authorized to exercise this decision right."
+        },
         "risky": {
           "description": "Risky for this record.",
           "type": "boolean"
@@ -2263,6 +2342,7 @@
         }
       },
       "required": [
+        "personId",
         "rule",
         "title",
         "detail",
@@ -2466,6 +2546,17 @@
           ],
           "description": "Risk for this record."
         },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DecisionRule"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Decision right that governs approval, decline and Undo."
+        },
         "shortTitle": {
           "description": "Short title for this record.",
           "type": "string"
@@ -2510,6 +2601,7 @@
         }
       },
       "required": [
+        "rule",
         "shortTitle",
         "goalChange",
         "release",
@@ -2920,6 +3012,18 @@
           "properties": {
             "type": {
               "const": "drafts.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "brief.changed",
               "type": "string"
             }
           },
@@ -3413,6 +3517,18 @@
         {
           "properties": {
             "type": {
+              "const": "brief.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
               "const": "brief.published",
               "type": "string"
             }
@@ -3892,6 +4008,17 @@
           ],
           "description": "Calm sub for this record."
         },
+        "deadlineAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Deadline for reaching the goal."
+        },
         "deals": {
           "description": "Deals for this record.",
           "items": {
@@ -4048,7 +4175,7 @@
           "type": "integer"
         },
         "target": {
-          "description": "Destination to open in the cockpit.",
+          "description": "Quantity the topic aims to achieve by its deadline.",
           "format": "int64",
           "type": "integer"
         },
@@ -4066,6 +4193,7 @@
         }
       },
       "required": [
+        "deadlineAt",
         "forecastLog",
         "target",
         "signed",
@@ -4105,6 +4233,17 @@
           },
           "type": "array"
         },
+        "deadlineAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Desired deadline, when it changes."
+        },
         "field": {
           "$ref": "#/$defs/GoalField",
           "description": "Field for this record."
@@ -4114,6 +4253,28 @@
           "format": "int64",
           "type": "integer"
         },
+        "previousDeadlineAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Original deadline when this proposal was written."
+        },
+        "previousUnit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Original unit when this proposal was written."
+        },
         "to": {
           "description": "To for this record.",
           "format": "int64",
@@ -4122,9 +4283,24 @@
         "topicId": {
           "$ref": "#/$defs/TopicId",
           "description": "Identifier of the associated topic."
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Desired unit, when it changes."
         }
       },
       "required": [
+        "deadlineAt",
+        "previousDeadlineAt",
+        "unit",
+        "previousUnit",
         "topicId",
         "field",
         "from",
@@ -4215,6 +4391,8 @@
       "description": "Goal field being edited.",
       "enum": [
         "target",
+        "deadline",
+        "unit",
         "unknown"
       ],
       "type": "string"
@@ -4581,6 +4759,12 @@
           },
           "type": "array"
         },
+        "newSince": {
+          "description": "Number of matching rows newer than the reader’s last visit, across all pages.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
         "nextCursor": {
           "anyOf": [
             {
@@ -4607,6 +4791,7 @@
         }
       },
       "required": [
+        "newSince",
         "seen",
         "nextCursor",
         "shown",
@@ -5493,6 +5678,10 @@
           ],
           "description": "Attachment for this record."
         },
+        "audience": {
+          "$ref": "#/$defs/MessageAudience",
+          "description": "Topic-wide or stage-only distribution for this message."
+        },
         "author": {
           "$ref": "#/$defs/Actor",
           "description": "Author for this record."
@@ -5573,6 +5762,7 @@
         }
       },
       "required": [
+        "audience",
         "decisionId",
         "attachment",
         "model",
@@ -5623,6 +5813,54 @@
       ],
       "type": "object"
     },
+    "MessageAudience": {
+      "description": "Audience allowed to receive a message in a topic.",
+      "oneOf": [
+        {
+          "description": "Everyone who can read the topic conversation.",
+          "properties": {
+            "kind": {
+              "const": "topic",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Readers who work in this stage.",
+          "properties": {
+            "kind": {
+              "const": "stage",
+              "type": "string"
+            },
+            "stage": {
+              "description": "Name of the stage in the topic.",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "stage"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "MessageId": {
       "description": "Identifier of a message.",
       "pattern": "^m[0-9]+$",
@@ -5665,6 +5903,17 @@
           ],
           "description": "Cap for this record."
         },
+        "count": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MeterCount"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Exact counts for meters measured in requests."
+        },
         "note": {
           "anyOf": [
             {
@@ -5674,7 +5923,7 @@
               "type": "null"
             }
           ],
-          "description": "Value for this record.\nNote for this record."
+          "description": "Note for this record."
         },
         "resetsAt": {
           "anyOf": [
@@ -5709,12 +5958,35 @@
         }
       },
       "required": [
+        "count",
         "spend",
         "cap",
         "what",
         "resetsAt",
         "used",
         "note"
+      ],
+      "type": "object"
+    },
+    "MeterCount": {
+      "description": "Used and allowed requests in the current window.",
+      "properties": {
+        "of": {
+          "description": "Request allowance.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        },
+        "used": {
+          "description": "Requests used.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "used",
+        "of"
       ],
       "type": "object"
     },
@@ -5756,6 +6028,7 @@
       "oneOf": [
         {
           "enum": [
+            "signedIn",
             "unknown"
           ],
           "type": "string"
@@ -5897,6 +6170,17 @@
           ],
           "description": "Time an answer or action is due."
         },
+        "moduleId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModuleId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Module to open when the next step crosses into another module."
+        },
         "step": {
           "description": "Step for this record.",
           "type": "string"
@@ -5918,6 +6202,7 @@
         }
       },
       "required": [
+        "moduleId",
         "target",
         "step",
         "who",
@@ -6561,6 +6846,17 @@
     "Receipt": {
       "description": "Where the Manager filed a request.",
       "properties": {
+        "actionId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ActionId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Action addressable by Undo, when this receipt records a reversible action."
+        },
         "chain": {
           "description": "Chain for this record.",
           "type": "boolean"
@@ -6590,11 +6886,52 @@
         }
       },
       "required": [
+        "actionId",
         "text",
         "filedUnder",
         "lead",
         "chain",
         "laneId"
+      ],
+      "type": "object"
+    },
+    "RecentPage": {
+      "description": "A page the reader opened recently.",
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the reader opened it."
+        },
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Navigation destination."
+        },
+        "title": {
+          "description": "Display label for the page.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "target",
+        "title",
+        "at"
+      ],
+      "type": "object"
+    },
+    "RecentView": {
+      "description": "Recent pages for the current reader, newest first.",
+      "properties": {
+        "items": {
+          "description": "Last six distinct pages.",
+          "items": {
+            "$ref": "#/$defs/RecentPage"
+          },
+          "maxItems": 6,
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
       ],
       "type": "object"
     },
@@ -6613,6 +6950,10 @@
         "rollbackTrigger": {
           "description": "Rollback trigger for this record.",
           "type": "string"
+        },
+        "scheduledAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Scheduled start of an approved rollout."
         },
         "stage": {
           "$ref": "#/$defs/ReleaseStage",
@@ -6636,6 +6977,7 @@
         }
       },
       "required": [
+        "scheduledAt",
         "pullId",
         "stage",
         "percent",
@@ -6815,6 +7157,10 @@
           },
           "type": "array"
         },
+        "baselineLabel": {
+          "description": "Legend for the unchanged comparison.",
+          "type": "string"
+        },
         "condition": {
           "description": "Condition for this record.",
           "type": "string"
@@ -6849,6 +7195,10 @@
           },
           "type": "array"
         },
+        "seriesLabel": {
+          "description": "Legend for the projected series.",
+          "type": "string"
+        },
         "summary": {
           "description": "Summary for this record.",
           "type": "string"
@@ -6859,6 +7209,8 @@
         }
       },
       "required": [
+        "seriesLabel",
+        "baselineLabel",
         "series",
         "baseline",
         "unit",
@@ -7133,6 +7485,44 @@
       ],
       "type": "object"
     },
+    "SettledBurn": {
+      "description": "A burn resolved by the reader during this edition.",
+      "properties": {
+        "actionId": {
+          "$ref": "#/$defs/ActionId",
+          "description": "Action recorded in the topic’s history for Undo."
+        },
+        "detail": {
+          "description": "Whether anything still needs attention.",
+          "type": "string"
+        },
+        "laneId": {
+          "$ref": "#/$defs/LaneId",
+          "description": "Lane where the stuck work was settled."
+        },
+        "stateWord": {
+          "description": "Status of the resolved burn.",
+          "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Topic to open from the settled row."
+        },
+        "title": {
+          "description": "Resolution text shown in the brief and in the receipt.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "laneId",
+        "actionId",
+        "title",
+        "stateWord",
+        "detail",
+        "target"
+      ],
+      "type": "object"
+    },
     "SharedResource": {
       "description": "Shared resource for the cockpit.",
       "properties": {
@@ -7159,6 +7549,86 @@
         "icon",
         "rule",
         "lanes"
+      ],
+      "type": "object"
+    },
+    "SharedTopicStatus": {
+      "description": "Aggregate progress without lanes, names, or private commentary.",
+      "properties": {
+        "goal": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Quantity needed to reach the goal."
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Health"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the topic is on track."
+        },
+        "name": {
+          "description": "Topic heading visible to the reader.",
+          "type": "string"
+        },
+        "nextReportAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Time of the next status report."
+        },
+        "signed": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Current progress toward the goal."
+        },
+        "topicId": {
+          "$ref": "#/$defs/TopicId",
+          "description": "Topic whose status is shared."
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Units used for the goal."
+        }
+      },
+      "required": [
+        "topicId",
+        "name",
+        "signed",
+        "goal",
+        "unit",
+        "health",
+        "nextReportAt"
       ],
       "type": "object"
     },
@@ -8695,6 +9165,17 @@
           },
           "type": "array"
         },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SharedTopicStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Progress shared with a status-only reader."
+        },
         "stuck": {
           "anyOf": [
             {
@@ -8730,6 +9211,7 @@
         }
       },
       "required": [
+        "status",
         "viewer",
         "stages",
         "id",
@@ -8921,6 +9403,30 @@
         "high",
         "noForecast",
         "title"
+      ],
+      "type": "object"
+    },
+    "UploadInput": {
+      "additionalProperties": false,
+      "description": "Binary data and display name supplied by the composer.",
+      "properties": {
+        "data": {
+          "description": "Base64 file bytes, capped at 512 KiB decoded.",
+          "maxLength": 699052,
+          "minLength": 4,
+          "pattern": "^[A-Za-z0-9+/]+={0,2}$",
+          "type": "string"
+        },
+        "name": {
+          "description": "File name to show on the attachment.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "data"
       ],
       "type": "object"
     },

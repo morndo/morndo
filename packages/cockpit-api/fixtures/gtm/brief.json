@@ -1,7 +1,7 @@
 {
   "title": "The Monday Brief",
   "lede": "Four decisions need you and one thing is stuck. Everything else moved on its own while you slept.",
-  "cadence": "Next brief at 13:00. Until then you hear only about what cannot wait.",
+  "cadence": "Until then you hear only about what cannot wait.",
   "spend": {
     "overnight": {
       "amountMinor": 2100,
@@ -96,7 +96,8 @@
       "doneNote": "Approved. The Paid agent starts now.",
       "laneId": "search-budget",
       "state": "open",
-      "dueAt": "2026-11-16T14:00:00+01:00"
+      "dueAt": "2026-11-16T14:00:00+01:00",
+      "rule": "overWeeklyCap"
     },
     {
       "id": "d2",
@@ -109,7 +110,8 @@
       "doneNote": "Approved. The first 60 emails go out at 10:00.",
       "laneId": "sequence-b",
       "state": "open",
-      "dueAt": "2026-11-17T17:00:00+01:00"
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "rule": "inYourName"
     },
     {
       "id": "d3",
@@ -122,7 +124,8 @@
       "doneNote": "Approved. The story is scheduled for Wednesday.",
       "laneId": "fenwick",
       "state": "open",
-      "dueAt": "2026-11-18T17:00:00+01:00"
+      "dueAt": "2026-11-18T17:00:00+01:00",
+      "rule": "inYourName"
     },
     {
       "id": "d4",
@@ -135,7 +138,8 @@
       "doneNote": "Approved. The offer goes out tomorrow at 09:00.",
       "laneId": "halden-offer",
       "state": "open",
-      "dueAt": "2026-11-19T17:00:00+01:00"
+      "dueAt": "2026-11-19T17:00:00+01:00",
+      "rule": "hardToUndo"
     }
   ],
   "openCount": 4,
@@ -150,7 +154,7 @@
         "kind": "lane",
         "id": "webinar"
       },
-      "stuckAt": "2026-11-16T09:12:00+01:00",
+      "stuckAt": "2026-11-15T09:12:00+01:00",
       "laneId": "webinar",
       "blocks": "The webinar promo goes out today.",
       "dueAt": "2026-11-16T16:00:00+01:00"
@@ -232,6 +236,8 @@
   "at": "2026-11-16T07:15:00+01:00",
   "nextBriefAt": "2026-11-16T13:00:00+01:00",
   "inWorks": null,
-  "overnightSinceAt": "2026-11-15T18:20:00+01:00",
-  "burnsSub": "This needs your call."
+  "overnightSinceAt": "2026-11-15T18:00:00+01:00",
+  "burnsSub": "This needs your call.",
+  "settledBurns": [],
+  "sharedTopics": []
 }

@@ -30,5 +30,6 @@
   "shortTitle": "Start sequence B",
   "goalChange": null,
   "release": null,
-  "changeRequest": null
+  "changeRequest": null,
+  "rule": "inYourName"
 }

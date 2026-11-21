@@ -207,7 +207,10 @@
       "run": "/review",
       "badge": false,
       "pinned": true,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "review"
+      }
     }
   ],
   "pinnable": [
@@ -296,7 +299,10 @@
       "run": null,
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "topic",
+        "id": "api"
+      }
     },
     {
       "id": "p-billing",
@@ -308,7 +314,10 @@
       "run": null,
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "topic",
+        "id": "billing"
+      }
     },
     {
       "id": "p-mobile",
@@ -320,7 +329,10 @@
       "run": null,
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "topic",
+        "id": "mobile"
+      }
     },
     {
       "id": "p-infra",
@@ -332,7 +344,10 @@
       "run": null,
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "topic",
+        "id": "infra"
+      }
     },
     {
       "id": "s-review",
@@ -344,7 +359,10 @@
       "run": "/review",
       "badge": false,
       "pinned": true,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "review"
+      }
     },
     {
       "id": "s-red-main",
@@ -356,7 +374,10 @@
       "run": "/red-main",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "red-main"
+      }
     },
     {
       "id": "s-release",
@@ -368,7 +389,10 @@
       "run": "/release",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "release"
+      }
     },
     {
       "id": "s-qa",
@@ -380,7 +404,10 @@
       "run": "/qa-by-hand",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "qa-by-hand"
+      }
     },
     {
       "id": "s-upgrade",
@@ -392,7 +419,10 @@
       "run": "/upgrade",
       "badge": false,
       "pinned": false,
-      "target": null
+      "target": {
+        "kind": "skill",
+        "id": "upgrade"
+      }
     }
   ],
   "pinLimit": 12

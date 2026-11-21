@@ -75,6 +75,8 @@ pub struct MessageAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
+    /// Topic-wide or stage-only distribution for this message.
+    pub audience: MessageAudience,
     /// Identifier of the associated decision.
     pub decision_id: Present<DecisionId>,
     /// Attachment for this record.
@@ -196,4 +198,19 @@ pub struct ThreadView {
     pub messages: Vec<Message>,
     /// Opaque cursor for the following page, or null at the end.
     pub next_cursor: Present<String>,
+}
+
+/// Audience allowed to receive a message in a topic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum MessageAudience {
+    /// Everyone who can read the topic conversation.
+    Topic,
+    /// Readers who work in this stage.
+    Stage {
+        /// Name of the stage in the topic.
+        stage: String,
+    },
+    #[serde(other)]
+    Unknown,
 }

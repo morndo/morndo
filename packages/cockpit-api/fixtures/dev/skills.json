@@ -31,7 +31,7 @@
       "needsKey": null,
       "enabled": true,
       "id": "review",
-      "engine": "Auto",
+      "engine": "Codex",
       "asksFirst": false,
       "builtIn": true
     },
@@ -42,7 +42,7 @@
       "needsKey": null,
       "enabled": true,
       "id": "qa-by-hand",
-      "engine": "Auto",
+      "engine": "Cursor",
       "asksFirst": false,
       "builtIn": true
     },

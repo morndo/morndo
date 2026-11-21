@@ -133,6 +133,10 @@ pub enum Command {
     },
     #[serde(rename = "message.send")]
     MessageSend {
+        /// Stage to post in when the thread covers several stages.
+        #[serde(default)]
+        #[schemars(length(min = 1, max = 200))]
+        stage: Option<String>,
         /// Attachment for this record.
         #[serde(default)]
         attachment: Option<AttachmentInput>,
@@ -198,6 +202,9 @@ pub enum Command {
     },
     #[serde(rename = "decisionRight.set")]
     DecisionRightSet {
+        /// Person authorized to exercise the decision right.
+        #[serde(default)]
+        person_id: Option<PersonId>,
         /// Rule for this record.
         rule: Known<DecisionRule>,
         /// Who for this record.
@@ -305,6 +312,11 @@ pub enum Command {
         /// Identifier of the associated lane.
         lane_id: LaneId,
     },
+    #[serde(rename = "recent.visit")]
+    RecentVisit {
+        /// Page the reader just opened.
+        target: TargetInput,
+    },
 }
 
 /// Receipt and sequenced updates produced by an accepted command.
@@ -337,6 +349,8 @@ pub struct TargetInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Receipt {
+    /// Action addressable by Undo, when this receipt records a reversible action.
+    pub action_id: Present<ActionId>,
     /// Text shown to the reader.
     pub text: String,
     /// Filed under for this record.
