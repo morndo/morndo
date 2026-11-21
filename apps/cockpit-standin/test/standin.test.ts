@@ -262,6 +262,63 @@ describe("cockpit stand-in", () => {
     }
   });
 
+  it("names an unknown command and only the fields of a known one", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const unknown = await act(url, { type: "nope" });
+      expect(unknown.status).toBe(400);
+      expect((unknown.body.error as { message: string }).message).toBe('unknown command type "nope"');
+      const missing = await act(url, { type: "decision.approve" });
+      expect(missing.status).toBe(400);
+      const message = (missing.body.error as { message: string }).message;
+      expect(message).toMatch(/decisionId/);
+      expect(message).not.toMatch(/threadId|pinId|skill/);
+    } finally {
+      await stop();
+    }
+  });
+
+  it("files a goal ask and a skill run, and applies an approved goal change", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const asked = await act(url, { type: "goal.ask", topicId: "content" });
+      expect(asked.status).toBe(200);
+      const askLane = String(asked.body.laneId);
+      expect(asked.body.events).toEqual([expect.objectContaining({ type: "lane.filed", laneId: askLane, topicId: "content" })]);
+      expect((await get(url, `/lanes/${askLane}`)).body).toMatchObject({ topicId: "content", state: "new" });
+      const manager = await get(url, "/manager");
+      expect((manager.body.lanes as { id: string; topicId: string | null }[]).some((lane) => lane.id === askLane && lane.topicId === "content")).toBe(true);
+      expect((await act(url, { type: "goal.ask", topicId: "missing" })).status).toBe(404);
+
+      const run = await act(url, { type: "skill.run", skill: "/linkedin-post", text: "Write a post about the webinar" });
+      expect(run.status).toBe(200);
+      const runLane = String(run.body.laneId);
+      expect(run.body.events).toEqual([expect.objectContaining({ type: "lane.filed", laneId: runLane, topicId: "content" })]);
+      expect((await get(url, `/lanes/${runLane}`)).body.topicId).toBe("content");
+
+      const loose = await act(url, { type: "skill.run", skill: "/decision-brief", text: "Brief the open question" });
+      expect(loose.status).toBe(200);
+      expect((loose.body.events as { topicId: string | null }[])[0]?.topicId).toBeNull();
+      expect((await get(url, `/lanes/${String(loose.body.laneId)}`)).body.topicId).toBeNull();
+      expect((await act(url, { type: "skill.run", skill: "/missing", text: "hi" })).status).toBe(404);
+
+      const before = (await get(url, "/topics/partnerships")).body.goal as { insight: string };
+      const sent = await act(url, { type: "message.send", threadId: "topic:partnerships", text: "Move the target to 5 partners" });
+      expect(sent.status).toBe(200);
+      const decisionId = (sent.body.events as { type: string; decisionId?: string }[]).find((event) => event.type === "decision.changed")?.decisionId;
+      expect(typeof decisionId).toBe("string");
+      expect((await get(url, "/topics/partnerships")).body.goal).toMatchObject({ insight: before.insight });
+      expect((await act(url, { type: "decision.approve", decisionId })).status).toBe(200);
+      const goal = (await get(url, "/topics/partnerships")).body.goal as { insight: string; verdict: { text: string } };
+      expect(goal.insight).toBe("Move the target to 5 partners");
+      expect(goal.verdict.text).toBe("Move the target to 5 partners");
+      expect((await act(url, { type: "decision.undo", decisionId })).status).toBe(200);
+      expect((await get(url, "/topics/partnerships")).body.goal).toMatchObject({ insight: before.insight });
+    } finally {
+      await stop();
+    }
+  });
+
   it("serves the development module", async () => {
     const { url, stop } = await boot("dev");
     try {

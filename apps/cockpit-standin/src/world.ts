@@ -1,5 +1,5 @@
 import { loadFixtures } from "@morndo/cockpit-api";
-import type { AccessView as Access, Actor, Ask, BriefView as Brief, Command, DecisionRule, DecisionView as Decision, Decider, LabelKind, LaneView as Lane, ManagerView as Manager, Message, Pin, DecisionQueueView as Queue, SettingsView as Settings, SidebarView as Sidebar, SkillsView as Skills, Theme, ThemePatch, ThreadView as Thread, TopicView as Topic, WorkspaceView as Workspace } from "@morndo/cockpit-api";
+import type { AccessView as Access, Actor, Ask, BriefView as Brief, Command, DecisionRule, DecisionView as Decision, Decider, LabelKind, LaneView as Lane, ManagerView as Manager, Message, Pin, DecisionQueueView as Queue, SettingsView as Settings, SidebarView as Sidebar, SkillsView as Skills, Theme, ThemePatch, ThreadView as Thread, TopicView as Topic, Verdict, WorkspaceView as Workspace } from "@morndo/cockpit-api";
 import type { Outcome } from "./model.ts";
 import { DEV_ROUTES, GTM_ROUTES, type Route } from "./routes.ts";
 import { answerTo, isQuestion, routePreview, searchResults } from "./search.ts";
@@ -84,6 +84,13 @@ function blankActor(name: string): Actor {
   };
 }
 
+interface GoalChange {
+  topicId: string;
+  applied: boolean;
+  noGoal: string | null;
+  goal: { insight: string; asOf: string; verdict: Verdict } | null;
+}
+
 export class World {
   readonly module: "gtm" | "dev";
   private readonly routes: Route[];
@@ -110,6 +117,7 @@ export class World {
   private readonly access = new Map<string, Access>();
   private readonly extraAsks: Ask[] = [];
   private readonly undone = new Set<string>();
+  private readonly goalChanges = new Map<string, GoalChange>();
   private seq = 0;
 
   constructor(module: "gtm" | "dev") {
@@ -222,7 +230,7 @@ export class World {
       case "person.remind":
         return this.remind(command.laneId, command.personId);
       case "goal.ask":
-        return this.topics.has(command.topicId) ? done([]) : missing("topic");
+        return this.goalAsk(command.topicId);
       case "message.send":
         return this.send(command.threadId, command.text);
       case "message.relabel":
@@ -238,7 +246,7 @@ export class World {
       case "decisionRight.set":
         return this.decisionRight(command.rule, command.who, command.dailyLimit);
       case "skill.run":
-        return this.skills.skills.some((skill) => skill.name === command.skill) ? done([]) : missing("skill");
+        return this.skillRun(command.skill, command.text);
       case "access.set":
         return this.setAccess(command.topicId, command.personId, command.access);
       case "access.invite":
@@ -469,6 +477,7 @@ export class World {
     const decision = this.decisions.get(id);
     if (!decision) return missing("decision");
     decision.state = state;
+    this.applyGoalChange(id, state);
     const events: unknown[] = [{ type: "decision.changed", decisionId: id, state }];
     for (const lane of this.allLanes()) {
       if (lane.decisionId === id) events.push({ type: "lane.changed", laneId: lane.id });
@@ -492,16 +501,16 @@ export class World {
     return done([{ type: "agentAction.changed", actionId: id }]);
   }
 
-  private fileLane(text: string, topicId: string | null, leadId: string | null, fromChat: boolean): Outcome {
+  private fileLane(text: string, topicId: string | null, leadId: string | null, fromChat: boolean, route = true): Outcome {
     let topic = topicId ? this.topics.get(topicId) : undefined;
     if (topicId && !topic) return missing("topic");
-    if (!topic) {
-      const route = this.routes.find((item) => item.re.test(text));
-      topic = route ? this.topics.get(route.topicId) : undefined;
+    if (!topic && route) {
+      const found = this.routes.find((item) => item.re.test(text));
+      topic = found ? this.topics.get(found.topicId) : undefined;
     }
     if (topic) topic.open = true;
-    const route = topic ? this.routes.find((item) => item.topicId === topic.id) : undefined;
-    const lead = this.resolveLead(topic, leadId, route?.lead ?? "Manager");
+    const leadRoute = topic ? this.routes.find((item) => item.topicId === topic.id) : undefined;
+    const lead = this.resolveLead(topic, leadId, leadRoute?.lead ?? "Manager");
     const id = `new-${++this.seq}`;
     const lane = newLane(id, text, topic, lead, fromChat);
     this.extraLanes.set(id, lane);
@@ -639,7 +648,68 @@ export class World {
     this.decisions.set(id, decision);
     this.extraDecisions.push(decision);
     this.extraAsks.unshift({ id: `ask-${id}`, quote: text, when: "Just now", chat: `in the ${topic.name} chat`, went: "a goal change · waits for you in Decide", href: `#decision/${id}` });
+    const goal = topic.goal;
+    this.goalChanges.set(id, {
+      topicId: topic.id,
+      applied: false,
+      noGoal: topic.noGoal,
+      goal: goal ? { insight: goal.insight, asOf: goal.asOf, verdict: clone(goal.verdict) } : null,
+    });
     return decision;
+  }
+
+  private goalAsk(topicId: string): Outcome {
+    const topic = this.topics.get(topicId);
+    if (!topic) return missing("topic");
+    return this.fileLane(`Set a goal for ${topic.name}`, topicId, null, false);
+  }
+
+  private skillRun(name: string, text: string): Outcome {
+    const skill = this.skills.skills.find((item) => item.name === name);
+    if (!skill) return missing("skill");
+    return this.fileLane(text, this.topicForSkill(skill.topics), null, false, false);
+  }
+
+  private topicForSkill(topics: string): string | null {
+    const hay = topics.toLowerCase();
+    let match: { id: string; length: number } | undefined;
+    for (const topic of this.topics.values()) {
+      const name = topic.name.toLowerCase();
+      if (!name || !hay.includes(name)) continue;
+      if (!match || name.length > match.length) match = { id: topic.id, length: name.length };
+    }
+    return match?.id ?? null;
+  }
+
+  private applyGoalChange(id: string, state: Decision["state"]): void {
+    const change = this.goalChanges.get(id);
+    if (!change) return;
+    const topic = this.topics.get(change.topicId);
+    const decision = this.decisions.get(id);
+    if (!topic || !decision) return;
+    if (state === "approved") {
+      this.writeGoal(topic, decision.title);
+      change.applied = true;
+      return;
+    }
+    if (!change.applied) return;
+    topic.noGoal = change.noGoal;
+    if (topic.goal && change.goal) {
+      topic.goal.insight = change.goal.insight;
+      topic.goal.asOf = change.goal.asOf;
+      topic.goal.verdict = clone(change.goal.verdict);
+    }
+    change.applied = false;
+  }
+
+  private writeGoal(topic: Topic, title: string): void {
+    if (!topic.goal) {
+      topic.noGoal = title;
+      return;
+    }
+    topic.goal.insight = title;
+    topic.goal.asOf = "updated just now";
+    topic.goal.verdict = { ...topic.goal.verdict, text: title, action: "You approved the change" };
   }
 
   private relabel(messageId: string, label: LabelKind): Outcome {
