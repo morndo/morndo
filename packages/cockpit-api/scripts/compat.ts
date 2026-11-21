@@ -30,7 +30,6 @@ interface Contract {
 }
 
 const defaultSchema = new URL("../schema/cockpit.schema.json", import.meta.url);
-const refPrefix = "#/$defs/";
 const minimums = ["minLength", "minItems", "minimum"] as const;
 const maximums = ["maxLength", "maxItems", "maximum"] as const;
 
@@ -38,13 +37,17 @@ function read(path: string | URL): Contract {
   return JSON.parse(readFileSync(path, "utf8")) as Contract;
 }
 
+function typeKey(type: Shape["type"]): string {
+  return JSON.stringify(Array.isArray(type) ? [...type].sort() : type) ?? "";
+}
+
 function branchKey(shape: Shape): string {
   const tag = shape.properties?.type?.const ?? shape.properties?.kind?.const;
   if (tag !== undefined) return `tag:${JSON.stringify(tag)}`;
   if (shape.const !== undefined) return `const:${JSON.stringify(shape.const)}`;
-  if (shape.enum) return `enum:${JSON.stringify(shape.type)}`;
+  if (shape.enum) return `enum:${typeKey(shape.type)}`;
   if (shape.$ref) return `ref:${shape.$ref}`;
-  return `type:${JSON.stringify(shape.type)}`;
+  return `type:${typeKey(shape.type)}`;
 }
 
 function reachable(defs: Contract["$defs"], root: string): Set<string> {
@@ -67,7 +70,7 @@ function compare(released: Contract, current: Contract): string[] {
   if (released.$id !== current.$id) fail("$id", "changed within a major version");
 
   function check(old: Shape, next: Shape, path: string, input: boolean) {
-    if (JSON.stringify(old.type) !== JSON.stringify(next.type) || old.$ref !== next.$ref || old.format !== next.format) {
+    if (typeKey(old.type) !== typeKey(next.type) || old.$ref !== next.$ref || old.format !== next.format) {
       fail(path, "type changed");
     }
     if (JSON.stringify(old.const) !== JSON.stringify(next.const)) fail(path, "constant changed");
@@ -79,11 +82,11 @@ function compare(released: Contract, current: Contract): string[] {
         }
       }
     }
+    if (next.additionalProperties === false && old.additionalProperties !== false) fail(path, "additional properties disallowed");
     if (input) {
       if (next.pattern && next.pattern !== old.pattern) fail(path, "input pattern changed");
       for (const key of minimums) if ((next[key] ?? -Infinity) > (old[key] ?? -Infinity)) fail(path, `${key} increased`);
       for (const key of maximums) if ((next[key] ?? Infinity) < (old[key] ?? Infinity)) fail(path, `${key} decreased`);
-      if (next.additionalProperties === false && old.additionalProperties !== false) fail(path, "additional inputs disallowed");
       for (const field of next.required ?? []) if (!old.required?.includes(field)) fail(`${path}.${field}`, "new required input");
     } else {
       for (const field of old.required ?? []) if (!next.required?.includes(field)) fail(`${path}.${field}`, "response field became optional");
@@ -96,8 +99,14 @@ function compare(released: Contract, current: Contract): string[] {
     if (old.items && next.items) check(old.items, next.items, `${path}[]`, input);
     else if (Boolean(old.items) !== Boolean(next.items)) fail(path, "array item type changed");
     for (const name of ["oneOf", "anyOf", "allOf"] as const) {
+      const previous = old[name] ?? [];
       const parts = next[name] ?? [];
-      for (const branch of old[name] ?? []) {
+      for (const added of parts.filter(part => !previous.some(branch => branchKey(branch) === branchKey(part)))) {
+        const tag = branchKey(added).startsWith("tag:");
+        const allowed = (name === "oneOf" || name === "anyOf") && tag && previous.some(part => branchKey(part).startsWith("tag:"));
+        if (!allowed) fail(path, `added ${name} member ${branchKey(added)} changes the type`);
+      }
+      for (const branch of previous) {
         const key = branchKey(branch);
         const replacement = parts.find(part => branchKey(part) === key);
         if (!replacement) fail(path, `removed ${name} member ${key}`);

@@ -2,70 +2,70 @@
 /**
  * Access kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AccessKind".
  */
 export type AccessKind = "all" | "stages" | "view" | "none" | "unknown";
 /**
  * Lane state for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LaneState".
  */
 export type LaneState = "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
 /**
  * Identifier of an action recorded in history.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ActionId".
  */
 export type ActionId = string;
 /**
  * Visual treatment of an action button.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ActionTone".
  */
 export type ActionTone = "ink" | "quiet" | "unknown";
 /**
  * Actor kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ActorKind".
  */
 export type ActorKind = "person" | "agent" | "unknown";
 /**
  * A point in time with an RFC 3339 UTC offset.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Timestamp".
  */
 export type Timestamp = string;
 /**
  * Identifier of a lane.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LaneId".
  */
 export type LaneId = string;
 /**
  * Identifier of a topic or project.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicId".
  */
 export type TopicId = string;
 /**
  * Chat mode for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ChatMode".
  */
 export type ChatMode = "floating" | "sidebar" | "unknown";
 /**
  * A user request accepted by the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Command".
  */
 export type Command =
@@ -424,42 +424,42 @@ export type Command =
 /**
  * Identifier of an actor, whether a person or an agent.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PersonId".
  */
 export type PersonId = string;
 /**
  * Identifier of a selectable model.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModelId".
  */
 export type ModelId = string;
 /**
  * Chat mode for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownChatMode".
  */
 export type KnownChatMode = "floating" | "sidebar";
 /**
  * Theme id for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownThemeId".
  */
 export type KnownThemeId = "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose";
 /**
  * Daily allowance for a rule delegated to an agent.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DailyLimit".
  */
 export type DailyLimit = 5 | 20 | 60;
 /**
  * A sequenced event on the resumable workspace feed.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "FeedEvent".
  */
 export type FeedEvent = {
@@ -601,63 +601,63 @@ export type FeedEvent1 =
 /**
  * Identifier of a decision.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionId".
  */
 export type DecisionId = string;
 /**
  * Identifier of a sidebar pin.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PinId".
  */
 export type PinId = string;
 /**
  * Identifier of a conversation.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ThreadId".
  */
 export type ThreadId = string;
 /**
  * Identifier of a pull request.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PullId".
  */
 export type PullId = string;
 /**
  * Available cockpit modules.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModuleId".
  */
 export type ModuleId = "gtm" | "dev" | "unknown";
 /**
  * Identifier of a service connection.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ConnectionId".
  */
 export type ConnectionId = string;
 /**
  * Connection state for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ConnectionState".
  */
 export type ConnectionState = "connected" | "signedIn" | "addKey" | "signIn" | "unknown";
 /**
  * Decider for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Decider".
  */
 export type Decider = "you" | "agent" | "unknown";
 /**
  * Decision rule for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionRule".
  */
 export type DecisionRule =
@@ -665,21 +665,21 @@ export type DecisionRule =
 /**
  * Decision state for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionState".
  */
 export type DecisionState = "open" | "approved" | "declined" | "expired" | "unknown";
 /**
  * Identifier of a draft.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DraftId".
  */
 export type DraftId = string;
 /**
  * Stable application code for a failed request.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ErrorCode".
  */
 export type ErrorCode =
@@ -697,7 +697,7 @@ export type ErrorCode =
 /**
  * A change notification delivered to cockpit readers.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Event".
  */
 export type Event =
@@ -829,35 +829,35 @@ export type Event =
 /**
  * Health state for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "HealthState".
  */
 export type HealthState = "ok" | "warn" | "bad" | "idle" | "unknown";
 /**
  * Gate state for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GateState".
  */
 export type GateState = "pass" | "running" | "todo" | "fail" | "skipped" | "unknown";
 /**
  * Goal field being edited.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GoalField".
  */
 export type GoalField = "target" | "unknown";
 /**
  * Group kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GroupKind".
  */
 export type GroupKind = "topic" | "project" | "unknown";
 /**
  * Evaluation of a guardrail at the current reading.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GuardrailState".
  */
 export type GuardrailState = "held" | "near" | "breached" | "unknown";
@@ -865,7 +865,7 @@ export type GuardrailState = "held" | "near" | "breached" | "unknown";
  * History entry for the cockpit.
  * History entry for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "HistoryEntry".
  */
 export type HistoryEntry =
@@ -926,56 +926,56 @@ export type HistoryEntry =
 /**
  * Identifier of a sharing invitation.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "InvitationId".
  */
 export type InvitationId = string;
 /**
  * Progress of an invitation.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "InvitationState".
  */
 export type InvitationState = "pending" | "accepted" | "unknown";
 /**
  * Access kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownAccessKind".
  */
 export type KnownAccessKind = "all" | "stages" | "view" | "none";
 /**
  * Decider for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownDecider".
  */
 export type KnownDecider = "you" | "agent";
 /**
  * Decision rule for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownDecisionRule".
  */
 export type KnownDecisionRule = "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap";
 /**
  * Label kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownLabelKind".
  */
 export type KnownLabelKind = "question" | "request" | "done" | "decision" | "goalChange";
 /**
  * Available cockpit modules.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownModuleId".
  */
 export type KnownModuleId = "gtm" | "dev";
 /**
  * Destination category for navigation within the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "KnownTargetKind".
  */
 export type KnownTargetKind =
@@ -995,77 +995,77 @@ export type KnownTargetKind =
 /**
  * Label kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LabelKind".
  */
 export type LabelKind = "question" | "request" | "done" | "decision" | "goalChange" | "unknown";
 /**
  * Identifier of a message.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "MessageId".
  */
 export type MessageId = string;
 /**
  * Availability of an engine in the model picker.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModelState".
  */
 export type ModelState = "unknown" | "default" | "connected" | "addKey" | "signIn";
 /**
  * Pin kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PinKind".
  */
 export type PinKind = "page" | "topic" | "project" | "skill" | "unknown";
 /**
  * Pin state for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PinState".
  */
 export type PinState = "waiting" | "approved" | "declined" | "expired" | "stuck" | "unknown";
 /**
  * Progress of a stage in a topic plan.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageState".
  */
 export type StageState = "done" | "next" | "now" | "wait" | "unknown";
 /**
  * Position of a pull request in the review and release flow.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PullState".
  */
 export type PullState = "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held" | "unknown";
 /**
  * Rollout lifecycle for a release decision.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ReleaseStage".
  */
 export type ReleaseStage = "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack" | "unknown";
 /**
  * Which side of the forecast the chart describes.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ScenarioKind".
  */
 export type ScenarioKind = "opportunity" | "risk" | "unknown";
 /**
  * Search kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SearchKind".
  */
 export type SearchKind = "topic" | "lane" | "person" | "decision" | "skill" | "unknown";
 /**
  * Status of a result, interpreted in the context of its kind.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SearchState".
  */
 export type SearchState =
@@ -1085,28 +1085,28 @@ export type SearchState =
 /**
  * Identifier of a runnable skill.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SkillId".
  */
 export type SkillId = string;
 /**
  * Access a reader has to one stage.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageAccess".
  */
 export type StageAccess = "work" | "view" | "locked" | "unknown";
 /**
  * Step kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StepKind".
  */
 export type StepKind = "ok" | "now" | "todo" | "unknown";
 /**
  * Destination category for navigation within the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TargetKind".
  */
 export type TargetKind =
@@ -1127,39 +1127,36 @@ export type TargetKind =
 /**
  * Theme id for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ThemeId".
  */
 export type ThemeId = "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose" | "unknown";
 /**
  * Topic kind for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicKind".
  */
 export type TopicKind = "topic" | "project" | "unknown";
 /**
  * How close a usage account is to its current limit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "UsageState".
  */
 export type UsageState = "ok" | "near" | "limit" | "standingBy" | "unknown";
 /**
  * Access level applied to a topic view.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ViewerRole".
  */
 export type ViewerRole = "owner" | "all" | "stages" | "view" | "unknown";
 
-export interface UrnMorndoCockpitApi1 {
-  [k: string]: unknown | undefined;
-}
 /**
  * Access grant for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AccessGrant".
  */
 export interface AccessGrant {
@@ -1175,7 +1172,7 @@ export interface AccessGrant {
 /**
  * Access grant submitted by an administrator.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AccessGrantInput".
  */
 export interface AccessGrantInput {
@@ -1191,7 +1188,7 @@ export interface AccessGrantInput {
 /**
  * Access person for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AccessPerson".
  */
 export interface AccessPerson {
@@ -1226,7 +1223,7 @@ export interface AccessGrant1 {
 /**
  * Other topic access for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "OtherTopicAccess".
  */
 export interface OtherTopicAccess {
@@ -1295,7 +1292,7 @@ export interface Actor {
 /**
  * Sharing settings for one topic.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AccessView".
  */
 export interface AccessView {
@@ -1323,7 +1320,7 @@ export interface AccessView {
 /**
  * A request to share the topic with someone.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Invitation".
  */
 export interface Invitation {
@@ -1347,7 +1344,7 @@ export interface Invitation {
 /**
  * A link showing status without names, lanes or chat.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StatusLink".
  */
 export interface StatusLink {
@@ -1364,7 +1361,7 @@ export interface StatusLink {
  * A person or agent, resolved to the record the screens show.
  * Fields a particular card does not carry are null.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Actor".
  */
 export interface Actor1 {
@@ -1420,7 +1417,7 @@ export interface Actor1 {
 /**
  * Agent spend for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AgentSpend".
  */
 export interface AgentSpend {
@@ -1456,7 +1453,7 @@ export interface Money1 {
 /**
  * Agents strip for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AgentsStrip".
  */
 export interface AgentsStrip {
@@ -1477,7 +1474,7 @@ export interface AgentsStrip {
 /**
  * Strip item for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StripItem".
  */
 export interface StripItem {
@@ -1506,7 +1503,7 @@ export interface SeenMarker {
 /**
  * Answer for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Answer".
  */
 export interface Answer {
@@ -1526,7 +1523,7 @@ export interface Answer {
 /**
  * An internal link resolved by the client.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Target".
  */
 export interface Target {
@@ -1556,7 +1553,7 @@ export interface Target {
 /**
  * An RFC 9457 problem details response.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ApiError".
  */
 export interface ApiError {
@@ -1599,7 +1596,7 @@ export interface ApiError {
 /**
  * A specific field that failed request validation.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "FieldError".
  */
 export interface FieldError {
@@ -1615,7 +1612,7 @@ export interface FieldError {
 /**
  * Artwork for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Artwork".
  */
 export interface Artwork {
@@ -1659,7 +1656,7 @@ export interface Artwork {
 /**
  * Ask for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Ask".
  */
 export interface Ask {
@@ -1715,7 +1712,7 @@ export interface Target1 {
 /**
  * Asked meta for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AskedMeta".
  */
 export interface AskedMeta {
@@ -1731,7 +1728,7 @@ export interface AskedMeta {
 /**
  * A file or link dropped onto a topic, or attached to a filed lane.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Attachment".
  */
 export interface Attachment {
@@ -1747,7 +1744,7 @@ export interface Attachment {
 /**
  * File or link supplied with a new request.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "AttachmentInput".
  */
 export interface AttachmentInput {
@@ -1763,7 +1760,7 @@ export interface AttachmentInput {
 /**
  * Blocker for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Blocker".
  */
 export interface Blocker {
@@ -1823,7 +1820,7 @@ export interface Target2 {
 /**
  * Brief decision for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "BriefDecision".
  */
 export interface BriefDecision {
@@ -1875,7 +1872,7 @@ export interface BriefDecision {
 /**
  * Brief topic for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "BriefTopic".
  */
 export interface BriefTopic {
@@ -1917,7 +1914,7 @@ export interface Money2 {
 /**
  * The current briefing and items that need attention.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "BriefView".
  */
 export interface BriefView {
@@ -2028,7 +2025,7 @@ export interface Artwork1 {
 /**
  * Burn for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Burn".
  */
 export interface Burn {
@@ -2113,7 +2110,7 @@ export interface DraftsSummary {
 /**
  * Pull requests still in progress, grouped by what happens next.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "InWorks".
  */
 export interface InWorks {
@@ -2165,7 +2162,7 @@ export interface Target4 {
 /**
  * Overnight action for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "OvernightAction".
  */
 export interface OvernightAction {
@@ -2209,7 +2206,7 @@ export interface OvernightAction {
 /**
  * Spend line for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SpendLine".
  */
 export interface SpendLine {
@@ -2259,7 +2256,7 @@ export interface Money5 {
 /**
  * Annotation at a category on the chart.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ChartMarker".
  */
 export interface ChartMarker {
@@ -2275,7 +2272,7 @@ export interface ChartMarker {
 /**
  * A point displayed in a decision chart.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ChartPoint".
  */
 export interface ChartPoint {
@@ -2291,7 +2288,7 @@ export interface ChartPoint {
 /**
  * Check result for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "CheckResult".
  */
 export interface CheckResult {
@@ -2307,7 +2304,7 @@ export interface CheckResult {
 /**
  * Context supplied by a composer when sending a message.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TargetInput".
  */
 export interface TargetInput {
@@ -2336,7 +2333,7 @@ export interface TargetInput {
 /**
  * Partial layout written by `prefs.set`.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LayoutPatch".
  */
 export interface LayoutPatch {
@@ -2352,7 +2349,7 @@ export interface LayoutPatch {
 /**
  * Partial theme written by `prefs.set`. Every field may be omitted.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ThemePatch".
  */
 export interface ThemePatch {
@@ -2386,7 +2383,7 @@ export interface AccessGrantInput1 {
 /**
  * Receipt and sequenced updates produced by an accepted command.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "CommandResult".
  */
 export interface CommandResult {
@@ -2464,7 +2461,7 @@ export interface Message {
 /**
  * Message action for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "MessageAction".
  */
 export interface MessageAction {
@@ -2541,7 +2538,7 @@ export interface Actor2 {
 /**
  * Message label for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "MessageLabel".
  */
 export interface MessageLabel {
@@ -2561,7 +2558,7 @@ export interface MessageLabel {
 /**
  * Read back for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ReadBack".
  */
 export interface ReadBack {
@@ -2581,7 +2578,7 @@ export interface ReadBack {
 /**
  * Thread card for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ThreadCard".
  */
 export interface ThreadCard {
@@ -2605,7 +2602,7 @@ export interface ThreadCard {
 /**
  * Message for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Message".
  */
 export interface Message1 {
@@ -2658,7 +2655,7 @@ export interface Message1 {
 /**
  * Where the Manager filed a request.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Receipt".
  */
 export interface Receipt {
@@ -2736,7 +2733,7 @@ export interface Actor3 {
 /**
  * Connection for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Connection".
  */
 export interface Connection {
@@ -2764,7 +2761,7 @@ export interface Connection {
 /**
  * Deal for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Deal".
  */
 export interface Deal {
@@ -2817,7 +2814,7 @@ export interface Deal {
 /**
  * Deal alt for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DealAlt".
  */
 export interface DealAlt {
@@ -2868,7 +2865,7 @@ export interface Target5 {
 /**
  * Position within the decision queue as seen by this reader.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionPosition".
  */
 export interface DecisionPosition {
@@ -2888,7 +2885,7 @@ export interface DecisionPosition {
 /**
  * Decision queue view for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionQueueView".
  */
 export interface DecisionQueueView {
@@ -2908,7 +2905,7 @@ export interface DecisionQueueView {
 /**
  * Queue item for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "QueueItem".
  */
 export interface QueueItem {
@@ -2937,7 +2934,7 @@ export interface QueueItem {
 /**
  * Proposed change to the numeric goal for a topic.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GoalChange".
  */
 export interface GoalChange {
@@ -2992,7 +2989,7 @@ export interface Target6 {
 /**
  * Decision right for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionRight".
  */
 export interface DecisionRight {
@@ -3024,7 +3021,7 @@ export interface DecisionRight {
 /**
  * The evidence, consequences and next steps for a decision.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionView".
  */
 export interface DecisionView {
@@ -3141,7 +3138,7 @@ export interface DecisionView {
 /**
  * Next step for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "NextStep".
  */
 export interface NextStep {
@@ -3165,7 +3162,7 @@ export interface NextStep {
 /**
  * Stat for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Stat".
  */
 export interface Stat {
@@ -3189,7 +3186,7 @@ export interface Stat {
 /**
  * A currency amount in the currency's minor units.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Money".
  */
 export interface Money6 {
@@ -3205,7 +3202,7 @@ export interface Money6 {
 /**
  * One possible outcome shown in the decision forecast.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Scenario".
  */
 export interface Scenario {
@@ -3270,7 +3267,7 @@ export interface DecisionPosition1 {
 /**
  * Proof for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Proof".
  */
 export interface Proof {
@@ -3290,7 +3287,7 @@ export interface Proof {
 /**
  * Provenance for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Provenance".
  */
 export interface Provenance {
@@ -3318,7 +3315,7 @@ export interface Provenance {
 /**
  * Staged rollout linked to the decision.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Release".
  */
 export interface Release {
@@ -3350,7 +3347,7 @@ export interface Release {
 /**
  * Draft for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Draft".
  */
 export interface Draft {
@@ -3390,7 +3387,7 @@ export interface Draft {
 /**
  * Drafts summary for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DraftsSummary".
  */
 export interface DraftsSummary1 {
@@ -3410,7 +3407,7 @@ export interface DraftsSummary1 {
 /**
  * Messages prepared for review in the mail app.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DraftsView".
  */
 export interface DraftsView {
@@ -3480,7 +3477,7 @@ export interface Message2 {
 /**
  * Fact for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Fact".
  */
 export interface Fact {
@@ -3496,7 +3493,7 @@ export interface Fact {
 /**
  * Failing test for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "FailingTest".
  */
 export interface FailingTest {
@@ -3528,7 +3525,7 @@ export interface FailingTest {
 /**
  * Figure for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Figure".
  */
 export interface Figure {
@@ -3548,7 +3545,7 @@ export interface Figure {
 /**
  * Forecast and its later outcome, for calibration.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Forecast".
  */
 export interface Forecast {
@@ -3568,7 +3565,7 @@ export interface Forecast {
 /**
  * Funnel for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Funnel".
  */
 export interface Funnel {
@@ -3588,7 +3585,7 @@ export interface Funnel {
 /**
  * Funnel step for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "FunnelStep".
  */
 export interface FunnelStep {
@@ -3616,7 +3613,7 @@ export interface FunnelStep {
 /**
  * Gap for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Gap".
  */
 export interface Gap {
@@ -3632,7 +3629,7 @@ export interface Gap {
 /**
  * Gate for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Gate".
  */
 export interface Gate {
@@ -3652,7 +3649,7 @@ export interface Gate {
 /**
  * Goal for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Goal".
  */
 export interface Goal {
@@ -3758,7 +3755,7 @@ export interface Goal {
 /**
  * Goal decision for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GoalDecision".
  */
 export interface GoalDecision {
@@ -3794,7 +3791,7 @@ export interface GoalDecision {
 /**
  * Guardrails for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Guardrails".
  */
 export interface Guardrails {
@@ -3810,7 +3807,7 @@ export interface Guardrails {
 /**
  * Guardrail item for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GuardrailItem".
  */
 export interface GuardrailItem {
@@ -3838,7 +3835,7 @@ export interface GuardrailItem {
 /**
  * Ladder rung for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LadderRung".
  */
 export interface LadderRung {
@@ -3854,7 +3851,7 @@ export interface LadderRung {
 /**
  * Rows heading for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "RowsHeading".
  */
 export interface RowsHeading {
@@ -3935,7 +3932,7 @@ export interface Trajectory {
 /**
  * Series point for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SeriesPoint".
  */
 export interface SeriesPoint {
@@ -3951,7 +3948,7 @@ export interface SeriesPoint {
 /**
  * Tick for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Tick".
  */
 export interface Tick {
@@ -3988,7 +3985,7 @@ export interface Verdict {
 /**
  * Guardrail switch for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GuardrailSwitch".
  */
 export interface GuardrailSwitch {
@@ -4008,7 +4005,7 @@ export interface GuardrailSwitch {
 /**
  * Handover for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Handover".
  */
 export interface Handover {
@@ -4056,7 +4053,7 @@ export interface Handover {
 /**
  * Health for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Health".
  */
 export interface Health {
@@ -4072,7 +4069,7 @@ export interface Health {
 /**
  * History day for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "HistoryDay".
  */
 export interface HistoryDay {
@@ -4141,7 +4138,7 @@ export interface Actor4 {
 /**
  * A page of activity in a topic.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "HistoryPage".
  */
 export interface HistoryPage {
@@ -4175,7 +4172,7 @@ export interface SeenMarker1 {
 /**
  * Job for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Job".
  */
 export interface Job {
@@ -4203,7 +4200,7 @@ export interface Job {
 /**
  * Lane act for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LaneAct".
  */
 export interface LaneAct {
@@ -4231,7 +4228,7 @@ export interface LaneAct {
 /**
  * A work item and its record of progress.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LaneView".
  */
 export interface LaneView {
@@ -4445,7 +4442,7 @@ export interface Actor5 {
 /**
  * Made item for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "MadeItem".
  */
 export interface MadeItem {
@@ -4469,7 +4466,7 @@ export interface MadeItem {
 /**
  * A reminder to the person holding up a lane.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Reminder".
  */
 export interface Reminder {
@@ -4498,7 +4495,7 @@ export interface Standing {
 /**
  * Step for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Step".
  */
 export interface Step {
@@ -4518,7 +4515,7 @@ export interface Step {
 /**
  * Thumb for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Thumb".
  */
 export interface Thumb {
@@ -4538,7 +4535,7 @@ export interface Thumb {
 /**
  * Layout for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Layout".
  */
 export interface Layout {
@@ -4554,7 +4551,7 @@ export interface Layout {
 /**
  * Manager lane for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ManagerLane".
  */
 export interface ManagerLane {
@@ -4598,7 +4595,7 @@ export interface ManagerLane {
 /**
  * The Manager’s triage queue and shared resources.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ManagerView".
  */
 export interface ManagerView {
@@ -4630,7 +4627,7 @@ export interface ManagerView {
 /**
  * Shared resource for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SharedResource".
  */
 export interface SharedResource {
@@ -4654,7 +4651,7 @@ export interface SharedResource {
 /**
  * Meter for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Meter".
  */
 export interface Meter {
@@ -4687,7 +4684,7 @@ export interface Meter {
 /**
  * Model offered by the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Model".
  */
 export interface Model {
@@ -4711,7 +4708,7 @@ export interface Model {
 /**
  * Choices available for a new request.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModelsView".
  */
 export interface ModelsView {
@@ -4723,7 +4720,7 @@ export interface ModelsView {
 /**
  * Module card for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModuleCard".
  */
 export interface ModuleCard {
@@ -4747,7 +4744,7 @@ export interface ModuleCard {
 /**
  * The active cockpit module.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ModuleInfo".
  */
 export interface ModuleInfo {
@@ -4771,7 +4768,7 @@ export interface ModuleInfo {
 /**
  * Night stat for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "NightStat".
  */
 export interface NightStat {
@@ -4787,7 +4784,7 @@ export interface NightStat {
 /**
  * Pin for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Pin".
  */
 export interface Pin {
@@ -4835,7 +4832,7 @@ export interface Pin {
 /**
  * Pinned decision for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PinnedDecision".
  */
 export interface PinnedDecision {
@@ -4867,7 +4864,7 @@ export interface PinnedDecision {
 /**
  * Plan for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Plan".
  */
 export interface Plan {
@@ -4883,7 +4880,7 @@ export interface Plan {
 /**
  * Stage for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Stage".
  */
 export interface Stage {
@@ -4915,7 +4912,7 @@ export interface Stage {
 /**
  * Stage alt for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageAlt".
  */
 export interface StageAlt {
@@ -4939,7 +4936,7 @@ export interface StageAlt {
 /**
  * Stage row for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageRow".
  */
 export interface StageRow {
@@ -4987,7 +4984,7 @@ export interface StageRow {
 /**
  * Row alt for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "RowAlt".
  */
 export interface RowAlt {
@@ -5011,7 +5008,7 @@ export interface RowAlt {
 /**
  * Pull request for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PullRequest".
  */
 export interface PullRequest {
@@ -5087,7 +5084,7 @@ export interface PullRequest {
 /**
  * Pull requests being tracked by the development module.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "PullsView".
  */
 export interface PullsView {
@@ -5107,7 +5104,7 @@ export interface PullsView {
 /**
  * Route preview for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "RoutePreview".
  */
 export interface RoutePreview {
@@ -5135,7 +5132,7 @@ export interface RoutePreview {
 /**
  * Search result for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SearchResult".
  */
 export interface SearchResult {
@@ -5199,7 +5196,7 @@ export interface Target7 {
 /**
  * A page of records matching the query and an optional answer.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SearchView".
  */
 export interface SearchView {
@@ -5227,7 +5224,7 @@ export interface SearchView {
 /**
  * The reader's last visit to a topic or thread.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SeenMarker".
  */
 export interface SeenMarker2 {
@@ -5239,7 +5236,7 @@ export interface SeenMarker2 {
 /**
  * Editable cockpit preferences and decision rights.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SettingsView".
  */
 export interface SettingsView {
@@ -5307,7 +5304,7 @@ export interface Theme {
 /**
  * Sidebar group for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SidebarGroup".
  */
 export interface SidebarGroup {
@@ -5347,7 +5344,7 @@ export interface SidebarGroup {
 /**
  * Sidebar lane for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SidebarLane".
  */
 export interface SidebarLane {
@@ -5379,7 +5376,7 @@ export interface SidebarLane {
 /**
  * Navigation, open lanes and ordered pins.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SidebarView".
  */
 export interface SidebarView {
@@ -5408,25 +5405,12 @@ export interface SidebarView {
    *
    * @maxItems 12
    */
-  pins:
-    | []
-    | [Pin]
-    | [Pin, Pin]
-    | [Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin]
-    | [Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin, Pin];
+  pins: Pin[];
 }
 /**
  * Since summary for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SinceSummary".
  */
 export interface SinceSummary {
@@ -5448,7 +5432,7 @@ export interface SeenMarker3 {
 /**
  * Skill for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Skill".
  */
 export interface Skill {
@@ -5492,7 +5476,7 @@ export interface Skill {
 /**
  * Runnable skills, service connections and standing guardrails.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SkillsView".
  */
 export interface SkillsView {
@@ -5528,7 +5512,7 @@ export interface SkillsView {
 /**
  * Aggregated progress in one stage, without names or work records.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageStatus".
  */
 export interface StageStatus {
@@ -5544,7 +5528,7 @@ export interface StageStatus {
 /**
  * Standing for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Standing".
  */
 export interface Standing1 {
@@ -5560,7 +5544,7 @@ export interface Standing1 {
 /**
  * Stuck action for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StuckAction".
  */
 export interface StuckAction {
@@ -5588,7 +5572,7 @@ export interface StuckAction {
 /**
  * Stuck report for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StuckReport".
  */
 export interface StuckReport {
@@ -5628,7 +5612,7 @@ export interface StuckReport {
 /**
  * Task row for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TaskRow".
  */
 export interface TaskRow {
@@ -5664,7 +5648,7 @@ export interface TaskRow {
 /**
  * Theme for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Theme".
  */
 export interface Theme1 {
@@ -5692,7 +5676,7 @@ export interface Theme1 {
 /**
  * A page of conversation and its reading context.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ThreadView".
  */
 export interface ThreadView {
@@ -5748,7 +5732,7 @@ export interface ThreadView {
 /**
  * Topic lane for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicLane".
  */
 export interface TopicLane {
@@ -5780,7 +5764,7 @@ export interface TopicLane {
 /**
  * Topic meta for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicMeta".
  */
 export interface TopicMeta {
@@ -5804,7 +5788,7 @@ export interface TopicMeta {
 /**
  * Redacted progress shared through an organization-only status link.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicStatusView".
  */
 export interface TopicStatusView {
@@ -5820,7 +5804,7 @@ export interface TopicStatusView {
 /**
  * Progress, work and conversation context for one topic or project.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicView".
  */
 export interface TopicView {
@@ -5925,7 +5909,7 @@ export interface TopicView {
 /**
  * One handover stage and what the current reader can do in it.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ViewerStage".
  */
 export interface ViewerStage {
@@ -5962,7 +5946,7 @@ export interface TopicViewer {
 /**
  * Effective topic access for the current reader.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicViewer".
  */
 export interface TopicViewer1 {
@@ -5982,7 +5966,7 @@ export interface TopicViewer1 {
 /**
  * Trajectory for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Trajectory".
  */
 export interface Trajectory1 {
@@ -6050,7 +6034,7 @@ export interface Trajectory1 {
 /**
  * Usage account for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "UsageAccount".
  */
 export interface UsageAccount {
@@ -6082,7 +6066,7 @@ export interface UsageAccount {
 /**
  * Provider usage and capacity for the workspace.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "UsageView".
  */
 export interface UsageView {
@@ -6106,7 +6090,7 @@ export interface UsageView {
 /**
  * Verdict for the cockpit.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "Verdict".
  */
 export interface Verdict1 {
@@ -6130,7 +6114,7 @@ export interface Verdict1 {
 /**
  * Identity and appearance of the workspace.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "WorkspaceInfo".
  */
 export interface WorkspaceInfo {
@@ -6172,7 +6156,7 @@ export interface Theme2 {
 /**
  * Workspace identity, reader and presentation settings.
  *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "WorkspaceView".
  */
 export interface WorkspaceView {

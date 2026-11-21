@@ -13,14 +13,48 @@
   "approveLabel": "Approve",
   "provenance": null,
   "context": "Both are built behind a switch and passed QA. Passkeys take 2 screens, the email link takes 4. The lane suggests passkeys.",
-  "numbers": [],
-  "proof": null,
+  "numbers": [
+    {
+      "label": "Passkeys",
+      "value": "2 screens",
+      "sub": null,
+      "money": null
+    },
+    {
+      "label": "Email link",
+      "value": "4 screens",
+      "sub": "Fallback",
+      "money": null
+    }
+  ],
+  "proof": {
+    "items": [
+      {
+        "label": "QA",
+        "value": "Both options passed",
+        "sub": "Both are built behind a switch.",
+        "money": null
+      }
+    ],
+    "meta": [],
+    "unchecked": null
+  },
   "opportunity": null,
   "risk": null,
-  "suggestion": null,
+  "suggestion": "Use passkeys with the email link as a fallback.",
   "guardrail": null,
-  "nextSteps": [],
-  "ifNoAnswer": null,
+  "nextSteps": [
+    {
+      "step": "Put passkeys on staging with the email link as the fallback",
+      "who": "Builder",
+      "dueAt": null,
+      "target": {
+        "kind": "lane",
+        "id": "new-sign-in"
+      }
+    }
+  ],
+  "ifNoAnswer": "The lane waits for your pick.",
   "position": {
     "index": 3,
     "of": 3,

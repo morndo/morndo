@@ -125,7 +125,7 @@ describe("cockpit stand-in", () => {
       const message = sent.body.message as { id: string; label: { kind: string; corrected: boolean } };
       expect(message.label.kind).toBe("question");
       const relabeled = await act(url, { type: "message.relabel", messageId: message.id, label: "request" });
-      expect((relabeled.body.message as { label: { kind: string; corrected: boolean } }).label).toEqual({ kind: "request", corrected: true });
+      expect((relabeled.body.message as { label: { kind: string; corrected: boolean } }).label).toEqual({ kind: "request", corrected: true, pinned: false });
 
       await act(url, { type: "prefs.set", theme: { id: "moss" } });
       expect(((await get(url, "/workspace")).body.workspace as { theme: { id: string; strength: number } }).theme).toMatchObject({ id: "moss", strength: 55 });
@@ -214,9 +214,9 @@ describe("cockpit stand-in", () => {
     try {
       const response = await fetch(`${url}${BASE}/decisions/%E0%A4%A`);
       expect(response.status).toBe(404);
-      const body = await response.json() as { error: { code: string; message: string } };
-      expect(body.error.code).toBe("not_found");
-      expect(body.error.message.length).toBeGreaterThan(0);
+      const body = await response.json() as { code: string; detail: string };
+      expect(body.code).toBe("notFound");
+      expect(body.detail.length).toBeGreaterThan(0);
       expect((await get(url, "/decisions/missing-decision")).status).toBe(404);
     } finally {
       await stop();
@@ -232,7 +232,7 @@ describe("cockpit stand-in", () => {
         body: JSON.stringify({ type: "decision.approve", decisionId: "d1" }),
       });
       expect(plain.status).toBe(415);
-      expect((await plain.json() as { error: { code: string } }).error.code).toBe("unsupported_media_type");
+      expect((await plain.json() as { code: string }).code).toBe("unsupportedMediaType");
 
       const charset = await fetch(`${url}${BASE}/actions`, {
         method: "POST",
@@ -247,7 +247,7 @@ describe("cockpit stand-in", () => {
         body: JSON.stringify({ type: "decision.approve", decisionId: "d1", pad: "x".repeat(1024 * 1024) }),
       });
       expect(huge.status).toBe(413);
-      expect((await huge.json() as { error: { code: string } }).error.code).toBe("payload_too_large");
+      expect((await huge.json() as { code: string }).code).toBe("payloadTooLarge");
 
       expect((await act(url, { type: "decision.approve", decisionId: "d1" })).status).toBe(200);
 
@@ -267,10 +267,10 @@ describe("cockpit stand-in", () => {
     try {
       const unknown = await act(url, { type: "nope" });
       expect(unknown.status).toBe(400);
-      expect((unknown.body.error as { message: string }).message).toBe('unknown command type "nope"');
+      expect(unknown.body.detail).toBe('unknown command type "nope"');
       const missing = await act(url, { type: "decision.approve" });
       expect(missing.status).toBe(400);
-      const message = (missing.body.error as { message: string }).message;
+      const message = missing.body.detail;
       expect(message).toMatch(/decisionId/);
       expect(message).not.toMatch(/threadId|pinId|skill/);
     } finally {
@@ -290,30 +290,28 @@ describe("cockpit stand-in", () => {
       expect((manager.body.lanes as { id: string; topicId: string | null }[]).some((lane) => lane.id === askLane && lane.topicId === "content")).toBe(true);
       expect((await act(url, { type: "goal.ask", topicId: "missing" })).status).toBe(404);
 
-      const run = await act(url, { type: "skill.run", skill: "/linkedin-post", text: "Write a post about the webinar" });
+      const run = await act(url, { type: "skill.run", skill: "linkedin-post", text: "Write a post about the webinar" });
       expect(run.status).toBe(200);
       const runLane = String(run.body.laneId);
       expect(run.body.events).toEqual([expect.objectContaining({ type: "lane.filed", laneId: runLane, topicId: "content" })]);
       expect((await get(url, `/lanes/${runLane}`)).body.topicId).toBe("content");
 
-      const loose = await act(url, { type: "skill.run", skill: "/decision-brief", text: "Brief the open question" });
+      const loose = await act(url, { type: "skill.run", skill: "decision-brief", text: "Brief the open question" });
       expect(loose.status).toBe(200);
       expect((loose.body.events as { topicId: string | null }[])[0]?.topicId).toBeNull();
       expect((await get(url, `/lanes/${String(loose.body.laneId)}`)).body.topicId).toBeNull();
-      expect((await act(url, { type: "skill.run", skill: "/missing", text: "hi" })).status).toBe(404);
+      expect((await act(url, { type: "skill.run", skill: "missing", text: "hi" })).status).toBe(404);
 
-      const before = (await get(url, "/topics/partnerships")).body.goal as { insight: string };
+      const before = (await get(url, "/topics/partnerships")).body.goal as { target: number; insight: string };
       const sent = await act(url, { type: "message.send", threadId: "topic:partnerships", text: "Move the target to 5 partners" });
       expect(sent.status).toBe(200);
       const decisionId = (sent.body.events as { type: string; decisionId?: string }[]).find((event) => event.type === "decision.changed")?.decisionId;
       expect(typeof decisionId).toBe("string");
       expect((await get(url, "/topics/partnerships")).body.goal).toMatchObject({ insight: before.insight });
       expect((await act(url, { type: "decision.approve", decisionId })).status).toBe(200);
-      const goal = (await get(url, "/topics/partnerships")).body.goal as { insight: string; verdict: { text: string } };
-      expect(goal.insight).toBe("Move the target to 5 partners");
-      expect(goal.verdict.text).toBe("Move the target to 5 partners");
+      expect((await get(url, "/topics/partnerships")).body.goal).toMatchObject({ target: 5, insight: before.insight });
       expect((await act(url, { type: "decision.undo", decisionId })).status).toBe(200);
-      expect((await get(url, "/topics/partnerships")).body.goal).toMatchObject({ insight: before.insight });
+      expect((await get(url, "/topics/partnerships")).body.goal).toMatchObject({ target: before.target, insight: before.insight });
     } finally {
       await stop();
     }
