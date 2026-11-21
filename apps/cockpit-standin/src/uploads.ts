@@ -13,6 +13,12 @@ export class Uploads {
   private size = 0;
   private readonly usage = new Map<string, { bytes: number; count: number }>();
 
+  private readonly origin: () => string;
+
+  constructor(origin: () => string) {
+    this.origin = origin;
+  }
+
   add(input: UploadInput, owner: string): Attachment {
     const bytes = Buffer.from(input.data, "base64");
     if (bytes.length > MAX_FILE) throw new Problem("payloadTooLarge", "Files are limited to 512 KiB.");
@@ -25,7 +31,14 @@ export class Uploads {
     this.entries.set(id, { owner, bytes, expires: Date.now() + UPLOAD_TTL });
     this.size += bytes.length;
     this.usage.set(owner, { count: usage.count + 1, bytes: usage.bytes + bytes.length });
-    return { name: input.name, url: `https://files.example.test${BASE}/uploads/${id}` };
+    return { name: input.name, url: `${this.origin()}${BASE}/uploads/${id}` };
+  }
+
+  requireAttachment(url: string, reader: string, workspaceOwner: boolean): void {
+    if (url.startsWith("https://")) return;
+    const prefix = `${this.origin()}${BASE}/uploads/`;
+    if (!url.startsWith(prefix)) throw new Problem("badRequest", "Use an attachment uploaded to this cockpit.");
+    this.get(url.slice(prefix.length), reader, workspaceOwner);
   }
 
   get(id: string, reader: string, workspaceOwner: boolean) {

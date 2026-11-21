@@ -3,6 +3,7 @@ import type { Command, CommandResult } from "@morndo/cockpit-api";
 import { Problem } from "./protocol.ts";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const MAX_ENTRIES = 1000;
 
 function ordered(value: unknown): unknown {
   if (Array.isArray(value)) return value.map(ordered);
@@ -14,13 +15,16 @@ function ordered(value: unknown): unknown {
 export class Idempotency {
   private readonly entries = new Map<string, { expires: number; digest: string; result: CommandResult }>();
 
-  constructor(privateClock = Date.now) {
-    this.clock = privateClock;
+  private readonly clock: () => number;
+  private readonly maxEntries: number;
+
+  constructor(clock = Date.now, maxEntries = MAX_ENTRIES) {
+    this.clock = clock;
+    this.maxEntries = maxEntries;
   }
 
-  private readonly clock: () => number;
-
-  run(reader: string, key: string | undefined, command: Command, execute: () => CommandResult): CommandResult {
+  run(reader: string, key: string | undefined, command: Command, execute: () => CommandResult,
+    authorizeReplay?: (result: CommandResult) => void): CommandResult {
     if (key === undefined) return execute();
     if (!key.length || key.length > 200) throw new Problem("badRequest", "Invalid Idempotency-Key.");
     const scope = JSON.stringify([reader, key]);
@@ -29,10 +33,16 @@ export class Idempotency {
     const saved = this.entries.get(scope);
     if (saved && saved.expires > now) {
       if (saved.digest !== digest) throw new Problem("idempotencyKeyReused", "The key already belongs to another command.");
+      authorizeReplay?.(saved.result);
       return saved.result;
     }
     const result = execute();
+    this.entries.delete(scope);
     this.entries.set(scope, { expires: now + DAY_MS, digest, result: structuredClone(result) });
+    if (this.entries.size > this.maxEntries) {
+      const oldest = this.entries.keys().next().value;
+      if (oldest !== undefined) this.entries.delete(oldest);
+    }
     return result;
   }
 

@@ -2,22 +2,28 @@ import { validate, type Event, type FeedEvent, type FeedResetSignal } from "@mor
 import type { WebSocket } from "ws";
 import type { World } from "./world.ts";
 
-type Subscription = { world: () => World; viewer: () => string };
-type Entry = { world: World; frame: FeedEvent; audience: Set<string>; privateTo?: string };
+type Subscription = { world: () => World; viewer: () => string; named: boolean };
+type Entry = { world: World; frame: FeedEvent; audience: Set<string> };
+type Delivery = {
+  caller?: string;
+  audience?: (event: Event) => Set<string>;
+  privateTo?: (event: Event) => string | undefined;
+  beforeSend?: (frames: FeedEvent[]) => void;
+};
 
 export class Feed {
   private seq = 0;
   private readonly buffer: Entry[] = [];
   private readonly clients = new Map<WebSocket, Subscription>();
 
-  publish(world: World, events: readonly Event[], at: string, privateTo?: string | ((event: Event) => string | undefined), beforeSend?: (frames: FeedEvent[]) => void): FeedEvent[] {
+  publish(world: World, events: readonly Event[], at: string, delivery: Delivery = {}): FeedEvent[] {
     const entries = events.map((event, index): Entry => {
       const frame = this.frame(event, at, this.seq + index + 1);
-      const reader = typeof privateTo === "function" ? privateTo(event) : privateTo;
-      return { world, frame, audience: reader ? new Set([reader]) : world.readers(event), ...(reader ? { privateTo: reader } : {}) };
+      const reader = delivery.privateTo?.(event);
+      return { world, frame, audience: reader ? new Set([reader]) : delivery.audience?.(event) ?? world.readers(event) };
     });
-    const frames = entries.map(entry => entry.frame);
-    beforeSend?.(frames);
+    const frames = entries.filter(entry => !delivery.caller || this.canRead(entry, delivery.caller)).map(entry => entry.frame);
+    delivery.beforeSend?.(frames);
     this.seq += entries.length;
     this.buffer.push(...entries);
     if (this.buffer.length > 1000) this.buffer.splice(0, this.buffer.length - 1000);
@@ -36,14 +42,26 @@ export class Feed {
     if (after === null) return;
     const first = this.buffer[0]?.frame.seq ?? this.seq + 1;
     if (after > this.seq || after < first - 1) {
-      const reset: FeedResetSignal = { type: "feed.reset" };
-      if (!validate("FeedResetSignal", reset).ok) throw new Error("Invalid feed reset");
-      this.send(client, reset);
+      this.reset(client);
       return;
     }
     for (const entry of this.buffer) {
       if (entry.frame.seq > after && this.visible(entry, subscription)) this.send(client, entry.frame);
     }
+  }
+
+  moduleSwitched(): void {
+    for (const [client, subscription] of this.clients) {
+      if (!subscription.named) continue;
+      this.reset(client);
+      client.close(1012, "Reconnect to the active module");
+    }
+  }
+
+  private reset(client: WebSocket): void {
+    const reset: FeedResetSignal = { type: "feed.reset" };
+    if (!validate("FeedResetSignal", reset).ok) throw new Error("Invalid feed reset");
+    this.send(client, reset);
   }
 
   ping(): void {
@@ -58,11 +76,11 @@ export class Feed {
   }
 
   private visible(entry: Entry, subscription: Subscription): boolean {
-    if (entry.world !== subscription.world()) return false;
-    const id = subscription.viewer();
-    const personal = entry.privateTo === id &&
-      (entry.frame.type === "pins.changed" || entry.frame.type === "prefs.changed" || entry.frame.type === "brief.published" || entry.frame.type === "drafts.changed");
-    return entry.audience.has(id) && (personal || entry.world.visibleEvent(entry.frame, entry.world.viewer(id)));
+    return entry.world === subscription.world() && this.canRead(entry, subscription.viewer());
+  }
+
+  private canRead(entry: Entry, id: string): boolean {
+    return entry.audience.has(id) && entry.world.canReceive(entry.frame, id);
   }
 
   private frame(event: Event, at: string, seq: number): FeedEvent {

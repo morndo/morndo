@@ -196,8 +196,16 @@ it("hides a chat action once its lane has settled", async () => {
     const hasAction = (view: ThreadView) => view.messages.some(message =>
       message.actions.some(action => action.laneId === laneId && action.id === "pin-the-old-session-library"));
     expect(hasAction(await read<ThreadView>(url, thread))).toBe(true);
-    await act(url, { type: "lane.act", laneId, act: "pin-the-old-session-library" });
+    const result = await act(url, { type: "lane.act", laneId, act: "pin-the-old-session-library" });
+    expect(result.events).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "brief.changed" }),
+      expect.objectContaining({ type: "thread.changed", threadId: "topic:web" }),
+    ]));
     expect(hasAction(await read<ThreadView>(url, thread))).toBe(false);
+    const action = result.events.find(event => event.type === "agentAction.changed");
+    if (!action) throw new Error("Missing reversible action");
+    const undo = await act(url, { type: "agentAction.undo", actionId: action.actionId });
+    expect(undo.events.map(event => event.type)).toEqual(expect.arrayContaining(["brief.changed", "thread.changed"]));
   });
 });
 
@@ -407,10 +415,9 @@ it("enforces local HTTP origins and bounded HTTPS links, and stores demo uploads
     });
     expect(uploaded.status).toBe(200);
     const file = await uploaded.json() as { name: string; url: string };
-    expect(file.url).toMatch(/^https:\/\/files\.example\.test\//);
-    const local = new URL(url).origin + new URL(file.url).pathname;
-    expect(await (await fetch(local)).text()).toBe("Plan");
-    expect((await fetch(local + "?as=lea-brandt")).status).toBe(404);
+    expect(new URL(file.url).origin).toBe(new URL(url).origin);
+    expect(await (await fetch(file.url)).text()).toBe("Plan");
+    expect((await fetch(file.url + "?as=lea-brandt")).status).toBe(404);
     const result = await act(url, { type: "lane.file", text: "Read this plan", attachment: file, topicId: "content" });
     expect((await read<LaneView>(url, `/lanes/${result.laneId}`)).attachment).toEqual(file);
   });
@@ -459,10 +466,10 @@ it("keeps owner posts and their replies out of shared threads and the live feed"
     await stageFeed.ready;
     const threadId = "topic:partnerships";
     const ownerPost = await act(url, { type: "message.send", threadId, text: "Between us: Halden may want a discount" });
-    expect(ownerPost.message?.audience).toEqual({ kind: "owner" });
+    expect(ownerPost.message?.audience).toEqual({ kind: "topic" });
     const ownerMessages = ownerPost.events.flatMap(event => event.type === "message.posted" ? [event.message] : []);
     expect(ownerMessages).toHaveLength(2);
-    expect(ownerMessages.every(item => item.audience.kind === "owner")).toBe(true);
+    expect(ownerMessages.every(item => item.audience.kind === "topic")).toBe(true);
     const ownerIds = ownerMessages.map(item => item.id);
     const stagePost = await act(url, { type: "message.send", threadId, stage: "Outreach", text: "Outreach is shared" });
     await expect.poll(() => stageFeed.frames.some(frame => frame.type === "message.posted" && frame.message.id === stagePost.message?.id)).toBe(true);
@@ -507,7 +514,8 @@ it("registers an invitee once, supports immediate role changes, and matches an e
   await withCockpit("gtm", async url => {
     const topicId = "partnerships";
     const path = "/topics/partnerships/access";
-    await act(url, { type: "access.invite", topicId, nameOrEmail: "lea-brandt@example.test" });
+    const match = await act(url, { type: "access.invite", topicId, nameOrEmail: "lea-brandt@example.test" });
+    expect(match.events).toContainEqual(expect.objectContaining({ type: "access.changed", topicId, personId: "lea-brandt" }));
     expect((await read<AccessView>(url, path)).invitations).toEqual([]);
     await act(url, { type: "access.invite", topicId, nameOrEmail: "nora@example.test" });
     await act(url, { type: "access.invite", topicId, nameOrEmail: "NORA@example.test" });
@@ -515,13 +523,26 @@ it("registers an invitee once, supports immediate role changes, and matches an e
     expect(invited.invitations).toHaveLength(1);
     const invitation = invited.invitations[0];
     if (!invitation) throw new Error("Missing invitation");
+    const as = invitation.personId;
+    const pending = await read<TopicView>(url, `/topics/${topicId}?as=${as}`);
+    expect(pending).toMatchObject({ viewer: { role: "view" }, lanes: [], goal: null });
+    expect(pending.seenBy).toContainEqual(expect.objectContaining({ id: as, pending: true }));
+    await act(url, { type: "access.statusLink", topicId, enabled: true });
+    expect(await read(url, `/topics/${topicId}/status?as=${as}`)).toMatchObject({ signed: 0, goal: 3 });
+    expect((await fetch(`${url}/threads/topic:${topicId}?as=${as}`)).status).toBe(403);
+    await act(url, { type: "message.send", threadId: `topic:${topicId}`, text: "I am still invited." }, { as, status: 403 });
     expect(invited.people.find(entry => entry.person.id === invitation.personId))
       .toMatchObject({ person: { membershipState: "invited" }, access: { kind: "view" } });
     await act(url, { type: "access.set", topicId, personId: invitation.personId, access: { kind: "stages", stages: ["Outreach"] } });
     expect((await read<AccessView>(url, path)).people.find(entry => entry.person.id === invitation.personId)?.access.kind).toBe("stages");
-    expect((await fetch(`${url}/workspace?as=${invitation.personId}`)).status).toBe(403);
-    await act(url, { type: "access.revoke", invitationId: invitation.id });
-    expect((await read<AccessView>(url, path)).people.some(entry => entry.person.id === invitation.personId)).toBe(false);
+    expect((await read<TopicView>(url, `/topics/${topicId}?as=${as}`)).viewer.role).toBe("view");
+    const accept: Command = { type: "access.accept", invitationId: invitation.id };
+    await act(url, accept, { as: "jonas-falk", status: 403 });
+    await act(url, accept, { as });
+    expect((await read<AccessView>(url, path)).invitations[0]?.state).toBe("accepted");
+    const member = await read<TopicView>(url, `/topics/${topicId}?as=${as}`);
+    expect(member.viewer.role).toBe("stages");
+    expect(member.seenBy).toContainEqual(expect.objectContaining({ id: as, pending: false }));
   });
 });
 
@@ -565,6 +586,11 @@ it("authorizes skill runs by topic and decision right and stores drafts with the
     expect((await read<DraftsView>(url, "/drafts")).items).toEqual(initial.items);
     await expect.poll(() => readerFeed.frames.some(frame => frame.type === "drafts.changed")).toBe(true);
     expect(ownerFeed.frames.some(frame => frame.type === "drafts.changed")).toBe(false);
+    const actionId = result.receipt?.actionId;
+    if (!actionId) throw new Error("Missing action");
+    await act(url, { type: "decisionRight.set", rule: "insideGuardrails", who: "you" });
+    await act(url, { type: "agentAction.undo", actionId }, { as, status: 403 });
+    await read<LaneView>(url, `/lanes/${result.laneId}?as=${as}`);
     await act(url, command);
     expect((await read<DraftsView>(url, "/drafts")).count).toBe(initial.count + 1);
   });
@@ -585,5 +611,174 @@ it("enforces file and reader upload quotas with problem details", async () => {
     const tooMany = await upload("YQ==", recipient);
     expect(tooMany.status).toBe(429);
     expect(await tooMany.json()).toMatchObject({ code: "rateLimited", status: 429 });
+  });
+});
+
+it("keeps unstaged messages between full readers and stage chat with its stage", async () => {
+  await withCockpit("gtm", async url => {
+    const topicId = "partnerships";
+    const threadId = "topic:partnerships";
+    const as = "jonas-falk";
+    await act(url, { type: "access.set", topicId, personId: as, access: { kind: "all" } });
+    const full = subscribe(url, "?as=jonas-falk");
+    const stage = subscribe(url, "?as=lea-brandt");
+    await Promise.all([full.ready, stage.ready]);
+    const post = await act(url, { type: "message.send", threadId, text: "Hold the offer for legal." });
+    const response = await act(url, { type: "message.send", threadId, text: "Legal needs a day." }, { as });
+    const shared = await act(url, { type: "message.send", threadId, stage: "Outreach", text: "Start with retail." });
+    await expect.poll(() => stage.frames.some(event => event.type === "message.posted" && event.message.id === shared.message?.id)).toBe(true);
+    const fullView = await read<ThreadView>(url, "/threads/" + threadId + "?as=jonas-falk");
+    expect(fullView.messages.map(message => message.id)).toEqual(expect.arrayContaining([post.message?.id, response.message?.id]));
+    expect(full.frames.some(event => event.type === "message.posted" && event.message.id === post.message?.id)).toBe(true);
+    const stageView = await read<ThreadView>(url, "/threads/" + threadId + "?as=lea-brandt");
+    for (const id of [post.message?.id, response.message?.id]) {
+      expect(stageView.messages.some(message => message.id === id)).toBe(false);
+      expect(stage.frames.some(event => event.type === "message.posted" && event.message.id === id)).toBe(false);
+    }
+    const laneChat = await act(url, { type: "message.send", threadId: "lane:outreach-wave-2", text: "Check the draft." });
+    expect((await read<ThreadView>(url, "/threads/lane:outreach-wave-2?as=lea-brandt")).messages.map(message => message.id))
+      .toContain(laneChat.message?.id);
+    await act(url, { type: "stage.assign", personId: "tom-ahrens", topicId, stage: "Outreach" });
+    expect((await read<ThreadView>(url, "/threads/" + threadId + "?as=tom-ahrens")).messages.map(message => message.id))
+      .toContain(shared.message?.id);
+  });
+});
+
+it("scopes changed record IDs, guardrails and command result frames to readers who can see them", async () => {
+  await withCockpit("gtm", async (url, setClock) => {
+    const owner = subscribe(url);
+    const lea = subscribe(url, "?as=lea-brandt");
+    const tom = subscribe(url, "?as=tom-ahrens");
+    await Promise.all([owner.ready, lea.ready, tom.ready]);
+    const sent = await act(url, { type: "lane.act", laneId: "outreach-wave-2", act: "send-wave-2" }, { as: "lea-brandt" });
+    expect(sent.events.map(event => event.type)).toContain("lane.changed");
+    expect(sent.events.map(event => event.type)).not.toContain("brief.changed");
+    const changed = sent.events.find(event => event.type === "topic.changed");
+    expect(changed).toBeDefined();
+    await expect.poll(() => owner.frames.some(event => event.type === "brief.changed")).toBe(true);
+    await act(url, { type: "decision.approve", decisionId: "d4" });
+    setClock("2026-11-16T13:01:00+01:00");
+    await read<BriefView>(url, "/brief");
+    await expect.poll(() => owner.frames.some(event => event.type === "guardrail.breached")).toBe(true);
+    await expect.poll(() => tom.frames.some(event => event.type === "brief.published")).toBe(true);
+    expect(tom.frames.some(event => event.type === "guardrail.breached")).toBe(false);
+    expect(tom.frames.some(event => event.type === "thread.changed" && event.threadId === "topic:partnerships")).toBe(false);
+    expect(tom.frames.some(event => event.type === "topic.changed" && event.seq === changed?.seq)).toBe(false);
+    expect(tom.frames.some(event => event.type === "topic.changed" && event.topicId === "partnerships")).toBe(true);
+    expect(lea.frames.some(event => event.type === "lane.changed" && event.laneId === "halden-offer")).toBe(false);
+  });
+});
+
+it("resets feeds opened for a named reader when the module changes", async () => {
+  await withCockpit("gtm", async url => {
+    const reader = subscribe(url, "?as=lea-brandt");
+    await reader.ready;
+    await act(url, { type: "module.switch", moduleId: "dev" });
+    await expect.poll(() => reader.frames).toContainEqual({ type: "feed.reset" });
+  });
+});
+
+it("reverts and restores overnight effects on the named records", async () => {
+  await withCockpit("dev", async url => {
+    const brief = await read<BriefView>(url, "/brief");
+    expect(brief.overnight.filter(row => row.undoable).every(row => row.laneId)).toBe(true);
+    for (const row of brief.overnight) {
+      const lane = "/lanes/" + row.laneId;
+      await read<LaneView>(url, lane);
+      await act(url, { type: "agentAction.undo", actionId: row.id });
+      expect((await fetch(url + lane)).status).toBe(404);
+      await act(url, { type: "agentAction.redo", actionId: row.id });
+      await read<LaneView>(url, lane);
+    }
+  });
+  await withCockpit("gtm", async url => {
+    const history = () => read<HistoryPage>(url, "/topics/partnerships/history");
+    const entry = (view: HistoryPage, id: string) => view.days.flatMap(day => day.entries)
+      .find(row => row.kind === "event" && row.id === id);
+    const brand = await read<LaneView>(url, "/lanes/brand-list");
+    const contacts = await read<LaneView>(url, "/lanes/contact-data");
+    await act(url, { type: "agentAction.undo", actionId: "o2" });
+    const page = await history();
+    for (const id of ["partnerships-history-8", "partnerships-history-9"]) {
+      expect(entry(page, id)).toMatchObject({ undone: true });
+    }
+    expect(await read<LaneView>(url, "/lanes/brand-list")).not.toEqual(brand);
+    expect(await read<LaneView>(url, "/lanes/contact-data")).not.toEqual(contacts);
+    await act(url, { type: "agentAction.redo", actionId: "o2" });
+    expect(await read<LaneView>(url, "/lanes/brand-list")).toEqual(brand);
+    expect(await read<LaneView>(url, "/lanes/contact-data")).toEqual(contacts);
+  });
+});
+
+it("requires the pull hold's owner right for Undo and Redo", async () => {
+  await withCockpit("dev", async url => {
+    const as = "nora-reed";
+    await act(url, { type: "access.set", topicId: "api", personId: as, access: { kind: "all" } });
+    const held = await act(url, { type: "pull.hold", pullId: "413" });
+    const action = held.events.find(event => event.type === "agentAction.changed");
+    if (!action) throw new Error("Missing action");
+    await act(url, { type: "agentAction.undo", actionId: action.actionId }, { as, status: 403 });
+    expect((await read<PullsView>(url, "/pulls")).items.find(item => item.id === "413")?.held).toBe(true);
+    await act(url, { type: "agentAction.undo", actionId: action.actionId });
+    await act(url, { type: "agentAction.redo", actionId: action.actionId }, { as, status: 403 });
+  });
+});
+
+it("checks access on replay and evicts the oldest cache entry at capacity", async () => {
+  await withCockpit("gtm", async url => {
+    const as = "lea-brandt";
+    const command: Command = { type: "message.send", threadId: "topic:partnerships", text: "Ready for retail." };
+    const original = await act(url, command, { as, key: "retail" });
+    expect(await act(url, command, { as, key: "retail" })).toEqual(original);
+    await act(url, { type: "access.set", topicId: "partnerships", personId: as, access: { kind: "none" } });
+    await act(url, command, { as, key: "retail", status: 403 });
+  });
+  const cache = new Idempotency(() => 0, 2);
+  const command: Command = { type: "prefs.set", briefsPerDay: 1 };
+  const result: CommandResult = { ok: true, receipt: null, message: null, events: [], laneId: null };
+  let executed = 0;
+  const run = (key: string) => cache.run("reader", key, command, () => { executed++; return result; });
+  for (const key of ["a", "b", "a", "c", "b"]) run(key);
+  expect(executed).toBe(3);
+  run("a");
+  expect(executed).toBe(4);
+});
+
+it("resolves staging run and review notes as distinct records", async () => {
+  await withCockpit("dev", async url => {
+    const lane = await read<LaneView>(url, "/lanes/export-for-big-accounts");
+    for (const [title, kind] of [["Staging run", "run"], ["Review notes", "review"]]) {
+      const item = lane.made.find(record => record.title === title);
+      expect(item?.target).toMatchObject({ kind, id: expect.any(String) });
+      expect(await read(url, "/records/" + item?.target?.id)).toMatchObject({ title, laneId: lane.id, kind });
+    }
+  });
+});
+
+it("refuses to reassign a finished stage and bounds edits to the since list", async () => {
+  await withCockpit("gtm", async url => {
+    await act(url, { type: "stage.assign", topicId: "partnerships", stage: "Strategy", personId: "lea-brandt" }, { status: 409 });
+    const edit = (lines: string[], status: number) => act(url, { type: "since.edit", threadId: "topic:partnerships", lines }, { status });
+    await edit(Array(13).fill("Update"), 400);
+    await edit(["x".repeat(4001)], 400);
+    await edit(["First update"], 200);
+  });
+});
+
+it("propagates an approved goal change to related topics and rolls it back on Undo", async () => {
+  await withCockpit("gtm", async url => {
+    const base = await read<TopicView>(url, "/topics/paid");
+    await act(url, { type: "message.send", threadId: "topic:partnerships", text: "Change the goal to 4 partners by 20 December." });
+    const queue = await read<{ items: DecisionView[] }>(url, "/decisions");
+    const proposal = queue.items.find(item => item.goalChange);
+    if (!proposal) throw new Error("Missing goal proposal");
+    const result = await act(url, { type: "decision.approve", decisionId: proposal.id });
+    expect(result.events).toContainEqual(expect.objectContaining({ type: "topic.changed", topicId: "paid" }));
+    const paid = await read<TopicView>(url, "/topics/paid");
+    expect(paid.appliedGoalChanges).toContainEqual(proposal.goalChange);
+    expect(paid.status?.nextReportAt).toBe(proposal.goalChange?.deadlineAt);
+    expect(paid.goal?.target).toBe(base.goal?.target);
+    await act(url, { type: "decision.undo", decisionId: proposal.id });
+    expect((await read<TopicView>(url, "/topics/paid")).appliedGoalChanges).toEqual([]);
   });
 });

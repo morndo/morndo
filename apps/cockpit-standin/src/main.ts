@@ -119,11 +119,12 @@ export async function start(module: Module, port: number, clock?: () => string):
   };
   const feed = new Feed();
   const idempotency = new Idempotency();
-  const uploads = new Uploads();
+  const uploads = new Uploads(origin);
   const tick = (world: World) => {
     const at = now();
+    const audience = world.hasTimedWorkChange(at) ? world.notificationAudience() : undefined;
     const events = world.advance(at);
-    if (events.length) feed.publish(world, events, at);
+    if (events.length) feed.publish(world, events, at, audience ? { audience } : undefined);
   };
   const requireLocal = (req: IncomingMessage) => {
     const address = server.address();
@@ -157,19 +158,33 @@ export async function start(module: Module, port: number, clock?: () => string):
       if (method === "post" && definition === "CommandResult") {
         const command = await readCommand(req);
         const key = header(req.headers["idempotency-key"]);
-        const result = idempotency.run(viewer.id === world.owner.id ? "owner" : viewer.id, key, command, () => {
+        const scope = command.type === "module.switch" && viewer.id === world.owner.id ? "owner" : `${world.module}:${viewer.id}`;
+        const result = idempotency.run(scope, key, command, () => {
+          if ("attachment" in command && command.attachment) {
+            uploads.requireAttachment(command.attachment.url, viewer.id, viewer.id === world.owner.id);
+          }
+          const audience = world.notificationAudience();
           const effect = world.act(command, viewer);
           const settings = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit";
           const privateTo = (event: (typeof effect.events)[number]) => settings || event.type === "drafts.changed" ? viewer.id : undefined;
-          const events = feed.publish(world, effect.events, now(), privateTo, frames => {
-            const check = validate(definition, { ...effect, events: frames });
-            if (!check.ok) throw new Error(`Invalid ${definition}: ${check.errors.join(", ")}`);
+          const events = feed.publish(world, effect.events, now(), {
+            caller: viewer.id,
+            audience,
+            privateTo,
+            beforeSend: frames => {
+              const check = validate(definition, { ...effect, events: frames });
+              if (!check.ok) throw new Error(`Invalid ${definition}: ${check.errors.join(", ")}`);
+            },
           });
-          if (command.type === "module.switch") active = command.moduleId;
+          if (command.type === "module.switch" && active !== command.moduleId) {
+            active = command.moduleId;
+            feed.moduleSwitched();
+          }
           return { ...effect, events };
-        });
+        }, saved => world.authorizeReplay(command, saved, viewer));
         respond(res, 200, definition, result);
       } else if (method === "post" && route.path === `${BASE}/uploads`) {
+        if (viewer.membershipState === "invited") throw new Problem("forbidden", "Accept the invitation before uploading files.");
         const payload = await readJson(req);
         if (payload && typeof payload === "object" && "data" in payload && typeof payload.data === "string" && payload.data.length > 699052) {
           throw new Problem("payloadTooLarge", "Files are limited to 512 KiB.");
@@ -212,7 +227,7 @@ export async function start(module: Module, port: number, clock?: () => string):
       const after = afterParam(url.searchParams);
       tick(world);
       ws.handleUpgrade(req, socket, head, client => {
-        feed.subscribe(client, { world: id ? () => world : worldOf, viewer: id ? () => viewer.id : () => worldOf().owner.id }, after);
+        feed.subscribe(client, { world: id ? () => world : worldOf, viewer: id ? () => viewer.id : () => worldOf().owner.id, named: Boolean(id) }, after);
       });
     } catch (error) {
       const problem = refused(error).body;
