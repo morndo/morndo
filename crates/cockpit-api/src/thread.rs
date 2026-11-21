@@ -217,7 +217,7 @@ pub enum MessageAudience {
         #[serde(rename = "personId")]
         person_id: crate::PersonId,
     },
-    /// Everyone who can read the topic conversation.
+    /// Full-access readers in the topic chat, or everyone assigned to the lane in a lane chat.
     Topic,
     /// Readers who work in this stage.
     Stage {

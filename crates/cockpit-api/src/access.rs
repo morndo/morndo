@@ -84,6 +84,8 @@ pub struct AccessGrantInput {
     pub kind: crate::input::Known<AccessKind>,
     /// Allowed stage names when the scope is stage-based.
     #[serde(default)]
+    #[schemars(schema_with = "crate::input::stage_names_schema")]
+    #[serde(deserialize_with = "crate::input::stage_names")]
     pub stages: Vec<String>,
 }
 
@@ -208,6 +210,8 @@ pub struct StageStatus {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SeenByFace {
+    /// The person has status access while they wait to accept their invitation.
+    pub pending: bool,
     /// Stable person identifier.
     pub id: crate::PersonId,
     /// Person’s display name.

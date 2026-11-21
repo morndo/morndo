@@ -2,6 +2,22 @@ use crate::{Target, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+/// A staging run or review opened from the work it records.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MadeRecordView {
+    /// Identifier in the lane's made-item target.
+    pub id: crate::RecordId,
+    /// Category of the review or run.
+    pub kind: crate::TargetKind,
+    /// Work this record belongs to.
+    pub lane_id: crate::LaneId,
+    /// Heading of the record.
+    pub title: String,
+    /// Result shown in the record.
+    pub detail: String,
+}
+
 /// Recent pages for the current reader, newest first.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RecentView {

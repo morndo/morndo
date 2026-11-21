@@ -51,6 +51,9 @@ pub enum Event {
     AccessChanged {
         /// Identifier of the associated topic.
         topic_id: Present<TopicId>,
+        /// Person whose grant changed, when the event concerns an individual.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        person_id: Option<crate::PersonId>,
     },
     #[serde(rename = "agentAction.changed")]
     AgentActionChanged {

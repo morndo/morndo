@@ -118,6 +118,9 @@ pub struct Burn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OvernightAction {
+    /// Other lanes modified by a grouped action.
+    #[serde(default)]
+    pub related_lane_ids: Vec<LaneId>,
     /// Time associated with undo until.
     pub undo_until_at: Present<Timestamp>,
     /// Stable identifier for this record.

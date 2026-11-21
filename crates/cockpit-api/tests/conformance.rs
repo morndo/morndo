@@ -45,3 +45,32 @@ fn installed_readers_tolerate_new_fields_and_tags() {
     .unwrap();
     assert_eq!(feed.event, Event::Unknown);
 }
+
+#[test]
+fn composer_inputs_reject_text_beyond_the_contract_limits() {
+    use serde_json::{from_value, json};
+    let long_name = "a".repeat(201);
+    let commands = [
+        json!({ "type": "lane.act", "laneId": "red-main", "act": long_name }),
+        json!({ "type": "prefs.set", "deviceId": long_name }),
+        json!({ "type": "access.set", "topicId": "web", "personId": "timo", "access": { "kind": "stages", "stages": [long_name] } }),
+        json!({ "type": "recent.visit", "target": { "kind": "topic", "id": long_name } }),
+        json!({ "type": "message.send", "threadId": "topic:web", "stage": long_name, "text": "Hello" }),
+        json!({ "type": "since.edit", "threadId": "topic:web", "lines": ["a".repeat(4001)] }),
+        json!({ "type": "since.edit", "threadId": "topic:web", "lines": vec!["line"; 13] }),
+    ];
+    for command in commands {
+        assert!(
+            from_value::<cockpit_api::Command>(command.clone()).is_err(),
+            "{command}"
+        );
+    }
+    let local = "http://127.0.0.1:1234/api/cockpit/uploads/00000000-0000-0000-0000-000000000000";
+    assert!(from_value::<cockpit_api::Attachment>(json!({"name":"plan", "url": local})).is_ok());
+    assert!(
+        from_value::<cockpit_api::Attachment>(
+            json!({"name":"plan", "url":"http://files.example.test/plan"})
+        )
+        .is_err()
+    );
+}

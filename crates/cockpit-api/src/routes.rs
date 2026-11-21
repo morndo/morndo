@@ -132,6 +132,7 @@ pub const ROUTES: &[Route] = &[
     ),
     read!("/models", ModelsView),
     read!("/recent", RecentView),
+    read!("/records/{id}", MadeRecordView, id("RecordId")),
     Route {
         method: "post",
         path: "/uploads",

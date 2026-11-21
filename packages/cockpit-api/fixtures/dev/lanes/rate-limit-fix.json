@@ -1,0 +1,81 @@
+{
+  "id": "rate-limit-fix",
+  "topicId": "api",
+  "title": "Rate-limit fix",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "release",
+    "name": "Release",
+    "shortName": "Release",
+    "kind": "agent",
+    "avatar": "R",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "API released the rate-limit fix after its review. The check on production passed.",
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Release the rate-limit fix after review.",
+  "askedMeta": {
+    "source": "API",
+    "note": null
+  },
+  "status": "API released the rate-limit fix after its review. The check on production passed.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "API released the rate-limit fix after its review. The check on production passed."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Release the rate-limit fix after review.",
+      "who": "Release"
+    }
+  ],
+  "doneNote": "API released the rate-limit fix after its review. The check on production passed.",
+  "crew": [
+    {
+      "id": "release",
+      "name": "Release",
+      "shortName": "Release",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "API released the rate-limit fix after its review. The check on production passed.",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-15T23:12:00+01:00",
+  "closedAt": "2026-11-15T23:12:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

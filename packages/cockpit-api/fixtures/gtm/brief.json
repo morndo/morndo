@@ -170,18 +170,23 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T07:10:00+01:00",
-      "undoUntilAt": null
+      "undoUntilAt": null,
+      "relatedLaneIds": []
     },
     {
       "id": "o2",
       "topicId": "partnerships",
       "topicName": "Partnerships",
-      "laneId": null,
+      "laneId": "brand-list",
       "text": "Partnerships added 32 brands from Clay, found 58 contacts in Apollo and drafted 24 emails for Lea to check.",
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T07:30:00+01:00",
-      "undoUntilAt": null
+      "undoUntilAt": null,
+      "relatedLaneIds": [
+        "contact-data",
+        "outreach-wave-2"
+      ]
     },
     {
       "id": "o3",
@@ -192,7 +197,8 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T07:42:00+01:00",
-      "undoUntilAt": null
+      "undoUntilAt": null,
+      "relatedLaneIds": []
     },
     {
       "id": "o4",
@@ -203,7 +209,8 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T08:05:00+01:00",
-      "undoUntilAt": null
+      "undoUntilAt": null,
+      "relatedLaneIds": []
     },
     {
       "id": "o5",
@@ -214,7 +221,8 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T08:30:00+01:00",
-      "undoUntilAt": null
+      "undoUntilAt": null,
+      "relatedLaneIds": []
     }
   ],
   "drafts": {

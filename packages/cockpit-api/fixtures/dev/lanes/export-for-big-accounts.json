@@ -164,8 +164,8 @@
       "title": "Staging run",
       "detail": "Fenwick's export: 48 seconds, file complete",
       "target": {
-        "kind": "lane",
-        "id": "export-for-big-accounts"
+        "kind": "run",
+        "id": "export-staging"
       }
     },
     {
@@ -173,8 +173,8 @@
       "title": "Review notes",
       "detail": "2 rounds, 3 findings, all fixed",
       "target": {
-        "kind": "lane",
-        "id": "export-for-big-accounts"
+        "kind": "review",
+        "id": "export-review"
       }
     }
   ],

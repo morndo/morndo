@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { commandErrors } from "../src/index.ts";
+import { commandErrors, validate } from "../src/index.ts";
 
 describe("command errors", () => {
   it("names an unknown command type", () => {
@@ -18,4 +18,18 @@ describe("command errors", () => {
 
     expect(commandErrors({ type: "decision.approve", decisionId: "d1" })).toEqual([]);
   });
+});
+
+it("bounds every free-text field used by the shared composer and equivalent commands", () => {
+  const extra = "a".repeat(201);
+  const inputs = [
+    { type: "lane.act", laneId: "red-main", act: extra },
+    { type: "prefs.set", deviceId: extra },
+    { type: "access.set", topicId: "web", personId: "nora-reed", access: { kind: "stages", stages: [extra] } },
+    { type: "recent.visit", target: { kind: "topic", id: extra } },
+    { type: "message.send", threadId: "topic:web", stage: extra, text: "Hello" },
+    { type: "since.edit", threadId: "topic:web", lines: ["a".repeat(4001)] },
+    { type: "since.edit", threadId: "topic:web", lines: Array(13).fill("Note") },
+  ];
+  for (const input of inputs) expect(validate("Command", input).ok, input.type).toBe(false);
 });

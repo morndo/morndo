@@ -82,6 +82,7 @@ slug_ids! {
     ConnectionId => "Identifier of a service connection.",
     InvitationId => "Identifier of a sharing invitation.",
     ModelId => "Identifier of a selectable model.",
+    RecordId => "Identifier of a staging run or review record.",
 }
 id!(MessageId, "Identifier of a message.", "^m[0-9]+$");
 id!(
@@ -153,6 +154,8 @@ pub enum TargetKind {
     Draft,
     Skill,
     Pull,
+    Run,
+    Review,
     Manager,
     Brief,
     Drafts,

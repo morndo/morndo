@@ -103,6 +103,7 @@ fn export() -> Value {
         FeedEvent,
         cockpit_api::event::FeedFrame,
         cockpit_api::extras::RecentView,
+        cockpit_api::extras::MadeRecordView,
         cockpit_api::extras::UploadInput,
         cockpit_api::access::TopicStatusView,
         ApiError,

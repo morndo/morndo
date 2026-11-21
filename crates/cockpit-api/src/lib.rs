@@ -39,6 +39,7 @@ pub use decision::{
 pub use drafts::{Draft, DraftsView};
 pub use error::{ApiError, ErrorCode, FieldError};
 pub use event::{Event, FeedEvent};
+pub use extras::MadeRecordView;
 pub use lane::{
     AskedMeta, Handover, LaneAct, LaneState, LaneView, MadeItem, Standing, Step, StepKind, Thumb,
 };

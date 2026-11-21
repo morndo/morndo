@@ -34,6 +34,8 @@
             "default": [],
             "description": "Allowed stage names when the scope is stage-based.",
             "items": {
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
             "type": "array"
@@ -555,10 +557,10 @@
             "type": "string"
           },
           "url": {
-            "description": "HTTPS URL for the attachment.",
+            "description": "The hub serves attachments over HTTPS. The local stand-in also returns its loopback upload URL.",
             "format": "uri",
             "maxLength": 2048,
-            "pattern": "^https://",
+            "pattern": "^https://|^http://127[.]0[.]0[.]1:(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])/api/cockpit/uploads/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$",
             "type": "string"
           }
         },
@@ -579,10 +581,10 @@
             "type": "string"
           },
           "url": {
-            "description": "HTTPS URL for the attachment.",
+            "description": "Supply an HTTPS URL to the hub. The local stand-in also accepts its own loopback upload URL.",
             "format": "uri",
             "maxLength": 2048,
-            "pattern": "^https://",
+            "pattern": "^https://|^http://127[.]0[.]0[.]1:(?:[1-9][0-9]{0,3}|[1-5][0-9]{4}|6[0-4][0-9]{3}|65[0-4][0-9]{2}|655[0-2][0-9]|6553[0-5])/api/cockpit/uploads/[a-fA-F0-9]{8}(?:-[a-fA-F0-9]{4}){3}-[a-fA-F0-9]{12}$",
             "type": "string"
           }
         },
@@ -1289,6 +1291,8 @@
             "properties": {
               "act": {
                 "description": "Act for this record.",
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               "laneId": {
@@ -1460,8 +1464,10 @@
               "lines": {
                 "description": "Lines for this record.",
                 "items": {
+                  "maxLength": 4000,
                   "type": "string"
                 },
+                "maxItems": 12,
                 "type": "array"
               },
               "threadId": {
@@ -1545,6 +1551,8 @@
               "deviceId": {
                 "default": null,
                 "description": "Identifier of the associated device.",
+                "maxLength": 200,
+                "minLength": 1,
                 "type": [
                   "string",
                   "null"
@@ -1824,6 +1832,24 @@
               },
               "type": {
                 "const": "access.revoke",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "invitationId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "invitationId": {
+                "$ref": "#/components/schemas/InvitationId",
+                "description": "Invitation accepted by its recipient."
+              },
+              "type": {
+                "const": "access.accept",
                 "type": "string"
               }
             },
@@ -2992,6 +3018,17 @@
           },
           {
             "properties": {
+              "personId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PersonId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Person whose grant changed, when the event concerns an individual."
+              },
               "topicId": {
                 "anyOf": [
                   {
@@ -3476,6 +3513,17 @@
           },
           {
             "properties": {
+              "personId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PersonId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Person whose grant changed, when the event concerns an individual."
+              },
               "topicId": {
                 "anyOf": [
                   {
@@ -5187,6 +5235,8 @@
           "draft",
           "skill",
           "pull",
+          "run",
+          "review",
           "manager",
           "brief",
           "drafts",
@@ -5756,6 +5806,39 @@
         ],
         "type": "object"
       },
+      "MadeRecordView": {
+        "description": "A staging run or review opened from the work it records.",
+        "properties": {
+          "detail": {
+            "description": "Result shown in the record.",
+            "type": "string"
+          },
+          "id": {
+            "$ref": "#/components/schemas/RecordId",
+            "description": "Identifier in the lane's made-item target."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/TargetKind",
+            "description": "Category of the review or run."
+          },
+          "laneId": {
+            "$ref": "#/components/schemas/LaneId",
+            "description": "Work this record belongs to."
+          },
+          "title": {
+            "description": "Heading of the record.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "laneId",
+          "title",
+          "detail"
+        ],
+        "type": "object"
+      },
       "ManagerLane": {
         "description": "Manager lane for the cockpit.",
         "properties": {
@@ -6225,7 +6308,7 @@
             "type": "object"
           },
           {
-            "description": "Everyone who can read the topic conversation.",
+            "description": "Full-access readers in the topic chat, or everyone assigned to the lane in a lane chat.",
             "properties": {
               "kind": {
                 "const": "topic",
@@ -6677,6 +6760,14 @@
               }
             ],
             "description": "Identifier of the associated lane."
+          },
+          "relatedLaneIds": {
+            "default": [],
+            "description": "Other lanes modified by a grouped action.",
+            "items": {
+              "$ref": "#/components/schemas/LaneId"
+            },
+            "type": "array"
           },
           "text": {
             "description": "Text shown to the reader.",
@@ -7359,6 +7450,11 @@
         ],
         "type": "object"
       },
+      "RecordId": {
+        "description": "Identifier of a staging run or review record.",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+        "type": "string"
+      },
       "Release": {
         "description": "Staged rollout linked to the decision.",
         "properties": {
@@ -7842,9 +7938,14 @@
           "name": {
             "description": "Person’s display name.",
             "type": "string"
+          },
+          "pending": {
+            "description": "The person has status access while they wait to accept their invitation.",
+            "type": "boolean"
           }
         },
         "required": [
+          "pending",
           "id",
           "name",
           "avatar",
@@ -8924,6 +9025,8 @@
           "id": {
             "anyOf": [
               {
+                "maxLength": 200,
+                "minLength": 1,
                 "type": "string"
               },
               {
@@ -8955,6 +9058,8 @@
           "draft",
           "skill",
           "pull",
+          "run",
+          "review",
           "manager",
           "brief",
           "drafts",
@@ -9543,6 +9648,14 @@
       "TopicView": {
         "description": "Progress, work and conversation context for one topic or project.",
         "properties": {
+          "appliedGoalChanges": {
+            "default": [],
+            "description": "Approved goal changes that apply to this plan from this or another topic.",
+            "items": {
+              "$ref": "#/components/schemas/GoalChange"
+            },
+            "type": "array"
+          },
           "chatSub": {
             "description": "Chat sub for this record.",
             "type": "string"
@@ -12045,6 +12158,150 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/RecentView"
+                }
+              }
+            },
+            "description": "Successful cockpit response",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cockpit/records/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/RecordId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PersonId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MadeRecordView"
                 }
               }
             },

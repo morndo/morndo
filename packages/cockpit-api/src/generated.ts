@@ -248,6 +248,8 @@ export type Command =
   | {
       /**
        * Lines for this record.
+       *
+       * @maxItems 12
        */
       lines: string[];
       /**
@@ -397,6 +399,13 @@ export type Command =
        */
       invitationId: string;
       type: "access.revoke";
+    }
+  | {
+      /**
+       * Invitation accepted by its recipient.
+       */
+      invitationId: string;
+      type: "access.accept";
     }
   | {
       /**
@@ -570,6 +579,10 @@ export type FeedEvent1 =
       type: "prefs.changed";
     }
   | {
+      /**
+       * Person whose grant changed, when the event concerns an individual.
+       */
+      personId?: PersonId | null;
       /**
        * Identifier of the associated topic.
        */
@@ -847,6 +860,10 @@ export type Event =
     }
   | {
       /**
+       * Person whose grant changed, when the event concerns an individual.
+       */
+      personId?: PersonId | null;
+      /**
        * Identifier of the associated topic.
        */
       topicId: TopicId | null;
@@ -995,6 +1012,10 @@ export type FeedEvent2 = {
       type: "prefs.changed";
     }
   | {
+      /**
+       * Person whose grant changed, when the event concerns an individual.
+       */
+      personId?: PersonId | null;
       /**
        * Identifier of the associated topic.
        */
@@ -1243,6 +1264,8 @@ export type KnownTargetKind =
   | "draft"
   | "skill"
   | "pull"
+  | "run"
+  | "review"
   | "manager"
   | "brief"
   | "drafts"
@@ -1325,6 +1348,13 @@ export type StageState = "done" | "next" | "now" | "wait";
  */
 export type PullState = "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held";
 /**
+ * Identifier of a staging run or review record.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "RecordId".
+ */
+export type RecordId = string;
+/**
  * Rollout lifecycle for a release decision.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -1389,6 +1419,8 @@ export type TargetKind =
   | "draft"
   | "skill"
   | "pull"
+  | "run"
+  | "review"
   | "manager"
   | "brief"
   | "drafts"
@@ -1829,6 +1861,8 @@ export interface Target {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -1988,6 +2022,8 @@ export interface Target1 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -2022,7 +2058,7 @@ export interface Attachment {
    */
   name: string;
   /**
-   * HTTPS URL for the attachment.
+   * The hub serves attachments over HTTPS. The local stand-in also returns its loopback upload URL.
    */
   url: string;
 }
@@ -2038,7 +2074,7 @@ export interface AttachmentInput {
    */
   name: string;
   /**
-   * HTTPS URL for the attachment.
+   * Supply an HTTPS URL to the hub. The local stand-in also accepts its own loopback upload URL.
    */
   url: string;
 }
@@ -2095,6 +2131,8 @@ export interface Target2 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -2379,6 +2417,8 @@ export interface Target3 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -2447,6 +2487,8 @@ export interface Target4 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -2472,6 +2514,10 @@ export interface OvernightAction {
    * Identifier of the associated lane.
    */
   laneId: LaneId | null;
+  /**
+   * Other lanes modified by a grouped action.
+   */
+  relatedLaneIds?: LaneId[];
   /**
    * Text shown to the reader.
    */
@@ -2546,6 +2592,8 @@ export interface Target5 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -2725,6 +2773,8 @@ export interface TargetInput {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -2801,6 +2851,8 @@ export interface TargetInput1 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -3375,6 +3427,8 @@ export interface Target6 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -3514,6 +3568,8 @@ export interface Target7 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -5307,6 +5363,49 @@ export interface Layout {
   sidebarWidth: number;
 }
 /**
+ * A staging run or review opened from the work it records.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MadeRecordView".
+ */
+export interface MadeRecordView {
+  /**
+   * Result shown in the record.
+   */
+  detail: string;
+  /**
+   * Identifier in the lane's made-item target.
+   */
+  id: string;
+  /**
+   * Category of the review or run.
+   */
+  kind:
+    | "topic"
+    | "lane"
+    | "decision"
+    | "thread"
+    | "person"
+    | "draft"
+    | "skill"
+    | "pull"
+    | "run"
+    | "review"
+    | "manager"
+    | "brief"
+    | "drafts"
+    | "skills"
+    | "settings";
+  /**
+   * Identifier of a lane.
+   */
+  laneId: string;
+  /**
+   * Heading of the record.
+   */
+  title: string;
+}
+/**
  * Manager lane for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -6019,6 +6118,8 @@ export interface Target8 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -6124,6 +6225,8 @@ export interface Target9 {
     | "draft"
     | "skill"
     | "pull"
+    | "run"
+    | "review"
     | "manager"
     | "brief"
     | "drafts"
@@ -6181,6 +6284,10 @@ export interface SeenByFace {
    * Person’s display name.
    */
   name: string;
+  /**
+   * The person has status access while they wait to accept their invitation.
+   */
+  pending: boolean;
 }
 /**
  * The reader's last visit to a topic or thread.
@@ -6793,6 +6900,10 @@ export interface TopicStatusView {
  * via the `definition` "TopicView".
  */
 export interface TopicView {
+  /**
+   * Approved goal changes that apply to this plan from this or another topic.
+   */
+  appliedGoalChanges?: GoalChange[];
   /**
    * Chat sub for this record.
    */

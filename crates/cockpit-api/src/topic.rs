@@ -689,6 +689,9 @@ pub struct TaskRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicView {
+    /// Approved goal changes that apply to this plan from this or another topic.
+    #[serde(default)]
+    pub applied_goal_changes: Vec<crate::decision::GoalChange>,
     /// Faces of people who can work on or watch this topic.
     pub seen_by: Vec<crate::access::SeenByFace>,
     /// Progress shared with a status-only reader.

@@ -18,9 +18,8 @@ pub struct Attachment {
     /// Name shown to the reader.
     #[schemars(length(min = 1, max = 200))]
     pub name: String,
-    /// HTTPS URL for the attachment.
-    #[schemars(extend("format" = "uri"))]
-    #[schemars(length(max = 2048), regex(pattern = "^https://"))]
+    /// The hub serves attachments over HTTPS. The local stand-in also returns its loopback upload URL.
+    #[schemars(schema_with = "input::attachment_schema")]
     #[serde(deserialize_with = "input::attachment_url")]
     pub url: String,
 }
@@ -33,9 +32,8 @@ pub struct AttachmentInput {
     #[schemars(length(min = 1, max = 200))]
     #[serde(deserialize_with = "input::name")]
     pub name: String,
-    /// HTTPS URL for the attachment.
-    #[schemars(extend("format" = "uri"))]
-    #[schemars(length(max = 2048), regex(pattern = "^https://"))]
+    /// Supply an HTTPS URL to the hub. The local stand-in also accepts its own loopback upload URL.
+    #[schemars(schema_with = "input::attachment_schema")]
     #[serde(deserialize_with = "input::attachment_url")]
     pub url: String,
 }
@@ -117,6 +115,8 @@ pub enum Command {
         /// Identifier of the associated lane.
         lane_id: LaneId,
         /// Act for this record.
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::name")]
         act: String,
     },
     #[serde(rename = "person.remind")]
@@ -139,6 +139,7 @@ pub enum Command {
         /// Stage to post in when the thread covers several stages.
         #[serde(default)]
         #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::optional_name")]
         stage: Option<String>,
         /// Attachment for this record.
         #[serde(default)]
@@ -168,6 +169,8 @@ pub enum Command {
         /// Identifier of the associated thread.
         thread_id: ThreadId,
         /// Lines for this record.
+        #[schemars(schema_with = "input::since_lines_schema")]
+        #[serde(deserialize_with = "input::since_lines")]
         lines: Vec<String>,
     },
     #[serde(rename = "pin.add")]
@@ -184,6 +187,8 @@ pub enum Command {
     PrefsSet {
         /// Identifier of the associated device.
         #[serde(default)]
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::optional_name")]
         device_id: Option<String>,
         /// Theme for this record.
         #[serde(default)]
@@ -277,6 +282,11 @@ pub enum Command {
         /// Identifier of the associated invitation.
         invitation_id: InvitationId,
     },
+    #[serde(rename = "access.accept")]
+    AccessAccept {
+        /// Invitation accepted by its recipient.
+        invitation_id: InvitationId,
+    },
     #[serde(rename = "access.statusLink")]
     AccessStatusLink {
         /// Enable the link or revoke it. Omission enables it.
@@ -356,6 +366,8 @@ pub struct TargetInput {
     /// Kind for this record.
     pub kind: Known<crate::TargetKind>,
     /// Stable identifier for this record.
+    #[schemars(schema_with = "input::target_id_schema")]
+    #[serde(deserialize_with = "input::target_id")]
     pub id: Present<String>,
 }
 
