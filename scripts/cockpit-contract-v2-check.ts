@@ -89,6 +89,8 @@ ajv.addFormat("uint8", intFormat(0, 255));
 ajv.addFormat("uint", intFormat(0, Number.MAX_SAFE_INTEGER));
 ajv.addFormat("double", { type: "number", validate: (n: number) => Number.isFinite(n) });
 ajv.addFormat("float", { type: "number", validate: (n: number) => Number.isFinite(n) });
+// the schema root carries the contract version as an annotation (https://ajv.js.org/strict-mode.html#unknown-keywords)
+ajv.addKeyword("x-contract-version");
 ajv.addFormat("date-time", { type: "string", validate: (s: string) => isTime(s) });
 ajv.addFormat("uri", { type: "string", validate: (s: string) => { try { new URL(s); return true; } catch { return false; } } });
 try { ajv.addSchema(schema, "cockpit"); ajv.getSchema("cockpit#/$defs/WorkspaceView"); ok(true, "schema compiles in Ajv strict mode"); }
@@ -140,7 +142,7 @@ function shapeRules(body: unknown, where: string) {
     if (k === "href") bad.push(`${path}: a hash or page link (use target or url)`);
     if ((k === "at" || /[a-z]At$/.test(k)) && v !== null && !isTime(v)) bad.push(`${path}: ${JSON.stringify(v)} is not an RFC 3339 time`);
     if (k === "currency" && !(typeof v === "string" && /^[A-Z]{3}$/.test(v) && Number.isInteger(parent.amountMinor))) bad.push(`${path}: money needs amountMinor and an ISO 4217 currency`);
-    if (k === "target" && v !== null) {
+    if (k === "target" && v !== null && typeof v === "object") {
       if (!(v && typeof v === "object" && TARGETS.includes((v as any).kind))) bad.push(`${path}: target kind ${JSON.stringify((v as any)?.kind)}`);
       else targetsSeen.push(v);
     }
@@ -268,12 +270,13 @@ async function gtm() {
     ok(wrong.status === 405 && (wrong.headers.get("allow") ?? "").includes("POST"), "a wrong method is 405 with Allow");
 
     // idempotency
+    const recapBefore = (by((await get(url, "/sidebar")).body?.groups, "id", "content")?.lanes ?? []).filter((l: any) => String(l.title).includes("recap")).length;
     const fileOnce = { type: "lane.file", text: "Write a recap of the webinar for the newsletter", topicId: "content" };
     const a1 = await act(url, fileOnce, { "idempotency-key": "check-recap-1" });
     const a2 = await act(url, fileOnce, { "idempotency-key": "check-recap-1" });
     ok(a1.status === 200 && a1.body?.laneId && a1.body.laneId === a2.body?.laneId, "a repeated Idempotency-Key returns the same lane");
     const contentLanes = by((await get(url, "/sidebar")).body?.groups, "id", "content")?.lanes ?? [];
-    ok(contentLanes.filter((l: any) => l.id === a1.body?.laneId).length === 1 && contentLanes.filter((l: any) => String(l.title).includes("recap")).length === 1, "the repeated command filed one lane");
+    ok(contentLanes.filter((l: any) => l.id === a1.body?.laneId).length === 1 && contentLanes.filter((l: any) => String(l.title).includes("recap")).length === recapBefore + 1, "the repeated command filed one lane");
 
     // a lane's own choice, with its history row and Undo
     const webinar = (await get(url, "/lanes/webinar")).body;
