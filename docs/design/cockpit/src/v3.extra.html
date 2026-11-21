@@ -59,13 +59,13 @@
 .cmdrow[aria-expanded="true"]{background:var(--tile-on);color:var(--text)}
 #tree>button.row[data-palette]{display:none}
 .cmd-scrim{position:fixed;inset:0;z-index:69;background:rgba(0,0,0,.55);animation:fade .16s ease-out}
-.cmd{font:var(--fs-md)/1.45 var(--sans);color:var(--text);position:fixed;z-index:70;left:0;right:0;margin:0 auto;top:11vh;width:min(640px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 11vh - 16px));display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-float,0 24px 70px rgba(0,0,0,.6));overflow:hidden;animation:pop .2s var(--ease-pop)}
+#cmd{font:var(--fs-md)/1.45 var(--sans);color:var(--text);position:fixed;z-index:70;left:0;right:0;margin:0 auto;top:11vh;width:min(640px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 11vh - 16px));display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-float,0 24px 70px rgba(0,0,0,.6));overflow:hidden;animation:pop .2s var(--ease-pop)}
 .cmd-in{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px}
-.cmd button,.cmd input{font:inherit;color:inherit}
+:where(#cmd) button,:where(#cmd) input{font:inherit;color:inherit}
 .cmd-in input{flex:1;min-width:0;height:46px;background:none;border:0;outline:0;color:var(--text-hi);font:inherit;font-size:var(--fs-lg)}
 .cmd-in input::placeholder{color:var(--muted)}
-.cmd .scope,.cmd .att{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-xs);font-weight:600;color:var(--text-2);white-space:nowrap}
-.cmd .scope button{display:grid;place-items:center;width:14px;height:14px;margin-right:-3px;color:var(--muted)}
+#cmd .scope,#cmd .att{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-xs);font-weight:600;color:var(--text-2);white-space:nowrap}
+#cmd .scope button{display:grid;place-items:center;width:14px;height:14px;margin-right:-3px;color:var(--muted)}
 .cmd-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:4px 6px 8px}
 .cmd-list h3{padding:10px 10px 4px;font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
 .cr{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;min-height:36px;padding:4px 10px;border-radius:var(--r-md);text-align:left;font-size:var(--fs-md);color:var(--text)}
@@ -313,7 +313,7 @@
   // it ready to start something. It answers from the records, and before anything is started it says where it goes.
   const sideEl = $("#side");
   $(".row.ws", sideEl).insertAdjacentHTML("afterend", '<button class="cmdrow" data-cmd aria-haspopup="dialog" aria-expanded="false" aria-controls="cmd"><svg class="i sm"><use href="#search"/></svg><span>Find, ask or start…</span><kbd>⌘K</kbd></button>');
-  document.body.insertAdjacentHTML("beforeend", `<div class="cmd-scrim" hidden></div><div class="cmd" id="cmd" aria-modal="true" role="dialog" aria-label="Find, ask or start" hidden>
+  document.body.insertAdjacentHTML("beforeend", `<div class="cmd-scrim" hidden></div><div id="cmd" aria-modal="true" role="dialog" aria-label="Find, ask or start" hidden>
     <div class="cmd-in"><svg class="i dim"><use href="#search"/></svg><span class="att" hidden></span><span class="scope" hidden></span><label class="sr" for="cmd-q">Find, ask or start</label><input id="cmd-q" autocomplete="off" spellcheck="false" role="combobox" aria-controls="cmd-list" aria-expanded="true"></div>
     <div class="cmd-list" id="cmd-list" role="listbox"></div>
     <div class="cmd-foot"><span><kbd>↵</kbd>Open or start</span><span><kbd>Tab</kbd>Another topic</span><span><kbd>/</kbd>Skills</span><span><kbd>Esc</kbd>Close</span></div></div>`);
