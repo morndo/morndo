@@ -265,7 +265,25 @@ The fleet (nodes, tmux lanes, typed ops, delivery queue, lane events, jobs), the
 decision briefs, usage windows and pools, key pools and the vault, sign-in from the app, memory synced as skills, push,
 the updater and its rollouts, passkey access. None of it is thrown away; the cockpit's components sit on top of it.
 
-## 8. Lane runtime: the terminal and a clean UI together (C26, proposal)
+## 8. Lane runtime: the terminal and a clean UI together (C26)
+
+**Direction agreed with the owner, 21 November 2026; details are worked out later.**
+- Lanes stay as they are: the agent CLIs run interactively in tmux on the server (Claude Code with
+  `--dangerously-skip-permissions`, on the owner's subscription), always on. Headless runs are only for the hub's small
+  judgement jobs (C5), never a replacement for lanes.
+- Morndo becomes a tmux client the way iTerm2 is one: it reads tmux's control mode (`tmux -CC`, a live `%output` stream
+  per pane, keys sent back as commands) instead of polling screenshots (today the terminal view asks for a frame every
+  80 ms, `apps/hub/src/adapters/http.ts:63`, and menus are found by a regex over captured screens,
+  `packages/node-ops/src/tmux.ts:98`).
+- Each lane has two views of the same stream: a clean view (conversation from the transcript and hooks; questions,
+  menus and prompts turned into buttons that send the exact keys; typing only when the live screen model says the input
+  is free) and a full terminal view (a real terminal engine such as libghostty in the Mac app) for taking over.
+- Our own terminal server in Rust (a small long-lived process per node that holds the terminals) replaces tmux only if
+  measurements show tmux itself causes failures. The clean view does not change either way.
+- First proof when the work starts: stream one lane through control mode into the terminal view and compare its
+  latency with today's 80 ms frames.
+
+The analysis behind it:
 
 Why: lanes are agent TUIs in tmux, and Morndo reaches them by reading screens (`pane.capture`) and typing keys. Most
 failures are the gap between what the screen shows and what Morndo believes: the delivery queue already names them
