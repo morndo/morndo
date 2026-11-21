@@ -158,6 +158,33 @@ describe("cockpit stand-in", () => {
     }
   });
 
+  it("gives each answer its own id when two questions land in the same minute", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const first = await act(url, { type: "message.send", threadId: "topic:partnerships", text: "Where is Halden?" });
+      const second = await act(url, { type: "message.send", threadId: "topic:partnerships", text: "How is Brightmoor doing?" });
+      expect(first.status).toBe(200);
+      expect(second.status).toBe(200);
+      const thread = await get(url, "/threads/topic:partnerships");
+      const messages = thread.body.messages as { id: string; text: string; label: { kind: string } | null }[];
+      const ids = messages.map((message) => message.id);
+      expect(new Set(ids).size).toBe(ids.length);
+      const last = messages.at(-1);
+      expect(last?.text.startsWith("From the record")).toBe(true);
+      const relabeled = await act(url, { type: "message.relabel", messageId: last?.id, label: "done" });
+      expect(relabeled.status).toBe(200);
+      expect((relabeled.body.message as { id: string; text: string }).id).toBe(last?.id);
+      expect((relabeled.body.message as { text: string }).text).toBe(last?.text);
+      const after = await get(url, "/threads/topic:partnerships");
+      const updated = (after.body.messages as { id: string; text: string; label: { kind: string } | null }[]).filter((message) => message.label?.kind === "done");
+      expect(updated.map((message) => message.id)).toEqual([last?.id]);
+      const halden = (after.body.messages as { text: string; label: { kind: string } | null }[]).find((message) => message.text.includes("the offer is drafted"));
+      expect(halden?.label).toBeNull();
+    } finally {
+      await stop();
+    }
+  });
+
   it("serves the development module", async () => {
     const { url, stop } = await boot("dev");
     try {

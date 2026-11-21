@@ -490,7 +490,7 @@ export class World {
     const id = `new-${++this.seq}`;
     const lane = newLane(id, text, topic, lead, fromChat);
     this.extraLanes.set(id, lane);
-    this.threads.set(`lane:${id}`, laneThread(id, text, topic?.name ?? null, this.workspace.me, lead));
+    this.threads.set(`lane:${id}`, laneThread(id, text, topic?.name ?? null, this.workspace.me, lead, this.messageId(), this.messageId()));
     const where = fromChat && topic ? `in the ${topic.name} chat` : "You to the Manager";
     const went = fromChat ? `a thread · ${lead.name} owns it` : topic ? `Filed under ${topic.name}. ${lead.name} leads.` : "With the Manager, until it knows where this belongs";
     this.extraAsks.unshift({ id: `ask-${id}`, quote: text, when: "Just now", chat: where, went, href: `#lane/${id}` });
@@ -555,7 +555,7 @@ export class World {
     const topic = topicId ? this.topics.get(topicId) : undefined;
     const kind = topic ? classify(text) : null;
     const time = nowTime();
-    const message = userMessage(`m${++this.seq}`, this.workspace.me, text, time, kind);
+    const message = userMessage(this.messageId(), this.workspace.me, text, time, kind);
     const events: unknown[] = [];
     if (topic && kind === "request") {
       const filed = this.fileLane(text, topic.id, null, true);
@@ -570,21 +570,21 @@ export class World {
     thread.messages.push(message);
     events.push({ type: "message.posted", threadId, message: clone(message) });
     if (topic && kind === "question") {
-      const answer = answerMessage(topic, answerFor(topic, text), time);
+      const answer = answerMessage(this.messageId(), topic, answerFor(topic, text), time);
       thread.messages.push(answer);
       events.push({ type: "message.posted", threadId, message: clone(answer) });
     } else if (topic && kind === "goalChange") {
       const decision = this.proposeChange(topic, text);
-      const reply = managerMessage(topic, "That changes the goal, and it reaches other topics. I proposed it to the Manager; you get one brief in Decide with what it affects. Nothing changes until you approve it there.", time);
+      const reply = answerMessage(this.messageId(), topic, "That changes the goal, and it reaches other topics. I proposed it to the Manager; you get one brief in Decide with what it affects. Nothing changes until you approve it there.", time);
       thread.messages.push(reply);
       events.push({ type: "decision.changed", decisionId: decision.id, state: "open" }, { type: "message.posted", threadId, message: clone(reply) });
     } else if (topic && kind === "done") {
-      const reply = managerMessage(topic, "Logged as done on the thread it belongs to.", time);
+      const reply = answerMessage(this.messageId(), topic, "Logged as done on the thread it belongs to.", time);
       reply.readBack = { owner: reply.author.name, quote: "Logged as done on the thread it belongs to.", time };
       thread.messages.push(reply);
       events.push({ type: "message.posted", threadId, message: clone(reply) });
     } else if (topic && kind === "decision") {
-      const reply = managerMessage(topic, "Noted as a decision and pinned for the team.", time);
+      const reply = answerMessage(this.messageId(), topic, "Noted as a decision and pinned for the team.", time);
       reply.readBack = { owner: reply.author.name, quote: "Noted as a decision and pinned for the team.", time };
       thread.messages.push(reply);
       events.push({ type: "message.posted", threadId, message: clone(reply) });
@@ -688,6 +688,10 @@ export class World {
     return done([{ type: "access.changed", topicId }]);
   }
 
+  private messageId(): string {
+    return `m${++this.seq}`;
+  }
+
   private invite(topicId: string, nameOrEmail: string): Outcome {
     const view = this.access.get(topicId);
     if (!view) return missing("topic");
@@ -779,9 +783,9 @@ function managerActor(topic: Topic): Actor {
   };
 }
 
-function answerMessage(topic: Topic, text: string, time: string): Message {
+function answerMessage(id: string, topic: Topic, text: string, time: string): Message {
   return {
-    id: `m-answer-${topic.id}-${time}`,
+    id,
     author: managerActor(topic),
     time,
     text,
@@ -791,10 +795,6 @@ function answerMessage(topic: Topic, text: string, time: string): Message {
     readBack: null,
     actions: [],
   };
-}
-
-function managerMessage(topic: Topic, text: string, time: string): Message {
-  return answerMessage(topic, text, `${time}-m`);
 }
 
 function newLane(id: string, text: string, topic: Topic | undefined, lead: Actor, fromChat: boolean): Lane {
@@ -850,7 +850,7 @@ function newLane(id: string, text: string, topic: Topic | undefined, lead: Actor
   };
 }
 
-function laneThread(id: string, text: string, topicName: string | null, me: Actor, lead: Actor): Thread {
+function laneThread(id: string, text: string, topicName: string | null, me: Actor, lead: Actor, yours: string, ack: string): Thread {
   return {
     id: `lane:${id}`,
     title: text,
@@ -862,9 +862,9 @@ function laneThread(id: string, text: string, topicName: string | null, me: Acto
     agents: null,
     suggestions: [],
     messages: [
-      userMessage(`m-${id}-you`, me, text, "now", null),
+      userMessage(yours, me, text, "now", null),
       {
-        id: `m-${id}-ack`,
+        id: ack,
         author: clone(lead),
         time: "now",
         text: "Got it. I will set what done means and start. You hear from me when it is done or when I need you.",
