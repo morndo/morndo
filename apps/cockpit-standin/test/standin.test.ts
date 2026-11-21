@@ -1,5 +1,4 @@
 import { spawn, type ChildProcess } from "node:child_process";
-import { once } from "node:events";
 import { describe, expect, it } from "vitest";
 
 const BASE = "/api/cockpit";
@@ -27,10 +26,14 @@ async function boot(module: "gtm" | "dev"): Promise<{ url: string; stop: () => P
   });
   return {
     url: `http://127.0.0.1:${port}`,
-    stop: async () => {
+    stop: () => new Promise((resolve) => {
+      if (child.exitCode !== null || child.signalCode !== null) {
+        resolve();
+        return;
+      }
+      child.once("exit", () => resolve());
       child.kill();
-      await once(child, "exit");
-    },
+    }),
   };
 }
 
