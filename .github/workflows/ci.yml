@@ -255,3 +255,24 @@ jobs:
 
       - name: Updater units on arm64
         run: npx vitest run --project=units apps/updater/test
+
+  cockpit-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json # engines.node
+          cache: npm
+
+      - run: npm ci
+
+      - run: cargo test --workspace
+
+      - run: cargo run -p cockpit-api --bin export-schema -- --check
+
+      - run: node scripts/cockpit-contract-check.ts
