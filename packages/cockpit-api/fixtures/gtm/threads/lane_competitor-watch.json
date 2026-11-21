@@ -1,0 +1,37 @@
+{
+  "id": "lane:competitor-watch",
+  "title": "Competitor watch, November",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "lane_competitor-watch-0",
+      "author": {
+        "id": "researcher",
+        "name": "Researcher",
+        "shortName": "Researcher",
+        "kind": "agent",
+        "avatar": "R",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "12 Nov",
+      "text": "Quaywright raised its entry price by 12% and added route planning. Dockmere cut its annual plan by 10%.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

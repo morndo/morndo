@@ -1,0 +1,201 @@
+{
+  "id": "research",
+  "name": "Research",
+  "kind": "topic",
+  "icon": "target",
+  "crumb": "Customers and market",
+  "open": false,
+  "meta": null,
+  "intro": "Nothing is open. The customer profile was rebuilt this morning; Outbound already works from it.",
+  "when": null,
+  "health": null,
+  "goal": null,
+  "noGoal": "Research answers asks from the other topics. A goal needs a measure and a date, for example: the profile refreshed every month.",
+  "facts": [
+    {
+      "value": "212",
+      "label": "won deals in the profile"
+    },
+    {
+      "value": "4",
+      "label": "customer segments"
+    },
+    {
+      "value": "Today",
+      "label": "last refresh, 07:10"
+    }
+  ],
+  "plan": null,
+  "focusLaneId": null,
+  "history": {
+    "seen": "yesterday at 18:20",
+    "shown": 2,
+    "since": "That is everything since the topic began on 20 October.",
+    "days": [
+      {
+        "label": "Today",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "07:10",
+            "actor": {
+              "id": "researcher",
+              "name": "Researcher",
+              "shortName": "Researcher",
+              "kind": "agent",
+              "avatar": "R",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "saved the rebuilt customer profile to memory; the Manager checked it against Supabase",
+            "laneId": "customer-profile",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "06:40",
+            "actor": {
+              "id": "researcher",
+              "name": "Researcher",
+              "shortName": "Researcher",
+              "kind": "agent",
+              "avatar": "R",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "read 212 won deals from Supabase, read only",
+            "laneId": "customer-profile",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Yesterday",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "21:30",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "ran /icp-refresh from your pins",
+            "laneId": "customer-profile",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "seen"
+          }
+        ]
+      },
+      {
+        "label": "Thursday, 12 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "15:00",
+            "actor": {
+              "id": "researcher",
+              "name": "Researcher",
+              "shortName": "Researcher",
+              "kind": "agent",
+              "avatar": "R",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "finished the competitor watch: 2 price changes, 1 new feature at Quaywright",
+            "laneId": "competitor-watch",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      }
+    ]
+  },
+  "crew": [
+    {
+      "id": "researcher",
+      "name": "Researcher",
+      "shortName": "Researcher",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "idle",
+      "word": "Idle",
+      "text": "Rebuilt the customer profile this morning",
+      "skill": "/icp-refresh",
+      "engine": "Claude",
+      "record": "3 of 3 profiles matched won deals when the Manager checked"
+    }
+  ],
+  "jobs": [],
+  "chatSub": "1 agent · the Manager reads it, it is not in it",
+  "lanes": [
+    {
+      "id": "customer-profile",
+      "title": "Customer profile refresh",
+      "state": "done",
+      "stateWord": "Done",
+      "leadName": "Researcher",
+      "next": "closed today, 07:10"
+    },
+    {
+      "id": "competitor-watch",
+      "title": "Competitor watch, November",
+      "state": "done",
+      "stateWord": "Done",
+      "leadName": "Researcher",
+      "next": "closed Thu 12 Nov"
+    }
+  ],
+  "spend": {
+    "spent": 3,
+    "cap": 20
+  },
+  "stuck": null,
+  "tasks": []
+}

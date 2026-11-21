@@ -1,0 +1,85 @@
+{
+  "id": "lane:sequence-b",
+  "title": "Sequence B, fintech ops",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "lane_sequence-b-0",
+      "author": {
+        "id": "sender",
+        "name": "Sender",
+        "shortName": "Sender",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "Fri 17:10",
+      "text": "The pilot is done: 6 replies out of 30, 2 meetings booked, no bounces. The best subject line was the shortest one.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "lane_sequence-b-1",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "What happens if it bounces a lot?",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "lane_sequence-b-2",
+      "author": {
+        "id": "sender",
+        "name": "Sender",
+        "shortName": "Sender",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "Fri 17:14",
+      "text": "I pause on my own at 4% and tell you. The pilot had none, so I do not expect it.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

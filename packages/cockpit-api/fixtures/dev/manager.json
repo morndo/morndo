@@ -1,0 +1,104 @@
+{
+  "intro": "Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane in the right project and names who leads it. It comes back to you only for decisions.",
+  "summary": "7 lanes in 4 projects · 3 wait for you",
+  "lanes": [
+    {
+      "id": "red-main",
+      "title": "Red main",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Builder",
+      "state": "bad",
+      "stateWord": "Stuck",
+      "next": "Now, needs your call"
+    },
+    {
+      "id": "export-for-big-accounts",
+      "title": "Export for big accounts",
+      "topicId": "api",
+      "topicName": "API",
+      "leadName": "Release",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your decision"
+    },
+    {
+      "id": "tax-rates",
+      "title": "Tax rates per country",
+      "topicId": "billing",
+      "topicName": "Billing",
+      "leadName": "Builder",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your decision"
+    },
+    {
+      "id": "new-sign-in",
+      "title": "New sign-in",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Builder",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your pick"
+    },
+    {
+      "id": "shipment-filters",
+      "title": "Shipment filters",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Reviewer",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Today, 11:30"
+    },
+    {
+      "id": "keep-scans",
+      "title": "Keep scans without a signal",
+      "topicId": "mobile",
+      "topicName": "Mobile",
+      "leadName": "Builder",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Today, 15:00"
+    },
+    {
+      "id": "upgrade-node-24",
+      "title": "Upgrade to Node 24",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Builder",
+      "state": "parked",
+      "stateWord": "Parked until Thu",
+      "next": "Thu 19 Nov"
+    }
+  ],
+  "sharedResources": [],
+  "asks": [
+    {
+      "id": "ask-red",
+      "quote": "Stop the red main from blocking everyone.",
+      "when": "Today 06:55",
+      "chat": "Web app",
+      "went": "lane Red main · Builder leads",
+      "href": "#topic/web"
+    },
+    {
+      "id": "ask-node",
+      "quote": "Move us to Node 24 when it is safe.",
+      "when": "Friday 09:30",
+      "chat": "Web app",
+      "went": "lane Upgrade to Node 24 · parked until Thursday",
+      "href": "#lane/upgrade-node-24"
+    },
+    {
+      "id": "ask-export",
+      "quote": "Fenwick says the export times out for their account. Fix it and prove it works on their data.",
+      "when": "Thursday 16:10",
+      "chat": "API",
+      "went": "lane Export for big accounts · Release leads",
+      "href": "#lane/export-for-big-accounts"
+    }
+  ],
+  "since": []
+}

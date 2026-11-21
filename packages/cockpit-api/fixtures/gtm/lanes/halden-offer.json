@@ -1,0 +1,156 @@
+{
+  "id": "halden-offer",
+  "topicId": "partnerships",
+  "title": "Offer for Halden Freight Network",
+  "state": "warn",
+  "stateWord": "Needs you",
+  "lead": {
+    "id": "jonas-falk",
+    "name": "Jonas Falk",
+    "shortName": "Jonas",
+    "kind": "person",
+    "avatar": "J",
+    "role": "Partner operations",
+    "state": "warn",
+    "word": "Leads",
+    "text": "Waits for your OK",
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened 13 Nov",
+  "closed": null,
+  "next": "After your OK",
+  "afterNext": "Mon 23 Nov, Jonas follows up",
+  "decisionId": "d4",
+  "short": "Offer to Halden",
+  "ask": "15% of first-year revenue for 12 months · due Thu",
+  "shortAfter": "It goes out tomorrow at 09:00.",
+  "recommendation": "Send it as drafted: our standard partner terms, already cleared by legal. About 96 new customers in the first year (2,400 at 4%).",
+  "yours": "It commits us to terms for 12 months and goes out in your name.",
+  "checks": [
+    "Terms match the template legal cleared last week",
+    "Customer numbers checked by Call prep: 2,400, about 4% take it up",
+    "The cover email waits in your drafts and goes only from your mail"
+  ],
+  "delay": "Halden sets its partner budget on 1 December. After that, signing slips to February and the goal loses its only likely deal.",
+  "approveLabel": "Send the offer",
+  "after": "The offer goes out from your mail tomorrow at 09:00. Jonas follows up on Monday if there is no answer.",
+  "asked": "Send Halden a referral offer this week, while they are warm.",
+  "askedMeta": {
+    "source": "You to the Manager after the call, Friday 13 November",
+    "note": "The Manager filed it under Partnerships and named Jonas to lead."
+  },
+  "status": "Halden wants a deal for its 2,400 business customers. Jonas drafted it from the template: 15% of first-year revenue for 12 months and a joint webinar in January. Due Thursday.",
+  "standing": {
+    "headline": "It waits for you.",
+    "detail": "Halden wants a deal for its 2,400 business customers. Jonas drafted it from the template: 15% of first-year revenue for 12 months and a joint webinar in January. Due Thursday."
+  },
+  "acts": [
+    {
+      "label": "Send the offer",
+      "tone": "ink"
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Call notes with what Halden asked for",
+      "who": "Notetaker · 13 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Offer drafted from the partner template",
+      "who": "Jonas · today, 08:30"
+    },
+    {
+      "kind": "ok",
+      "text": "Numbers checked: 2,400 customers, about 4% take it up",
+      "who": "Call prep · today"
+    },
+    {
+      "kind": "now",
+      "text": "Your OK to send",
+      "who": "You · by Thursday"
+    },
+    {
+      "kind": "todo",
+      "text": "Sent from your mail",
+      "who": "Sender · after your OK"
+    },
+    {
+      "kind": "todo",
+      "text": "Halden signs",
+      "who": "Halden · goal: December"
+    }
+  ],
+  "doneNote": "Done means all 6. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "jonas-falk",
+      "name": "Jonas Falk",
+      "shortName": "Jonas",
+      "kind": "person",
+      "avatar": "J",
+      "role": "Partner operations",
+      "state": "warn",
+      "word": "Leads",
+      "text": "Waits for your OK",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "notetaker",
+      "name": "Notetaker",
+      "shortName": "Notetaker",
+      "kind": "agent",
+      "avatar": "N",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Wrote up the call",
+      "skill": "/call-notes",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "call-prep",
+      "name": "Call prep",
+      "shortName": "Call",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Checked the numbers",
+      "skill": "/call-brief",
+      "engine": "Claude",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "The offer",
+      "detail": "2 pages, from the partner template",
+      "href": null
+    },
+    {
+      "icon": "file",
+      "title": "Halden call notes",
+      "detail": "13 November, 34 minutes",
+      "href": null
+    },
+    {
+      "icon": "mail",
+      "title": "Cover email",
+      "detail": "In your drafts, not sent",
+      "href": "#drafts"
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

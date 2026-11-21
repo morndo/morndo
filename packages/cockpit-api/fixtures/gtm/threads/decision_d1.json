@@ -1,0 +1,64 @@
+{
+  "id": "decision:d1",
+  "title": "Move €1,200 a week from LinkedIn to Google Search",
+  "sub": null,
+  "placeholder": "Ask about this decision",
+  "reading": "Reading this decision and its numbers",
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [
+    "Make it a 2-week test",
+    "Show the 14-day numbers"
+  ],
+  "messages": [
+    {
+      "id": "decision_d1-0",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "What happens if Search gets more expensive?",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "decision_d1-1",
+      "author": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "The Paid agent checks the cost of a Search lead every morning. Above €110 for 5 days in a row, it moves the €1,200 back to LinkedIn and tells you.\nIn the worst case you lose about 2 sales calls before that happens. You do not have to watch it.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

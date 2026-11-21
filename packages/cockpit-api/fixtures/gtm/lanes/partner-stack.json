@@ -1,0 +1,103 @@
+{
+  "id": "partner-stack",
+  "topicId": "partnerships",
+  "title": "Tools for partner outreach",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "jonas-falk",
+    "name": "Jonas Falk",
+    "shortName": "Jonas",
+    "kind": "person",
+    "avatar": "J",
+    "role": "Partner operations",
+    "state": "done",
+    "word": "Led it",
+    "text": "Compared, set up and tested",
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened 23 Oct",
+  "closed": "closed 30 Oct",
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Pick the tools for finding brands and people, and set them up so the agents can use them safely.",
+  "askedMeta": {
+    "source": "You to Jonas and the Manager, 23 October",
+    "note": "Jonas leads; the Manager gave the agents their access."
+  },
+  "status": "Clay finds brands, Apollo finds people, HubSpot keeps the pipeline. Agents read and write there, but nothing is sent without Lea or you.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "Clay finds brands, Apollo finds people, HubSpot keeps the pipeline. Agents read and write there, but nothing is sent without Lea or you."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "4 setups compared on data, price and what agents can drive",
+      "who": "Jonas · 26 Oct"
+    },
+    {
+      "kind": "ok",
+      "text": "Your choice: Clay, Apollo and HubSpot",
+      "who": "You · 27 Oct"
+    },
+    {
+      "kind": "ok",
+      "text": "Keys added, agents connected, test run of 10 brands",
+      "who": "Jonas · 29 Oct"
+    },
+    {
+      "kind": "ok",
+      "text": "Guardrail: no email leaves without a person's OK",
+      "who": "Manager · 30 Oct"
+    }
+  ],
+  "doneNote": "Done means all four. The test run passed, so the Manager closed the lane.",
+  "crew": [
+    {
+      "id": "jonas-falk",
+      "name": "Jonas Falk",
+      "shortName": "Jonas",
+      "kind": "person",
+      "avatar": "J",
+      "role": "Partner operations",
+      "state": "done",
+      "word": "Led it",
+      "text": "Compared, set up and tested",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Tool comparison",
+      "detail": "Clay, Apollo, HubSpot against 3 other setups",
+      "href": null
+    },
+    {
+      "icon": "file",
+      "title": "Setup notes",
+      "detail": "Which agent may do what, in which tool",
+      "href": null
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

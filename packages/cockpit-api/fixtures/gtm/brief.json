@@ -1,0 +1,195 @@
+{
+  "date": "16 Nov 2026",
+  "time": "07:15 AM",
+  "title": "The Monday Brief",
+  "lede": "Four decisions need you and one thing is stuck. Everything else moved on its own while you slept.",
+  "nextBriefAt": "13:00",
+  "cadence": "Next brief at 13:00. Until then you hear only about what cannot wait.",
+  "spend": {
+    "overnight": 21,
+    "week": 117,
+    "cap": 220
+  },
+  "topics": [
+    {
+      "id": "content",
+      "name": "Content",
+      "state": "bad",
+      "verdict": "At risk",
+      "progress": "212 of 300 signed up",
+      "spend": 36
+    },
+    {
+      "id": "partnerships",
+      "name": "Partnerships",
+      "state": "warn",
+      "verdict": "Behind plan",
+      "progress": "0 of 3 signed",
+      "spend": 38
+    },
+    {
+      "id": "paid",
+      "name": "Paid",
+      "state": "warn",
+      "verdict": "Over cost",
+      "progress": "214 of 450 leads since 1 October",
+      "spend": 9
+    },
+    {
+      "id": "outbound",
+      "name": "Outbound",
+      "state": "ok",
+      "verdict": "Ahead of plan",
+      "progress": "11 of 30 meetings booked",
+      "spend": 17
+    },
+    {
+      "id": "seo",
+      "name": "SEO",
+      "state": "idle",
+      "verdict": "Too early to tell",
+      "progress": "0 of 3 pages in the top 10",
+      "spend": 14
+    },
+    {
+      "id": "research",
+      "name": "Research",
+      "state": "idle",
+      "verdict": "No goal set",
+      "progress": "Answers asks from the other topics",
+      "spend": 3
+    }
+  ],
+  "decisions": [
+    {
+      "id": "d1",
+      "topicId": "paid",
+      "topicName": "Paid",
+      "due": "Due today, 14:00",
+      "whyYours": "Yours: over €500",
+      "title": "Move €1,200 a week from LinkedIn to Google Search",
+      "context": "A lead costs €200 on LinkedIn and €80 on Search. The weekly budget stays at €4,000.",
+      "minutes": 2,
+      "doneNote": "Approved. The Paid agent starts now.",
+      "laneId": "search-budget",
+      "state": "open"
+    },
+    {
+      "id": "d2",
+      "topicId": "outbound",
+      "topicName": "Outbound",
+      "due": "Due tomorrow",
+      "whyYours": "Yours: in your name",
+      "title": "Start sequence B for 180 fintech ops leads",
+      "context": "The pilot of 30 emails got 6 replies and 2 meetings. Sending stays at 60 a day.",
+      "minutes": 2,
+      "doneNote": "Approved. The first 60 emails go out at 10:00.",
+      "laneId": "sequence-b",
+      "state": "open"
+    },
+    {
+      "id": "d3",
+      "topicId": "content",
+      "topicName": "Content",
+      "due": "Due Wednesday",
+      "whyYours": "Yours: a public claim",
+      "title": "Publish the Fenwick Freight customer story",
+      "context": "Fenwick signed off the quote. The claim of 38% fewer manual hand-offs still needs your OK.",
+      "minutes": 3,
+      "doneNote": "Approved. The story is scheduled for Wednesday.",
+      "laneId": "fenwick",
+      "state": "open"
+    },
+    {
+      "id": "d4",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "due": "Due Thursday",
+      "whyYours": "Yours: binding terms",
+      "title": "Send the referral offer to Halden Freight Network",
+      "context": "Halden wants a deal for its 2,400 business customers: 15% of first-year revenue for 12 months. Jonas drafted it from the template.",
+      "minutes": 3,
+      "doneNote": "Approved. The offer goes out tomorrow at 09:00.",
+      "laneId": "halden-offer",
+      "state": "open"
+    }
+  ],
+  "openCount": 4,
+  "minutes": 10,
+  "burns": [
+    {
+      "topicId": "content",
+      "topicName": "Content",
+      "since": "Stuck since 09:12",
+      "deadline": "Post goes out today at 16:00",
+      "title": "The webinar promo visuals are stuck",
+      "detail": "Visuals used its 3 feedback rounds. 4 of 6 images pass the brand check, 2 still fail.",
+      "href": "#topic/content"
+    }
+  ],
+  "overnight": [
+    {
+      "id": "o1",
+      "topicId": "research",
+      "topicName": "Research",
+      "laneId": "customer-profile",
+      "text": "Research rebuilt the customer profile from 212 won deals and saved it to memory.",
+      "time": "07:10",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o2",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "laneId": null,
+      "text": "Partnerships added 32 brands from Clay, found 58 contacts in Apollo and drafted 24 emails for Lea to check.",
+      "time": "07:30",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o3",
+      "topicId": "seo",
+      "topicName": "SEO",
+      "laneId": "comparison-pages",
+      "text": "SEO published the 2 comparison pages you approved on Friday.",
+      "time": "07:42",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o4",
+      "topicId": "outbound",
+      "topicName": "Outbound",
+      "laneId": "sequence-a",
+      "text": "Outbound stopped sequence A for the 14 people who replied.",
+      "time": "08:05",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o5",
+      "topicId": "paid",
+      "topicName": "Paid",
+      "laneId": "click-floor",
+      "text": "Paid switched off 3 ads that fell below the click floor.",
+      "time": "08:30",
+      "undoable": true,
+      "undone": false
+    }
+  ],
+  "drafts": {
+    "count": 4,
+    "text": "4 drafts wait in your mail",
+    "detail": "The team update, the board note and 2 customer replies. Nothing is sent until you send it."
+  },
+  "artwork": {
+    "index": 13,
+    "total": 14,
+    "title": "The Muses at sunrise",
+    "manner": "early Renaissance frescoes",
+    "alt": "The Muses rest on a hillside at sunrise, their lyres laid in the grass and a finished scroll tied with a ribbon.",
+    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes"
+  }
+}

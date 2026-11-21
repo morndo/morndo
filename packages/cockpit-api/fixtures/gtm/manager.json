@@ -1,0 +1,233 @@
+{
+  "intro": "Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane under the right topic and names who leads it. It splits an ask into several lanes only where the parts can run side by side; steps that build on each other stay in one lane. It comes back to you only for decisions.",
+  "summary": "16 lanes in 5 topics · 5 wait for you",
+  "lanes": [
+    {
+      "id": "webinar",
+      "title": "Webinar on Thursday",
+      "topicId": "content",
+      "topicName": "Content",
+      "leadName": "Visuals",
+      "state": "bad",
+      "stateWord": "Stuck",
+      "next": "Now, needs your call"
+    },
+    {
+      "id": "outreach-wave-2",
+      "title": "Outreach, wave 2: retail",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "leadName": "Sender",
+      "state": "warn",
+      "stateWord": "Waits for Lea",
+      "next": "After Lea's check"
+    },
+    {
+      "id": "halden-offer",
+      "title": "Offer for Halden Freight Network",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "leadName": "Jonas",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your OK"
+    },
+    {
+      "id": "fenwick",
+      "title": "Fenwick customer story",
+      "topicId": "content",
+      "topicName": "Content",
+      "leadName": "Writer",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your OK"
+    },
+    {
+      "id": "sequence-b",
+      "title": "Sequence B, fintech ops",
+      "topicId": "outbound",
+      "topicName": "Outbound",
+      "leadName": "Sender",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your decision"
+    },
+    {
+      "id": "search-budget",
+      "title": "Search budget shift",
+      "topicId": "paid",
+      "topicName": "Paid",
+      "leadName": "Paid buyer",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your decision"
+    },
+    {
+      "id": "reply-handling",
+      "title": "Meetings from replies",
+      "topicId": "outbound",
+      "topicName": "Outbound",
+      "leadName": "Replies",
+      "state": "warn",
+      "stateWord": "Waits for Jonas",
+      "next": "Today, once Jonas answers"
+    },
+    {
+      "id": "brand-list",
+      "title": "200 brands that fit",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "leadName": "Brand scout",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Today, 18:00"
+    },
+    {
+      "id": "contact-data",
+      "title": "Who decides at each brand",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "leadName": "Contact finder",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Tomorrow, 08:00"
+    },
+    {
+      "id": "outreach-wave-1",
+      "title": "Outreach, wave 1",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "leadName": "Sender",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Wed 18 Nov"
+    },
+    {
+      "id": "partner-calls",
+      "title": "Partnership calls",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "leadName": "You",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Today, 16:00"
+    },
+    {
+      "id": "recap",
+      "title": "Webinar recap post",
+      "topicId": "content",
+      "topicName": "Content",
+      "leadName": "Writer",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Thu 19 Nov"
+    },
+    {
+      "id": "comparison-pages",
+      "title": "Comparison pages",
+      "topicId": "seo",
+      "topicName": "SEO",
+      "leadName": "SEO writer",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Today, 15:00"
+    },
+    {
+      "id": "webinar-reminders",
+      "title": "Webinar invites and reminder",
+      "topicId": "content",
+      "topicName": "Content",
+      "leadName": "Publisher",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Wed 18 Nov, 09:00"
+    },
+    {
+      "id": "logistics-round-2",
+      "title": "Logistics ops, round 2",
+      "topicId": "outbound",
+      "topicName": "Outbound",
+      "leadName": "Prospector",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Thu 19 Nov"
+    },
+    {
+      "id": "webinar-campaign",
+      "title": "Webinar sign-up campaign",
+      "topicId": "paid",
+      "topicName": "Paid",
+      "leadName": "Paid buyer",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "Thu 19 Nov, when it ends"
+    }
+  ],
+  "sharedResources": [
+    {
+      "name": "Your mail",
+      "icon": "mail",
+      "rule": "Wave 1 follow-ups and wave 2 share 40 sends a day; wave 1 goes first",
+      "lanes": 2
+    },
+    {
+      "name": "HubSpot",
+      "icon": "partner",
+      "rule": "Brand scout, Contact finder and Sender write to it, one at a time per brand",
+      "lanes": 3
+    },
+    {
+      "name": "The ad accounts",
+      "icon": "horn",
+      "rule": "Only Paid buyer changes them; Analyst reads",
+      "lanes": 2
+    }
+  ],
+  "asks": [
+    {
+      "id": "ask-retail",
+      "quote": "Retail first. Send wave 2 to the retail brands first.",
+      "when": "Today 08:30",
+      "chat": "in the Partnerships chat",
+      "went": "thread Outreach, wave 2 · Sender owns it",
+      "href": "#lane/outreach-wave-2"
+    },
+    {
+      "id": "ask-partners",
+      "quote": "Tom wants partnerships with big brands. Set it up; I lead it, Lea and Jonas help.",
+      "when": "Monday 19 October",
+      "chat": "Partnerships",
+      "went": "a topic of its own · you lead",
+      "href": "#topic/partnerships"
+    },
+    {
+      "id": "ask-budget",
+      "quote": "LinkedIn leads cost too much. Find where the budget works best and propose a shift.",
+      "when": "Friday 10:20",
+      "chat": "Paid",
+      "went": "lane Search budget shift · Paid buyer leads",
+      "href": "#lane/search-budget"
+    },
+    {
+      "id": "ask-webinar",
+      "quote": "Get the webinar promo out on Monday.",
+      "when": "Thursday 17:40",
+      "chat": "Content",
+      "went": "lane Webinar on Thursday · Visuals leads",
+      "href": "#lane/webinar"
+    },
+    {
+      "id": "ask-sequence",
+      "quote": "Start writing to fintech ops people once the pilot shows it works.",
+      "when": "Wednesday 09:05",
+      "chat": "Outbound",
+      "went": "lane Sequence B, fintech ops · Sender leads",
+      "href": "#lane/sequence-b"
+    }
+  ],
+  "since": [
+    "Partnerships: 1 instruction (wave 2 to retail first), 1 question answered in the topic.",
+    "Content: the promo is stuck; you decide in the topic.",
+    "No goal or priority changes wait for you."
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "id": "lane:comparison-pages",
+  "title": "Comparison pages",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "lane_comparison-pages-0",
+      "author": {
+        "id": "seo-writer",
+        "name": "SEO writer",
+        "shortName": "SEO",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "07:42",
+      "text": "Pages 1 and 2 are live. Each claim about the other tool links to their own public page.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

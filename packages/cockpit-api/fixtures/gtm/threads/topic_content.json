@@ -1,0 +1,164 @@
+{
+  "id": "topic:content",
+  "title": "Content",
+  "sub": "Mara and 3 agents · the Manager reads it, it is not in it",
+  "placeholder": "Message Content · its manager sorts it",
+  "reading": null,
+  "since": {
+    "seen": "yesterday at 18:20",
+    "lines": [
+      "Agents: 6 updates, the latest: Visuals asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3."
+    ]
+  },
+  "pinned": {
+    "title": "Webinar promo is stuck",
+    "detail": "2 of 6 pictures fail the brand check · post at 16:00",
+    "state": "stuck",
+    "decisionId": null,
+    "laneId": "webinar",
+    "approveLabel": null
+  },
+  "agents": {
+    "seen": "yesterday at 18:20",
+    "count": 6,
+    "summary": "Agents · 6 updates since yesterday at 18:20, nothing needs you",
+    "items": [
+      {
+        "time": "09:21",
+        "name": "Visuals",
+        "text": "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3"
+      },
+      {
+        "time": "09:13",
+        "name": "Publisher",
+        "text": "held the 16:00 promo post until the images are settled"
+      },
+      {
+        "time": "09:12",
+        "name": "Visuals",
+        "text": "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail"
+      },
+      {
+        "time": "08:00",
+        "name": "Publisher",
+        "text": "sent newsletter 46 to 4,200 readers, with the webinar on top"
+      },
+      {
+        "time": "07:30",
+        "name": "Writer",
+        "text": "started draft 2 of the recap post, aiming at 350 words"
+      },
+      {
+        "time": "17:00",
+        "name": "Publisher",
+        "text": "scheduled the reminder email for Wednesday 09:00"
+      }
+    ]
+  },
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "topic_content-0",
+      "author": {
+        "id": "visuals",
+        "name": "Visuals",
+        "shortName": "Visuals",
+        "kind": "agent",
+        "avatar": "V",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "09:12",
+      "text": "Round 3 is done. 4 images pass. Images 3 and 6 fail: the logo sits on a light photo. I am out of rounds, so I stopped.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_content-1",
+      "author": {
+        "id": "publisher",
+        "name": "Publisher",
+        "shortName": "Publisher",
+        "kind": "agent",
+        "avatar": "P",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "09:13",
+      "text": "I am holding the 16:00 post until this is settled.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_content-2",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "Can you darken the photo behind the logo instead of moving it?",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_content-3",
+      "author": {
+        "id": "visuals",
+        "name": "Visuals",
+        "shortName": "Visuals",
+        "kind": "agent",
+        "avatar": "V",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "09:21",
+      "text": "Yes. That is one more round, about 4 minutes and €0.60. It is over my limit of 3 rounds, so I need your OK.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [
+        {
+          "label": "Run one more round"
+        },
+        {
+          "label": "Post the 4"
+        }
+      ]
+    }
+  ]
+}

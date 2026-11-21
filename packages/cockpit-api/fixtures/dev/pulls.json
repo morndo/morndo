@@ -1,0 +1,171 @@
+{
+  "intro": "Everything your agents have open. A change merges only after its tests, a fresh review and green checks. Production always waits for you.",
+  "summary": "2 are ready and wait for you, 2 are in review, and 1 merges by itself at 09:00 because it only changes docs.",
+  "items": [
+    {
+      "id": "412",
+      "projectId": "api",
+      "projectName": "API",
+      "number": 412,
+      "author": "Builder",
+      "opened": "yesterday 17:20",
+      "title": "Write big exports in chunks",
+      "summary": "Fixes the export that times out for the 14 largest accounts.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "QA by hand",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        }
+      ],
+      "verdict": "Ready, yours to release",
+      "href": "#decision"
+    },
+    {
+      "id": "96",
+      "projectId": "billing",
+      "projectName": "Billing",
+      "number": 96,
+      "author": "Builder",
+      "opened": "Friday",
+      "title": "Tax rates per country",
+      "summary": "Adds the rates table and a migration that fills 48,000 invoices.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "QA by hand",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        }
+      ],
+      "verdict": "Ready, the migration waits for you",
+      "href": null
+    },
+    {
+      "id": "731",
+      "projectId": "web",
+      "projectName": "Web app",
+      "number": 731,
+      "author": "Builder",
+      "opened": "Saturday",
+      "title": "Shipment filters",
+      "summary": "Filter the shipment list by carrier, status and date.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "running",
+          "detail": "round 2"
+        },
+        {
+          "name": "QA by hand",
+          "state": "todo",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "fail",
+          "detail": null
+        }
+      ],
+      "verdict": "Blocked by red main",
+      "href": "#topic/web"
+    },
+    {
+      "id": "58",
+      "projectId": "mobile",
+      "projectName": "Mobile",
+      "number": 58,
+      "author": "Builder",
+      "opened": "today 06:10",
+      "title": "Keep scans made without a signal",
+      "summary": "Scans are stored on the phone and sent when it is online again.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "running",
+          "detail": "round 1"
+        },
+        {
+          "name": "QA by hand",
+          "state": "todo",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        }
+      ],
+      "verdict": "In review",
+      "href": null
+    },
+    {
+      "id": "413",
+      "projectId": "api",
+      "projectName": "API",
+      "number": 413,
+      "author": "Builder",
+      "opened": "today 06:55",
+      "title": "Document the export limits",
+      "summary": "Docs only: the new limits and how to ask for a bigger export.",
+      "gates": [
+        {
+          "name": "Fresh review",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "No tests needed",
+          "state": "skipped",
+          "detail": null
+        }
+      ],
+      "verdict": "Merges by itself at 09:00, docs only",
+      "href": null
+    }
+  ]
+}

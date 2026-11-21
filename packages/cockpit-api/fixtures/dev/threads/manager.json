@@ -1,0 +1,64 @@
+{
+  "id": "manager",
+  "title": "Manager",
+  "sub": "Your chief of staff. It knows every project and every lane.",
+  "placeholder": "Tell the Manager",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [
+    "Show what waits for me",
+    "What is parked, and why?"
+  ],
+  "messages": [
+    {
+      "id": "manager-0",
+      "author": {
+        "id": "timo-varga",
+        "name": "Timo Varga",
+        "shortName": "Timo",
+        "kind": "person",
+        "avatar": "T",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "What is still open on the Fenwick export?",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "manager-1",
+      "author": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "One thing: your OK to release it. The fix passed its tests, a fresh review and a run on Fenwick's own data on staging.\nIt is the lane Export for big accounts, in API. Release leads it and holds it until 14:00.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    }
+  ]
+}

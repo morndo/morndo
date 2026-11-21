@@ -1,0 +1,818 @@
+{
+  "id": "paid",
+  "name": "Paid",
+  "kind": "topic",
+  "icon": "horn",
+  "crumb": "Leads from ads",
+  "open": false,
+  "meta": {
+    "askedBy": "Asked by you",
+    "ownerLine": "Paid buyer leads",
+    "nextReport": "€4,000 a week",
+    "parts": [
+      "Asked by you",
+      "Paid buyer leads",
+      "€4,000 a week",
+      "Next report Mon 23 Nov"
+    ]
+  },
+  "intro": "€4,000 a week across LinkedIn and Google Search. The goal: 450 leads this quarter, at €100 or less each.",
+  "when": "Week 7 of 13",
+  "health": null,
+  "goal": {
+    "target": 450,
+    "signed": 214,
+    "likely": 216,
+    "unit": "Leads",
+    "verdict": {
+      "state": "warn",
+      "word": "Over cost",
+      "action": "Decide by 14:00",
+      "text": "The count is on plan; the cost is not. Search brings a lead for €80, LinkedIn for €200."
+    },
+    "insight": "The count is on plan; the cost is not. Search brings a lead for €80, LinkedIn for €200.",
+    "asOf": "updated 07:05, forecast unchanged since Friday · agents €9 of €30 this week",
+    "decision": {
+      "title": "Move €1,200 a week to Search",
+      "detail": "Due today, 14:00 · a lead costs more than its guardrail",
+      "done": "Shift approved",
+      "why": null,
+      "decisionId": "d1",
+      "laneId": "search-budget",
+      "approveLabel": "Approve the shift"
+    },
+    "calm": null,
+    "calmSub": null,
+    "trajectory": {
+      "start": "2026-10-01",
+      "days": 91,
+      "now": 46,
+      "goal": 450,
+      "step": 100,
+      "unit": "Leads",
+      "key": "Leads",
+      "ticks": [
+        {
+          "day": 0,
+          "label": "1 Oct"
+        },
+        {
+          "day": 46,
+          "label": "Today"
+        },
+        {
+          "day": 61,
+          "label": "1 Dec"
+        },
+        {
+          "day": 91,
+          "label": "31 Dec"
+        }
+      ],
+      "plan": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 7,
+          "value": 35
+        },
+        {
+          "day": 14,
+          "value": 70
+        },
+        {
+          "day": 21,
+          "value": 105
+        },
+        {
+          "day": 28,
+          "value": 140
+        },
+        {
+          "day": 35,
+          "value": 175
+        },
+        {
+          "day": 42,
+          "value": 210
+        },
+        {
+          "day": 49,
+          "value": 245
+        },
+        {
+          "day": 56,
+          "value": 280
+        },
+        {
+          "day": 63,
+          "value": 315
+        },
+        {
+          "day": 70,
+          "value": 350
+        },
+        {
+          "day": 77,
+          "value": 385
+        },
+        {
+          "day": 84,
+          "value": 420
+        },
+        {
+          "day": 91,
+          "value": 450
+        }
+      ],
+      "actual": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 7,
+          "value": 30
+        },
+        {
+          "day": 14,
+          "value": 62
+        },
+        {
+          "day": 21,
+          "value": 95
+        },
+        {
+          "day": 28,
+          "value": 128
+        },
+        {
+          "day": 35,
+          "value": 160
+        },
+        {
+          "day": 42,
+          "value": 190
+        },
+        {
+          "day": 46,
+          "value": 214
+        }
+      ],
+      "expected": [
+        {
+          "day": 46,
+          "value": 214
+        },
+        {
+          "day": 53,
+          "value": 247
+        },
+        {
+          "day": 60,
+          "value": 280
+        },
+        {
+          "day": 67,
+          "value": 313
+        },
+        {
+          "day": 74,
+          "value": 346
+        },
+        {
+          "day": 81,
+          "value": 379
+        },
+        {
+          "day": 88,
+          "value": 412
+        },
+        {
+          "day": 91,
+          "value": 430
+        }
+      ],
+      "low": [
+        {
+          "day": 46,
+          "value": 214
+        },
+        {
+          "day": 60,
+          "value": 270
+        },
+        {
+          "day": 74,
+          "value": 326
+        },
+        {
+          "day": 91,
+          "value": 395
+        }
+      ],
+      "high": [
+        {
+          "day": 46,
+          "value": 214
+        },
+        {
+          "day": 60,
+          "value": 290
+        },
+        {
+          "day": 74,
+          "value": 370
+        },
+        {
+          "day": 91,
+          "value": 470
+        }
+      ],
+      "noForecast": null,
+      "title": "Forecast vs goal"
+    },
+    "milestones": [],
+    "rows": {
+      "title": "Where the leads come from",
+      "sub": "Each channel · last 14 days · cost per lead"
+    },
+    "deals": [
+      {
+        "name": "Google Search",
+        "confidence": "€80 a lead",
+        "close": null,
+        "at": null,
+        "stage": "Two campaigns, €1,600 a week",
+        "short": "Cheapest; €1,200 more waits for you",
+        "laneId": "search-budget",
+        "href": "#lane/search-budget",
+        "evidence": "40 leads for €3,200 in the last 14 days, and €86 a lead in the 14 days before. 35% of them took a sales call.",
+        "next": "your decision by 14:00.",
+        "value": "40 leads",
+        "alt": {
+          "decisionId": "d1",
+          "stage": "Two campaigns, €2,800 a week",
+          "short": "Gets €1,200 more a week from today",
+          "next": null
+        }
+      },
+      {
+        "name": "LinkedIn, always on",
+        "confidence": "€200 a lead",
+        "close": null,
+        "at": null,
+        "stage": "€2,400 a week",
+        "short": "Costly; the shift cuts it to retargeting",
+        "laneId": "search-budget",
+        "href": "#lane/search-budget",
+        "evidence": "24 leads for €4,800 in the last 14 days. 25% took a sales call.",
+        "next": "cut to the retargeting audience, after your decision.",
+        "value": "24 leads",
+        "alt": {
+          "decisionId": "d1",
+          "stage": "€1,200 a week",
+          "short": "Cut to retargeting, €1,200 a week",
+          "next": null
+        }
+      },
+      {
+        "name": "Webinar campaign",
+        "confidence": "€36 a lead",
+        "close": null,
+        "at": null,
+        "stage": "Its own €400, ends Thursday",
+        "short": "Ends Thursday",
+        "laneId": "webinar-campaign",
+        "href": "#lane/webinar-campaign",
+        "evidence": "11 sign-ups counted as leads for €400 in 7 days. They are cheap because they are sign-ups, not sales leads; only 2 took a call last time.",
+        "next": null,
+        "value": "11 leads",
+        "alt": null
+      }
+    ],
+    "guardrails": {
+      "sub": "What the leads must not cost",
+      "items": [
+        {
+          "what": "Cost per lead",
+          "value": "€114",
+          "limit": "limit €100",
+          "ratio": 1.14
+        },
+        {
+          "what": "Weekly spend",
+          "value": "€3,640",
+          "limit": "limit €4,000",
+          "ratio": 0.91
+        },
+        {
+          "what": "Changes over €500 without you",
+          "value": "0",
+          "limit": "none allowed",
+          "ratio": null
+        },
+        {
+          "what": "Customer data in ads",
+          "value": "none",
+          "limit": "never",
+          "ratio": null
+        }
+      ]
+    },
+    "ladder": [
+      {
+        "word": "Forecast",
+        "fact": "Each channel's last 14 days, held flat to 31 December."
+      },
+      {
+        "word": "Range",
+        "fact": "A lead 15% cheaper or dearer than now."
+      }
+    ],
+    "calibration": "October was forecast at 140 leads on 1 October; it came in at 132.",
+    "outside": null,
+    "gap": {
+      "says": "To bring a lead under €100 by December:",
+      "steps": [
+        "Move €1,200 a week from LinkedIn to Search today. At the last 14 days' rates a lead then costs about €98.",
+        "Write 3 new Search ads for the extra budget by Tuesday.",
+        "If a Search lead costs more than €110 for 5 days in a row, Paid buyer moves the money back and tells you."
+      ]
+    },
+    "blockers": [
+      {
+        "state": "warn",
+        "short": "a lead costs €114 against the €100 guardrail",
+        "what": null,
+        "why": null,
+        "who": "Paid buyer",
+        "href": "#lane/search-budget",
+        "laneId": "search-budget"
+      },
+      {
+        "state": "warn",
+        "short": "3 Search ads wait for the shift",
+        "what": null,
+        "why": null,
+        "who": "Writer",
+        "href": "#lane/search-budget",
+        "laneId": "search-budget"
+      }
+    ],
+    "routine": null,
+    "funnel": {
+      "title": "Funnel",
+      "since": "Since 1 October · change this week · rate against the plan",
+      "steps": [
+        {
+          "count": "6,480",
+          "what": "clicks",
+          "change": "+910",
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": "214",
+          "what": "leads",
+          "change": "+32",
+          "rate": "3.3% · plan 3%",
+          "state": null
+        },
+        {
+          "count": "64",
+          "what": "took a call",
+          "change": "+10",
+          "rate": "30% · plan 30%",
+          "state": null
+        },
+        {
+          "count": "38",
+          "what": "qualified",
+          "change": "+6",
+          "rate": "59% · plan 60%",
+          "state": null
+        },
+        {
+          "count": "4",
+          "what": "won",
+          "change": null,
+          "rate": "plan 6 by 31 Dec",
+          "state": "warn"
+        }
+      ]
+    },
+    "restSub": null,
+    "figures": [
+      {
+        "value": "214",
+        "of": "450",
+        "label": "Leads since 1 October"
+      },
+      {
+        "value": "216",
+        "of": null,
+        "label": "More forecast"
+      },
+      {
+        "value": "20",
+        "of": null,
+        "label": "Still missing"
+      }
+    ],
+    "pathTitle": null
+  },
+  "noGoal": null,
+  "facts": [
+    {
+      "value": "€3,640",
+      "label": "spent of €4,000 this week"
+    },
+    {
+      "value": "32",
+      "label": "leads this week"
+    },
+    {
+      "value": "€114",
+      "label": "average cost per lead"
+    },
+    {
+      "value": "3",
+      "label": "ads switched off today"
+    }
+  ],
+  "plan": null,
+  "focusLaneId": "search-budget",
+  "history": {
+    "seen": "yesterday at 18:20",
+    "shown": 2,
+    "since": "That is everything since the quarter began on 1 October.",
+    "days": [
+      {
+        "label": "Today",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "08:30",
+            "actor": {
+              "id": "paid-buyer",
+              "name": "Paid buyer",
+              "shortName": "Paid",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "switched off 3 ads below the click floor of 0.6%; they cost €140 last week and brought no lead",
+            "laneId": "click-floor",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": true,
+            "count": 3,
+            "samples": [
+              "LinkedIn · Ops debt checklist, image 2 · 0.31%",
+              "LinkedIn · Webinar teaser · 0.44%",
+              "Search · Freight software, broad · 0.52%"
+            ],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "08:10",
+            "actor": {
+              "id": "analyst",
+              "name": "Analyst",
+              "shortName": "Analyst",
+              "kind": "agent",
+              "avatar": "A",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "checked every running ad against the click floor",
+            "laneId": "click-floor",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "07:20",
+            "actor": {
+              "id": "paid-buyer",
+              "name": "Paid buyer",
+              "shortName": "Paid",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "answered: Search has been cheaper for a month, €86 a lead the 14 days before",
+            "laneId": "search-budget",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "07:05",
+            "actor": {
+              "id": "paid-buyer",
+              "name": "Paid buyer",
+              "shortName": "Paid",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "wrote the decision brief with the best and the worst case and put it in Decide",
+            "laneId": "search-budget",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Yesterday",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "18:30",
+            "actor": {
+              "id": "paid-buyer",
+              "name": "Paid buyer",
+              "shortName": "Paid",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "kept the webinar campaign at its own €400 for the last 4 days",
+            "laneId": "webinar-campaign",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "seen"
+          }
+        ]
+      },
+      {
+        "label": "Saturday, 14 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "10:15",
+            "actor": {
+              "id": "analyst",
+              "name": "Analyst",
+              "shortName": "Analyst",
+              "kind": "agent",
+              "avatar": "A",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "pulled 14 days of spend and leads and matched them against both ad accounts",
+            "laneId": "search-budget",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      },
+      {
+        "label": "Friday, 13 November",
+        "entries": [
+          {
+            "kind": "event",
+            "time": "10:20",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "asked where the budget works best, and for a proposal to shift it",
+            "laneId": "search-budget",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          },
+          {
+            "kind": "event",
+            "time": "09:00",
+            "actor": {
+              "id": "paid-buyer",
+              "name": "Paid buyer",
+              "shortName": "Paid",
+              "kind": "agent",
+              "avatar": "B",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "started the webinar sign-up campaign on LinkedIn, €400 in all",
+            "laneId": "webinar-campaign",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null
+          }
+        ]
+      }
+    ]
+  },
+  "crew": [
+    {
+      "id": "mara-lind",
+      "name": "Mara Lind",
+      "shortName": "Mara",
+      "kind": "person",
+      "avatar": "M",
+      "role": "Head of GTM",
+      "state": "warn",
+      "word": "Owns it",
+      "text": "Decides any change over €500",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "paid-buyer",
+      "name": "Paid buyer",
+      "shortName": "Paid",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "warn",
+      "word": "Waiting",
+      "text": "Holds the shift until you decide",
+      "skill": "/decision-brief",
+      "engine": "Claude",
+      "record": "4 of 4 budget calls held up two weeks later"
+    },
+    {
+      "id": "analyst",
+      "name": "Analyst",
+      "shortName": "Analyst",
+      "kind": "agent",
+      "avatar": "A",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Checked 14 days of spend against the ad accounts",
+      "skill": "/weekly-summary",
+      "engine": "Claude",
+      "record": "Numbers matched the ad accounts 7 of 7 weeks"
+    },
+    {
+      "id": "writer",
+      "name": "Writer",
+      "shortName": "Writer",
+      "kind": "agent",
+      "avatar": "W",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "3 new Search ads, once you say yes",
+      "skill": "/ad-variants",
+      "engine": "GPT",
+      "record": "9 of 12 ads stayed above the click floor"
+    }
+  ],
+  "jobs": [
+    {
+      "job": "Move €1,200 a week to Search",
+      "agent": "Paid buyer",
+      "state": "warn",
+      "due": "Today, 14:00",
+      "laneId": "search-budget"
+    },
+    {
+      "job": "Webinar sign-up campaign",
+      "agent": "Paid buyer",
+      "state": "ok",
+      "due": "Ends Thu 19 Nov",
+      "laneId": "webinar-campaign"
+    },
+    {
+      "job": "Switch off ads below the click floor",
+      "agent": "Paid buyer",
+      "state": "done",
+      "due": "Today, 08:30",
+      "laneId": "click-floor"
+    },
+    {
+      "job": "3 new Search ads",
+      "agent": "Writer",
+      "state": "next",
+      "due": "After your decision",
+      "laneId": null
+    },
+    {
+      "job": "Weekly spend report",
+      "agent": "Analyst",
+      "state": "next",
+      "due": "Mon 23 Nov",
+      "laneId": null
+    }
+  ],
+  "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",
+  "lanes": [
+    {
+      "id": "search-budget",
+      "title": "Search budget shift",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "leadName": "Paid buyer",
+      "next": "After your decision"
+    },
+    {
+      "id": "webinar-campaign",
+      "title": "Webinar sign-up campaign",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Paid buyer",
+      "next": "Thu 19 Nov, when it ends"
+    },
+    {
+      "id": "click-floor",
+      "title": "Ads below the click floor",
+      "state": "done",
+      "stateWord": "Done",
+      "leadName": "Paid buyer",
+      "next": "closed today, 08:30"
+    }
+  ],
+  "spend": {
+    "spent": 9,
+    "cap": 30
+  },
+  "stuck": null,
+  "tasks": []
+}

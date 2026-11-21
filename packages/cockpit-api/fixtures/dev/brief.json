@@ -1,0 +1,174 @@
+{
+  "date": "16 Nov 2026",
+  "time": "07:15 AM",
+  "title": "The Monday Brief",
+  "lede": "Three decisions need you and main is red in the web app. Everything else was built, reviewed and shipped while you slept.",
+  "nextBriefAt": "13:00",
+  "cadence": "Next brief at 13:00. Until then you hear only about what cannot wait.",
+  "spend": {
+    "overnight": 0,
+    "week": 0,
+    "cap": 0
+  },
+  "topics": [
+    {
+      "id": "web",
+      "name": "Web app",
+      "state": "bad",
+      "verdict": "Stuck",
+      "progress": "This week: the shipment filters, the new sign-in and the dependency updates.",
+      "spend": 0
+    },
+    {
+      "id": "api",
+      "name": "API",
+      "state": "warn",
+      "verdict": "Needs you",
+      "progress": "Exports, reviews and releases.",
+      "spend": 0
+    },
+    {
+      "id": "billing",
+      "name": "Billing",
+      "state": "warn",
+      "verdict": "Needs you",
+      "progress": "Invoices, tax rates and migrations.",
+      "spend": 0
+    },
+    {
+      "id": "mobile",
+      "name": "Mobile",
+      "state": "ok",
+      "verdict": "Working",
+      "progress": "The phone app.",
+      "spend": 0
+    },
+    {
+      "id": "infra",
+      "name": "Infra",
+      "state": "idle",
+      "verdict": "Idle",
+      "progress": "Servers, certificates and deploys.",
+      "spend": 0
+    }
+  ],
+  "decisions": [
+    {
+      "id": "d1",
+      "topicId": "api",
+      "topicName": "API",
+      "due": "Due today, 14:00",
+      "whyYours": "",
+      "title": "Release the fix for exports that time out",
+      "context": "Exports fail for the 14 largest accounts. The fix passed its tests, a fresh review and a run on staging. Rolling back takes 2 minutes.",
+      "minutes": 3,
+      "doneNote": "Approved. The Release lane rolls out at 22:00 and watches for 30 minutes.",
+      "laneId": "export-for-big-accounts",
+      "state": "open"
+    },
+    {
+      "id": "d2",
+      "topicId": "billing",
+      "topicName": "Billing",
+      "due": "Due tomorrow",
+      "whyYours": "",
+      "title": "Run the tax-rate migration on the production database",
+      "context": "It adds 2 columns and fills 48,000 invoices. A backup comes first. The dry run on a copy took 41 seconds.",
+      "minutes": 2,
+      "doneNote": "Approved. The migration runs tonight at 23:00, after the backup.",
+      "laneId": "tax-rates",
+      "state": "open"
+    },
+    {
+      "id": "d3",
+      "topicId": "web",
+      "topicName": "Web app",
+      "due": "Due Wednesday",
+      "whyYours": "",
+      "title": "Choose the new sign-in: passkeys or a link by email",
+      "context": "Both are built behind a switch and passed QA. Passkeys take 2 screens, the email link takes 4. The lane suggests passkeys.",
+      "minutes": 3,
+      "doneNote": "Approved. Passkeys go to staging today, with the email link as the fallback.",
+      "laneId": "new-sign-in",
+      "state": "open"
+    }
+  ],
+  "openCount": 3,
+  "minutes": 8,
+  "burns": [
+    {
+      "topicId": "web",
+      "topicName": "Web app",
+      "since": "Red since 06:40",
+      "deadline": "Blocks the shipment filters",
+      "title": "Main is red in the web app",
+      "detail": "The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit.",
+      "href": "#topic/web"
+    }
+  ],
+  "overnight": [
+    {
+      "id": "o1",
+      "topicId": "api",
+      "topicName": "API",
+      "laneId": null,
+      "text": "API released the rate-limit fix after its review. The check on production passed.",
+      "time": "23:12",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o2",
+      "topicId": "billing",
+      "topicName": "Billing",
+      "laneId": null,
+      "text": "Billing merged the invoice rounding fix after 2 review rounds.",
+      "time": "01:40",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o3",
+      "topicId": "web",
+      "topicName": "Web app",
+      "laneId": null,
+      "text": "Web app updated 6 dependencies and held 1 back because its tests failed.",
+      "time": "03:05",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o4",
+      "topicId": "infra",
+      "topicName": "Infra",
+      "laneId": null,
+      "text": "Infra renewed the staging certificate, 12 days before it ran out.",
+      "time": "04:30",
+      "undoable": true,
+      "undone": false
+    },
+    {
+      "id": "o5",
+      "topicId": "mobile",
+      "topicName": "Mobile",
+      "laneId": null,
+      "text": "Mobile deleted 4 branches that were already merged.",
+      "time": "05:15",
+      "undoable": true,
+      "undone": false
+    }
+  ],
+  "drafts": {
+    "count": 0,
+    "text": "5 pull requests are open",
+    "detail": "2 are ready and wait for you, 2 are in review, and 1 merges by itself at 09:00 because it only changes docs."
+  },
+  "artwork": {
+    "index": 13,
+    "total": 14,
+    "title": "The Muses at sunrise",
+    "manner": "early Renaissance frescoes",
+    "alt": "The Muses rest on a hillside at sunrise, their lyres laid in the grass and a finished scroll tied with a ribbon.",
+    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes"
+  }
+}

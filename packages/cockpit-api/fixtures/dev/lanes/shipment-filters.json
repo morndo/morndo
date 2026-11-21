@@ -1,0 +1,80 @@
+{
+  "id": "shipment-filters",
+  "topicId": "web",
+  "title": "Shipment filters",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "reviewer",
+    "name": "Reviewer",
+    "shortName": "Reviewer",
+    "kind": "agent",
+    "avatar": "R",
+    "role": null,
+    "state": "ok",
+    "word": "Working",
+    "text": "Shipment filters, review round 2",
+    "skill": "/review",
+    "engine": "Codex",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened Saturday",
+  "closed": null,
+  "next": "Today, 11:30",
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Filter the shipment list by carrier, status and date.",
+  "askedMeta": {
+    "source": "You to the Manager, Saturday",
+    "note": "The Manager filed it under Web app and named Reviewer to lead."
+  },
+  "status": "Review round 2. QA is holding the walk-through for a green main.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "Review round 2. QA is holding the walk-through for a green main."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "now",
+      "text": "Fresh review, round 2",
+      "who": "Reviewer · today 11:30"
+    },
+    {
+      "kind": "todo",
+      "text": "QA walk-through, once main is green",
+      "who": "QA"
+    }
+  ],
+  "doneNote": "Done means all 2. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "reviewer",
+      "name": "Reviewer",
+      "shortName": "Reviewer",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Shipment filters, review round 2",
+      "skill": "/review",
+      "engine": "Codex",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false
+}

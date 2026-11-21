@@ -1,0 +1,127 @@
+{
+  "id": "outreach-wave-1",
+  "topicId": "partnerships",
+  "title": "Outreach, wave 1",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "sender",
+    "name": "Sender",
+    "shortName": "Sender",
+    "kind": "agent",
+    "avatar": "S",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "Follow-ups",
+    "skill": "/outbound-sequence",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened 6 Nov",
+  "closed": null,
+  "next": "Wed 18 Nov",
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Write to the first 52 brands. Personal, from Mara's mail, no templates you can smell.",
+  "askedMeta": {
+    "source": "You to the Manager, 6 November",
+    "note": "Sender leads; Lea approved every email before it went out."
+  },
+  "status": "52 sent, 11 replies, 5 calls booked. Follow-ups are going out to the rest: 38 of 52 done.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "52 sent, 11 replies, 5 calls booked. Follow-ups are going out to the rest: 38 of 52 done."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "52 personal emails, approved by Lea",
+      "who": "Lea · 9 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Sent from your mail, 20 a day",
+      "who": "Sender · 11 Nov"
+    },
+    {
+      "kind": "now",
+      "text": "One follow-up to everyone without a reply",
+      "who": "Sender · 38 of 52"
+    },
+    {
+      "kind": "todo",
+      "text": "Replies turned into calls",
+      "who": "Sender · Wed"
+    }
+  ],
+  "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "sender",
+      "name": "Sender",
+      "shortName": "Sender",
+      "kind": "agent",
+      "avatar": "S",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "Follow-ups",
+      "skill": "/outbound-sequence",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "lea-brandt",
+      "name": "Lea Brandt",
+      "shortName": "Lea",
+      "kind": "person",
+      "avatar": "L",
+      "role": "GTM associate",
+      "state": "done",
+      "word": "Approved",
+      "text": "All 52 emails",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "The 52 emails",
+      "detail": "Each with one line about the brand",
+      "href": null
+    },
+    {
+      "icon": "file",
+      "title": "Replies",
+      "detail": "11: 5 calls, 4 later, 2 no",
+      "href": null
+    }
+  ],
+  "handover": {
+    "when": "Yesterday 21:10",
+    "match": true,
+    "why": "Sender's conversation had grown long, so it started a fresh one.",
+    "state": "52 sent, 11 replies, 5 calls booked; follow-ups 20 of 52 done.",
+    "open": "Follow-ups to the 32 brands without a reply; reminders for the 4 that want January.",
+    "risk": "A brand that already replied gets a follow-up.",
+    "ifSo": "Stop the sequence for that brand and apologise from your mail the same day.",
+    "restated": "“Follow up the 32 without a reply, never one that replied; January reminders for 4.”",
+    "fixed": null
+  },
+  "fresh": false
+}

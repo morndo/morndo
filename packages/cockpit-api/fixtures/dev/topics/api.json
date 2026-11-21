@@ -1,0 +1,74 @@
+{
+  "id": "api",
+  "name": "API",
+  "kind": "project",
+  "icon": "braces",
+  "crumb": "Exports",
+  "open": false,
+  "meta": null,
+  "intro": "Exports, reviews and releases.",
+  "when": null,
+  "health": {
+    "state": "warn",
+    "word": "Needs you"
+  },
+  "goal": null,
+  "noGoal": null,
+  "facts": [],
+  "plan": null,
+  "focusLaneId": null,
+  "history": null,
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Writes the fixes",
+      "skill": "/fix-with-proof",
+      "engine": "Claude Code",
+      "record": null
+    },
+    {
+      "id": "release",
+      "name": "Release",
+      "shortName": "Release",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "warn",
+      "word": "Needs you",
+      "text": "Holds the export release",
+      "skill": "/release",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "jobs": [],
+  "chatSub": "You, Builder and Release.",
+  "lanes": [
+    {
+      "id": "export-for-big-accounts",
+      "title": "Export for big accounts",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "leadName": "Release",
+      "next": "After your decision"
+    },
+    {
+      "id": "export-limits-docs",
+      "title": "Export limits in the docs",
+      "state": "next",
+      "stateWord": "Merges by itself at 09:00",
+      "leadName": "Builder",
+      "next": "09:00"
+    }
+  ],
+  "spend": null,
+  "stuck": null,
+  "tasks": []
+}

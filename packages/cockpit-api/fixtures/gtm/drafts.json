@@ -1,0 +1,38 @@
+{
+  "intro": "Morndo wrote these from this morning's work. They sit in your mail as drafts. Nothing is sent until you send it.",
+  "count": 4,
+  "items": [
+    {
+      "id": "team",
+      "to": "To the team",
+      "written": "written 07:15 with /weekly-summary",
+      "skill": "weekly-summary",
+      "subject": "Week 47: what moved and what needs you",
+      "body": "Search now brings leads at €80, LinkedIn at €200. Sequence A is done, B is ready to start. The webinar is on Thursday and the promo goes out today."
+    },
+    {
+      "id": "board",
+      "to": "To the board",
+      "written": "written 07:15",
+      "skill": null,
+      "subject": "Pipeline note for November",
+      "body": "20 sales calls in the last 14 days, 10 a week. One budget change is waiting for approval that could lift this to 14 a week."
+    },
+    {
+      "id": "fenwick",
+      "to": "To Fenwick Freight",
+      "written": "written 08:10",
+      "skill": null,
+      "subject": "Re: your quote in our customer story",
+      "body": "Thank you for signing off the quote. Here is the final text. We plan to publish on Wednesday if the last number is confirmed."
+    },
+    {
+      "id": "guest",
+      "to": "To a webinar guest",
+      "written": "written 08:40",
+      "skill": null,
+      "subject": "Re: can I get the slides afterwards?",
+      "body": "Yes. Everyone who signs up gets the recording and the slides on Friday morning."
+    }
+  ]
+}

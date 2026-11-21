@@ -1,0 +1,71 @@
+{
+  "briefsPerDay": 3,
+  "interruptOnlyUrgent": true,
+  "decisionRights": [
+    {
+      "rule": "inYourName",
+      "title": "It goes out in your name",
+      "detail": "An email, an offer, a post, a release",
+      "who": "you",
+      "dailyLimit": null,
+      "risky": true
+    },
+    {
+      "rule": "hardToUndo",
+      "title": "It is hard to undo",
+      "detail": "A signed term, a published claim, a deleted record",
+      "who": "you",
+      "dailyLimit": null,
+      "risky": true
+    },
+    {
+      "rule": "onlyYouKnow",
+      "title": "It rests on what only you know",
+      "detail": "A call you held, a relationship, a promise",
+      "who": "you",
+      "dailyLimit": null,
+      "risky": true
+    },
+    {
+      "rule": "insideGuardrails",
+      "title": "It stays inside the guardrails and can be undone",
+      "detail": "A paused ad, a list, a draft, a reminder",
+      "who": "agent",
+      "dailyLimit": null,
+      "risky": false
+    },
+    {
+      "rule": "overWeeklyCap",
+      "title": "It spends more than a topic's weekly cap on agents",
+      "detail": "Model and tool costs; the agents pause at the cap and ask",
+      "who": "you",
+      "dailyLimit": null,
+      "risky": true
+    }
+  ],
+  "theme": {
+    "id": "ink",
+    "name": "Ink",
+    "strength": 55,
+    "glass": 25
+  },
+  "chatMode": "floating",
+  "layout": {
+    "sidebarWidth": 236,
+    "chatWidth": 380
+  },
+  "modules": [
+    {
+      "id": "gtm",
+      "name": "Go-to-market",
+      "summary": "Content, outbound, paid, SEO and research",
+      "here": true
+    },
+    {
+      "id": "dev",
+      "name": "Development",
+      "summary": "Projects, pull requests, reviews and releases",
+      "here": false
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "id": "decision:d3",
+  "title": "Choose the new sign-in: passkeys or a link by email",
+  "sub": null,
+  "placeholder": "Ask about this decision",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": []
+}

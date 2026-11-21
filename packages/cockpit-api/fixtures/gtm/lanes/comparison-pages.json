@@ -1,0 +1,128 @@
+{
+  "id": "comparison-pages",
+  "topicId": "seo",
+  "title": "Comparison pages",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "seo-writer",
+    "name": "SEO writer",
+    "shortName": "SEO",
+    "kind": "agent",
+    "avatar": "S",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "Page 3 of 5",
+    "skill": "/seo-page",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened 2 Nov",
+  "closed": null,
+  "next": "Today, 15:00",
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Write comparison pages against the three tools we lose deals to. Fair, no cheap shots.",
+  "askedMeta": {
+    "source": "You to the Manager, Monday 2 November",
+    "note": "The Manager filed it under SEO and named SEO writer to lead."
+  },
+  "status": "Pages 1 and 2 are live since 07:42. Page 3 is half written and goes to the checker at 15:00.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "Pages 1 and 2 are live since 07:42. Page 3 is half written and goes to the checker at 15:00."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Outlines for 5 pages, approved by you",
+      "who": "You · Friday"
+    },
+    {
+      "kind": "ok",
+      "text": "Pages 1 and 2 live",
+      "who": "SEO writer · today, 07:42"
+    },
+    {
+      "kind": "now",
+      "text": "Page 3 written and checked",
+      "who": "SEO writer · today, 15:00"
+    },
+    {
+      "kind": "todo",
+      "text": "Pages 4 and 5 live",
+      "who": "SEO writer · Fri 20 Nov"
+    },
+    {
+      "kind": "todo",
+      "text": "Rankings checked after two weeks",
+      "who": "Checker · Mon 30 Nov"
+    }
+  ],
+  "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "seo-writer",
+      "name": "SEO writer",
+      "shortName": "SEO",
+      "kind": "agent",
+      "avatar": "S",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "Page 3 of 5",
+      "skill": "/seo-page",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "checker",
+      "name": "Checker",
+      "shortName": "Checker",
+      "kind": "agent",
+      "avatar": "C",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Checks every claim against a public source",
+      "skill": "/fact-check",
+      "engine": "GPT",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Page 1: Tidewell or Quaywright",
+      "detail": "Live since 07:42",
+      "href": null
+    },
+    {
+      "icon": "file",
+      "title": "Page 2: Tidewell or Dockmere",
+      "detail": "Live since 07:42",
+      "href": null
+    },
+    {
+      "icon": "file",
+      "title": "Outlines for all 5",
+      "detail": "Approved Friday",
+      "href": null
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

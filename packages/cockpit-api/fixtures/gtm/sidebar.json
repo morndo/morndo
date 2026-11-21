@@ -1,0 +1,427 @@
+{
+  "kindWord": "Topic",
+  "groups": [
+    {
+      "id": "partnerships",
+      "name": "Partnerships",
+      "kind": "topic",
+      "icon": "partner",
+      "stateWord": "Needs you",
+      "mark": "warn",
+      "open": true,
+      "lanes": [
+        {
+          "id": "outreach-wave-2",
+          "title": "Outreach, wave 2: retail",
+          "state": "warn",
+          "stateWord": "Waits for Lea",
+          "leadName": "Sender"
+        },
+        {
+          "id": "halden-offer",
+          "title": "Offer for Halden Freight Network",
+          "state": "warn",
+          "stateWord": "Needs you",
+          "leadName": "Jonas"
+        },
+        {
+          "id": "brand-list",
+          "title": "200 brands that fit",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Brand scout"
+        },
+        {
+          "id": "contact-data",
+          "title": "Who decides at each brand",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Contact finder"
+        },
+        {
+          "id": "outreach-wave-1",
+          "title": "Outreach, wave 1",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Sender"
+        },
+        {
+          "id": "partner-calls",
+          "title": "Partnership calls",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "You"
+        }
+      ]
+    },
+    {
+      "id": "content",
+      "name": "Content",
+      "kind": "topic",
+      "icon": "pen",
+      "stateWord": "Stuck",
+      "mark": "bad",
+      "open": false,
+      "lanes": [
+        {
+          "id": "webinar",
+          "title": "Webinar on Thursday",
+          "state": "bad",
+          "stateWord": "Stuck",
+          "leadName": "Visuals"
+        },
+        {
+          "id": "fenwick",
+          "title": "Fenwick customer story",
+          "state": "warn",
+          "stateWord": "Needs you",
+          "leadName": "Writer"
+        },
+        {
+          "id": "recap",
+          "title": "Webinar recap post",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Writer"
+        },
+        {
+          "id": "webinar-reminders",
+          "title": "Webinar invites and reminder",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Publisher"
+        }
+      ]
+    },
+    {
+      "id": "outbound",
+      "name": "Outbound",
+      "kind": "topic",
+      "icon": "send",
+      "stateWord": "Needs you",
+      "mark": "warn",
+      "open": false,
+      "lanes": [
+        {
+          "id": "sequence-b",
+          "title": "Sequence B, fintech ops",
+          "state": "warn",
+          "stateWord": "Needs you",
+          "leadName": "Sender"
+        },
+        {
+          "id": "reply-handling",
+          "title": "Meetings from replies",
+          "state": "warn",
+          "stateWord": "Waits for Jonas",
+          "leadName": "Replies"
+        },
+        {
+          "id": "logistics-round-2",
+          "title": "Logistics ops, round 2",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Prospector"
+        }
+      ]
+    },
+    {
+      "id": "paid",
+      "name": "Paid",
+      "kind": "topic",
+      "icon": "horn",
+      "stateWord": "Needs you",
+      "mark": "warn",
+      "open": false,
+      "lanes": [
+        {
+          "id": "search-budget",
+          "title": "Search budget shift",
+          "state": "warn",
+          "stateWord": "Needs you",
+          "leadName": "Paid buyer"
+        },
+        {
+          "id": "webinar-campaign",
+          "title": "Webinar sign-up campaign",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Paid buyer"
+        }
+      ]
+    },
+    {
+      "id": "seo",
+      "name": "SEO",
+      "kind": "topic",
+      "icon": "search",
+      "stateWord": "Working",
+      "mark": "ok",
+      "open": false,
+      "lanes": [
+        {
+          "id": "comparison-pages",
+          "title": "Comparison pages",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "SEO writer"
+        }
+      ]
+    },
+    {
+      "id": "research",
+      "name": "Research",
+      "kind": "topic",
+      "icon": "target",
+      "stateWord": "Idle",
+      "mark": null,
+      "open": false,
+      "lanes": []
+    }
+  ],
+  "managerLanes": [],
+  "pins": [
+    {
+      "id": "t-brief",
+      "kind": "page",
+      "label": "Brief",
+      "name": null,
+      "note": null,
+      "icon": "sun",
+      "href": "#brief",
+      "run": null,
+      "badge": false,
+      "pinned": true
+    },
+    {
+      "id": "t-decide",
+      "kind": "page",
+      "label": "Decide",
+      "name": null,
+      "note": null,
+      "icon": "decide",
+      "href": "#decision",
+      "run": null,
+      "badge": true,
+      "pinned": true
+    },
+    {
+      "id": "t-drafts",
+      "kind": "page",
+      "label": "Drafts",
+      "name": null,
+      "note": null,
+      "icon": "mail",
+      "href": "#drafts",
+      "run": null,
+      "badge": false,
+      "pinned": true
+    },
+    {
+      "id": "t-skills",
+      "kind": "page",
+      "label": "Skills",
+      "name": null,
+      "note": null,
+      "icon": "star",
+      "href": "#skills",
+      "run": null,
+      "badge": false,
+      "pinned": true
+    },
+    {
+      "id": "s-weekly",
+      "kind": "skill",
+      "label": "Weekly",
+      "name": "/weekly-summary",
+      "note": "Write the weekly update",
+      "icon": "play",
+      "href": null,
+      "run": "/weekly-summary",
+      "badge": false,
+      "pinned": true
+    }
+  ],
+  "pinnable": [
+    {
+      "id": "t-brief",
+      "kind": "page",
+      "label": "Brief",
+      "name": null,
+      "note": null,
+      "icon": "sun",
+      "href": "#brief",
+      "run": null,
+      "badge": false,
+      "pinned": true
+    },
+    {
+      "id": "t-decide",
+      "kind": "page",
+      "label": "Decide",
+      "name": null,
+      "note": null,
+      "icon": "decide",
+      "href": "#decision",
+      "run": null,
+      "badge": true,
+      "pinned": true
+    },
+    {
+      "id": "t-drafts",
+      "kind": "page",
+      "label": "Drafts",
+      "name": null,
+      "note": null,
+      "icon": "mail",
+      "href": "#drafts",
+      "run": null,
+      "badge": false,
+      "pinned": true
+    },
+    {
+      "id": "t-skills",
+      "kind": "page",
+      "label": "Skills",
+      "name": null,
+      "note": null,
+      "icon": "star",
+      "href": "#skills",
+      "run": null,
+      "badge": false,
+      "pinned": true
+    },
+    {
+      "id": "a-partnerships",
+      "kind": "topic",
+      "label": "Partners",
+      "name": "Partnerships",
+      "note": null,
+      "icon": "partner",
+      "href": "#topic/partnerships",
+      "run": null,
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "a-content",
+      "kind": "topic",
+      "label": "Content",
+      "name": null,
+      "note": null,
+      "icon": "pen",
+      "href": "#topic/content",
+      "run": null,
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "a-outbound",
+      "kind": "topic",
+      "label": "Outbound",
+      "name": null,
+      "note": null,
+      "icon": "send",
+      "href": "#topic/outbound",
+      "run": null,
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "a-paid",
+      "kind": "topic",
+      "label": "Paid",
+      "name": null,
+      "note": null,
+      "icon": "horn",
+      "href": "#topic/paid",
+      "run": null,
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "a-seo",
+      "kind": "topic",
+      "label": "SEO",
+      "name": null,
+      "note": null,
+      "icon": "search",
+      "href": "#topic/seo",
+      "run": null,
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "a-research",
+      "kind": "topic",
+      "label": "Research",
+      "name": null,
+      "note": null,
+      "icon": "target",
+      "href": "#topic/research",
+      "run": null,
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "s-weekly",
+      "kind": "skill",
+      "label": "Weekly",
+      "name": "/weekly-summary",
+      "note": "Write the weekly update",
+      "icon": "play",
+      "href": null,
+      "run": "/weekly-summary",
+      "badge": false,
+      "pinned": true
+    },
+    {
+      "id": "s-post",
+      "kind": "skill",
+      "label": "Post",
+      "name": "/linkedin-post",
+      "note": "A post in your voice",
+      "icon": "play",
+      "href": null,
+      "run": "/linkedin-post",
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "s-visual",
+      "kind": "skill",
+      "label": "Visuals",
+      "name": "/brand-visual",
+      "note": "Images in your brand",
+      "icon": "play",
+      "href": null,
+      "run": "/brand-visual",
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "s-ads",
+      "kind": "skill",
+      "label": "Ads",
+      "name": "/ad-variants",
+      "note": "6 ad variants",
+      "icon": "play",
+      "href": null,
+      "run": "/ad-variants",
+      "badge": false,
+      "pinned": false
+    },
+    {
+      "id": "s-profile",
+      "kind": "skill",
+      "label": "Profile",
+      "name": "/icp-refresh",
+      "note": "Rebuild the customer profile",
+      "icon": "play",
+      "href": null,
+      "run": "/icp-refresh",
+      "badge": false,
+      "pinned": false
+    }
+  ]
+}

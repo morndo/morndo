@@ -1,0 +1,92 @@
+{
+  "id": "click-floor",
+  "topicId": "paid",
+  "title": "Ads below the click floor",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "paid-buyer",
+    "name": "Paid buyer",
+    "shortName": "Paid",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Switched off 3 ads",
+    "skill": "/ad-variants",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened today, 08:10",
+  "closed": "closed today, 08:30",
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Keep the ads clean: switch off anything that stays below the click floor.",
+  "askedMeta": {
+    "source": "Your standing rule since October",
+    "note": "The Manager opens this lane on its own each Monday."
+  },
+  "status": "3 ads were below 0.6% clicks after 1,000 views. Paid buyer switched them off. They cost €140 last week and brought no lead.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "3 ads were below 0.6% clicks after 1,000 views. Paid buyer switched them off. They cost €140 last week and brought no lead."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Every running ad checked against the floor",
+      "who": "Analyst · 08:10"
+    },
+    {
+      "kind": "ok",
+      "text": "3 ads switched off, inside your €500 guardrail",
+      "who": "Paid buyer · 08:30"
+    },
+    {
+      "kind": "ok",
+      "text": "Logged in the brief, with Undo",
+      "who": "Manager · 08:30"
+    }
+  ],
+  "doneNote": "Done means all three. You can undo it from the brief until tonight.",
+  "crew": [
+    {
+      "id": "paid-buyer",
+      "name": "Paid buyer",
+      "shortName": "Paid",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Switched off 3 ads",
+      "skill": "/ad-variants",
+      "engine": "Claude",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "The 3 ads",
+      "detail": "LinkedIn: 2, Search: 1 · 0.31% to 0.52% clicks",
+      "href": null
+    }
+  ],
+  "handover": null,
+  "fresh": false
+}

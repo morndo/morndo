@@ -1,0 +1,93 @@
+{
+  "id": "red-main",
+  "topicId": "web",
+  "title": "Red main",
+  "state": "bad",
+  "stateWord": "Stuck",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "bad",
+    "word": "Stuck",
+    "text": "Red main, out of tries",
+    "skill": "/red-main",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened today, 06:55",
+  "closed": null,
+  "next": "Now, needs your call",
+  "afterNext": null,
+  "decisionId": null,
+  "short": "Red main",
+  "ask": "Main is red and needs your call",
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Stop the red main from blocking everyone.",
+  "askedMeta": {
+    "source": "You to the Manager, today 06:55",
+    "note": "The Manager filed it under Web app and named Builder to lead."
+  },
+  "status": "The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit: the new session library signs cookies differently, so saved sessions are refused.",
+  "standing": {
+    "headline": "It is stuck.",
+    "detail": "The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit: the new session library signs cookies differently, so saved sessions are refused."
+  },
+  "acts": [
+    {
+      "label": "Pin the old session library",
+      "tone": "ink"
+    },
+    {
+      "label": "Allow one more try",
+      "tone": "quiet"
+    },
+    {
+      "label": "Open the run",
+      "tone": "quiet"
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "3 fixes tried",
+      "who": "Builder · 06:40"
+    },
+    {
+      "kind": "now",
+      "text": "Your call: pin the old session library, or allow one more try",
+      "who": "You · now"
+    }
+  ],
+  "doneNote": "Pinning takes about 3 minutes and turns main green.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "bad",
+      "word": "Stuck",
+      "text": "Red main, out of tries",
+      "skill": "/red-main",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false
+}

@@ -1,0 +1,116 @@
+{
+  "id": "topic:web",
+  "title": "Web app",
+  "sub": "You, Builder, Reviewer and QA. Nothing else lives here.",
+  "placeholder": "Message Web app",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "topic_web-0",
+      "author": {
+        "id": "builder",
+        "name": "Builder",
+        "shortName": "Builder",
+        "kind": "agent",
+        "avatar": "B",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "07:20",
+      "text": "Main is red since 06:40. I tried 3 fixes and none worked: the new session library signs cookies differently, so saved sessions get a 401. I am out of tries, so I stopped.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_web-1",
+      "author": {
+        "id": "qa",
+        "name": "QA",
+        "shortName": "QA",
+        "kind": "agent",
+        "avatar": "Q",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "07:21",
+      "text": "I am holding the filters walk-through until main is green.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_web-2",
+      "author": {
+        "id": "timo-varga",
+        "name": "Timo Varga",
+        "shortName": "Timo",
+        "kind": "person",
+        "avatar": "T",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "",
+      "text": "Can you pin the old version for now and do the upgrade properly later?",
+      "own": true,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": []
+    },
+    {
+      "id": "topic_web-3",
+      "author": {
+        "id": "builder",
+        "name": "Builder",
+        "shortName": "Builder",
+        "kind": "agent",
+        "avatar": "B",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "time": "07:26",
+      "text": "Yes. Pinning takes about 3 minutes. I will file the proper upgrade as its own task, with a test for saved sessions. It changes main directly, so I need your OK.",
+      "own": false,
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [
+        {
+          "label": "Pin it"
+        },
+        {
+          "label": "One more try"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "id": "tax-rates",
+  "topicId": "billing",
+  "title": "Tax rates per country",
+  "state": "warn",
+  "stateWord": "Needs you",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "warn",
+    "word": "Needs you",
+    "text": "Migration waits for you",
+    "skill": "/fix-with-proof",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "opened": "Opened Friday",
+  "closed": null,
+  "next": "After your decision",
+  "afterNext": null,
+  "decisionId": "d2",
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Run the tax-rate migration on the production database.",
+  "askedMeta": {
+    "source": "You to the Manager, Friday",
+    "note": "The Manager filed it under Billing and named Builder to lead."
+  },
+  "status": "It adds 2 columns and fills 48,000 invoices. A backup comes first. The dry run on a copy took 41 seconds.",
+  "standing": {
+    "headline": "It waits for you.",
+    "detail": "It adds 2 columns and fills 48,000 invoices. A backup comes first. The dry run on a copy took 41 seconds."
+  },
+  "acts": [
+    {
+      "label": "Approve",
+      "tone": "ink"
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "now",
+      "text": "Your OK to run the migration",
+      "who": "You · due tomorrow"
+    },
+    {
+      "kind": "todo",
+      "text": "The migration runs tonight at 23:00, after the backup",
+      "who": "Builder"
+    }
+  ],
+  "doneNote": "Done means all 2. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "warn",
+      "word": "Needs you",
+      "text": "Migration waits for you",
+      "skill": "/fix-with-proof",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false
+}

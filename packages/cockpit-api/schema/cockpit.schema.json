@@ -1,0 +1,5615 @@
+{
+  "$defs": {
+    "AccessGrant": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/AccessKind"
+        },
+        "stages": {
+          "default": [],
+          "description": "Stage names the person can work. Empty unless `kind` is `stages`.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
+    "AccessKind": {
+      "enum": [
+        "all",
+        "stages",
+        "view",
+        "none"
+      ],
+      "type": "string"
+    },
+    "AccessPerson": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/AccessGrant"
+        },
+        "otherTopics": {
+          "items": {
+            "$ref": "#/$defs/OtherTopicAccess"
+          },
+          "type": "array"
+        },
+        "person": {
+          "$ref": "#/$defs/Actor"
+        },
+        "scope": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "person",
+        "access",
+        "scope",
+        "otherTopics"
+      ],
+      "type": "object"
+    },
+    "AccessView": {
+      "additionalProperties": false,
+      "properties": {
+        "people": {
+          "items": {
+            "$ref": "#/$defs/AccessPerson"
+          },
+          "type": "array"
+        },
+        "topicId": {
+          "type": "string"
+        },
+        "topicName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topicId",
+        "topicName",
+        "people"
+      ],
+      "type": "object"
+    },
+    "Actor": {
+      "additionalProperties": false,
+      "description": "A person or agent, resolved to the record the screens show.\nFields a particular card does not carry are null.",
+      "properties": {
+        "avatar": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "engine": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "name": {
+          "type": "string"
+        },
+        "record": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "role": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shortName": {
+          "type": "string"
+        },
+        "skill": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "word": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "shortName",
+        "kind",
+        "avatar",
+        "role",
+        "state",
+        "word",
+        "text",
+        "skill",
+        "engine",
+        "record"
+      ],
+      "type": "object"
+    },
+    "ActorKind": {
+      "enum": [
+        "person",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "AgentSpend": {
+      "additionalProperties": false,
+      "properties": {
+        "cap": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "spent": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "spent",
+        "cap"
+      ],
+      "type": "object"
+    },
+    "AgentsStrip": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/StripItem"
+          },
+          "type": "array"
+        },
+        "seen": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seen",
+        "count",
+        "summary",
+        "items"
+      ],
+      "type": "object"
+    },
+    "Answer": {
+      "additionalProperties": false,
+      "properties": {
+        "href": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "source",
+        "href"
+      ],
+      "type": "object"
+    },
+    "ApiError": {
+      "additionalProperties": false,
+      "properties": {
+        "error": {
+          "$ref": "#/$defs/ErrorBody"
+        }
+      },
+      "required": [
+        "error"
+      ],
+      "type": "object"
+    },
+    "Artwork": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "type": "string"
+        },
+        "credit": {
+          "type": "string"
+        },
+        "index": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "manner": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "total": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "index",
+        "total",
+        "title",
+        "manner",
+        "alt",
+        "credit"
+      ],
+      "type": "object"
+    },
+    "Ask": {
+      "additionalProperties": false,
+      "properties": {
+        "chat": {
+          "type": "string"
+        },
+        "href": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "went": {
+          "type": "string"
+        },
+        "when": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "quote",
+        "when",
+        "chat",
+        "went",
+        "href"
+      ],
+      "type": "object"
+    },
+    "AskedMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "source": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "source",
+        "note"
+      ],
+      "type": "object"
+    },
+    "Attachment": {
+      "additionalProperties": false,
+      "description": "A file or link dropped onto a topic, or attached to a filed lane.",
+      "properties": {
+        "href": {
+          "default": null,
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name"
+      ],
+      "type": "object"
+    },
+    "Blocker": {
+      "additionalProperties": false,
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "short": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "what": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "who": {
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "state",
+        "short",
+        "what",
+        "why",
+        "who",
+        "href",
+        "laneId"
+      ],
+      "type": "object"
+    },
+    "BriefDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "context": {
+          "type": "string"
+        },
+        "doneNote": {
+          "type": "string"
+        },
+        "due": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minutes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "state": {
+          "$ref": "#/$defs/DecisionState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topicId": {
+          "type": "string"
+        },
+        "topicName": {
+          "type": "string"
+        },
+        "whyYours": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "topicId",
+        "topicName",
+        "due",
+        "whyYours",
+        "title",
+        "context",
+        "minutes",
+        "doneNote",
+        "laneId",
+        "state"
+      ],
+      "type": "object"
+    },
+    "BriefTopic": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "progress": {
+          "type": "string"
+        },
+        "spend": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "state": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "state",
+        "verdict",
+        "progress",
+        "spend"
+      ],
+      "type": "object"
+    },
+    "BriefView": {
+      "additionalProperties": false,
+      "properties": {
+        "artwork": {
+          "$ref": "#/$defs/Artwork"
+        },
+        "burns": {
+          "items": {
+            "$ref": "#/$defs/Burn"
+          },
+          "type": "array"
+        },
+        "cadence": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "decisions": {
+          "items": {
+            "$ref": "#/$defs/BriefDecision"
+          },
+          "type": "array"
+        },
+        "drafts": {
+          "$ref": "#/$defs/DraftsSummary"
+        },
+        "lede": {
+          "type": "string"
+        },
+        "minutes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "nextBriefAt": {
+          "type": "string"
+        },
+        "openCount": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "overnight": {
+          "items": {
+            "$ref": "#/$defs/OvernightAction"
+          },
+          "type": "array"
+        },
+        "spend": {
+          "$ref": "#/$defs/SpendLine"
+        },
+        "time": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topics": {
+          "items": {
+            "$ref": "#/$defs/BriefTopic"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "date",
+        "time",
+        "title",
+        "lede",
+        "nextBriefAt",
+        "cadence",
+        "spend",
+        "topics",
+        "decisions",
+        "openCount",
+        "minutes",
+        "burns",
+        "overnight",
+        "drafts",
+        "artwork"
+      ],
+      "type": "object"
+    },
+    "Burn": {
+      "additionalProperties": false,
+      "properties": {
+        "deadline": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "href": {
+          "type": "string"
+        },
+        "since": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topicId": {
+          "type": "string"
+        },
+        "topicName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topicId",
+        "topicName",
+        "since",
+        "deadline",
+        "title",
+        "detail",
+        "href"
+      ],
+      "type": "object"
+    },
+    "ChatMode": {
+      "enum": [
+        "floating",
+        "sidebar"
+      ],
+      "type": "string"
+    },
+    "CheckResult": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "passed"
+      ],
+      "type": "object"
+    },
+    "Command": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decisionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "decision.approve",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "decisionId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decisionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "decision.decline",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "decisionId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decisionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "decision.undo",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "decisionId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decisionId": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "decision.change",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "decisionId",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "actionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "agentAction.undo",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "actionId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "actionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "agentAction.redo",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "actionId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "attachment": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/Attachment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "leadId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "text": {
+              "type": "string"
+            },
+            "topicId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "lane.file",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "laneId": {
+              "type": "string"
+            },
+            "topicId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "lane.move",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId",
+            "topicId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "laneId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "lane.undoFile",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "act": {
+              "type": "string"
+            },
+            "laneId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "lane.act",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId",
+            "act"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "laneId": {
+              "type": "string"
+            },
+            "personId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "person.remind",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId",
+            "personId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "topicId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "goal.ask",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "topicId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "message.send",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "threadId",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "label": {
+              "$ref": "#/$defs/LabelKind"
+            },
+            "messageId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "message.relabel",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "messageId",
+            "label"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "lines": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "since.edit",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "threadId",
+            "lines"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pinId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "pin.add",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pinId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pinId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "pin.remove",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pinId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "briefsPerDay": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "chatMode": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ChatMode"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "interruptOnlyUrgent": {
+              "default": null,
+              "type": [
+                "boolean",
+                "null"
+              ]
+            },
+            "layout": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/LayoutPatch"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "theme": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/ThemePatch"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "default": null
+            },
+            "type": {
+              "const": "prefs.set",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dailyLimit": {
+              "default": null,
+              "format": "int64",
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "rule": {
+              "$ref": "#/$defs/DecisionRule"
+            },
+            "type": {
+              "const": "decisionRight.set",
+              "type": "string"
+            },
+            "who": {
+              "$ref": "#/$defs/Decider"
+            }
+          },
+          "required": [
+            "type",
+            "rule",
+            "who"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "skill": {
+              "type": "string"
+            },
+            "text": {
+              "type": "string"
+            },
+            "type": {
+              "const": "skill.run",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "skill",
+            "text"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "access": {
+              "$ref": "#/$defs/AccessGrant"
+            },
+            "personId": {
+              "type": "string"
+            },
+            "topicId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "access.set",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "topicId",
+            "personId",
+            "access"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "nameOrEmail": {
+              "type": "string"
+            },
+            "topicId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "access.invite",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "topicId",
+            "nameOrEmail"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "CommandResult": {
+      "additionalProperties": false,
+      "properties": {
+        "events": {
+          "items": {
+            "$ref": "#/$defs/Event"
+          },
+          "type": "array"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "message": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Message"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ok": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok",
+        "events",
+        "laneId",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Connection": {
+      "additionalProperties": false,
+      "properties": {
+        "capacity": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "purpose": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ConnectionState"
+        }
+      },
+      "required": [
+        "name",
+        "purpose",
+        "state",
+        "capacity"
+      ],
+      "type": "object"
+    },
+    "ConnectionState": {
+      "enum": [
+        "connected",
+        "signedIn",
+        "addKey",
+        "signIn"
+      ],
+      "type": "string"
+    },
+    "Deal": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/DealAlt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "at": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "close": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "confidence": {
+          "type": "string"
+        },
+        "evidence": {
+          "type": "string"
+        },
+        "href": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "next": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "short": {
+          "type": "string"
+        },
+        "stage": {
+          "type": "string"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "confidence",
+        "close",
+        "at",
+        "stage",
+        "short",
+        "laneId",
+        "href",
+        "evidence",
+        "next",
+        "value",
+        "alt"
+      ],
+      "type": "object"
+    },
+    "DealAlt": {
+      "additionalProperties": false,
+      "properties": {
+        "decisionId": {
+          "type": "string"
+        },
+        "next": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "short": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "decisionId",
+        "stage",
+        "short",
+        "next"
+      ],
+      "type": "object"
+    },
+    "Decider": {
+      "enum": [
+        "you",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "DecisionQueueView": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/QueueItem"
+          },
+          "type": "array"
+        },
+        "open": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "total": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "items",
+        "open",
+        "total"
+      ],
+      "type": "object"
+    },
+    "DecisionRight": {
+      "additionalProperties": false,
+      "properties": {
+        "dailyLimit": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "risky": {
+          "type": "boolean"
+        },
+        "rule": {
+          "$ref": "#/$defs/DecisionRule"
+        },
+        "title": {
+          "type": "string"
+        },
+        "who": {
+          "$ref": "#/$defs/Decider"
+        }
+      },
+      "required": [
+        "rule",
+        "title",
+        "detail",
+        "who",
+        "dailyLimit",
+        "risky"
+      ],
+      "type": "object"
+    },
+    "DecisionRule": {
+      "enum": [
+        "inYourName",
+        "hardToUndo",
+        "onlyYouKnow",
+        "insideGuardrails",
+        "overWeeklyCap"
+      ],
+      "type": "string"
+    },
+    "DecisionState": {
+      "enum": [
+        "open",
+        "approved",
+        "declined"
+      ],
+      "type": "string"
+    },
+    "DecisionView": {
+      "additionalProperties": false,
+      "properties": {
+        "approveLabel": {
+          "type": "string"
+        },
+        "cardContext": {
+          "description": "The short paragraph on the decision card. The full page uses `context`.",
+          "type": "string"
+        },
+        "context": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "contextLine": {
+          "type": "string"
+        },
+        "doneNote": {
+          "type": "string"
+        },
+        "due": {
+          "type": "string"
+        },
+        "guardrail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "ifNoAnswer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "minutes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "nextSteps": {
+          "items": {
+            "$ref": "#/$defs/NextStep"
+          },
+          "type": "array"
+        },
+        "numbers": {
+          "items": {
+            "$ref": "#/$defs/Stat"
+          },
+          "type": "array"
+        },
+        "opportunity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scenario"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "position": {
+          "type": "string"
+        },
+        "proof": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Proof"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provenance": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Provenance"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "risk": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Scenario"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/DecisionState"
+        },
+        "suggestion": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "topicId": {
+          "type": "string"
+        },
+        "topicName": {
+          "type": "string"
+        },
+        "whyYours": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "state",
+        "topicId",
+        "topicName",
+        "due",
+        "whyYours",
+        "minutes",
+        "contextLine",
+        "cardContext",
+        "doneNote",
+        "laneId",
+        "approveLabel",
+        "provenance",
+        "context",
+        "numbers",
+        "proof",
+        "opportunity",
+        "risk",
+        "suggestion",
+        "guardrail",
+        "nextSteps",
+        "ifNoAnswer",
+        "position"
+      ],
+      "type": "object"
+    },
+    "Draft": {
+      "additionalProperties": false,
+      "properties": {
+        "body": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "skill": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "subject": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        },
+        "written": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "to",
+        "written",
+        "skill",
+        "subject",
+        "body"
+      ],
+      "type": "object"
+    },
+    "DraftsSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "text",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "DraftsView": {
+      "additionalProperties": false,
+      "properties": {
+        "count": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "intro": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/Draft"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "intro",
+        "count",
+        "items"
+      ],
+      "type": "object"
+    },
+    "ErrorBody": {
+      "additionalProperties": false,
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "message": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "type": "object"
+    },
+    "Event": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "decisionId": {
+              "type": "string"
+            },
+            "state": {
+              "$ref": "#/$defs/DecisionState"
+            },
+            "type": {
+              "const": "decision.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "decisionId",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "laneId": {
+              "type": "string"
+            },
+            "topicId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "type": {
+              "const": "lane.filed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId",
+            "topicId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "laneId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "lane.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/Message"
+            },
+            "threadId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "message.posted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "threadId",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "pinId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "pins.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "type": {
+              "const": "prefs.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "topicId": {
+              "default": null,
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "type": {
+              "const": "access.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "actionId": {
+              "type": "string"
+            },
+            "type": {
+              "const": "agentAction.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "actionId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Fact": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "type": "object"
+    },
+    "FailingTest": {
+      "additionalProperties": false,
+      "properties": {
+        "expected": {
+          "type": "string"
+        },
+        "failures": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "got": {
+          "type": "string"
+        },
+        "location": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "runs": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "name",
+        "expected",
+        "got",
+        "location",
+        "runs",
+        "failures"
+      ],
+      "type": "object"
+    },
+    "Figure": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "of": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "of",
+        "label"
+      ],
+      "type": "object"
+    },
+    "Funnel": {
+      "additionalProperties": false,
+      "properties": {
+        "since": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/FunnelStep"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "since",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "FunnelStep": {
+      "additionalProperties": false,
+      "properties": {
+        "change": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "count": {
+          "type": "string"
+        },
+        "rate": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "what": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "count",
+        "what",
+        "change",
+        "rate",
+        "state"
+      ],
+      "type": "object"
+    },
+    "Gap": {
+      "additionalProperties": false,
+      "properties": {
+        "says": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "says",
+        "steps"
+      ],
+      "type": "object"
+    },
+    "Gate": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/GateState"
+        }
+      },
+      "required": [
+        "name",
+        "state",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "GateState": {
+      "enum": [
+        "pass",
+        "running",
+        "todo",
+        "fail",
+        "skipped"
+      ],
+      "type": "string"
+    },
+    "Goal": {
+      "additionalProperties": false,
+      "properties": {
+        "asOf": {
+          "type": "string"
+        },
+        "blockers": {
+          "items": {
+            "$ref": "#/$defs/Blocker"
+          },
+          "type": "array"
+        },
+        "calibration": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calm": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "calmSub": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "deals": {
+          "items": {
+            "$ref": "#/$defs/Deal"
+          },
+          "type": "array"
+        },
+        "decision": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/GoalDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "figures": {
+          "items": {
+            "$ref": "#/$defs/Figure"
+          },
+          "type": "array"
+        },
+        "funnel": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Funnel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "gap": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Gap"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "guardrails": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Guardrails"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "insight": {
+          "type": "string"
+        },
+        "ladder": {
+          "items": {
+            "$ref": "#/$defs/LadderRung"
+          },
+          "type": "array"
+        },
+        "likely": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "milestones": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "outside": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pathTitle": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "restSub": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "routine": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "rows": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RowsHeading"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "signed": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "target": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "trajectory": {
+          "$ref": "#/$defs/Trajectory"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "verdict": {
+          "$ref": "#/$defs/Verdict"
+        }
+      },
+      "required": [
+        "target",
+        "signed",
+        "likely",
+        "unit",
+        "verdict",
+        "insight",
+        "asOf",
+        "decision",
+        "calm",
+        "calmSub",
+        "trajectory",
+        "milestones",
+        "rows",
+        "deals",
+        "guardrails",
+        "ladder",
+        "calibration",
+        "outside",
+        "gap",
+        "blockers",
+        "routine",
+        "funnel",
+        "restSub",
+        "figures",
+        "pathTitle"
+      ],
+      "type": "object"
+    },
+    "GoalDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "approveLabel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decisionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "done": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "why": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "title",
+        "detail",
+        "done",
+        "why",
+        "decisionId",
+        "laneId",
+        "approveLabel"
+      ],
+      "type": "object"
+    },
+    "GroupKind": {
+      "enum": [
+        "topic",
+        "project"
+      ],
+      "type": "string"
+    },
+    "GuardrailItem": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "type": "string"
+        },
+        "ratio": {
+          "anyOf": [
+            {
+              "format": "double",
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "string"
+        },
+        "what": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "what",
+        "value",
+        "limit",
+        "ratio"
+      ],
+      "type": "object"
+    },
+    "GuardrailSwitch": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "on": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "name",
+        "detail",
+        "on"
+      ],
+      "type": "object"
+    },
+    "Guardrails": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/GuardrailItem"
+          },
+          "type": "array"
+        },
+        "sub": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "sub",
+        "items"
+      ],
+      "type": "object"
+    },
+    "Handover": {
+      "additionalProperties": false,
+      "properties": {
+        "fixed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ifSo": {
+          "type": "string"
+        },
+        "match": {
+          "type": "boolean"
+        },
+        "open": {
+          "type": "string"
+        },
+        "restated": {
+          "type": "string"
+        },
+        "risk": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "when": {
+          "type": "string"
+        },
+        "why": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "when",
+        "match",
+        "why",
+        "state",
+        "open",
+        "risk",
+        "ifSo",
+        "restated",
+        "fixed"
+      ],
+      "type": "object"
+    },
+    "Health": {
+      "additionalProperties": false,
+      "properties": {
+        "state": {
+          "$ref": "#/$defs/HealthState"
+        },
+        "word": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "word"
+      ],
+      "type": "object"
+    },
+    "HealthState": {
+      "enum": [
+        "ok",
+        "warn",
+        "bad",
+        "idle"
+      ],
+      "type": "string"
+    },
+    "History": {
+      "additionalProperties": false,
+      "properties": {
+        "days": {
+          "items": {
+            "$ref": "#/$defs/HistoryDay"
+          },
+          "type": "array"
+        },
+        "seen": {
+          "type": "string"
+        },
+        "shown": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "since": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seen",
+        "shown",
+        "since",
+        "days"
+      ],
+      "type": "object"
+    },
+    "HistoryDay": {
+      "additionalProperties": false,
+      "properties": {
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/HistoryEntry"
+          },
+          "type": "array"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "entries"
+      ],
+      "type": "object"
+    },
+    "HistoryEntry": {
+      "oneOf": [
+        {
+          "additionalProperties": false,
+          "properties": {
+            "kind": {
+              "const": "seen",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "actor": {
+              "$ref": "#/$defs/Actor"
+            },
+            "count": {
+              "anyOf": [
+                {
+                  "format": "int64",
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "decision": {
+              "type": "boolean"
+            },
+            "decisionId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "kind": {
+              "const": "event",
+              "type": "string"
+            },
+            "laneId": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "samples": {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            "sentOutside": {
+              "type": "boolean"
+            },
+            "text": {
+              "type": "string"
+            },
+            "time": {
+              "type": "string"
+            },
+            "undoable": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "kind",
+            "time",
+            "actor",
+            "text",
+            "laneId",
+            "decision",
+            "sentOutside",
+            "undoable",
+            "count",
+            "samples",
+            "decisionId"
+          ],
+          "type": "object"
+        }
+      ]
+    },
+    "Job": {
+      "additionalProperties": false,
+      "properties": {
+        "agent": {
+          "type": "string"
+        },
+        "due": {
+          "type": "string"
+        },
+        "job": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/LaneState"
+        }
+      },
+      "required": [
+        "job",
+        "agent",
+        "state",
+        "due",
+        "laneId"
+      ],
+      "type": "object"
+    },
+    "LabelKind": {
+      "enum": [
+        "question",
+        "request",
+        "done",
+        "decision",
+        "goalChange"
+      ],
+      "type": "string"
+    },
+    "LadderRung": {
+      "additionalProperties": false,
+      "properties": {
+        "fact": {
+          "type": "string"
+        },
+        "word": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "word",
+        "fact"
+      ],
+      "type": "object"
+    },
+    "LaneAct": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "tone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "tone"
+      ],
+      "type": "object"
+    },
+    "LaneState": {
+      "enum": [
+        "new",
+        "ok",
+        "warn",
+        "bad",
+        "done",
+        "idle",
+        "next",
+        "parked"
+      ],
+      "type": "string"
+    },
+    "LaneView": {
+      "additionalProperties": false,
+      "properties": {
+        "acts": {
+          "items": {
+            "$ref": "#/$defs/LaneAct"
+          },
+          "type": "array"
+        },
+        "after": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "afterNext": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "approveLabel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ask": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "asked": {
+          "type": "string"
+        },
+        "askedMeta": {
+          "$ref": "#/$defs/AskedMeta"
+        },
+        "checks": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "closed": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "crew": {
+          "items": {
+            "$ref": "#/$defs/Actor"
+          },
+          "type": "array"
+        },
+        "decisionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "delay": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "doneNote": {
+          "type": "string"
+        },
+        "fresh": {
+          "type": "boolean"
+        },
+        "handover": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Handover"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "lead": {
+          "$ref": "#/$defs/Actor"
+        },
+        "made": {
+          "items": {
+            "$ref": "#/$defs/MadeItem"
+          },
+          "type": "array"
+        },
+        "next": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opened": {
+          "type": "string"
+        },
+        "recommendation": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "short": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "shortAfter": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "standing": {
+          "$ref": "#/$defs/Standing"
+        },
+        "state": {
+          "$ref": "#/$defs/LaneState"
+        },
+        "stateWord": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "steps": {
+          "items": {
+            "$ref": "#/$defs/Step"
+          },
+          "type": "array"
+        },
+        "thumbs": {
+          "items": {
+            "$ref": "#/$defs/Thumb"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topicId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "waitsFor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "yours": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "topicId",
+        "title",
+        "state",
+        "stateWord",
+        "lead",
+        "waitsFor",
+        "opened",
+        "closed",
+        "next",
+        "afterNext",
+        "decisionId",
+        "short",
+        "ask",
+        "shortAfter",
+        "recommendation",
+        "yours",
+        "checks",
+        "delay",
+        "approveLabel",
+        "after",
+        "asked",
+        "askedMeta",
+        "status",
+        "standing",
+        "acts",
+        "thumbs",
+        "steps",
+        "doneNote",
+        "crew",
+        "made",
+        "handover",
+        "fresh"
+      ],
+      "type": "object"
+    },
+    "Layout": {
+      "additionalProperties": false,
+      "properties": {
+        "chatWidth": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "sidebarWidth": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "sidebarWidth",
+        "chatWidth"
+      ],
+      "type": "object"
+    },
+    "LayoutPatch": {
+      "additionalProperties": false,
+      "description": "Partial layout written by `prefs.set`.",
+      "properties": {
+        "chatWidth": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "sidebarWidth": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "MadeItem": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "href": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icon": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "icon",
+        "title",
+        "detail",
+        "href"
+      ],
+      "type": "object"
+    },
+    "ManagerLane": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "leadName": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/LaneState"
+        },
+        "stateWord": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topicId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topicName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "topicId",
+        "topicName",
+        "leadName",
+        "state",
+        "stateWord",
+        "next"
+      ],
+      "type": "object"
+    },
+    "ManagerView": {
+      "additionalProperties": false,
+      "properties": {
+        "asks": {
+          "items": {
+            "$ref": "#/$defs/Ask"
+          },
+          "type": "array"
+        },
+        "intro": {
+          "type": "string"
+        },
+        "lanes": {
+          "items": {
+            "$ref": "#/$defs/ManagerLane"
+          },
+          "type": "array"
+        },
+        "sharedResources": {
+          "items": {
+            "$ref": "#/$defs/SharedResource"
+          },
+          "type": "array"
+        },
+        "since": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "intro",
+        "summary",
+        "lanes",
+        "sharedResources",
+        "asks",
+        "since"
+      ],
+      "type": "object"
+    },
+    "Message": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/MessageAction"
+          },
+          "type": "array"
+        },
+        "author": {
+          "$ref": "#/$defs/Actor"
+        },
+        "id": {
+          "type": "string"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MessageLabel"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "own": {
+          "type": "boolean"
+        },
+        "readBack": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReadBack"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "threadCard": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThreadCard"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "time": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "author",
+        "time",
+        "text",
+        "own",
+        "label",
+        "threadCard",
+        "readBack",
+        "actions"
+      ],
+      "type": "object"
+    },
+    "MessageAction": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label"
+      ],
+      "type": "object"
+    },
+    "MessageLabel": {
+      "additionalProperties": false,
+      "properties": {
+        "corrected": {
+          "type": "boolean"
+        },
+        "kind": {
+          "$ref": "#/$defs/LabelKind"
+        }
+      },
+      "required": [
+        "kind",
+        "corrected"
+      ],
+      "type": "object"
+    },
+    "Meter": {
+      "additionalProperties": false,
+      "properties": {
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "used": {
+          "format": "double",
+          "type": "number"
+        },
+        "value": {
+          "type": "string"
+        },
+        "what": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "what",
+        "used",
+        "value",
+        "note"
+      ],
+      "type": "object"
+    },
+    "ModuleCard": {
+      "additionalProperties": false,
+      "properties": {
+        "here": {
+          "type": "boolean"
+        },
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "summary",
+        "here"
+      ],
+      "type": "object"
+    },
+    "ModuleId": {
+      "enum": [
+        "gtm",
+        "dev"
+      ],
+      "type": "string"
+    },
+    "ModuleInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "$ref": "#/$defs/ModuleId"
+        },
+        "kindWord": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "icon",
+        "kindWord"
+      ],
+      "type": "object"
+    },
+    "NextStep": {
+      "additionalProperties": false,
+      "properties": {
+        "by": {
+          "type": "string"
+        },
+        "step": {
+          "type": "string"
+        },
+        "who": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "who",
+        "by"
+      ],
+      "type": "object"
+    },
+    "NightStat": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "value",
+        "label"
+      ],
+      "type": "object"
+    },
+    "OtherTopicAccess": {
+      "additionalProperties": false,
+      "properties": {
+        "access": {
+          "$ref": "#/$defs/AccessKind"
+        },
+        "topicId": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "topicId",
+        "access"
+      ],
+      "type": "object"
+    },
+    "OvernightAction": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        },
+        "topicId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topicName": {
+          "type": "string"
+        },
+        "undoable": {
+          "type": "boolean"
+        },
+        "undone": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "id",
+        "topicId",
+        "topicName",
+        "laneId",
+        "text",
+        "time",
+        "undoable",
+        "undone"
+      ],
+      "type": "object"
+    },
+    "Pin": {
+      "additionalProperties": false,
+      "properties": {
+        "badge": {
+          "type": "boolean"
+        },
+        "href": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PinKind"
+        },
+        "label": {
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "run": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "label",
+        "name",
+        "note",
+        "icon",
+        "href",
+        "run",
+        "badge",
+        "pinned"
+      ],
+      "type": "object"
+    },
+    "PinKind": {
+      "enum": [
+        "page",
+        "topic",
+        "project",
+        "skill"
+      ],
+      "type": "string"
+    },
+    "PinState": {
+      "enum": [
+        "waiting",
+        "approved",
+        "stuck"
+      ],
+      "type": "string"
+    },
+    "PinnedDecision": {
+      "additionalProperties": false,
+      "properties": {
+        "approveLabel": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "decisionId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "$ref": "#/$defs/PinState"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "detail",
+        "state",
+        "decisionId",
+        "laneId",
+        "approveLabel"
+      ],
+      "type": "object"
+    },
+    "Plan": {
+      "additionalProperties": false,
+      "properties": {
+        "night": {
+          "items": {
+            "$ref": "#/$defs/NightStat"
+          },
+          "type": "array"
+        },
+        "stages": {
+          "items": {
+            "$ref": "#/$defs/Stage"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "stages",
+        "night"
+      ],
+      "type": "object"
+    },
+    "Proof": {
+      "additionalProperties": false,
+      "properties": {
+        "items": {
+          "items": {
+            "$ref": "#/$defs/Stat"
+          },
+          "type": "array"
+        },
+        "meta": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "unchecked": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "items",
+        "meta",
+        "unchecked"
+      ],
+      "type": "object"
+    },
+    "Provenance": {
+      "additionalProperties": false,
+      "properties": {
+        "checkedAt": {
+          "type": "string"
+        },
+        "checkedBy": {
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "laneTitle": {
+          "type": "string"
+        },
+        "writtenBy": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "laneId",
+        "laneTitle",
+        "writtenBy",
+        "checkedBy",
+        "checkedAt"
+      ],
+      "type": "object"
+    },
+    "PullRequest": {
+      "additionalProperties": false,
+      "properties": {
+        "author": {
+          "type": "string"
+        },
+        "gates": {
+          "items": {
+            "$ref": "#/$defs/Gate"
+          },
+          "type": "array"
+        },
+        "href": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "number": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "opened": {
+          "type": "string"
+        },
+        "projectId": {
+          "type": "string"
+        },
+        "projectName": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "verdict": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "projectId",
+        "projectName",
+        "number",
+        "author",
+        "opened",
+        "title",
+        "summary",
+        "gates",
+        "verdict",
+        "href"
+      ],
+      "type": "object"
+    },
+    "PullsView": {
+      "additionalProperties": false,
+      "properties": {
+        "intro": {
+          "type": "string"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/PullRequest"
+          },
+          "type": "array"
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "intro",
+        "summary",
+        "items"
+      ],
+      "type": "object"
+    },
+    "QueueItem": {
+      "additionalProperties": false,
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/DecisionState"
+        },
+        "title": {
+          "type": "string"
+        },
+        "topicName": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "state",
+        "topicName",
+        "href"
+      ],
+      "type": "object"
+    },
+    "ReadBack": {
+      "additionalProperties": false,
+      "properties": {
+        "owner": {
+          "type": "string"
+        },
+        "quote": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "owner",
+        "quote",
+        "time"
+      ],
+      "type": "object"
+    },
+    "RoutePreview": {
+      "additionalProperties": false,
+      "properties": {
+        "chain": {
+          "type": "boolean"
+        },
+        "lead": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Actor"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "type": "string"
+        },
+        "topicId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "topicName": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "text",
+        "topicId",
+        "topicName",
+        "lead",
+        "chain"
+      ],
+      "type": "object"
+    },
+    "RowAlt": {
+      "additionalProperties": false,
+      "properties": {
+        "decisionId": {
+          "type": "string"
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "when": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "decisionId",
+        "text",
+        "when",
+        "state"
+      ],
+      "type": "object"
+    },
+    "RowsHeading": {
+      "additionalProperties": false,
+      "properties": {
+        "sub": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "sub"
+      ],
+      "type": "object"
+    },
+    "Scenario": {
+      "additionalProperties": false,
+      "properties": {
+        "condition": {
+          "type": "string"
+        },
+        "headline": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "label",
+        "headline",
+        "condition",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "SearchKind": {
+      "enum": [
+        "topic",
+        "lane",
+        "person",
+        "decision",
+        "skill"
+      ],
+      "type": "string"
+    },
+    "SearchResult": {
+      "additionalProperties": false,
+      "properties": {
+        "href": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/SearchKind"
+        },
+        "sub": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "id",
+        "title",
+        "sub",
+        "href"
+      ],
+      "type": "object"
+    },
+    "SearchView": {
+      "additionalProperties": false,
+      "properties": {
+        "answer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Answer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "query": {
+          "type": "string"
+        },
+        "results": {
+          "items": {
+            "$ref": "#/$defs/SearchResult"
+          },
+          "type": "array"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "query",
+        "scope",
+        "results",
+        "answer"
+      ],
+      "type": "object"
+    },
+    "SeriesPoint": {
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "value": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "day",
+        "value"
+      ],
+      "type": "object"
+    },
+    "SettingsView": {
+      "additionalProperties": false,
+      "properties": {
+        "briefsPerDay": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "chatMode": {
+          "$ref": "#/$defs/ChatMode"
+        },
+        "decisionRights": {
+          "items": {
+            "$ref": "#/$defs/DecisionRight"
+          },
+          "type": "array"
+        },
+        "interruptOnlyUrgent": {
+          "type": "boolean"
+        },
+        "layout": {
+          "$ref": "#/$defs/Layout"
+        },
+        "modules": {
+          "items": {
+            "$ref": "#/$defs/ModuleCard"
+          },
+          "type": "array"
+        },
+        "theme": {
+          "$ref": "#/$defs/Theme"
+        }
+      },
+      "required": [
+        "briefsPerDay",
+        "interruptOnlyUrgent",
+        "decisionRights",
+        "theme",
+        "chatMode",
+        "layout",
+        "modules"
+      ],
+      "type": "object"
+    },
+    "SharedResource": {
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "lanes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "name": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "icon",
+        "rule",
+        "lanes"
+      ],
+      "type": "object"
+    },
+    "SidebarGroup": {
+      "additionalProperties": false,
+      "properties": {
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/GroupKind"
+        },
+        "lanes": {
+          "items": {
+            "$ref": "#/$defs/SidebarLane"
+          },
+          "type": "array"
+        },
+        "mark": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "stateWord": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "icon",
+        "stateWord",
+        "mark",
+        "open",
+        "lanes"
+      ],
+      "type": "object"
+    },
+    "SidebarLane": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "leadName": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/LaneState"
+        },
+        "stateWord": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "state",
+        "stateWord",
+        "leadName"
+      ],
+      "type": "object"
+    },
+    "SidebarView": {
+      "additionalProperties": false,
+      "properties": {
+        "groups": {
+          "items": {
+            "$ref": "#/$defs/SidebarGroup"
+          },
+          "type": "array"
+        },
+        "kindWord": {
+          "type": "string"
+        },
+        "managerLanes": {
+          "items": {
+            "$ref": "#/$defs/SidebarLane"
+          },
+          "type": "array"
+        },
+        "pinnable": {
+          "items": {
+            "$ref": "#/$defs/Pin"
+          },
+          "type": "array"
+        },
+        "pins": {
+          "items": {
+            "$ref": "#/$defs/Pin"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kindWord",
+        "groups",
+        "managerLanes",
+        "pins",
+        "pinnable"
+      ],
+      "type": "object"
+    },
+    "SinceSummary": {
+      "additionalProperties": false,
+      "properties": {
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "seen": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "seen",
+        "lines"
+      ],
+      "type": "object"
+    },
+    "Skill": {
+      "additionalProperties": false,
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "needsKey": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "type": "string"
+        },
+        "topics": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "summary",
+        "topics",
+        "needsKey",
+        "enabled"
+      ],
+      "type": "object"
+    },
+    "SkillsView": {
+      "additionalProperties": false,
+      "properties": {
+        "builtIn": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "connected": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "connections": {
+          "items": {
+            "$ref": "#/$defs/Connection"
+          },
+          "type": "array"
+        },
+        "guardrails": {
+          "items": {
+            "$ref": "#/$defs/GuardrailSwitch"
+          },
+          "type": "array"
+        },
+        "intro": {
+          "type": "string"
+        },
+        "rulesNote": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "skills": {
+          "items": {
+            "$ref": "#/$defs/Skill"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "intro",
+        "builtIn",
+        "skills",
+        "connections",
+        "connected",
+        "guardrails",
+        "rulesNote"
+      ],
+      "type": "object"
+    },
+    "SpendLine": {
+      "additionalProperties": false,
+      "properties": {
+        "cap": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "overnight": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "week": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "overnight",
+        "week",
+        "cap"
+      ],
+      "type": "object"
+    },
+    "Stage": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StageAlt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "percent": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "rows": {
+          "items": {
+            "$ref": "#/$defs/StageRow"
+          },
+          "type": "array"
+        },
+        "state": {
+          "type": "string"
+        },
+        "summary": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state",
+        "percent",
+        "summary",
+        "rows",
+        "alt"
+      ],
+      "type": "object"
+    },
+    "StageAlt": {
+      "additionalProperties": false,
+      "properties": {
+        "decisionId": {
+          "type": "string"
+        },
+        "percent": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "summary": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "decisionId",
+        "state",
+        "percent",
+        "summary"
+      ],
+      "type": "object"
+    },
+    "StageRow": {
+      "additionalProperties": false,
+      "properties": {
+        "alt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RowAlt"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "avatar": {
+          "type": "string"
+        },
+        "href": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "kind": {
+          "$ref": "#/$defs/ActorKind"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "percent": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "when": {
+          "type": "string"
+        },
+        "who": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "avatar",
+        "who",
+        "kind",
+        "state",
+        "text",
+        "when",
+        "percent",
+        "href",
+        "laneId",
+        "alt"
+      ],
+      "type": "object"
+    },
+    "Standing": {
+      "additionalProperties": false,
+      "properties": {
+        "detail": {
+          "type": "string"
+        },
+        "headline": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "headline",
+        "detail"
+      ],
+      "type": "object"
+    },
+    "Stat": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "sub": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value",
+        "sub"
+      ],
+      "type": "object"
+    },
+    "Step": {
+      "additionalProperties": false,
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/StepKind"
+        },
+        "text": {
+          "type": "string"
+        },
+        "who": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text",
+        "who"
+      ],
+      "type": "object"
+    },
+    "StepKind": {
+      "enum": [
+        "ok",
+        "now",
+        "todo"
+      ],
+      "type": "string"
+    },
+    "StripItem": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "time": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "time",
+        "name",
+        "text"
+      ],
+      "type": "object"
+    },
+    "StuckAction": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "tone": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "tone"
+      ],
+      "type": "object"
+    },
+    "StuckReport": {
+      "additionalProperties": false,
+      "properties": {
+        "actions": {
+          "items": {
+            "$ref": "#/$defs/StuckAction"
+          },
+          "type": "array"
+        },
+        "blocks": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/CheckResult"
+          },
+          "type": "array"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "log": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/FailingTest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "since",
+        "title",
+        "detail",
+        "blocks",
+        "checks",
+        "log",
+        "actions",
+        "note"
+      ],
+      "type": "object"
+    },
+    "TaskRow": {
+      "additionalProperties": false,
+      "properties": {
+        "lane": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "state": {
+          "type": "string"
+        },
+        "stateWord": {
+          "type": "string"
+        },
+        "task": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "task",
+        "lane",
+        "state",
+        "stateWord",
+        "next",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "Theme": {
+      "additionalProperties": false,
+      "properties": {
+        "glass": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "id": {
+          "$ref": "#/$defs/ThemeId"
+        },
+        "name": {
+          "type": "string"
+        },
+        "strength": {
+          "format": "int64",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "strength",
+        "glass"
+      ],
+      "type": "object"
+    },
+    "ThemeId": {
+      "enum": [
+        "ink",
+        "ember",
+        "sand",
+        "moss",
+        "tide",
+        "sky",
+        "iris",
+        "rose"
+      ],
+      "type": "string"
+    },
+    "ThemePatch": {
+      "additionalProperties": false,
+      "description": "Partial theme written by `prefs.set`. Every field may be omitted.",
+      "properties": {
+        "glass": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ThemeId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "strength": {
+          "default": null,
+          "format": "int64",
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
+    },
+    "ThreadCard": {
+      "additionalProperties": false,
+      "properties": {
+        "laneId": {
+          "type": "string"
+        },
+        "owner": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "title",
+        "owner",
+        "state",
+        "laneId"
+      ],
+      "type": "object"
+    },
+    "ThreadView": {
+      "additionalProperties": false,
+      "properties": {
+        "agents": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentsStrip"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "id": {
+          "type": "string"
+        },
+        "messages": {
+          "items": {
+            "$ref": "#/$defs/Message"
+          },
+          "type": "array"
+        },
+        "pinned": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/PinnedDecision"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "placeholder": {
+          "type": "string"
+        },
+        "reading": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "since": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SinceSummary"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "sub": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "suggestions": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "sub",
+        "placeholder",
+        "reading",
+        "since",
+        "pinned",
+        "agents",
+        "suggestions",
+        "messages"
+      ],
+      "type": "object"
+    },
+    "Thumb": {
+      "additionalProperties": false,
+      "properties": {
+        "label": {
+          "type": "string"
+        },
+        "passed": {
+          "type": "boolean"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "label",
+        "passed",
+        "reason"
+      ],
+      "type": "object"
+    },
+    "Tick": {
+      "additionalProperties": false,
+      "properties": {
+        "day": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "label": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "day",
+        "label"
+      ],
+      "type": "object"
+    },
+    "TopicKind": {
+      "enum": [
+        "topic",
+        "project"
+      ],
+      "type": "string"
+    },
+    "TopicLane": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "leadName": {
+          "type": "string"
+        },
+        "next": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/LaneState"
+        },
+        "stateWord": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "state",
+        "stateWord",
+        "leadName",
+        "next"
+      ],
+      "type": "object"
+    },
+    "TopicMeta": {
+      "additionalProperties": false,
+      "properties": {
+        "askedBy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "nextReport": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ownerLine": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "parts": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "askedBy",
+        "ownerLine",
+        "nextReport",
+        "parts"
+      ],
+      "type": "object"
+    },
+    "TopicView": {
+      "additionalProperties": false,
+      "properties": {
+        "chatSub": {
+          "type": "string"
+        },
+        "crew": {
+          "items": {
+            "$ref": "#/$defs/Actor"
+          },
+          "type": "array"
+        },
+        "crumb": {
+          "type": "string"
+        },
+        "facts": {
+          "items": {
+            "$ref": "#/$defs/Fact"
+          },
+          "type": "array"
+        },
+        "focusLaneId": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "goal": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Goal"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "health": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Health"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "history": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/History"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "icon": {
+          "type": "string"
+        },
+        "id": {
+          "type": "string"
+        },
+        "intro": {
+          "type": "string"
+        },
+        "jobs": {
+          "items": {
+            "$ref": "#/$defs/Job"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "$ref": "#/$defs/TopicKind"
+        },
+        "lanes": {
+          "items": {
+            "$ref": "#/$defs/TopicLane"
+          },
+          "type": "array"
+        },
+        "meta": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TopicMeta"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "noGoal": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "open": {
+          "type": "boolean"
+        },
+        "plan": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Plan"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "spend": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AgentSpend"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "stuck": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/StuckReport"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "tasks": {
+          "items": {
+            "$ref": "#/$defs/TaskRow"
+          },
+          "type": "array"
+        },
+        "when": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "kind",
+        "icon",
+        "crumb",
+        "open",
+        "meta",
+        "intro",
+        "when",
+        "health",
+        "goal",
+        "noGoal",
+        "facts",
+        "plan",
+        "focusLaneId",
+        "history",
+        "crew",
+        "jobs",
+        "chatSub",
+        "lanes",
+        "spend",
+        "stuck",
+        "tasks"
+      ],
+      "type": "object"
+    },
+    "Trajectory": {
+      "additionalProperties": false,
+      "properties": {
+        "actual": {
+          "items": {
+            "$ref": "#/$defs/SeriesPoint"
+          },
+          "type": "array"
+        },
+        "days": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "expected": {
+          "items": {
+            "$ref": "#/$defs/SeriesPoint"
+          },
+          "type": "array"
+        },
+        "goal": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "high": {
+          "items": {
+            "$ref": "#/$defs/SeriesPoint"
+          },
+          "type": "array"
+        },
+        "key": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "low": {
+          "items": {
+            "$ref": "#/$defs/SeriesPoint"
+          },
+          "type": "array"
+        },
+        "noForecast": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "now": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "plan": {
+          "items": {
+            "$ref": "#/$defs/SeriesPoint"
+          },
+          "type": "array"
+        },
+        "start": {
+          "type": "string"
+        },
+        "step": {
+          "anyOf": [
+            {
+              "format": "int64",
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "ticks": {
+          "items": {
+            "$ref": "#/$defs/Tick"
+          },
+          "type": "array"
+        },
+        "title": {
+          "type": "string"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "start",
+        "days",
+        "now",
+        "goal",
+        "step",
+        "unit",
+        "key",
+        "ticks",
+        "plan",
+        "actual",
+        "expected",
+        "low",
+        "high",
+        "noForecast",
+        "title"
+      ],
+      "type": "object"
+    },
+    "UsageAccount": {
+      "additionalProperties": false,
+      "properties": {
+        "lanes": {
+          "format": "int64",
+          "type": "integer"
+        },
+        "meters": {
+          "items": {
+            "$ref": "#/$defs/Meter"
+          },
+          "type": "array"
+        },
+        "name": {
+          "type": "string"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "lanes",
+        "note",
+        "meters"
+      ],
+      "type": "object"
+    },
+    "UsageView": {
+      "additionalProperties": false,
+      "properties": {
+        "asOf": {
+          "type": "string"
+        },
+        "keys": {
+          "items": {
+            "$ref": "#/$defs/UsageAccount"
+          },
+          "type": "array"
+        },
+        "missing": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "subscriptions": {
+          "items": {
+            "$ref": "#/$defs/UsageAccount"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "asOf",
+        "subscriptions",
+        "keys",
+        "missing"
+      ],
+      "type": "object"
+    },
+    "Verdict": {
+      "additionalProperties": false,
+      "properties": {
+        "action": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/HealthState"
+        },
+        "text": {
+          "type": "string"
+        },
+        "word": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "state",
+        "word",
+        "action",
+        "text"
+      ],
+      "type": "object"
+    },
+    "WorkspaceInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "theme": {
+          "$ref": "#/$defs/Theme"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "theme"
+      ],
+      "type": "object"
+    },
+    "WorkspaceView": {
+      "additionalProperties": false,
+      "properties": {
+        "chatMode": {
+          "$ref": "#/$defs/ChatMode"
+        },
+        "layout": {
+          "$ref": "#/$defs/Layout"
+        },
+        "me": {
+          "$ref": "#/$defs/Actor"
+        },
+        "module": {
+          "$ref": "#/$defs/ModuleInfo"
+        },
+        "workspace": {
+          "$ref": "#/$defs/WorkspaceInfo"
+        }
+      },
+      "required": [
+        "workspace",
+        "module",
+        "me",
+        "layout",
+        "chatMode"
+      ],
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema"
+}
