@@ -1,8 +1,8 @@
 # ADR-0044: The cockpit replaces the Slack-style desktop, and the backend is built to serve all of it
 
-- **Status:** Proposed, 2026-11-21. The owner made each decision below on 21 November; the ADR becomes Accepted when he
-  accepts this text.
-- **Replaces, once accepted:** ADR-0006 (Slack-style desktop client) as a whole, including its rule that the hub never
+- **Status:** Accepted, 2026-11-21. The owner made each decision below on 21 November and accepted this text the same
+  day ("okay lets go for it then").
+- **Replaces:** ADR-0006 (Slack-style desktop client) as a whole, including its rule that the hub never
   stores message text.
 - **Amends:** ADR-0004 (one principal; access becomes per person), ADR-0005 (stack: a native Mac app with a Rust core
   joins the TypeScript hub and the SvelteKit web app).
