@@ -432,12 +432,18 @@ async function dev() {
     const d1 = await view(url, "/decisions/d1", "DecisionView");
     ok(d1?.release && typeof d1.release.stage === "string" && Number.isInteger(d1.release.watchMinutes), "the release decision carries its staged rollout");
     ok([d1?.opportunity, d1?.risk].filter(Boolean).every((s: any) => (s.series ?? []).length >= 2), "the release decision's scenarios carry chart series");
-    await act(url, { type: "decision.approve", decisionId: "d1" });
-    ok(by((await get(url, "/pulls")).body?.items, "number", 412)?.state === "releasing", "approving the release starts PR 412's rollout");
-    const held = await act(url, { type: "pull.hold", pullId: pr412?.id ?? "412" });
-    ok(held.status === 200 && by((await get(url, "/pulls")).body?.items, "number", 412)?.state === "held", "a pull request can be held");
     const m = await view(url, "/manager", "ManagerView");
     ok(m?.summary === "7 lanes in 4 projects · 3 wait for you", `the dev Manager summary matches the mockup (got ${m?.summary})`);
+    // Hold sits on the pull request that merges by itself (dev.blocks.html:377)
+    const pr413 = by(pulls?.items, "number", 413);
+    ok(pr413?.state === "autoMerge" && isTime(pr413?.autoMergeAt), "PR 413 merges by itself at a set time");
+    const held = await act(url, { type: "pull.hold", pullId: pr413?.id ?? "413" });
+    const pr413After = by((await get(url, "/pulls")).body?.items, "number", 413);
+    ok(held.status === 200 && pr413After?.state === "held" && pr413After?.autoMergeAt === null, "holding PR 413 stops its merge");
+    await act(url, { type: "decision.approve", decisionId: "d1" });
+    ok(by((await get(url, "/pulls")).body?.items, "number", 412)?.state === "releasing", "approving the release starts PR 412's rollout");
+    const late = await act(url, { type: "pull.hold", pullId: pr412?.id ?? "412" });
+    ok(late.status === 409 && late.body?.code === "conflict", "a release in progress cannot be held");
     for (const g of (await get(url, "/sidebar")).body?.groups ?? []) await view(url, `/topics/${g.id}`, "TopicView");
     const devButtons: any[] = [];
     for (const g of (await get(url, "/sidebar")).body?.groups ?? []) devButtons.push(...((await get(url, `/threads/topic:${g.id}`)).body?.messages ?? []).filter((m: any) => (m.actions ?? []).length));
