@@ -1,7 +1,7 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::ModelId;
+use crate::{ModelId, Present};
 
 /// Availability of an engine in the model picker.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -30,9 +30,9 @@ pub struct Model {
     /// Display name.
     pub name: String,
     /// Engine vendor.
-    pub vendor: String,
+    pub vendor: Present<String>,
     /// Current availability.
-    pub state: ModelState,
+    pub state: Present<ModelState>,
 }
 
 /// Choices available for a new request.

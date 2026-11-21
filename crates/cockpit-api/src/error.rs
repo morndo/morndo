@@ -17,6 +17,7 @@ pub enum ErrorCode {
     MethodNotAllowed,
     Internal,
     IdempotencyKeyReused,
+    RateLimited,
     #[serde(other)]
     #[schemars(skip)]
     Unknown,

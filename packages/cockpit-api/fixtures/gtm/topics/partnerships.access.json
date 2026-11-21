@@ -23,7 +23,8 @@
       },
       "scope": "owner",
       "otherTopics": [],
-      "owner": true
+      "owner": true,
+      "email": "mara-lind@example.test"
     },
     {
       "person": {
@@ -53,7 +54,8 @@
           "access": "view"
         }
       ],
-      "owner": false
+      "owner": false,
+      "email": "lea-brandt@example.test"
     },
     {
       "person": {
@@ -78,7 +80,8 @@
       },
       "scope": "Offers",
       "otherTopics": [],
-      "owner": false
+      "owner": false,
+      "email": "jonas-falk@example.test"
     },
     {
       "person": {
@@ -114,7 +117,8 @@
           "access": "view"
         }
       ],
-      "owner": false
+      "owner": false,
+      "email": "tom-ahrens@example.test"
     }
   ],
   "invitations": [],

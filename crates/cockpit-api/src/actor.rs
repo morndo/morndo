@@ -22,6 +22,9 @@ pub enum ActorKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Actor {
+    /// Membership state, set for invited readers who have not joined.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub membership_state: Option<MembershipState>,
     /// Stable identifier for this record.
     pub id: PersonId,
     /// Name shown to the reader.
@@ -46,4 +49,16 @@ pub struct Actor {
     pub engine: Present<String>,
     /// Record for this record.
     pub record: Present<String>,
+}
+
+/// Membership of the person in the workspace.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
+pub enum MembershipState {
+    Active,
+    Invited,
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
 }

@@ -8,13 +8,11 @@
   "meta": {
     "askedBy": "Asked by you",
     "ownerLine": "Paid buyer leads",
-    "nextReport": "€4,000 a week",
     "parts": [
       "Asked by you",
-      "Paid buyer leads",
-      "€4,000 a week",
-      "Next report Mon 23 Nov"
-    ]
+      "Paid buyer leads"
+    ],
+    "nextReportAt": "2026-11-23T17:00:00+01:00"
   },
   "intro": "€4,000 a week across LinkedIn and Google Search. The goal: 450 leads this quarter, at €100 or less each.",
   "when": "Week 7 of 13",
@@ -31,7 +29,6 @@
       "text": null
     },
     "insight": "The count is on plan; the cost is not. Search brings a lead for €80, LinkedIn for €200.",
-    "asOf": "updated 07:05, forecast unchanged since Friday",
     "decision": {
       "title": "Move €1,200 a week to Search",
       "detail": "Due today, 14:00 · a lead costs more than its guardrail",
@@ -307,29 +304,77 @@
       "items": [
         {
           "what": "Cost per lead",
-          "value": "€114",
-          "limit": "limit €100",
+          "value": {
+            "kind": "money",
+            "money": {
+              "amountMinor": 11400,
+              "currency": "EUR"
+            },
+            "cap": null
+          },
+          "limit": {
+            "kind": "money",
+            "money": {
+              "amountMinor": 10000,
+              "currency": "EUR"
+            },
+            "cap": null
+          },
           "ratio": 1.14,
           "state": "breached"
         },
         {
           "what": "Weekly spend",
-          "value": "€3,640",
-          "limit": "limit €4,000",
+          "value": {
+            "kind": "money",
+            "money": {
+              "amountMinor": 364000,
+              "currency": "EUR"
+            },
+            "cap": null
+          },
+          "limit": {
+            "kind": "money",
+            "money": {
+              "amountMinor": 400000,
+              "currency": "EUR"
+            },
+            "cap": null
+          },
           "ratio": 0.91,
           "state": "near"
         },
         {
           "what": "Changes over €500 without you",
-          "value": "0",
-          "limit": "none allowed",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         },
         {
           "what": "Customer data in ads",
-          "value": "none",
-          "limit": "never",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         }
@@ -426,41 +471,70 @@
     "restSub": null,
     "figures": [
       {
-        "value": "214",
-        "of": "450",
+        "value": 214,
+        "of": 450,
         "label": "Leads since 1 October"
       },
       {
-        "value": "216",
+        "value": 216,
         "of": null,
         "label": "More forecast"
       },
       {
-        "value": "20",
+        "value": 20,
         "of": null,
         "label": "Still missing"
       }
     ],
     "pathTitle": null,
     "forecastLog": [],
-    "deadlineAt": null
+    "deadlineAt": null,
+    "updatedAt": "2026-11-16T07:05:00+01:00",
+    "forecastNote": "forecast unchanged since Friday"
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "€3,640",
-      "label": "spent of €4,000 this week"
+      "value": {
+        "kind": "money",
+        "money": {
+          "amountMinor": 364000,
+          "currency": "EUR"
+        },
+        "cap": {
+          "amountMinor": 400000,
+          "currency": "EUR"
+        }
+      },
+      "label": "spent this week"
     },
     {
-      "value": "32",
+      "value": {
+        "kind": "count",
+        "value": 32,
+        "of": null,
+        "unit": null
+      },
       "label": "leads this week"
     },
     {
-      "value": "€114",
+      "value": {
+        "kind": "money",
+        "money": {
+          "amountMinor": 11400,
+          "currency": "EUR"
+        },
+        "cap": null
+      },
       "label": "average cost per lead"
     },
     {
-      "value": "3",
+      "value": {
+        "kind": "count",
+        "value": 3,
+        "of": null,
+        "unit": null
+      },
       "label": "ads switched off today"
     }
   ],
@@ -791,36 +865,46 @@
       "job": "Move €1,200 a week to Search",
       "agent": "Paid buyer",
       "state": "warn",
-      "due": "Today, 14:00",
-      "laneId": "search-budget"
+      "laneId": "search-budget",
+      "dueAt": "2026-11-16T14:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Webinar sign-up campaign",
       "agent": "Paid buyer",
       "state": "ok",
-      "due": "Ends Thu 19 Nov",
-      "laneId": "webinar-campaign"
+      "laneId": "webinar-campaign",
+      "dueAt": "2026-11-19T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Switch off ads below the click floor",
       "agent": "Paid buyer",
       "state": "done",
-      "due": "Today, 08:30",
-      "laneId": "click-floor"
+      "laneId": "click-floor",
+      "dueAt": null,
+      "completedAt": "2026-11-16T08:30:00+01:00",
+      "cadence": null
     },
     {
       "job": "3 new Search ads",
       "agent": "Writer",
       "state": "next",
-      "due": "After your decision",
-      "laneId": null
+      "laneId": null,
+      "dueAt": null,
+      "completedAt": null,
+      "cadence": "afterDecision"
     },
     {
       "job": "Weekly spend report",
       "agent": "Analyst",
       "state": "next",
-      "due": "Mon 23 Nov",
-      "laneId": null
+      "laneId": null,
+      "dueAt": "2026-11-23T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     }
   ],
   "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",
@@ -868,5 +952,6 @@
     "sharedBy": null
   },
   "stages": [],
-  "status": null
+  "status": null,
+  "seenBy": []
 }

@@ -52,7 +52,7 @@ pub struct TopicMeta {
     /// Owner line for this record.
     pub owner_line: Present<String>,
     /// Next report for this record.
-    pub next_report: Present<String>,
+    pub next_report_at: Present<Timestamp>,
     /// Parts for this record.
     pub parts: Vec<String>,
 }
@@ -62,7 +62,7 @@ pub struct TopicMeta {
 #[serde(rename_all = "camelCase")]
 pub struct Fact {
     /// Value for this record.
-    pub value: String,
+    pub value: MeasuredValue,
     /// Label for this record.
     pub label: String,
 }
@@ -72,9 +72,9 @@ pub struct Fact {
 #[serde(rename_all = "camelCase")]
 pub struct Figure {
     /// Value for this record.
-    pub value: String,
+    pub value: Present<i64>,
     /// Of for this record.
-    pub of: Present<String>,
+    pub of: Present<i64>,
     /// Label for this record.
     pub label: String,
 }
@@ -212,9 +212,9 @@ pub struct GuardrailItem {
     /// What for this record.
     pub what: String,
     /// Value for this record.
-    pub value: String,
+    pub value: MeasuredValue,
     /// Limit for this record.
-    pub limit: String,
+    pub limit: MeasuredValue,
     /// Ratio for this record.
     pub ratio: Present<f64>,
 }
@@ -347,8 +347,10 @@ pub struct Goal {
     pub verdict: Verdict,
     /// Insight for this record.
     pub insight: String,
-    /// As of for this record.
-    pub as_of: String,
+    /// Last recorded goal assessment.
+    pub updated_at: Timestamp,
+    /// Assessment context written alongside the forecast.
+    pub forecast_note: Present<String>,
     /// Decision for this record.
     pub decision: Present<GoalDecision>,
     /// Calm for this record.
@@ -561,8 +563,12 @@ pub struct Job {
     pub agent: String,
     /// Current state of the record.
     pub state: LaneState,
-    /// Due for this record.
-    pub due: String,
+    /// Time the job must finish, when it has a deadline.
+    pub due_at: Present<Timestamp>,
+    /// Time the job finished.
+    pub completed_at: Present<Timestamp>,
+    /// How an undated job is scheduled.
+    pub cadence: Present<JobCadence>,
     /// Identifier of the associated lane.
     pub lane_id: Present<LaneId>,
 }
@@ -675,6 +681,8 @@ pub struct TaskRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicView {
+    /// Faces of people who can work on or watch this topic.
+    pub seen_by: Vec<crate::access::SeenByFace>,
     /// Progress shared with a status-only reader.
     pub status: Present<SharedTopicStatus>,
     /// Viewer for this record.
@@ -793,4 +801,54 @@ pub struct SharedTopicStatus {
     pub health: Present<Health>,
     /// Time of the next status report.
     pub next_report_at: Present<Timestamp>,
+}
+
+/// Numeric or machine-readable value rendered according to its measurement kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:tag:kind"))]
+pub enum MeasuredValue {
+    Count {
+        /// Observed count.
+        value: f64,
+        /// Total, when presented as a fraction.
+        of: Present<f64>,
+        /// Count unit or interval.
+        unit: Present<String>,
+    },
+    Rate {
+        /// Percentage points, e.g. 1.2 for 1.2%.
+        percent: f64,
+        /// Whether the rate is the standard policy.
+        standard: bool,
+    },
+    Money {
+        /// Amount in minor currency units.
+        money: crate::Money,
+        /// Budget cap, when applicable.
+        cap: Present<crate::Money>,
+    },
+    Time {
+        /// Time of the observation.
+        at: Timestamp,
+    },
+    Policy {
+        /// Rule expressed in words when it has no measurable threshold.
+        text: String,
+    },
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
+}
+
+/// Schedule for a job whose next run does not have a timestamp.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
+pub enum JobCadence {
+    EveryMorning,
+    AfterDecision,
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
 }

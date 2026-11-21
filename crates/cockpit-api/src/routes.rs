@@ -18,7 +18,7 @@ pub struct Route {
 /// Common prefix for every cockpit operation.
 pub const BASE: &str = "/api/cockpit";
 const READ: &[u16] = &[400, 403, 404, 405, 500];
-const WRITE: &[u16] = &[400, 403, 404, 405, 409, 413, 415, 422, 500];
+const WRITE: &[u16] = &[400, 403, 404, 405, 409, 413, 415, 422, 429, 500];
 
 fn parameter(name: &str, location: &str, schema: Value) -> Value {
     json!({"name": name, "in": location, "required": location == "path", "schema": schema})

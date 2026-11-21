@@ -8,12 +8,11 @@
   "meta": {
     "askedBy": "Asked by you",
     "ownerLine": "SEO writer leads; Checker checks every claim",
-    "nextReport": "First ranking check Mon 30 Nov",
     "parts": [
       "Asked by you",
-      "SEO writer leads; Checker checks every claim",
-      "First ranking check Mon 30 Nov"
-    ]
+      "SEO writer leads; Checker checks every claim"
+    ],
+    "nextReportAt": "2026-11-30T17:00:00+01:00"
   },
   "intro": "Five comparison pages against the tools we lose deals to. The goal: three of them in Google's top 10 by 31 December.",
   "when": "Week 3 of 9",
@@ -30,7 +29,6 @@
       "text": null
     },
     "insight": "Pages 1 and 2 went live this morning. Rankings settle in 2 to 4 weeks; the first reading is on 30 November.",
-    "asOf": "updated 07:42",
     "decision": null,
     "calm": "Nothing needs you",
     "calmSub": "The first ranking check is Mon 30 Nov. You hear about it in that morning's brief.",
@@ -197,22 +195,52 @@
       "items": [
         {
           "what": "Claims without a public source",
-          "value": "0",
-          "limit": "none allowed",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         },
         {
           "what": "Pages live without your outline",
-          "value": "0",
-          "limit": "none allowed",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         },
         {
           "what": "Bought links",
-          "value": "0",
-          "limit": "never",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         }
@@ -270,41 +298,62 @@
     "restSub": "Why there is no forecast yet, and what each page has going for it",
     "figures": [
       {
-        "value": "0",
-        "of": "3",
+        "value": 0,
+        "of": 3,
         "label": "Pages in the top 10"
       },
       {
-        "value": "–",
+        "value": null,
         "of": null,
         "label": "Forecast from 30 Nov"
       },
       {
-        "value": "3",
+        "value": 3,
         "of": null,
         "label": "Still to rank"
       }
     ],
     "pathTitle": null,
     "forecastLog": [],
-    "deadlineAt": null
+    "deadlineAt": null,
+    "updatedAt": "2026-11-16T07:42:00+01:00",
+    "forecastNote": null
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "2,310",
+      "value": {
+        "kind": "count",
+        "value": 2310,
+        "of": null,
+        "unit": null
+      },
       "label": "visits from search this week"
     },
     {
-      "value": "+18%",
+      "value": {
+        "kind": "rate",
+        "percent": 18.0,
+        "standard": false
+      },
       "label": "against last week"
     },
     {
-      "value": "41",
+      "value": {
+        "kind": "count",
+        "value": 41,
+        "of": null,
+        "unit": null
+      },
       "label": "keywords in the top 10"
     },
     {
-      "value": "2 of 5",
+      "value": {
+        "kind": "count",
+        "value": 2,
+        "of": 5,
+        "unit": null
+      },
       "label": "comparison pages live"
     }
   ],
@@ -564,29 +613,37 @@
       "job": "Page 3 written and checked",
       "agent": "SEO writer",
       "state": "ok",
-      "due": "Today, 15:00",
-      "laneId": "comparison-pages"
+      "laneId": "comparison-pages",
+      "dueAt": "2026-11-16T15:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Pages 4 and 5 live",
       "agent": "SEO writer",
       "state": "next",
-      "due": "Fri 20 Nov",
-      "laneId": "comparison-pages"
+      "laneId": "comparison-pages",
+      "dueAt": "2026-11-20T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Pages 1 and 2 published",
       "agent": "SEO writer",
       "state": "done",
-      "due": "Today, 07:42",
-      "laneId": "comparison-pages"
+      "laneId": "comparison-pages",
+      "dueAt": null,
+      "completedAt": "2026-11-16T07:42:00+01:00",
+      "cadence": null
     },
     {
       "job": "First ranking check",
       "agent": "Checker",
       "state": "next",
-      "due": "Mon 30 Nov",
-      "laneId": null
+      "laneId": null,
+      "dueAt": "2026-11-30T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     }
   ],
   "chatSub": "Mara and 2 agents · the Manager reads it, it is not in it",
@@ -626,5 +683,6 @@
     "sharedBy": null
   },
   "stages": [],
-  "status": null
+  "status": null,
+  "seenBy": []
 }

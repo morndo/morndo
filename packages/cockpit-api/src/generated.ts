@@ -7,6 +7,13 @@
  */
 export type AccessKind = "all" | "stages" | "view" | "none";
 /**
+ * Membership of the person in the workspace.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MembershipState".
+ */
+export type MembershipState = "active" | "invited";
+/**
  * Lane state for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -210,6 +217,10 @@ export type Command =
        */
       page?: TargetInput | null;
       /**
+       * Status viewer receiving a private reply from the owner.
+       */
+      recipientId?: PersonId | null;
+      /**
        * Stage to post in when the thread covers several stages.
        */
       stage?: string | null;
@@ -318,6 +329,10 @@ export type Command =
        * Text shown to the reader.
        */
       text: string;
+      /**
+       * Explicit destination when the skill is run from shared work.
+       */
+      topicId?: TopicId | null;
       type: "skill.run";
     }
   | {
@@ -385,6 +400,10 @@ export type Command =
     }
   | {
       /**
+       * Enable the link or revoke it. Omission enables it.
+       */
+      enabled?: boolean;
+      /**
        * Identifier of a topic or project.
        */
       topicId: string;
@@ -414,6 +433,13 @@ export type Command =
        */
       pullId: string;
       type: "pull.hold";
+    }
+  | {
+      /**
+       * Auto-merge pull request whose hold is lifted.
+       */
+      pullId: string;
+      type: "pull.unhold";
     }
   | {
       /**
@@ -704,7 +730,8 @@ export type ErrorCode =
   | "payloadTooLarge"
   | "methodNotAllowed"
   | "internal"
-  | "idempotencyKeyReused";
+  | "idempotencyKeyReused"
+  | "rateLimited";
 /**
  * A change notification delivered to cockpit readers.
  *
@@ -1105,6 +1132,13 @@ export type InvitationId = string;
  */
 export type InvitationState = "pending" | "accepted";
 /**
+ * Schedule for a job whose next run does not have a timestamp.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "JobCadence".
+ */
+export type JobCadence = "everyMorning" | "afterDecision";
+/**
  * Access kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -1167,12 +1201,77 @@ export type KnownTargetKind =
  */
 export type LabelKind = "question" | "request" | "done" | "decision" | "goalChange";
 /**
+ * Numeric or machine-readable value rendered according to its measurement kind.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MeasuredValue".
+ */
+export type MeasuredValue =
+  | {
+      kind: "count";
+      /**
+       * Total, when presented as a fraction.
+       */
+      of: number | null;
+      /**
+       * Count unit or interval.
+       */
+      unit: string | null;
+      /**
+       * Observed count.
+       */
+      value: number;
+    }
+  | {
+      kind: "rate";
+      /**
+       * Percentage points, e.g. 1.2 for 1.2%.
+       */
+      percent: number;
+      /**
+       * Whether the rate is the standard policy.
+       */
+      standard: boolean;
+    }
+  | {
+      /**
+       * Budget cap, when applicable.
+       */
+      cap: Money6 | null;
+      kind: "money";
+      money: Money7;
+    }
+  | {
+      /**
+       * A point in time with an RFC 3339 UTC offset.
+       */
+      at: string;
+      kind: "time";
+    }
+  | {
+      kind: "policy";
+      /**
+       * Rule expressed in words when it has no measurable threshold.
+       */
+      text: string;
+    };
+/**
  * Audience allowed to receive a message in a topic.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "MessageAudience".
  */
 export type MessageAudience =
+  | {
+      kind: "owner";
+    }
+  | {
+      kind: "viewer";
+      /**
+       * Identifier of an actor, whether a person or an agent.
+       */
+      personId: string;
+    }
   | {
       kind: "topic";
     }
@@ -1365,6 +1464,10 @@ export interface AccessGrantInput {
 export interface AccessPerson {
   access: AccessGrant1;
   /**
+   * Address used for this person’s invitations.
+   */
+  email?: string | null;
+  /**
    * Other topics for this record.
    */
   otherTopics: OtherTopicAccess[];
@@ -1427,6 +1530,10 @@ export interface Actor {
    * Kind for this record.
    */
   kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
   /**
    * Name shown to the reader.
    */
@@ -1508,6 +1615,10 @@ export interface Invitation {
    */
   nameOrEmail: string;
   /**
+   * Person whose access can be set while the invitation is pending.
+   */
+  personId: string;
+  /**
    * Current state of the record.
    */
   state: "pending" | "accepted";
@@ -1552,6 +1663,10 @@ export interface Actor1 {
    * Kind for this record.
    */
   kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
   /**
    * Name shown to the reader.
    */
@@ -1741,7 +1856,8 @@ export interface ApiError {
     | "payloadTooLarge"
     | "methodNotAllowed"
     | "internal"
-    | "idempotencyKeyReused";
+    | "idempotencyKeyReused"
+    | "rateLimited";
   /**
    * Explanation specific to this request.
    */
@@ -2740,6 +2856,16 @@ export interface Message {
    */
   audience:
     | {
+        kind: "owner";
+      }
+    | {
+        kind: "viewer";
+        /**
+         * Identifier of an actor, whether a person or an agent.
+         */
+        personId: string;
+      }
+    | {
         kind: "topic";
       }
     | {
@@ -2827,6 +2953,10 @@ export interface Actor2 {
    * Kind for this record.
    */
   kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
   /**
    * Name shown to the reader.
    */
@@ -2948,6 +3078,16 @@ export interface Message1 {
    */
   audience:
     | {
+        kind: "owner";
+      }
+    | {
+        kind: "viewer";
+        /**
+         * Identifier of an actor, whether a person or an agent.
+         */
+        personId: string;
+      }
+    | {
         kind: "topic";
       }
     | {
@@ -3040,6 +3180,10 @@ export interface Actor3 {
    * Kind for this record.
    */
   kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
   /**
    * Name shown to the reader.
    */
@@ -3826,6 +3970,16 @@ export interface Message2 {
    */
   audience:
     | {
+        kind: "owner";
+      }
+    | {
+        kind: "viewer";
+        /**
+         * Identifier of an actor, whether a person or an agent.
+         */
+        personId: string;
+      }
+    | {
         kind: "topic";
       }
     | {
@@ -3883,7 +4037,68 @@ export interface Fact {
   /**
    * Value for this record.
    */
-  value: string;
+  value:
+    | {
+        kind: "count";
+        /**
+         * Total, when presented as a fraction.
+         */
+        of: number | null;
+        /**
+         * Count unit or interval.
+         */
+        unit: string | null;
+        /**
+         * Observed count.
+         */
+        value: number;
+      }
+    | {
+        kind: "rate";
+        /**
+         * Percentage points, e.g. 1.2 for 1.2%.
+         */
+        percent: number;
+        /**
+         * Whether the rate is the standard policy.
+         */
+        standard: boolean;
+      }
+    | {
+        /**
+         * Budget cap, when applicable.
+         */
+        cap: Money6 | null;
+        kind: "money";
+        money: Money7;
+      }
+    | {
+        /**
+         * A point in time with an RFC 3339 UTC offset.
+         */
+        at: string;
+        kind: "time";
+      }
+    | {
+        kind: "policy";
+        /**
+         * Rule expressed in words when it has no measurable threshold.
+         */
+        text: string;
+      };
+}
+/**
+ * A currency amount in the currency's minor units.
+ */
+export interface Money7 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
 }
 /**
  * Failing test for the cockpit.
@@ -3931,11 +4146,11 @@ export interface Figure {
   /**
    * Of for this record.
    */
-  of: string | null;
+  of: number | null;
   /**
    * Value for this record.
    */
-  value: string;
+  value: number | null;
 }
 /**
  * Forecast and its later outcome, for calibration.
@@ -4049,10 +4264,6 @@ export interface Gate {
  */
 export interface Goal {
   /**
-   * As of for this record.
-   */
-  asOf: string;
-  /**
    * Blockers for this record.
    */
   blockers: Blocker[];
@@ -4088,6 +4299,10 @@ export interface Goal {
    * Forecast log for this record.
    */
   forecastLog: Forecast[];
+  /**
+   * Assessment context written alongside the forecast.
+   */
+  forecastNote: string | null;
   /**
    * Funnel for this record.
    */
@@ -4149,6 +4364,10 @@ export interface Goal {
    * Unit for this record.
    */
   unit: string;
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  updatedAt: string;
   verdict: Verdict;
 }
 /**
@@ -4213,7 +4432,55 @@ export interface GuardrailItem {
   /**
    * Limit for this record.
    */
-  limit: string;
+  limit:
+    | {
+        kind: "count";
+        /**
+         * Total, when presented as a fraction.
+         */
+        of: number | null;
+        /**
+         * Count unit or interval.
+         */
+        unit: string | null;
+        /**
+         * Observed count.
+         */
+        value: number;
+      }
+    | {
+        kind: "rate";
+        /**
+         * Percentage points, e.g. 1.2 for 1.2%.
+         */
+        percent: number;
+        /**
+         * Whether the rate is the standard policy.
+         */
+        standard: boolean;
+      }
+    | {
+        /**
+         * Budget cap, when applicable.
+         */
+        cap: Money6 | null;
+        kind: "money";
+        money: Money7;
+      }
+    | {
+        /**
+         * A point in time with an RFC 3339 UTC offset.
+         */
+        at: string;
+        kind: "time";
+      }
+    | {
+        kind: "policy";
+        /**
+         * Rule expressed in words when it has no measurable threshold.
+         */
+        text: string;
+      };
   /**
    * Ratio for this record.
    */
@@ -4225,7 +4492,55 @@ export interface GuardrailItem {
   /**
    * Value for this record.
    */
-  value: string;
+  value:
+    | {
+        kind: "count";
+        /**
+         * Total, when presented as a fraction.
+         */
+        of: number | null;
+        /**
+         * Count unit or interval.
+         */
+        unit: string | null;
+        /**
+         * Observed count.
+         */
+        value: number;
+      }
+    | {
+        kind: "rate";
+        /**
+         * Percentage points, e.g. 1.2 for 1.2%.
+         */
+        percent: number;
+        /**
+         * Whether the rate is the standard policy.
+         */
+        standard: boolean;
+      }
+    | {
+        /**
+         * Budget cap, when applicable.
+         */
+        cap: Money6 | null;
+        kind: "money";
+        money: Money7;
+      }
+    | {
+        /**
+         * A point in time with an RFC 3339 UTC offset.
+         */
+        at: string;
+        kind: "time";
+      }
+    | {
+        kind: "policy";
+        /**
+         * Rule expressed in words when it has no measurable threshold.
+         */
+        text: string;
+      };
   /**
    * What for this record.
    */
@@ -4486,6 +4801,10 @@ export interface Actor4 {
    */
   kind: "person" | "agent";
   /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
+  /**
    * Name shown to the reader.
    */
   name: string;
@@ -4568,9 +4887,17 @@ export interface Job {
    */
   agent: string;
   /**
-   * Due for this record.
+   * How an undated job is scheduled.
    */
-  due: string;
+  cadence: JobCadence | null;
+  /**
+   * Time the job finished.
+   */
+  completedAt: Timestamp | null;
+  /**
+   * Time the job must finish, when it has a deadline.
+   */
+  dueAt: Timestamp | null;
   /**
    * Job for this record.
    */
@@ -4793,6 +5120,10 @@ export interface Actor5 {
    * Kind for this record.
    */
   kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
   /**
    * Name shown to the reader.
    */
@@ -5105,11 +5436,11 @@ export interface Model {
   /**
    * Current availability.
    */
-  state: "signedIn" | "default" | "connected" | "addKey" | "signIn";
+  state: ModelState | null;
   /**
    * Engine vendor.
    */
-  vendor: string;
+  vendor: string | null;
 }
 /**
  * Choices available for a new request.
@@ -5688,6 +6019,30 @@ export interface SearchView {
   scope: string | null;
 }
 /**
+ * A person shown in the topic header without their private profile or work details.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "SeenByFace".
+ */
+export interface SeenByFace {
+  /**
+   * Whether this person works on this topic or watches its status.
+   */
+  access: "work" | "view" | "locked";
+  /**
+   * Initials shown in the topic header.
+   */
+  avatar: string | null;
+  /**
+   * Identifier of an actor, whether a person or an agent.
+   */
+  id: string;
+  /**
+   * Person’s display name.
+   */
+  name: string;
+}
+/**
  * The reader's last visit to a topic or thread.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -6241,7 +6596,7 @@ export interface TopicMeta {
   /**
    * Next report for this record.
    */
-  nextReport: string | null;
+  nextReportAt: Timestamp | null;
   /**
    * Owner line for this record.
    */
@@ -6259,13 +6614,29 @@ export interface TopicMeta {
  */
 export interface TopicStatusView {
   /**
+   * Target quantity in the status summary.
+   */
+  goal: number | null;
+  /**
    * Topic progress in the current reporting period.
    */
   health: Health | null;
   /**
+   * Next report time.
+   */
+  nextReportAt: Timestamp | null;
+  /**
+   * Progress measured for the current goal.
+   */
+  signed: number | null;
+  /**
    * Stages with their aggregate progress only.
    */
   stages: StageStatus[];
+  /**
+   * Units used for progress.
+   */
+  unit: string | null;
 }
 /**
  * Progress, work and conversation context for one topic or project.
@@ -6350,6 +6721,10 @@ export interface TopicView {
    * Plan for this record.
    */
   plan: Plan | null;
+  /**
+   * Faces of people who can work on or watch this topic.
+   */
+  seenBy: SeenByFace[];
   /**
    * Spend for this record.
    */
@@ -6701,6 +7076,10 @@ export interface Actor6 {
    * Kind for this record.
    */
   kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
   /**
    * Name shown to the reader.
    */

@@ -133,6 +133,9 @@ pub enum Command {
     },
     #[serde(rename = "message.send")]
     MessageSend {
+        /// Status viewer receiving a private reply from the owner.
+        #[serde(default)]
+        recipient_id: Option<PersonId>,
         /// Stage to post in when the thread covers several stages.
         #[serde(default)]
         #[schemars(length(min = 1, max = 200))]
@@ -215,6 +218,9 @@ pub enum Command {
     },
     #[serde(rename = "skill.run")]
     SkillRun {
+        /// Explicit destination when the skill is run from shared work.
+        #[serde(default)]
+        topic_id: Option<TopicId>,
         /// Model for this record.
         #[serde(default)]
         model: Option<ModelId>,
@@ -273,6 +279,9 @@ pub enum Command {
     },
     #[serde(rename = "access.statusLink")]
     AccessStatusLink {
+        /// Enable the link or revoke it. Omission enables it.
+        #[serde(default = "enabled_by_default")]
+        enabled: bool,
         /// Identifier of the associated topic.
         topic_id: TopicId,
     },
@@ -295,6 +304,11 @@ pub enum Command {
     #[serde(rename = "pull.hold")]
     PullHold {
         /// Identifier of the associated pull.
+        pull_id: PullId,
+    },
+    #[serde(rename = "pull.unhold")]
+    PullUnhold {
+        /// Auto-merge pull request whose hold is lifted.
         pull_id: PullId,
     },
     #[serde(rename = "connection.connect")]
@@ -361,4 +375,8 @@ pub struct Receipt {
     pub chain: bool,
     /// Identifier of the associated lane.
     pub lane_id: LaneId,
+}
+
+fn enabled_by_default() -> bool {
+    true
 }

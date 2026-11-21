@@ -215,5 +215,6 @@
     "sharedBy": null
   },
   "stages": [],
-  "status": null
+  "status": null,
+  "seenBy": []
 }

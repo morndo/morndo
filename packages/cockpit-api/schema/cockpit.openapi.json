@@ -62,6 +62,13 @@
             "$ref": "#/components/schemas/AccessGrant",
             "description": "Access for this record."
           },
+          "email": {
+            "description": "Address used for this person’s invitations.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "otherTopics": {
             "description": "Other topics for this record.",
             "items": {
@@ -183,6 +190,17 @@
           "kind": {
             "$ref": "#/components/schemas/ActorKind",
             "description": "Kind for this record."
+          },
+          "membershipState": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MembershipState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Membership state, set for invited readers who have not joined."
           },
           "name": {
             "description": "Name shown to the reader.",
@@ -1369,6 +1387,18 @@
                 "default": null,
                 "description": "Page for this record."
               },
+              "recipientId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PersonId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Status viewer receiving a private reply from the owner."
+              },
               "stage": {
                 "default": null,
                 "description": "Stage to post in when the thread covers several stages.",
@@ -1634,6 +1664,18 @@
                 "minLength": 1,
                 "type": "string"
               },
+              "topicId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/TopicId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "default": null,
+                "description": "Explicit destination when the skill is run from shared work."
+              },
               "type": {
                 "const": "skill.run",
                 "type": "string"
@@ -1794,6 +1836,11 @@
           {
             "additionalProperties": false,
             "properties": {
+              "enabled": {
+                "default": true,
+                "description": "Enable the link or revoke it. Omission enables it.",
+                "type": "boolean"
+              },
               "topicId": {
                 "$ref": "#/components/schemas/TopicId",
                 "description": "Identifier of the associated topic."
@@ -1863,6 +1910,24 @@
               },
               "type": {
                 "const": "pull.hold",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "pullId"
+            ],
+            "type": "object"
+          },
+          {
+            "additionalProperties": false,
+            "properties": {
+              "pullId": {
+                "$ref": "#/components/schemas/PullId",
+                "description": "Auto-merge pull request whose hold is lifted."
+              },
+              "type": {
+                "const": "pull.unhold",
                 "type": "string"
               }
             },
@@ -2766,7 +2831,8 @@
           "payloadTooLarge",
           "methodNotAllowed",
           "internal",
-          "idempotencyKeyReused"
+          "idempotencyKeyReused",
+          "rateLimited"
         ],
         "type": "string"
       },
@@ -3204,8 +3270,8 @@
             "type": "string"
           },
           "value": {
-            "description": "Value for this record.",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasuredValue",
+            "description": "Value for this record."
           }
         },
         "required": [
@@ -3756,7 +3822,8 @@
           "of": {
             "anyOf": [
               {
-                "type": "string"
+                "format": "int64",
+                "type": "integer"
               },
               {
                 "type": "null"
@@ -3765,8 +3832,16 @@
             "description": "Of for this record."
           },
           "value": {
-            "description": "Value for this record.",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Value for this record."
           }
         },
         "required": [
@@ -3945,10 +4020,6 @@
       "Goal": {
         "description": "Goal for the cockpit.",
         "properties": {
-          "asOf": {
-            "description": "As of for this record.",
-            "type": "string"
-          },
           "blockers": {
             "description": "Blockers for this record.",
             "items": {
@@ -4031,6 +4102,17 @@
               "$ref": "#/components/schemas/Forecast"
             },
             "type": "array"
+          },
+          "forecastNote": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Assessment context written alongside the forecast."
           },
           "funnel": {
             "anyOf": [
@@ -4168,6 +4250,10 @@
             "description": "Unit for this record.",
             "type": "string"
           },
+          "updatedAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Last recorded goal assessment."
+          },
           "verdict": {
             "$ref": "#/components/schemas/Verdict",
             "description": "Verdict for this record."
@@ -4182,7 +4268,8 @@
           "unit",
           "verdict",
           "insight",
-          "asOf",
+          "updatedAt",
+          "forecastNote",
           "decision",
           "calm",
           "calmSub",
@@ -4391,8 +4478,8 @@
         "description": "Guardrail item for the cockpit.",
         "properties": {
           "limit": {
-            "description": "Limit for this record.",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasuredValue",
+            "description": "Limit for this record."
           },
           "ratio": {
             "anyOf": [
@@ -4411,8 +4498,8 @@
             "description": "Current state of the record."
           },
           "value": {
-            "description": "Value for this record.",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasuredValue",
+            "description": "Value for this record."
           },
           "what": {
             "description": "What for this record.",
@@ -4828,12 +4915,17 @@
             "description": "Name or email for this record.",
             "type": "string"
           },
+          "personId": {
+            "$ref": "#/components/schemas/PersonId",
+            "description": "Person whose access can be set while the invitation is pending."
+          },
           "state": {
             "$ref": "#/components/schemas/InvitationState",
             "description": "Current state of the record."
           }
         },
         "required": [
+          "personId",
           "id",
           "nameOrEmail",
           "state",
@@ -4862,9 +4954,38 @@
             "description": "Agent for this record.",
             "type": "string"
           },
-          "due": {
-            "description": "Due for this record.",
-            "type": "string"
+          "cadence": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/JobCadence"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How an undated job is scheduled."
+          },
+          "completedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the job finished."
+          },
+          "dueAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the job must finish, when it has a deadline."
           },
           "job": {
             "description": "Job for this record.",
@@ -4890,10 +5011,21 @@
           "job",
           "agent",
           "state",
-          "due",
+          "dueAt",
+          "completedAt",
+          "cadence",
           "laneId"
         ],
         "type": "object"
+      },
+      "JobCadence": {
+        "$comment": "cockpit-reader:enum",
+        "description": "Schedule for a job whose next run does not have a timestamp.",
+        "enum": [
+          "everyMorning",
+          "afterDecision"
+        ],
+        "type": "string"
       },
       "KnownAccessKind": {
         "$comment": "cockpit-reader:enum",
@@ -5631,6 +5763,150 @@
         ],
         "type": "object"
       },
+      "MeasuredValue": {
+        "$comment": "cockpit-reader:tag:kind",
+        "description": "Numeric or machine-readable value rendered according to its measurement kind.",
+        "oneOf": [
+          {
+            "properties": {
+              "kind": {
+                "const": "count",
+                "type": "string"
+              },
+              "of": {
+                "anyOf": [
+                  {
+                    "format": "double",
+                    "type": "number"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Total, when presented as a fraction."
+              },
+              "unit": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Count unit or interval."
+              },
+              "value": {
+                "description": "Observed count.",
+                "format": "double",
+                "type": "number"
+              }
+            },
+            "required": [
+              "kind",
+              "value",
+              "of",
+              "unit"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "rate",
+                "type": "string"
+              },
+              "percent": {
+                "description": "Percentage points, e.g. 1.2 for 1.2%.",
+                "format": "double",
+                "type": "number"
+              },
+              "standard": {
+                "description": "Whether the rate is the standard policy.",
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "kind",
+              "percent",
+              "standard"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "cap": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/Money"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Budget cap, when applicable."
+              },
+              "kind": {
+                "const": "money",
+                "type": "string"
+              },
+              "money": {
+                "$ref": "#/components/schemas/Money",
+                "description": "Amount in minor currency units."
+              }
+            },
+            "required": [
+              "kind",
+              "money",
+              "cap"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "at": {
+                "$ref": "#/components/schemas/Timestamp",
+                "description": "Time of the observation."
+              },
+              "kind": {
+                "const": "time",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "at"
+            ],
+            "type": "object"
+          },
+          {
+            "properties": {
+              "kind": {
+                "const": "policy",
+                "type": "string"
+              },
+              "text": {
+                "description": "Rule expressed in words when it has no measurable threshold.",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind",
+              "text"
+            ],
+            "type": "object"
+          }
+        ]
+      },
+      "MembershipState": {
+        "$comment": "cockpit-reader:enum",
+        "description": "Membership of the person in the workspace.",
+        "enum": [
+          "active",
+          "invited"
+        ],
+        "type": "string"
+      },
       "Message": {
         "description": "Message for the cockpit.",
         "properties": {
@@ -5795,6 +6071,37 @@
         "$comment": "cockpit-reader:tag:kind",
         "description": "Audience allowed to receive a message in a topic.",
         "oneOf": [
+          {
+            "description": "Visible only to the workspace owner.",
+            "properties": {
+              "kind": {
+                "const": "owner",
+                "type": "string"
+              }
+            },
+            "required": [
+              "kind"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "Private exchange between this status viewer and the workspace owner.",
+            "properties": {
+              "kind": {
+                "const": "viewer",
+                "type": "string"
+              },
+              "personId": {
+                "$ref": "#/components/schemas/PersonId",
+                "description": "Reader participating in the exchange."
+              }
+            },
+            "required": [
+              "kind",
+              "personId"
+            ],
+            "type": "object"
+          },
           {
             "description": "Everyone who can read the topic conversation.",
             "properties": {
@@ -5969,12 +6276,26 @@
             "type": "string"
           },
           "state": {
-            "$ref": "#/components/schemas/ModelState",
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ModelState"
+              },
+              {
+                "type": "null"
+              }
+            ],
             "description": "Current availability."
           },
           "vendor": {
-            "description": "Engine vendor.",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Engine vendor."
           }
         },
         "required": [
@@ -7371,6 +7692,41 @@
           "results",
           "answer",
           "nextCursor"
+        ],
+        "type": "object"
+      },
+      "SeenByFace": {
+        "description": "A person shown in the topic header without their private profile or work details.",
+        "properties": {
+          "access": {
+            "$ref": "#/components/schemas/StageAccess",
+            "description": "Whether this person works on this topic or watches its status."
+          },
+          "avatar": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Initials shown in the topic header."
+          },
+          "id": {
+            "$ref": "#/components/schemas/PersonId",
+            "description": "Stable person identifier."
+          },
+          "name": {
+            "description": "Person’s display name.",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "avatar",
+          "access"
         ],
         "type": "object"
       },
@@ -8922,10 +9278,10 @@
             ],
             "description": "Asked by for this record."
           },
-          "nextReport": {
+          "nextReportAt": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/Timestamp"
               },
               {
                 "type": "null"
@@ -8955,7 +9311,7 @@
         "required": [
           "askedBy",
           "ownerLine",
-          "nextReport",
+          "nextReportAt",
           "parts"
         ],
         "type": "object"
@@ -8963,6 +9319,18 @@
       "TopicStatusView": {
         "description": "Redacted progress shared through an organization-only status link.",
         "properties": {
+          "goal": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Target quantity in the status summary."
+          },
           "health": {
             "anyOf": [
               {
@@ -8974,15 +9342,53 @@
             ],
             "description": "Topic progress in the current reporting period."
           },
+          "nextReportAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Next report time."
+          },
+          "signed": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Progress measured for the current goal."
+          },
           "stages": {
             "description": "Stages with their aggregate progress only.",
             "items": {
               "$ref": "#/components/schemas/StageStatus"
             },
             "type": "array"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Units used for progress."
           }
         },
         "required": [
+          "signed",
+          "goal",
+          "unit",
+          "nextReportAt",
           "stages",
           "health"
         ],
@@ -9128,6 +9534,13 @@
             ],
             "description": "Plan for this record."
           },
+          "seenBy": {
+            "description": "Faces of people who can work on or watch this topic.",
+            "items": {
+              "$ref": "#/components/schemas/SeenByFace"
+            },
+            "type": "array"
+          },
           "spend": {
             "anyOf": [
               {
@@ -9192,6 +9605,7 @@
           }
         },
         "required": [
+          "seenBy",
           "status",
           "viewer",
           "stages",
@@ -9864,6 +10278,25 @@
             }
           },
           "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
             "content": {
               "application/problem+json": {
                 "schema": {
@@ -13275,6 +13708,25 @@
             }
           },
           "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "429": {
             "content": {
               "application/problem+json": {
                 "schema": {

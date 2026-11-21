@@ -8,12 +8,11 @@
   "meta": {
     "askedBy": "Asked by Tom Ahrens, CEO",
     "ownerLine": "You own it",
-    "nextReport": "Next report to Tom Fri 08:00",
     "parts": [
       "Asked by Tom Ahrens, CEO",
-      "You own it",
-      "Next report to Tom Fri 08:00"
-    ]
+      "You own it"
+    ],
+    "nextReportAt": "2026-11-20T08:00:00+01:00"
   },
   "intro": "Partnerships with big brands that bring us customers we cannot reach alone. You do the calls and the deals; Lea and Jonas run the rest; agents do the list work around the clock.",
   "when": "Week 5 of 15",
@@ -25,7 +24,7 @@
     "target": 3,
     "signed": 0,
     "likely": null,
-    "unit": "partners by 31 January",
+    "unit": "partners",
     "verdict": {
       "state": "warn",
       "word": "Behind plan",
@@ -33,7 +32,6 @@
       "text": "The forecast reaches 1 signed partner by 31 January, 0 to 2 at the edges; the plan needs 3. Halden is the only likely deal, and nothing else has reached a qualified call yet."
     },
     "insight": "Only Halden is likely. Two more deals need an offer by early January.",
-    "asOf": "updated 07:45, forecast unchanged since yesterday",
     "decision": {
       "title": "Approve the Halden offer",
       "detail": "Due Thursday · their budget is set on 1 December",
@@ -219,29 +217,63 @@
       "items": [
         {
           "what": "Bounces",
-          "value": "1.2%",
-          "limit": "limit 4%",
+          "value": {
+            "kind": "rate",
+            "percent": 1.2,
+            "standard": false
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 4.0,
+            "standard": false
+          },
           "ratio": 0.3,
           "state": "held"
         },
         {
           "what": "Asked to stop",
-          "value": "0 of 52",
-          "limit": "limit 2%",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": 52,
+            "unit": null
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 2.0,
+            "standard": false
+          },
           "ratio": 0,
           "state": "held"
         },
         {
           "what": "Sent unchecked",
-          "value": "0",
-          "limit": "none allowed",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         },
         {
           "what": "Terms",
-          "value": "standard 15%",
-          "limit": "no discount without you",
+          "value": {
+            "kind": "rate",
+            "percent": 15.0,
+            "standard": true
+          },
+          "limit": {
+            "kind": "policy",
+            "text": "no discount without you"
+          },
           "ratio": null,
           "state": "held"
         }
@@ -368,33 +400,45 @@
     "restSub": null,
     "figures": [
       {
-        "value": "0",
-        "of": "3",
+        "value": 0,
+        "of": 3,
         "label": "Signed"
       },
       {
-        "value": "1",
+        "value": 1,
         "of": null,
         "label": "Likely, forecast"
       },
       {
-        "value": "2",
+        "value": 2,
         "of": null,
         "label": "Still unsecured"
       }
     ],
     "pathTitle": "Path to three",
     "forecastLog": [],
-    "deadlineAt": "2027-01-31T17:00:00+01:00"
+    "deadlineAt": "2027-01-31T17:00:00+01:00",
+    "updatedAt": "2026-11-16T07:45:00+01:00",
+    "forecastNote": "forecast unchanged since yesterday"
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "0/3",
+      "value": {
+        "kind": "count",
+        "value": 0,
+        "of": 3,
+        "unit": null
+      },
       "label": "partners signed"
     },
     {
-      "value": "5",
+      "value": {
+        "kind": "count",
+        "value": 5,
+        "of": null,
+        "unit": null
+      },
       "label": "calls booked"
     }
   ],
@@ -1702,5 +1746,6 @@
       "runBy": null
     }
   ],
-  "status": null
+  "status": null,
+  "seenBy": []
 }

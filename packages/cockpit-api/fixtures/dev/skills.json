@@ -86,8 +86,8 @@
       "needsKey": "Sentry",
       "enabled": false,
       "id": "what-broke",
-      "engine": "Sentry",
-      "asksFirst": true,
+      "engine": "Auto",
+      "asksFirst": false,
       "builtIn": true
     },
     {

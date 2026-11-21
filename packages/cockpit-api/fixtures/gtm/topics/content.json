@@ -8,12 +8,11 @@
   "meta": {
     "askedBy": "Asked by you",
     "ownerLine": "Writer, Visuals and Publisher work on it",
-    "nextReport": "Sign-ups reported Fri 20 Nov",
     "parts": [
       "Asked by you",
-      "Writer, Visuals and Publisher work on it",
-      "Sign-ups reported Fri 20 Nov"
-    ]
+      "Writer, Visuals and Publisher work on it"
+    ],
+    "nextReportAt": "2026-11-20T17:00:00+01:00"
   },
   "intro": "Everything we publish: the webinar on Thursday and its promo, the recap post, one customer story and a carousel. The goal this week is the webinar's sign-ups.",
   "when": "3 days to the webinar",
@@ -30,7 +29,6 @@
       "text": null
     },
     "insight": "Today's promo post decides which end of the range we land on.",
-    "asOf": "updated 09:20, forecast down 33 since yesterday",
     "decision": {
       "title": "The promo visuals are stuck",
       "detail": "Post at 16:00 · 2 of 6 images fail the brand check",
@@ -265,22 +263,52 @@
       "items": [
         {
           "what": "Off-brand posts",
-          "value": "0",
-          "limit": "none allowed",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         },
         {
           "what": "Newsletter sends",
-          "value": "2 this week",
-          "limit": "limit 2",
+          "value": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": "per week"
+          },
+          "limit": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": "per week"
+          },
           "ratio": 1,
           "state": "near"
         },
         {
           "what": "Claims without a source",
-          "value": "0",
-          "limit": "none allowed",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         }
@@ -374,41 +402,63 @@
     "restSub": null,
     "figures": [
       {
-        "value": "212",
-        "of": "300",
+        "value": 212,
+        "of": 300,
         "label": "Signed up"
       },
       {
-        "value": "55",
+        "value": 55,
         "of": null,
         "label": "More expected, forecast"
       },
       {
-        "value": "33",
+        "value": 33,
         "of": null,
         "label": "Still missing"
       }
     ],
     "pathTitle": null,
     "forecastLog": [],
-    "deadlineAt": "2026-11-19T17:00:00+01:00"
+    "deadlineAt": "2026-11-19T17:00:00+01:00",
+    "updatedAt": "2026-11-16T08:45:00+01:00",
+    "forecastNote": "forecast down 33 since yesterday"
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "212",
+      "value": {
+        "kind": "count",
+        "value": 212,
+        "of": null,
+        "unit": null
+      },
       "label": "sign-ups for Thursday"
     },
     {
-      "value": "1,840",
+      "value": {
+        "kind": "count",
+        "value": 1840,
+        "of": null,
+        "unit": null
+      },
       "label": "webinar page visits"
     },
     {
-      "value": "4",
+      "value": {
+        "kind": "count",
+        "value": 4,
+        "of": null,
+        "unit": null
+      },
       "label": "posts this week"
     },
     {
-      "value": "2",
+      "value": {
+        "kind": "count",
+        "value": 2,
+        "of": null,
+        "unit": null
+      },
       "label": "brand-check fails"
     }
   ],
@@ -875,43 +925,55 @@
       "job": "Webinar promo post",
       "agent": "Visuals",
       "state": "bad",
-      "due": "Today, 16:00",
-      "laneId": "webinar"
+      "laneId": "webinar",
+      "dueAt": "2026-11-16T16:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Fenwick Freight customer story",
       "agent": "Writer",
       "state": "warn",
-      "due": "Wed 18 Nov",
-      "laneId": "fenwick"
+      "laneId": "fenwick",
+      "dueAt": "2026-11-18T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Webinar reminder email",
       "agent": "Publisher",
       "state": "ok",
-      "due": "Wed 18 Nov, 09:00",
-      "laneId": "webinar-reminders"
+      "laneId": "webinar-reminders",
+      "dueAt": "2026-11-18T09:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Webinar recap post",
       "agent": "Writer",
       "state": "ok",
-      "due": "Thu 19 Nov",
-      "laneId": "recap"
+      "laneId": "recap",
+      "dueAt": "2026-11-19T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Carousel: 5 signs of ops debt",
       "agent": "Visuals",
       "state": "next",
-      "due": "Fri 20 Nov",
-      "laneId": null
+      "laneId": null,
+      "dueAt": "2026-11-20T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Newsletter 46",
       "agent": "Publisher",
       "state": "done",
-      "due": "Sent today, 08:00",
-      "laneId": null
+      "laneId": null,
+      "dueAt": null,
+      "completedAt": "2026-11-16T08:00:00+01:00",
+      "cadence": null
     }
   ],
   "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",
@@ -967,5 +1029,6 @@
     "sharedBy": null
   },
   "stages": [],
-  "status": null
+  "status": null,
+  "seenBy": []
 }

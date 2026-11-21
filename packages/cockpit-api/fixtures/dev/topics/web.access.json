@@ -23,7 +23,8 @@
       },
       "scope": "owner",
       "otherTopics": [],
-      "owner": true
+      "owner": true,
+      "email": "timo-varga@example.test"
     }
   ],
   "invitations": [],

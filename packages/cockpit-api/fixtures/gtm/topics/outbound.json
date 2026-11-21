@@ -8,12 +8,11 @@
   "meta": {
     "askedBy": "Asked by you",
     "ownerLine": "Sender leads; Jonas takes the meetings",
-    "nextReport": "Next report Fri 20 Nov",
     "parts": [
       "Asked by you",
-      "Sender leads; Jonas takes the meetings",
-      "Next report Fri 20 Nov"
-    ]
+      "Sender leads; Jonas takes the meetings"
+    ],
+    "nextReportAt": "2026-11-20T17:00:00+01:00"
   },
   "intro": "Cold email to ops teams, from your mail, never more than 60 a day. The goal: 30 sales meetings by 18 December.",
   "when": "Week 4 of 8",
@@ -30,7 +29,6 @@
       "text": null
     },
     "insight": "Sequence B carries the forecast; round 2 has to bring the last 9.",
-    "asOf": "updated 08:40, forecast up 2 since Friday",
     "decision": {
       "title": "Start sequence B",
       "detail": "Due tomorrow · the list goes stale in 2 weeks",
@@ -275,29 +273,65 @@
       "items": [
         {
           "what": "Bounces",
-          "value": "1.8%",
-          "limit": "limit 4%",
+          "value": {
+            "kind": "rate",
+            "percent": 1.8,
+            "standard": false
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 4.0,
+            "standard": false
+          },
           "ratio": 0.45,
           "state": "held"
         },
         {
           "what": "Asked to stop",
-          "value": "1.1%",
-          "limit": "11 of 990 · limit 2%",
+          "value": {
+            "kind": "rate",
+            "percent": 1.1,
+            "standard": false
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 2.0,
+            "standard": false
+          },
           "ratio": 0.56,
           "state": "held"
         },
         {
           "what": "Sends a day",
-          "value": "60",
-          "limit": "limit 60",
+          "value": {
+            "kind": "count",
+            "value": 60,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 60,
+            "of": null,
+            "unit": null
+          },
           "ratio": 1,
           "state": "near"
         },
         {
           "what": "Spam complaints",
-          "value": "0",
-          "limit": "none allowed",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
           "ratio": null,
           "state": "held"
         }
@@ -398,42 +432,62 @@
     "restSub": null,
     "figures": [
       {
-        "value": "11",
-        "of": "30",
+        "value": 11,
+        "of": 30,
         "label": "Meetings booked"
       },
       {
-        "value": "10",
+        "value": 10,
         "of": null,
         "label": "Likely, forecast"
       },
       {
-        "value": "9",
+        "value": 9,
         "of": null,
         "label": "Still unsecured"
       }
     ],
     "pathTitle": null,
     "forecastLog": [],
-    "deadlineAt": null
+    "deadlineAt": null,
+    "updatedAt": "2026-11-16T08:40:00+01:00",
+    "forecastNote": "forecast up 2 since Friday"
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "990",
+      "value": {
+        "kind": "count",
+        "value": 990,
+        "of": null,
+        "unit": null
+      },
       "label": "emails sent since 26 Oct"
     },
     {
-      "value": "5.9%",
+      "value": {
+        "kind": "rate",
+        "percent": 5.9,
+        "standard": false
+      },
       "label": "reply rate"
     },
     {
-      "value": "11",
+      "value": {
+        "kind": "count",
+        "value": 11,
+        "of": null,
+        "unit": null
+      },
       "label": "meetings booked"
     },
     {
-      "value": "1.8%",
-      "label": "bounces, limit 4%"
+      "value": {
+        "kind": "rate",
+        "percent": 1.8,
+        "standard": false
+      },
+      "label": "bounces"
     }
   ],
   "plan": null,
@@ -869,36 +923,46 @@
       "job": "Start sequence B, 180 leads",
       "agent": "Sender",
       "state": "warn",
-      "due": "Tue 17 Nov",
-      "laneId": "sequence-b"
+      "laneId": "sequence-b",
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Meeting times for 2 yeses",
       "agent": "Replies",
       "state": "warn",
-      "due": "Today",
-      "laneId": "reply-handling"
+      "laneId": "reply-handling",
+      "dueAt": "2026-11-16T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "List for logistics ops, round 2",
       "agent": "Prospector",
       "state": "ok",
-      "due": "Thu 19 Nov",
-      "laneId": "logistics-round-2"
+      "laneId": "logistics-round-2",
+      "dueAt": "2026-11-19T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Answer replies from sequence A",
       "agent": "Replies",
       "state": "ok",
-      "due": "Every morning",
-      "laneId": "sequence-a"
+      "laneId": "sequence-a",
+      "dueAt": null,
+      "completedAt": null,
+      "cadence": "everyMorning"
     },
     {
       "job": "Bounce check",
       "agent": "Sender",
       "state": "done",
-      "due": "Today, 08:05",
-      "laneId": null
+      "laneId": null,
+      "dueAt": null,
+      "completedAt": "2026-11-16T08:05:00+01:00",
+      "cadence": null
     }
   ],
   "chatSub": "Mara, Jonas and 3 agents · the Manager reads it, it is not in it",
@@ -954,5 +1018,6 @@
     "sharedBy": null
   },
   "stages": [],
-  "status": null
+  "status": null,
+  "seenBy": []
 }

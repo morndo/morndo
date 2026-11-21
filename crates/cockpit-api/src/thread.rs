@@ -209,6 +209,14 @@ pub struct ThreadView {
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[schemars(extend("$comment" = "cockpit-reader:tag:kind"))]
 pub enum MessageAudience {
+    /// Visible only to the workspace owner.
+    Owner,
+    /// Private exchange between this status viewer and the workspace owner.
+    Viewer {
+        /// Reader participating in the exchange.
+        #[serde(rename = "personId")]
+        person_id: crate::PersonId,
+    },
     /// Everyone who can read the topic conversation.
     Topic,
     /// Readers who work in this stage.

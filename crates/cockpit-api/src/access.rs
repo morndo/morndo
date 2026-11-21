@@ -45,6 +45,9 @@ pub struct OtherTopicAccess {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct AccessPerson {
+    /// Address used for this person’s invitations.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub email: Option<String>,
     /// Owner for this record.
     pub owner: bool,
     /// Person for this record.
@@ -88,6 +91,8 @@ pub struct AccessGrantInput {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Invitation {
+    /// Person whose access can be set while the invitation is pending.
+    pub person_id: crate::PersonId,
     /// Stable identifier for this record.
     pub id: InvitationId,
     /// Name or email for this record.
@@ -176,6 +181,14 @@ pub enum StageAccess {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicStatusView {
+    /// Progress measured for the current goal.
+    pub signed: Present<i64>,
+    /// Target quantity in the status summary.
+    pub goal: Present<i64>,
+    /// Units used for progress.
+    pub unit: Present<String>,
+    /// Next report time.
+    pub next_report_at: Present<Timestamp>,
     /// Stages with their aggregate progress only.
     pub stages: Vec<StageStatus>,
     /// Topic progress in the current reporting period.
@@ -189,4 +202,18 @@ pub struct StageStatus {
     pub name: String,
     /// Progress from 0 to 100.
     pub percent: i64,
+}
+
+/// A person shown in the topic header without their private profile or work details.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct SeenByFace {
+    /// Stable person identifier.
+    pub id: crate::PersonId,
+    /// Person’s display name.
+    pub name: String,
+    /// Initials shown in the topic header.
+    pub avatar: Present<String>,
+    /// Whether this person works on this topic or watches its status.
+    pub access: StageAccess,
 }

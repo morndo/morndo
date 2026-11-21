@@ -16,16 +16,29 @@
   "noGoal": "Research answers asks from the other topics. A goal needs a measure and a date, for example: the profile refreshed every month.",
   "facts": [
     {
-      "value": "212",
+      "value": {
+        "kind": "count",
+        "value": 212,
+        "of": null,
+        "unit": null
+      },
       "label": "won deals in the profile"
     },
     {
-      "value": "4",
+      "value": {
+        "kind": "count",
+        "value": 4,
+        "of": null,
+        "unit": null
+      },
       "label": "customer segments"
     },
     {
-      "value": "Today",
-      "label": "last refresh, 07:10"
+      "value": {
+        "kind": "time",
+        "at": "2026-11-16T07:10:00+01:00"
+      },
+      "label": "last refresh"
     }
   ],
   "plan": null,
@@ -225,5 +238,6 @@
     "sharedBy": null
   },
   "stages": [],
-  "status": null
+  "status": null,
+  "seenBy": []
 }
