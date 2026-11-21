@@ -1,0 +1,81 @@
+{
+  "id": "staging-certificate",
+  "topicId": "infra",
+  "title": "Staging certificate",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "ops",
+    "name": "Ops",
+    "shortName": "Ops",
+    "kind": "agent",
+    "avatar": "O",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Infra renewed the staging certificate, 12 days before it ran out.",
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Renew the staging certificate before expiry.",
+  "askedMeta": {
+    "source": "Infra",
+    "note": null
+  },
+  "status": "Infra renewed the staging certificate, 12 days before it ran out.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "Infra renewed the staging certificate, 12 days before it ran out."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Renew the staging certificate before expiry.",
+      "who": "Ops"
+    }
+  ],
+  "doneNote": "Infra renewed the staging certificate, 12 days before it ran out.",
+  "crew": [
+    {
+      "id": "ops",
+      "name": "Ops",
+      "shortName": "Ops",
+      "kind": "agent",
+      "avatar": "O",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Infra renewed the staging certificate, 12 days before it ran out.",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-16T04:30:00+01:00",
+  "closedAt": "2026-11-16T04:30:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

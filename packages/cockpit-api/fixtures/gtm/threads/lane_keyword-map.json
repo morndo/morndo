@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_keyword-map-0",
+      "id": "m14",
       "author": {
         "id": "checker",
         "name": "Checker",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "4 Nov",
       "text": "Quaywright is the biggest: 1,300 searches a month. Keelson the smallest at 410, but nobody good ranks for it yet.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-04T00:00:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

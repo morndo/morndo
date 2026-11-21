@@ -10,7 +10,9 @@
       "leadName": "Visuals",
       "state": "bad",
       "stateWord": "Stuck",
-      "next": "Now, needs your call"
+      "next": "Now, needs your call",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "outreach-wave-2",
@@ -20,7 +22,9 @@
       "leadName": "Sender",
       "state": "warn",
       "stateWord": "Waits for Lea",
-      "next": "After Lea's check"
+      "next": "After Lea's check",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "halden-offer",
@@ -30,7 +34,9 @@
       "leadName": "Jonas",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your OK"
+      "next": "After your OK",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "fenwick",
@@ -40,7 +46,9 @@
       "leadName": "Writer",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your OK"
+      "next": "After your OK",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "sequence-b",
@@ -50,7 +58,9 @@
       "leadName": "Sender",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "search-budget",
@@ -60,7 +70,9 @@
       "leadName": "Paid buyer",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "reply-handling",
@@ -70,7 +82,9 @@
       "leadName": "Replies",
       "state": "warn",
       "stateWord": "Waits for Jonas",
-      "next": "Today, once Jonas answers"
+      "next": "once Jonas answers",
+      "reason": null,
+      "nextAt": "2026-11-16T17:00:00+01:00"
     },
     {
       "id": "brand-list",
@@ -80,7 +94,9 @@
       "leadName": "Brand scout",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 18:00"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T18:00:00+01:00"
     },
     {
       "id": "contact-data",
@@ -90,7 +106,9 @@
       "leadName": "Contact finder",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Tomorrow, 08:00"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-17T08:00:00+01:00"
     },
     {
       "id": "outreach-wave-1",
@@ -100,7 +118,9 @@
       "leadName": "Sender",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Wed 18 Nov"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-18T17:00:00+01:00"
     },
     {
       "id": "partner-calls",
@@ -110,7 +130,9 @@
       "leadName": "You",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 16:00"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T16:00:00+01:00"
     },
     {
       "id": "recap",
@@ -120,7 +142,9 @@
       "leadName": "Writer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "comparison-pages",
@@ -130,7 +154,9 @@
       "leadName": "SEO writer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 15:00"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T15:00:00+01:00"
     },
     {
       "id": "webinar-reminders",
@@ -140,7 +166,9 @@
       "leadName": "Publisher",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Wed 18 Nov, 09:00"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-18T09:00:00+01:00"
     },
     {
       "id": "logistics-round-2",
@@ -150,7 +178,9 @@
       "leadName": "Prospector",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "webinar-campaign",
@@ -160,7 +190,9 @@
       "leadName": "Paid buyer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov, when it ends"
+      "next": "when it ends",
+      "reason": null,
+      "nextAt": "2026-11-19T17:00:00+01:00"
     }
   ],
   "sharedResources": [
@@ -187,42 +219,57 @@
     {
       "id": "ask-retail",
       "quote": "Retail first. Send wave 2 to the retail brands first.",
-      "when": "Today 08:30",
       "chat": "in the Partnerships chat",
       "went": "thread Outreach, wave 2 · Sender owns it",
-      "href": "#lane/outreach-wave-2"
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-2"
+      },
+      "at": "2026-11-16T08:30:00+01:00"
     },
     {
       "id": "ask-partners",
       "quote": "Tom wants partnerships with big brands. Set it up; I lead it, Lea and Jonas help.",
-      "when": "Monday 19 October",
       "chat": "Partnerships",
       "went": "a topic of its own · you lead",
-      "href": "#topic/partnerships"
+      "target": {
+        "kind": "topic",
+        "id": "partnerships"
+      },
+      "at": "2026-10-19T00:00:00+02:00"
     },
     {
       "id": "ask-budget",
       "quote": "LinkedIn leads cost too much. Find where the budget works best and propose a shift.",
-      "when": "Friday 10:20",
       "chat": "Paid",
       "went": "lane Search budget shift · Paid buyer leads",
-      "href": "#lane/search-budget"
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      },
+      "at": "2026-11-13T10:20:00+01:00"
     },
     {
       "id": "ask-webinar",
       "quote": "Get the webinar promo out on Monday.",
-      "when": "Thursday 17:40",
       "chat": "Content",
       "went": "lane Webinar on Thursday · Visuals leads",
-      "href": "#lane/webinar"
+      "target": {
+        "kind": "lane",
+        "id": "webinar"
+      },
+      "at": "2026-11-12T17:40:00+01:00"
     },
     {
       "id": "ask-sequence",
       "quote": "Start writing to fintech ops people once the pilot shows it works.",
-      "when": "Wednesday 09:05",
       "chat": "Outbound",
       "went": "lane Sequence B, fintech ops · Sender leads",
-      "href": "#lane/sequence-b"
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      },
+      "at": "2026-11-11T09:05:00+01:00"
     }
   ],
   "since": [

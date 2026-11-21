@@ -15,42 +15,48 @@
           "title": "Outreach, wave 2: retail",
           "state": "warn",
           "stateWord": "Waits for Lea",
-          "leadName": "Sender"
+          "leadName": "Sender",
+          "fresh": false
         },
         {
           "id": "halden-offer",
           "title": "Offer for Halden Freight Network",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Jonas"
+          "leadName": "Jonas",
+          "fresh": false
         },
         {
           "id": "brand-list",
           "title": "200 brands that fit",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Brand scout"
+          "leadName": "Brand scout",
+          "fresh": false
         },
         {
           "id": "contact-data",
           "title": "Who decides at each brand",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Contact finder"
+          "leadName": "Contact finder",
+          "fresh": false
         },
         {
           "id": "outreach-wave-1",
           "title": "Outreach, wave 1",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Sender"
+          "leadName": "Sender",
+          "fresh": false
         },
         {
           "id": "partner-calls",
           "title": "Partnership calls",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "You"
+          "leadName": "You",
+          "fresh": false
         }
       ]
     },
@@ -68,28 +74,32 @@
           "title": "Webinar on Thursday",
           "state": "bad",
           "stateWord": "Stuck",
-          "leadName": "Visuals"
+          "leadName": "Visuals",
+          "fresh": false
         },
         {
           "id": "fenwick",
           "title": "Fenwick customer story",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Writer"
+          "leadName": "Writer",
+          "fresh": false
         },
         {
           "id": "recap",
           "title": "Webinar recap post",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Writer"
+          "leadName": "Writer",
+          "fresh": false
         },
         {
           "id": "webinar-reminders",
           "title": "Webinar invites and reminder",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Publisher"
+          "leadName": "Publisher",
+          "fresh": false
         }
       ]
     },
@@ -107,21 +117,24 @@
           "title": "Sequence B, fintech ops",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Sender"
+          "leadName": "Sender",
+          "fresh": false
         },
         {
           "id": "reply-handling",
           "title": "Meetings from replies",
           "state": "warn",
           "stateWord": "Waits for Jonas",
-          "leadName": "Replies"
+          "leadName": "Replies",
+          "fresh": false
         },
         {
           "id": "logistics-round-2",
           "title": "Logistics ops, round 2",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Prospector"
+          "leadName": "Prospector",
+          "fresh": false
         }
       ]
     },
@@ -139,14 +152,16 @@
           "title": "Search budget shift",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Paid buyer"
+          "leadName": "Paid buyer",
+          "fresh": false
         },
         {
           "id": "webinar-campaign",
           "title": "Webinar sign-up campaign",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Paid buyer"
+          "leadName": "Paid buyer",
+          "fresh": false
         }
       ]
     },
@@ -164,7 +179,8 @@
           "title": "Comparison pages",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "SEO writer"
+          "leadName": "SEO writer",
+          "fresh": false
         }
       ]
     },
@@ -188,10 +204,14 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -200,10 +220,14 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "badgeCount": 4
     },
     {
       "id": "t-drafts",
@@ -212,10 +236,14 @@
       "name": null,
       "note": null,
       "icon": "mail",
-      "href": "#drafts",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "drafts",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -224,10 +252,14 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "s-weekly",
@@ -236,10 +268,14 @@
       "name": "/weekly-summary",
       "note": "Write the weekly update",
       "icon": "play",
-      "href": null,
       "run": "/weekly-summary",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skill",
+        "id": "weekly-summary"
+      },
+      "badgeCount": null
     }
   ],
   "pinnable": [
@@ -250,10 +286,14 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -262,10 +302,14 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "badgeCount": 4
     },
     {
       "id": "t-drafts",
@@ -274,10 +318,14 @@
       "name": null,
       "note": null,
       "icon": "mail",
-      "href": "#drafts",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "drafts",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -286,10 +334,14 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "a-partnerships",
@@ -298,10 +350,14 @@
       "name": "Partnerships",
       "note": null,
       "icon": "partner",
-      "href": "#topic/partnerships",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "partnerships"
+      },
+      "badgeCount": null
     },
     {
       "id": "a-content",
@@ -310,10 +366,14 @@
       "name": null,
       "note": null,
       "icon": "pen",
-      "href": "#topic/content",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "content"
+      },
+      "badgeCount": null
     },
     {
       "id": "a-outbound",
@@ -322,10 +382,14 @@
       "name": null,
       "note": null,
       "icon": "send",
-      "href": "#topic/outbound",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "outbound"
+      },
+      "badgeCount": null
     },
     {
       "id": "a-paid",
@@ -334,10 +398,14 @@
       "name": null,
       "note": null,
       "icon": "horn",
-      "href": "#topic/paid",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "paid"
+      },
+      "badgeCount": null
     },
     {
       "id": "a-seo",
@@ -346,10 +414,14 @@
       "name": null,
       "note": null,
       "icon": "search",
-      "href": "#topic/seo",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "seo"
+      },
+      "badgeCount": null
     },
     {
       "id": "a-research",
@@ -358,10 +430,14 @@
       "name": null,
       "note": null,
       "icon": "target",
-      "href": "#topic/research",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "research"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-weekly",
@@ -370,10 +446,14 @@
       "name": "/weekly-summary",
       "note": "Write the weekly update",
       "icon": "play",
-      "href": null,
       "run": "/weekly-summary",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skill",
+        "id": "weekly-summary"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-post",
@@ -382,10 +462,14 @@
       "name": "/linkedin-post",
       "note": "A post in your voice",
       "icon": "play",
-      "href": null,
       "run": "/linkedin-post",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "linkedin-post"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-visual",
@@ -394,10 +478,14 @@
       "name": "/brand-visual",
       "note": "Images in your brand",
       "icon": "play",
-      "href": null,
       "run": "/brand-visual",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "brand-visual"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-ads",
@@ -406,10 +494,14 @@
       "name": "/ad-variants",
       "note": "6 ad variants",
       "icon": "play",
-      "href": null,
       "run": "/ad-variants",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "ad-variants"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-profile",
@@ -418,10 +510,15 @@
       "name": "/icp-refresh",
       "note": "Rebuild the customer profile",
       "icon": "play",
-      "href": null,
       "run": "/icp-refresh",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "icp-refresh"
+      },
+      "badgeCount": null
     }
-  ]
+  ],
+  "pinLimit": 12
 }

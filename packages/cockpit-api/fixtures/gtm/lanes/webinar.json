@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Thursday",
-  "closed": null,
   "next": "Now, needs your call",
   "afterNext": null,
   "decisionId": null,
@@ -46,11 +44,17 @@
   "acts": [
     {
       "label": "Post with the 4 that pass",
-      "tone": "ink"
+      "tone": "ink",
+      "id": "post-passing",
+      "personId": null,
+      "target": null
     },
     {
       "label": "Allow one more round",
-      "tone": "quiet"
+      "tone": "quiet",
+      "id": "one-more-round",
+      "personId": null,
+      "target": null
     }
   ],
   "thumbs": [
@@ -162,15 +166,29 @@
       "icon": "file",
       "title": "Promo text",
       "detail": "120 words, approved Friday",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "webinar"
+      }
     },
     {
       "icon": "image",
       "title": "6 images",
       "detail": "4 pass the brand check, 2 fail",
-      "href": "#topic/content"
+      "target": {
+        "kind": "topic",
+        "id": "content"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-12T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
 }

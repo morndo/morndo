@@ -8,15 +8,19 @@
   "meta": {
     "askedBy": "Asked by Tom Ahrens, CEO",
     "ownerLine": "You own it",
-    "nextReport": "Next report to Tom Fri 08:00",
     "parts": [
       "Asked by Tom Ahrens, CEO",
-      "You own it",
-      "Next report to Tom Fri 08:00"
-    ]
+      "You own it"
+    ],
+    "nextReportAt": "2026-11-20T08:00:00+01:00"
   },
   "intro": "Partnerships with big brands that bring us customers we cannot reach alone. You do the calls and the deals; Lea and Jonas run the rest; agents do the list work around the clock.",
-  "when": "Week 5 of 15",
+"when": {
+    "kind": "count",
+    "value": 5,
+    "of": 15,
+    "unit": "weeks"
+  },
   "health": {
     "state": "ok",
     "word": "On track"
@@ -25,7 +29,7 @@
     "target": 3,
     "signed": 0,
     "likely": null,
-    "unit": "partners by 31 January",
+    "unit": "partners",
     "verdict": {
       "state": "warn",
       "word": "Behind plan",
@@ -33,7 +37,6 @@
       "text": "The forecast reaches 1 signed partner by 31 January, 0 to 2 at the edges; the plan needs 3. Halden is the only likely deal, and nothing else has reached a qualified call yet."
     },
     "insight": "Only Halden is likely. Two more deals need an offer by early January.",
-    "asOf": "updated 07:45, forecast unchanged since yesterday · agents €38 of €60 this week",
     "decision": {
       "title": "Approve the Halden offer",
       "detail": "Due Thursday · their budget is set on 1 December",
@@ -161,11 +164,9 @@
         "name": "Halden Freight Network",
         "confidence": "Likely",
         "close": "December",
-        "at": 3,
         "stage": "Offer drafted, not sent",
         "short": "Your OK on the offer",
         "laneId": "halden-offer",
-        "href": "#lane/halden-offer",
         "evidence": "They asked for an offer on the 13 November call and named their budget date, 1 December.",
         "next": "your OK on the offer (due Thursday), then their budget on 1 December.",
         "value": null,
@@ -174,35 +175,49 @@
           "stage": "Offer goes out tomorrow",
           "short": "Offer out tomorrow",
           "next": "their budget is set on 1 December; Jonas follows up on 23 November."
-        }
+        },
+        "target": {
+          "kind": "lane",
+          "id": "halden-offer"
+        },
+        "chartDay": 3,
+        "costPerLead": null
       },
       {
         "name": "Brightmoor Retail",
         "confidence": "Possible",
         "close": "January at best",
-        "at": 1,
         "stage": "First call today, 15:00",
         "short": "First call today, 15:00",
         "laneId": "partner-calls",
-        "href": "#lane/partner-calls",
         "evidence": "Replied to wave 1 and booked a call. No partner owner or budget known yet.",
         "next": "today's call must name the partner owner and their budget date.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "partner-calls"
+        },
+        "chartDay": 1,
+        "costPerLead": null
       },
       {
         "name": "Northvale or Corvane",
         "confidence": "Early",
         "close": null,
-        "at": 1,
         "stage": "First calls Wednesday and Thursday",
         "short": "Qualify this week",
         "laneId": "partner-calls",
-        "href": "#lane/partner-calls",
         "evidence": "Northvale Bank and Corvane ERP both replied to wave 1. Nothing known yet about fit or budget.",
         "next": "the first calls on Wednesday and Thursday; one of them has to qualify.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "partner-calls"
+        },
+        "chartDay": 1,
+        "costPerLead": null
       }
     ],
     "guardrails": {
@@ -210,27 +225,65 @@
       "items": [
         {
           "what": "Bounces",
-          "value": "1.2%",
-          "limit": "limit 4%",
-          "ratio": 0.3
+          "value": {
+            "kind": "rate",
+            "percent": 1.2,
+            "standard": false
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 4.0,
+            "standard": false
+          },
+          "ratio": 0.3,
+          "state": "held"
         },
         {
           "what": "Asked to stop",
-          "value": "0 of 52",
-          "limit": "limit 2%",
-          "ratio": 0
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": 52,
+            "unit": null
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 2.0,
+            "standard": false
+          },
+          "ratio": 0,
+          "state": "held"
         },
         {
           "what": "Sent unchecked",
-          "value": "0",
-          "limit": "none allowed",
-          "ratio": null
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "ratio": null,
+          "state": "held"
         },
         {
           "what": "Terms",
-          "value": "standard 15%",
-          "limit": "no discount without you",
-          "ratio": null
+          "value": {
+            "kind": "rate",
+            "percent": 15.0,
+            "standard": true
+          },
+          "limit": {
+            "kind": "policy",
+            "text": "no discount without you"
+          },
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -265,8 +318,11 @@
         "what": "Wave 2 is blocked on Lea's review",
         "why": "24 emails drafted at 04:30. Sender sends nothing until she checks them. Due 11:00.",
         "who": "Lea Brandt",
-        "href": "#lane/outreach-wave-2",
-        "laneId": "outreach-wave-2"
+        "laneId": "outreach-wave-2",
+        "target": {
+          "kind": "lane",
+          "id": "outreach-wave-2"
+        }
       },
       {
         "state": "warn",
@@ -274,8 +330,11 @@
         "what": "Calls booked are below plan",
         "why": "45% of replies booked a call, against 50%. 4 brands asked to wait until January; Sender's follow-ups go out today.",
         "who": "Sender",
-        "href": "#lane/outreach-wave-1",
-        "laneId": "outreach-wave-1"
+        "laneId": "outreach-wave-1",
+        "target": {
+          "kind": "lane",
+          "id": "outreach-wave-1"
+        }
       },
       {
         "state": "warn",
@@ -283,94 +342,152 @@
         "what": "9 new brands wait for Lea's check",
         "why": "Contact finder holds batch 4 until they are checked. Due Thursday.",
         "who": "Lea Brandt",
-        "href": "#lane/brand-list",
-        "laneId": "brand-list"
+        "laneId": "brand-list",
+        "target": {
+          "kind": "lane",
+          "id": "brand-list"
+        }
       }
     ],
     "routine": "On schedule: Jonas, partner contract template with legal (Wed) · you, Brightmoor call at 15:00, brief ready at 13:00 · 4 agents working, none stuck.",
     "funnel": {
       "title": "Funnel",
-      "since": "Since 6 November · change this week · rate against the plan",
+      "since": "change this week · rate against the plan",
       "steps": [
         {
-          "count": "64",
+          "count": 64,
           "what": "brands fit",
-          "change": "+9",
+          "change": {
+            "kind": "count",
+            "value": 9,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "52",
+          "count": 52,
           "what": "written to",
           "change": null,
           "rate": null,
           "state": null
         },
         {
-          "count": "11",
+          "count": 11,
           "what": "replied",
-          "change": "+2",
-          "rate": "21% · plan 15%",
+          "change": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 21.0,
+            "planPercent": 15.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "5",
+          "count": 5,
           "what": "calls booked",
-          "change": "+1",
-          "rate": "45% · plan 50%",
+          "change": {
+            "kind": "count",
+            "value": 1,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 45.0,
+            "planPercent": 50.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": "warn"
         },
         {
-          "count": "2",
+          "count": 2,
           "what": "calls held",
           "change": null,
           "rate": null,
           "state": null
         },
         {
-          "count": "1",
+          "count": 1,
           "what": "offer",
-          "change": "+1",
-          "rate": "plan 2 by 30 Nov",
+          "change": {
+            "kind": "count",
+            "value": 1,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 2,
+            "dueAt": "2026-11-30T17:00:00+01:00"
+          },
           "state": "warn"
         },
         {
-          "count": "0",
+          "count": 0,
           "what": "signed",
           "change": null,
-          "rate": "plan 1 by 18 Dec",
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 1,
+            "dueAt": "2026-12-18T17:00:00+01:00"
+          },
           "state": null
         }
-      ]
+      ],
+      "sinceAt": "2026-10-19T00:00:00+02:00"
     },
     "restSub": null,
     "figures": [
       {
-        "value": "0",
-        "of": "3",
+        "value": 0,
+        "of": 3,
         "label": "Signed"
       },
       {
-        "value": "1",
+        "value": 1,
         "of": null,
         "label": "Likely, forecast"
       },
       {
-        "value": "2",
+        "value": 2,
         "of": null,
         "label": "Still unsecured"
       }
     ],
-    "pathTitle": "Path to three"
+    "pathTitle": "Path to three",
+    "forecastLog": [],
+    "deadlineAt": "2027-01-31T17:00:00+01:00",
+    "updatedAt": "2026-11-16T07:45:00+01:00",
+    "forecastNote": "forecast unchanged since yesterday"
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "0/3",
+      "value": {
+        "kind": "count",
+        "value": 0,
+        "of": 3,
+        "unit": null
+      },
       "label": "partners signed"
     },
     {
-      "value": "5",
+      "value": {
+        "kind": "count",
+        "value": 5,
+        "of": null,
+        "unit": null
+      },
       "label": "calls booked"
     }
   ],
@@ -404,11 +521,19 @@
             "kind": "agent",
             "state": "ok",
             "text": "finds brands in Clay",
-            "when": "160 of 200",
+            "when": {
+              "kind": "count",
+              "value": 160,
+              "of": 200,
+              "unit": null
+            },
             "percent": 80,
-            "href": "#lane/brand-list",
             "laneId": "brand-list",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "brand-list"
+            }
           },
           {
             "avatar": "C",
@@ -416,11 +541,19 @@
             "kind": "agent",
             "state": "ok",
             "text": "finds decision-makers in Apollo",
-            "when": "96 of 160",
+            "when": {
+              "kind": "count",
+              "value": 96,
+              "of": 160,
+              "unit": null
+            },
             "percent": 60,
-            "href": "#lane/contact-data",
             "laneId": "contact-data",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "contact-data"
+            }
           }
         ],
         "alt": null
@@ -437,11 +570,17 @@
             "kind": "person",
             "state": "warn",
             "text": "checks 24 emails for wave 2",
-            "when": "by 11:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T11:00:00+01:00"
+            },
             "percent": null,
-            "href": "#lane/outreach-wave-2",
             "laneId": "outreach-wave-2",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "outreach-wave-2"
+            }
           },
           {
             "avatar": "S",
@@ -449,11 +588,19 @@
             "kind": "agent",
             "state": "ok",
             "text": "follows up on wave 1",
-            "when": "38 of 52",
+            "when": {
+              "kind": "count",
+              "value": 38,
+              "of": 52,
+              "unit": null
+            },
             "percent": 73,
-            "href": "#lane/outreach-wave-1",
             "laneId": "outreach-wave-1",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "outreach-wave-1"
+            }
           },
           {
             "avatar": "S",
@@ -461,11 +608,17 @@
             "kind": "agent",
             "state": "next",
             "text": "sends wave 2, 20 a day",
-            "when": "after Lea",
+            "when": {
+              "kind": "policy",
+              "text": "after Lea"
+            },
             "percent": null,
-            "href": "#lane/outreach-wave-2",
             "laneId": "outreach-wave-2",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "outreach-wave-2"
+            }
           }
         ],
         "alt": null
@@ -482,11 +635,17 @@
             "kind": "person",
             "state": "ok",
             "text": "call with Brightmoor Retail",
-            "when": "today 15:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T15:00:00+01:00"
+            },
             "percent": null,
-            "href": "#lane/partner-calls",
             "laneId": "partner-calls",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "partner-calls"
+            }
           },
           {
             "avatar": "P",
@@ -494,11 +653,17 @@
             "kind": "agent",
             "state": "ok",
             "text": "writes the Brightmoor brief",
-            "when": "ready 13:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T13:00:00+01:00"
+            },
             "percent": null,
-            "href": "#lane/partner-calls",
             "laneId": "partner-calls",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "partner-calls"
+            }
           },
           {
             "avatar": "N",
@@ -506,11 +671,17 @@
             "kind": "agent",
             "state": "next",
             "text": "notes and the follow-up draft",
-            "when": "today 16:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T16:00:00+01:00"
+            },
             "percent": null,
-            "href": "#lane/partner-calls",
             "laneId": "partner-calls",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "partner-calls"
+            }
           },
           {
             "avatar": "M",
@@ -518,11 +689,17 @@
             "kind": "person",
             "state": "next",
             "text": "calls with Northvale Bank and Corvane ERP",
-            "when": "Wed, Thu",
+            "when": {
+              "kind": "policy",
+              "text": "Wed, Thu"
+            },
             "percent": null,
-            "href": "#lane/partner-calls",
             "laneId": "partner-calls",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "partner-calls"
+            }
           }
         ],
         "alt": null
@@ -539,15 +716,24 @@
             "kind": "person",
             "state": "warn",
             "text": "approve the offer to Halden",
-            "when": "due Thu",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-19T17:00:00+01:00"
+            },
             "percent": null,
-            "href": "#lane/halden-offer",
             "laneId": "halden-offer",
             "alt": {
               "decisionId": "d4",
               "text": "approved the offer to Halden",
-              "when": "goes out 09:00",
+              "when": {
+                "kind": "time",
+                "at": "2026-11-16T09:00:00+01:00"
+              },
               "state": null
+            },
+            "target": {
+              "kind": "lane",
+              "id": "halden-offer"
             }
           },
           {
@@ -556,11 +742,17 @@
             "kind": "person",
             "state": "ok",
             "text": "partner contract template, with legal",
-            "when": "Wed",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-18T17:00:00+01:00"
+            },
             "percent": null,
-            "href": "#lane/halden-offer",
             "laneId": "halden-offer",
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "lane",
+              "id": "halden-offer"
+            }
           }
         ],
         "alt": {
@@ -582,11 +774,17 @@
             "kind": "agent",
             "state": "next",
             "text": "weekly partner report for Tom, as a draft",
-            "when": "Fri 08:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-20T08:00:00+01:00"
+            },
             "percent": null,
-            "href": "#drafts",
             "laneId": null,
-            "alt": null
+            "alt": null,
+            "target": {
+              "kind": "drafts",
+              "id": null
+            }
           }
         ],
         "alt": null
@@ -594,22 +792,39 @@
     ],
     "night": [
       {
-        "value": "+32",
+        "value": {
+          "kind": "count",
+          "value": 32,
+          "of": null,
+          "unit": null
+        },
         "label": "brands"
       },
       {
-        "value": "+58",
+        "value": {
+          "kind": "count",
+          "value": 58,
+          "of": null,
+          "unit": null
+        },
         "label": "contacts"
       },
       {
-        "value": "24",
+        "value": {
+          "kind": "count",
+          "value": 24,
+          "of": null,
+          "unit": null
+        },
         "label": "emails drafted"
       }
     ]
   },
   "focusLaneId": "halden-offer",
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 3,
     "since": "That is everything since the topic began on 19 October. Nothing is dropped.",
     "days": [
@@ -618,7 +833,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "now",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -640,11 +854,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": "d4"
+            "decisionId": "d4",
+            "at": "2026-11-16T08:45:00+01:00",
+            "id": "partnerships-history-1",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:41",
             "actor": {
               "id": "call-prep",
               "name": "Call prep",
@@ -666,11 +882,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:41:00+01:00",
+            "id": "partnerships-history-2",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:30",
             "actor": {
               "id": "jonas-falk",
               "name": "Jonas Falk",
@@ -692,11 +910,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:30:00+01:00",
+            "id": "partnerships-history-3",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:12",
             "actor": {
               "id": "lea-brandt",
               "name": "Lea Brandt",
@@ -718,11 +938,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:12:00+01:00",
+            "id": "partnerships-history-4",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:00",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -748,11 +970,13 @@
               "Tallis Logistics · to the VP business development",
               "Brookmere Foods · to the partnerships lead"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:00:00+01:00",
+            "id": "partnerships-history-5",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "07:20",
             "actor": {
               "id": "manager",
               "name": "Manager",
@@ -774,11 +998,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:20:00+01:00",
+            "id": "partnerships-history-6",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "07:00",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -800,11 +1026,13 @@
             "undoable": true,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:00:00+01:00",
+            "id": "partnerships-history-7",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "06:10",
             "actor": {
               "id": "contact-finder",
               "name": "Contact finder",
@@ -830,11 +1058,13 @@
               "Osprey Cargo · VP business development",
               "Quillon Pay · partnerships lead"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T06:10:00+01:00",
+            "id": "partnerships-history-8",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "05:40",
             "actor": {
               "id": "brand-scout",
               "name": "Brand scout",
@@ -860,11 +1090,13 @@
               "Osprey Cargo · fits: sells to freight forwarders",
               "Marlow Kitchens · does not fit: consumers only"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T05:40:00+01:00",
+            "id": "partnerships-history-9",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "05:05",
             "actor": {
               "id": "manager",
               "name": "Manager",
@@ -886,11 +1118,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T05:05:00+01:00",
+            "id": "partnerships-history-10",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "04:30",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -916,11 +1150,13 @@
               "Pell & Rowe · 81 words",
               "Southgate Supply · 69 words"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T04:30:00+01:00",
+            "id": "partnerships-history-11",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "02:10",
             "actor": {
               "id": "brand-scout",
               "name": "Brand scout",
@@ -942,7 +1178,10 @@
             "undoable": true,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T02:10:00+01:00",
+            "id": "partnerships-history-12",
+            "undone": false
           }
         ]
       },
@@ -951,7 +1190,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "21:40",
             "actor": {
               "id": "brand-scout",
               "name": "Brand scout",
@@ -973,11 +1211,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T21:40:00+01:00",
+            "id": "partnerships-history-13",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "21:10",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -999,14 +1239,16 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T21:10:00+01:00",
+            "id": "partnerships-history-14",
+            "undone": false
           },
           {
             "kind": "seen"
           },
           {
             "kind": "event",
-            "time": "17:10",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -1032,11 +1274,13 @@
               "Ardent Wholesale · to the CEO",
               "Linden Pay · to the partnerships lead"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T17:10:00+01:00",
+            "id": "partnerships-history-15",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "15:20",
             "actor": {
               "id": "jonas-falk",
               "name": "Jonas Falk",
@@ -1058,11 +1302,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T15:20:00+01:00",
+            "id": "partnerships-history-16",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "11:05",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -1084,11 +1330,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T11:05:00+01:00",
+            "id": "partnerships-history-17",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "09:30",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -1110,7 +1358,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T09:30:00+01:00",
+            "id": "partnerships-history-18",
+            "undone": false
           }
         ]
       },
@@ -1119,7 +1370,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "17:30",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -1141,11 +1391,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T17:30:00+01:00",
+            "id": "partnerships-history-19",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "16:40",
             "actor": {
               "id": "lea-brandt",
               "name": "Lea Brandt",
@@ -1167,11 +1419,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T16:40:00+01:00",
+            "id": "partnerships-history-20",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "14:05",
             "actor": {
               "id": "notetaker",
               "name": "Notetaker",
@@ -1193,11 +1447,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T14:05:00+01:00",
+            "id": "partnerships-history-21",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "13:00",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -1219,11 +1475,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T13:00:00+01:00",
+            "id": "partnerships-history-22",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "12:20",
             "actor": {
               "id": "call-prep",
               "name": "Call prep",
@@ -1245,7 +1503,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T12:20:00+01:00",
+            "id": "partnerships-history-23",
+            "undone": false
           }
         ]
       },
@@ -1254,7 +1515,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "16:00",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -1276,11 +1536,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T16:00:00+01:00",
+            "id": "partnerships-history-24",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "10:00",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -1306,11 +1568,16 @@
               "Halden Freight Network · to the VP partnerships",
               "Northvale Bank · to the partnerships lead"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T10:00:00+01:00",
+            "id": "partnerships-history-25",
+            "undone": false
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -1449,7 +1716,8 @@
       "state": "warn",
       "stateWord": "Waits for Lea",
       "leadName": "Sender",
-      "next": "After Lea's check"
+      "next": "After Lea's check",
+      "nextAt": null
     },
     {
       "id": "halden-offer",
@@ -1457,7 +1725,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Jonas",
-      "next": "After your OK"
+      "next": "After your OK",
+      "nextAt": null
     },
     {
       "id": "brand-list",
@@ -1465,7 +1734,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Brand scout",
-      "next": "Today, 18:00"
+      "next": "",
+      "nextAt": "2026-11-16T18:00:00+01:00"
     },
     {
       "id": "contact-data",
@@ -1473,7 +1743,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Contact finder",
-      "next": "Tomorrow, 08:00"
+      "next": "",
+      "nextAt": "2026-11-17T08:00:00+01:00"
     },
     {
       "id": "outreach-wave-1",
@@ -1481,7 +1752,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Sender",
-      "next": "Wed 18 Nov"
+      "next": "",
+      "nextAt": "2026-11-18T17:00:00+01:00"
     },
     {
       "id": "partner-calls",
@@ -1489,7 +1761,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "You",
-      "next": "Today, 16:00"
+      "next": "",
+      "nextAt": "2026-11-16T16:00:00+01:00"
     },
     {
       "id": "partner-strategy",
@@ -1497,7 +1770,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "You",
-      "next": "closed 23 Oct"
+      "next": "",
+      "nextAt": "2026-10-23T17:00:00+02:00"
     },
     {
       "id": "partner-stack",
@@ -1505,13 +1779,91 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Jonas",
-      "next": "closed 30 Oct"
+      "next": "",
+      "nextAt": "2026-10-30T17:00:00+01:00"
     }
   ],
   "spend": {
-    "spent": 38,
-    "cap": 60
+    "spent": {
+      "amountMinor": 3800,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 6000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [
+    {
+      "name": "Strategy",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Stack",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Brands",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Outreach",
+      "access": "work",
+      "runBy": {
+        "id": "lea-brandt",
+        "name": "Lea Brandt",
+        "shortName": "Lea",
+        "kind": "person",
+        "avatar": "L",
+        "role": "GTM associate",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      }
+    },
+    {
+      "name": "Calls",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Offers",
+      "access": "work",
+      "runBy": {
+        "id": "jonas-falk",
+        "name": "Jonas Falk",
+        "shortName": "Jonas",
+        "kind": "person",
+        "avatar": "J",
+        "role": "Partner operations",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      }
+    },
+    {
+      "name": "Signed",
+      "access": "work",
+      "runBy": null
+    }
+  ],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

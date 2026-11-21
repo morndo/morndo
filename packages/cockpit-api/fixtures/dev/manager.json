@@ -10,7 +10,9 @@
       "leadName": "Builder",
       "state": "bad",
       "stateWord": "Stuck",
-      "next": "Now, needs your call"
+      "next": "Now, needs your call",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "export-for-big-accounts",
@@ -20,7 +22,9 @@
       "leadName": "Release",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "tax-rates",
@@ -30,7 +34,9 @@
       "leadName": "Builder",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "new-sign-in",
@@ -40,7 +46,9 @@
       "leadName": "Builder",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your pick"
+      "next": "After your pick",
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "shipment-filters",
@@ -50,7 +58,9 @@
       "leadName": "Reviewer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 11:30"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T11:30:00+01:00"
     },
     {
       "id": "keep-scans",
@@ -60,7 +70,9 @@
       "leadName": "Builder",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 15:00"
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T15:00:00+01:00"
     },
     {
       "id": "upgrade-node-24",
@@ -70,7 +82,9 @@
       "leadName": "Builder",
       "state": "parked",
       "stateWord": "Parked until Thu",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "reason": "The session library supports Node 24 from Thursday’s release.",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     }
   ],
   "sharedResources": [],
@@ -78,26 +92,35 @@
     {
       "id": "ask-red",
       "quote": "Stop the red main from blocking everyone.",
-      "when": "Today 06:55",
       "chat": "Web app",
       "went": "lane Red main · Builder leads",
-      "href": "#topic/web"
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "at": "2026-11-16T06:55:00+01:00"
     },
     {
       "id": "ask-node",
       "quote": "Move us to Node 24 when it is safe.",
-      "when": "Friday 09:30",
       "chat": "Web app",
       "went": "lane Upgrade to Node 24 · parked until Thursday",
-      "href": "#lane/upgrade-node-24"
+      "target": {
+        "kind": "lane",
+        "id": "upgrade-node-24"
+      },
+      "at": "2026-11-13T09:30:00+01:00"
     },
     {
       "id": "ask-export",
       "quote": "Fenwick says the export times out for their account. Fix it and prove it works on their data.",
-      "when": "Thursday 16:10",
       "chat": "API",
       "went": "lane Export for big accounts · Release leads",
-      "href": "#lane/export-for-big-accounts"
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      },
+      "at": "2026-11-12T16:10:00+01:00"
     }
   ],
   "since": []

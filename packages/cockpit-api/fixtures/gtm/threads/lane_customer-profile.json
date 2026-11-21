@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_customer-profile-0",
+      "id": "m9",
       "author": {
         "id": "researcher",
         "name": "Researcher",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "07:10",
       "text": "Done. Fintech ops teams close in 19 days on average, the fastest of the 4 segments.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:10:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

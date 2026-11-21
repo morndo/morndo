@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_webinar-reminders-0",
+      "id": "m32",
       "author": {
         "id": "publisher",
         "name": "Publisher",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "Sun 17:00",
       "text": "Reminder is scheduled for Wednesday 09:00. It only goes to people who opened and did not sign up, so nobody gets it twice.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-15T17:00:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

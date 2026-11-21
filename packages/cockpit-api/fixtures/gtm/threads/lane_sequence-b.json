@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_sequence-b-0",
+      "id": "m28",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -25,16 +25,22 @@
         "engine": null,
         "record": null
       },
-      "time": "Fri 17:10",
       "text": "The pilot is done: 6 replies out of 30, 2 meetings booked, no bounces. The best subject line was the shortest one.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-13T17:10:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "lane_sequence-b-1",
+      "id": "m29",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -49,16 +55,22 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "What happens if it bounces a lot?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-13T17:13:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "lane_sequence-b-2",
+      "id": "m30",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -73,13 +85,21 @@
         "engine": null,
         "record": null
       },
-      "time": "Fri 17:14",
       "text": "I pause on my own at 4% and tell you. The pilot had none, so I do not expect it.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-13T17:14:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

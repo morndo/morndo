@@ -1,11 +1,13 @@
 {
   "id": "topic:content",
-  "title": "Content",
+  "title": "Content chat",
   "sub": "Mara and 3 agents · the Manager reads it, it is not in it",
   "placeholder": "Message Content · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
       "Agents: 6 updates, the latest: Visuals asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3."
     ]
@@ -19,46 +21,48 @@
     "approveLabel": null
   },
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 6,
     "summary": "Agents · 6 updates since yesterday at 18:20, nothing needs you",
     "items": [
       {
-        "time": "09:21",
-        "name": "Visuals",
-        "text": "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3"
-      },
-      {
-        "time": "09:13",
         "name": "Publisher",
-        "text": "held the 16:00 promo post until the images are settled"
+        "text": "sent newsletter 46 to 4,200 readers, with the webinar on top",
+        "at": "2026-11-16T08:00:00+01:00"
       },
       {
-        "time": "09:12",
-        "name": "Visuals",
-        "text": "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail"
-      },
-      {
-        "time": "08:00",
-        "name": "Publisher",
-        "text": "sent newsletter 46 to 4,200 readers, with the webinar on top"
-      },
-      {
-        "time": "07:30",
         "name": "Writer",
-        "text": "started draft 2 of the recap post, aiming at 350 words"
+        "text": "started draft 2 of the recap post, aiming at 350 words",
+        "at": "2026-11-16T07:30:00+01:00"
       },
       {
-        "time": "17:00",
         "name": "Publisher",
-        "text": "scheduled the reminder email for Wednesday 09:00"
+        "text": "scheduled the reminder email for Wednesday 09:00",
+        "at": "2026-11-15T17:00:00+01:00"
+      },
+      {
+        "name": "Visuals",
+        "text": "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3",
+        "at": "2026-11-15T09:21:00+01:00"
+      },
+      {
+        "name": "Publisher",
+        "text": "held the 16:00 promo post until the images are settled",
+        "at": "2026-11-15T09:13:00+01:00"
+      },
+      {
+        "name": "Visuals",
+        "text": "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail",
+        "at": "2026-11-15T09:12:00+01:00"
       }
     ]
   },
   "suggestions": [],
   "messages": [
     {
-      "id": "topic_content-0",
+      "id": "m36",
       "author": {
         "id": "visuals",
         "name": "Visuals",
@@ -73,16 +77,22 @@
         "engine": null,
         "record": null
       },
-      "time": "09:12",
       "text": "Round 3 is done. 4 images pass. Images 3 and 6 fail: the logo sits on a light photo. I am out of rounds, so I stopped.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:44:57+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "topic_content-1",
+      "id": "m37",
       "author": {
         "id": "publisher",
         "name": "Publisher",
@@ -97,16 +107,22 @@
         "engine": null,
         "record": null
       },
-      "time": "09:13",
       "text": "I am holding the 16:00 post until this is settled.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:44:58+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "topic_content-2",
+      "id": "m38",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -121,16 +137,22 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "Can you darken the photo behind the logo instead of moving it?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:44:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "topic_content-3",
+      "id": "m39",
       "author": {
         "id": "visuals",
         "name": "Visuals",
@@ -145,20 +167,34 @@
         "engine": null,
         "record": null
       },
-      "time": "09:21",
       "text": "Yes. That is one more round, about 4 minutes and €0.60. It is over my limit of 3 rounds, so I need your OK.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
       "actions": [
         {
-          "label": "Run one more round"
+          "label": "Run one more round",
+          "id": "one-more-round",
+          "laneId": "webinar",
+          "personId": null
         },
         {
-          "label": "Post the 4"
+          "label": "Post the 4",
+          "id": "post-passing",
+          "laneId": "webinar",
+          "personId": null
         }
-      ]
+      ],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

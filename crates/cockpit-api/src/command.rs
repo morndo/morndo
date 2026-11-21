@@ -1,170 +1,394 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-use crate::access::AccessGrant;
-use crate::event::Event;
+use crate::{ActionId, DecisionId, LaneId, MessageId, PersonId, PinId, SkillId, ThreadId, TopicId};
+
+use crate::access::AccessGrantInput;
+use crate::event::FeedEvent;
+use crate::input::{self, Known};
 use crate::present::Present;
-use crate::settings::{ChatMode, Decider, DecisionRule, LayoutPatch, ThemePatch};
+use crate::settings::{ChatMode, DailyLimit, Decider, DecisionRule, LayoutPatch, ThemePatch};
 use crate::thread::{LabelKind, Message};
+use crate::{ConnectionId, InvitationId, ModelId, ModuleId, PullId, Target};
 
 /// A file or link dropped onto a topic, or attached to a filed lane.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Attachment {
+    /// Name shown to the reader.
+    #[schemars(length(min = 1, max = 200))]
     pub name: String,
-    #[serde(default)]
-    pub href: Option<String>,
+    /// The hub serves attachments over HTTPS. The local stand-in also returns its loopback upload URL.
+    #[schemars(schema_with = "input::attachment_schema")]
+    #[serde(deserialize_with = "input::attachment_url")]
+    pub url: String,
 }
 
+/// File or link supplied with a new request.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "type", rename_all = "camelCase", deny_unknown_fields)]
+#[serde(deny_unknown_fields)]
+pub struct AttachmentInput {
+    /// Name shown to the reader.
+    #[schemars(length(min = 1, max = 200))]
+    #[serde(deserialize_with = "input::name")]
+    pub name: String,
+    /// Supply an HTTPS URL to the hub. The local stand-in also accepts its own loopback upload URL.
+    #[schemars(schema_with = "input::attachment_schema")]
+    #[serde(deserialize_with = "input::attachment_url")]
+    pub url: String,
+}
+
+/// A user request accepted by the cockpit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type", rename_all_fields = "camelCase", deny_unknown_fields)]
 pub enum Command {
     #[serde(rename = "decision.approve")]
     DecisionApprove {
-        #[serde(rename = "decisionId")]
-        decision_id: String,
+        /// Identifier of the associated decision.
+        decision_id: DecisionId,
     },
     #[serde(rename = "decision.decline")]
     DecisionDecline {
-        #[serde(rename = "decisionId")]
-        decision_id: String,
+        /// Identifier of the associated decision.
+        decision_id: DecisionId,
     },
     #[serde(rename = "decision.undo")]
     DecisionUndo {
-        #[serde(rename = "decisionId")]
-        decision_id: String,
+        /// Identifier of the associated decision.
+        decision_id: DecisionId,
     },
     #[serde(rename = "decision.change")]
     DecisionChange {
-        #[serde(rename = "decisionId")]
-        decision_id: String,
+        /// Identifier of the associated decision.
+        decision_id: DecisionId,
+        /// Text shown to the reader.
+        #[schemars(length(min = 1, max = 4000))]
+        #[serde(deserialize_with = "input::text")]
         text: String,
     },
     #[serde(rename = "agentAction.undo")]
     AgentActionUndo {
-        #[serde(rename = "actionId")]
-        action_id: String,
+        /// Identifier of the associated action.
+        action_id: ActionId,
     },
     #[serde(rename = "agentAction.redo")]
     AgentActionRedo {
-        #[serde(rename = "actionId")]
-        action_id: String,
+        /// Identifier of the associated action.
+        action_id: ActionId,
     },
     #[serde(rename = "lane.file")]
     LaneFile {
-        text: String,
-        #[serde(rename = "topicId", default)]
-        topic_id: Option<String>,
-        #[serde(rename = "leadId", default)]
-        lead_id: Option<String>,
+        /// To manager for this record.
         #[serde(default)]
-        attachment: Option<Attachment>,
+        to_manager: bool,
+        /// Model for this record.
+        #[serde(default)]
+        model: Option<ModelId>,
+        /// Text shown to the reader.
+        #[schemars(length(min = 1, max = 4000))]
+        #[serde(deserialize_with = "input::text")]
+        text: String,
+        /// Identifier of the associated topic.
+        #[serde(default)]
+        topic_id: Option<TopicId>,
+        /// Identifier of the associated lead.
+        #[serde(default)]
+        lead_id: Option<PersonId>,
+        /// Attachment for this record.
+        #[serde(default)]
+        attachment: Option<AttachmentInput>,
     },
     #[serde(rename = "lane.move")]
     LaneMove {
-        #[serde(rename = "laneId")]
-        lane_id: String,
-        #[serde(rename = "topicId")]
-        topic_id: String,
+        /// Identifier of the associated lane.
+        lane_id: LaneId,
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
     },
     #[serde(rename = "lane.undoFile")]
     LaneUndoFile {
-        #[serde(rename = "laneId")]
-        lane_id: String,
+        /// Identifier of the associated lane.
+        lane_id: LaneId,
     },
     #[serde(rename = "lane.act")]
     LaneAct {
-        #[serde(rename = "laneId")]
-        lane_id: String,
+        /// Identifier of the associated lane.
+        lane_id: LaneId,
+        /// Act for this record.
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::name")]
         act: String,
     },
     #[serde(rename = "person.remind")]
     PersonRemind {
-        #[serde(rename = "laneId")]
-        lane_id: String,
-        #[serde(rename = "personId")]
-        person_id: String,
+        /// Identifier of the associated lane.
+        lane_id: LaneId,
+        /// Identifier of the associated person.
+        person_id: PersonId,
     },
     #[serde(rename = "goal.ask")]
     GoalAsk {
-        #[serde(rename = "topicId")]
-        topic_id: String,
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
     },
     #[serde(rename = "message.send")]
     MessageSend {
-        #[serde(rename = "threadId")]
-        thread_id: String,
+        /// Status viewer receiving a private reply from the owner.
+        #[serde(default)]
+        recipient_id: Option<PersonId>,
+        /// Stage to post in when the thread covers several stages.
+        #[serde(default)]
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::optional_name")]
+        stage: Option<String>,
+        /// Attachment for this record.
+        #[serde(default)]
+        attachment: Option<AttachmentInput>,
+        /// Page for this record.
+        #[serde(default)]
+        page: Option<TargetInput>,
+        /// Model for this record.
+        #[serde(default)]
+        model: Option<ModelId>,
+        /// Identifier of the associated thread.
+        thread_id: ThreadId,
+        /// Text shown to the reader.
+        #[schemars(length(min = 1, max = 4000))]
+        #[serde(deserialize_with = "input::text")]
         text: String,
     },
     #[serde(rename = "message.relabel")]
     MessageRelabel {
-        #[serde(rename = "messageId")]
-        message_id: String,
-        label: LabelKind,
+        /// Identifier of the associated message.
+        message_id: MessageId,
+        /// Label for this record.
+        label: Known<LabelKind>,
     },
     #[serde(rename = "since.edit")]
     SinceEdit {
-        #[serde(rename = "threadId")]
-        thread_id: String,
+        /// Identifier of the associated thread.
+        thread_id: ThreadId,
+        /// Lines for this record.
+        #[schemars(schema_with = "input::since_lines_schema")]
+        #[serde(deserialize_with = "input::since_lines")]
         lines: Vec<String>,
     },
     #[serde(rename = "pin.add")]
     PinAdd {
-        #[serde(rename = "pinId")]
-        pin_id: String,
+        /// Identifier of the associated pin.
+        pin_id: PinId,
     },
     #[serde(rename = "pin.remove")]
     PinRemove {
-        #[serde(rename = "pinId")]
-        pin_id: String,
+        /// Identifier of the associated pin.
+        pin_id: PinId,
     },
     #[serde(rename = "prefs.set")]
     PrefsSet {
+        /// Identifier of the associated device.
+        #[serde(default)]
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::optional_name")]
+        device_id: Option<String>,
+        /// Theme for this record.
         #[serde(default)]
         theme: Option<ThemePatch>,
+        /// Sizes of the cockpit panes.
         #[serde(default)]
         layout: Option<LayoutPatch>,
-        #[serde(rename = "chatMode", default)]
-        chat_mode: Option<ChatMode>,
-        #[serde(rename = "briefsPerDay", default)]
+        /// Chat mode for this record.
+        #[serde(default)]
+        chat_mode: Option<Known<ChatMode>>,
+        /// Briefs per day for this record.
+        #[serde(default)]
+        #[schemars(range(min = 1, max = 3))]
+        #[serde(deserialize_with = "input::optional_range::<_, 1, 3>")]
         briefs_per_day: Option<i64>,
-        #[serde(rename = "interruptOnlyUrgent", default)]
+        /// Interrupt only urgent for this record.
+        #[serde(default)]
         interrupt_only_urgent: Option<bool>,
     },
     #[serde(rename = "decisionRight.set")]
     DecisionRightSet {
-        rule: DecisionRule,
-        who: Decider,
-        #[serde(rename = "dailyLimit", default)]
-        daily_limit: Option<i64>,
+        /// Person authorized to exercise the decision right.
+        #[serde(default)]
+        person_id: Option<PersonId>,
+        /// Rule for this record.
+        rule: Known<DecisionRule>,
+        /// Who for this record.
+        who: Known<Decider>,
+        /// Daily limit for this record.
+        #[serde(default)]
+        daily_limit: Option<DailyLimit>,
     },
     #[serde(rename = "skill.run")]
     SkillRun {
-        skill: String,
+        /// Explicit destination when the skill is run from shared work.
+        #[serde(default)]
+        topic_id: Option<TopicId>,
+        /// Model for this record.
+        #[serde(default)]
+        model: Option<ModelId>,
+        /// Skill for this record.
+        skill: SkillId,
+        /// Text shown to the reader.
+        #[schemars(length(min = 1, max = 4000))]
+        #[serde(deserialize_with = "input::text")]
         text: String,
     },
     #[serde(rename = "access.set")]
     AccessSet {
-        #[serde(rename = "topicId")]
-        topic_id: String,
-        #[serde(rename = "personId")]
-        person_id: String,
-        access: AccessGrant,
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+        /// Identifier of the associated person.
+        person_id: PersonId,
+        /// Access for this record.
+        access: AccessGrantInput,
     },
     #[serde(rename = "access.invite")]
     AccessInvite {
-        #[serde(rename = "topicId")]
-        topic_id: String,
-        #[serde(rename = "nameOrEmail")]
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+        /// Name or email for this record.
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::name")]
         name_or_email: String,
+    },
+    #[serde(rename = "pin.move")]
+    PinMove {
+        /// Identifier of the associated pin.
+        pin_id: PinId,
+        /// To for this record.
+        to: u8,
+    },
+    #[serde(rename = "topic.seen")]
+    TopicSeen {
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+    },
+    #[serde(rename = "stage.assign")]
+    StageAssign {
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+        /// Stage for this record.
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::name")]
+        stage: String,
+        /// Identifier of the associated person.
+        person_id: PersonId,
+    },
+    #[serde(rename = "access.revoke")]
+    AccessRevoke {
+        /// Identifier of the associated invitation.
+        invitation_id: InvitationId,
+    },
+    #[serde(rename = "access.accept")]
+    AccessAccept {
+        /// Invitation accepted by its recipient.
+        invitation_id: InvitationId,
+    },
+    #[serde(rename = "access.statusLink")]
+    AccessStatusLink {
+        /// Enable the link or revoke it. Omission enables it.
+        #[serde(default = "enabled_by_default")]
+        enabled: bool,
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+    },
+    #[serde(rename = "skill.create")]
+    SkillCreate {
+        /// Description for this record.
+        #[schemars(length(min = 1, max = 4000))]
+        #[serde(deserialize_with = "input::text")]
+        description: String,
+    },
+    #[serde(rename = "guardrail.set")]
+    GuardrailSet {
+        /// Name shown to the reader.
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::name")]
+        name: String,
+        /// On for this record.
+        on: bool,
+    },
+    #[serde(rename = "pull.hold")]
+    PullHold {
+        /// Identifier of the associated pull.
+        pull_id: PullId,
+    },
+    #[serde(rename = "pull.unhold")]
+    PullUnhold {
+        /// Auto-merge pull request whose hold is lifted.
+        pull_id: PullId,
+    },
+    #[serde(rename = "connection.connect")]
+    ConnectionConnect {
+        /// Identifier of the associated connection.
+        connection_id: ConnectionId,
+    },
+    #[serde(rename = "module.switch")]
+    ModuleSwitch {
+        /// Identifier of the associated module.
+        module_id: Known<ModuleId>,
+    },
+    #[serde(rename = "handover.confirm")]
+    HandoverConfirm {
+        /// Identifier of the associated lane.
+        lane_id: LaneId,
+    },
+    #[serde(rename = "recent.visit")]
+    RecentVisit {
+        /// Page the reader just opened.
+        target: TargetInput,
     },
 }
 
+/// Receipt and sequenced updates produced by an accepted command.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct CommandResult {
+    /// Receipt for this record.
+    pub receipt: Present<Receipt>,
+    /// Ok for this record.
+    pub ok: bool,
+    /// Events for this record.
+    pub events: Vec<FeedEvent>,
+    /// Identifier of the associated lane.
+    pub lane_id: Present<LaneId>,
+    /// Message for this record.
+    pub message: Present<Message>,
+}
+
+/// Context supplied by a composer when sending a message.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct CommandResult {
-    pub ok: bool,
-    pub events: Vec<Event>,
-    pub lane_id: Present<String>,
-    pub message: Present<Message>,
+pub struct TargetInput {
+    /// Kind for this record.
+    pub kind: Known<crate::TargetKind>,
+    /// Stable identifier for this record.
+    #[schemars(schema_with = "input::target_id_schema")]
+    #[serde(deserialize_with = "input::target_id")]
+    pub id: Present<String>,
+}
+
+/// Where the Manager filed a request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Receipt {
+    /// Action addressable by Undo, when this receipt records a reversible action.
+    pub action_id: Present<ActionId>,
+    /// Text shown to the reader.
+    pub text: String,
+    /// Filed under for this record.
+    pub filed_under: Present<Target>,
+    /// Lead for this record.
+    pub lead: crate::Actor,
+    /// Chain for this record.
+    pub chain: bool,
+    /// Identifier of the associated lane.
+    pub lane_id: LaneId,
+}
+
+fn enabled_by_default() -> bool {
+    true
 }

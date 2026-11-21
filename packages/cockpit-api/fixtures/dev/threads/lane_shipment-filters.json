@@ -8,5 +8,7 @@
   "pinned": null,
   "agents": null,
   "suggestions": [],
-  "messages": []
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
 }

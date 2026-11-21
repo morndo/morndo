@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_search-budget-0",
+      "id": "m24",
       "author": {
         "id": "analyst",
         "name": "Analyst",
@@ -25,16 +25,22 @@
         "engine": null,
         "record": null
       },
-      "time": "Sat 10:15",
       "text": "14 days are in: LinkedIn 24 leads for €4,800, Search 40 leads for €3,200. I matched both against the ad accounts.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-14T10:15:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "lane_search-budget-1",
+      "id": "m25",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -49,16 +55,22 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "Is the Search number solid, or just two good weeks?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:19:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "lane_search-budget-2",
+      "id": "m26",
       "author": {
         "id": "paid-buyer",
         "name": "Paid buyer",
@@ -73,13 +85,21 @@
         "engine": null,
         "record": null
       },
-      "time": "07:20",
       "text": "It holds. The 14 days before were 36 leads at €86 each, so Search has been cheaper for a month. I added that period to the lane.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:20:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

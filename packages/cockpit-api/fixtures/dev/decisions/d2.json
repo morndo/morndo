@@ -4,7 +4,6 @@
   "state": "open",
   "topicId": "billing",
   "topicName": "Billing",
-  "due": "Due tomorrow",
   "whyYours": null,
   "minutes": 2,
   "contextLine": "Billing · Due tomorrow · 2 min",
@@ -14,13 +13,68 @@
   "approveLabel": "Approve",
   "provenance": null,
   "context": "It adds 2 columns and fills 48,000 invoices. A backup comes first. The dry run on a copy took 41 seconds.",
-  "numbers": [],
-  "proof": null,
+  "numbers": [
+    {
+      "label": "Columns added",
+      "value": "2",
+      "sub": null,
+      "money": null
+    },
+    {
+      "label": "Invoices backfilled",
+      "value": "48,000",
+      "sub": null,
+      "money": null
+    }
+  ],
+  "proof": {
+    "items": [
+      {
+        "label": "Dry run",
+        "value": "41 seconds",
+        "sub": "Ran on a copy of the database.",
+        "money": null
+      }
+    ],
+    "meta": [],
+    "unchecked": "The production run still needs your approval."
+  },
   "opportunity": null,
   "risk": null,
-  "suggestion": null,
-  "guardrail": null,
-  "nextSteps": [],
-  "ifNoAnswer": null,
-  "position": "2 of 3 · 3 open"
+  "suggestion": "Run the migration after the backup.",
+  "guardrail": "Take a backup before the change.",
+  "nextSteps": [
+    {
+      "step": "Back up the production database",
+      "who": "Builder",
+      "dueAt": null,
+      "target": {
+        "kind": "lane",
+        "id": "tax-rates"
+      },
+      "moduleId": null
+    },
+    {
+      "step": "Run the tax-rate migration",
+      "who": "Builder",
+      "dueAt": "2026-11-16T23:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "tax-rates"
+      },
+      "moduleId": null
+    }
+  ],
+  "ifNoAnswer": "The migration waits for your OK.",
+  "position": {
+    "index": 2,
+    "of": 3,
+    "open": 3
+  },
+  "dueAt": "2026-11-17T17:00:00+01:00",
+  "shortTitle": "Run the tax migration",
+  "goalChange": null,
+  "release": null,
+  "changeRequest": null,
+  "rule": "hardToUndo"
 }

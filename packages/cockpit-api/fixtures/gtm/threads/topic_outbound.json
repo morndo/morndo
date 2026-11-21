@@ -1,11 +1,13 @@
 {
   "id": "topic:outbound",
-  "title": "Outbound",
+  "title": "Outbound chat",
   "sub": "Mara, Jonas and 3 agents · the Manager reads it, it is not in it",
   "placeholder": "Message Outbound · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
       "Agents: 5 updates, the latest: Prospector answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days."
     ]
@@ -19,41 +21,43 @@
     "approveLabel": "Start sequence B"
   },
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 5,
     "summary": "Agents · 5 updates since yesterday at 18:20, nothing needs you",
     "items": [
       {
-        "time": "08:52",
-        "name": "Prospector",
-        "text": "answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days"
-      },
-      {
-        "time": "08:40",
         "name": "Replies",
-        "text": "sorted 14 replies: 9 meetings, 3 later, 2 no"
+        "text": "sorted 14 replies: 9 meetings, 3 later, 2 no",
+        "at": "2026-11-16T08:40:00+01:00"
       },
       {
-        "time": "08:20",
         "name": "Replies",
-        "text": "asked Jonas for times for 2 people who said yes"
+        "text": "asked Jonas for times for 2 people who said yes",
+        "at": "2026-11-16T08:20:00+01:00"
       },
       {
-        "time": "08:05",
         "name": "Sender",
-        "text": "stopped sequence A for the 14 people who replied"
+        "text": "stopped sequence A for the 14 people who replied",
+        "at": "2026-11-16T08:05:00+01:00"
       },
       {
-        "time": "19:30",
         "name": "Prospector",
-        "text": "started round 2: 400 logistics ops leads, 120 found so far"
+        "text": "started round 2: 400 logistics ops leads, 120 found so far",
+        "at": "2026-11-15T19:30:00+01:00"
+      },
+      {
+        "name": "Prospector",
+        "text": "answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days",
+        "at": "2026-11-15T08:52:00+01:00"
       }
     ]
   },
   "suggestions": [],
   "messages": [
     {
-      "id": "topic_outbound-0",
+      "id": "m40",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -68,16 +72,22 @@
         "engine": null,
         "record": null
       },
-      "time": "08:05",
       "text": "Sequence A is done. I stopped it for the 14 people who replied, so nobody gets a follow-up after answering.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:05:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "topic_outbound-1",
+      "id": "m41",
       "author": {
         "id": "replies",
         "name": "Replies",
@@ -92,16 +102,22 @@
         "engine": null,
         "record": null
       },
-      "time": "08:40",
       "text": "Of the 14 replies, 9 booked a meeting, 3 asked for later and 2 said no. The later ones get a note in January.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:40:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "topic_outbound-2",
+      "id": "m42",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -116,16 +132,22 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "Why only fintech ops for B?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:44:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "topic_outbound-3",
+      "id": "m43",
       "author": {
         "id": "prospector",
         "name": "Prospector",
@@ -140,13 +162,21 @@
         "engine": null,
         "record": null
       },
-      "time": "08:52",
       "text": "The new customer profile says fintech ops teams close fastest: 41 of the 212 won deals, in 19 days on average. The list of 180 is built from that.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

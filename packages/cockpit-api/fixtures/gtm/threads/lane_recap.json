@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_recap-0",
+      "id": "m22",
       "author": {
         "id": "writer",
         "name": "Writer",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "10:02",
       "text": "Draft 1 was too long. Draft 2 keeps the 3 points people asked about most in the Q&A.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

@@ -1,207 +1,271 @@
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { realpathSync } from "node:fs";
 import { fileURLToPath } from "node:url";
-import { commandErrors, validate, type ValidationResult } from "@morndo/cockpit-api";
-import { WebSocket, WebSocketServer } from "ws";
-import type { Command } from "@morndo/cockpit-api";
-import { World } from "./world.ts";
+import { commandErrors, contractVersion, validate, type Command, type UploadInput } from "@morndo/cockpit-api";
+import { WebSocketServer } from "ws";
+import { image } from "./artwork.ts";
+import { Feed } from "./feed.ts";
+import { Idempotency } from "./idempotency.ts";
+import { Uploads } from "./uploads.ts";
+import { BASE, definitionFor, matchRoute, missing, Problem } from "./protocol.ts";
+import { DEMO_AT, World, type Module } from "./world.ts";
 
-const BASE = "/api/cockpit";
 const MAX_BODY = 1024 * 1024;
 
-function arg(name: string, fallback: string): string {
-  const index = process.argv.indexOf(name);
-  const value = index >= 0 ? process.argv[index + 1] : undefined;
-  return value ?? fallback;
+
+function parseUrl(req: IncomingMessage): URL {
+  return new URL(req.url ?? "/", "http://localhost");
 }
 
-function readBody(req: IncomingMessage, limit: number): Promise<string | undefined> {
+function argument(name: string, fallback: string): string {
+  const index = process.argv.indexOf(name);
+  return index < 0 ? fallback : process.argv[index + 1] ?? fallback;
+}
+
+function header(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function readBody(req: IncomingMessage): Promise<string | null> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
-    let settled = false;
-    const finish = (value: string | undefined) => {
-      if (settled) return;
-      settled = true;
-      resolve(value);
-    };
     req.on("data", (chunk: Buffer) => {
       size += chunk.length;
-      if (size > limit) {
-        req.destroy();
-        finish(undefined);
+      if (size > MAX_BODY) {
+        chunks.length = 0;
+        resolve(null);
         return;
       }
       chunks.push(chunk);
     });
-    req.on("end", () => finish(Buffer.concat(chunks).toString("utf8")));
-    req.on("error", (err: Error) => {
-      if (settled) return;
-      settled = true;
-      reject(err);
-    });
+    req.once("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    req.once("error", reject);
   });
 }
 
-function send(res: ServerResponse, status: number, body: unknown): void {
-  res.writeHead(status, { "content-type": "application/json; charset=utf-8" });
+async function readJson(req: IncomingMessage): Promise<unknown> {
+  const type = header(req.headers["content-type"])?.split(";")[0]?.trim().toLowerCase();
+  if (type !== "application/json") {
+    req.resume();
+    throw new Problem("unsupportedMediaType", "Content-Type must be application/json.");
+  }
+  if (Number(req.headers["content-length"]) > MAX_BODY) {
+    req.resume();
+    throw new Problem("payloadTooLarge", "The body is larger than 1 MiB.");
+  }
+  const body = await readBody(req);
+  if (body === null) throw new Problem("payloadTooLarge", "The body is larger than 1 MiB.");
+  let data: unknown;
+  try {
+    data = JSON.parse(body) as unknown;
+  } catch {
+    throw new Problem("badRequest", "The body is not JSON.");
+  }
+  return data;
+}
+
+async function readCommand(req: IncomingMessage): Promise<Command> {
+  const data = await readJson(req);
+  const result = validate<Command>("Command", data);
+  if (!result.ok) {
+    const errors = commandErrors(data).map(message => {
+      const match = /^(\/[^ ]+) (.*)$/.exec(message);
+      return { path: match?.[1] ?? "", message: match?.[2] ?? message };
+    });
+    throw new Problem("badRequest", errors.map(item => item.message).join(", ") || "The command was refused.", errors);
+  }
+  return result.value;
+}
+
+function respond(res: ServerResponse, status: number, definition: string, body: unknown): void {
+  const result = validate(definition, body);
+  if (!result.ok) throw new Error(`Invalid ${definition}: ${result.errors.join(", ")}`);
+  res.writeHead(status, {
+    "content-type": status < 400 ? "application/json; charset=utf-8" : "application/problem+json; charset=utf-8",
+    "cockpit-contract": contractVersion,
+  });
   res.end(JSON.stringify(body));
 }
 
-function refusal(code: string, message: string): { error: { code: string; message: string } } {
-  return { error: { code, message } };
+function refused(error: unknown): Problem {
+  if (error instanceof Problem) return error;
+  if (error instanceof URIError) return missing("route");
+  console.error(error instanceof Error ? error.message : "The stand-in failed.");
+  return new Problem("internal", "The cockpit could not finish the request.");
 }
 
-function checked(def: string, body: unknown): ValidationResult<unknown> {
-  return validate(def, body);
+function afterParam(query: URLSearchParams): number | null {
+  const raw = query.get("after");
+  if (raw === null) return null;
+  const after = Number(raw);
+  if (!/^\d+$/.test(raw) || !Number.isSafeInteger(after)) throw new Problem("badRequest", "after must be a nonnegative sequence number.");
+  return after;
 }
 
-export async function start(module: "gtm" | "dev", port: number): Promise<{ port: number; close: () => Promise<void> }> {
-  const world = new World(module);
-  const bound = { port };
+export async function start(module: Module, port: number, clock?: () => string): Promise<{ port: number; close: () => Promise<void> }> {
+  const started = Date.now();
+  const now = clock ?? (() => new Date(Date.parse(DEMO_AT) + Date.now() - started).toISOString());
+  const worlds = new Map<Module, World>();
+  const origin = () => {
+    const address = server.address();
+    return `http://127.0.0.1:${typeof address === "object" && address ? address.port : port}`;
+  };
+  let active = module;
+  const worldOf = (): World => {
+    const world = worlds.get(active) ?? new World(active, origin);
+    worlds.set(active, world);
+    return world;
+  };
+  const feed = new Feed();
+  const idempotency = new Idempotency();
+  const uploads = new Uploads(origin);
+  const tick = (world: World) => {
+    const at = now();
+    const audience = world.hasTimedWorkChange(at) ? world.notificationAudience() : undefined;
+    const events = world.advance(at);
+    if (events.length) feed.publish(world, events, at, audience ? { audience } : undefined);
+  };
+  const requireLocal = (req: IncomingMessage) => {
+    const address = server.address();
+    const bound = typeof address === "object" && address ? address.port : port;
+    const local = [`127.0.0.1:${bound}`, `localhost:${bound}`];
+    if (!local.includes(req.headers.host?.toLowerCase() ?? "")
+      || (req.headers.origin !== undefined && !local.some(value => req.headers.origin === `http://${value}`))) {
+      throw new Problem("forbidden", "This cockpit accepts requests from its local origin.");
+    }
+  };
+  const ws = new WebSocketServer({ noServer: true, maxPayload: 1024 });
+  ws.on("headers", headers => headers.push(`cockpit-contract: ${contractVersion}`));
   const server = createServer((req, res) => {
-    void handle(world, req, res, (event) => {
-      const encoded = JSON.stringify(event);
-      for (const client of feed.clients) {
-        if (client.readyState === WebSocket.OPEN) client.send(encoded);
+    void (async () => {
+      requireLocal(req);
+      const url = parseUrl(req);
+      const route = matchRoute(url.pathname);
+      if (!route) throw missing("route");
+      const method = req.method?.toLowerCase() ?? "";
+      const operation = route.operations[method];
+      if (!operation) {
+        res.setHeader("allow", Object.keys(route.operations).map(value => value.toUpperCase()).join(", "));
+        throw new Problem("methodNotAllowed", "That method is not available on this route.");
       }
+      if (operation["x-websocket-message"]) throw new Problem("badRequest", "Use a WebSocket to read the feed.");
+      const world = worldOf();
+      const reader = url.searchParams.get("as");
+      const viewer = world.viewer(reader);
+      tick(world);
+      const definition = definitionFor(operation);
+      if (method === "post" && definition === "CommandResult") {
+        const command = await readCommand(req);
+        const key = header(req.headers["idempotency-key"]);
+        const scope = command.type === "module.switch" && viewer.id === world.owner.id ? "owner" : `${world.module}:${viewer.id}`;
+        const result = idempotency.run(scope, key, command, () => {
+          if ("attachment" in command && command.attachment) {
+            uploads.requireAttachment(command.attachment.url, viewer.id, viewer.id === world.owner.id);
+          }
+          const audience = world.notificationAudience();
+          const effect = world.act(command, viewer);
+          const settings = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit";
+          const privateTo = (event: (typeof effect.events)[number]) => settings || event.type === "drafts.changed" ? viewer.id : undefined;
+          const events = feed.publish(world, effect.events, now(), {
+            caller: viewer.id,
+            audience,
+            privateTo,
+            beforeSend: frames => {
+              const check = validate(definition, { ...effect, events: frames });
+              if (!check.ok) throw new Error(`Invalid ${definition}: ${check.errors.join(", ")}`);
+            },
+          });
+          if (command.type === "module.switch" && active !== command.moduleId) {
+            active = command.moduleId;
+            feed.moduleSwitched();
+          }
+          return { ...effect, events };
+        }, saved => world.authorizeReplay(command, saved, viewer));
+        respond(res, 200, definition, result);
+      } else if (method === "post" && route.path === `${BASE}/uploads`) {
+        if (viewer.membershipState === "invited") throw new Problem("forbidden", "Accept the invitation before uploading files.");
+        const payload = await readJson(req);
+        if (payload && typeof payload === "object" && "data" in payload && typeof payload.data === "string" && payload.data.length > 699052) {
+          throw new Problem("payloadTooLarge", "Files are limited to 512 KiB.");
+        }
+        const result = validate<UploadInput>("UploadInput", payload);
+        if (!result.ok) throw new Problem("badRequest", result.errors.join(", "));
+        respond(res, 200, "Attachment", uploads.add(result.value, viewer.id));
+      } else if (route.path === `${BASE}/uploads/{id}`) {
+        const file = uploads.get(route.parameters[0] ?? "", viewer.id, viewer.id === world.owner.id);
+        res.writeHead(200, {
+          "content-type": "application/octet-stream", "content-disposition": "attachment",
+          "x-content-type-options": "nosniff", "cockpit-contract": contractVersion,
+        });
+        res.end(file.bytes);
+      } else if (definition) {
+        respond(res, 200, definition, world.read(definition, route.parameters[0], url.searchParams, viewer));
+      } else {
+        const [index, variant] = route.parameters;
+        const bytes = image(Number(index), variant ?? "");
+        res.writeHead(200, { "content-type": "image/webp", "cockpit-contract": contractVersion });
+        res.end(bytes);
+      }
+    })().catch((error: unknown) => {
+      if (res.headersSent) {
+        res.end();
+        return;
+      }
+      const problem = refused(error).body;
+      respond(res, problem.status, "ApiError", problem);
     });
   });
-  const feed = new WebSocketServer({
-    server,
-    path: `${BASE}/feed`,
-    verifyClient: (info: { req: IncomingMessage }) => allowedOrigin(headerValue(info.req.headers.origin), bound.port),
+  server.on("upgrade", (req, socket, head) => {
+    try {
+      requireLocal(req);
+      const url = parseUrl(req);
+      if (!matchRoute(url.pathname)?.operations.get?.["x-websocket-message"]) throw missing("route");
+      const world = worldOf();
+      const id = url.searchParams.get("as");
+      const viewer = world.viewer(id);
+      const after = afterParam(url.searchParams);
+      tick(world);
+      ws.handleUpgrade(req, socket, head, client => {
+        feed.subscribe(client, { world: id ? () => world : worldOf, viewer: id ? () => viewer.id : () => worldOf().owner.id, named: Boolean(id) }, after);
+      });
+    } catch (error) {
+      const problem = refused(error).body;
+      if (!validate("ApiError", problem).ok) {
+        socket.destroy();
+        return;
+      }
+      const body = JSON.stringify(problem);
+      socket.end(`HTTP/1.1 ${problem.status} ${problem.title}\r\ncontent-type: application/problem+json\r\ncockpit-contract: ${contractVersion}\r\ncontent-length: ${Buffer.byteLength(body)}\r\nconnection: close\r\n\r\n${body}`);
+    }
   });
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
-    server.listen(port, "127.0.0.1", () => resolve());
+    server.listen(port, "127.0.0.1", resolve);
   });
+  worldOf();
+  const ping = setInterval(() => feed.ping(), 25000);
+  const updates = setInterval(() => {
+    for (const world of worlds.values()) tick(world);
+  }, 1000);
+  const cleanup = setInterval(() => {
+    idempotency.sweep();
+    uploads.sweep();
+  }, 60000);
   const address = server.address();
-  const actual = typeof address === "object" && address ? address.port : port;
-  bound.port = actual;
-  console.log(`cockpit-standin listening on http://127.0.0.1:${actual}`);
+  const bound = typeof address === "object" && address ? address.port : port;
+  console.log(`cockpit-standin listening on http://127.0.0.1:${bound}`);
   return {
-    port: actual,
+    port: bound,
     close: () => new Promise((resolve, reject) => {
+      clearInterval(ping);
+      clearInterval(updates);
+      clearInterval(cleanup);
       feed.close();
-      server.close((err) => err ? reject(err) : resolve());
+      ws.close();
+      server.close(error => error ? reject(error) : resolve());
     }),
   };
-}
-
-async function handle(world: World, req: IncomingMessage, res: ServerResponse, broadcast: (event: unknown) => void): Promise<void> {
-  try {
-    const url = new URL(req.url ?? "/", "http://127.0.0.1");
-    if (!url.pathname.startsWith(BASE)) {
-      send(res, 404, refusal("not_found", "No route for that path."));
-      return;
-    }
-    const path = decodePath(url.pathname);
-    if (path === undefined) {
-      respond(res, 404, "ApiError", refusal("not_found", "No route for that path."));
-      return;
-    }
-    if (req.method === "POST" && path === "/actions") {
-      await postAction(world, req, res, broadcast);
-      return;
-    }
-    if (req.method !== "GET") {
-      send(res, 404, refusal("not_found", "No route for that path."));
-      return;
-    }
-    const outcome = world.get(path, url.searchParams);
-    respond(res, outcome.status, outcome.definition, outcome.body);
-  } catch (err) {
-    if (err instanceof URIError) {
-      respond(res, 404, "ApiError", refusal("not_found", "No route for that path."));
-      return;
-    }
-    const message = err instanceof Error ? err.message : "The stand-in failed.";
-    send(res, 500, refusal("internal", message));
-  }
-}
-
-function decodePath(pathname: string): string | undefined {
-  try {
-    return decodeURI(pathname.slice(BASE.length)) || "/";
-  } catch (err) {
-    if (err instanceof URIError) return undefined;
-    throw err;
-  }
-}
-
-function headerValue(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
-  return value;
-}
-
-function mediaType(req: IncomingMessage): string {
-  return (headerValue(req.headers["content-type"]) ?? "").split(";")[0]?.trim().toLowerCase() ?? "";
-}
-
-function allowedOrigin(origin: string | undefined, port: number): boolean {
-  if (!origin) return true;
-  return origin === `http://127.0.0.1:${port}` || origin === `http://localhost:${port}`;
-}
-
-async function postAction(world: World, req: IncomingMessage, res: ServerResponse, broadcast: (event: unknown) => void): Promise<void> {
-  if (mediaType(req) !== "application/json") {
-    req.resume();
-    respond(res, 415, "ApiError", refusal("unsupported_media_type", "Content-Type must be application/json."));
-    return;
-  }
-  const declared = Number(req.headers["content-length"]);
-  if (Number.isFinite(declared) && declared > MAX_BODY) {
-    req.resume();
-    respond(res, 413, "ApiError", refusal("payload_too_large", "The body is larger than 1 MiB."));
-    return;
-  }
-  const raw = await readBody(req, MAX_BODY);
-  if (raw === undefined) {
-    if (!res.headersSent) respond(res, 413, "ApiError", refusal("payload_too_large", "The body is larger than 1 MiB."));
-    return;
-  }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw) as unknown;
-  } catch {
-    respond(res, 400, "ApiError", refusal("invalid_command", "The body is not JSON."));
-    return;
-  }
-  const command = validate<Command>("Command", parsed);
-  if (!command.ok) {
-    const specific = commandErrors(parsed);
-    const message = (specific.length > 0 ? specific : command.errors).join("; ") || "The command was refused.";
-    respond(res, 400, "ApiError", refusal("invalid_command", message));
-    return;
-  }
-  const outcome = world.act(command.value);
-  if (outcome.status === 200) {
-    const events = eventsOf(outcome.body);
-    for (const event of events) {
-      const check = validate("Event", event);
-      if (!check.ok) {
-        respond(res, 500, "ApiError", refusal("invalid_response", check.errors.join("; ")));
-        return;
-      }
-    }
-    for (const event of events) broadcast(event);
-  }
-  respond(res, outcome.status, outcome.definition, outcome.body);
-}
-
-function respond(res: ServerResponse, status: number, def: string, body: unknown): void {
-  const result = checked(def, body);
-  if (!result.ok) {
-    send(res, 500, refusal("invalid_response", result.errors.join("; ") || `Response is not a ${def}.`));
-    return;
-  }
-  send(res, status, body);
-}
-
-function eventsOf(body: unknown): unknown[] {
-  if (!body || typeof body !== "object" || !("events" in body) || !Array.isArray(body.events)) return [];
-  return body.events;
 }
 
 function invokedDirectly(): boolean {
@@ -215,18 +279,15 @@ function invokedDirectly(): boolean {
 }
 
 if (invokedDirectly()) {
-  const module = arg("--module", "gtm");
-  const port = Number(arg("--port", "0"));
-  if (module !== "gtm" && module !== "dev") {
-    console.error("module must be gtm or dev");
-    process.exit(1);
+  const module = argument("--module", "gtm");
+  const port = Number(argument("--port", "0"));
+  if ((module !== "gtm" && module !== "dev") || !Number.isInteger(port) || port < 0 || port > 65535) {
+    console.error("Use --module gtm|dev and --port 0..65535.");
+    process.exitCode = 1;
+  } else {
+    start(module, port).catch((error: unknown) => {
+      console.error(error instanceof Error ? error.message : error);
+      process.exitCode = 1;
+    });
   }
-  if (!Number.isInteger(port) || port < 0) {
-    console.error("port must be a whole number");
-    process.exit(1);
-  }
-  start(module, port).catch((err: unknown) => {
-    console.error(err instanceof Error ? err.message : err);
-    process.exit(1);
-  });
 }

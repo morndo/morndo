@@ -8,15 +8,17 @@
   "meta": {
     "askedBy": "Asked by you",
     "ownerLine": "Writer, Visuals and Publisher work on it",
-    "nextReport": "Sign-ups reported Fri 20 Nov",
     "parts": [
       "Asked by you",
-      "Writer, Visuals and Publisher work on it",
-      "Sign-ups reported Fri 20 Nov"
-    ]
+      "Writer, Visuals and Publisher work on it"
+    ],
+    "nextReportAt": "2026-11-20T17:00:00+01:00"
   },
   "intro": "Everything we publish: the webinar on Thursday and its promo, the recap post, one customer story and a carousel. The goal this week is the webinar's sign-ups.",
-  "when": "3 days to the webinar",
+"when": {
+    "kind": "time",
+    "at": "2026-11-19T17:00:00+01:00"
+  },
   "health": null,
   "goal": {
     "target": 300,
@@ -27,14 +29,13 @@
       "state": "bad",
       "word": "At risk",
       "action": "Your call by 16:00",
-      "text": "Today's promo post decides which end of the range we land on."
+      "text": null
     },
     "insight": "Today's promo post decides which end of the range we land on.",
-    "asOf": "updated 09:20, forecast down 33 since yesterday · agents €36 of €40 this week",
     "decision": {
       "title": "The promo visuals are stuck",
       "detail": "Post at 16:00 · 2 of 6 images fail the brand check",
-      "done": "",
+      "done": null,
       "why": "Details",
       "decisionId": null,
       "laneId": "webinar",
@@ -212,43 +213,55 @@
         "name": "Newsletter",
         "confidence": "Likely",
         "close": null,
-        "at": 4,
         "stage": "Two sends out, reminder scheduled",
         "short": "118 so far; reminder Wed 09:00",
         "laneId": "webinar-reminders",
-        "href": "#lane/webinar-reminders",
         "evidence": "Two sends brought 118 sign-ups. The reminder goes to the 3,900 who opened but did not sign up; last webinar's reminder brought 31.",
         "next": "the reminder, Wednesday 09:00.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "webinar-reminders"
+        },
+        "chartDay": 4,
+        "costPerLead": null
       },
       {
         "name": "LinkedIn promo post",
         "confidence": "Possible",
         "close": null,
-        "at": 1,
         "stage": "Text approved, images stuck",
         "short": "Stuck: 2 images fail",
         "laneId": "webinar",
-        "href": "#lane/webinar",
         "evidence": "Last webinar's promo post brought 41 sign-ups in 3 days. Nothing else reaches LinkedIn before Thursday.",
         "next": "your call before 16:00: post the 4 images that pass, or allow one more round.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "webinar"
+        },
+        "chartDay": 1,
+        "costPerLead": null
       },
       {
         "name": "Fenwick shares it",
         "confidence": "Early",
         "close": null,
-        "at": 0,
         "stage": "Promised, no date yet",
         "short": "Their ops lead said yes",
         "laneId": "fenwick",
-        "href": "#lane/fenwick",
         "evidence": "Fenwick's ops lead offered to share it in an email on Friday. There is no date in their calendar yet.",
         "next": "Writer sends them the post text on Tuesday.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "fenwick"
+        },
+        "chartDay": 0,
+        "costPerLead": null
       }
     ],
     "guardrails": {
@@ -256,21 +269,54 @@
       "items": [
         {
           "what": "Off-brand posts",
-          "value": "0",
-          "limit": "none allowed",
-          "ratio": null
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "ratio": null,
+          "state": "held"
         },
         {
           "what": "Newsletter sends",
-          "value": "2 this week",
-          "limit": "limit 2",
-          "ratio": 1
+          "value": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": "per week"
+          },
+          "limit": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": "per week"
+          },
+          "ratio": 1,
+          "state": "near"
         },
         {
           "what": "Claims without a source",
-          "value": "0",
-          "limit": "none allowed",
-          "ratio": null
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -305,8 +351,11 @@
         "what": null,
         "why": null,
         "who": "Publisher",
-        "href": "#lane/webinar",
-        "laneId": "webinar"
+        "laneId": "webinar",
+        "target": {
+          "kind": "lane",
+          "id": "webinar"
+        }
       },
       {
         "state": "warn",
@@ -314,88 +363,138 @@
         "what": null,
         "why": null,
         "who": "Checker",
-        "href": "#lane/recap",
-        "laneId": "recap"
+        "laneId": "recap",
+        "target": {
+          "kind": "lane",
+          "id": "recap"
+        }
       }
     ],
     "routine": null,
     "funnel": {
       "title": "Funnel",
-      "since": "Since 5 November · change today · rate against the plan",
+      "since": "change today · rate against the plan",
       "steps": [
         {
-          "count": "4,200",
+          "count": 4200,
           "what": "emails sent",
           "change": null,
           "rate": null,
           "state": null
         },
         {
-          "count": "1,890",
+          "count": 1890,
           "what": "opened",
           "change": null,
-          "rate": "45% · plan 40%",
+          "rate": {
+            "percent": 45.0,
+            "planPercent": 40.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "1,840",
+          "count": 1840,
           "what": "page visits",
-          "change": "+310",
+          "change": {
+            "kind": "count",
+            "value": 310,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "212",
+          "count": 212,
           "what": "signed up",
-          "change": "+22",
-          "rate": "11.5% · plan 15%",
+          "change": {
+            "kind": "count",
+            "value": 22,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 11.5,
+            "planPercent": 15.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": "warn"
         }
-      ]
+      ],
+      "sinceAt": "2026-11-05T00:00:00+01:00"
     },
     "restSub": null,
     "figures": [
       {
-        "value": "212",
-        "of": "300",
+        "value": 212,
+        "of": 300,
         "label": "Signed up"
       },
       {
-        "value": "55",
+        "value": 55,
         "of": null,
         "label": "More expected, forecast"
       },
       {
-        "value": "33",
+        "value": 33,
         "of": null,
         "label": "Still missing"
       }
     ],
-    "pathTitle": null
+    "pathTitle": null,
+    "forecastLog": [],
+    "deadlineAt": "2026-11-19T17:00:00+01:00",
+    "updatedAt": "2026-11-16T08:45:00+01:00",
+    "forecastNote": "forecast down 33 since yesterday"
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "212",
+      "value": {
+        "kind": "count",
+        "value": 212,
+        "of": null,
+        "unit": null
+      },
       "label": "sign-ups for Thursday"
     },
     {
-      "value": "1,840",
+      "value": {
+        "kind": "count",
+        "value": 1840,
+        "of": null,
+        "unit": null
+      },
       "label": "webinar page visits"
     },
     {
-      "value": "4",
+      "value": {
+        "kind": "count",
+        "value": 4,
+        "of": null,
+        "unit": null
+      },
       "label": "posts this week"
     },
     {
-      "value": "2",
+      "value": {
+        "kind": "count",
+        "value": 2,
+        "of": null,
+        "unit": null
+      },
       "label": "brand-check fails"
     }
   ],
   "plan": null,
   "focusLaneId": "webinar",
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the webinar page went live on 5 November.",
     "days": [
@@ -404,7 +503,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "09:21",
             "actor": {
               "id": "visuals",
               "name": "Visuals",
@@ -426,11 +524,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:44:59+01:00",
+            "id": "content-history-1",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "09:13",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -452,11 +552,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:44:51+01:00",
+            "id": "content-history-2",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "09:12",
             "actor": {
               "id": "visuals",
               "name": "Visuals",
@@ -478,11 +580,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:44:50+01:00",
+            "id": "content-history-3",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:00",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -504,11 +608,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:00:00+01:00",
+            "id": "content-history-4",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "07:30",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -530,7 +636,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:30:00+01:00",
+            "id": "content-history-5",
+            "undone": false
           }
         ]
       },
@@ -539,7 +648,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "17:00",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -561,14 +669,16 @@
             "undoable": true,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T17:00:00+01:00",
+            "id": "content-history-6",
+            "undone": false
           },
           {
             "kind": "seen"
           },
           {
             "kind": "event",
-            "time": "11:40",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -590,7 +700,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T11:40:00+01:00",
+            "id": "content-history-7",
+            "undone": false
           }
         ]
       },
@@ -599,7 +712,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "16:41",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -621,11 +733,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T16:41:00+01:00",
+            "id": "content-history-8",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "16:20",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -647,11 +761,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T16:20:00+01:00",
+            "id": "content-history-9",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "11:05",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -673,11 +789,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T11:05:00+01:00",
+            "id": "content-history-10",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "10:00",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -699,7 +817,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T10:00:00+01:00",
+            "id": "content-history-11",
+            "undone": false
           }
         ]
       },
@@ -708,7 +829,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "17:40",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -730,11 +850,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T17:40:00+01:00",
+            "id": "content-history-12",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:00",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -756,11 +878,16 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T08:00:00+01:00",
+            "id": "content-history-13",
+            "undone": false
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -825,43 +952,55 @@
       "job": "Webinar promo post",
       "agent": "Visuals",
       "state": "bad",
-      "due": "Today, 16:00",
-      "laneId": "webinar"
+      "laneId": "webinar",
+      "dueAt": "2026-11-16T16:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Fenwick Freight customer story",
       "agent": "Writer",
       "state": "warn",
-      "due": "Wed 18 Nov",
-      "laneId": "fenwick"
+      "laneId": "fenwick",
+      "dueAt": "2026-11-18T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Webinar reminder email",
       "agent": "Publisher",
       "state": "ok",
-      "due": "Wed 18 Nov, 09:00",
-      "laneId": "webinar-reminders"
+      "laneId": "webinar-reminders",
+      "dueAt": "2026-11-18T09:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Webinar recap post",
       "agent": "Writer",
       "state": "ok",
-      "due": "Thu 19 Nov",
-      "laneId": "recap"
+      "laneId": "recap",
+      "dueAt": "2026-11-19T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Carousel: 5 signs of ops debt",
       "agent": "Visuals",
       "state": "next",
-      "due": "Fri 20 Nov",
-      "laneId": null
+      "laneId": null,
+      "dueAt": "2026-11-20T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Newsletter 46",
       "agent": "Publisher",
       "state": "done",
-      "due": "Sent today, 08:00",
-      "laneId": null
+      "laneId": null,
+      "dueAt": null,
+      "completedAt": "2026-11-16T08:00:00+01:00",
+      "cadence": null
     }
   ],
   "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",
@@ -872,7 +1011,8 @@
       "state": "bad",
       "stateWord": "Stuck",
       "leadName": "Visuals",
-      "next": "Now, needs your call"
+      "next": "Now, needs your call",
+      "nextAt": null
     },
     {
       "id": "fenwick",
@@ -880,7 +1020,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Writer",
-      "next": "After your OK"
+      "next": "After your OK",
+      "nextAt": null
     },
     {
       "id": "recap",
@@ -888,7 +1029,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Writer",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "webinar-reminders",
@@ -896,13 +1038,29 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Publisher",
-      "next": "Wed 18 Nov, 09:00"
+      "next": "",
+      "nextAt": "2026-11-18T09:00:00+01:00"
     }
   ],
   "spend": {
-    "spent": 36,
-    "cap": 40
+    "spent": {
+      "amountMinor": 3600,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 4000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

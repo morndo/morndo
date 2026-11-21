@@ -8,27 +8,45 @@
   "meta": null,
   "intro": "Nothing is open. The customer profile was rebuilt this morning; Outbound already works from it.",
   "when": null,
-  "health": null,
+  "health": {
+    "state": "idle",
+    "word": "No goal set"
+  },
   "goal": null,
   "noGoal": "Research answers asks from the other topics. A goal needs a measure and a date, for example: the profile refreshed every month.",
   "facts": [
     {
-      "value": "212",
+      "value": {
+        "kind": "count",
+        "value": 212,
+        "of": null,
+        "unit": null
+      },
       "label": "won deals in the profile"
     },
     {
-      "value": "4",
+      "value": {
+        "kind": "count",
+        "value": 4,
+        "of": null,
+        "unit": null
+      },
       "label": "customer segments"
     },
     {
-      "value": "Today",
-      "label": "last refresh, 07:10"
+      "value": {
+        "kind": "time",
+        "at": "2026-11-16T07:10:00+01:00"
+      },
+      "label": "last refresh"
     }
   ],
   "plan": null,
   "focusLaneId": null,
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the topic began on 20 October.",
     "days": [
@@ -37,7 +55,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "07:10",
             "actor": {
               "id": "researcher",
               "name": "Researcher",
@@ -59,11 +76,13 @@
             "undoable": true,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:10:00+01:00",
+            "id": "research-history-1",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "06:40",
             "actor": {
               "id": "researcher",
               "name": "Researcher",
@@ -85,7 +104,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T06:40:00+01:00",
+            "id": "research-history-2",
+            "undone": false
           }
         ]
       },
@@ -94,7 +116,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "21:30",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -116,7 +137,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T21:30:00+01:00",
+            "id": "research-history-3",
+            "undone": false
           },
           {
             "kind": "seen"
@@ -128,7 +152,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "15:00",
             "actor": {
               "id": "researcher",
               "name": "Researcher",
@@ -150,11 +173,16 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T15:00:00+01:00",
+            "id": "research-history-4",
+            "undone": false
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -181,7 +209,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Researcher",
-      "next": "closed today, 07:10"
+      "next": "",
+      "nextAt": "2026-11-16T07:10:00+01:00"
     },
     {
       "id": "competitor-watch",
@@ -189,13 +218,29 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Researcher",
-      "next": "closed Thu 12 Nov"
+      "next": "",
+      "nextAt": "2026-11-12T17:00:00+01:00"
     }
   ],
   "spend": {
-    "spent": 3,
-    "cap": 20
+    "spent": {
+      "amountMinor": 300,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 2000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

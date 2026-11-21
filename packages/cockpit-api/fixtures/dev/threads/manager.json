@@ -13,7 +13,7 @@
   ],
   "messages": [
     {
-      "id": "manager-0",
+      "id": "m9",
       "author": {
         "id": "timo-varga",
         "name": "Timo Varga",
@@ -28,16 +28,22 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "What is still open on the Fenwick export?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:44:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "manager-1",
+      "id": "m10",
       "author": {
         "id": "manager",
         "name": "Manager",
@@ -52,13 +58,21 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "One thing: your OK to release it. The fix passed its tests, a fresh review and a run on Fenwick's own data on staging.\nIt is the lane Export for big accounts, in API. Release leads it and holds it until 14:00.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

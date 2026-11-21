@@ -43,10 +43,20 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Builder",
-      "next": "After your decision"
+      "next": "After your decision",
+      "nextAt": null
     }
   ],
   "spend": null,
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

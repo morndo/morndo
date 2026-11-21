@@ -19,9 +19,7 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened today, 06:10",
-  "closed": null,
-  "next": "Today, 15:00",
+  "next": null,
   "afterNext": null,
   "decisionId": null,
   "short": null,
@@ -76,5 +74,13 @@
   ],
   "made": [],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-16T06:10:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-16T15:00:00+01:00",
+  "afterNextAt": null
 }

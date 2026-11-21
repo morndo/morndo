@@ -19,9 +19,7 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 6 Nov",
-  "closed": null,
-  "next": "Wed 18 Nov",
+  "next": null,
   "afterNext": null,
   "decisionId": null,
   "short": null,
@@ -103,25 +101,40 @@
       "icon": "file",
       "title": "The 52 emails",
       "detail": "Each with one line about the brand",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-1"
+      }
     },
     {
       "icon": "file",
       "title": "Replies",
       "detail": "11: 5 calls, 4 later, 2 no",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-1"
+      }
     }
   ],
   "handover": {
-    "when": "Yesterday 21:10",
     "match": true,
     "why": "Sender's conversation had grown long, so it started a fresh one.",
-    "state": "52 sent, 11 replies, 5 calls booked; follow-ups 20 of 52 done.",
     "open": "Follow-ups to the 32 brands without a reply; reminders for the 4 that want January.",
     "risk": "A brand that already replied gets a follow-up.",
     "ifSo": "Stop the sequence for that brand and apologise from your mail the same day.",
     "restated": "“Follow up the 32 without a reply, never one that replied; January reminders for 4.”",
-    "fixed": null
+    "fixed": null,
+    "at": "2026-11-15T21:10:00+01:00",
+    "summary": "52 sent, 11 replies, 5 calls booked; follow-ups 20 of 52 done.",
+    "confirmedAt": null
   },
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-06T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-18T17:00:00+01:00",
+  "afterNextAt": null
 }

@@ -5,21 +5,33 @@
       "title": "Release the fix for exports that time out",
       "state": "open",
       "topicName": "API",
-      "href": "#decision"
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "goalChange": null
     },
     {
       "id": "d2",
       "title": "Run the tax-rate migration on the production database",
       "state": "open",
       "topicName": "Billing",
-      "href": "#lane/tax-rates"
+      "target": {
+        "kind": "decision",
+        "id": "d2"
+      },
+      "goalChange": null
     },
     {
       "id": "d3",
       "title": "Choose the new sign-in: passkeys or a link by email",
       "state": "open",
       "topicName": "Web app",
-      "href": "#lane/new-sign-in"
+      "target": {
+        "kind": "decision",
+        "id": "d3"
+      },
+      "goalChange": null
     }
   ],
   "open": 3,

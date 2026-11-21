@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_reply-handling-0",
+      "id": "m23",
       "author": {
         "id": "replies",
         "name": "Replies",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "08:20",
       "text": "Jonas, two yeses this morning: Ostrand Haulage and Velmont Freight. Both asked for this week. Which slots can I offer?",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:20:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

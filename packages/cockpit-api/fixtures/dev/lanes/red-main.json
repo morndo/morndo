@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened today, 06:55",
-  "closed": null,
   "next": "Now, needs your call",
   "afterNext": null,
   "decisionId": null,
@@ -46,15 +44,27 @@
   "acts": [
     {
       "label": "Pin the old session library",
-      "tone": "ink"
+      "tone": "ink",
+      "id": "pin-the-old-session-library",
+      "personId": null,
+      "target": null
     },
     {
       "label": "Allow one more try",
-      "tone": "quiet"
+      "tone": "quiet",
+      "id": "allow-one-more-try",
+      "personId": null,
+      "target": null
     },
     {
       "label": "Open the run",
-      "tone": "quiet"
+      "tone": "quiet",
+      "id": "open-the-run",
+      "personId": null,
+      "target": {
+        "kind": "thread",
+        "id": "lane:red-main"
+      }
     }
   ],
   "thumbs": [],
@@ -89,5 +99,13 @@
   ],
   "made": [],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-16T06:55:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
 }

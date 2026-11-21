@@ -24,7 +24,7 @@
     "shortName": "Jonas",
     "kind": "person",
     "avatar": "J",
-    "role": "Partner operations",
+    "role": "Sales",
     "state": null,
     "word": null,
     "text": null,
@@ -32,9 +32,7 @@
     "engine": null,
     "record": null
   },
-  "opened": "Opened 2 Nov",
-  "closed": null,
-  "next": "Today, once Jonas answers",
+  "next": "once Jonas answers",
   "afterNext": null,
   "decisionId": null,
   "short": null,
@@ -59,7 +57,10 @@
   "acts": [
     {
       "label": "Remind Jonas",
-      "tone": "quiet"
+      "tone": "quiet",
+      "id": "remind-jonas",
+      "personId": "jonas-falk",
+      "target": null
     }
   ],
   "thumbs": [],
@@ -107,7 +108,7 @@
       "shortName": "Jonas",
       "kind": "person",
       "avatar": "J",
-      "role": "Partner operations",
+      "role": "Sales",
       "state": "warn",
       "word": "Asked",
       "text": "2 meeting times",
@@ -121,9 +122,20 @@
       "icon": "mail",
       "title": "2 invite drafts",
       "detail": "In your drafts, times left open",
-      "href": "#drafts"
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-02T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-16T17:00:00+01:00",
+  "afterNextAt": null
 }

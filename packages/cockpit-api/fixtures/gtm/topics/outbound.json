@@ -8,15 +8,19 @@
   "meta": {
     "askedBy": "Asked by you",
     "ownerLine": "Sender leads; Jonas takes the meetings",
-    "nextReport": "Next report Fri 20 Nov",
     "parts": [
       "Asked by you",
-      "Sender leads; Jonas takes the meetings",
-      "Next report Fri 20 Nov"
-    ]
+      "Sender leads; Jonas takes the meetings"
+    ],
+    "nextReportAt": "2026-11-20T17:00:00+01:00"
   },
   "intro": "Cold email to ops teams, from your mail, never more than 60 a day. The goal: 30 sales meetings by 18 December.",
-  "when": "Week 4 of 8",
+"when": {
+    "kind": "count",
+    "value": 4,
+    "of": 8,
+    "unit": "weeks"
+  },
   "health": null,
   "goal": {
     "target": 30,
@@ -27,10 +31,9 @@
       "state": "ok",
       "word": "Ahead of plan",
       "action": "Round 2 decides December",
-      "text": "Sequence B carries the forecast; round 2 has to bring the last 9."
+      "text": null
     },
     "insight": "Sequence B carries the forecast; round 2 has to bring the last 9.",
-    "asOf": "updated 08:40, forecast up 2 since Friday · agents €17 of €40 this week",
     "decision": {
       "title": "Start sequence B",
       "detail": "Due tomorrow · the list goes stale in 2 weeks",
@@ -217,25 +220,27 @@
         "name": "Sequence A, logistics ops",
         "confidence": "Done",
         "close": null,
-        "at": 5,
         "stage": "Finished today",
         "short": "9 meetings; forecast was 8",
         "laneId": "sequence-a",
-        "href": "#lane/sequence-a",
         "evidence": "960 emails, 52 replies, 9 meetings. Its forecast at the start was 8.",
         "next": null,
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "sequence-a"
+        },
+        "chartDay": 5,
+        "costPerLead": null
       },
       {
         "name": "Sequence B, fintech ops",
         "confidence": "Likely",
         "close": null,
-        "at": 2,
         "stage": "Pilot done, waits for your OK",
         "short": "Pilot booked 2; your OK tomorrow",
         "laneId": "sequence-b",
-        "href": "#lane/sequence-b",
         "evidence": "The pilot of 30 booked 2 meetings. The other 150 at that rate bring 10.",
         "next": "your OK, then 60 a day from 10:00.",
         "value": null,
@@ -244,21 +249,31 @@
           "stage": "Sending, 60 a day",
           "short": "First 60 go out at 10:00",
           "next": "replies sorted every morning; meetings reported Friday."
-        }
+        },
+        "target": {
+          "kind": "lane",
+          "id": "sequence-b"
+        },
+        "chartDay": 2,
+        "costPerLead": null
       },
       {
         "name": "Logistics ops, round 2",
         "confidence": "Early",
         "close": null,
-        "at": 0,
         "stage": "List being built",
         "short": "List of 400 due Thursday",
         "laneId": "logistics-round-2",
-        "href": "#lane/logistics-round-2",
         "evidence": "Same segment as sequence A, which booked 9 from 960. 400 new leads at that rate bring about 4; the plan needs 9.",
         "next": "the list on Thursday, then a pilot of 30 from Monday 23 November.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "logistics-round-2"
+        },
+        "chartDay": 0,
+        "costPerLead": null
       }
     ],
     "guardrails": {
@@ -266,27 +281,67 @@
       "items": [
         {
           "what": "Bounces",
-          "value": "1.8%",
-          "limit": "limit 4%",
-          "ratio": 0.45
+          "value": {
+            "kind": "rate",
+            "percent": 1.8,
+            "standard": false
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 4.0,
+            "standard": false
+          },
+          "ratio": 0.45,
+          "state": "held"
         },
         {
           "what": "Asked to stop",
-          "value": "1.1%",
-          "limit": "11 of 990 · limit 2%",
-          "ratio": 0.56
+          "value": {
+            "kind": "rate",
+            "percent": 1.1,
+            "standard": false
+          },
+          "limit": {
+            "kind": "rate",
+            "percent": 2.0,
+            "standard": false
+          },
+          "ratio": 0.56,
+          "state": "held"
         },
         {
           "what": "Sends a day",
-          "value": "60",
-          "limit": "limit 60",
-          "ratio": 1
+          "value": {
+            "kind": "count",
+            "value": 60,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 60,
+            "of": null,
+            "unit": null
+          },
+          "ratio": 1,
+          "state": "near"
         },
         {
           "what": "Spam complaints",
-          "value": "0",
-          "limit": "none allowed",
-          "ratio": null
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -321,8 +376,11 @@
         "what": null,
         "why": null,
         "who": "Jonas Falk",
-        "href": "#lane/reply-handling",
-        "laneId": "reply-handling"
+        "laneId": "reply-handling",
+        "target": {
+          "kind": "lane",
+          "id": "reply-handling"
+        }
       },
       {
         "state": "warn",
@@ -330,95 +388,163 @@
         "what": null,
         "why": null,
         "who": "Sender",
-        "href": "#lane/sequence-a",
-        "laneId": "sequence-a"
+        "laneId": "sequence-a",
+        "target": {
+          "kind": "lane",
+          "id": "sequence-a"
+        }
       }
     ],
     "routine": null,
     "funnel": {
       "title": "Funnel",
-      "since": "Since 26 October · change this week · rate against the plan",
+      "since": "change this week · rate against the plan",
       "steps": [
         {
-          "count": "990",
+          "count": 990,
           "what": "emails sent",
-          "change": "+30",
+          "change": {
+            "kind": "count",
+            "value": 30,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "58",
+          "count": 58,
           "what": "replied",
-          "change": "+14",
-          "rate": "5.9% · plan 5%",
+          "change": {
+            "kind": "count",
+            "value": 14,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 5.9,
+            "planPercent": 5.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "21",
+          "count": 21,
           "what": "positive",
-          "change": "+5",
-          "rate": "36% · plan 40%",
+          "change": {
+            "kind": "count",
+            "value": 5,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 36.0,
+            "planPercent": 40.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": "warn"
         },
         {
-          "count": "11",
+          "count": 11,
           "what": "meetings booked",
-          "change": "+3",
-          "rate": "52% · plan 50%",
+          "change": {
+            "kind": "count",
+            "value": 3,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 52.0,
+            "planPercent": 50.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "6",
+          "count": 6,
           "what": "meetings held",
-          "change": "+2",
+          "change": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         }
-      ]
+      ],
+      "sinceAt": "2026-10-26T00:00:00+01:00"
     },
     "restSub": null,
     "figures": [
       {
-        "value": "11",
-        "of": "30",
+        "value": 11,
+        "of": 30,
         "label": "Meetings booked"
       },
       {
-        "value": "10",
+        "value": 10,
         "of": null,
         "label": "Likely, forecast"
       },
       {
-        "value": "9",
+        "value": 9,
         "of": null,
         "label": "Still unsecured"
       }
     ],
-    "pathTitle": null
+    "pathTitle": null,
+    "forecastLog": [],
+    "deadlineAt": null,
+    "updatedAt": "2026-11-16T08:40:00+01:00",
+    "forecastNote": "forecast up 2 since Friday"
   },
   "noGoal": null,
   "facts": [
     {
-      "value": "990",
+      "value": {
+        "kind": "count",
+        "value": 990,
+        "of": null,
+        "unit": null
+      },
       "label": "emails sent since 26 Oct"
     },
     {
-      "value": "5.9%",
+      "value": {
+        "kind": "rate",
+        "percent": 5.9,
+        "standard": false
+      },
       "label": "reply rate"
     },
     {
-      "value": "11",
+      "value": {
+        "kind": "count",
+        "value": 11,
+        "of": null,
+        "unit": null
+      },
       "label": "meetings booked"
     },
     {
-      "value": "1.8%",
-      "label": "bounces, limit 4%"
+      "value": {
+        "kind": "rate",
+        "percent": 1.8,
+        "standard": false
+      },
+      "label": "bounces"
     }
   ],
   "plan": null,
   "focusLaneId": "sequence-b",
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the topic began on 26 October.",
     "days": [
@@ -427,7 +553,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "08:52",
             "actor": {
               "id": "prospector",
               "name": "Prospector",
@@ -449,11 +574,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:44:59+01:00",
+            "id": "outbound-history-1",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:40",
             "actor": {
               "id": "replies",
               "name": "Replies",
@@ -475,11 +602,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:40:00+01:00",
+            "id": "outbound-history-2",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:20",
             "actor": {
               "id": "replies",
               "name": "Replies",
@@ -501,11 +630,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:20:00+01:00",
+            "id": "outbound-history-3",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:05",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -531,7 +662,10 @@
               "Pinecrest Cold Chain · head of operations",
               "Velmont Freight · COO"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:05:00+01:00",
+            "id": "outbound-history-4",
+            "undone": false
           }
         ]
       },
@@ -540,7 +674,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "19:30",
             "actor": {
               "id": "prospector",
               "name": "Prospector",
@@ -562,14 +695,16 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T19:30:00+01:00",
+            "id": "outbound-history-5",
+            "undone": false
           },
           {
             "kind": "seen"
           },
           {
             "kind": "event",
-            "time": "10:15",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -595,7 +730,10 @@
               "Calder Yards · head of logistics",
               "Holmfield Carriers · COO"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T10:15:00+01:00",
+            "id": "outbound-history-6",
+            "undone": false
           }
         ]
       },
@@ -604,7 +742,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "17:14",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -626,11 +763,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T17:14:00+01:00",
+            "id": "outbound-history-7",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "17:10",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -656,18 +795,20 @@
               "Quillon Pay · head of operations",
               "Tessaly Bank · ops manager"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T17:10:00+01:00",
+            "id": "outbound-history-8",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "15:00",
             "actor": {
               "id": "jonas-falk",
               "name": "Jonas Falk",
               "shortName": "Jonas",
               "kind": "person",
               "avatar": "J",
-              "role": "Partner operations",
+              "role": "Sales",
               "state": null,
               "word": null,
               "text": null,
@@ -682,7 +823,10 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T15:00:00+01:00",
+            "id": "outbound-history-9",
+            "undone": false
           }
         ]
       },
@@ -691,7 +835,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "09:05",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -713,11 +856,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-11T09:05:00+01:00",
+            "id": "outbound-history-10",
+            "undone": false
           },
           {
             "kind": "event",
-            "time": "08:30",
             "actor": {
               "id": "prospector",
               "name": "Prospector",
@@ -739,11 +884,16 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-11T08:30:00+01:00",
+            "id": "outbound-history-11",
+            "undone": false
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null,
+    "newSince": 0
   },
   "crew": [
     {
@@ -766,7 +916,7 @@
       "shortName": "Jonas",
       "kind": "person",
       "avatar": "J",
-      "role": "Partner operations",
+      "role": "Sales",
       "state": "warn",
       "word": "2 waiting",
       "text": "Takes the meetings",
@@ -822,36 +972,46 @@
       "job": "Start sequence B, 180 leads",
       "agent": "Sender",
       "state": "warn",
-      "due": "Tue 17 Nov",
-      "laneId": "sequence-b"
+      "laneId": "sequence-b",
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Meeting times for 2 yeses",
       "agent": "Replies",
       "state": "warn",
-      "due": "Today",
-      "laneId": "reply-handling"
+      "laneId": "reply-handling",
+      "dueAt": "2026-11-16T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "List for logistics ops, round 2",
       "agent": "Prospector",
       "state": "ok",
-      "due": "Thu 19 Nov",
-      "laneId": "logistics-round-2"
+      "laneId": "logistics-round-2",
+      "dueAt": "2026-11-19T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
     },
     {
       "job": "Answer replies from sequence A",
       "agent": "Replies",
       "state": "ok",
-      "due": "Every morning",
-      "laneId": "sequence-a"
+      "laneId": "sequence-a",
+      "dueAt": null,
+      "completedAt": null,
+      "cadence": "everyMorning"
     },
     {
       "job": "Bounce check",
       "agent": "Sender",
       "state": "done",
-      "due": "Today, 08:05",
-      "laneId": null
+      "laneId": null,
+      "dueAt": null,
+      "completedAt": "2026-11-16T08:05:00+01:00",
+      "cadence": null
     }
   ],
   "chatSub": "Mara, Jonas and 3 agents · the Manager reads it, it is not in it",
@@ -862,7 +1022,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Sender",
-      "next": "After your decision"
+      "next": "After your decision",
+      "nextAt": null
     },
     {
       "id": "reply-handling",
@@ -870,7 +1031,8 @@
       "state": "warn",
       "stateWord": "Waits for Jonas",
       "leadName": "Replies",
-      "next": "Today, once Jonas answers"
+      "next": "once Jonas answers",
+      "nextAt": "2026-11-16T17:00:00+01:00"
     },
     {
       "id": "logistics-round-2",
@@ -878,7 +1040,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Prospector",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "sequence-a",
@@ -886,13 +1049,29 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Sender",
-      "next": "closed today, 08:05"
+      "next": "",
+      "nextAt": "2026-11-16T08:05:00+01:00"
     }
   ],
   "spend": {
-    "spent": 17,
-    "cap": 40
+    "spent": {
+      "amountMinor": 1700,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 4000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

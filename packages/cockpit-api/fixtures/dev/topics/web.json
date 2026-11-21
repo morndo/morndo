@@ -71,7 +71,8 @@
       "state": "bad",
       "stateWord": "Stuck",
       "leadName": "Builder",
-      "next": "Now, needs your call"
+      "next": "Now, needs your call",
+      "nextAt": null
     },
     {
       "id": "new-sign-in",
@@ -79,7 +80,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Builder",
-      "next": "After your pick"
+      "next": "After your pick",
+      "nextAt": null
     },
     {
       "id": "shipment-filters",
@@ -87,7 +89,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Reviewer",
-      "next": "Today, 11:30"
+      "next": "",
+      "nextAt": "2026-11-16T11:30:00+01:00"
     },
     {
       "id": "upgrade-node-24",
@@ -95,12 +98,13 @@
       "state": "parked",
       "stateWord": "Parked until Thu",
       "leadName": "Builder",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     }
   ],
   "spend": null,
   "stuck": {
-    "since": "Red since 06:40",
+    "sinceAt": "2026-11-16T06:40:00+01:00",
     "title": "Main is red and needs your call",
     "detail": "The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit: the new session library signs cookies differently, so saved sessions are refused.",
     "blocks": "blocks the shipment filters",
@@ -137,15 +141,27 @@
     "actions": [
       {
         "label": "Pin the old session library",
-        "tone": "ink"
+        "tone": "ink",
+        "id": "pin-the-old-session-library",
+        "laneId": "red-main",
+        "target": null
       },
       {
         "label": "Allow one more try",
-        "tone": "quiet"
+        "tone": "quiet",
+        "id": "allow-one-more-try",
+        "laneId": "red-main",
+        "target": null
       },
       {
         "label": "Open the run",
-        "tone": "quiet"
+        "tone": "quiet",
+        "id": "open-the-run",
+        "laneId": "red-main",
+        "target": {
+          "kind": "thread",
+          "id": "lane:red-main"
+        }
       }
     ],
     "note": "Pinning takes about 3 minutes and turns main green"
@@ -157,7 +173,9 @@
       "state": "bad",
       "stateWord": "Stuck",
       "next": "Now, needs your call",
-      "reason": null
+      "reason": null,
+      "laneId": "red-main",
+      "nextAt": null
     },
     {
       "task": "New sign-in",
@@ -165,31 +183,48 @@
       "state": "warn",
       "stateWord": "Needs you",
       "next": "After your pick",
-      "reason": null
+      "reason": null,
+      "laneId": "new-sign-in",
+      "nextAt": null
     },
     {
       "task": "Shipment filters",
       "lane": "Reviewer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 11:30",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "laneId": "shipment-filters",
+      "nextAt": "2026-11-16T11:30:00+01:00"
     },
     {
       "task": "Upgrade to Node 24",
       "lane": "Builder",
       "state": "parked",
       "stateWord": "Parked",
-      "next": "Thu 19 Nov",
-      "reason": "Parked: the session library supports Node 24 from Thursday's release."
+      "next": "",
+      "reason": "Parked: the session library supports Node 24 from Thursday's release.",
+      "laneId": "upgrade-node-24",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "task": "Dependency updates",
       "lane": "Builder",
       "state": "done",
       "stateWord": "Done",
-      "next": "Merged today, 03:05",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "laneId": "dependency-updates",
+      "nextAt": "2026-11-16T03:05:00+01:00"
     }
-  ]
+  ],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

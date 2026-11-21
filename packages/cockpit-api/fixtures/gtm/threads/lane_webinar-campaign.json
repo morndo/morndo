@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_webinar-campaign-0",
+      "id": "m31",
       "author": {
         "id": "paid-buyer",
         "name": "Paid buyer",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "Sun 18:30",
       "text": "11 sign-ups for €290 so far. I keep it at its own budget; it never takes from the lead campaigns.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-15T18:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

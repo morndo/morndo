@@ -19,10 +19,8 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Friday",
-  "closed": null,
   "next": "After your decision",
-  "afterNext": "Mon 7 Dec, with the result",
+  "afterNext": "with the result",
   "decisionId": "d1",
   "short": "Search budget shift",
   "ask": "€1,200 a week from LinkedIn to Search · by 14:00",
@@ -46,11 +44,13 @@
   "acts": [
     {
       "label": "Open the decision",
-      "tone": "quiet"
-    },
-    {
-      "label": "Approve the shift",
-      "tone": "ink"
+      "tone": "quiet",
+      "id": "open-the-decision",
+      "personId": null,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     }
   ],
   "thumbs": [],
@@ -131,21 +131,38 @@
       "icon": "decide",
       "title": "Decision brief",
       "detail": "Move €1,200 a week from LinkedIn to Google Search · due today, 14:00",
-      "href": "#decision"
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     },
     {
       "icon": "file",
       "title": "The 14-day numbers",
       "detail": "24 leads on LinkedIn, 40 on Search",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     },
     {
       "icon": "file",
       "title": "The 14 days before",
       "detail": "For comparison: 22 leads on LinkedIn, 36 on Search",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": "2026-12-07T17:00:00+01:00"
 }

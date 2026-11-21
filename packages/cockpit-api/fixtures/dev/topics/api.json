@@ -57,7 +57,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Release",
-      "next": "After your decision"
+      "next": "After your decision",
+      "nextAt": null
     },
     {
       "id": "export-limits-docs",
@@ -65,10 +66,20 @@
       "state": "next",
       "stateWord": "Merges by itself at 09:00",
       "leadName": "Builder",
-      "next": "09:00"
+      "next": "",
+      "nextAt": "2026-11-16T09:00:00+01:00"
     }
   ],
   "spend": null,
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

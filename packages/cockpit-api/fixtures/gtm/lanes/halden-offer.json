@@ -19,10 +19,8 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 13 Nov",
-  "closed": null,
   "next": "After your OK",
-  "afterNext": "Mon 23 Nov, Jonas follows up",
+  "afterNext": "Jonas follows up",
   "decisionId": "d4",
   "short": "Offer to Halden",
   "ask": "15% of first-year revenue for 12 months · due Thu",
@@ -47,12 +45,7 @@
     "headline": "It waits for you.",
     "detail": "Halden wants a deal for its 2,400 business customers. Jonas drafted it from the template: 15% of first-year revenue for 12 months and a joint webinar in January. Due Thursday."
   },
-  "acts": [
-    {
-      "label": "Send the offer",
-      "tone": "ink"
-    }
-  ],
+  "acts": [],
   "thumbs": [],
   "steps": [
     {
@@ -136,21 +129,38 @@
       "icon": "file",
       "title": "The offer",
       "detail": "2 pages, from the partner template",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "halden-offer"
+      }
     },
     {
       "icon": "file",
       "title": "Halden call notes",
       "detail": "13 November, 34 minutes",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "halden-offer"
+      }
     },
     {
       "icon": "mail",
       "title": "Cover email",
       "detail": "In your drafts, not sent",
-      "href": "#drafts"
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": "2026-11-23T17:00:00+01:00"
 }

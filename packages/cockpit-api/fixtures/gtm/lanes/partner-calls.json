@@ -19,9 +19,7 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 10 Nov",
-  "closed": null,
-  "next": "Today, 16:00",
+  "next": null,
   "afterNext": null,
   "decisionId": null,
   "short": null,
@@ -122,21 +120,38 @@
       "icon": "file",
       "title": "Brief: Brightmoor Retail",
       "detail": "Ready 13:00",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-calls"
+      }
     },
     {
       "icon": "file",
       "title": "Notes: Halden Freight Network",
       "detail": "They want a referral deal for 2,400 customers",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-calls"
+      }
     },
     {
       "icon": "file",
       "title": "Notes: Kestrel Parcel",
       "detail": "Budget frozen until spring",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-calls"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-10T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-16T16:00:00+01:00",
+  "afterNextAt": null
 }

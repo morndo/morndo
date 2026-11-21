@@ -19,9 +19,7 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Friday",
-  "closed": null,
-  "next": "Thu 19 Nov",
+  "next": null,
   "afterNext": null,
   "decisionId": null,
   "short": null,
@@ -103,15 +101,29 @@
       "icon": "file",
       "title": "Summary in 8 points",
       "detail": "From the October recording",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "recap"
+      }
     },
     {
       "icon": "file",
       "title": "Draft 1",
       "detail": "Too long at 900 words; draft 2 aims at 350",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "recap"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-19T17:00:00+01:00",
+  "afterNextAt": null
 }

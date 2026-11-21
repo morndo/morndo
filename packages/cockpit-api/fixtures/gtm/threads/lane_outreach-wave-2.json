@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_outreach-wave-2-0",
+      "id": "m17",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -25,16 +25,22 @@
         "engine": null,
         "record": null
       },
-      "time": "04:30",
       "text": "24 drafts ready for Lea. I kept them under 90 words and named one thing each brand did this year.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T04:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "lane_outreach-wave-2-1",
+      "id": "m18",
       "author": {
         "id": "lea-brandt",
         "name": "Lea Brandt",
@@ -49,13 +55,21 @@
         "engine": null,
         "record": null
       },
-      "time": "08:12",
       "text": "On it after coffee.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:12:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Thursday",
-  "closed": null,
   "next": "After your decision",
   "afterNext": null,
   "decisionId": "d1",
@@ -46,7 +44,13 @@
   "acts": [
     {
       "label": "Open the decision",
-      "tone": "ink"
+      "tone": "ink",
+      "id": "open-the-decision",
+      "personId": null,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     }
   ],
   "thumbs": [],
@@ -141,27 +145,47 @@
       "icon": "decide",
       "title": "Decision brief",
       "detail": "Release the fix for exports that time out · due today, 14:00",
-      "href": "#decision"
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     },
     {
       "icon": "pr",
       "title": "Pull request 412",
       "detail": "Write big exports in chunks · ready",
-      "href": "#pulls"
+      "target": {
+        "kind": "pull",
+        "id": "412"
+      }
     },
     {
       "icon": "file",
       "title": "Staging run",
       "detail": "Fenwick's export: 48 seconds, file complete",
-      "href": null
+      "target": {
+        "kind": "run",
+        "id": "export-staging"
+      }
     },
     {
       "icon": "file",
       "title": "Review notes",
       "detail": "2 rounds, 3 findings, all fixed",
-      "href": null
+      "target": {
+        "kind": "review",
+        "id": "export-review"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-12T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
 }

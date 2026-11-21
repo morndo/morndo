@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_logistics-round-2-0",
+      "id": "m15",
       "author": {
         "id": "prospector",
         "name": "Prospector",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "Sun 19:30",
       "text": "Started round 2. I match the profile of the 9 who booked in sequence A: ops leads at carriers with 50 to 500 people.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-15T19:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

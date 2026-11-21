@@ -13,10 +13,11 @@ const header = "// Generated from schema/cockpit.schema.json by scripts/generate
 
 export async function generate(): Promise<string> {
   const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as JSONSchema;
-  const compiled = await compile(schema, "CockpitSchemaRoot", {
+  const compiled = await compile({ ...schema, title: "CockpitSchemaRoot" }, "CockpitSchemaRoot", {
     bannerComment: "",
     additionalProperties: false,
     unreachableDefinitions: true,
+    ignoreMinAndMaxItems: true,
     format: true,
     unknownAny: true,
     strictIndexSignatures: true,

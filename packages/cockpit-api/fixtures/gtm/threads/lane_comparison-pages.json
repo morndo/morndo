@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_comparison-pages-0",
+      "id": "m6",
       "author": {
         "id": "seo-writer",
         "name": "SEO writer",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "07:42",
       "text": "Pages 1 and 2 are live. Each claim about the other tool links to their own public page.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:42:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

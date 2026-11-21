@@ -5,7 +5,9 @@
   "placeholder": "Tell the Manager",
   "reading": null,
   "since": {
-    "seen": "from the topics' records",
+    "seen": {
+      "at": null
+    },
     "lines": [
       "Partnerships: 1 instruction (wave 2 to retail first), 1 question answered in the topic.",
       "Content: the promo is stuck; you decide in the topic.",
@@ -20,7 +22,7 @@
   ],
   "messages": [
     {
-      "id": "manager-0",
+      "id": "m34",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -35,16 +37,22 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "What is still open on the budget shift?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:44:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     },
     {
-      "id": "manager-1",
+      "id": "m35",
       "author": {
         "id": "manager",
         "name": "Manager",
@@ -59,13 +67,21 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "One thing: your OK. The numbers for 14 days are checked and the decision brief is written.\nIt is the lane Search budget shift, in Paid. Paid buyer leads it. Without your answer by 14:00 nothing changes.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

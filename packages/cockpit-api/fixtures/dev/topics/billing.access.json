@@ -21,8 +21,12 @@
         "kind": "all",
         "stages": []
       },
-      "scope": "Owner",
-      "otherTopics": []
+      "scope": "owner",
+      "otherTopics": [],
+      "owner": true,
+      "email": "timo-varga@example.test"
     }
-  ]
+  ],
+  "invitations": [],
+  "statusLink": null
 }

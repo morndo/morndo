@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_brand-list-0",
+      "id": "m4",
       "author": {
         "id": "brand-scout",
         "name": "Brand scout",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "05:40",
       "text": "32 new brands overnight. I skipped 6 that already work with a competitor.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T05:40:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

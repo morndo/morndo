@@ -1,6 +1,6 @@
 {
   "id": "decision:d3",
-  "title": "Publish the Fenwick Freight customer story",
+  "title": "Chat",
   "sub": null,
   "placeholder": "Ask about this decision",
   "reading": null,
@@ -8,5 +8,7 @@
   "pinned": null,
   "agents": null,
   "suggestions": [],
-  "messages": []
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
 }

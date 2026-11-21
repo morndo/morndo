@@ -15,28 +15,32 @@
           "title": "Red main",
           "state": "bad",
           "stateWord": "Stuck",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         },
         {
           "id": "new-sign-in",
           "title": "New sign-in",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         },
         {
           "id": "shipment-filters",
           "title": "Shipment filters",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Reviewer"
+          "leadName": "Reviewer",
+          "fresh": false
         },
         {
           "id": "upgrade-node-24",
           "title": "Upgrade to Node 24",
           "state": "parked",
           "stateWord": "Parked until Thu",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -54,14 +58,16 @@
           "title": "Export for big accounts",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Release"
+          "leadName": "Release",
+          "fresh": false
         },
         {
           "id": "export-limits-docs",
           "title": "Export limits in the docs",
           "state": "next",
           "stateWord": "Merges by itself at 09:00",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -79,7 +85,8 @@
           "title": "Tax rates per country",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -97,7 +104,8 @@
           "title": "Keep scans without a signal",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -121,10 +129,14 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -133,10 +145,14 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "badgeCount": 3
     },
     {
       "id": "t-pulls",
@@ -145,10 +161,14 @@
       "name": "Pull requests",
       "note": null,
       "icon": "pr",
-      "href": "#pulls",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "pull",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -157,10 +177,14 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "p-web",
@@ -169,10 +193,14 @@
       "name": null,
       "note": null,
       "icon": "window",
-      "href": "#area",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-review",
@@ -181,10 +209,14 @@
       "name": "/review",
       "note": "A fresh review of a change",
       "icon": "play",
-      "href": null,
       "run": "/review",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skill",
+        "id": "review"
+      },
+      "badgeCount": null
     }
   ],
   "pinnable": [
@@ -195,10 +227,14 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-decide",
@@ -207,10 +243,14 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "badgeCount": 3
     },
     {
       "id": "t-pulls",
@@ -219,10 +259,14 @@
       "name": "Pull requests",
       "note": null,
       "icon": "pr",
-      "href": "#pulls",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "pull",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "t-skills",
@@ -231,10 +275,14 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      },
+      "badgeCount": null
     },
     {
       "id": "p-web",
@@ -243,10 +291,14 @@
       "name": null,
       "note": null,
       "icon": "window",
-      "href": "#area",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "badgeCount": null
     },
     {
       "id": "p-api",
@@ -255,10 +307,14 @@
       "name": null,
       "note": null,
       "icon": "braces",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "api"
+      },
+      "badgeCount": null
     },
     {
       "id": "p-billing",
@@ -267,10 +323,14 @@
       "name": null,
       "note": null,
       "icon": "card",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "billing"
+      },
+      "badgeCount": null
     },
     {
       "id": "p-mobile",
@@ -279,10 +339,14 @@
       "name": null,
       "note": null,
       "icon": "phone",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "mobile"
+      },
+      "badgeCount": null
     },
     {
       "id": "p-infra",
@@ -291,10 +355,14 @@
       "name": null,
       "note": null,
       "icon": "server",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "infra"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-review",
@@ -303,10 +371,14 @@
       "name": "/review",
       "note": "A fresh review of a change",
       "icon": "play",
-      "href": null,
       "run": "/review",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skill",
+        "id": "review"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-red-main",
@@ -315,10 +387,14 @@
       "name": "/red-main",
       "note": "Find why main is red",
       "icon": "play",
-      "href": null,
       "run": "/red-main",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "red-main"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-release",
@@ -327,10 +403,14 @@
       "name": "/release",
       "note": "Roll out, watch, roll back",
       "icon": "play",
-      "href": null,
       "run": "/release",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "release"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-qa",
@@ -339,10 +419,14 @@
       "name": "/qa-by-hand",
       "note": "Click through a change",
       "icon": "play",
-      "href": null,
       "run": "/qa-by-hand",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "qa-by-hand"
+      },
+      "badgeCount": null
     },
     {
       "id": "s-upgrade",
@@ -351,10 +435,15 @@
       "name": "/upgrade",
       "note": "Update dependencies",
       "icon": "play",
-      "href": null,
       "run": "/upgrade",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "upgrade"
+      },
+      "badgeCount": null
     }
-  ]
+  ],
+  "pinLimit": 12
 }

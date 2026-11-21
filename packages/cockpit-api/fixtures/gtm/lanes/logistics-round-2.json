@@ -19,9 +19,7 @@
     "record": "Pilot list: 0 bounces in 30"
   },
   "waitsFor": null,
-  "opened": "Opened yesterday",
-  "closed": null,
-  "next": "Thu 19 Nov",
+  "next": null,
   "afterNext": null,
   "decisionId": null,
   "short": null,
@@ -89,9 +87,20 @@
       "icon": "file",
       "title": "Lead list, round 2",
       "detail": "120 so far, logistics ops, 50 to 500 people",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "logistics-round-2"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-15T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-19T17:00:00+01:00",
+  "afterNextAt": null
 }

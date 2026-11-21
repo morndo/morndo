@@ -1,6 +1,6 @@
 {
   "id": "decision:d2",
-  "title": "Start sequence B for 180 fintech ops leads",
+  "title": "Chat",
   "sub": null,
   "placeholder": "Ask about this decision",
   "reading": null,
@@ -8,5 +8,7 @@
   "pinned": null,
   "agents": null,
   "suggestions": [],
-  "messages": []
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
 }

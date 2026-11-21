@@ -4,7 +4,6 @@
   "state": "open",
   "topicId": "api",
   "topicName": "API",
-  "due": "Due today, 14:00",
   "whyYours": null,
   "minutes": 3,
   "contextLine": "API · Due today, 14:00 · 3 min to read",
@@ -17,7 +16,7 @@
     "laneTitle": "Export for big accounts",
     "writtenBy": "Release",
     "checkedBy": "the Manager",
-    "checkedAt": "07:05"
+    "checkedAt": "2026-11-16T07:05:00+01:00"
   },
   "context": "Exports for accounts with more than 200,000 shipments stop after 30 seconds. Fenwick Freight reported it on Thursday. 14 accounts are affected, and 23 of about 580 exports failed yesterday. The fix writes the file in chunks of 5,000 rows instead of building it in memory.",
   "numbers": [],
@@ -26,22 +25,26 @@
       {
         "label": "Tests",
         "value": "214 pass",
-        "sub": "6 are new and failed before the fix"
+        "sub": "6 are new and failed before the fix",
+        "money": null
       },
       {
         "label": "Fresh review",
         "value": "2 rounds",
-        "sub": "3 findings, all fixed"
+        "sub": "3 findings, all fixed",
+        "money": null
       },
       {
         "label": "Run on staging",
         "value": "48 s",
-        "sub": "Fenwick's 1.2 GB export, a timeout before"
+        "sub": "Fenwick's 1.2 GB export, a timeout before",
+        "money": null
       },
       {
         "label": "Checks",
         "value": "5 of 5",
-        "sub": "Green on the version to release"
+        "sub": "Green on the version to release",
+        "money": null
       }
     ],
     "meta": [
@@ -57,14 +60,123 @@
     "label": "Opportunity · the dream output",
     "headline": "No failed exports from Tuesday",
     "condition": "Failed exports a day, if the fix holds on live data as it did on staging.",
-    "summary": "With the release, failed exports a day fall from 23 today to 0 from Tuesday. With no change they stay at 23."
+    "summary": "With the release, failed exports a day fall from 23 today to 0 from Tuesday. With no change they stay at 23.",
+    "series": [
+      {
+        "x": "Today",
+        "y": 23
+      },
+      {
+        "x": "Tue",
+        "y": 0
+      },
+      {
+        "x": "Wed",
+        "y": 0
+      },
+      {
+        "x": "Thu",
+        "y": 0
+      },
+      {
+        "x": "Fri",
+        "y": 0
+      }
+    ],
+    "baseline": [
+      {
+        "x": "Today",
+        "y": 23
+      },
+      {
+        "x": "Tue",
+        "y": 23
+      },
+      {
+        "x": "Wed",
+        "y": 23
+      },
+      {
+        "x": "Thu",
+        "y": 23
+      },
+      {
+        "x": "Fri",
+        "y": 23
+      }
+    ],
+    "axis": [
+      0,
+      10,
+      20
+    ],
+    "unit": "failed exports a day",
+    "marker": null,
+    "baselineLabel": "No change",
+    "seriesLabel": "With the release"
   },
   "risk": {
     "kind": "risk",
     "label": "Risk · the worst case",
     "headline": "1 in 7 exports fails for 2 minutes",
     "condition": "Share of exports failing, if the new code breaks on live data. Only the first 10% of accounts get it.",
-    "summary": "In the worst case the share of exports that fail rises from 4% to 14% for two minutes after the rollout starts, then returns to 4% when the release is rolled back."
+    "summary": "In the worst case the share of exports that fail rises from 4% to 14% for two minutes after the rollout starts, then returns to 4% when the release is rolled back.",
+    "series": [
+      {
+        "x": "Start",
+        "y": 4
+      },
+      {
+        "x": "1 min",
+        "y": 14
+      },
+      {
+        "x": "3 min",
+        "y": 14
+      },
+      {
+        "x": "4 min",
+        "y": 4
+      },
+      {
+        "x": "8 min",
+        "y": 4
+      }
+    ],
+    "baseline": [
+      {
+        "x": "Start",
+        "y": 4
+      },
+      {
+        "x": "1 min",
+        "y": 4
+      },
+      {
+        "x": "3 min",
+        "y": 4
+      },
+      {
+        "x": "4 min",
+        "y": 4
+      },
+      {
+        "x": "8 min",
+        "y": 4
+      }
+    ],
+    "axis": [
+      0,
+      10,
+      20
+    ],
+    "unit": "% of exports failing",
+    "marker": {
+      "x": "4 min",
+      "label": "rolled back"
+    },
+    "baselineLabel": "No change",
+    "seriesLabel": "Worst case"
   },
   "suggestion": "Release tonight at 22:00, when few exports run. The first 10% of accounts get it for 30 minutes, then everyone.",
   "guardrail": "Guardrail: if exports fail more often than today during the watch, the Release lane rolls back on its own and tells you. Rolling back takes about 2 minutes and loses no data.",
@@ -72,34 +184,82 @@
     {
       "step": "Merge pull request 412",
       "who": "Release lane",
-      "by": "Today, after your OK"
+      "dueAt": null,
+      "target": {
+        "kind": "pull",
+        "id": "412"
+      },
+      "moduleId": null
     },
     {
       "step": "Roll out to 10% of accounts and watch for 30 minutes",
       "who": "Release lane",
-      "by": "Today, 22:00"
+      "dueAt": "2026-11-16T22:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      },
+      "moduleId": null
     },
     {
       "step": "Roll out to everyone",
       "who": "Release lane",
-      "by": "Today, 22:30"
+      "dueAt": "2026-11-16T22:30:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      },
+      "moduleId": null
     },
     {
       "step": "Run Fenwick's export on production and compare the file",
       "who": "QA lane",
-      "by": "Today, 22:45"
+      "dueAt": "2026-11-16T22:45:00+01:00",
+      "target": {
+        "kind": "thread",
+        "id": "lane:export-for-big-accounts"
+      },
+      "moduleId": null
     },
     {
       "step": "Draft the \"it is fixed\" note to Fenwick Freight",
       "who": "Writer, go-to-market",
-      "by": "Tue 17 Nov"
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "target": {
+        "kind": "topic",
+        "id": "content"
+      },
+      "moduleId": "gtm"
     },
     {
       "step": "Report the result against the dream output",
       "who": "Manager",
-      "by": "Tue 17 Nov, 09:00"
+      "dueAt": "2026-11-17T09:00:00+01:00",
+      "target": {
+        "kind": "manager",
+        "id": null
+      },
+      "moduleId": null
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing is released.",
-  "position": "1 of 3 · 3 open"
+  "position": {
+    "index": 1,
+    "of": 3,
+    "open": 3
+  },
+  "dueAt": "2026-11-16T14:00:00+01:00",
+  "shortTitle": "Release the export fix",
+  "goalChange": null,
+  "release": {
+    "pullId": "412",
+    "stage": "scheduled",
+    "percent": 10,
+    "watchMinutes": 30,
+    "rollbackTrigger": "Exports fail more often than today during the watch.",
+    "startedAt": null,
+    "scheduledAt": "2026-11-16T22:00:00+01:00"
+  },
+  "changeRequest": null,
+  "rule": "hardToUndo"
 }

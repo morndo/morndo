@@ -43,10 +43,20 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Builder",
-      "next": "Today, 15:00"
+      "next": "",
+      "nextAt": "2026-11-16T15:00:00+01:00"
     }
   ],
   "spend": null,
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
 }

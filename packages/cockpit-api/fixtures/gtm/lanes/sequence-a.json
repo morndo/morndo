@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 26 Oct",
-  "closed": "closed today, 08:05",
   "next": null,
   "afterNext": null,
   "decisionId": null,
@@ -103,9 +101,20 @@
       "icon": "file",
       "title": "Results",
       "detail": "960 sent, 52 replies, 9 meetings, 1.8% bounces",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "sequence-a"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-10-26T00:00:00+01:00",
+  "closedAt": "2026-11-16T08:05:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
 }

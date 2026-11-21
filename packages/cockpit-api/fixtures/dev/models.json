@@ -1,0 +1,34 @@
+{
+  "items": [
+    {
+      "id": "auto",
+      "name": "Auto",
+      "vendor": "Morndo",
+      "state": "default"
+    },
+    {
+      "id": "claude-code",
+      "name": "Claude Code",
+      "vendor": "Anthropic",
+      "state": "signedIn"
+    },
+    {
+      "id": "codex",
+      "name": "Codex",
+      "vendor": "OpenAI",
+      "state": "signedIn"
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "vendor": "Anysphere",
+      "state": "signedIn"
+    },
+    {
+      "id": "gemini-cli",
+      "name": "Gemini CLI",
+      "vendor": "Google",
+      "state": "signIn"
+    }
+  ]
+}

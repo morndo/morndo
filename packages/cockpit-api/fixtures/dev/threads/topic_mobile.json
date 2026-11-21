@@ -1,6 +1,6 @@
 {
   "id": "topic:mobile",
-  "title": "Mobile",
+  "title": "Mobile chat",
   "sub": "You and Builder.",
   "placeholder": "Message Mobile",
   "reading": null,
@@ -8,5 +8,7 @@
   "pinned": null,
   "agents": null,
   "suggestions": [],
-  "messages": []
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
 }

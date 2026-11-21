@@ -1,0 +1,81 @@
+{
+  "id": "invoice-rounding",
+  "topicId": "billing",
+  "title": "Invoice rounding",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Billing merged the invoice rounding fix after 2 review rounds.",
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Merge the invoice rounding fix after review.",
+  "askedMeta": {
+    "source": "Billing",
+    "note": null
+  },
+  "status": "Billing merged the invoice rounding fix after 2 review rounds.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "Billing merged the invoice rounding fix after 2 review rounds."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Merge the invoice rounding fix after review.",
+      "who": "Builder"
+    }
+  ],
+  "doneNote": "Billing merged the invoice rounding fix after 2 review rounds.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Billing merged the invoice rounding fix after 2 review rounds.",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-16T01:40:00+01:00",
+  "closedAt": "2026-11-16T01:40:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened today, 08:10",
-  "closed": "closed today, 08:30",
   "next": null,
   "afterNext": null,
   "decisionId": null,
@@ -84,9 +82,20 @@
       "icon": "file",
       "title": "The 3 ads",
       "detail": "LinkedIn: 2, Search: 1 · 0.31% to 0.52% clicks",
-      "href": null
+      "target": {
+        "kind": "lane",
+        "id": "click-floor"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-16T08:10:00+01:00",
+  "closedAt": "2026-11-16T08:30:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
 }

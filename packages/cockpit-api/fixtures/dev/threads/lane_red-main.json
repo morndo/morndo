@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_red-main-0",
+      "id": "m8",
       "author": {
         "id": "builder",
         "name": "Builder",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "07:20",
       "text": "Main is red since 06:40. I tried 3 fixes and none worked: the new session library signs cookies differently, so saved sessions get a 401. I am out of tries, so I stopped.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:20:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }

@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Friday",
-  "closed": null,
   "next": "After your decision",
   "afterNext": null,
   "decisionId": "d2",
@@ -46,7 +44,10 @@
   "acts": [
     {
       "label": "Approve",
-      "tone": "ink"
+      "tone": "ink",
+      "id": "approve",
+      "personId": null,
+      "target": null
     }
   ],
   "thumbs": [],
@@ -81,5 +82,13 @@
   ],
   "made": [],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
 }

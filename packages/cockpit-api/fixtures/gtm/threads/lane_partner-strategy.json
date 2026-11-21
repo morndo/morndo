@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_partner-strategy-0",
+      "id": "m21",
       "author": {
         "id": "researcher",
         "name": "Researcher",
@@ -25,13 +25,21 @@
         "engine": null,
         "record": null
       },
-      "time": "20 Oct",
       "text": "Freight networks and business banks reach the most of our kind of customer. ERP vendors are slower to sign but stay longest.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-10-20T00:00:00+02:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
     }
-  ]
+  ],
+  "nextCursor": null,
+  "scope": null
 }
