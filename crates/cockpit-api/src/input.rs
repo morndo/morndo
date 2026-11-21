@@ -70,3 +70,26 @@ pub(crate) fn percent_schema(_: &mut SchemaGenerator) -> Schema {
         { "type": "null" }
     ] })
 }
+
+pub(crate) fn attachment_url<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<String, D::Error> {
+    let value = String::deserialize(deserializer)?;
+    let authority = value
+        .strip_prefix("https://")
+        .unwrap_or("")
+        .split(['/', '?', '#'])
+        .next()
+        .unwrap_or("");
+    if authority.is_empty()
+        || value.chars().count() > 2048
+        || value
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control() || c == '\\')
+    {
+        return Err(de::Error::custom(
+            "expected an HTTPS attachment URL of at most 2048 characters",
+        ));
+    }
+    Ok(value)
+}

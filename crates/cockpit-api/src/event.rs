@@ -107,3 +107,22 @@ pub struct FeedEvent {
     #[serde(flatten)]
     pub event: Event,
 }
+
+/// A feed control message without a sequence number; the reader should fetch fresh views.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "type")]
+pub enum FeedResetSignal {
+    /// Replay is unavailable for the requested cursor.
+    #[serde(rename = "feed.reset")]
+    Reset {},
+}
+
+/// A change event or an unsequenced control message on the feed.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(untagged)]
+pub enum FeedFrame {
+    /// A notification that can be replayed.
+    Event(Box<FeedEvent>),
+    /// Instructions to re-read the views.
+    Reset(FeedResetSignal),
+}

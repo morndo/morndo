@@ -18,8 +18,10 @@ pub struct Attachment {
     /// Name shown to the reader.
     #[schemars(length(min = 1, max = 200))]
     pub name: String,
-    /// Url for this record.
+    /// HTTPS URL for the attachment.
     #[schemars(extend("format" = "uri"))]
+    #[schemars(length(max = 2048), regex(pattern = "^https://"))]
+    #[serde(deserialize_with = "input::attachment_url")]
     pub url: String,
 }
 
@@ -31,8 +33,10 @@ pub struct AttachmentInput {
     #[schemars(length(min = 1, max = 200))]
     #[serde(deserialize_with = "input::name")]
     pub name: String,
-    /// Url for this record.
+    /// HTTPS URL for the attachment.
     #[schemars(extend("format" = "uri"))]
+    #[schemars(length(max = 2048), regex(pattern = "^https://"))]
+    #[serde(deserialize_with = "input::attachment_url")]
     pub url: String,
 }
 

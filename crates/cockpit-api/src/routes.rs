@@ -18,7 +18,7 @@ pub struct Route {
 /// Common prefix for every cockpit operation.
 pub const BASE: &str = "/api/cockpit";
 const READ: &[u16] = &[400, 403, 404, 405, 500];
-const WRITE: &[u16] = &[400, 403, 404, 405, 409, 413, 415, 500];
+const WRITE: &[u16] = &[400, 403, 404, 405, 409, 413, 415, 422, 500];
 
 fn parameter(name: &str, location: &str, schema: Value) -> Value {
     json!({"name": name, "in": location, "required": location == "path", "schema": schema})
@@ -34,6 +34,13 @@ fn reference(name: &str) -> Value {
 
 fn id(kind: &str) -> Value {
     parameter("id", "path", reference(kind))
+}
+
+fn device_id() -> Value {
+    query(
+        "deviceId",
+        json!({"type": "string", "minLength": 1, "maxLength": 200}),
+    )
 }
 
 fn page() -> Vec<Value> {
@@ -54,7 +61,7 @@ macro_rules! read {
 
 /// Public routes and their wire representations.
 pub const ROUTES: &[Route] = &[
-    read!("/workspace", WorkspaceView),
+    read!("/workspace", WorkspaceView, device_id()),
     read!("/sidebar", SidebarView),
     read!("/usage", UsageView),
     read!("/brief", BriefView),
@@ -79,14 +86,20 @@ pub const ROUTES: &[Route] = &[
     read!("/topics/{id}", TopicView, id("TopicId")),
     read!("/topics/{id}/access", AccessView, id("TopicId")),
     Route {
-        parameters: || [vec![id("TopicId")], page()].concat(),
+        parameters: || {
+            [
+                vec![id("TopicId"), query("laneId", reference("LaneId"))],
+                page(),
+            ]
+            .concat()
+        },
         ..read!("/topics/{id}/history", HistoryPage)
     },
     read!("/lanes/{id}", LaneView, id("LaneId")),
     read!("/manager", ManagerView),
     read!("/drafts", DraftsView),
     read!("/skills", SkillsView),
-    read!("/settings", SettingsView),
+    read!("/settings", SettingsView, device_id()),
     read!("/pulls", PullsView),
     Route {
         parameters: || {
@@ -133,7 +146,7 @@ pub const ROUTES: &[Route] = &[
     },
     read!(
         "/feed",
-        FeedEvent,
+        FeedFrame,
         query(
             "after",
             json!({"type": "integer", "minimum": 0, "maximum": 9007199254740991_u64})

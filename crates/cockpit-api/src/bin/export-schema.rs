@@ -49,6 +49,9 @@ fn run() -> Result<(), Box<dyn std::error::Error>> {
             let path = released.join(format!("{major}.json"));
             let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
             file.write_all(pretty(&schema).as_bytes())?;
+            let path = released.join(format!("{major}.openapi.json"));
+            let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
+            file.write_all(pretty(&openapi).as_bytes())?;
         }
         _ => return Err("usage: export-schema [--check | --release]".into()),
     }
@@ -98,6 +101,7 @@ fn export() -> Value {
         CommandResult,
         Event,
         FeedEvent,
+        cockpit_api::event::FeedFrame,
         cockpit_api::access::TopicStatusView,
         ApiError,
     );

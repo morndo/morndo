@@ -1,4 +1,5 @@
 // Compare the current contract to the immutable baseline for its major version.
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 
 interface Shape {
@@ -61,6 +62,64 @@ function reachable(defs: Contract["$defs"], root: string): Set<string> {
   return seen;
 }
 
+interface Operation {
+  parameters?: { name: string; in: string; required?: boolean; schema: Shape }[];
+  responses: Record<string, { content?: Record<string, { schema?: Shape }> }>;
+}
+interface OpenApi {
+  paths: Record<string, Record<string, Operation>>;
+}
+
+export function compareRoutes(released: OpenApi, current: OpenApi): string[] {
+  const failures: string[] = [];
+  for (const [path, operations] of Object.entries(released.paths)) {
+    for (const [method, before] of Object.entries(operations)) {
+      const label = `${method.toUpperCase()} ${path}`;
+      const after = current.paths[path]?.[method];
+      if (!after) {
+        failures.push(`${label}: removed operation`);
+        continue;
+      }
+      const params = after.parameters ?? [];
+      for (const prior of before.parameters ?? []) {
+        const next = params.find(item => item.name === prior.name && item.in === prior.in);
+        if (!next || JSON.stringify(next.schema) !== JSON.stringify(prior.schema)) {
+          failures.push(`${label}: removed or changed parameter ${prior.name}`);
+        }
+      }
+      for (const next of params) {
+        if (next.required && !before.parameters?.some(item => item.name === next.name && item.in === next.in && item.required)) {
+          failures.push(`${label}: new required parameter ${next.name}`);
+        }
+      }
+      for (const [status, response] of Object.entries(before.responses)) {
+        const actual = after.responses[status];
+        if (!actual || Object.entries(response.content ?? {}).some(([media, body]) =>
+          !actual.content?.[media] || body.schema?.$ref !== actual.content[media]?.schema?.$ref)) {
+          failures.push(`${label}: removed or changed response ${status}`);
+        }
+      }
+    }
+  }
+  return failures;
+}
+
+function checkBaseline(ref: string, path: string, current: URL): void {
+  const git = (args: string[]) => spawnSync("git", args, { encoding: "utf8" });
+  const revision = git(["rev-parse", "--verify", ref + "^{commit}"]);
+  if (revision.status !== 0) throw new Error("Could not read baseline revision");
+  const tracked = git(["ls-tree", "--name-only", revision.stdout.trim(), "--", path]);
+  if (tracked.status !== 0) throw new Error("Could not inspect baseline revision");
+  // On the first PR that ships this major, compare with its first committed baseline if present.
+  const first = tracked.stdout.trim() ? revision.stdout.trim()
+    : git(["log", "--format=%H", "--diff-filter=A", "--reverse", "HEAD", "--", path]).stdout.trim().split("\n")[0];
+  if (!first) return;
+  const previous = git(["show", `${first}:${path}`]);
+  if (previous.status !== 0 || previous.stdout !== readFileSync(current, "utf8")) {
+    throw new Error(`${path} changed within its major version`);
+  }
+}
+
 function compare(released: Contract, current: Contract): string[] {
   const issues: string[] = [];
   const fail = (path: string, detail: string) => issues.push(`${path}: ${detail}`);
@@ -83,10 +142,12 @@ function compare(released: Contract, current: Contract): string[] {
       }
     }
     if (next.additionalProperties === false && old.additionalProperties !== false) fail(path, "additional properties disallowed");
+    const attachmentHardening = path === "AttachmentInput.url" && !old.pattern
+      && next.pattern === "^https://" && next.maxLength === 2048;
+    if (old.pattern !== next.pattern && !attachmentHardening && (old.pattern !== undefined || input)) fail(path, "pattern changed");
     if (input) {
-      if (next.pattern && next.pattern !== old.pattern) fail(path, "input pattern changed");
       for (const key of minimums) if ((next[key] ?? -Infinity) > (old[key] ?? -Infinity)) fail(path, `${key} increased`);
-      for (const key of maximums) if ((next[key] ?? Infinity) < (old[key] ?? Infinity)) fail(path, `${key} decreased`);
+      for (const key of maximums) if (!(attachmentHardening && key === "maxLength") && (next[key] ?? Infinity) < (old[key] ?? Infinity)) fail(path, `${key} decreased`);
       for (const field of next.required ?? []) if (!old.required?.includes(field)) fail(`${path}.${field}`, "new required input");
     } else {
       for (const field of old.required ?? []) if (!next.required?.includes(field)) fail(`${path}.${field}`, "response field became optional");
@@ -103,7 +164,10 @@ function compare(released: Contract, current: Contract): string[] {
       const parts = next[name] ?? [];
       for (const added of parts.filter(part => !previous.some(branch => branchKey(branch) === branchKey(part)))) {
         const tag = branchKey(added).startsWith("tag:");
-        const allowed = (name === "oneOf" || name === "anyOf") && tag && previous.some(part => branchKey(part).startsWith("tag:"));
+        const enumValue = added.const !== undefined && previous.length > 0 && previous.every(part =>
+          part.const !== undefined || (part.enum?.length && part.enum.every(value => typeof value === typeof added.const)));
+        const allowed = (name === "oneOf" || name === "anyOf")
+          && ((tag && previous.some(part => branchKey(part).startsWith("tag:"))) || enumValue);
         if (!allowed) fail(path, `added ${name} member ${branchKey(added)} changes the type`);
       }
       for (const branch of previous) {
@@ -129,14 +193,31 @@ function compare(released: Contract, current: Contract): string[] {
 
 try {
   const args = process.argv.slice(2);
-  if (args.length && (args.length !== 2 || args[0] !== "--current")) {
-    throw new Error("usage: compat.ts [--current <schema>]");
+  const options = new Map<string, string>();
+  for (let i = 0; i < args.length; i += 2) {
+    const flag = args[i] ?? "";
+    const value = args[i + 1];
+    if (!["--current", "--current-openapi", "--base-ref"].includes(flag) || !value || options.has(flag)) {
+      throw new Error("usage: compat.ts [--current <schema>] [--current-openapi <document>] [--base-ref <revision>]");
+    }
+    options.set(flag, value);
   }
-  const current = read(args[1] ?? defaultSchema);
+  const current = read(options.get("--current") ?? defaultSchema);
   const major = /^([1-9]\d*)\.\d+\.\d+$/.exec(current["x-contract-version"])?.[1];
   if (!major || current.$id !== `urn:morndo:cockpit-api:${major}`) throw new Error("invalid contract version or schema identifier");
-  const baseline = read(new URL(`../schema/released/${major}.json`, import.meta.url));
-  const issues = compare(baseline, current);
+  const baselineUrl = new URL(`../schema/released/${major}.json`, import.meta.url);
+  const baselineRoutes = new URL(`../schema/released/${major}.openapi.json`, import.meta.url);
+  const ref = options.get("--base-ref");
+  if (ref) {
+    checkBaseline(ref, `packages/cockpit-api/schema/released/${major}.json`, baselineUrl);
+    checkBaseline(ref, `packages/cockpit-api/schema/released/${major}.openapi.json`, baselineRoutes);
+  }
+  const baseline = read(baselineUrl);
+  const readRoutes = (path: string | URL) => JSON.parse(readFileSync(path, "utf8")) as OpenApi;
+  const issues = [
+    ...compare(baseline, current),
+    ...compareRoutes(readRoutes(baselineRoutes), readRoutes(options.get("--current-openapi") ?? new URL("../schema/cockpit.openapi.json", import.meta.url))),
+  ];
   if (issues.length) {
     console.error(issues.join("\n"));
     process.exitCode = 1;

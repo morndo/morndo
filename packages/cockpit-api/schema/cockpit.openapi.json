@@ -537,8 +537,10 @@
             "type": "string"
           },
           "url": {
-            "description": "Url for this record.",
+            "description": "HTTPS URL for the attachment.",
             "format": "uri",
+            "maxLength": 2048,
+            "pattern": "^https://",
             "type": "string"
           }
         },
@@ -559,8 +561,10 @@
             "type": "string"
           },
           "url": {
-            "description": "Url for this record.",
+            "description": "HTTPS URL for the attachment.",
             "format": "uri",
+            "maxLength": 2048,
+            "pattern": "^https://",
             "type": "string"
           }
         },
@@ -2669,6 +2673,7 @@
           "payloadTooLarge",
           "methodNotAllowed",
           "internal",
+          "idempotencyKeyReused",
           "unknown"
         ],
         "type": "string"
@@ -3595,6 +3600,37 @@
           "at"
         ],
         "type": "object"
+      },
+      "FeedFrame": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/FeedEvent",
+            "description": "A notification that can be replayed."
+          },
+          {
+            "$ref": "#/components/schemas/FeedResetSignal",
+            "description": "Instructions to re-read the views."
+          }
+        ],
+        "description": "A change event or an unsequenced control message on the feed."
+      },
+      "FeedResetSignal": {
+        "description": "A feed control message without a sequence number; the reader should fetch fresh views.",
+        "oneOf": [
+          {
+            "description": "Replay is unavailable for the requested cursor.",
+            "properties": {
+              "type": {
+                "const": "feed.reset",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          }
+        ]
       },
       "FieldError": {
         "description": "A specific field that failed request validation.",
@@ -9341,6 +9377,25 @@
               }
             }
           },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "const": "1.0.0",
+                  "type": "string"
+                }
+              }
+            }
+          },
           "500": {
             "content": {
               "application/problem+json": {
@@ -10351,7 +10406,7 @@
           }
         },
         "x-websocket-message": {
-          "$ref": "#/components/schemas/FeedEvent"
+          "$ref": "#/components/schemas/FeedFrame"
         }
       }
     },
@@ -11237,6 +11292,16 @@
         "parameters": [
           {
             "in": "query",
+            "name": "deviceId",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
             "name": "as",
             "required": false,
             "schema": {
@@ -12104,6 +12169,14 @@
           },
           {
             "in": "query",
+            "name": "laneId",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/LaneId"
+            }
+          },
+          {
+            "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
@@ -12537,6 +12610,16 @@
     "/api/cockpit/workspace": {
       "get": {
         "parameters": [
+          {
+            "in": "query",
+            "name": "deviceId",
+            "required": false,
+            "schema": {
+              "maxLength": 200,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
           {
             "in": "query",
             "name": "as",

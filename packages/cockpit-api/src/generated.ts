@@ -693,6 +693,7 @@ export type ErrorCode =
   | "payloadTooLarge"
   | "methodNotAllowed"
   | "internal"
+  | "idempotencyKeyReused"
   | "unknown";
 /**
  * A change notification delivered to cockpit readers.
@@ -826,6 +827,165 @@ export type Event =
   | {
       type: "Unknown";
     };
+/**
+ * A change event or an unsequenced control message on the feed.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "FeedFrame".
+ */
+export type FeedFrame =
+  | FeedEvent2
+  | {
+      type: "feed.reset";
+    };
+/**
+ * A sequenced event on the resumable workspace feed.
+ */
+export type FeedEvent2 = {
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  at: string;
+  /**
+   * Monotonically increasing sequence number on this hub.
+   */
+  seq: number;
+} & (
+  | {
+      /**
+       * Identifier of the associated decision.
+       */
+      decisionId: string;
+      /**
+       * Current state of the record.
+       */
+      state: "open" | "approved" | "declined" | "expired" | "unknown";
+      type: "decision.changed";
+    }
+  | {
+      /**
+       * Chain for this record.
+       */
+      chain: boolean;
+      /**
+       * Identifier of a lane.
+       */
+      laneId: string;
+      /**
+       * Identifier of the associated topic.
+       */
+      topicId: TopicId | null;
+      type: "lane.filed";
+    }
+  | {
+      /**
+       * Identifier of a lane.
+       */
+      laneId: string;
+      type: "lane.changed";
+    }
+  | {
+      message: Message;
+      /**
+       * Identifier of the associated thread.
+       */
+      threadId: string;
+      type: "message.posted";
+    }
+  | {
+      /**
+       * Identifier of the associated pin.
+       */
+      pinId: PinId | null;
+      type: "pins.changed";
+    }
+  | {
+      type: "prefs.changed";
+    }
+  | {
+      /**
+       * Identifier of the associated topic.
+       */
+      topicId: TopicId | null;
+      type: "access.changed";
+    }
+  | {
+      /**
+       * Identifier of the associated action.
+       */
+      actionId: string;
+      type: "agentAction.changed";
+    }
+  | {
+      decisionId: DecisionId;
+      type: "decision.expired";
+    }
+  | {
+      laneId: LaneId;
+      type: "lane.removed";
+    }
+  | {
+      threadId: ThreadId;
+      type: "thread.changed";
+    }
+  | {
+      topicId: TopicId;
+      type: "topic.changed";
+    }
+  | {
+      type: "drafts.changed";
+    }
+  | {
+      type: "brief.published";
+    }
+  | {
+      reason: string;
+      target: Target;
+      type: "attention.raised";
+    }
+  | {
+      name: string;
+      topicId: TopicId | null;
+      type: "guardrail.breached";
+    }
+  | {
+      type: "usage.changed";
+    }
+  | {
+      decisionId: DecisionId;
+      type: "release.changed";
+    }
+  | {
+      pullId: PullId;
+      type: "pull.changed";
+    }
+  | {
+      laneId: LaneId;
+      type: "handover.changed";
+    }
+  | {
+      type: "skills.changed";
+    }
+  | {
+      moduleId: ModuleId;
+      type: "module.changed";
+    }
+  | {
+      type: "feed.reset";
+    }
+  | {
+      type: "Unknown";
+    }
+);
+/**
+ * A feed control message without a sequence number; the reader should fetch fresh views.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "FeedResetSignal".
+ */
+export type FeedResetSignal = {
+  type: "feed.reset";
+};
 /**
  * Health state for the cockpit.
  *
@@ -1571,6 +1731,7 @@ export interface ApiError {
     | "payloadTooLarge"
     | "methodNotAllowed"
     | "internal"
+    | "idempotencyKeyReused"
     | "unknown";
   /**
    * Explanation specific to this request.
@@ -1737,7 +1898,7 @@ export interface Attachment {
    */
   name: string;
   /**
-   * Url for this record.
+   * HTTPS URL for the attachment.
    */
   url: string;
 }
@@ -1753,7 +1914,7 @@ export interface AttachmentInput {
    */
   name: string;
   /**
-   * Url for this record.
+   * HTTPS URL for the attachment.
    */
   url: string;
 }

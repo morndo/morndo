@@ -15,6 +15,7 @@ pub enum ErrorCode {
     PayloadTooLarge,
     MethodNotAllowed,
     Internal,
+    IdempotencyKeyReused,
     #[serde(other)]
     Unknown,
 }

@@ -263,6 +263,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          fetch-depth: 0
 
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
@@ -290,6 +291,14 @@ jobs:
 
       - run: node scripts/cockpit-contract-check.ts
 
-      - run: node packages/cockpit-api/scripts/compat.ts
+      - name: Check compatibility and released baselines
+        env:
+          COCKPIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          if git rev-parse --verify "${COCKPIT_BASE}^{commit}" >/dev/null 2>&1; then
+            node packages/cockpit-api/scripts/compat.ts --base-ref "$COCKPIT_BASE"
+          else
+            node packages/cockpit-api/scripts/compat.ts --base-ref HEAD
+          fi
 
       - run: node scripts/cockpit-contract-v2-check.ts

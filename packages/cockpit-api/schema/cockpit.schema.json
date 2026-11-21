@@ -536,8 +536,10 @@
           "type": "string"
         },
         "url": {
-          "description": "Url for this record.",
+          "description": "HTTPS URL for the attachment.",
           "format": "uri",
+          "maxLength": 2048,
+          "pattern": "^https://",
           "type": "string"
         }
       },
@@ -558,8 +560,10 @@
           "type": "string"
         },
         "url": {
-          "description": "Url for this record.",
+          "description": "HTTPS URL for the attachment.",
           "format": "uri",
+          "maxLength": 2048,
+          "pattern": "^https://",
           "type": "string"
         }
       },
@@ -2668,6 +2672,7 @@
         "payloadTooLarge",
         "methodNotAllowed",
         "internal",
+        "idempotencyKeyReused",
         "unknown"
       ],
       "type": "string"
@@ -3594,6 +3599,37 @@
         "at"
       ],
       "type": "object"
+    },
+    "FeedFrame": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/FeedEvent",
+          "description": "A notification that can be replayed."
+        },
+        {
+          "$ref": "#/$defs/FeedResetSignal",
+          "description": "Instructions to re-read the views."
+        }
+      ],
+      "description": "A change event or an unsequenced control message on the feed."
+    },
+    "FeedResetSignal": {
+      "description": "A feed control message without a sequence number; the reader should fetch fresh views.",
+      "oneOf": [
+        {
+          "description": "Replay is unavailable for the requested cursor.",
+          "properties": {
+            "type": {
+              "const": "feed.reset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ]
     },
     "FieldError": {
       "description": "A specific field that failed request validation.",
