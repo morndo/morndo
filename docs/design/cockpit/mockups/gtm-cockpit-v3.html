@@ -991,6 +991,14 @@ input[type=range]:disabled{opacity:.4;cursor:default}
 .rcpt q{quotes:"“" "”";color:var(--text)}
 .rcpt small{grid-column:2;font-size:var(--fs-2xs);color:var(--muted)}
 .av.tm{background:var(--ink);color:var(--ink-fg)}
+/* One place to write, chosen 21 November: the chat (floating or as a sidebar, as Settings says). */
+/* One place to write: the brief's and the Manager's own composers go; the chat is the only one. */
+.view .dock{display:none}
+.views .doc{scroll-padding-bottom:120px}
+/* Who you are talking to: this page's owner, or the Manager from anywhere. */
+.to{display:inline-flex;gap:2px;margin-top:8px;padding:2px;border-radius:var(--r-pill);background:var(--fill)}
+.to button{height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:500;color:var(--text-2)}
+.to button[aria-pressed="true"]{background:var(--ink);color:var(--ink-fg);font-weight:600}
 </style>
 <script>
 try {
@@ -3834,6 +3842,60 @@ try {
       b.textContent = on ? "Done" : "Edit";
       if (on && lis[0]) lis[0].focus();
     }
+  });
+
+  // ---- One place to write: the chat. The brief's and the Manager page's composers are gone. ----
+
+  // Who you are talking to. The chat belongs to the page; the Manager is one click away from any page.
+  let toMgr = false;
+  const OWN = { brief: "The Manager", decision: "This decision", manager: "The Manager", skills: "The Manager", drafts: "The Manager", settings: "The Manager" };
+  const ownerName = () => { const t = topicNow(); if (t) return t.name; const v = pane.dataset.view; if (v === "lane") return "This lane"; return OWN[v] || "This page"; };
+  const fillChatBefore = fillChat;
+  fillChat = view => {
+    const mine = pane.dataset.view === "manager" || pane.dataset.view === "brief" || !pane.dataset.view;
+    if (mine) toMgr = false;
+    fillChatBefore(toMgr ? "manager" : view);
+    const head = $(".chat header div");
+    $$(".to", head).forEach(x => x.remove());
+    if (!mine) head.insertAdjacentHTML("beforeend", `<div class="to" role="group" aria-label="Talk to"><button data-to="page" aria-pressed="${!toMgr}">${esc(ownerName())}</button><button data-to="mgr" aria-pressed="${toMgr}">The Manager</button></div>`);
+    if (toMgr) { $("#chat-input").placeholder = "Tell the Manager"; $("#chat-sub").hidden = true; }
+    (STORE[storeKey()] || []).forEach(h => $("#chat-thread").insertAdjacentHTML("beforeend", h));
+  };
+  const showBefore = show;
+  show = hash => { toMgr = false; showBefore(hash); };
+
+  // Writing to the Manager or to a lane from any page: the Manager files it as a lane and says where it went.
+  const STORE = {};
+  const storeKey = () => (toMgr || !topicNow() && pane.dataset.view !== "lane" ? "mgr" : pane.dataset.nav);
+  const keep = html => { (STORE[storeKey()] = STORE[storeKey()] || []).push(html); $("#chat-thread").insertAdjacentHTML("beforeend", html); $("#chat-thread").scrollTop = 1e6; };
+  const sendTopic = send;
+  send = text => {
+    if (!text.trim()) return false;
+    if (topicNow() && !toMgr) return sendTopic(text);
+    const time = nowTime();
+    keep(`<p class="said">${esc(text)}</p>`);
+    setTimeout(() => {
+      if (pane.dataset.view === "lane" && !toMgr) {
+        const l = laneById(pane.dataset.nav.split("/")[1]);
+        keep(`<div class="msg"><span class="av">${esc(l.lead[0])}</span><div class="who">${esc(l.lead)}<time>${time}</time></div><p>Got it. I add it to this lane and tell you here when it is done.</p></div>`);
+        return;
+      }
+      fileDirection(text);
+      const pop = $("#receipts .receipt");
+      if (pop) pop.remove();
+      const l = PAGES.lanes[0], t = topicOf(l);
+      keep(`<a class="tcard mine" href="#lane/${l.id}"><svg class="i sm"><use href="#elbow"/></svg><b>Lane · ${esc(text.length > 48 ? text.slice(0, 46) + "…" : text)}</b><span>${t ? esc(t.name) + " · " : ""}${esc(l.lead)} leads · just opened</span></a>
+        <div class="msg">${tmAv}<div class="who">Manager<time>${time}</time></div><p>Filed it as its own lane${t ? ` under ${esc(t.name)}, and named ${esc(l.lead)} to lead` : "; I keep it until I know where it belongs"}. You hear from it there.</p></div>`);
+    }, 400);
+    return true;
+  };
+
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-to]");
+    if (!b) return;
+    toMgr = b.dataset.to === "mgr";
+    fillChat(pane.dataset.view);
+    $("#chat-input").focus();
   });
   addEventListener("hashchange", () => show(location.hash.slice(1)));
   drawTree();
