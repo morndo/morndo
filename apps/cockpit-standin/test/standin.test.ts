@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { describe, expect, it } from "vitest";
+import { World } from "../src/world.ts";
 
 const BASE = "/api/cockpit";
 
@@ -180,6 +181,23 @@ describe("cockpit stand-in", () => {
       expect(updated.map((message) => message.id)).toEqual([last?.id]);
       const halden = (after.body.messages as { text: string; label: { kind: string } | null }[]).find((message) => message.text.includes("the offer is drafted"));
       expect(halden?.label).toBeNull();
+    } finally {
+      await stop();
+    }
+  });
+
+  it("answers a malformed percent-escape with not found", async () => {
+    const direct = new World("gtm").get("/decisions/%E0%A4%A", new URLSearchParams());
+    expect(direct.status).toBe(404);
+    expect(direct.definition).toBe("ApiError");
+    const { url, stop } = await boot("gtm");
+    try {
+      const response = await fetch(`${url}${BASE}/decisions/%E0%A4%A`);
+      expect(response.status).toBe(404);
+      const body = await response.json() as { error: { code: string; message: string } };
+      expect(body.error.code).toBe("not_found");
+      expect(body.error.message.length).toBeGreaterThan(0);
+      expect((await get(url, "/decisions/missing-decision")).status).toBe(404);
     } finally {
       await stop();
     }

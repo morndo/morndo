@@ -70,7 +70,11 @@ async function handle(world: World, req: IncomingMessage, res: ServerResponse, b
       send(res, 404, refusal("not_found", "No route for that path."));
       return;
     }
-    const path = decodeURI(url.pathname.slice(BASE.length)) || "/";
+    const path = decodePath(url.pathname);
+    if (path === undefined) {
+      respond(res, 404, "ApiError", refusal("not_found", "No route for that path."));
+      return;
+    }
     if (req.method === "POST" && path === "/actions") {
       await postAction(world, req, res, broadcast);
       return;
@@ -82,8 +86,21 @@ async function handle(world: World, req: IncomingMessage, res: ServerResponse, b
     const outcome = world.get(path, url.searchParams);
     respond(res, outcome.status, outcome.definition, outcome.body);
   } catch (err) {
+    if (err instanceof URIError) {
+      respond(res, 404, "ApiError", refusal("not_found", "No route for that path."));
+      return;
+    }
     const message = err instanceof Error ? err.message : "The stand-in failed.";
     send(res, 500, refusal("internal", message));
+  }
+}
+
+function decodePath(pathname: string): string | undefined {
+  try {
+    return decodeURI(pathname.slice(BASE.length)) || "/";
+  } catch (err) {
+    if (err instanceof URIError) return undefined;
+    throw err;
   }
 }
 

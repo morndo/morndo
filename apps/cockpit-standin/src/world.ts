@@ -25,6 +25,15 @@ const THEME_NAMES: Record<string, string> = {
   rose: "Rose",
 };
 
+function decodeId(value: string): string | undefined {
+  try {
+    return decodeURIComponent(value);
+  } catch (err) {
+    if (err instanceof URIError) return undefined;
+    throw err;
+  }
+}
+
 function clone<T>(value: T): T {
   return structuredClone(value);
 }
@@ -157,26 +166,31 @@ export class World {
     if (path === "/route-preview") return ok("RoutePreview", routePreview(query.get("text") ?? "", query.get("topic"), this.topics, this.routes));
     const decision = /^\/decisions\/([^/]+)$/.exec(path);
     if (decision?.[1]) {
-      const view = this.decisions.get(decodeURIComponent(decision[1]));
+      const id = decodeId(decision[1]);
+      const view = id ? this.decisions.get(id) : undefined;
       return view ? ok("DecisionView", clone(view)) : missing("decision");
     }
     const access = /^\/topics\/([^/]+)\/access$/.exec(path);
     if (access?.[1]) {
-      const view = this.access.get(decodeURIComponent(access[1]));
+      const id = decodeId(access[1]);
+      const view = id ? this.access.get(id) : undefined;
       return view ? ok("AccessView", clone(view)) : missing("topic");
     }
     const topic = /^\/topics\/([^/]+)$/.exec(path);
     if (topic?.[1]) {
-      const view = this.topic(decodeURIComponent(topic[1]));
+      const id = decodeId(topic[1]);
+      const view = id ? this.topic(id) : undefined;
       return view ? ok("TopicView", view) : missing("topic");
     }
     const lane = /^\/lanes\/([^/]+)$/.exec(path);
     if (lane?.[1]) {
-      const view = this.lane(decodeURIComponent(lane[1]));
+      const id = decodeId(lane[1]);
+      const view = id ? this.lane(id) : undefined;
       return view ? ok("LaneView", view) : missing("lane");
     }
     if (path.startsWith("/threads/")) {
-      const view = this.thread(decodeURIComponent(path.slice("/threads/".length)));
+      const id = decodeId(path.slice("/threads/".length));
+      const view = id ? this.thread(id) : undefined;
       return view ? ok("ThreadView", view) : missing("thread");
     }
     return missing("route");
