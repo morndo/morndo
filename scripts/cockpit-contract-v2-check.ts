@@ -194,6 +194,13 @@ function openFeed(url: string, after?: number) {
   return { ws, frames, opened };
 }
 const pause = (ms: number) => new Promise(r => setTimeout(r, ms));
+async function actionsResolve(url: string, messages: any[]) {
+  for (const m of messages) for (const x of m.actions ?? []) {
+    const lane = (await get(url, `/lanes/${x.laneId}`)).body;
+    if (!(lane?.acts ?? []).some((a: any) => a.id === x.id)) return false;
+  }
+  return true;
+}
 
 async function gtm() {
   const { child, url } = await start("gtm");
@@ -298,6 +305,7 @@ async function gtm() {
     const contentThread = (await get(url, "/threads/topic:content")).body;
     const withActions = (contentThread?.messages ?? []).filter((m: any) => (m.actions ?? []).length);
     ok(withActions.length >= 1 && withActions.every((m: any) => m.actions.every((x: any) => typeof x.id === "string" && typeof x.laneId === "string")), "chat buttons carry a choice id and its lane");
+    ok(await actionsResolve(url, withActions), "every chat button names a choice its lane has");
 
     // decisions recompute, expire and conflict
     await act(url, { type: "decision.approve", decisionId: "d1" });
@@ -418,6 +426,9 @@ async function dev() {
     const m = await view(url, "/manager", "ManagerView");
     ok(m?.summary === "7 lanes in 4 projects · 3 wait for you", `the dev Manager summary matches the mockup (got ${m?.summary})`);
     for (const g of (await get(url, "/sidebar")).body?.groups ?? []) await view(url, `/topics/${g.id}`, "TopicView");
+    const devButtons: any[] = [];
+    for (const g of (await get(url, "/sidebar")).body?.groups ?? []) devButtons.push(...((await get(url, `/threads/topic:${g.id}`)).body?.messages ?? []).filter((m: any) => (m.actions ?? []).length));
+    ok(devButtons.length >= 1 && await actionsResolve(url, devButtons), "every dev chat button names a choice its lane has");
   } finally { child.kill(); }
 }
 
