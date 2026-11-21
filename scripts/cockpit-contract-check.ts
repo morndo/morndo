@@ -78,11 +78,13 @@ async function start(module: string) {
 
 async function get(url: string, path: string) {
   const r = await fetch(url + BASE + path);
-  return { status: r.status, body: r.headers.get("content-type")?.includes("json") ? await r.json() : await r.text() };
+  const body: any = r.headers.get("content-type")?.includes("json") ? await r.json() : await r.text();
+  return { status: r.status, body };
 }
 async function act(url: string, command: unknown) {
   const r = await fetch(url + BASE + "/actions", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(command) });
-  return { status: r.status, body: await r.json() };
+  const body: any = await r.json();
+  return { status: r.status, body };
 }
 async function view(url: string, path: string, def: string) {
   const r = await get(url, path);
