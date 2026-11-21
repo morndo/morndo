@@ -142,6 +142,7 @@ function shapeRules(body: unknown, where: string) {
     if (k === "href") bad.push(`${path}: a hash or page link (use target or url)`);
     if ((k === "at" || /[a-z]At$/.test(k)) && v !== null && !isTime(v)) bad.push(`${path}: ${JSON.stringify(v)} is not an RFC 3339 time`);
     if (k === "currency" && !(typeof v === "string" && /^[A-Z]{3}$/.test(v) && Number.isInteger(parent.amountMinor))) bad.push(`${path}: money needs amountMinor and an ISO 4217 currency`);
+    if (k === "target" && typeof v === "string") bad.push(`${path}: a string target (use a Target object)`);
     if (k === "target" && v !== null && typeof v === "object") {
       if (!(v && typeof v === "object" && TARGETS.includes((v as any).kind))) bad.push(`${path}: target kind ${JSON.stringify((v as any)?.kind)}`);
       else targetsSeen.push(v);
