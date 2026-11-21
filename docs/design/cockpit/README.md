@@ -21,6 +21,7 @@ Both are built from one shell, so they differ only in what a module brings. The 
 | `src/shell.html` | Everything the modules share: styles, icons, the sidebar frame, the brief's masthead, settings, behaviour. |
 | `src/gtm.blocks.html`, `src/dev.blocks.html` | What one module brings, as blocks. A line `<!-- @@ name -->` starts the block `name`, which fills `@@BLOCK:name@@` in the shell. |
 | `src/build.py` | Builds the mockups into `mockups/`. Fonts and artworks are inlined. |
+| `backend-map.md` | Every function the mockups promise, mapped to what the server has, the 25 components to build, their order and the decisions needed first. |
 | `topic-status-framework.md` | The guard rails an agent follows when it writes a topic's status page. |
 | `src/share.extra.html` | The sharing proposal: styles and behaviour laid over the go-to-market module (a variant in `build.py`). |
 | `src/v2.extra.html` | The review's fixes, laid over the go-to-market module the same way (variant `v2`, frozen: a plain build skips it). |
