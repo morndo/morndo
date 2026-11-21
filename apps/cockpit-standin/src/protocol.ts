@@ -40,6 +40,7 @@ const problems = {
   unsupportedMediaType: [415, "Unsupported media type"],
   payloadTooLarge: [413, "Payload too large"],
   methodNotAllowed: [405, "Method not allowed"],
+  rateLimited: [429, "Too many requests"],
   idempotencyKeyReused: [422, "Idempotency key reused"],
   internal: [500, "Internal error"],
 } as const satisfies Partial<Record<ErrorCode, readonly [number, string]>>;

@@ -159,7 +159,8 @@ export async function start(module: Module, port: number, clock?: () => string):
         const key = header(req.headers["idempotency-key"]);
         const result = idempotency.run(viewer.id === world.owner.id ? "owner" : viewer.id, key, command, () => {
           const effect = world.act(command, viewer);
-          const privateTo = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit" ? viewer.id : undefined;
+          const settings = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit";
+          const privateTo = (event: (typeof effect.events)[number]) => settings || event.type === "drafts.changed" ? viewer.id : undefined;
           const events = feed.publish(world, effect.events, now(), privateTo, frames => {
             const check = validate(definition, { ...effect, events: frames });
             if (!check.ok) throw new Error(`Invalid ${definition}: ${check.errors.join(", ")}`);
@@ -169,7 +170,11 @@ export async function start(module: Module, port: number, clock?: () => string):
         });
         respond(res, 200, definition, result);
       } else if (method === "post" && route.path === `${BASE}/uploads`) {
-        const result = validate<UploadInput>("UploadInput", await readJson(req));
+        const payload = await readJson(req);
+        if (payload && typeof payload === "object" && "data" in payload && typeof payload.data === "string" && payload.data.length > 699052) {
+          throw new Problem("payloadTooLarge", "Files are limited to 512 KiB.");
+        }
+        const result = validate<UploadInput>("UploadInput", payload);
         if (!result.ok) throw new Problem("badRequest", result.errors.join(", "));
         respond(res, 200, "Attachment", uploads.add(result.value, viewer.id));
       } else if (route.path === `${BASE}/uploads/{id}`) {

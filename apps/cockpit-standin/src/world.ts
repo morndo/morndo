@@ -1,9 +1,10 @@
+import { readerCopy } from "./viewer-copy.ts";
 import { createHash } from "node:crypto";
 import { loadFixtures } from "@morndo/cockpit-api";
 import type {
   AccessView, Actor, ApiError, Ask, Attachment, BriefView, Command, DailyLimit,
   DecisionQueueView, DecisionView, DraftsView, Event, HistoryEntry, HistoryPage, LabelKind, LaneAct,
-  LaneView, ManagerView, Message, MessageAudience, ModelId, ModelsView, Pin, PullsView, Receipt,
+  LaneView, ManagerView, Message, MessageAudience, ModelId, ModelsView, PullsView, Receipt,
   RecentView, SearchView, SettingsView, SidebarView, SkillsView, Target, Theme, ThemePatch, ThreadView,
   TopicView, UsageView, WorkspaceView,
 } from "@morndo/cockpit-api";
@@ -19,10 +20,10 @@ const DAY = "2026-11-16";
 const hour = (time: string) => `${DAY}T${time}:00+01:00`;
 const byId = <T extends { id: string }>(items: readonly T[], id: string) => items.find(item => item.id === id);
 const target = (kind: Target["kind"], id: string | null = null): Target => ({ kind, id });
-const RANK: Record<LaneView["state"], number> = { bad: 4, warn: 3, new: 2, ok: 1, parked: 0, next: 0, idle: 0, done: -1, unknown: 0 };
+const RANK: Record<LaneView["state"], number> = { bad: 4, warn: 3, new: 2, ok: 1, parked: 0, next: 0, idle: 0, done: -1 };
 const WORDS: Record<LaneView["state"], string> = {
   bad: "Stuck", warn: "Needs you", ok: "Working", done: "Done", new: "Starting",
-  idle: "Idle", next: "Up next", parked: "Parked", unknown: "Unknown",
+  idle: "Idle", next: "Up next", parked: "Parked",
 };
 
 
@@ -118,7 +119,7 @@ export class World {
   private readonly recent = new Map<string, RecentView["items"]>();
   private readonly settlements = new Map<string, BriefView["settledBurns"][number]>();
   private readonly alerted = new Set<string>();
-  private readonly releasePause = new Map<string, number>();
+  private readonly personalDrafts = new Map<string, DraftsView>();
   private readonly pulls: PullsView;
   private readonly topics = new Map<string, TopicView>();
   private readonly lanes = new Map<string, LaneView>();
@@ -198,6 +199,14 @@ export class World {
         if (decisionThread && !byId(decisionThread.messages, message.id)) decisionThread.messages.push(message);
       }
     }
+    const partnerships = this.threads.get("topic:partnerships");
+    if (partnerships && this.people.has("tom-ahrens")) {
+      const note = this.message(this.owner, "Tom, this is where Partnerships stands, live. The weekly report still comes on Friday.", null,
+        { kind: "viewer", personId: "tom-ahrens" });
+      note.at = "2026-11-16T08:00:00+01:00";
+      partnerships.messages.push(note);
+      partnerships.messages.sort((left, right) => Date.parse(left.at) - Date.parse(right.at));
+    }
     for (const topic of this.topics.values()) {
       for (const day of topic.history?.days ?? []) {
         for (const row of day.entries) {
@@ -218,7 +227,7 @@ export class World {
   viewer(id: string | null): Actor {
     if (!id) return this.owner;
     const person = this.people.get(id);
-    if (!person) throw new Problem("forbidden", "This reader is not part of the workspace.");
+    if (!person || person.membershipState === "invited") throw new Problem("forbidden", "This reader is not part of the workspace.");
     return person;
   }
 
@@ -256,12 +265,14 @@ export class World {
       case "TopicStatusView": return this.status(key, viewer);
       case "LaneView": return this.visibleLane(key, viewer);
       case "ManagerView": this.requireOwner(viewer); return this.manager(viewer);
-      case "DraftsView": this.requireOwner(viewer); return this.draftsView();
+      case "DraftsView": return this.draftsView(viewer);
       case "SkillsView": this.requireOwner(viewer); return this.skills;
       case "SettingsView": return { ...this.settings, decisionRights: viewer.id === this.owner.id ? this.settings.decisionRights : [],
         ...this.prefsOf(viewer, query.get("deviceId")) };
       case "PullsView": this.requireOwner(viewer); return this.pullsView();
-      case "ModelsView": return this.modelPicker;
+      case "ModelsView": return viewer.id === this.owner.id ? this.modelPicker : {
+        items: this.modelPicker.items.map(({ id, name }) => ({ id, name, vendor: null, state: null })),
+      };
       case "RecentView": return { items: (this.recent.get(viewer.id) ?? []).filter(item => this.recentTitle(item.target, viewer)) } satisfies RecentView;
       case "ThreadView": return this.threadView(key, viewer, query);
       case "SearchView": return this.search(query, viewer);
@@ -317,16 +328,17 @@ export class World {
       case "prefs.set": return this.setPrefs(command, viewer);
       case "decisionRight.set": return this.decisionRight(command.rule, command.who, command.dailyLimit, command.personId ?? null, viewer);
       case "recent.visit": return this.visitPage(command.target, viewer);
-      case "skill.run": return this.runSkill(command.skill, command.text, command.model, viewer);
+      case "skill.run": return this.runSkill(command.skill, command.text, command.model, command.topicId ?? null, viewer);
       case "skill.create": return this.createSkill(command.description, viewer);
       case "access.set": return this.setAccess(command.topicId, command.personId, command.access.kind, command.access.stages ?? [], viewer);
       case "access.invite": return this.invite(command.topicId, command.nameOrEmail, viewer);
       case "access.revoke": return this.revoke(command.invitationId, viewer);
-      case "access.statusLink": return this.statusLink(command.topicId, viewer);
+      case "access.statusLink": return this.statusLink(command.topicId, command.enabled ?? true, viewer);
       case "stage.assign": return this.assign(command.topicId, command.stage, command.personId, viewer);
       case "topic.seen": return this.visit(command.topicId, viewer);
       case "guardrail.set": return this.guardrail(command.name, command.on, viewer);
       case "pull.hold": return this.hold(command.pullId, viewer);
+      case "pull.unhold": return this.unhold(command.pullId, viewer);
       case "connection.connect": return this.connect(command.connectionId, viewer);
       case "module.switch": this.requireOwner(viewer); return done([{ type: "module.changed", moduleId: command.moduleId }]);
       case "handover.confirm": return this.confirm(command.laneId, viewer);
@@ -348,7 +360,7 @@ export class World {
   private role(id: string, viewer: Actor): TopicRole {
     if (viewer.id === this.owner.id) return "owner";
     const kind = this.accessEntry(id, viewer)?.access.kind;
-    return kind && kind !== "unknown" ? kind : "none";
+    return kind ?? "none";
   }
 
   private fullTopic(id: string, viewer: Actor): boolean {
@@ -389,8 +401,14 @@ export class World {
   }
 
   private projectLane(lane: LaneView, viewer: Actor): LaneView {
-    if (viewer.id === this.owner.id) return lane;
     const decision = lane.decisionId ? this.decisions.get(lane.decisionId) : undefined;
+    if (viewer.id !== this.owner.id) this.shareLaneCopy(lane);
+    if (decision && (decision.state === "approved" || decision.state === "declined")) {
+      const actor = this.history.get(`decision-${decision.id}`)?.row.actor ?? this.owner;
+      const verb = decision.state === "approved" ? "approved" : "declined";
+      lane.standing.headline = `${actor.id === viewer.id ? "You" : actor.shortName} ${verb} it.`;
+    }
+    if (viewer.id === this.owner.id) return lane;
     if (decision && !this.hasDecisionRight(decision, viewer)) {
       lane.decisionId = null;
       lane.approveLabel = null;
@@ -415,6 +433,31 @@ export class World {
     return lane;
   }
 
+  private shareLaneCopy(lane: LaneView): void {
+    const copy = (text: string) => readerCopy(text, this.owner.shortName);
+    lane.stateWord = copy(lane.stateWord);
+    lane.status = copy(lane.status);
+    lane.standing = { headline: copy(lane.standing.headline), detail: copy(lane.standing.detail) };
+    lane.next = readerCopy(lane.next, this.owner.shortName);
+    lane.afterNext = readerCopy(lane.afterNext, this.owner.shortName);
+    lane.yours = readerCopy(lane.yours, this.owner.shortName);
+    lane.after = readerCopy(lane.after, this.owner.shortName);
+    lane.doneNote = copy(lane.doneNote);
+    if (lane.handover) lane.handover.ifSo = copy(lane.handover.ifSo);
+    lane.checks = lane.checks.map(copy);
+    lane.steps = lane.steps.map(step => ({ ...step, who: copy(step.who), text: copy(step.text) }));
+    lane.made = lane.made.map(item => ({ ...item, detail: copy(item.detail) }));
+    lane.lead = this.shareActorCopy(lane.lead);
+    lane.crew = lane.crew.map(actor => this.shareActorCopy(actor));
+    lane.askedMeta.source = copy(lane.askedMeta.source);
+    lane.askedMeta.note = readerCopy(lane.askedMeta.note, this.owner.shortName);
+  }
+
+  private shareActorCopy(actor: Actor): Actor {
+    const owner = this.owner.shortName;
+    return { ...actor, text: readerCopy(actor.text, owner), word: readerCopy(actor.word, owner), record: readerCopy(actor.record, owner) };
+  }
+
   private lane(id: string): LaneView | undefined {
     const stored = this.lanes.get(id);
     if (!stored || this.removed.has(id)) return undefined;
@@ -432,7 +475,7 @@ export class World {
     const decision = lane.decisionId && this.decisions.get(lane.decisionId);
     const held = decision && this.pulls.items.some(pull => pull.decisionId === decision.id && pull.held);
     if (decision && decision.state !== "open") {
-      lane.acts = decision.state === "expired" ? [] : [{ id: "undo", label: "Undo", tone: "quiet", target: null, personId: null }];
+      lane.acts = decision.state === "expired" || decision.release?.stage === "done" ? [] : [{ id: "undo", label: "Undo", tone: "quiet", target: null, personId: null }];
       if (decision.state === "approved" && !held) {
         const release = decision.release;
         lane.yours = null;
@@ -441,14 +484,28 @@ export class World {
         lane.stateWord = release?.stage === "scheduled" ? "Scheduled" : WORDS[lane.state];
         if (release) {
           const done = release.stage === "done";
-          lane.next = done ? "Report the rollout result" : release.stage === "scheduled" ? "Rollout is scheduled" : "Watch export failures during rollout";
-          lane.standing = { headline: "You approved it.", detail: done ? "The rollout is complete." : decision.doneNote };
-          lane.lead = { ...lane.lead, state: lane.state, word: lane.stateWord };
+          const scheduled = release.stage === "scheduled";
+          const phrase = done ? "The rollout is complete." : scheduled
+            ? "The rollout is approved and scheduled." : "The release is rolling out and export failures are being watched.";
+          lane.next = done ? "Report the rollout result" : scheduled ? "Rollout is scheduled" : "Watch export failures during rollout";
+          lane.nextAt = scheduled ? release.scheduledAt : release.startedAt && !done
+            ? new Date(Date.parse(release.startedAt) + release.watchMinutes * 60000).toISOString() : null;
+          lane.status = phrase;
+          lane.standing = { headline: "You approved it.", detail: phrase };
+          lane.lead = { ...lane.lead, state: lane.state, word: lane.stateWord, text: phrase };
           lane.crew = lane.crew.map(member => member.id === lane.lead.id ? lane.lead : member);
-          lane.steps = lane.steps.map(step => !done ? step : { ...step, kind: "ok" });
+          lane.steps = lane.steps.map(step => step.text === "Released to production" ? {
+            ...step, kind: done ? "ok" : scheduled ? "todo" : "now",
+            who: done ? "Release · complete" : scheduled ? "Release · scheduled" : "Release · watching",
+          } : step);
+          lane.made = lane.made.map(item => item.target?.kind === "decision"
+            ? { ...item, detail: `${decision.shortTitle} · approved` }
+            : item.target?.kind === "pull" ? { ...item, detail: done ? "Released" : scheduled ? "Rollout scheduled" : "Rollout in progress" } : item);
         } else {
           lane.next = lane.afterNext ?? lane.next;
-          lane.standing = { headline: "You approved it.", detail: lane.after ?? lane.status };
+          lane.nextAt = lane.afterNextAt ?? lane.nextAt;
+          lane.status = lane.after ?? decision.doneNote;
+          lane.standing = { headline: "You approved it.", detail: lane.status };
           let promoted = false;
           lane.steps = lane.steps.map(step => {
             if (step.kind === "now") return { ...step, kind: "ok" };
@@ -467,10 +524,12 @@ export class World {
           lane.yours = null;
           lane.waitsFor = null;
           lane.next = null;
+          lane.nextAt = null;
           lane.approveLabel = null;
           lane.steps = lane.steps.map(step => step.kind === "now" ? { ...step, kind: "todo" } : step);
         }
-        lane.standing = { headline, detail: decision.ifNoAnswer ?? headline };
+        lane.status = decision.ifNoAnswer ?? headline;
+        lane.standing = { headline, detail: lane.status };
       }
     }
     return lane;
@@ -493,7 +552,7 @@ export class World {
     const lanes = this.allLanes(viewer).filter(lane => lane.state !== "done").sort(sortLanes);
     const pinIds = this.pinsOf(viewer);
     const open = this.queue(viewer).open;
-    const pinnable = this.sidebarBase.pinnable.filter(pin => this.pinVisible(pin, viewer)).map(pin => ({
+    const pinnable = (viewer.id === this.owner.id ? this.sidebarBase.pinnable : []).map(pin => ({
       ...pin, pinned: pinIds.includes(pin.id), badge: pin.id === "t-decide" ? open > 0 : pin.badge,
       badgeCount: pin.id === "t-decide" ? open : null,
     }));
@@ -503,9 +562,10 @@ export class World {
     const groups = this.sidebarBase.groups.filter(group => this.role(group.id, viewer) !== "none").map(group => {
       const topic = this.topics.get(group.id);
       const inGroup = lanes.filter(lane => lane.topicId === group.id);
-      const worst = inGroup[0]?.state;
+      const health = this.topicView(group.id, viewer, new URLSearchParams()).health;
+      const worst = health?.state ?? inGroup[0]?.state;
       const mark = worst && ["bad", "warn", "new", "ok"].includes(worst) ? worst === "new" ? "ok" : worst : null;
-      return { ...group, open: topic?.open ?? group.open, stateWord: worst ? WORDS[worst] : topic?.health?.word ?? "Idle", mark, lanes: inGroup.map(summarize) };
+      return { ...group, open: topic?.open ?? group.open, stateWord: health?.word ?? (worst ? WORDS[worst] : "Idle"), mark, lanes: inGroup.map(summarize) };
     });
     return {
       ...this.sidebarBase, groups, pinnable, managerLanes: lanes.filter(lane => !lane.topicId).map(summarize),
@@ -631,7 +691,7 @@ export class World {
       summary: `${lanes.length} lanes in ${projects.size} ${this.module === "dev" ? "projects" : "topics"} · ${waiting ? `${waiting} wait for you` : "none waits for you"}`,
       lanes: lanes.map(lane => ({
         id: lane.id, title: lane.title, topicId: lane.topicId, topicName: this.topics.get(lane.topicId ?? "")?.name ?? "Manager",
-        leadName: labelFor(lane, viewer), state: lane.state, stateWord: lane.stateWord, next: lane.next ?? "",
+        leadName: labelFor(lane, viewer), state: lane.state, stateWord: lane.stateWord, next: lane.next ?? "", nextAt: lane.nextAt,
         reason: byId(this.managerBase.lanes, lane.id)?.reason ?? null,
       })),
       asks: [...asks, ...this.managerBase.asks],
@@ -645,6 +705,9 @@ export class World {
     const stages = this.accessEntry(id, viewer)?.access.stages ?? [];
     const view = structuredClone(stored);
     view.viewer = { role, stages, sharedBy: role === "owner" ? null : this.owner };
+    view.seenBy = (this.access.get(id)?.people ?? []).filter(entry => entry.access.kind !== "none" && entry.person.membershipState !== "invited")
+      .map(entry => ({ id: entry.person.id, name: entry.person.name, avatar: entry.person.avatar,
+        access: entry.access.kind === "view" ? "view" : "work" }));
     view.stages = view.stages.map(stage => {
       const access = this.fullTopic(id, viewer) || stages.includes(stage.name)
         ? "work" : role === "view" ? "view" : "locked";
@@ -653,7 +716,7 @@ export class World {
     const lanes = this.allLanes(viewer).filter(lane => lane.topicId === id).sort(sortLanes);
     view.lanes = lanes.map(lane => ({
       id: lane.id, title: lane.title, state: lane.state, stateWord: lane.stateWord,
-      leadName: labelFor(lane, viewer), next: lane.next ?? "",
+      leadName: labelFor(lane, viewer), next: lane.next ?? "", nextAt: lane.state === "done" ? lane.closedAt : lane.nextAt,
     }));
     const approved = (decisionId: string) => this.decisions.get(decisionId)?.state === "approved";
     const settled = stored.stuck && stored.stuck.actions.length > 0 && !lanes.some(lane => lane.id === stored.stuck?.actions[0]?.laneId && lane.state === "bad");
@@ -667,7 +730,7 @@ export class World {
     });
     view.tasks = view.tasks.map(task => {
       const lane = task.laneId ? byId(lanes, task.laneId) : undefined;
-      return lane ? { ...task, state: lane.state, stateWord: lane.stateWord, next: lane.next ?? task.next } : task;
+      return lane ? { ...task, state: lane.state, stateWord: lane.stateWord, next: lane.next ?? task.next, nextAt: lane.nextAt ?? task.nextAt } : task;
     });
     if (view.plan) {
       for (const stage of view.plan.stages) {
@@ -733,23 +796,29 @@ export class World {
       if (goal.guardrails && view.spend && view.spend.cap.amountMinor > 0) {
         const ratio = view.spend.spent.amountMinor / view.spend.cap.amountMinor;
         if (id !== "partnerships") goal.guardrails.items.push({
-          what: "Agents this week", value: "", limit: "Then they pause and ask", ratio,
+          what: "Agents this week",
+          value: { kind: "money", money: view.spend.spent, cap: null },
+          limit: { kind: "money", money: view.spend.cap, cap: null },
+          ratio,
           state: ratio >= 1 ? "breached" : ratio >= 0.8 ? "near" : "held",
         });
       }
     }
+    const goal = view.goal;
+    const liveLanes = this.module === "dev" ? this.allLanes(this.owner).filter(lane => lane.topicId === id).sort(sortLanes) : [];
+    if (goal) {
+      view.health = { state: goal.verdict.state, word: goal.verdict.word };
+    } else if (this.module === "dev" && [...this.decisions.values()].some(decision => decision.topicId === id && decision.state !== "open")) {
+      const worst = liveLanes.find(lane => lane.state !== "done" && lane.state !== "parked");
+      view.health = { state: worst?.state === "bad" ? "bad" : worst?.state === "warn" ? "warn" : worst ? "ok" : "idle",
+        word: worst ? WORDS[worst.state] : "Idle" };
+    }
+    const nextReportAt = view.meta?.nextReportAt ?? null;
+    view.status = { topicId: id, name: view.name, signed: goal?.signed ?? null, goal: goal?.target ?? null,
+      unit: goal?.unit ?? null, health: view.health, nextReportAt };
     if (viewer.id !== this.owner.id) {
       const dash = role === "all" ? "You work on all of it" : role === "stages" ? `You run ${stages.join(", ")}` : "You see the status";
-      view.meta = { askedBy: null, ownerLine: null, nextReport: null, parts: [`Shared by ${this.owner.name}`, dash] };
-      if (role === "view" && id === "partnerships") view.meta.nextReport = "The weekly report comes on Friday at 08:00.";
-      const goal = view.goal;
-      const health = goal ? { state: goal.verdict.state, word: goal.verdict.word } : view.health;
-      view.status = {
-        topicId: id, name: view.name,
-        signed: goal?.signed ?? null, goal: goal?.target ?? null, unit: goal?.unit ?? null, health,
-        nextReportAt: id === "partnerships" ? "2026-11-20T08:00:00+01:00" : null,
-      };
-      view.health = health;
+      view.meta = { askedBy: null, ownerLine: null, nextReportAt, parts: [`Shared by ${this.owner.name}`, dash] };
     }
     if (role === "view" || role === "stages") {
       const team = new Set(lanes.flatMap(lane => [lane.lead.id, ...lane.crew.map(actor => actor.id)]));
@@ -765,7 +834,44 @@ export class World {
       view.focusLaneId = lanes.find(lane => lane.waitsFor?.id === viewer.id)?.id ?? null;
       view.noGoal = null;
       view.intro = "";
-      view.chatSub = role === "view" ? "" : `${stages.join(", ")} chat`;
+      view.chatSub = role === "view" ? `You and ${this.owner.shortName}.` : `${stages.join(", ")} chat`;
+    }
+    if (viewer.id !== this.owner.id) {
+      const owner = this.owner.shortName;
+      view.intro = readerCopy(view.intro, owner);
+      view.crew = view.crew.map(actor => this.shareActorCopy(actor));
+      if (view.goal) {
+        view.goal.calm = readerCopy(view.goal.calm, owner);
+        view.goal.calmSub = readerCopy(view.goal.calmSub, owner);
+        view.goal.routine = readerCopy(view.goal.routine, owner);
+        view.goal.verdict.action = readerCopy(view.goal.verdict.action, owner);
+        if (view.goal.gap) view.goal.gap.steps = view.goal.gap.steps.map(step => readerCopy(step, owner));
+        for (const deal of view.goal.deals) {
+          deal.stage = readerCopy(deal.stage, owner);
+          deal.short = readerCopy(deal.short, owner);
+          deal.evidence = readerCopy(deal.evidence, owner);
+          deal.next = readerCopy(deal.next, owner);
+          deal.alt = null;
+        }
+        for (const guardrail of view.goal.guardrails?.items ?? []) {
+          guardrail.what = readerCopy(guardrail.what, owner);
+          if (guardrail.limit.kind === "policy") guardrail.limit.text = readerCopy(guardrail.limit.text, owner);
+        }
+        const decision = this.decisions.get(view.goal.decision?.decisionId ?? "");
+        if (view.goal.decision && decision && !this.hasDecisionRight(decision, viewer)) {
+          view.goal.decision.approveLabel = null;
+        }
+      }
+      for (const stage of view.plan?.stages ?? []) {
+        stage.summary = readerCopy(stage.summary, owner);
+        stage.alt = null;
+        for (const row of stage.rows) {
+          row.who = readerCopy(row.who, owner);
+          row.text = readerCopy(row.text, owner);
+          if (row.when.kind === "policy") row.when.text = readerCopy(row.when.text, owner);
+          row.alt = null;
+        }
+      }
     }
     view.history = role === "view" || (!stored.history && ![...this.history.values()].some(action => action.topicId === id))
       ? null : this.historyView(id, viewer, query);
@@ -808,7 +914,9 @@ export class World {
         day.entries.push({ kind: "seen" });
         seenAdded = true;
       }
-      day.entries.push(role === "stages" ? { ...entry, text: entry.text.replaceAll("your mail", `${this.owner.shortName}'s mail`) } : entry);
+      day.entries.push(viewer.id !== this.owner.id ? {
+        ...entry, text: readerCopy(entry.text, this.owner.shortName), actor: this.shareActorCopy(entry.actor),
+      } : entry);
     }
     const newSince = records.filter(item => !seenAt || Date.parse(item.entry.at) > Date.parse(seenAt)).length;
     return { seen: { at: seenAt }, shown: items.length, newSince, since: base?.since ?? "", days, nextCursor };
@@ -830,14 +938,18 @@ export class World {
       return Boolean(lane && this.sharedLane(lane, viewer));
     }
     const topicId = this.threadTopic(id);
-    return topicId ? this.fullTopic(topicId, viewer) || (scope.kind === "topic" && this.role(topicId, viewer) === "stages") : viewer.id === this.owner.id;
+    return topicId ? this.fullTopic(topicId, viewer) || (scope.kind === "topic" && ["stages", "view"].includes(this.role(topicId, viewer))) : viewer.id === this.owner.id;
   }
 
   private seesAudience(topicId: string, audience: MessageAudience, viewer: Actor): boolean {
-    if (this.fullTopic(topicId, viewer)) return true;
-    const access = this.accessEntry(topicId, viewer)?.access;
-    return access?.kind === "stages" && (audience.kind === "topic" ||
-      (audience.kind === "stage" && Boolean(access.stages?.includes(audience.stage))));
+    if (viewer.id === this.owner.id) return true;
+    if (audience.kind === "owner") return false;
+    const role = this.role(topicId, viewer);
+    if (role === "none") return false;
+    if (audience.kind === "viewer") return audience.personId === viewer.id;
+    if (role === "all") return true;
+    const stages = this.accessEntry(topicId, viewer)?.access.stages ?? [];
+    return role === "stages" && (audience.kind === "topic" || (audience.kind === "stage" && stages.includes(audience.stage)));
   }
 
   private writableThread(id: string, viewer: Actor): ThreadView {
@@ -857,15 +969,17 @@ export class World {
     if (!this.canReadThread(id, viewer)) throw new Problem("forbidden", "This reader cannot see that conversation.");
     const associatedTopic = this.threadTopic(id);
     const view = structuredClone(stored);
-    if (associatedTopic && scope?.kind === "topic" && this.role(associatedTopic, viewer) === "stages") {
+    if (associatedTopic) view.messages = view.messages.filter(message => this.seesAudience(associatedTopic, message.audience, viewer));
+    const role = associatedTopic ? this.role(associatedTopic, viewer) : "owner";
+    if (associatedTopic && scope?.kind === "topic" && (role === "stages" || role === "view")) {
       const stages = this.accessEntry(associatedTopic, viewer)?.access.stages ?? [];
-      view.scope = `${stages.join(", ")} only`;
+      view.scope = role === "view" ? `You and ${this.owner.shortName}.` : `${stages.join(", ")} only`;
       view.sub = view.scope;
       view.since = null;
       view.agents = null;
       view.pinned = null;
       view.suggestions = [];
-      view.messages = view.messages.filter(message => this.seesAudience(associatedTopic, message.audience, viewer)).map(message => {
+      view.messages = view.messages.map(message => {
         const visible = (id: string) => {
           const lane = this.lanes.get(id);
           return Boolean(lane && this.sharedLane(lane, viewer));
@@ -889,16 +1003,25 @@ export class World {
     if (edited) view.since = { seen: view.since?.seen ?? { at: null }, lines: edited };
     const pin = view.pinned;
     const decision = pin?.decisionId ? this.decisions.get(pin.decisionId) : undefined;
-    if (pin && decision && decision.state !== "open" && decision.state !== "unknown") {
+    if (pin && decision && decision.state !== "open") {
       pin.state = decision.state;
       if (decision.state === "approved") {
         const lane = pin.laneId ? this.lane(pin.laneId) : undefined;
-        pin.title = `${lane?.short ?? pin.title}: you approved it`;
+        const actor = this.history.get(`decision-${decision.id}`)?.row.actor ?? this.owner;
+        pin.title = `${lane?.short ?? pin.title}: ${actor.id === viewer.id ? "you" : actor.shortName} approved it`;
         if (lane?.shortAfter) pin.detail = lane.shortAfter;
       }
     } else if (pin && pin.laneId && this.lane(pin.laneId)?.state !== "bad" && pin.state === "stuck") {
       view.pinned = null;
     }
+    view.messages = view.messages.map(message => ({
+      ...message,
+      author: viewer.id === this.owner.id ? message.author : this.shareActorCopy(message.author),
+      actions: message.actions.filter(action => {
+        const lane = this.lane(action.laneId);
+        return lane && this.sharedLane(lane, viewer) && this.projectLane(lane, viewer).acts.some(choice => choice.id === action.id);
+      }),
+    }));
     const result = page([...view.messages].reverse(), item => item.id, `thread:${id}:${viewer.id}`, query);
     return { ...view, messages: result.items.reverse(), nextCursor: result.nextCursor };
   }
@@ -914,7 +1037,7 @@ export class World {
     const people = topics.flatMap(topic => topic.crew.filter(actor => actor.kind === "person").map(actor => ({ actor, topicId: topic.id })));
     const decisions = [...this.decisions.values()].filter(d => this.fullTopic(d.topicId, viewer))
       .map(d => ({ ...d, lead: d.laneId ? this.lane(d.laneId)?.lead ?? null : null }));
-    const results = searchResults(text, scope, topics, lanes, people, decisions, this.skills.skills);
+    const results = searchResults(text, scope, topics, lanes, people, decisions, viewer.id === this.owner.id ? this.skills.skills : []);
     const scopeKey = createHash("sha256").update(JSON.stringify([text, scope, viewer.id])).digest("base64url");
     const { items, nextCursor } = page(results, item => `${item.kind}:${item.id}`, `search:${scopeKey}`, query);
     return { query: text, scope: scope || null, results: items, nextCursor, answer: isQuestion(text) ? answerTo(text, scope || null, topics, lanes) : null };
@@ -963,13 +1086,9 @@ export class World {
     return this.pinned.get(viewer.id) ?? (viewer.id === this.owner.id ? this.sidebarBase.pins.map(pin => pin.id) : []);
   }
 
-  private pinVisible(pin: Pin, viewer: Actor): boolean {
-    return viewer.id === this.owner.id || (pin.target?.kind === "topic" && this.role(pin.target.id ?? "", viewer) !== "none");
-  }
-
   private pin(id: string, viewer: Actor, action: "add" | "remove" | "move", to = 0): Effect {
-    const pin = requireRecord(byId(this.sidebarBase.pinnable, id), "pin");
-    if (!this.pinVisible(pin, viewer)) throw new Problem("forbidden", "That pin is outside this reader’s access.");
+    this.requireOwner(viewer);
+    requireRecord(byId(this.sidebarBase.pinnable, id), "pin");
     const pins = this.pinsOf(viewer).slice();
     const from = pins.indexOf(id);
     if (action === "add" && from < 0) {
@@ -1005,10 +1124,11 @@ export class World {
   }
 
   private status(id: string, viewer: Actor) {
-    const topic = requireRecord(this.topics.get(id), "topic");
     if (!this.access.get(id)?.statusLink) throw missing("status link");
-    if (!this.people.has(viewer.id)) throw new Problem("forbidden", "The status link is for this workspace.");
-    return { health: topic.health, stages: (topic.plan?.stages ?? []).map(({ name, percent }) => ({ name, percent })) };
+    const topic = this.topicView(id, viewer, new URLSearchParams());
+    const status = requireRecord(topic.status, "topic status");
+    return { health: topic.health, signed: status.signed, goal: status.goal, unit: status.unit, nextReportAt: status.nextReportAt,
+      stages: (topic.plan?.stages ?? []).map(({ name, percent }) => ({ name, percent })) };
   }
 
   private setAccess(id: string, personId: string, kind: "all" | "stages" | "view" | "none", stages: string[], viewer: Actor): Effect {
@@ -1078,7 +1198,6 @@ export class World {
       case "skills": return viewer.id === this.owner.id ? "Skills" : undefined;
       case "brief": return "Brief";
       case "settings": return "Settings";
-      case "unknown": return undefined;
     }
   }
 
@@ -1096,27 +1215,46 @@ export class World {
     const access = requireRecord(this.access.get(id), "topic");
     const name = nameOrEmail.trim();
     if (!name) throw new Problem("badRequest", "Enter a name or email address.");
-    if (access.people.some(item => item.person.name.toLowerCase() === name.toLowerCase())
-      || access.invitations.some(item => item.nameOrEmail.toLowerCase() === name.toLowerCase())) return done();
-    access.invitations.push({ id: `invite-${++this.serial}`, nameOrEmail: name, state: "pending", invitedAt: this.now });
+    const lookup = name.toLowerCase();
+    if (access.invitations.some(item => item.nameOrEmail.toLowerCase() === lookup)) return done();
+    const existing = [...this.access.values()].flatMap(record => record.people)
+      .find(entry => entry.person.name.toLowerCase() === lookup || entry.email?.toLowerCase() === lookup);
+    const current = existing && this.accessEntry(id, existing.person);
+    if (current && current.access.kind !== "none") return done();
+    const invitationId = `invite-${++this.serial}`;
+    const person = existing?.person ?? { ...blankActor(name.includes("@") ? name.split("@")[0] ?? name : name, "person"),
+      id: invitationId, membershipState: "invited" as const };
+    this.people.set(person.id, person);
+    this.setAccess(id, person.id, "view", [], viewer);
+    const entry = this.accessEntry(id, person);
+    const email = existing?.email ?? (name.includes("@") ? lookup : undefined);
+    if (entry && email) entry.email = email;
+    if (person.membershipState === "invited") {
+      access.invitations.push({ id: invitationId, personId: person.id, nameOrEmail: name, state: "pending", invitedAt: this.now });
+    }
     return done([{ type: "access.changed", topicId: id }]);
   }
 
   private revoke(id: string, viewer: Actor): Effect {
     this.requireOwner(viewer);
     for (const [topicId, access] of this.access) {
-      const i = access.invitations.findIndex(invitation => invitation.id === id);
-      if (i < 0) continue;
-      access.invitations.splice(i, 1);
+      const invitation = byId(access.invitations, id);
+      if (!invitation) continue;
+      const person = this.people.get(invitation.personId);
+      if (person?.membershipState === "invited") {
+        this.setAccess(topicId, person.id, "none", [], viewer);
+        access.people = access.people.filter(entry => entry.person.id !== person.id);
+      }
+      access.invitations = access.invitations.filter(item => item.id !== id);
       return done([{ type: "access.changed", topicId }]);
     }
     throw missing("invitation");
   }
 
-  private statusLink(id: string, viewer: Actor): Effect {
+  private statusLink(id: string, enabled: boolean, viewer: Actor): Effect {
     this.requireOwner(viewer);
     const access = requireRecord(this.access.get(id), "topic");
-    access.statusLink ??= { url: `${this.origin()}${BASE}/topics/${id}/status`, orgOnly: true };
+    access.statusLink = enabled ? { url: `${this.origin()}${BASE}/topics/${id}/status`, orgOnly: true } : null;
     return done([{ type: "access.changed", topicId: id }]);
   }
 
@@ -1175,16 +1313,18 @@ export class World {
     else this.requireOwner(viewer);
     const proposedLead = options.leadId && topic ? requireRecord(byId(topic.crew, options.leadId), "lead") : null;
     const assigned = proposedLead ?? (topic && leadFor(topic, text, this.routes)) ?? blankActor("Manager");
-    const lead = { ...assigned, state: "new", word: "Leads", text: "Reading your ask", engine: model?.name ?? assigned.engine ?? "Auto" } satisfies Actor;
+    const requester = viewer.id === this.owner.id ? "your" : `${viewer.shortName}'s`;
+    const lead = { ...assigned, state: "new", word: "Leads", text: `Reading ${requester} ask`, engine: model?.name ?? assigned.engine ?? "Auto" } satisfies Actor;
     const id = `new-${++this.serial}`;
     const chain = /\b(then|once|after|before)\b/i.test(text);
-    const source = options.fromChat && topic ? `In the ${topic.name} chat` : "You to the Manager";
+    const source = options.fromChat && topic ? `In the ${topic.name} chat` : `${viewer.id === this.owner.id ? "You" : viewer.name} to the Manager`;
     const note = topic ? `Filed under ${topic.name}. ${lead.name} leads.` : "The Manager keeps it until it knows where it belongs.";
-    const status = topic ? `${lead.name} is reading your ask and will set what done means before starting.` : note;
+    const status = topic ? `${lead.name} is reading ${requester} ask and will set what done means before starting.` : note;
     const askText = options.attachment ? `${text} (with ${options.attachment.name})` : text;
     const lane: LaneView = {
       id, topicId, title: text, state: "new", stateWord: "Starting", lead, waitsFor: null,
-      openedAt: this.now, closedAt: null, next: "Within the hour", afterNext: null, decisionId: null,
+      openedAt: this.now, closedAt: null, next: null, nextAt: new Date(Date.parse(this.now) + 3600000).toISOString(),
+      afterNext: null, afterNextAt: null, decisionId: null,
       short: null, ask: null, shortAfter: null, recommendation: null, yours: null, checks: [], delay: null,
       approveLabel: null, after: null, asked: askText, askedMeta: { source, note }, status,
       standing: { headline: "Just opened.", detail: status },
@@ -1220,7 +1360,7 @@ export class World {
       else this.removed.delete(id);
       const events: Event[] = [undone ? { type: "lane.removed", laneId: id } : { ...filed, topicId: lane.topicId }];
       if (lane.topicId) events.push({ type: "topic.changed", topicId: lane.topicId });
-      if (this.drafts.items.some(draft => draft.laneId === id)) events.push({ type: "drafts.changed" });
+      if (this.draftsFor(viewer).items.some(draft => draft.laneId === id)) events.push({ type: "drafts.changed" });
       return events;
     }, id, `file-${id}`);
     return { lane, receipt, message, events: [filed] };
@@ -1254,7 +1394,7 @@ export class World {
     const action = byId(lane.acts, actionId);
     if (actionId === "undo-file" && action) return this.undo(`file-${id}`, true, viewer);
     if (lane.decisionId && actionId === "undo" && action) return this.setDecision(lane.decisionId, "open", viewer);
-    if (lane.decisionId && actionId === "approve" && lane.approveLabel) return this.setDecision(lane.decisionId, "approved", viewer);
+    if (lane.decisionId && actionId === "approve" && action) return this.setDecision(lane.decisionId, "approved", viewer);
     if (!action) throw new Problem("badRequest", "That choice is not available on this lane.");
     if (action.target) return done([], id);
     if (id === "webinar" && (actionId === "post-passing" || actionId === "one-more-round")) {
@@ -1279,7 +1419,7 @@ export class World {
     const status = replies[action.id];
     if (!status || lane.state !== "bad") throw new Problem("badRequest", "That choice is not available on this lane.");
     const base = requireRecord(this.lanes.get(id), "lane");
-    const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, standing: base.standing, steps: base.steps, acts: base.acts };
+    const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, nextAt: base.nextAt, standing: base.standing, steps: base.steps, acts: base.acts };
     const next = {
       state: "ok", stateWord: "Working", status, next: status, standing: { headline: "Working again.", detail: status },
       steps: base.steps.map(step => step.kind === "now" ? { ...step, text: status } : step), acts: [] as LaneAct[],
@@ -1297,7 +1437,7 @@ export class World {
     const values = WEBINAR_SETTLEMENTS[choice];
     const base = requireRecord(this.lanes.get(lane.id), "lane");
     const topicId = requireRecord(base.topicId, "topic");
-    const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, standing: base.standing, steps: base.steps, acts: base.acts };
+    const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, nextAt: base.nextAt, standing: base.standing, steps: base.steps, acts: base.acts };
     const id = `action-${++this.serial}`;
     const settlement = {
       laneId: lane.id, actionId: id, title: values.receipt, stateWord: "Settled by you",
@@ -1307,7 +1447,8 @@ export class World {
       if (undone) this.settlements.delete(lane.id);
       else this.settlements.set(lane.id, settlement);
       Object.assign(base, undone ? previous : {
-        state: "ok", stateWord: "Working", status: values.status, next: values.status, acts: [],
+        state: "ok", stateWord: "Working", status: values.status, next: "Promo scheduled",
+        nextAt: this.briefBase.burns.find(burn => burn.laneId === lane.id)?.dueAt ?? null, acts: [],
         standing: { headline: "The promo is settled.", detail: values.status },
         steps: previous.steps.map(step => step.kind === "now" ? { kind: "ok", text: values.step, who: "You · now" } : step),
       });
@@ -1390,7 +1531,6 @@ export class World {
       if (decision.release && state === "approved") {
         decision.release.stage = "scheduled";
         decision.release.startedAt = null;
-        this.releasePause.delete(decision.release.pullId);
         events.push({ type: "release.changed", decisionId: id });
       }
       if (pull && state === "approved" && !pull.held) {
@@ -1426,6 +1566,19 @@ export class World {
     const { threadId, text } = command;
     const scope = requireRecord(threadScope(threadId), "thread");
     const topicId = this.threadTopic(threadId);
+    if (topicId && scope.kind === "topic" && (command.recipientId || this.role(topicId, viewer) === "view")) {
+      if (command.stage) throw new Problem("badRequest", "A status conversation has no stage.");
+      if (command.recipientId) this.requireOwner(viewer);
+      const personId = command.recipientId ?? viewer.id;
+      const recipient = this.viewer(personId);
+      if (this.role(topicId, recipient) !== "view") throw new Problem("forbidden", "This person does not have status access.");
+      const thread = requireRecord(this.threads.get(threadId), "thread");
+      const message = this.message(viewer, text, null, { kind: "viewer", personId });
+      message.attachment = command.attachment ?? null;
+      thread.messages.push(message);
+      return done([{ type: "message.posted", threadId, message }], null, message);
+    }
+    if (command.recipientId) throw new Problem("badRequest", "A status conversation belongs to a topic.");
     if (scope.kind === "topic" && topicId && (this.role(topicId, viewer) === "stages" || command.stage)) {
       const topic = requireRecord(this.topics.get(topicId), "topic");
       const stages = this.fullTopic(topicId, viewer) ? topic.stages.map(stage => stage.name) : this.accessEntry(topicId, viewer)?.access.stages ?? [];
@@ -1445,7 +1598,7 @@ export class World {
     const kind = scope.kind === "topic" || scope.kind === "manager" || scope.kind === "general"
       ? command.page && /^(sum up|summari[sz]e)\b/i.test(text) ? "question" : classify(text) : null;
     const model = this.model(command.model);
-    const sent = this.message(viewer, text, kind);
+    const sent = this.message(viewer, text, kind, scope.kind === "topic" && viewer.id === this.owner.id ? { kind: "owner" } : { kind: "topic" });
     sent.attachment = command.attachment ?? null;
     sent.model = model?.id ?? null;
     sent.page = command.page ?? null;
@@ -1462,13 +1615,10 @@ export class World {
       events.push(...filed.events);
     } else if (scope.kind === "lane") {
       const lane = this.visibleLane(scope.id, viewer);
-      reply = this.message(lane.lead, "Got it. I add it to this lane and tell you here when it is done.", null);
+      reply = this.message(lane.lead, `Got it. I added ${viewer.shortName}'s note and will report back here.`, null);
     } else if (kind === "question" && topic) {
-      const answer = answerTo(text, topic.id, [topic], this.allLanes(viewer).filter(lane => lane.topicId === topic.id));
-      const source = answer?.target?.kind === "lane" ? this.lanes.get(answer.target.id ?? "") : undefined;
-      const stage = source ? this.laneStage(source) : undefined;
-      if (stage) sent.audience = { kind: "stage", stage };
-      reply = this.message(blankActor(`${topic.name} manager`), this.questionReply(topic, text), null, sent.audience);
+      const answer = this.questionReply(topic, text);
+      reply = this.message(blankActor(`${topic.name} manager`), sent.audience.kind === "owner" ? answer : readerCopy(answer, this.owner.shortName), null, sent.audience);
     } else if (kind === "question" && (scope.kind === "manager" || scope.kind === "general")) {
       const page = command.page;
       const named = page ? this.recentTitle(page, viewer) : undefined;
@@ -1478,7 +1628,7 @@ export class World {
       reply = this.message(blankActor("Manager"), detail ? `From the record: ${detail}` : brief.lede, null);
     } else if (kind === "goalChange" && topic?.goal) {
       const decision = this.proposeGoal(topic, text, sent);
-      reply = this.message(blankActor(`${topic.name} manager`), "I put the goal change in Decide. The goal stays as it is until you approve it.", null);
+      reply = this.message(blankActor(`${topic.name} manager`), `I put the goal change in Decide. The goal stays as it is until ${this.owner.shortName} approves it.`, null);
       reply.decisionId = decision.id;
       events.push(...this.decisionEvents(decision));
       if (!this.prefsOf(viewer).interruptOnlyUrgent) events.push({ type: "attention.raised", target: target("decision", decision.id), reason: "A proposed goal change needs a decision." });
@@ -1489,6 +1639,7 @@ export class World {
       reply = this.message(blankActor(`${topic.name} manager`), "Noted as a decision and pinned for the team.", null);
       reply.decisionId = sent.decisionId;
     }
+    if (reply) reply.audience = sent.audience;
     for (const message of reply ? [sent, reply] : [sent]) {
       thread.messages.push(message);
       events.push({ type: "message.posted", threadId, message });
@@ -1498,20 +1649,19 @@ export class World {
 
   private projectGoalChange(goal: NonNullable<TopicView["goal"]>, change: NonNullable<DecisionView["goalChange"]>): void {
     const priorTarget = goal.target;
-    const unit = change.unit ?? goal.unit.split(/\s+by\s+/i)[0] ?? goal.unit;
+    const unit = change.unit ?? goal.unit;
     goal.target = change.to;
     goal.trajectory.goal = change.to;
     if (change.deadlineAt) goal.deadlineAt = change.deadlineAt;
     if (change.unit || change.deadlineAt) {
-      const date = goal.deadlineAt ? new Intl.DateTimeFormat("en-GB", { day: "numeric", month: "long", timeZone: "Europe/Berlin" }).format(new Date(goal.deadlineAt)) : null;
-      goal.unit = date ? `${unit} by ${date}` : unit;
+      goal.unit = unit;
       if (goal.trajectory.unit) goal.trajectory.unit = unit;
     }
-    const targetFigure = goal.figures.find(figure => figure.of === String(priorTarget));
-    if (targetFigure) targetFigure.of = String(change.to);
+    const targetFigure = goal.figures.find(figure => figure.of === priorTarget);
+    if (targetFigure) targetFigure.of = change.to;
     const gap = Math.max(0, goal.target - goal.signed - (goal.likely ?? 0));
     const unsecured = goal.figures.find(figure => /still (unsecured|missing)/i.test(figure.label));
-    if (unsecured) unsecured.value = String(gap);
+    if (unsecured) unsecured.value = gap;
     if (goal.gap) {
       goal.gap.says = gap === 0 ? `The current forecast reaches the goal of ${goal.target}.` : `To reach ${goal.target}, the forecast still needs ${gap} more ${unit}.`;
     }
@@ -1553,7 +1703,7 @@ export class World {
     const dateOnly = /\b(?:deadline|end date|due date)\b/i.test(text) && !/\b(?:target|from)\b/i.test(text);
     const match = dateOnly ? null : /\b(?:to|target is|goal is)\s+(\d+)\b(?:\s+([a-z][a-z -]*?))?(?=\s+by\b|[.!?,]|$)/i.exec(text);
     const to = match?.[1] ? Number(match[1]) : goal.target;
-    const currentUnit = goal.unit.split(/\s+by\s+/i)[0] ?? goal.unit;
+    const currentUnit = goal.unit;
     const namedUnit = match?.[2]?.trim() ?? /\bunit to ([a-z][a-z -]{0,199}?)(?=\s+by\b|[.!?,]|$)/i.exec(text)?.[1]?.trim();
     const unit = namedUnit && namedUnit.toLowerCase() !== currentUnit.toLowerCase() ? namedUnit : null;
     if (!Number.isSafeInteger(to) || to <= 0 || (match === null && !deadlineAt && !unit)) {
@@ -1598,9 +1748,19 @@ export class World {
     return done(containing.map(item => ({ type: "thread.changed", threadId: item.id })), null, message);
   }
 
-  private draftsView(): DraftsView {
-    const items = this.drafts.items.filter(draft => !draft.laneId || !this.removed.has(draft.laneId));
-    return { ...this.drafts, items, count: items.length };
+  private draftsFor(viewer: Actor): DraftsView {
+    if (viewer.id === this.owner.id) return this.drafts;
+    const stored = this.personalDrafts.get(viewer.id);
+    if (stored) return stored;
+    const drafts: DraftsView = { intro: "Drafts prepared for your review.", count: 0, items: [] };
+    this.personalDrafts.set(viewer.id, drafts);
+    return drafts;
+  }
+
+  private draftsView(viewer = this.owner): DraftsView {
+    const view = this.draftsFor(viewer);
+    const items = view.items.filter(draft => !draft.laneId || !this.removed.has(draft.laneId));
+    return { ...view, items, count: items.length };
   }
 
   private model(id: string | null | undefined) {
@@ -1611,19 +1771,29 @@ export class World {
     return model;
   }
 
-  private runSkill(id: string, text: string, model: string | null | undefined, viewer: Actor): Effect {
+  private runSkill(id: string, text: string, model: string | null | undefined, explicitTopic: string | null, viewer: Actor): Effect {
     const skill = requireRecord(byId(this.skills.skills, id), "skill");
+    const named = [...this.topics.values()].filter(item => skill.topics.toLowerCase().includes(item.name.toLowerCase()))
+      .sort((a, b) => b.name.length - a.name.length)[0]?.id ?? null;
+    const topicId = explicitTopic ?? named;
+    const owner = viewer.id === this.owner.id;
+    if (!owner) {
+      if (!topicId || !this.fullTopic(topicId, viewer)) throw new Problem("forbidden", "This skill needs work access to its topic.");
+      const delegation = this.settings.decisionRights.find(right => right.rule === "insideGuardrails");
+      if (skill.asksFirst || delegation?.who !== "agent" || (delegation.personId && delegation.personId !== viewer.id)) {
+        throw new Problem("forbidden", "The inside-guardrails decision right does not allow this skill run.");
+      }
+    }
     if (!skill.enabled) throw new Problem("skillDisabled", "Connect the skill’s provider before running it.");
-    const topic = [...this.topics.values()].filter(item => skill.topics.toLowerCase().includes(item.name.toLowerCase()))
-      .sort((a, b) => b.name.length - a.name.length)[0];
-    const file = this.file(text, viewer, { model: model ?? null, topicId: topic?.id ?? null, route: false });
-    if (skill.id === "weekly-summary") {
+    const file = this.file(text, viewer, { model: model ?? null, topicId, route: false });
+    if (skill.id === "weekly-summary" || !owner) {
       const draftId = `draft-${++this.serial}`;
-      this.drafts.items.push({
-        id: draftId, to: "Team", writtenAt: this.now, skill: skill.name, subject: "Weekly summary",
+      const drafts = this.draftsFor(viewer);
+      drafts.items.push({
+        id: draftId, to: "Team", writtenAt: this.now, skill: skill.name, subject: skill.id === "weekly-summary" ? "Weekly summary" : skill.name,
         body: text, laneId: file.lane.id, openUrl: `https://mail.example.test/mail/u/0/#drafts/${draftId}`,
       });
-      this.drafts.count = this.drafts.items.length;
+      drafts.count = drafts.items.length;
       file.events.push({ type: "drafts.changed" });
     }
     return done(file.events, file.lane.id, file.message, file.receipt);
@@ -1670,32 +1840,32 @@ export class World {
   private hold(id: string, viewer: Actor): Effect {
     this.requireOwner(viewer);
     const pull = requireRecord(byId(this.pulls.items, id), "pull request");
-    if (pull.state === "released") throw new Problem("conflict", "The pull request is already released.");
-    if (pull.held) return done();
-    const prev = pull.state;
-    const release = pull.decisionId ? this.decisions.get(pull.decisionId)?.release : null;
-    const priorStage = release?.stage;
-    let heldAt = Date.parse(this.now);
+    if (pull.state !== "autoMerge" || !pull.autoMergeAt) {
+      throw new Problem("conflict", "Only pending auto-merge pull requests can be held.");
+    }
+    const scheduledAt = pull.autoMergeAt;
+    const actionId = `pull-hold-${id}`;
+    const previous = this.history.get(actionId);
+    if (previous?.row.undone) return this.undo(actionId, false, viewer);
     const lane = pull.laneId ? this.lane(pull.laneId) : undefined;
     const apply = (undone: boolean): Event[] => {
-      pull.held = !undone;
-      pull.state = undone ? prev : "held";
-      const events: Event[] = [{ type: "pull.changed", pullId: id }];
-      if (release && priorStage && pull.decisionId) {
-        if (undone && release.startedAt) {
-          this.releasePause.set(id, (this.releasePause.get(id) ?? 0) + Date.parse(this.now) - heldAt);
-        } else if (undone && Date.parse(release.scheduledAt) < Date.parse(this.now)) {
-          release.scheduledAt = this.now;
-        }
-        if (!undone) heldAt = Date.parse(this.now);
-        release.stage = undone ? priorStage : "held";
-        events.push({ type: "release.changed", decisionId: pull.decisionId });
+      if (undone ? pull.state !== "held" : pull.state !== "autoMerge") {
+        throw new Problem("conflict", "The auto-merge state has changed.");
       }
-      if (lane) events.push(...laneUpdate(lane.id, lane.topicId));
-      return events;
+      pull.held = !undone;
+      pull.state = undone ? "autoMerge" : "held";
+      pull.autoMergeAt = undone ? scheduledAt : null;
+      return [{ type: "pull.changed", pullId: id }, { type: "brief.changed" }, ...(lane ? laneUpdate(lane.id, lane.topicId) : [])];
     };
-    this.remember(lane?.topicId ?? pull.projectId, `pull-${id}`, `Held pull request ${pull.number}.`, viewer, apply, pull.laneId);
-    return done(apply(false));
+    const action = this.remember(lane?.topicId ?? pull.projectId, actionId, `Held pull request ${pull.number}.`, viewer, apply, pull.laneId, actionId);
+    return done([...apply(false), { type: "agentAction.changed", actionId: action.row.id }]);
+  }
+
+  private unhold(id: string, viewer: Actor): Effect {
+    this.requireOwner(viewer);
+    const pull = requireRecord(byId(this.pulls.items, id), "pull request");
+    if (pull.state !== "held") throw new Problem("conflict", "This pull request is not held.");
+    return this.undo(`pull-hold-${id}`, true, viewer);
   }
 
   advance(at: string): Event[] {
@@ -1737,7 +1907,7 @@ export class World {
         events.push({ type: "release.changed", decisionId: decision.id }, ...(decision.laneId ? laneUpdate(decision.laneId, decision.topicId) : []));
       }
       if (release?.startedAt && (release.stage === "rolling" || release.stage === "watching")) {
-        const elapsed = now - Date.parse(release.startedAt) - (this.releasePause.get(release.pullId) ?? 0);
+        const elapsed = now - Date.parse(release.startedAt);
         const stage = elapsed >= release.watchMinutes * 60000 ? "done" : elapsed >= 60000 ? "watching" : "rolling";
         if (stage === release.stage) continue;
         release.stage = stage;
@@ -1843,7 +2013,7 @@ export class World {
       }
     }
     if ("topicId" in event) return event.topicId !== null && this.role(event.topicId, viewer) !== "none";
-    return event.type === "brief.published" || event.type === "feed.reset" || event.type === "skills.changed";
+    return event.type === "brief.published" || event.type === "feed.reset";
   }
 }
 

@@ -1,11 +1,11 @@
 import { once } from "node:events";
 import { request } from "node:http";
-import type { BriefView, Command, CommandResult, DecisionView, FeedEvent, HistoryPage, LaneView, ModelsView, PullsView, RecentView, SidebarView, ThreadView, TopicView, UsageView, WorkspaceView } from "@morndo/cockpit-api";
+import { loadFixtures, type AccessView, type DraftsView, type SearchView, type BriefView, type Command, type CommandResult, type DecisionView, type FeedEvent, type HistoryPage, type LaneView, type ModelsView, type PullsView, type RecentView, type SidebarView, type ThreadView, type TopicView, type UsageView, type WorkspaceView } from "@morndo/cockpit-api";
 import { expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { Idempotency } from "../src/idempotency.ts";
 import { start } from "../src/main.ts";
-import { DEMO_AT, type Module } from "../src/world.ts";
+import { DEMO_AT, World, type Module } from "../src/world.ts";
 
 async function withCockpit(module: Module, run: (url: string, setClock: (at: string) => void) => Promise<void>) {
   let clock = DEMO_AT;
@@ -129,7 +129,7 @@ it("derives reader-specific grants, viewing markers, and redacted link status", 
     expect((await read<{ invitations: unknown[] }>(url, topic + "/access")).invitations).toEqual([]);
     await act(url, { type: "access.statusLink", topicId: "partnerships" });
     const status = await read<Record<string, unknown>>(url, topic + "/status" + viewer);
-    expect(Object.keys(status).sort()).toEqual(["health", "stages"]);
+    expect(Object.keys(status).sort()).toEqual(["goal", "health", "nextReportAt", "signed", "stages", "unit"]);
   });
 });
 
@@ -168,18 +168,36 @@ it("moves pins, serves artwork and models, and connects an engine", async () => 
   });
 });
 
-it("keeps module state and lets held pull requests stop a release", async () => {
+it("keeps module state and only holds an auto-merge pull request", async () => {
   await withCockpit("dev", async (url, setClock) => {
     await act(url, { type: "decision.approve", decisionId: "d1" });
-    await act(url, { type: "pull.hold", pullId: "412" });
+    await act(url, { type: "pull.hold", pullId: "412" }, { status: 409 });
+    await act(url, { type: "pull.hold", pullId: "58" }, { status: 409 });
+    await act(url, { type: "pull.hold", pullId: "413" });
+    await act(url, { type: "pull.hold", pullId: "413" }, { status: 409 });
     setClock("2026-11-16T09:20:00+01:00");
-    const pulls = await read<{ items: { id: string; state: string }[] }>(url, "/pulls");
-    expect(pulls.items.find(item => item.id === "412")?.state).toBe("held");
-    expect(pulls.items.find(item => item.id === "413")?.state).toBe("released");
+    const pulls = await read<PullsView>(url, "/pulls");
+    expect(pulls.items.find(item => item.id === "412")?.state).toBe("releasing");
+    expect(pulls.items.find(item => item.id === "413")).toMatchObject({ state: "held", autoMergeAt: null });
     await act(url, { type: "module.switch", moduleId: "gtm" });
     expect((await read<{ module: { id: string } }>(url, "/workspace")).module.id).toBe("gtm");
     await act(url, { type: "module.switch", moduleId: "dev" });
-    expect((await read<{ items: { id: string; state: string }[] }>(url, "/pulls")).items.find(item => item.id === "412")?.state).toBe("held");
+    expect((await read<PullsView>(url, "/pulls")).items.find(item => item.id === "413")?.state).toBe("held");
+    await act(url, { type: "pull.unhold", pullId: "413" });
+    expect((await read<PullsView>(url, "/pulls")).items.find(item => item.id === "413"))
+      .toMatchObject({ state: "autoMerge", autoMergeAt: "2026-11-16T09:00:00+01:00" });
+  });
+});
+
+it("hides a chat action once its lane has settled", async () => {
+  await withCockpit("dev", async url => {
+    const thread = "/threads/topic:web";
+    const laneId = "red-main";
+    const hasAction = (view: ThreadView) => view.messages.some(message =>
+      message.actions.some(action => action.laneId === laneId && action.id === "pin-the-old-session-library"));
+    expect(hasAction(await read<ThreadView>(url, thread))).toBe(true);
+    await act(url, { type: "lane.act", laneId, act: "pin-the-old-session-library" });
+    expect(hasAction(await read<ThreadView>(url, thread))).toBe(false);
   });
 });
 
@@ -238,21 +256,24 @@ it("scopes stage chat, lane actions, history and live messages to the reader", a
     expect(shared.lanes).toEqual([]);
     expect(shared.goal).toBeNull();
     expect(shared.history).toBeNull();
-    expect((await fetch(url + thread + tom)).status).toBe(403);
+    expect((await read<ThreadView>(url, thread + tom)).scope).toBe("You and Mara.");
     expect(JSON.stringify(await read<BriefView>(url, "/brief" + lea))).not.toContain('"currency"');
     await act(url, { type: "lane.act", laneId: lane.id, act: "send-wave-2" }, { as: "lea-brandt" });
     expect((await read<LaneView>(url, "/lanes/outreach-wave-2")).stateWord).toBe("Working");
   });
 });
 
-it("delivers non-owner preferences and pin frames privately and advertises per-device reads", async () => {
+it("delivers non-owner preferences privately, hides pins, and advertises per-device reads", async () => {
   await withCockpit("gtm", async url => {
     const owner = subscribe(url);
     const reader = subscribe(url, "?as=lea-brandt");
     await Promise.all([owner.ready, reader.ready]);
     await act(url, { type: "prefs.set", deviceId: "phone", layout: { chatWidth: 350 } }, { as: "lea-brandt" });
-    await act(url, { type: "pin.add", pinId: "a-partnerships" }, { as: "lea-brandt" });
-    await expect.poll(() => reader.frames.map(frame => frame.type)).toEqual(["prefs.changed", "pins.changed"]);
+    await act(url, { type: "pin.add", pinId: "a-partnerships" }, { as: "lea-brandt", status: 403 });
+    await expect.poll(() => reader.frames.map(frame => frame.type)).toEqual(["prefs.changed"]);
+    const sidebar = await read<SidebarView>(url, "/sidebar?as=lea-brandt");
+    expect(sidebar.pins).toEqual([]);
+    expect(sidebar.pinnable).toEqual([]);
     expect(owner.frames).toEqual([]);
     expect((await read<WorkspaceView>(url, "/workspace?as=lea-brandt&deviceId=phone")).layout.chatWidth).toBe(350);
     expect((await read<WorkspaceView>(url, "/workspace?as=lea-brandt")).layout.chatWidth).toBe(380);
@@ -296,8 +317,8 @@ it("projects goal and lane history changes through approval and Undo", async () 
     await act(url, { type: "decision.approve", decisionId: decision.decisionId });
     const path = "/topics/partnerships";
     const goal = (await read<TopicView>(url, path)).goal;
-    expect(goal).toMatchObject({ target: 4, unit: "qualified partners by 28 February", trajectory: { goal: 4 } });
-    expect(goal?.figures[0]?.of).toBe("4");
+    expect(goal).toMatchObject({ target: 4, unit: "qualified partners", deadlineAt: "2027-02-28T16:00:00.000Z", trajectory: { goal: 4 } });
+    expect(goal?.figures[0]?.of).toBe(4);
     expect(goal?.trajectory.ticks.at(-1)?.label).toBe("28 Feb");
     expect(goal?.gap?.says).toContain("To reach 4");
     await act(url, { type: "decision.undo", decisionId: decision.decisionId });
@@ -326,7 +347,13 @@ it("executes both dev chat choices and starts an approved release on schedule", 
     const pulls = await read<PullsView>(url, "/pulls");
     expect(pulls.items.find(item => item.id === "412")).toMatchObject({ verdict: "Approved, rollout scheduled", state: "releasing" });
     expect(pulls.summary).toContain("1 ready");
-    expect((await read<LaneView>(url, "/lanes/export-for-big-accounts")).next).toBe("Rollout is scheduled");
+    const lane = await read<LaneView>(url, "/lanes/export-for-big-accounts");
+    expect(lane.next).toBe("Rollout is scheduled");
+    expect(lane.status).toBe("The rollout is approved and scheduled.");
+    expect(lane.steps.find(step => step.text === "Released to production")).toMatchObject({ kind: "todo", who: "Release · scheduled" });
+    expect(lane.crew.find(person => person.id === "release")?.text).toBe(lane.status);
+    expect(lane.made.find(item => item.target?.kind === "pull")?.detail).toBe("Rollout scheduled");
+    expect((await read<TopicView>(url, "/topics/api")).health?.word).toBe("Working");
     const release = async () => (await read<DecisionView>(url, "/decisions/d1")).release;
     expect(await release()).toMatchObject({ stage: "scheduled", startedAt: null });
     setClock("2026-11-16T22:00:00+01:00");
@@ -407,5 +434,156 @@ it("retains six recent pages per reader and sends urgent attention", async () =>
     expect(usage.subscriptions.find(item => item.name === "Cursor Pro")?.meters[0]?.count).toEqual({ used: 312, of: 500 });
     await expect.poll(() => ws.frames.filter(frame => frame.type === "attention.raised").map(frame => frame.target.id))
       .toEqual(expect.arrayContaining(["d1", "webinar"]));
+  });
+});
+
+for (const module of ["gtm", "dev"] as const) {
+  it(`accepts every choice the ${module} lane views list on fresh state`, () => {
+    const lanes = loadFixtures(module).filter(item => item.definition === "LaneView").map(item => item.value as LaneView);
+    let tried = 0;
+    for (const lane of lanes) {
+      const view = new World(module).get(`/lanes/${lane.id}`, new URLSearchParams()).body as LaneView;
+      for (const choice of view.acts) {
+        const fresh = new World(module);
+        expect(fresh.act({ type: "lane.act", laneId: lane.id, act: choice.id }).ok, `${lane.id}/${choice.id}`).toBe(true);
+        tried++;
+      }
+    }
+    expect(tried).toBeGreaterThan(0);
+  });
+}
+
+it("keeps owner posts and their replies out of shared threads and the live feed", async () => {
+  await withCockpit("gtm", async url => {
+    const stageFeed = subscribe(url, "?as=lea-brandt");
+    await stageFeed.ready;
+    const threadId = "topic:partnerships";
+    const ownerPost = await act(url, { type: "message.send", threadId, text: "Between us: Halden may want a discount" });
+    expect(ownerPost.message?.audience).toEqual({ kind: "owner" });
+    const ownerMessages = ownerPost.events.flatMap(event => event.type === "message.posted" ? [event.message] : []);
+    expect(ownerMessages).toHaveLength(2);
+    expect(ownerMessages.every(item => item.audience.kind === "owner")).toBe(true);
+    const ownerIds = ownerMessages.map(item => item.id);
+    const stagePost = await act(url, { type: "message.send", threadId, stage: "Outreach", text: "Outreach is shared" });
+    await expect.poll(() => stageFeed.frames.some(frame => frame.type === "message.posted" && frame.message.id === stagePost.message?.id)).toBe(true);
+    expect(stageFeed.frames.some(frame => frame.type === "message.posted" && ownerIds.includes(frame.message.id))).toBe(false);
+    const view = await read<ThreadView>(url, "/threads/topic:partnerships?as=lea-brandt");
+    expect(view.messages.some(message => ownerIds.includes(message.id))).toBe(false);
+  });
+});
+
+it("projects shared config, faces, copy and the watcher chat for each reader", async () => {
+  await withCockpit("gtm", async url => {
+    const jonas = "?as=jonas-falk";
+    const tom = "?as=tom-ahrens";
+    const models = await read<ModelsView>(url, "/models" + tom);
+    expect(models.items.every(model => model.state === null && model.vendor === null)).toBe(true);
+    expect((await read<SearchView>(url, "/search?q=email&as=tom-ahrens")).results.some(item => item.kind === "skill")).toBe(false);
+    const lanePath = "/lanes/halden-offer";
+    const lane = await read<LaneView>(url, lanePath + jonas);
+    expect(lane.next).not.toMatch(/\byour?\b/i);
+    expect(lane.checks.join(" ")).toContain("Mara's");
+    await act(url, { type: "decision.approve", decisionId: "d4" });
+    expect((await read<LaneView>(url, lanePath + jonas)).standing.headline).toBe("Mara approved it.");
+    const topic = await read<TopicView>(url, "/topics/partnerships" + tom);
+    expect(topic.seenBy).toEqual(expect.arrayContaining([expect.objectContaining({ id: "lea-brandt", access: "work" }), expect.objectContaining({ id: "tom-ahrens", access: "view" })]));
+    const statusThread = "/threads/topic:partnerships";
+    const before = await read<ThreadView>(url, statusThread + tom);
+    expect(before.sub).toBe("You and Mara.");
+    expect(before.messages.every(message => message.audience.kind === "viewer")).toBe(true);
+    const reply = await act(url, { type: "message.send", threadId: "topic:partnerships", text: "Thanks for sharing the status." }, { as: "tom-ahrens" });
+    expect(reply.message?.audience).toEqual({ kind: "viewer", personId: "tom-ahrens" });
+    expect((await read<ThreadView>(url, statusThread)).messages).toContainEqual(reply.message);
+    expect((await read<ThreadView>(url, statusThread + jonas)).messages.map(message => message.id)).not.toContain(reply.message?.id);
+    expect((await read<TopicView>(url, "/topics/partnerships?as=lea-brandt")).spend).toBeNull();
+    await act(url, { type: "access.set", topicId: "seo", personId: "lea-brandt", access: { kind: "all" } });
+    const seo = await read<TopicView>(url, "/topics/seo?as=lea-brandt");
+    expect(seo.spend).toBeTruthy();
+    expect(seo.goal?.calmSub).toContain("Mara hears");
+  });
+});
+
+it("registers an invitee once, supports immediate role changes, and matches an existing address", async () => {
+  await withCockpit("gtm", async url => {
+    const topicId = "partnerships";
+    const path = "/topics/partnerships/access";
+    await act(url, { type: "access.invite", topicId, nameOrEmail: "lea-brandt@example.test" });
+    expect((await read<AccessView>(url, path)).invitations).toEqual([]);
+    await act(url, { type: "access.invite", topicId, nameOrEmail: "nora@example.test" });
+    await act(url, { type: "access.invite", topicId, nameOrEmail: "NORA@example.test" });
+    const invited = await read<AccessView>(url, path);
+    expect(invited.invitations).toHaveLength(1);
+    const invitation = invited.invitations[0];
+    if (!invitation) throw new Error("Missing invitation");
+    expect(invited.people.find(entry => entry.person.id === invitation.personId))
+      .toMatchObject({ person: { membershipState: "invited" }, access: { kind: "view" } });
+    await act(url, { type: "access.set", topicId, personId: invitation.personId, access: { kind: "stages", stages: ["Outreach"] } });
+    expect((await read<AccessView>(url, path)).people.find(entry => entry.person.id === invitation.personId)?.access.kind).toBe("stages");
+    expect((await fetch(`${url}/workspace?as=${invitation.personId}`)).status).toBe(403);
+    await act(url, { type: "access.revoke", invitationId: invitation.id });
+    expect((await read<AccessView>(url, path)).people.some(entry => entry.person.id === invitation.personId)).toBe(false);
+  });
+});
+
+it("reports the same health and numbers on status, topic and sidebar and revokes the link", async () => {
+  await withCockpit("gtm", async url => {
+    const topicId = "partnerships";
+    const viewer = "?as=tom-ahrens";
+    await act(url, { type: "access.statusLink", topicId, enabled: true });
+    const status = await read<{ health: unknown; signed: number; goal: number; nextReportAt: string }>(url, "/topics/partnerships/status" + viewer);
+    const topic = await read<TopicView>(url, "/topics/partnerships" + viewer);
+    expect(status).toMatchObject({ health: topic.health, signed: 0, goal: 3, nextReportAt: "2026-11-20T08:00:00+01:00" });
+    const sidebar = await read<SidebarView>(url, "/sidebar" + viewer);
+    expect(sidebar.groups.find(item => item.id === topicId)?.stateWord).toBe(topic.health?.word);
+    await act(url, { type: "access.set", topicId, personId: "tom-ahrens", access: { kind: "none" } });
+    expect((await fetch(url + "/topics/partnerships/status" + viewer)).status).toBe(403);
+    await act(url, { type: "access.statusLink", topicId, enabled: false });
+    expect((await fetch(url + "/topics/partnerships/status")).status).toBe(404);
+  });
+});
+
+it("authorizes skill runs by topic and decision right and stores drafts with the runner", async () => {
+  await withCockpit("gtm", async url => {
+    const as = "lea-brandt";
+    const topicId = "partnerships";
+    const command: Command = { type: "skill.run", skill: "weekly-summary", topicId, text: "Summarize this week's work" };
+    const initial = await read<DraftsView>(url, "/drafts");
+    const ownerFeed = subscribe(url);
+    const readerFeed = subscribe(url, "?as=lea-brandt");
+    await Promise.all([ownerFeed.ready, readerFeed.ready]);
+    await act(url, command, { as, status: 403 });
+    await act(url, { type: "access.set", topicId, personId: as, access: { kind: "all" } });
+    await act(url, { type: "decisionRight.set", rule: "insideGuardrails", who: "you" });
+    await act(url, command, { as, status: 403 });
+    await act(url, { type: "decisionRight.set", rule: "insideGuardrails", who: "agent" });
+    const result = await act(url, command, { as });
+    expect((await read<DraftsView>(url, "/drafts?as=lea-brandt")).items).toContainEqual(expect.objectContaining({ laneId: result.laneId }));
+    expect((await read<LaneView>(url, `/lanes/${result.laneId}`)).status).toContain("Lea's ask");
+    const post = await act(url, { ...command, skill: "linkedin-post" }, { as });
+    expect((await read<DraftsView>(url, "/drafts?as=lea-brandt")).items)
+      .toContainEqual(expect.objectContaining({ laneId: post.laneId, skill: "/linkedin-post" }));
+    expect((await read<DraftsView>(url, "/drafts")).items).toEqual(initial.items);
+    await expect.poll(() => readerFeed.frames.some(frame => frame.type === "drafts.changed")).toBe(true);
+    expect(ownerFeed.frames.some(frame => frame.type === "drafts.changed")).toBe(false);
+    await act(url, command);
+    expect((await read<DraftsView>(url, "/drafts")).count).toBe(initial.count + 1);
+  });
+});
+
+it("enforces file and reader upload quotas with problem details", async () => {
+  await withCockpit("gtm", async url => {
+    const upload = (data: string, as = "") => fetch(url + "/uploads" + as, {
+      method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "plan.txt", data }),
+    });
+    const large = Buffer.alloc(512 * 1024).toString("base64");
+    for (let i = 0; i < 4; i++) expect((await upload(large)).status).toBe(200);
+    const tooLarge = await upload("YQ==");
+    expect(tooLarge.status).toBe(413);
+    expect(await tooLarge.json()).toMatchObject({ code: "payloadTooLarge", status: 413 });
+    const recipient = "?as=lea-brandt";
+    for (let i = 0; i < 8; i++) expect((await upload("YQ==", recipient)).status).toBe(200);
+    const tooMany = await upload("YQ==", recipient);
+    expect(tooMany.status).toBe(429);
+    expect(await tooMany.json()).toMatchObject({ code: "rateLimited", status: 429 });
   });
 });

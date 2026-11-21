@@ -59,14 +59,14 @@ export function answerTo(query: string, scope: string | null, topics: Topic[], l
   }
   const named = topics.find((topic) => text.includes(topic.name.toLowerCase())) ?? (scope ? topics.find((topic) => topic.id === scope) : undefined);
   if (named?.goal) {
-    return { text: `${named.name}: ${named.goal.verdict.word}. ${named.goal.insight}`, source: `${named.name} · ${named.goal.asOf}`, target: { kind: "topic", id: named.id } };
+    return { text: `${named.name}: ${named.goal.verdict.word}. ${named.goal.insight}`, source: named.name, target: { kind: "topic", id: named.id } };
   }
   return null;
 }
 
 function dealAnswer(topic: Topic, deal: Deal): Answer {
   const next = deal.next ? `Next: ${deal.next}` : deal.short;
-  return { text: `${deal.name}: ${deal.stage}. ${next}`, source: `${topic.name} · ${deal.confidence}`, target: deal.target };
+  return { text: `${deal.name}: ${deal.stage}. ${next}`, source: deal.confidence ? `${topic.name} · ${deal.confidence}` : topic.name, target: deal.target };
 }
 
 export function routePreview(text: string, topicParam: string | null, topics: Map<string, Topic>, routes: Route[]): { text: string; topicId: string | null; topicName: string | null; lead: Actor | null; chain: boolean } {

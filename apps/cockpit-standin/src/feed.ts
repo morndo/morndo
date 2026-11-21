@@ -10,10 +10,11 @@ export class Feed {
   private readonly buffer: Entry[] = [];
   private readonly clients = new Map<WebSocket, Subscription>();
 
-  publish(world: World, events: readonly Event[], at: string, privateTo?: string, beforeSend?: (frames: FeedEvent[]) => void): FeedEvent[] {
+  publish(world: World, events: readonly Event[], at: string, privateTo?: string | ((event: Event) => string | undefined), beforeSend?: (frames: FeedEvent[]) => void): FeedEvent[] {
     const entries = events.map((event, index): Entry => {
       const frame = this.frame(event, at, this.seq + index + 1);
-      return { world, frame, audience: privateTo ? new Set([privateTo]) : world.readers(event), ...(privateTo ? { privateTo } : {}) };
+      const reader = typeof privateTo === "function" ? privateTo(event) : privateTo;
+      return { world, frame, audience: reader ? new Set([reader]) : world.readers(event), ...(reader ? { privateTo: reader } : {}) };
     });
     const frames = entries.map(entry => entry.frame);
     beforeSend?.(frames);
@@ -60,7 +61,7 @@ export class Feed {
     if (entry.world !== subscription.world()) return false;
     const id = subscription.viewer();
     const personal = entry.privateTo === id &&
-      (entry.frame.type === "pins.changed" || entry.frame.type === "prefs.changed" || entry.frame.type === "brief.published");
+      (entry.frame.type === "pins.changed" || entry.frame.type === "prefs.changed" || entry.frame.type === "brief.published" || entry.frame.type === "drafts.changed");
     return entry.audience.has(id) && (personal || entry.world.visibleEvent(entry.frame, entry.world.viewer(id)));
   }
 
