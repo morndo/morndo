@@ -330,8 +330,13 @@ td{padding:11px 16px;border-bottom:1px solid var(--line-soft);color:var(--text-2
 td:first-child{color:var(--text);white-space:normal}tr:last-child td{border-bottom:0}
 td .st{display:inline-flex;align-items:center;gap:7px}
 .jobs td:first-child{font-weight:500}
-.decidebar{position:sticky;bottom:16px;z-index:3;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:10px 10px 10px 20px;background:color-mix(in srgb,var(--field) 94%,transparent);backdrop-filter:blur(14px);border:1px solid var(--rim);border-radius:var(--r-pill);box-shadow:0 14px 44px rgba(0,0,0,.5)}
-.decidebar p{flex:1 1 220px;color:var(--muted)}
+.decidebar{position:sticky;bottom:16px;z-index:3;container:bar/inline-size;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:10px;background:color-mix(in srgb,var(--field) 94%,transparent);backdrop-filter:blur(14px);border:1px solid var(--rim);border-radius:29px;box-shadow:0 14px 44px rgba(0,0,0,.5)}
+/* Narrow (the floating chat takes the right side): the sentence gets its own line, the buttons one row below it,
+   Approve on the right. 29px is the pill's own radius at one row, so the wide bar looks the same; two rows read as a card. */
+@container bar (max-width:620px){.decidebar p{flex-basis:100%;padding:4px 10px 0}.decidebar .acts{flex:1 1 100%;flex-wrap:nowrap}.decidebar .btn{padding:0 14px}.decidebar .btn.ink{margin-left:auto}}
+/* Very narrow: Approve gets the whole first row, Decline and Change share the second. */
+@container bar (max-width:420px){.decidebar .acts{flex-wrap:wrap}.decidebar .btn{flex:1 1 auto;min-width:0;justify-content:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.decidebar .btn.ink{order:-1;flex-basis:100%;margin-left:0}}
+.decidebar p{flex:1 1 220px;padding-left:10px;color:var(--muted)}
 .decidebar .acts{flex-wrap:wrap}.decidebar .btn{height:38px;border-radius:var(--r-pill);padding:0 17px}
 
 /* The chat is one panel for the whole window. By default it floats over the page at the bottom right, as Dia's does:
@@ -343,6 +348,8 @@ td .st{display:inline-flex;align-items:center;gap:7px}
 .split{container-type:inline-size}
 .decidebar{transition:margin-right .28s cubic-bezier(.2,.8,.2,1)}
 @container (min-width:800px){.pane:not(.chat-off) .decidebar{margin-right:max(0px,min(430px,calc(846px - 50cqw)))}}
+/* Below 800px the document fills the page (18px padding), so the bar ends 448px short: the chat's 454 plus the gap, minus the padding. */
+@container (min-width:600px) and (max-width:799.98px){.pane:not(.chat-off) .decidebar{margin-right:448px}}
 /* The brief has its own command bar. While the chat floats open, the bar steps aside instead of sitting under it. */
 .pane:not(.chat-off) .dock{visibility:hidden}
 
