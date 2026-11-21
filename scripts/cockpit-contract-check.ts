@@ -48,6 +48,9 @@ ok(gen.status === 0, `generated TypeScript is current (${GENERATE} --check exit 
 // ---- validator straight from the committed schema, independent of the package under test
 const Ajv2020 = require("ajv/dist/2020.js").default ?? require("ajv/dist/2020.js");
 const ajv = new Ajv2020({ allErrors: true, strict: false });
+// schemars writes these number formats; check them instead of letting Ajv warn and ignore them
+ajv.addFormat("int64", { type: "number", validate: (n: number) => Number.isSafeInteger(n) });
+ajv.addFormat("double", { type: "number", validate: (n: number) => Number.isFinite(n) });
 ajv.addSchema(schema, "cockpit");
 function valid(def: string, value: unknown, what: string) {
   const v = ajv.getSchema(`cockpit#/$defs/${def}`);
