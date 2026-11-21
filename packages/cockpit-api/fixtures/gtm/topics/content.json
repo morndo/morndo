@@ -212,43 +212,52 @@
         "name": "Newsletter",
         "confidence": "Likely",
         "close": null,
-        "at": 4,
         "stage": "Two sends out, reminder scheduled",
         "short": "118 so far; reminder Wed 09:00",
         "laneId": "webinar-reminders",
-        "href": "#lane/webinar-reminders",
         "evidence": "Two sends brought 118 sign-ups. The reminder goes to the 3,900 who opened but did not sign up; last webinar's reminder brought 31.",
         "next": "the reminder, Wednesday 09:00.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "webinar-reminders"
+        },
+        "chartDay": 4
       },
       {
         "name": "LinkedIn promo post",
         "confidence": "Possible",
         "close": null,
-        "at": 1,
         "stage": "Text approved, images stuck",
         "short": "Stuck: 2 images fail",
         "laneId": "webinar",
-        "href": "#lane/webinar",
         "evidence": "Last webinar's promo post brought 41 sign-ups in 3 days. Nothing else reaches LinkedIn before Thursday.",
         "next": "your call before 16:00: post the 4 images that pass, or allow one more round.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "webinar"
+        },
+        "chartDay": 1
       },
       {
         "name": "Fenwick shares it",
         "confidence": "Early",
         "close": null,
-        "at": 0,
         "stage": "Promised, no date yet",
         "short": "Their ops lead said yes",
         "laneId": "fenwick",
-        "href": "#lane/fenwick",
         "evidence": "Fenwick's ops lead offered to share it in an email on Friday. There is no date in their calendar yet.",
         "next": "Writer sends them the post text on Tuesday.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "fenwick"
+        },
+        "chartDay": 0
       }
     ],
     "guardrails": {
@@ -305,8 +314,11 @@
         "what": null,
         "why": null,
         "who": "Publisher",
-        "href": "#lane/webinar",
-        "laneId": "webinar"
+        "laneId": "webinar",
+        "target": {
+          "kind": "lane",
+          "id": "webinar"
+        }
       },
       {
         "state": "warn",
@@ -314,8 +326,11 @@
         "what": null,
         "why": null,
         "who": "Checker",
-        "href": "#lane/recap",
-        "laneId": "recap"
+        "laneId": "recap",
+        "target": {
+          "kind": "lane",
+          "id": "recap"
+        }
       }
     ],
     "routine": null,
@@ -395,7 +410,9 @@
   "plan": null,
   "focusLaneId": "webinar",
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the webinar page went live on 5 November.",
     "days": [
@@ -404,7 +421,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "09:21",
             "actor": {
               "id": "visuals",
               "name": "Visuals",
@@ -426,11 +442,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T09:21:00+01:00"
           },
           {
             "kind": "event",
-            "time": "09:13",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -452,11 +468,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T09:13:00+01:00"
           },
           {
             "kind": "event",
-            "time": "09:12",
             "actor": {
               "id": "visuals",
               "name": "Visuals",
@@ -478,11 +494,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T09:12:00+01:00"
           },
           {
             "kind": "event",
-            "time": "08:00",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -504,11 +520,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:00:00+01:00"
           },
           {
             "kind": "event",
-            "time": "07:30",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -530,7 +546,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:30:00+01:00"
           }
         ]
       },
@@ -539,7 +556,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "17:00",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -561,14 +577,14 @@
             "undoable": true,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T17:00:00+01:00"
           },
           {
             "kind": "seen"
           },
           {
             "kind": "event",
-            "time": "11:40",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -590,7 +606,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T11:40:00+01:00"
           }
         ]
       },
@@ -599,7 +616,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "16:41",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -621,11 +637,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T16:41:00+01:00"
           },
           {
             "kind": "event",
-            "time": "16:20",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -647,11 +663,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T16:20:00+01:00"
           },
           {
             "kind": "event",
-            "time": "11:05",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -673,11 +689,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T11:05:00+01:00"
           },
           {
             "kind": "event",
-            "time": "10:00",
             "actor": {
               "id": "writer",
               "name": "Writer",
@@ -699,7 +715,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T10:00:00+01:00"
           }
         ]
       },
@@ -708,7 +725,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "17:40",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -730,11 +746,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T17:40:00+01:00"
           },
           {
             "kind": "event",
-            "time": "08:00",
             "actor": {
               "id": "publisher",
               "name": "Publisher",
@@ -756,11 +772,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T08:00:00+01:00"
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null
   },
   "crew": [
     {
@@ -900,8 +918,14 @@
     }
   ],
   "spend": {
-    "spent": 36,
-    "cap": 40
+    "spent": {
+      "amountMinor": 3600,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 4000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
   "tasks": []

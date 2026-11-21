@@ -5,22 +5,28 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use cockpit_api::{
-    AccessView, BriefView, DecisionQueueView, DecisionView, DraftsView, LaneView, ManagerView, PullsView,
-    SettingsView, SidebarView, SkillsView, ThreadView, TopicView, UsageView, WorkspaceView,
+    AccessView, BriefView, DecisionQueueView, DecisionView, DraftsView, LaneView, ManagerView,
+    PullsView, SettingsView, SidebarView, SkillsView, ThreadView, TopicView, UsageView,
+    WorkspaceView,
 };
-use serde::de::DeserializeOwned;
 use serde::Serialize;
+use serde::de::DeserializeOwned;
 use serde_json::Value;
 
 #[test]
 fn fixtures_round_trip() {
-    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/cockpit-api/fixtures");
+    let root =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../packages/cockpit-api/fixtures");
     let mut files = Vec::new();
     collect(&root, &mut files);
     assert!(!files.is_empty(), "no fixtures under {}", root.display());
     let mut failed = Vec::new();
     for path in files {
-        let rel = path.strip_prefix(&root).unwrap().to_string_lossy().replace('\\', "/");
+        let rel = path
+            .strip_prefix(&root)
+            .unwrap()
+            .to_string_lossy()
+            .replace('\\', "/");
         let text = fs::read_to_string(&path).unwrap();
         let result = match kind(&rel) {
             Some("WorkspaceView") => round_trip::<WorkspaceView>(&text),
@@ -45,7 +51,11 @@ fn fixtures_round_trip() {
             failed.push(format!("{rel}: {reason}"));
         }
     }
-    assert!(failed.is_empty(), "fixture round-trip failed:\n{}", failed.join("\n"));
+    assert!(
+        failed.is_empty(),
+        "fixture round-trip failed:\n{}",
+        failed.join("\n")
+    );
 }
 
 fn kind(rel: &str) -> Option<&'static str> {
@@ -92,8 +102,14 @@ fn first_diff(left: &Value, right: &Value, path: &str) -> Option<String> {
             for key in keys {
                 let next = format!("{path}.{key}");
                 match (a.get(key), b.get(key)) {
-                    (None, Some(value)) => return Some(format!("{next} missing in fixture, typed has {value}")),
-                    (Some(value), None) => return Some(format!("{next} missing after round-trip, fixture has {value}")),
+                    (None, Some(value)) => {
+                        return Some(format!("{next} missing in fixture, typed has {value}"));
+                    }
+                    (Some(value), None) => {
+                        return Some(format!(
+                            "{next} missing after round-trip, fixture has {value}"
+                        ));
+                    }
                     (Some(av), Some(bv)) => {
                         if let Some(diff) = first_diff(av, bv, &next) {
                             return Some(diff);

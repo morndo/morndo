@@ -4,7 +4,6 @@
   "state": "open",
   "topicId": "api",
   "topicName": "API",
-  "due": "Due today, 14:00",
   "whyYours": null,
   "minutes": 3,
   "contextLine": "API · Due today, 14:00 · 3 min to read",
@@ -17,7 +16,7 @@
     "laneTitle": "Export for big accounts",
     "writtenBy": "Release",
     "checkedBy": "the Manager",
-    "checkedAt": "07:05"
+    "checkedAt": "2026-11-16T07:05:00+01:00"
   },
   "context": "Exports for accounts with more than 200,000 shipments stop after 30 seconds. Fenwick Freight reported it on Thursday. 14 accounts are affected, and 23 of about 580 exports failed yesterday. The fix writes the file in chunks of 5,000 rows instead of building it in memory.",
   "numbers": [],
@@ -72,34 +71,35 @@
     {
       "step": "Merge pull request 412",
       "who": "Release lane",
-      "by": "Today, after your OK"
+      "dueAt": "2026-11-16T17:00:00+01:00"
     },
     {
       "step": "Roll out to 10% of accounts and watch for 30 minutes",
       "who": "Release lane",
-      "by": "Today, 22:00"
+      "dueAt": "2026-11-16T22:00:00+01:00"
     },
     {
       "step": "Roll out to everyone",
       "who": "Release lane",
-      "by": "Today, 22:30"
+      "dueAt": "2026-11-16T22:30:00+01:00"
     },
     {
       "step": "Run Fenwick's export on production and compare the file",
       "who": "QA lane",
-      "by": "Today, 22:45"
+      "dueAt": "2026-11-16T22:45:00+01:00"
     },
     {
       "step": "Draft the \"it is fixed\" note to Fenwick Freight",
       "who": "Writer, go-to-market",
-      "by": "Tue 17 Nov"
+      "dueAt": "2026-11-17T17:00:00+01:00"
     },
     {
       "step": "Report the result against the dream output",
       "who": "Manager",
-      "by": "Tue 17 Nov, 09:00"
+      "dueAt": "2026-11-17T09:00:00+01:00"
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing is released.",
-  "position": "1 of 3 · 3 open"
+  "position": "1 of 3 · 3 open",
+  "dueAt": "2026-11-16T14:00:00+01:00"
 }

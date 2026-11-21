@@ -4,7 +4,6 @@
   "state": "open",
   "topicId": "web",
   "topicName": "Web app",
-  "due": "Due Wednesday",
   "whyYours": null,
   "minutes": 3,
   "contextLine": "Web app · Due Wednesday · 3 min",
@@ -22,5 +21,6 @@
   "guardrail": null,
   "nextSteps": [],
   "ifNoAnswer": null,
-  "position": "3 of 3 · 3 open"
+  "position": "3 of 3 · 3 open",
+  "dueAt": "2026-11-18T17:00:00+01:00"
 }

@@ -1,8 +1,11 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::{PullId, Target, Timestamp, TopicId};
+
 use crate::present::Present;
 
+/// Gate state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum GateState {
@@ -11,36 +14,60 @@ pub enum GateState {
     Todo,
     Fail,
     Skipped,
+    #[serde(other)]
+    Unknown,
 }
 
+/// Gate for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Gate {
+    /// Name shown to the reader.
     pub name: String,
+    /// Current state of the record.
     pub state: GateState,
+    /// Explanation shown alongside the summary.
     pub detail: Present<String>,
 }
 
+/// Pull request for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PullRequest {
-    pub id: String,
-    pub project_id: String,
+    /// Stable identifier for this record.
+    pub id: PullId,
+    /// Identifier of the associated project.
+    pub project_id: TopicId,
+    /// Project name for this record.
     pub project_name: String,
+    /// Number for this record.
     pub number: i64,
+    /// Author for this record.
     pub author: String,
-    pub opened: String,
+    /// Time associated with opened.
+    pub opened_at: Timestamp,
+    /// Title displayed above the record.
     pub title: String,
+    /// Summary for this record.
     pub summary: String,
+    /// Gates for this record.
     pub gates: Vec<Gate>,
+    /// Verdict for this record.
     pub verdict: String,
-    pub href: Present<String>,
+    /// Url for this record.
+    pub url: String,
+    /// Destination to open in the cockpit.
+    pub target: Present<Target>,
 }
 
+/// Pull requests being tracked by the development module.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PullsView {
+    /// Intro for this record.
     pub intro: String,
+    /// Summary for this record.
     pub summary: Present<String>,
+    /// Items for this record.
     pub items: Vec<PullRequest>,
 }

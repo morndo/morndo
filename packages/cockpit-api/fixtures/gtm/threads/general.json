@@ -14,7 +14,7 @@
   ],
   "messages": [
     {
-      "id": "general-0",
+      "id": "m1",
       "author": {
         "id": "manager",
         "name": "Manager",
@@ -29,13 +29,13 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "Ask about anything on this page, or say what you want done. A new job becomes its own lane.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

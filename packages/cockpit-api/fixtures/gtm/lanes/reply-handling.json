@@ -32,8 +32,6 @@
     "engine": null,
     "record": null
   },
-  "opened": "Opened 2 Nov",
-  "closed": null,
   "next": "Today, once Jonas answers",
   "afterNext": null,
   "decisionId": null,
@@ -121,9 +119,14 @@
       "icon": "mail",
       "title": "2 invite drafts",
       "detail": "In your drafts, times left open",
-      "href": "#drafts"
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-02T00:00:00+01:00",
+  "closedAt": null
 }

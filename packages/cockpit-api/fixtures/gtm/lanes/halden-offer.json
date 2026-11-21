@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 13 Nov",
-  "closed": null,
   "next": "After your OK",
   "afterNext": "Mon 23 Nov, Jonas follows up",
   "decisionId": "d4",
@@ -136,21 +134,26 @@
       "icon": "file",
       "title": "The offer",
       "detail": "2 pages, from the partner template",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "Halden call notes",
       "detail": "13 November, 34 minutes",
-      "href": null
+      "target": null
     },
     {
       "icon": "mail",
       "title": "Cover email",
       "detail": "In your drafts, not sent",
-      "href": "#drafts"
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null
 }

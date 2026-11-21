@@ -1,104 +1,169 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::{ActionId, DecisionId, LaneId, Money, Target, Timestamp, TopicId};
+
 use crate::decision::DecisionState;
 use crate::present::Present;
 
+/// Artwork for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Artwork {
+    /// Index for this record.
     pub index: i64,
+    /// Total for this record.
     pub total: i64,
+    /// Title displayed above the record.
     pub title: String,
+    /// Manner for this record.
     pub manner: String,
+    /// Alt for this record.
     pub alt: String,
+    /// Credit for this record.
     pub credit: String,
 }
 
+/// Spend line for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct SpendLine {
-    pub overnight: i64,
-    pub week: i64,
-    pub cap: i64,
+    /// Overnight for this record.
+    pub overnight: Money,
+    /// Week for this record.
+    pub week: Money,
+    /// Cap for this record.
+    pub cap: Money,
 }
 
+/// Brief topic for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct BriefTopic {
-    pub id: String,
+    /// Stable identifier for this record.
+    pub id: TopicId,
+    /// Name shown to the reader.
     pub name: String,
-    pub state: String,
+    /// Current state of the record.
+    pub state: crate::HealthState,
+    /// Verdict for this record.
     pub verdict: String,
+    /// Progress for this record.
     pub progress: String,
-    pub spend: i64,
+    /// Spend for this record.
+    pub spend: Money,
 }
 
+/// Brief decision for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct BriefDecision {
-    pub id: String,
-    pub topic_id: String,
+    /// Stable identifier for this record.
+    pub id: DecisionId,
+    /// Identifier of the associated topic.
+    pub topic_id: TopicId,
+    /// Topic name for this record.
     pub topic_name: String,
-    pub due: String,
+    /// Time an answer or action is due.
+    pub due_at: Timestamp,
+    /// Why yours for this record.
     pub why_yours: String,
+    /// Title displayed above the record.
     pub title: String,
+    /// Context for this record.
     pub context: String,
+    /// Minutes for this record.
     pub minutes: i64,
+    /// Done note for this record.
     pub done_note: String,
-    pub lane_id: Present<String>,
+    /// Identifier of the associated lane.
+    pub lane_id: Present<LaneId>,
+    /// Current state of the record.
     pub state: DecisionState,
 }
 
+/// Burn for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Burn {
-    pub topic_id: String,
+    /// Identifier of the associated topic.
+    pub topic_id: TopicId,
+    /// Topic name for this record.
     pub topic_name: String,
-    pub since: String,
-    pub deadline: String,
+    /// Time associated with stuck.
+    pub stuck_at: Timestamp,
+    /// Title displayed above the record.
     pub title: String,
+    /// Explanation shown alongside the summary.
     pub detail: String,
-    pub href: String,
+    /// Destination to open in the cockpit.
+    pub target: Target,
 }
 
+/// Overnight action for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct OvernightAction {
-    pub id: String,
-    pub topic_id: Present<String>,
+    /// Stable identifier for this record.
+    pub id: ActionId,
+    /// Identifier of the associated topic.
+    pub topic_id: Present<TopicId>,
+    /// Topic name for this record.
     pub topic_name: String,
-    pub lane_id: Present<String>,
+    /// Identifier of the associated lane.
+    pub lane_id: Present<LaneId>,
+    /// Text shown to the reader.
     pub text: String,
-    pub time: String,
+    /// Time the record was created or observed.
+    pub at: Timestamp,
+    /// Undoable for this record.
     pub undoable: bool,
+    /// Undone for this record.
     pub undone: bool,
 }
 
+/// Drafts summary for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct DraftsSummary {
+    /// Count for this record.
     pub count: i64,
+    /// Text shown to the reader.
     pub text: String,
+    /// Explanation shown alongside the summary.
     pub detail: String,
 }
 
+/// The current briefing and items that need attention.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct BriefView {
-    pub date: String,
-    pub time: String,
+    /// Time the record was created or observed.
+    pub at: Timestamp,
+    /// Title displayed above the record.
     pub title: String,
+    /// Lede for this record.
     pub lede: String,
-    pub next_brief_at: String,
+    /// Time associated with next brief.
+    pub next_brief_at: Timestamp,
+    /// Cadence for this record.
     pub cadence: String,
+    /// Spend for this record.
     pub spend: SpendLine,
+    /// Topics for this record.
     pub topics: Vec<BriefTopic>,
+    /// Decisions for this record.
     pub decisions: Vec<BriefDecision>,
+    /// Open count for this record.
     pub open_count: i64,
+    /// Minutes for this record.
     pub minutes: i64,
+    /// Burns for this record.
     pub burns: Vec<Burn>,
+    /// Overnight for this record.
     pub overnight: Vec<OvernightAction>,
+    /// Drafts for this record.
     pub drafts: DraftsSummary,
+    /// Artwork for this record.
     pub artwork: Artwork,
 }

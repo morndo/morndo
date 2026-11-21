@@ -121,10 +121,13 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      }
     },
     {
       "id": "t-decide",
@@ -133,10 +136,13 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     },
     {
       "id": "t-pulls",
@@ -145,10 +151,13 @@
       "name": "Pull requests",
       "note": null,
       "icon": "pr",
-      "href": "#pulls",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "pull",
+        "id": null
+      }
     },
     {
       "id": "t-skills",
@@ -157,10 +166,13 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      }
     },
     {
       "id": "p-web",
@@ -169,10 +181,13 @@
       "name": null,
       "note": null,
       "icon": "window",
-      "href": "#area",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      }
     },
     {
       "id": "s-review",
@@ -181,10 +196,10 @@
       "name": "/review",
       "note": "A fresh review of a change",
       "icon": "play",
-      "href": null,
       "run": "/review",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": null
     }
   ],
   "pinnable": [
@@ -195,10 +210,13 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      }
     },
     {
       "id": "t-decide",
@@ -207,10 +225,13 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     },
     {
       "id": "t-pulls",
@@ -219,10 +240,13 @@
       "name": "Pull requests",
       "note": null,
       "icon": "pr",
-      "href": "#pulls",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "pull",
+        "id": null
+      }
     },
     {
       "id": "t-skills",
@@ -231,10 +255,13 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      }
     },
     {
       "id": "p-web",
@@ -243,10 +270,13 @@
       "name": null,
       "note": null,
       "icon": "window",
-      "href": "#area",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      }
     },
     {
       "id": "p-api",
@@ -255,10 +285,10 @@
       "name": null,
       "note": null,
       "icon": "braces",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "p-billing",
@@ -267,10 +297,10 @@
       "name": null,
       "note": null,
       "icon": "card",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "p-mobile",
@@ -279,10 +309,10 @@
       "name": null,
       "note": null,
       "icon": "phone",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "p-infra",
@@ -291,10 +321,10 @@
       "name": null,
       "note": null,
       "icon": "server",
-      "href": null,
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "s-review",
@@ -303,10 +333,10 @@
       "name": "/review",
       "note": "A fresh review of a change",
       "icon": "play",
-      "href": null,
       "run": "/review",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": null
     },
     {
       "id": "s-red-main",
@@ -315,10 +345,10 @@
       "name": "/red-main",
       "note": "Find why main is red",
       "icon": "play",
-      "href": null,
       "run": "/red-main",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "s-release",
@@ -327,10 +357,10 @@
       "name": "/release",
       "note": "Roll out, watch, roll back",
       "icon": "play",
-      "href": null,
       "run": "/release",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "s-qa",
@@ -339,10 +369,10 @@
       "name": "/qa-by-hand",
       "note": "Click through a change",
       "icon": "play",
-      "href": null,
       "run": "/qa-by-hand",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "s-upgrade",
@@ -351,10 +381,10 @@
       "name": "/upgrade",
       "note": "Update dependencies",
       "icon": "play",
-      "href": null,
       "run": "/upgrade",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     }
   ]
 }

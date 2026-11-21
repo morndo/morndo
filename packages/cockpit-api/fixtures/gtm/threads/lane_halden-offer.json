@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_halden-offer-0",
+      "id": "m1",
       "author": {
         "id": "jonas-falk",
         "name": "Jonas Falk",
@@ -25,13 +25,13 @@
         "engine": null,
         "record": null
       },
-      "time": "08:30",
       "text": "Offer is ready. I kept the template's 15% and added the webinar they asked for. Legal saw the template last week, so no new review needed.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:30:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

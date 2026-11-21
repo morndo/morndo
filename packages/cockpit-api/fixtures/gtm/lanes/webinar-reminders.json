@@ -19,8 +19,6 @@
     "record": "31 of 31 posts went out on time"
   },
   "waitsFor": null,
-  "opened": "Opened Thu 12 Nov",
-  "closed": null,
   "next": "Wed 18 Nov, 09:00",
   "afterNext": null,
   "decisionId": null,
@@ -89,15 +87,20 @@
       "icon": "mail",
       "title": "Reminder email",
       "detail": "90 words, one link, scheduled",
-      "href": "#drafts"
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     },
     {
       "icon": "file",
       "title": "Sign-ups by source",
       "detail": "Newsletter 118, LinkedIn 61, partners 33",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-12T00:00:00+01:00",
+  "closedAt": null
 }

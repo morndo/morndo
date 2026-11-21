@@ -20,7 +20,7 @@
   ],
   "messages": [
     {
-      "id": "manager-0",
+      "id": "m1",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -35,16 +35,15 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "What is still open on the budget shift?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     },
     {
-      "id": "manager-1",
+      "id": "m2",
       "author": {
         "id": "manager",
         "name": "Manager",
@@ -59,13 +58,13 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "One thing: your OK. The numbers for 14 days are checked and the decision brief is written.\nIt is the lane Search budget shift, in Paid. Paid buyer leads it. Without your answer by 14:00 nothing changes.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

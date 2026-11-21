@@ -188,10 +188,13 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      }
     },
     {
       "id": "t-decide",
@@ -200,10 +203,13 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     },
     {
       "id": "t-drafts",
@@ -212,10 +218,13 @@
       "name": null,
       "note": null,
       "icon": "mail",
-      "href": "#drafts",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     },
     {
       "id": "t-skills",
@@ -224,10 +233,13 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      }
     },
     {
       "id": "s-weekly",
@@ -236,10 +248,10 @@
       "name": "/weekly-summary",
       "note": "Write the weekly update",
       "icon": "play",
-      "href": null,
       "run": "/weekly-summary",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": null
     }
   ],
   "pinnable": [
@@ -250,10 +262,13 @@
       "name": null,
       "note": null,
       "icon": "sun",
-      "href": "#brief",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      }
     },
     {
       "id": "t-decide",
@@ -262,10 +277,13 @@
       "name": null,
       "note": null,
       "icon": "decide",
-      "href": "#decision",
       "run": null,
       "badge": true,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     },
     {
       "id": "t-drafts",
@@ -274,10 +292,13 @@
       "name": null,
       "note": null,
       "icon": "mail",
-      "href": "#drafts",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     },
     {
       "id": "t-skills",
@@ -286,10 +307,13 @@
       "name": null,
       "note": null,
       "icon": "star",
-      "href": "#skills",
       "run": null,
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      }
     },
     {
       "id": "a-partnerships",
@@ -298,10 +322,13 @@
       "name": "Partnerships",
       "note": null,
       "icon": "partner",
-      "href": "#topic/partnerships",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "partnerships"
+      }
     },
     {
       "id": "a-content",
@@ -310,10 +337,13 @@
       "name": null,
       "note": null,
       "icon": "pen",
-      "href": "#topic/content",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "content"
+      }
     },
     {
       "id": "a-outbound",
@@ -322,10 +352,13 @@
       "name": null,
       "note": null,
       "icon": "send",
-      "href": "#topic/outbound",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "outbound"
+      }
     },
     {
       "id": "a-paid",
@@ -334,10 +367,13 @@
       "name": null,
       "note": null,
       "icon": "horn",
-      "href": "#topic/paid",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "paid"
+      }
     },
     {
       "id": "a-seo",
@@ -346,10 +382,13 @@
       "name": null,
       "note": null,
       "icon": "search",
-      "href": "#topic/seo",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "seo"
+      }
     },
     {
       "id": "a-research",
@@ -358,10 +397,13 @@
       "name": null,
       "note": null,
       "icon": "target",
-      "href": "#topic/research",
       "run": null,
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "research"
+      }
     },
     {
       "id": "s-weekly",
@@ -370,10 +412,10 @@
       "name": "/weekly-summary",
       "note": "Write the weekly update",
       "icon": "play",
-      "href": null,
       "run": "/weekly-summary",
       "badge": false,
-      "pinned": true
+      "pinned": true,
+      "target": null
     },
     {
       "id": "s-post",
@@ -382,10 +424,10 @@
       "name": "/linkedin-post",
       "note": "A post in your voice",
       "icon": "play",
-      "href": null,
       "run": "/linkedin-post",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "s-visual",
@@ -394,10 +436,10 @@
       "name": "/brand-visual",
       "note": "Images in your brand",
       "icon": "play",
-      "href": null,
       "run": "/brand-visual",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "s-ads",
@@ -406,10 +448,10 @@
       "name": "/ad-variants",
       "note": "6 ad variants",
       "icon": "play",
-      "href": null,
       "run": "/ad-variants",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     },
     {
       "id": "s-profile",
@@ -418,10 +460,10 @@
       "name": "/icp-refresh",
       "note": "Rebuild the customer profile",
       "icon": "play",
-      "href": null,
       "run": "/icp-refresh",
       "badge": false,
-      "pinned": false
+      "pinned": false,
+      "target": null
     }
   ]
 }

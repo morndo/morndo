@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_export-for-big-accounts-0",
+      "id": "m1",
       "author": {
         "id": "builder",
         "name": "Builder",
@@ -25,16 +25,15 @@
         "engine": null,
         "record": null
       },
-      "time": "Fri 11:40",
       "text": "Found it: the export builds the whole file in memory. I am changing it to write 5,000 rows at a time, with a test on a 400,000-row account.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-13T11:40:00+01:00"
     },
     {
-      "id": "lane_export-for-big-accounts-1",
+      "id": "m2",
       "author": {
         "id": "qa",
         "name": "QA",
@@ -49,16 +48,15 @@
         "engine": null,
         "record": null
       },
-      "time": "Sun 18:05",
       "text": "Fenwick's export ran on staging in 48 seconds. I compared the file with their data: every row is there.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-15T18:05:00+01:00"
     },
     {
-      "id": "lane_export-for-big-accounts-2",
+      "id": "m3",
       "author": {
         "id": "timo-varga",
         "name": "Timo Varga",
@@ -73,16 +71,15 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "Can Fenwick get it before everyone else?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     },
     {
-      "id": "lane_export-for-big-accounts-3",
+      "id": "m4",
       "author": {
         "id": "release",
         "name": "Release",
@@ -97,13 +94,13 @@
         "engine": null,
         "record": null
       },
-      "time": "07:12",
       "text": "Yes. I can put Fenwick in the first 10% of accounts, so they have it tonight at 22:00. It is in the decision brief as an option.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:12:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

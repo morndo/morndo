@@ -4,7 +4,6 @@
   "state": "open",
   "topicId": "paid",
   "topicName": "Paid",
-  "due": "Due today, 14:00",
   "whyYours": "Yours: over €500",
   "minutes": 2,
   "contextLine": "Paid · Due today, 14:00 · 2 min to read",
@@ -17,7 +16,7 @@
     "laneTitle": "Search budget shift",
     "writtenBy": "Paid buyer",
     "checkedBy": "the Manager",
-    "checkedAt": "07:05"
+    "checkedAt": "2026-11-16T07:05:00+01:00"
   },
   "context": "In the last 14 days LinkedIn brought 24 leads and Google Search brought 40, for less money. Search leads also take a sales call more often. The weekly budget is €4,000: €2,400 on LinkedIn and €1,600 on Search.",
   "numbers": [
@@ -63,29 +62,30 @@
     {
       "step": "Move €1,200 a week to the two Search campaigns",
       "who": "Paid agent",
-      "by": "Today, after your OK"
+      "dueAt": "2026-11-16T17:00:00+01:00"
     },
     {
       "step": "Cut LinkedIn down to the retargeting audience",
       "who": "Paid agent",
-      "by": "Today"
+      "dueAt": "2026-11-16T17:00:00+01:00"
     },
     {
       "step": "Write 3 new Search ads for the extra budget",
       "who": "Content agent",
-      "by": "Tue 17 Nov"
+      "dueAt": "2026-11-17T17:00:00+01:00"
     },
     {
       "step": "Check with sales that the new leads are good",
       "who": "Jonas, sales",
-      "by": "Fri 20 Nov"
+      "dueAt": "2026-11-20T17:00:00+01:00"
     },
     {
       "step": "Report the result against the dream output",
       "who": "Manager",
-      "by": "Mon 7 Dec"
+      "dueAt": "2026-12-07T17:00:00+01:00"
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing changes.",
-  "position": "1 of 4 · 4 open"
+  "position": "1 of 4 · 4 open",
+  "dueAt": "2026-11-16T14:00:00+01:00"
 }

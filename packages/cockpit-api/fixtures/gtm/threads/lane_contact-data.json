@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_contact-data-0",
+      "id": "m1",
       "author": {
         "id": "contact-finder",
         "name": "Contact finder",
@@ -25,13 +25,13 @@
         "engine": null,
         "record": null
       },
-      "time": "06:10",
       "text": "58 contacts found overnight. 4 emails bounced the check, so I left them out.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T06:10:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

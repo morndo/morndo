@@ -4,7 +4,6 @@
   "state": "open",
   "topicId": "outbound",
   "topicName": "Outbound",
-  "due": "Due tomorrow",
   "whyYours": "Yours: in your name",
   "minutes": 2,
   "contextLine": "Outbound · Due tomorrow · 2 min",
@@ -22,5 +21,6 @@
   "guardrail": null,
   "nextSteps": [],
   "ifNoAnswer": null,
-  "position": "2 of 4 · 4 open"
+  "position": "2 of 4 · 4 open",
+  "dueAt": "2026-11-17T17:00:00+01:00"
 }

@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Mon 9 Nov",
-  "closed": null,
   "next": "After your OK",
   "afterNext": "Wed 18 Nov, when it is published",
   "decisionId": "d3",
@@ -113,21 +111,26 @@
       "icon": "file",
       "title": "The story",
       "detail": "1,100 words, signed off by Fenwick",
-      "href": null
+      "target": null
     },
     {
       "icon": "mail",
       "title": "Fenwick's sign-off",
       "detail": "From their ops lead, Friday 16:20",
-      "href": "#drafts"
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
     },
     {
       "icon": "file",
       "title": "Source for the 38%",
       "detail": "Fenwick's Q3 ops report, page 4",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-09T00:00:00+01:00",
+  "closedAt": null
 }

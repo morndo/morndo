@@ -1,10 +1,11 @@
 {
   "$defs": {
     "AccessGrant": {
-      "additionalProperties": false,
+      "description": "Access grant for the cockpit.",
       "properties": {
         "kind": {
-          "$ref": "#/$defs/AccessKind"
+          "$ref": "#/$defs/AccessKind",
+          "description": "Kind for this record."
         },
         "stages": {
           "default": [],
@@ -20,31 +21,59 @@
       ],
       "type": "object"
     },
+    "AccessGrantInput": {
+      "additionalProperties": false,
+      "description": "Access grant submitted by an administrator.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/KnownAccessKind",
+          "description": "Scope granted to the recipient."
+        },
+        "stages": {
+          "default": [],
+          "description": "Allowed stage names when the scope is stage-based.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "kind"
+      ],
+      "type": "object"
+    },
     "AccessKind": {
+      "description": "Access kind for the cockpit.",
       "enum": [
         "all",
         "stages",
         "view",
-        "none"
+        "none",
+        "unknown"
       ],
       "type": "string"
     },
     "AccessPerson": {
-      "additionalProperties": false,
+      "description": "Access person for the cockpit.",
       "properties": {
         "access": {
-          "$ref": "#/$defs/AccessGrant"
+          "$ref": "#/$defs/AccessGrant",
+          "description": "Access for this record."
         },
         "otherTopics": {
+          "description": "Other topics for this record.",
           "items": {
             "$ref": "#/$defs/OtherTopicAccess"
           },
           "type": "array"
         },
         "person": {
-          "$ref": "#/$defs/Actor"
+          "$ref": "#/$defs/Actor",
+          "description": "Person for this record."
         },
         "scope": {
+          "description": "Scope for this record.",
           "type": "string"
         }
       },
@@ -57,18 +86,21 @@
       "type": "object"
     },
     "AccessView": {
-      "additionalProperties": false,
+      "description": "Sharing settings for one topic.",
       "properties": {
         "people": {
+          "description": "People for this record.",
           "items": {
             "$ref": "#/$defs/AccessPerson"
           },
           "type": "array"
         },
         "topicId": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Identifier of the associated topic."
         },
         "topicName": {
+          "description": "Topic name for this record.",
           "type": "string"
         }
       },
@@ -79,8 +111,21 @@
       ],
       "type": "object"
     },
+    "ActionId": {
+      "description": "Identifier of an action recorded in history.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
+    "ActionTone": {
+      "description": "Visual treatment of an action button.",
+      "enum": [
+        "ink",
+        "quiet",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "Actor": {
-      "additionalProperties": false,
       "description": "A person or agent, resolved to the record the screens show.\nFields a particular card does not carry are null.",
       "properties": {
         "avatar": {
@@ -91,7 +136,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Avatar for this record."
         },
         "engine": {
           "anyOf": [
@@ -101,15 +147,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Engine for this record."
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/PersonId",
+          "description": "Stable identifier for this record."
         },
         "kind": {
-          "$ref": "#/$defs/ActorKind"
+          "$ref": "#/$defs/ActorKind",
+          "description": "Kind for this record."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "record": {
@@ -120,7 +170,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Record for this record."
         },
         "role": {
           "anyOf": [
@@ -130,9 +181,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Role for this record."
         },
         "shortName": {
+          "description": "Short name for this record.",
           "type": "string"
         },
         "skill": {
@@ -143,17 +196,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Skill for this record."
         },
         "state": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneState"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Current state of the record."
         },
         "text": {
           "anyOf": [
@@ -163,7 +218,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Text shown to the reader."
         },
         "word": {
           "anyOf": [
@@ -173,7 +229,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Word for this record."
         }
       },
       "required": [
@@ -193,22 +250,24 @@
       "type": "object"
     },
     "ActorKind": {
+      "description": "Actor kind for the cockpit.",
       "enum": [
         "person",
-        "agent"
+        "agent",
+        "unknown"
       ],
       "type": "string"
     },
     "AgentSpend": {
-      "additionalProperties": false,
+      "description": "Agent spend for the cockpit.",
       "properties": {
         "cap": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/$defs/Money",
+          "description": "Cap for this record."
         },
         "spent": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/$defs/Money",
+          "description": "Spent for this record."
         }
       },
       "required": [
@@ -218,22 +277,26 @@
       "type": "object"
     },
     "AgentsStrip": {
-      "additionalProperties": false,
+      "description": "Agents strip for the cockpit.",
       "properties": {
         "count": {
+          "description": "Count for this record.",
           "format": "int64",
           "type": "integer"
         },
         "items": {
+          "description": "Items for this record.",
           "items": {
             "$ref": "#/$defs/StripItem"
           },
           "type": "array"
         },
         "seen": {
+          "description": "Seen for this record.",
           "type": "string"
         },
         "summary": {
+          "description": "Summary for this record.",
           "type": "string"
         }
       },
@@ -246,64 +309,106 @@
       "type": "object"
     },
     "Answer": {
-      "additionalProperties": false,
+      "description": "Answer for the cockpit.",
       "properties": {
-        "href": {
+        "source": {
+          "description": "Source for this record.",
+          "type": "string"
+        },
+        "target": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/Target"
             },
             {
               "type": "null"
             }
-          ]
-        },
-        "source": {
-          "type": "string"
+          ],
+          "description": "Destination to open in the cockpit."
         },
         "text": {
+          "description": "Text shown to the reader.",
           "type": "string"
         }
       },
       "required": [
         "text",
         "source",
-        "href"
+        "target"
       ],
       "type": "object"
     },
     "ApiError": {
-      "additionalProperties": false,
+      "description": "An RFC 9457 problem details response.",
       "properties": {
-        "error": {
-          "$ref": "#/$defs/ErrorBody"
+        "code": {
+          "$ref": "#/$defs/ErrorCode",
+          "description": "Stable application code."
+        },
+        "detail": {
+          "description": "Explanation specific to this request.",
+          "type": "string"
+        },
+        "errors": {
+          "description": "Field-level validation failures, if any.",
+          "items": {
+            "$ref": "#/$defs/FieldError"
+          },
+          "type": "array"
+        },
+        "status": {
+          "description": "HTTP response status.",
+          "format": "uint16",
+          "maximum": 65535,
+          "minimum": 0,
+          "type": "integer"
+        },
+        "title": {
+          "description": "Short description of the problem type.",
+          "type": "string"
+        },
+        "type": {
+          "description": "URI identifying the problem type.",
+          "format": "uri",
+          "type": "string"
         }
       },
       "required": [
-        "error"
+        "type",
+        "title",
+        "status",
+        "detail",
+        "code",
+        "errors"
       ],
       "type": "object"
     },
     "Artwork": {
-      "additionalProperties": false,
+      "description": "Artwork for the cockpit.",
       "properties": {
         "alt": {
+          "description": "Alt for this record.",
           "type": "string"
         },
         "credit": {
+          "description": "Credit for this record.",
           "type": "string"
         },
         "index": {
+          "description": "Index for this record.",
           "format": "int64",
           "type": "integer"
         },
         "manner": {
+          "description": "Manner for this record.",
           "type": "string"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "total": {
+          "description": "Total for this record.",
           "format": "int64",
           "type": "integer"
         }
@@ -319,39 +424,45 @@
       "type": "object"
     },
     "Ask": {
-      "additionalProperties": false,
+      "description": "Ask for the cockpit.",
       "properties": {
-        "chat": {
-          "type": "string"
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
         },
-        "href": {
+        "chat": {
+          "description": "Chat for this record.",
           "type": "string"
         },
         "id": {
+          "description": "Stable identifier for this record.",
           "type": "string"
         },
         "quote": {
+          "description": "Quote for this record.",
           "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Destination to open in the cockpit."
         },
         "went": {
-          "type": "string"
-        },
-        "when": {
+          "description": "Went for this record.",
           "type": "string"
         }
       },
       "required": [
         "id",
         "quote",
-        "when",
+        "at",
         "chat",
         "went",
-        "href"
+        "target"
       ],
       "type": "object"
     },
     "AskedMeta": {
-      "additionalProperties": false,
+      "description": "Asked meta for the cockpit.",
       "properties": {
         "note": {
           "anyOf": [
@@ -361,9 +472,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Note for this record."
         },
         "source": {
+          "description": "Source for this record.",
           "type": "string"
         }
       },
@@ -373,47 +486,53 @@
       ],
       "type": "object"
     },
-    "Attachment": {
+    "AttachmentInput": {
       "additionalProperties": false,
-      "description": "A file or link dropped onto a topic, or attached to a filed lane.",
+      "description": "File or link supplied with a new request.",
       "properties": {
-        "href": {
-          "default": null,
-          "type": [
-            "string",
-            "null"
-          ]
-        },
         "name": {
+          "description": "Name shown to the reader.",
+          "maxLength": 200,
+          "minLength": 1,
+          "type": "string"
+        },
+        "url": {
+          "description": "Url for this record.",
+          "format": "uri",
           "type": "string"
         }
       },
       "required": [
-        "name"
+        "name",
+        "url"
       ],
       "type": "object"
     },
     "Blocker": {
-      "additionalProperties": false,
+      "description": "Blocker for the cockpit.",
       "properties": {
-        "href": {
-          "type": "string"
-        },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "short": {
+          "description": "Short for this record.",
           "type": "string"
         },
         "state": {
-          "type": "string"
+          "$ref": "#/$defs/HealthState",
+          "description": "Current state of the record."
+        },
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Destination to open in the cockpit."
         },
         "what": {
           "anyOf": [
@@ -423,9 +542,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "What for this record."
         },
         "who": {
+          "description": "Who for this record.",
           "type": "string"
         },
         "why": {
@@ -436,7 +557,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Why for this record."
         }
       },
       "required": [
@@ -445,53 +567,64 @@
         "what",
         "why",
         "who",
-        "href",
+        "target",
         "laneId"
       ],
       "type": "object"
     },
     "BriefDecision": {
-      "additionalProperties": false,
+      "description": "Brief decision for the cockpit.",
       "properties": {
         "context": {
+          "description": "Context for this record.",
           "type": "string"
         },
         "doneNote": {
+          "description": "Done note for this record.",
           "type": "string"
         },
-        "due": {
-          "type": "string"
+        "dueAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time an answer or action is due."
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/DecisionId",
+          "description": "Stable identifier for this record."
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "minutes": {
+          "description": "Minutes for this record.",
           "format": "int64",
           "type": "integer"
         },
         "state": {
-          "$ref": "#/$defs/DecisionState"
+          "$ref": "#/$defs/DecisionState",
+          "description": "Current state of the record."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "topicId": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Identifier of the associated topic."
         },
         "topicName": {
+          "description": "Topic name for this record.",
           "type": "string"
         },
         "whyYours": {
+          "description": "Why yours for this record.",
           "type": "string"
         }
       },
@@ -499,7 +632,7 @@
         "id",
         "topicId",
         "topicName",
-        "due",
+        "dueAt",
         "whyYours",
         "title",
         "context",
@@ -511,25 +644,30 @@
       "type": "object"
     },
     "BriefTopic": {
-      "additionalProperties": false,
+      "description": "Brief topic for the cockpit.",
       "properties": {
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Stable identifier for this record."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "progress": {
+          "description": "Progress for this record.",
           "type": "string"
         },
         "spend": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/$defs/Money",
+          "description": "Spend for this record."
         },
         "state": {
-          "type": "string"
+          "$ref": "#/$defs/HealthState",
+          "description": "Current state of the record."
         },
         "verdict": {
+          "description": "Verdict for this record.",
           "type": "string"
         }
       },
@@ -544,62 +682,73 @@
       "type": "object"
     },
     "BriefView": {
-      "additionalProperties": false,
+      "description": "The current briefing and items that need attention.",
       "properties": {
         "artwork": {
-          "$ref": "#/$defs/Artwork"
+          "$ref": "#/$defs/Artwork",
+          "description": "Artwork for this record."
+        },
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
         },
         "burns": {
+          "description": "Burns for this record.",
           "items": {
             "$ref": "#/$defs/Burn"
           },
           "type": "array"
         },
         "cadence": {
-          "type": "string"
-        },
-        "date": {
+          "description": "Cadence for this record.",
           "type": "string"
         },
         "decisions": {
+          "description": "Decisions for this record.",
           "items": {
             "$ref": "#/$defs/BriefDecision"
           },
           "type": "array"
         },
         "drafts": {
-          "$ref": "#/$defs/DraftsSummary"
+          "$ref": "#/$defs/DraftsSummary",
+          "description": "Drafts for this record."
         },
         "lede": {
+          "description": "Lede for this record.",
           "type": "string"
         },
         "minutes": {
+          "description": "Minutes for this record.",
           "format": "int64",
           "type": "integer"
         },
         "nextBriefAt": {
-          "type": "string"
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time associated with next brief."
         },
         "openCount": {
+          "description": "Open count for this record.",
           "format": "int64",
           "type": "integer"
         },
         "overnight": {
+          "description": "Overnight for this record.",
           "items": {
             "$ref": "#/$defs/OvernightAction"
           },
           "type": "array"
         },
         "spend": {
-          "$ref": "#/$defs/SpendLine"
-        },
-        "time": {
-          "type": "string"
+          "$ref": "#/$defs/SpendLine",
+          "description": "Spend for this record."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "topics": {
+          "description": "Topics for this record.",
           "items": {
             "$ref": "#/$defs/BriefTopic"
           },
@@ -607,8 +756,7 @@
         }
       },
       "required": [
-        "date",
-        "time",
+        "at",
         "title",
         "lede",
         "nextBriefAt",
@@ -626,55 +774,61 @@
       "type": "object"
     },
     "Burn": {
-      "additionalProperties": false,
+      "description": "Burn for the cockpit.",
       "properties": {
-        "deadline": {
-          "type": "string"
-        },
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
-        "href": {
-          "type": "string"
+        "stuckAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time associated with stuck."
         },
-        "since": {
-          "type": "string"
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Destination to open in the cockpit."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "topicId": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Identifier of the associated topic."
         },
         "topicName": {
+          "description": "Topic name for this record.",
           "type": "string"
         }
       },
       "required": [
         "topicId",
         "topicName",
-        "since",
-        "deadline",
+        "stuckAt",
         "title",
         "detail",
-        "href"
+        "target"
       ],
       "type": "object"
     },
     "ChatMode": {
+      "description": "Chat mode for the cockpit.",
       "enum": [
         "floating",
-        "sidebar"
+        "sidebar",
+        "unknown"
       ],
       "type": "string"
     },
     "CheckResult": {
-      "additionalProperties": false,
+      "description": "Check result for the cockpit.",
       "properties": {
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "passed": {
+          "description": "Passed for this record.",
           "type": "boolean"
         }
       },
@@ -685,12 +839,14 @@
       "type": "object"
     },
     "Command": {
+      "description": "A user request accepted by the cockpit.",
       "oneOf": [
         {
           "additionalProperties": false,
           "properties": {
             "decisionId": {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId",
+              "description": "Identifier of the associated decision."
             },
             "type": {
               "const": "decision.approve",
@@ -707,7 +863,8 @@
           "additionalProperties": false,
           "properties": {
             "decisionId": {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId",
+              "description": "Identifier of the associated decision."
             },
             "type": {
               "const": "decision.decline",
@@ -724,7 +881,8 @@
           "additionalProperties": false,
           "properties": {
             "decisionId": {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId",
+              "description": "Identifier of the associated decision."
             },
             "type": {
               "const": "decision.undo",
@@ -741,9 +899,13 @@
           "additionalProperties": false,
           "properties": {
             "decisionId": {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId",
+              "description": "Identifier of the associated decision."
             },
             "text": {
+              "description": "Text shown to the reader.",
+              "maxLength": 4000,
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -762,7 +924,8 @@
           "additionalProperties": false,
           "properties": {
             "actionId": {
-              "type": "string"
+              "$ref": "#/$defs/ActionId",
+              "description": "Identifier of the associated action."
             },
             "type": {
               "const": "agentAction.undo",
@@ -779,7 +942,8 @@
           "additionalProperties": false,
           "properties": {
             "actionId": {
-              "type": "string"
+              "$ref": "#/$defs/ActionId",
+              "description": "Identifier of the associated action."
             },
             "type": {
               "const": "agentAction.redo",
@@ -798,30 +962,44 @@
             "attachment": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/Attachment"
+                  "$ref": "#/$defs/AttachmentInput"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "default": null
+              "default": null,
+              "description": "Attachment for this record."
             },
             "leadId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PersonId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
+              "description": "Identifier of the associated lead."
             },
             "text": {
+              "description": "Text shown to the reader.",
+              "maxLength": 4000,
+              "minLength": 1,
               "type": "string"
             },
             "topicId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TopicId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
+              "description": "Identifier of the associated topic."
             },
             "type": {
               "const": "lane.file",
@@ -838,10 +1016,12 @@
           "additionalProperties": false,
           "properties": {
             "laneId": {
-              "type": "string"
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
             },
             "topicId": {
-              "type": "string"
+              "$ref": "#/$defs/TopicId",
+              "description": "Identifier of the associated topic."
             },
             "type": {
               "const": "lane.move",
@@ -859,7 +1039,8 @@
           "additionalProperties": false,
           "properties": {
             "laneId": {
-              "type": "string"
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
             },
             "type": {
               "const": "lane.undoFile",
@@ -876,10 +1057,12 @@
           "additionalProperties": false,
           "properties": {
             "act": {
+              "description": "Act for this record.",
               "type": "string"
             },
             "laneId": {
-              "type": "string"
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
             },
             "type": {
               "const": "lane.act",
@@ -897,10 +1080,12 @@
           "additionalProperties": false,
           "properties": {
             "laneId": {
-              "type": "string"
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
             },
             "personId": {
-              "type": "string"
+              "$ref": "#/$defs/PersonId",
+              "description": "Identifier of the associated person."
             },
             "type": {
               "const": "person.remind",
@@ -918,7 +1103,8 @@
           "additionalProperties": false,
           "properties": {
             "topicId": {
-              "type": "string"
+              "$ref": "#/$defs/TopicId",
+              "description": "Identifier of the associated topic."
             },
             "type": {
               "const": "goal.ask",
@@ -935,10 +1121,14 @@
           "additionalProperties": false,
           "properties": {
             "text": {
+              "description": "Text shown to the reader.",
+              "maxLength": 4000,
+              "minLength": 1,
               "type": "string"
             },
             "threadId": {
-              "type": "string"
+              "$ref": "#/$defs/ThreadId",
+              "description": "Identifier of the associated thread."
             },
             "type": {
               "const": "message.send",
@@ -956,10 +1146,12 @@
           "additionalProperties": false,
           "properties": {
             "label": {
-              "$ref": "#/$defs/LabelKind"
+              "$ref": "#/$defs/KnownLabelKind",
+              "description": "Label for this record."
             },
             "messageId": {
-              "type": "string"
+              "$ref": "#/$defs/MessageId",
+              "description": "Identifier of the associated message."
             },
             "type": {
               "const": "message.relabel",
@@ -977,13 +1169,15 @@
           "additionalProperties": false,
           "properties": {
             "lines": {
+              "description": "Lines for this record.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "threadId": {
-              "type": "string"
+              "$ref": "#/$defs/ThreadId",
+              "description": "Identifier of the associated thread."
             },
             "type": {
               "const": "since.edit",
@@ -1001,7 +1195,8 @@
           "additionalProperties": false,
           "properties": {
             "pinId": {
-              "type": "string"
+              "$ref": "#/$defs/PinId",
+              "description": "Identifier of the associated pin."
             },
             "type": {
               "const": "pin.add",
@@ -1018,7 +1213,8 @@
           "additionalProperties": false,
           "properties": {
             "pinId": {
-              "type": "string"
+              "$ref": "#/$defs/PinId",
+              "description": "Identifier of the associated pin."
             },
             "type": {
               "const": "pin.remove",
@@ -1036,7 +1232,10 @@
           "properties": {
             "briefsPerDay": {
               "default": null,
+              "description": "Briefs per day for this record.",
               "format": "int64",
+              "maximum": 3,
+              "minimum": 1,
               "type": [
                 "integer",
                 "null"
@@ -1045,16 +1244,18 @@
             "chatMode": {
               "anyOf": [
                 {
-                  "$ref": "#/$defs/ChatMode"
+                  "$ref": "#/$defs/KnownChatMode"
                 },
                 {
                   "type": "null"
                 }
               ],
-              "default": null
+              "default": null,
+              "description": "Chat mode for this record."
             },
             "interruptOnlyUrgent": {
               "default": null,
+              "description": "Interrupt only urgent for this record.",
               "type": [
                 "boolean",
                 "null"
@@ -1069,7 +1270,8 @@
                   "type": "null"
                 }
               ],
-              "default": null
+              "default": null,
+              "description": "Sizes of the cockpit panes."
             },
             "theme": {
               "anyOf": [
@@ -1080,7 +1282,8 @@
                   "type": "null"
                 }
               ],
-              "default": null
+              "default": null,
+              "description": "Theme for this record."
             },
             "type": {
               "const": "prefs.set",
@@ -1096,22 +1299,28 @@
           "additionalProperties": false,
           "properties": {
             "dailyLimit": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/DailyLimit"
+                },
+                {
+                  "type": "null"
+                }
+              ],
               "default": null,
-              "format": "int64",
-              "type": [
-                "integer",
-                "null"
-              ]
+              "description": "Daily limit for this record."
             },
             "rule": {
-              "$ref": "#/$defs/DecisionRule"
+              "$ref": "#/$defs/KnownDecisionRule",
+              "description": "Rule for this record."
             },
             "type": {
               "const": "decisionRight.set",
               "type": "string"
             },
             "who": {
-              "$ref": "#/$defs/Decider"
+              "$ref": "#/$defs/KnownDecider",
+              "description": "Who for this record."
             }
           },
           "required": [
@@ -1125,9 +1334,13 @@
           "additionalProperties": false,
           "properties": {
             "skill": {
-              "type": "string"
+              "$ref": "#/$defs/SkillId",
+              "description": "Skill for this record."
             },
             "text": {
+              "description": "Text shown to the reader.",
+              "maxLength": 4000,
+              "minLength": 1,
               "type": "string"
             },
             "type": {
@@ -1146,13 +1359,16 @@
           "additionalProperties": false,
           "properties": {
             "access": {
-              "$ref": "#/$defs/AccessGrant"
+              "$ref": "#/$defs/AccessGrantInput",
+              "description": "Access for this record."
             },
             "personId": {
-              "type": "string"
+              "$ref": "#/$defs/PersonId",
+              "description": "Identifier of the associated person."
             },
             "topicId": {
-              "type": "string"
+              "$ref": "#/$defs/TopicId",
+              "description": "Identifier of the associated topic."
             },
             "type": {
               "const": "access.set",
@@ -1171,10 +1387,14 @@
           "additionalProperties": false,
           "properties": {
             "nameOrEmail": {
+              "description": "Name or email for this record.",
+              "maxLength": 200,
+              "minLength": 1,
               "type": "string"
             },
             "topicId": {
-              "type": "string"
+              "$ref": "#/$defs/TopicId",
+              "description": "Identifier of the associated topic."
             },
             "type": {
               "const": "access.invite",
@@ -1191,23 +1411,25 @@
       ]
     },
     "CommandResult": {
-      "additionalProperties": false,
+      "description": "Receipt and sequenced updates produced by an accepted command.",
       "properties": {
         "events": {
+          "description": "Events for this record.",
           "items": {
-            "$ref": "#/$defs/Event"
+            "$ref": "#/$defs/FeedEvent"
           },
           "type": "array"
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "message": {
           "anyOf": [
@@ -1217,9 +1439,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Message for this record."
         },
         "ok": {
+          "description": "Ok for this record.",
           "type": "boolean"
         }
       },
@@ -1232,7 +1456,7 @@
       "type": "object"
     },
     "Connection": {
-      "additionalProperties": false,
+      "description": "Connection for the cockpit.",
       "properties": {
         "capacity": {
           "anyOf": [
@@ -1242,16 +1466,20 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Capacity for this record."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "purpose": {
+          "description": "Purpose for this record.",
           "type": "string"
         },
         "state": {
-          "$ref": "#/$defs/ConnectionState"
+          "$ref": "#/$defs/ConnectionState",
+          "description": "Current state of the record."
         }
       },
       "required": [
@@ -1263,16 +1491,27 @@
       "type": "object"
     },
     "ConnectionState": {
+      "description": "Connection state for the cockpit.",
       "enum": [
         "connected",
         "signedIn",
         "addKey",
-        "signIn"
+        "signIn",
+        "unknown"
       ],
       "type": "string"
     },
+    "DailyLimit": {
+      "description": "Daily allowance for a rule delegated to an agent.",
+      "enum": [
+        5,
+        20,
+        60
+      ],
+      "type": "integer"
+    },
     "Deal": {
-      "additionalProperties": false,
+      "description": "Deal for the cockpit.",
       "properties": {
         "alt": {
           "anyOf": [
@@ -1282,9 +1521,10 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Alt for this record."
         },
-        "at": {
+        "chartDay": {
           "anyOf": [
             {
               "format": "int64",
@@ -1293,7 +1533,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Chart day for this record."
         },
         "close": {
           "anyOf": [
@@ -1303,28 +1544,30 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Close for this record."
         },
         "confidence": {
+          "description": "Confidence for this record.",
           "type": "string"
         },
         "evidence": {
-          "type": "string"
-        },
-        "href": {
+          "description": "Evidence for this record.",
           "type": "string"
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "next": {
@@ -1335,13 +1578,20 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Next for this record."
         },
         "short": {
+          "description": "Short for this record.",
           "type": "string"
         },
         "stage": {
+          "description": "Stage for this record.",
           "type": "string"
+        },
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Destination to open in the cockpit."
         },
         "value": {
           "anyOf": [
@@ -1351,18 +1601,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Value for this record."
         }
       },
       "required": [
         "name",
         "confidence",
         "close",
-        "at",
+        "chartDay",
         "stage",
         "short",
         "laneId",
-        "href",
+        "target",
         "evidence",
         "next",
         "value",
@@ -1371,10 +1622,11 @@
       "type": "object"
     },
     "DealAlt": {
-      "additionalProperties": false,
+      "description": "Deal alt for the cockpit.",
       "properties": {
         "decisionId": {
-          "type": "string"
+          "$ref": "#/$defs/DecisionId",
+          "description": "Identifier of the associated decision."
         },
         "next": {
           "anyOf": [
@@ -1384,7 +1636,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Next for this record."
         },
         "short": {
           "anyOf": [
@@ -1394,7 +1647,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Short for this record."
         },
         "stage": {
           "anyOf": [
@@ -1404,7 +1658,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Stage for this record."
         }
       },
       "required": [
@@ -1416,26 +1671,36 @@
       "type": "object"
     },
     "Decider": {
+      "description": "Decider for the cockpit.",
       "enum": [
         "you",
-        "agent"
+        "agent",
+        "unknown"
       ],
       "type": "string"
     },
+    "DecisionId": {
+      "description": "Identifier of a decision.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "DecisionQueueView": {
-      "additionalProperties": false,
+      "description": "Decision queue view for the cockpit.",
       "properties": {
         "items": {
+          "description": "Items for this record.",
           "items": {
             "$ref": "#/$defs/QueueItem"
           },
           "type": "array"
         },
         "open": {
+          "description": "Open for this record.",
           "format": "int64",
           "type": "integer"
         },
         "total": {
+          "description": "Total for this record.",
           "format": "int64",
           "type": "integer"
         }
@@ -1448,33 +1713,38 @@
       "type": "object"
     },
     "DecisionRight": {
-      "additionalProperties": false,
+      "description": "Decision right for the cockpit.",
       "properties": {
         "dailyLimit": {
           "anyOf": [
             {
-              "format": "int64",
-              "type": "integer"
+              "$ref": "#/$defs/DailyLimit"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Daily limit for this record."
         },
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
         "risky": {
+          "description": "Risky for this record.",
           "type": "boolean"
         },
         "rule": {
-          "$ref": "#/$defs/DecisionRule"
+          "$ref": "#/$defs/DecisionRule",
+          "description": "Rule for this record."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "who": {
-          "$ref": "#/$defs/Decider"
+          "$ref": "#/$defs/Decider",
+          "description": "Who for this record."
         }
       },
       "required": [
@@ -1488,27 +1758,32 @@
       "type": "object"
     },
     "DecisionRule": {
+      "description": "Decision rule for the cockpit.",
       "enum": [
         "inYourName",
         "hardToUndo",
         "onlyYouKnow",
         "insideGuardrails",
-        "overWeeklyCap"
+        "overWeeklyCap",
+        "unknown"
       ],
       "type": "string"
     },
     "DecisionState": {
+      "description": "Decision state for the cockpit.",
       "enum": [
         "open",
         "approved",
-        "declined"
+        "declined",
+        "unknown"
       ],
       "type": "string"
     },
     "DecisionView": {
-      "additionalProperties": false,
+      "description": "The evidence, consequences and next steps for a decision.",
       "properties": {
         "approveLabel": {
+          "description": "Approve label for this record.",
           "type": "string"
         },
         "cardContext": {
@@ -1523,16 +1798,20 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Context for this record."
         },
         "contextLine": {
+          "description": "Context line for this record.",
           "type": "string"
         },
         "doneNote": {
+          "description": "Done note for this record.",
           "type": "string"
         },
-        "due": {
-          "type": "string"
+        "dueAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time an answer or action is due."
         },
         "guardrail": {
           "anyOf": [
@@ -1542,10 +1821,12 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Guardrail for this record."
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/DecisionId",
+          "description": "Stable identifier for this record."
         },
         "ifNoAnswer": {
           "anyOf": [
@@ -1555,29 +1836,34 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "If no answer for this record."
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "minutes": {
+          "description": "Minutes for this record.",
           "format": "int64",
           "type": "integer"
         },
         "nextSteps": {
+          "description": "Next steps for this record.",
           "items": {
             "$ref": "#/$defs/NextStep"
           },
           "type": "array"
         },
         "numbers": {
+          "description": "Numbers for this record.",
           "items": {
             "$ref": "#/$defs/Stat"
           },
@@ -1591,9 +1877,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Opportunity for this record."
         },
         "position": {
+          "description": "Position for this record.",
           "type": "string"
         },
         "proof": {
@@ -1604,7 +1892,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Proof for this record."
         },
         "provenance": {
           "anyOf": [
@@ -1614,7 +1903,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Provenance for this record."
         },
         "risk": {
           "anyOf": [
@@ -1624,10 +1914,12 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Risk for this record."
         },
         "state": {
-          "$ref": "#/$defs/DecisionState"
+          "$ref": "#/$defs/DecisionState",
+          "description": "Current state of the record."
         },
         "suggestion": {
           "anyOf": [
@@ -1637,15 +1929,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Suggestion for this record."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "topicId": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Identifier of the associated topic."
         },
         "topicName": {
+          "description": "Topic name for this record.",
           "type": "string"
         },
         "whyYours": {
@@ -1656,7 +1952,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Why yours for this record."
         }
       },
       "required": [
@@ -1665,7 +1962,7 @@
         "state",
         "topicId",
         "topicName",
-        "due",
+        "dueAt",
         "whyYours",
         "minutes",
         "contextLine",
@@ -1688,13 +1985,15 @@
       "type": "object"
     },
     "Draft": {
-      "additionalProperties": false,
+      "description": "Draft for the cockpit.",
       "properties": {
         "body": {
+          "description": "Body for this record.",
           "type": "string"
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/DraftId",
+          "description": "Stable identifier for this record."
         },
         "skill": {
           "anyOf": [
@@ -1704,39 +2003,51 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Skill for this record."
         },
         "subject": {
+          "description": "Subject for this record.",
           "type": "string"
         },
         "to": {
+          "description": "To for this record.",
           "type": "string"
         },
-        "written": {
-          "type": "string"
+        "writtenAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time associated with written."
         }
       },
       "required": [
         "id",
         "to",
-        "written",
+        "writtenAt",
         "skill",
         "subject",
         "body"
       ],
       "type": "object"
     },
+    "DraftId": {
+      "description": "Identifier of a draft.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "DraftsSummary": {
-      "additionalProperties": false,
+      "description": "Drafts summary for the cockpit.",
       "properties": {
         "count": {
+          "description": "Count for this record.",
           "format": "int64",
           "type": "integer"
         },
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
         "text": {
+          "description": "Text shown to the reader.",
           "type": "string"
         }
       },
@@ -1748,16 +2059,19 @@
       "type": "object"
     },
     "DraftsView": {
-      "additionalProperties": false,
+      "description": "Messages prepared for review in the mail app.",
       "properties": {
         "count": {
+          "description": "Count for this record.",
           "format": "int64",
           "type": "integer"
         },
         "intro": {
+          "description": "Intro for this record.",
           "type": "string"
         },
         "items": {
+          "description": "Items for this record.",
           "items": {
             "$ref": "#/$defs/Draft"
           },
@@ -1771,32 +2085,35 @@
       ],
       "type": "object"
     },
-    "ErrorBody": {
-      "additionalProperties": false,
-      "properties": {
-        "code": {
-          "type": "string"
-        },
-        "message": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "code",
-        "message"
+    "ErrorCode": {
+      "description": "Stable application code for a failed request.",
+      "enum": [
+        "badRequest",
+        "notFound",
+        "forbidden",
+        "conflict",
+        "limitReached",
+        "skillDisabled",
+        "unsupportedMediaType",
+        "payloadTooLarge",
+        "methodNotAllowed",
+        "internal",
+        "unknown"
       ],
-      "type": "object"
+      "type": "string"
     },
     "Event": {
+      "description": "A change notification delivered to cockpit readers.",
       "oneOf": [
         {
-          "additionalProperties": false,
           "properties": {
             "decisionId": {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId",
+              "description": "Identifier of the associated decision."
             },
             "state": {
-              "$ref": "#/$defs/DecisionState"
+              "$ref": "#/$defs/DecisionState",
+              "description": "Current state of the record."
             },
             "type": {
               "const": "decision.changed",
@@ -1811,20 +2128,21 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "laneId": {
-              "type": "string"
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
             },
             "topicId": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/$defs/TopicId"
                 },
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "Identifier of the associated topic."
             },
             "type": {
               "const": "lane.filed",
@@ -1839,10 +2157,10 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "laneId": {
-              "type": "string"
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
             },
             "type": {
               "const": "lane.changed",
@@ -1856,13 +2174,14 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "message": {
-              "$ref": "#/$defs/Message"
+              "$ref": "#/$defs/Message",
+              "description": "Message for this record."
             },
             "threadId": {
-              "type": "string"
+              "$ref": "#/$defs/ThreadId",
+              "description": "Identifier of the associated thread."
             },
             "type": {
               "const": "message.posted",
@@ -1877,14 +2196,17 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "pinId": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PinId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identifier of the associated pin."
             },
             "type": {
               "const": "pins.changed",
@@ -1892,12 +2214,12 @@
             }
           },
           "required": [
-            "type"
+            "type",
+            "pinId"
           ],
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "type": {
               "const": "prefs.changed",
@@ -1910,14 +2232,17 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "topicId": {
-              "default": null,
-              "type": [
-                "string",
-                "null"
-              ]
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TopicId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identifier of the associated topic."
             },
             "type": {
               "const": "access.changed",
@@ -1925,15 +2250,16 @@
             }
           },
           "required": [
-            "type"
+            "type",
+            "topicId"
           ],
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "actionId": {
-              "type": "string"
+              "$ref": "#/$defs/ActionId",
+              "description": "Identifier of the associated action."
             },
             "type": {
               "const": "agentAction.changed",
@@ -1945,16 +2271,42 @@
             "actionId"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "feed.reset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "Unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
         }
       ]
     },
     "Fact": {
-      "additionalProperties": false,
+      "description": "Fact for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "value": {
+          "description": "Value for this record.",
           "type": "string"
         }
       },
@@ -1965,25 +2317,31 @@
       "type": "object"
     },
     "FailingTest": {
-      "additionalProperties": false,
+      "description": "Failing test for the cockpit.",
       "properties": {
         "expected": {
+          "description": "Expected for this record.",
           "type": "string"
         },
         "failures": {
+          "description": "Failures for this record.",
           "format": "int64",
           "type": "integer"
         },
         "got": {
+          "description": "Got for this record.",
           "type": "string"
         },
         "location": {
+          "description": "Location for this record.",
           "type": "string"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "runs": {
+          "description": "Runs for this record.",
           "format": "int64",
           "type": "integer"
         }
@@ -1998,10 +2356,242 @@
       ],
       "type": "object"
     },
+    "FeedEvent": {
+      "description": "A sequenced event on the resumable workspace feed.",
+      "oneOf": [
+        {
+          "properties": {
+            "decisionId": {
+              "$ref": "#/$defs/DecisionId",
+              "description": "Identifier of the associated decision."
+            },
+            "state": {
+              "$ref": "#/$defs/DecisionState",
+              "description": "Current state of the record."
+            },
+            "type": {
+              "const": "decision.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "decisionId",
+            "state"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "laneId": {
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
+            },
+            "topicId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TopicId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identifier of the associated topic."
+            },
+            "type": {
+              "const": "lane.filed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId",
+            "topicId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "laneId": {
+              "$ref": "#/$defs/LaneId",
+              "description": "Identifier of the associated lane."
+            },
+            "type": {
+              "const": "lane.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "laneId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "message": {
+              "$ref": "#/$defs/Message",
+              "description": "Message for this record."
+            },
+            "threadId": {
+              "$ref": "#/$defs/ThreadId",
+              "description": "Identifier of the associated thread."
+            },
+            "type": {
+              "const": "message.posted",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "threadId",
+            "message"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "pinId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/PinId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identifier of the associated pin."
+            },
+            "type": {
+              "const": "pins.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "pinId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "prefs.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "topicId": {
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/TopicId"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Identifier of the associated topic."
+            },
+            "type": {
+              "const": "access.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "topicId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "actionId": {
+              "$ref": "#/$defs/ActionId",
+              "description": "Identifier of the associated action."
+            },
+            "type": {
+              "const": "agentAction.changed",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type",
+            "actionId"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "feed.reset",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        },
+        {
+          "properties": {
+            "type": {
+              "const": "Unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "type"
+          ],
+          "type": "object"
+        }
+      ],
+      "properties": {
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the hub published the event."
+        },
+        "seq": {
+          "description": "Monotonically increasing sequence number on this hub.",
+          "format": "uint64",
+          "minimum": 0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "seq",
+        "at"
+      ],
+      "type": "object"
+    },
+    "FieldError": {
+      "description": "A specific field that failed request validation.",
+      "properties": {
+        "message": {
+          "description": "Explanation of the validation failure.",
+          "type": "string"
+        },
+        "path": {
+          "description": "JSON Pointer to the field.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "message"
+      ],
+      "type": "object"
+    },
     "Figure": {
-      "additionalProperties": false,
+      "description": "Figure for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "of": {
@@ -2012,9 +2602,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Of for this record."
         },
         "value": {
+          "description": "Value for this record.",
           "type": "string"
         }
       },
@@ -2026,18 +2618,21 @@
       "type": "object"
     },
     "Funnel": {
-      "additionalProperties": false,
+      "description": "Funnel for the cockpit.",
       "properties": {
         "since": {
+          "description": "Since for this record.",
           "type": "string"
         },
         "steps": {
+          "description": "Steps for this record.",
           "items": {
             "$ref": "#/$defs/FunnelStep"
           },
           "type": "array"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -2049,7 +2644,7 @@
       "type": "object"
     },
     "FunnelStep": {
-      "additionalProperties": false,
+      "description": "Funnel step for the cockpit.",
       "properties": {
         "change": {
           "anyOf": [
@@ -2059,9 +2654,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Change for this record."
         },
         "count": {
+          "description": "Count for this record.",
           "type": "string"
         },
         "rate": {
@@ -2072,19 +2669,22 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Rate for this record."
         },
         "state": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/HealthState"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Current state of the record."
         },
         "what": {
+          "description": "What for this record.",
           "type": "string"
         }
       },
@@ -2098,12 +2698,14 @@
       "type": "object"
     },
     "Gap": {
-      "additionalProperties": false,
+      "description": "Gap for the cockpit.",
       "properties": {
         "says": {
+          "description": "Says for this record.",
           "type": "string"
         },
         "steps": {
+          "description": "Steps for this record.",
           "items": {
             "type": "string"
           },
@@ -2117,7 +2719,7 @@
       "type": "object"
     },
     "Gate": {
-      "additionalProperties": false,
+      "description": "Gate for the cockpit.",
       "properties": {
         "detail": {
           "anyOf": [
@@ -2127,13 +2729,16 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Explanation shown alongside the summary."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "state": {
-          "$ref": "#/$defs/GateState"
+          "$ref": "#/$defs/GateState",
+          "description": "Current state of the record."
         }
       },
       "required": [
@@ -2144,22 +2749,26 @@
       "type": "object"
     },
     "GateState": {
+      "description": "Gate state for the cockpit.",
       "enum": [
         "pass",
         "running",
         "todo",
         "fail",
-        "skipped"
+        "skipped",
+        "unknown"
       ],
       "type": "string"
     },
     "Goal": {
-      "additionalProperties": false,
+      "description": "Goal for the cockpit.",
       "properties": {
         "asOf": {
+          "description": "As of for this record.",
           "type": "string"
         },
         "blockers": {
+          "description": "Blockers for this record.",
           "items": {
             "$ref": "#/$defs/Blocker"
           },
@@ -2173,7 +2782,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Calibration for this record."
         },
         "calm": {
           "anyOf": [
@@ -2183,7 +2793,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Calm for this record."
         },
         "calmSub": {
           "anyOf": [
@@ -2193,9 +2804,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Calm sub for this record."
         },
         "deals": {
+          "description": "Deals for this record.",
           "items": {
             "$ref": "#/$defs/Deal"
           },
@@ -2209,9 +2822,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Decision for this record."
         },
         "figures": {
+          "description": "Figures for this record.",
           "items": {
             "$ref": "#/$defs/Figure"
           },
@@ -2225,7 +2840,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Funnel for this record."
         },
         "gap": {
           "anyOf": [
@@ -2235,7 +2851,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Gap for this record."
         },
         "guardrails": {
           "anyOf": [
@@ -2245,12 +2862,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Guardrails for this record."
         },
         "insight": {
+          "description": "Insight for this record.",
           "type": "string"
         },
         "ladder": {
+          "description": "Ladder for this record.",
           "items": {
             "$ref": "#/$defs/LadderRung"
           },
@@ -2265,9 +2885,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Likely for this record."
         },
         "milestones": {
+          "description": "Milestones for this record.",
           "items": {
             "type": "string"
           },
@@ -2281,7 +2903,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Outside for this record."
         },
         "pathTitle": {
           "anyOf": [
@@ -2291,7 +2914,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Path title for this record."
         },
         "restSub": {
           "anyOf": [
@@ -2301,7 +2925,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Rest sub for this record."
         },
         "routine": {
           "anyOf": [
@@ -2311,7 +2936,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Routine for this record."
         },
         "rows": {
           "anyOf": [
@@ -2321,24 +2947,30 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Rows for this record."
         },
         "signed": {
+          "description": "Signed for this record.",
           "format": "int64",
           "type": "integer"
         },
         "target": {
+          "description": "Destination to open in the cockpit.",
           "format": "int64",
           "type": "integer"
         },
         "trajectory": {
-          "$ref": "#/$defs/Trajectory"
+          "$ref": "#/$defs/Trajectory",
+          "description": "Trajectory for this record."
         },
         "unit": {
+          "description": "Unit for this record.",
           "type": "string"
         },
         "verdict": {
-          "$ref": "#/$defs/Verdict"
+          "$ref": "#/$defs/Verdict",
+          "description": "Verdict for this record."
         }
       },
       "required": [
@@ -2371,7 +3003,7 @@
       "type": "object"
     },
     "GoalDecision": {
-      "additionalProperties": false,
+      "description": "Goal decision for the cockpit.",
       "properties": {
         "approveLabel": {
           "anyOf": [
@@ -2381,35 +3013,41 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Approve label for this record."
         },
         "decisionId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated decision."
         },
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
         "done": {
+          "description": "Done for this record.",
           "type": "string"
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "why": {
@@ -2420,7 +3058,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Why for this record."
         }
       },
       "required": [
@@ -2435,16 +3074,19 @@
       "type": "object"
     },
     "GroupKind": {
+      "description": "Group kind for the cockpit.",
       "enum": [
         "topic",
-        "project"
+        "project",
+        "unknown"
       ],
       "type": "string"
     },
     "GuardrailItem": {
-      "additionalProperties": false,
+      "description": "Guardrail item for the cockpit.",
       "properties": {
         "limit": {
+          "description": "Limit for this record.",
           "type": "string"
         },
         "ratio": {
@@ -2456,12 +3098,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Ratio for this record."
         },
         "value": {
+          "description": "Value for this record.",
           "type": "string"
         },
         "what": {
+          "description": "What for this record.",
           "type": "string"
         }
       },
@@ -2474,15 +3119,18 @@
       "type": "object"
     },
     "GuardrailSwitch": {
-      "additionalProperties": false,
+      "description": "Guardrail switch for the cockpit.",
       "properties": {
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "on": {
+          "description": "On for this record.",
           "type": "boolean"
         }
       },
@@ -2494,15 +3142,17 @@
       "type": "object"
     },
     "Guardrails": {
-      "additionalProperties": false,
+      "description": "Guardrails for the cockpit.",
       "properties": {
         "items": {
+          "description": "Items for this record.",
           "items": {
             "$ref": "#/$defs/GuardrailItem"
           },
           "type": "array"
         },
         "sub": {
+          "description": "Sub for this record.",
           "type": "string"
         }
       },
@@ -2513,8 +3163,12 @@
       "type": "object"
     },
     "Handover": {
-      "additionalProperties": false,
+      "description": "Handover for the cockpit.",
       "properties": {
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
+        },
         "fixed": {
           "anyOf": [
             {
@@ -2523,38 +3177,43 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Fixed for this record."
         },
         "ifSo": {
+          "description": "If so for this record.",
           "type": "string"
         },
         "match": {
+          "description": "Matched for this record.",
           "type": "boolean"
         },
         "open": {
+          "description": "Open for this record.",
           "type": "string"
         },
         "restated": {
+          "description": "Restated for this record.",
           "type": "string"
         },
         "risk": {
+          "description": "Risk for this record.",
           "type": "string"
         },
-        "state": {
-          "type": "string"
-        },
-        "when": {
+        "summary": {
+          "description": "Current state of the record.",
           "type": "string"
         },
         "why": {
+          "description": "Why for this record.",
           "type": "string"
         }
       },
       "required": [
-        "when",
+        "at",
         "match",
         "why",
-        "state",
+        "summary",
         "open",
         "risk",
         "ifSo",
@@ -2564,12 +3223,14 @@
       "type": "object"
     },
     "Health": {
-      "additionalProperties": false,
+      "description": "Health for the cockpit.",
       "properties": {
         "state": {
-          "$ref": "#/$defs/HealthState"
+          "$ref": "#/$defs/HealthState",
+          "description": "Current state of the record."
         },
         "word": {
+          "description": "Word for this record.",
           "type": "string"
         }
       },
@@ -2580,52 +3241,28 @@
       "type": "object"
     },
     "HealthState": {
+      "description": "Health state for the cockpit.",
       "enum": [
         "ok",
         "warn",
         "bad",
-        "idle"
+        "idle",
+        "unknown"
       ],
       "type": "string"
     },
-    "History": {
-      "additionalProperties": false,
-      "properties": {
-        "days": {
-          "items": {
-            "$ref": "#/$defs/HistoryDay"
-          },
-          "type": "array"
-        },
-        "seen": {
-          "type": "string"
-        },
-        "shown": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "since": {
-          "type": "string"
-        }
-      },
-      "required": [
-        "seen",
-        "shown",
-        "since",
-        "days"
-      ],
-      "type": "object"
-    },
     "HistoryDay": {
-      "additionalProperties": false,
+      "description": "History day for the cockpit.",
       "properties": {
         "entries": {
+          "description": "Entries for this record.",
           "items": {
             "$ref": "#/$defs/HistoryEntry"
           },
           "type": "array"
         },
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         }
       },
@@ -2636,9 +3273,9 @@
       "type": "object"
     },
     "HistoryEntry": {
+      "description": "History entry for the cockpit.",
       "oneOf": [
         {
-          "additionalProperties": false,
           "properties": {
             "kind": {
               "const": "seen",
@@ -2651,10 +3288,14 @@
           "type": "object"
         },
         {
-          "additionalProperties": false,
           "properties": {
             "actor": {
-              "$ref": "#/$defs/Actor"
+              "$ref": "#/$defs/Actor",
+              "description": "Actor for this record."
+            },
+            "at": {
+              "$ref": "#/$defs/Timestamp",
+              "description": "Time the record was created or observed."
             },
             "count": {
               "anyOf": [
@@ -2665,20 +3306,23 @@
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "Count for this record."
             },
             "decision": {
+              "description": "Decision for this record.",
               "type": "boolean"
             },
             "decisionId": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/$defs/DecisionId"
                 },
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "Identifier of the associated decision."
             },
             "kind": {
               "const": "event",
@@ -2687,35 +3331,37 @@
             "laneId": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/$defs/LaneId"
                 },
                 {
                   "type": "null"
                 }
-              ]
+              ],
+              "description": "Identifier of the associated lane."
             },
             "samples": {
+              "description": "Samples for this record.",
               "items": {
                 "type": "string"
               },
               "type": "array"
             },
             "sentOutside": {
+              "description": "Sent outside for this record.",
               "type": "boolean"
             },
             "text": {
-              "type": "string"
-            },
-            "time": {
+              "description": "Text shown to the reader.",
               "type": "string"
             },
             "undoable": {
+              "description": "Undoable for this record.",
               "type": "boolean"
             }
           },
           "required": [
             "kind",
-            "time",
+            "at",
             "actor",
             "text",
             "laneId",
@@ -2727,22 +3373,32 @@
             "decisionId"
           ],
           "type": "object"
+        },
+        {
+          "properties": {
+            "kind": {
+              "const": "unknown",
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "type": "object"
         }
       ]
     },
-    "Job": {
-      "additionalProperties": false,
+    "HistoryPage": {
+      "description": "A page of activity in a topic.",
       "properties": {
-        "agent": {
-          "type": "string"
+        "days": {
+          "description": "Days for this record.",
+          "items": {
+            "$ref": "#/$defs/HistoryDay"
+          },
+          "type": "array"
         },
-        "due": {
-          "type": "string"
-        },
-        "job": {
-          "type": "string"
-        },
-        "laneId": {
+        "nextCursor": {
           "anyOf": [
             {
               "type": "string"
@@ -2750,10 +3406,61 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Opaque cursor for the following page, or null at the end."
+        },
+        "seen": {
+          "$ref": "#/$defs/SeenMarker",
+          "description": "Seen for this record."
+        },
+        "shown": {
+          "description": "Shown for this record.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "since": {
+          "description": "Since for this record.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "seen",
+        "nextCursor",
+        "shown",
+        "since",
+        "days"
+      ],
+      "type": "object"
+    },
+    "Job": {
+      "description": "Job for the cockpit.",
+      "properties": {
+        "agent": {
+          "description": "Agent for this record.",
+          "type": "string"
+        },
+        "due": {
+          "description": "Due for this record.",
+          "type": "string"
+        },
+        "job": {
+          "description": "Job for this record.",
+          "type": "string"
+        },
+        "laneId": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/LaneId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Identifier of the associated lane."
         },
         "state": {
-          "$ref": "#/$defs/LaneState"
+          "$ref": "#/$defs/LaneState",
+          "description": "Current state of the record."
         }
       },
       "required": [
@@ -2765,7 +3472,45 @@
       ],
       "type": "object"
     },
-    "LabelKind": {
+    "KnownAccessKind": {
+      "description": "Access kind for the cockpit.",
+      "enum": [
+        "all",
+        "stages",
+        "view",
+        "none"
+      ],
+      "type": "string"
+    },
+    "KnownChatMode": {
+      "description": "Chat mode for the cockpit.",
+      "enum": [
+        "floating",
+        "sidebar"
+      ],
+      "type": "string"
+    },
+    "KnownDecider": {
+      "description": "Decider for the cockpit.",
+      "enum": [
+        "you",
+        "agent"
+      ],
+      "type": "string"
+    },
+    "KnownDecisionRule": {
+      "description": "Decision rule for the cockpit.",
+      "enum": [
+        "inYourName",
+        "hardToUndo",
+        "onlyYouKnow",
+        "insideGuardrails",
+        "overWeeklyCap"
+      ],
+      "type": "string"
+    },
+    "KnownLabelKind": {
+      "description": "Label kind for the cockpit.",
       "enum": [
         "question",
         "request",
@@ -2775,13 +3520,41 @@
       ],
       "type": "string"
     },
+    "KnownThemeId": {
+      "description": "Theme id for the cockpit.",
+      "enum": [
+        "ink",
+        "ember",
+        "sand",
+        "moss",
+        "tide",
+        "sky",
+        "iris",
+        "rose"
+      ],
+      "type": "string"
+    },
+    "LabelKind": {
+      "description": "Label kind for the cockpit.",
+      "enum": [
+        "question",
+        "request",
+        "done",
+        "decision",
+        "goalChange",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "LadderRung": {
-      "additionalProperties": false,
+      "description": "Ladder rung for the cockpit.",
       "properties": {
         "fact": {
+          "description": "Fact for this record.",
           "type": "string"
         },
         "word": {
+          "description": "Word for this record.",
           "type": "string"
         }
       },
@@ -2792,13 +3565,15 @@
       "type": "object"
     },
     "LaneAct": {
-      "additionalProperties": false,
+      "description": "Lane act for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "tone": {
-          "type": "string"
+          "$ref": "#/$defs/ActionTone",
+          "description": "Tone for this record."
         }
       },
       "required": [
@@ -2807,7 +3582,13 @@
       ],
       "type": "object"
     },
+    "LaneId": {
+      "description": "Identifier of a lane.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "LaneState": {
+      "description": "Lane state for the cockpit.",
       "enum": [
         "new",
         "ok",
@@ -2816,14 +3597,16 @@
         "done",
         "idle",
         "next",
-        "parked"
+        "parked",
+        "unknown"
       ],
       "type": "string"
     },
     "LaneView": {
-      "additionalProperties": false,
+      "description": "A work item and its record of progress.",
       "properties": {
         "acts": {
+          "description": "Acts for this record.",
           "items": {
             "$ref": "#/$defs/LaneAct"
           },
@@ -2837,7 +3620,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "After for this record."
         },
         "afterNext": {
           "anyOf": [
@@ -2847,7 +3631,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "After next for this record."
         },
         "approveLabel": {
           "anyOf": [
@@ -2857,7 +3642,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Approve label for this record."
         },
         "ask": {
           "anyOf": [
@@ -2867,31 +3653,37 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Ask for this record."
         },
         "asked": {
+          "description": "Asked for this record.",
           "type": "string"
         },
         "askedMeta": {
-          "$ref": "#/$defs/AskedMeta"
+          "$ref": "#/$defs/AskedMeta",
+          "description": "Asked meta for this record."
         },
         "checks": {
+          "description": "Checks for this record.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
-        "closed": {
+        "closedAt": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/Timestamp"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Time associated with closed."
         },
         "crew": {
+          "description": "Crew for this record.",
           "items": {
             "$ref": "#/$defs/Actor"
           },
@@ -2900,12 +3692,13 @@
         "decisionId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated decision."
         },
         "delay": {
           "anyOf": [
@@ -2915,12 +3708,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Delay for this record."
         },
         "doneNote": {
+          "description": "Done note for this record.",
           "type": "string"
         },
         "fresh": {
+          "description": "Fresh for this record.",
           "type": "boolean"
         },
         "handover": {
@@ -2931,15 +3727,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Handover for this record."
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/LaneId",
+          "description": "Stable identifier for this record."
         },
         "lead": {
-          "$ref": "#/$defs/Actor"
+          "$ref": "#/$defs/Actor",
+          "description": "Lead for this record."
         },
         "made": {
+          "description": "Made for this record.",
           "items": {
             "$ref": "#/$defs/MadeItem"
           },
@@ -2953,10 +3753,12 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Next for this record."
         },
-        "opened": {
-          "type": "string"
+        "openedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time associated with opened."
         },
         "recommendation": {
           "anyOf": [
@@ -2966,7 +3768,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Recommendation for this record."
         },
         "short": {
           "anyOf": [
@@ -2976,7 +3779,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Short for this record."
         },
         "shortAfter": {
           "anyOf": [
@@ -2986,44 +3790,53 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Short after for this record."
         },
         "standing": {
-          "$ref": "#/$defs/Standing"
+          "$ref": "#/$defs/Standing",
+          "description": "Standing for this record."
         },
         "state": {
-          "$ref": "#/$defs/LaneState"
+          "$ref": "#/$defs/LaneState",
+          "description": "Current state of the record."
         },
         "stateWord": {
+          "description": "State word for this record.",
           "type": "string"
         },
         "status": {
+          "description": "Status for this record.",
           "type": "string"
         },
         "steps": {
+          "description": "Steps for this record.",
           "items": {
             "$ref": "#/$defs/Step"
           },
           "type": "array"
         },
         "thumbs": {
+          "description": "Thumbs for this record.",
           "items": {
             "$ref": "#/$defs/Thumb"
           },
           "type": "array"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "topicId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/TopicId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated topic."
         },
         "waitsFor": {
           "anyOf": [
@@ -3033,7 +3846,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Waits for for this record."
         },
         "yours": {
           "anyOf": [
@@ -3043,7 +3857,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Yours for this record."
         }
       },
       "required": [
@@ -3054,8 +3869,8 @@
         "stateWord",
         "lead",
         "waitsFor",
-        "opened",
-        "closed",
+        "openedAt",
+        "closedAt",
         "next",
         "afterNext",
         "decisionId",
@@ -3084,14 +3899,20 @@
       "type": "object"
     },
     "Layout": {
-      "additionalProperties": false,
+      "description": "Layout for the cockpit.",
       "properties": {
         "chatWidth": {
+          "description": "Chat width for this record.",
           "format": "int64",
+          "maximum": 640,
+          "minimum": 320,
           "type": "integer"
         },
         "sidebarWidth": {
+          "description": "Sidebar width for this record.",
           "format": "int64",
+          "maximum": 380,
+          "minimum": 224,
           "type": "integer"
         }
       },
@@ -3107,7 +3928,10 @@
       "properties": {
         "chatWidth": {
           "default": null,
+          "description": "Chat width for this record.",
           "format": "int64",
+          "maximum": 640,
+          "minimum": 320,
           "type": [
             "integer",
             "null"
@@ -3115,7 +3939,10 @@
         },
         "sidebarWidth": {
           "default": null,
+          "description": "Sidebar width for this record.",
           "format": "int64",
+          "maximum": 380,
+          "minimum": 224,
           "type": [
             "integer",
             "null"
@@ -3125,25 +3952,29 @@
       "type": "object"
     },
     "MadeItem": {
-      "additionalProperties": false,
+      "description": "Made item for the cockpit.",
       "properties": {
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
-        "href": {
+        "icon": {
+          "description": "Icon for this record.",
+          "type": "string"
+        },
+        "target": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/Target"
             },
             {
               "type": "null"
             }
-          ]
-        },
-        "icon": {
-          "type": "string"
+          ],
+          "description": "Destination to open in the cockpit."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -3151,42 +3982,50 @@
         "icon",
         "title",
         "detail",
-        "href"
+        "target"
       ],
       "type": "object"
     },
     "ManagerLane": {
-      "additionalProperties": false,
+      "description": "Manager lane for the cockpit.",
       "properties": {
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/LaneId",
+          "description": "Stable identifier for this record."
         },
         "leadName": {
+          "description": "Lead name for this record.",
           "type": "string"
         },
         "next": {
+          "description": "Next for this record.",
           "type": "string"
         },
         "state": {
-          "$ref": "#/$defs/LaneState"
+          "$ref": "#/$defs/LaneState",
+          "description": "Current state of the record."
         },
         "stateWord": {
+          "description": "State word for this record.",
           "type": "string"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "topicId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/TopicId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated topic."
         },
         "topicName": {
+          "description": "Topic name for this record.",
           "type": "string"
         }
       },
@@ -3203,36 +4042,42 @@
       "type": "object"
     },
     "ManagerView": {
-      "additionalProperties": false,
+      "description": "The Manager’s triage queue and shared resources.",
       "properties": {
         "asks": {
+          "description": "Asks for this record.",
           "items": {
             "$ref": "#/$defs/Ask"
           },
           "type": "array"
         },
         "intro": {
+          "description": "Intro for this record.",
           "type": "string"
         },
         "lanes": {
+          "description": "Lanes for this record.",
           "items": {
             "$ref": "#/$defs/ManagerLane"
           },
           "type": "array"
         },
         "sharedResources": {
+          "description": "Shared resources for this record.",
           "items": {
             "$ref": "#/$defs/SharedResource"
           },
           "type": "array"
         },
         "since": {
+          "description": "Since for this record.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "summary": {
+          "description": "Summary for this record.",
           "type": "string"
         }
       },
@@ -3247,19 +4092,26 @@
       "type": "object"
     },
     "Message": {
-      "additionalProperties": false,
+      "description": "Message for the cockpit.",
       "properties": {
         "actions": {
+          "description": "Actions for this record.",
           "items": {
             "$ref": "#/$defs/MessageAction"
           },
           "type": "array"
         },
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
+        },
         "author": {
-          "$ref": "#/$defs/Actor"
+          "$ref": "#/$defs/Actor",
+          "description": "Author for this record."
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/MessageId",
+          "description": "Stable identifier for this record."
         },
         "label": {
           "anyOf": [
@@ -3269,10 +4121,8 @@
             {
               "type": "null"
             }
-          ]
-        },
-        "own": {
-          "type": "boolean"
+          ],
+          "description": "Label for this record."
         },
         "readBack": {
           "anyOf": [
@@ -3282,9 +4132,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Read back for this record."
         },
         "text": {
+          "description": "Text shown to the reader.",
           "type": "string"
         },
         "threadCard": {
@@ -3295,18 +4147,15 @@
             {
               "type": "null"
             }
-          ]
-        },
-        "time": {
-          "type": "string"
+          ],
+          "description": "Thread card for this record."
         }
       },
       "required": [
         "id",
         "author",
-        "time",
+        "at",
         "text",
-        "own",
         "label",
         "threadCard",
         "readBack",
@@ -3315,9 +4164,10 @@
       "type": "object"
     },
     "MessageAction": {
-      "additionalProperties": false,
+      "description": "Message action for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         }
       },
@@ -3326,14 +4176,21 @@
       ],
       "type": "object"
     },
+    "MessageId": {
+      "description": "Identifier of a message.",
+      "pattern": "^m[0-9]+$",
+      "type": "string"
+    },
     "MessageLabel": {
-      "additionalProperties": false,
+      "description": "Message label for the cockpit.",
       "properties": {
         "corrected": {
+          "description": "Corrected for this record.",
           "type": "boolean"
         },
         "kind": {
-          "$ref": "#/$defs/LabelKind"
+          "$ref": "#/$defs/LabelKind",
+          "description": "Kind for this record."
         }
       },
       "required": [
@@ -3343,7 +4200,7 @@
       "type": "object"
     },
     "Meter": {
-      "additionalProperties": false,
+      "description": "Meter for the cockpit.",
       "properties": {
         "note": {
           "anyOf": [
@@ -3353,40 +4210,140 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Note for this record."
+        },
+        "resetsAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Time associated with resets."
         },
         "used": {
+          "description": "Used for this record.",
           "format": "double",
           "type": "number"
         },
         "value": {
+          "description": "Value for this record.",
           "type": "string"
         },
         "what": {
+          "description": "What for this record.",
           "type": "string"
         }
       },
       "required": [
         "what",
+        "resetsAt",
         "used",
         "value",
         "note"
       ],
       "type": "object"
     },
+    "Model": {
+      "description": "Model offered by the cockpit.",
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ModelId",
+          "description": "Identifier passed with a command."
+        },
+        "name": {
+          "description": "Display name.",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/ModelState",
+          "description": "Current availability."
+        },
+        "vendor": {
+          "description": "Engine vendor.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "vendor",
+        "state"
+      ],
+      "type": "object"
+    },
+    "ModelId": {
+      "description": "Identifier of a selectable model.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
+    "ModelState": {
+      "description": "Availability of an engine in the model picker.",
+      "oneOf": [
+        {
+          "enum": [
+            "unknown"
+          ],
+          "type": "string"
+        },
+        {
+          "const": "default",
+          "description": "Selected automatically by the hub.",
+          "type": "string"
+        },
+        {
+          "const": "connected",
+          "description": "Available for work.",
+          "type": "string"
+        },
+        {
+          "const": "addKey",
+          "description": "Requires a connection.",
+          "type": "string"
+        },
+        {
+          "const": "signIn",
+          "description": "Requires sign-in.",
+          "type": "string"
+        }
+      ]
+    },
+    "ModelsView": {
+      "description": "Choices available for a new request.",
+      "properties": {
+        "items": {
+          "description": "Selectable models in picker order.",
+          "items": {
+            "$ref": "#/$defs/Model"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "items"
+      ],
+      "type": "object"
+    },
     "ModuleCard": {
-      "additionalProperties": false,
+      "description": "Module card for the cockpit.",
       "properties": {
         "here": {
+          "description": "Here for this record.",
           "type": "boolean"
         },
         "id": {
+          "description": "Stable identifier for this record.",
           "type": "string"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "summary": {
+          "description": "Summary for this record.",
           "type": "string"
         }
       },
@@ -3399,25 +4356,31 @@
       "type": "object"
     },
     "ModuleId": {
+      "description": "Available cockpit modules.",
       "enum": [
         "gtm",
-        "dev"
+        "dev",
+        "unknown"
       ],
       "type": "string"
     },
     "ModuleInfo": {
-      "additionalProperties": false,
+      "description": "The active cockpit module.",
       "properties": {
         "icon": {
+          "description": "Icon for this record.",
           "type": "string"
         },
         "id": {
-          "$ref": "#/$defs/ModuleId"
+          "$ref": "#/$defs/ModuleId",
+          "description": "Stable identifier for this record."
         },
         "kindWord": {
+          "description": "Kind word for this record.",
           "type": "string"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         }
       },
@@ -3429,33 +4392,65 @@
       ],
       "type": "object"
     },
-    "NextStep": {
-      "additionalProperties": false,
+    "Money": {
+      "description": "A currency amount in the currency's minor units.",
       "properties": {
-        "by": {
+        "amountMinor": {
+          "description": "Amount in cents for currencies with two fractional digits.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "currency": {
+          "description": "ISO 4217 alphabetic currency code.",
+          "pattern": "^[A-Z]{3}$",
           "type": "string"
+        }
+      },
+      "required": [
+        "amountMinor",
+        "currency"
+      ],
+      "type": "object"
+    },
+    "NextStep": {
+      "description": "Next step for the cockpit.",
+      "properties": {
+        "dueAt": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Time an answer or action is due."
         },
         "step": {
+          "description": "Step for this record.",
           "type": "string"
         },
         "who": {
+          "description": "Who for this record.",
           "type": "string"
         }
       },
       "required": [
         "step",
         "who",
-        "by"
+        "dueAt"
       ],
       "type": "object"
     },
     "NightStat": {
-      "additionalProperties": false,
+      "description": "Night stat for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "value": {
+          "description": "Value for this record.",
           "type": "string"
         }
       },
@@ -3466,13 +4461,15 @@
       "type": "object"
     },
     "OtherTopicAccess": {
-      "additionalProperties": false,
+      "description": "Other topic access for the cockpit.",
       "properties": {
         "access": {
-          "$ref": "#/$defs/AccessKind"
+          "$ref": "#/$defs/AccessKind",
+          "description": "Access for this record."
         },
         "topicId": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Identifier of the associated topic."
         }
       },
       "required": [
@@ -3482,44 +4479,52 @@
       "type": "object"
     },
     "OvernightAction": {
-      "additionalProperties": false,
+      "description": "Overnight action for the cockpit.",
       "properties": {
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
+        },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/ActionId",
+          "description": "Stable identifier for this record."
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "text": {
-          "type": "string"
-        },
-        "time": {
+          "description": "Text shown to the reader.",
           "type": "string"
         },
         "topicId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/TopicId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated topic."
         },
         "topicName": {
+          "description": "Topic name for this record.",
           "type": "string"
         },
         "undoable": {
+          "description": "Undoable for this record.",
           "type": "boolean"
         },
         "undone": {
+          "description": "Undone for this record.",
           "type": "boolean"
         }
       },
@@ -3529,38 +4534,38 @@
         "topicName",
         "laneId",
         "text",
-        "time",
+        "at",
         "undoable",
         "undone"
       ],
       "type": "object"
     },
+    "PersonId": {
+      "description": "Identifier of an actor, whether a person or an agent.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "Pin": {
-      "additionalProperties": false,
+      "description": "Pin for the cockpit.",
       "properties": {
         "badge": {
+          "description": "Badge for this record.",
           "type": "boolean"
         },
-        "href": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "icon": {
+          "description": "Icon for this record.",
           "type": "string"
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/PinId",
+          "description": "Stable identifier for this record."
         },
         "kind": {
-          "$ref": "#/$defs/PinKind"
+          "$ref": "#/$defs/PinKind",
+          "description": "Kind for this record."
         },
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "name": {
@@ -3571,7 +4576,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Name shown to the reader."
         },
         "note": {
           "anyOf": [
@@ -3581,9 +4587,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Note for this record."
         },
         "pinned": {
+          "description": "Pinned for this record.",
           "type": "boolean"
         },
         "run": {
@@ -3594,7 +4602,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Run for this record."
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Target"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Destination to open in the cockpit."
         }
       },
       "required": [
@@ -3604,32 +4624,41 @@
         "name",
         "note",
         "icon",
-        "href",
+        "target",
         "run",
         "badge",
         "pinned"
       ],
       "type": "object"
     },
+    "PinId": {
+      "description": "Identifier of a sidebar pin.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "PinKind": {
+      "description": "Pin kind for the cockpit.",
       "enum": [
         "page",
         "topic",
         "project",
-        "skill"
+        "skill",
+        "unknown"
       ],
       "type": "string"
     },
     "PinState": {
+      "description": "Pin state for the cockpit.",
       "enum": [
         "waiting",
         "approved",
-        "stuck"
+        "stuck",
+        "unknown"
       ],
       "type": "string"
     },
     "PinnedDecision": {
-      "additionalProperties": false,
+      "description": "Pinned decision for the cockpit.",
       "properties": {
         "approveLabel": {
           "anyOf": [
@@ -3639,35 +4668,41 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Approve label for this record."
         },
         "decisionId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/DecisionId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated decision."
         },
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "state": {
-          "$ref": "#/$defs/PinState"
+          "$ref": "#/$defs/PinState",
+          "description": "Current state of the record."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -3682,15 +4717,17 @@
       "type": "object"
     },
     "Plan": {
-      "additionalProperties": false,
+      "description": "Plan for the cockpit.",
       "properties": {
         "night": {
+          "description": "Night for this record.",
           "items": {
             "$ref": "#/$defs/NightStat"
           },
           "type": "array"
         },
         "stages": {
+          "description": "Stages for this record.",
           "items": {
             "$ref": "#/$defs/Stage"
           },
@@ -3704,15 +4741,17 @@
       "type": "object"
     },
     "Proof": {
-      "additionalProperties": false,
+      "description": "Proof for the cockpit.",
       "properties": {
         "items": {
+          "description": "Items for this record.",
           "items": {
             "$ref": "#/$defs/Stat"
           },
           "type": "array"
         },
         "meta": {
+          "description": "Meta for this record.",
           "items": {
             "type": "string"
           },
@@ -3726,7 +4765,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Unchecked for this record."
         }
       },
       "required": [
@@ -3737,28 +4777,33 @@
       "type": "object"
     },
     "Provenance": {
-      "additionalProperties": false,
+      "description": "Provenance for the cockpit.",
       "properties": {
         "checkedAt": {
-          "type": "string"
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time associated with checked."
         },
         "checkedBy": {
+          "description": "Checked by for this record.",
           "type": "string"
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "laneTitle": {
+          "description": "Lane title for this record.",
           "type": "string"
         },
         "writtenBy": {
+          "description": "Written by for this record.",
           "type": "string"
         }
       },
@@ -3771,51 +4816,71 @@
       ],
       "type": "object"
     },
+    "PullId": {
+      "description": "Identifier of a pull request.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "PullRequest": {
-      "additionalProperties": false,
+      "description": "Pull request for the cockpit.",
       "properties": {
         "author": {
+          "description": "Author for this record.",
           "type": "string"
         },
         "gates": {
+          "description": "Gates for this record.",
           "items": {
             "$ref": "#/$defs/Gate"
           },
           "type": "array"
         },
-        "href": {
+        "id": {
+          "$ref": "#/$defs/PullId",
+          "description": "Stable identifier for this record."
+        },
+        "number": {
+          "description": "Number for this record.",
+          "format": "int64",
+          "type": "integer"
+        },
+        "openedAt": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time associated with opened."
+        },
+        "projectId": {
+          "$ref": "#/$defs/TopicId",
+          "description": "Identifier of the associated project."
+        },
+        "projectName": {
+          "description": "Project name for this record.",
+          "type": "string"
+        },
+        "summary": {
+          "description": "Summary for this record.",
+          "type": "string"
+        },
+        "target": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/Target"
             },
             {
               "type": "null"
             }
-          ]
-        },
-        "id": {
-          "type": "string"
-        },
-        "number": {
-          "format": "int64",
-          "type": "integer"
-        },
-        "opened": {
-          "type": "string"
-        },
-        "projectId": {
-          "type": "string"
-        },
-        "projectName": {
-          "type": "string"
-        },
-        "summary": {
-          "type": "string"
+          ],
+          "description": "Destination to open in the cockpit."
         },
         "title": {
+          "description": "Title displayed above the record.",
+          "type": "string"
+        },
+        "url": {
+          "description": "Url for this record.",
           "type": "string"
         },
         "verdict": {
+          "description": "Verdict for this record.",
           "type": "string"
         }
       },
@@ -3825,22 +4890,25 @@
         "projectName",
         "number",
         "author",
-        "opened",
+        "openedAt",
         "title",
         "summary",
         "gates",
         "verdict",
-        "href"
+        "url",
+        "target"
       ],
       "type": "object"
     },
     "PullsView": {
-      "additionalProperties": false,
+      "description": "Pull requests being tracked by the development module.",
       "properties": {
         "intro": {
+          "description": "Intro for this record.",
           "type": "string"
         },
         "items": {
+          "description": "Items for this record.",
           "items": {
             "$ref": "#/$defs/PullRequest"
           },
@@ -3854,7 +4922,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Summary for this record."
         }
       },
       "required": [
@@ -3865,21 +4934,26 @@
       "type": "object"
     },
     "QueueItem": {
-      "additionalProperties": false,
+      "description": "Queue item for the cockpit.",
       "properties": {
-        "href": {
-          "type": "string"
-        },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/DecisionId",
+          "description": "Stable identifier for this record."
         },
         "state": {
-          "$ref": "#/$defs/DecisionState"
+          "$ref": "#/$defs/DecisionState",
+          "description": "Current state of the record."
+        },
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Destination to open in the cockpit."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "topicName": {
+          "description": "Topic name for this record.",
           "type": "string"
         }
       },
@@ -3888,34 +4962,38 @@
         "title",
         "state",
         "topicName",
-        "href"
+        "target"
       ],
       "type": "object"
     },
     "ReadBack": {
-      "additionalProperties": false,
+      "description": "Read back for the cockpit.",
       "properties": {
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
+        },
         "owner": {
+          "description": "Owner for this record.",
           "type": "string"
         },
         "quote": {
-          "type": "string"
-        },
-        "time": {
+          "description": "Quote for this record.",
           "type": "string"
         }
       },
       "required": [
         "owner",
         "quote",
-        "time"
+        "at"
       ],
       "type": "object"
     },
     "RoutePreview": {
-      "additionalProperties": false,
+      "description": "Route preview for the cockpit.",
       "properties": {
         "chain": {
+          "description": "Chain for this record.",
           "type": "boolean"
         },
         "lead": {
@@ -3926,20 +5004,23 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Lead for this record."
         },
         "text": {
+          "description": "Text shown to the reader.",
           "type": "string"
         },
         "topicId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/TopicId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated topic."
         },
         "topicName": {
           "anyOf": [
@@ -3949,7 +5030,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Topic name for this record."
         }
       },
       "required": [
@@ -3962,20 +5044,22 @@
       "type": "object"
     },
     "RowAlt": {
-      "additionalProperties": false,
+      "description": "Row alt for the cockpit.",
       "properties": {
         "decisionId": {
-          "type": "string"
+          "$ref": "#/$defs/DecisionId",
+          "description": "Identifier of the associated decision."
         },
         "state": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneState"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Current state of the record."
         },
         "text": {
           "anyOf": [
@@ -3985,7 +5069,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Text shown to the reader."
         },
         "when": {
           "anyOf": [
@@ -3995,7 +5080,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "When for this record."
         }
       },
       "required": [
@@ -4007,12 +5093,14 @@
       "type": "object"
     },
     "RowsHeading": {
-      "additionalProperties": false,
+      "description": "Rows heading for the cockpit.",
       "properties": {
         "sub": {
+          "description": "Sub for this record.",
           "type": "string"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -4023,21 +5111,26 @@
       "type": "object"
     },
     "Scenario": {
-      "additionalProperties": false,
+      "description": "One possible outcome shown in the decision forecast.",
       "properties": {
         "condition": {
+          "description": "Condition for this record.",
           "type": "string"
         },
         "headline": {
+          "description": "Headline for this record.",
           "type": "string"
         },
         "kind": {
-          "type": "string"
+          "$ref": "#/$defs/ScenarioKind",
+          "description": "Kind for this record."
         },
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "summary": {
+          "description": "Summary for this record.",
           "type": "string"
         }
       },
@@ -4050,27 +5143,37 @@
       ],
       "type": "object"
     },
+    "ScenarioKind": {
+      "description": "Which side of the forecast the chart describes.",
+      "enum": [
+        "opportunity",
+        "risk",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "SearchKind": {
+      "description": "Search kind for the cockpit.",
       "enum": [
         "topic",
         "lane",
         "person",
         "decision",
-        "skill"
+        "skill",
+        "unknown"
       ],
       "type": "string"
     },
     "SearchResult": {
-      "additionalProperties": false,
+      "description": "Search result for the cockpit.",
       "properties": {
-        "href": {
-          "type": "string"
-        },
         "id": {
+          "description": "Stable identifier for this record.",
           "type": "string"
         },
         "kind": {
-          "$ref": "#/$defs/SearchKind"
+          "$ref": "#/$defs/SearchKind",
+          "description": "Kind for this record."
         },
         "sub": {
           "anyOf": [
@@ -4080,9 +5183,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Sub for this record."
+        },
+        "target": {
+          "$ref": "#/$defs/Target",
+          "description": "Destination to open in the cockpit."
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -4091,12 +5200,12 @@
         "id",
         "title",
         "sub",
-        "href"
+        "target"
       ],
       "type": "object"
     },
     "SearchView": {
-      "additionalProperties": false,
+      "description": "A page of records matching the query and an optional answer.",
       "properties": {
         "answer": {
           "anyOf": [
@@ -4106,12 +5215,26 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Answer for this record."
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque cursor for the following page, or null at the end."
         },
         "query": {
+          "description": "Query for this record.",
           "type": "string"
         },
         "results": {
+          "description": "Results for this record.",
           "items": {
             "$ref": "#/$defs/SearchResult"
           },
@@ -4125,25 +5248,49 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Scope for this record."
         }
       },
       "required": [
         "query",
         "scope",
         "results",
-        "answer"
+        "answer",
+        "nextCursor"
+      ],
+      "type": "object"
+    },
+    "SeenMarker": {
+      "description": "The reader's last visit to a topic or thread.",
+      "properties": {
+        "at": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Timestamp"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Time of the visit."
+        }
+      },
+      "required": [
+        "at"
       ],
       "type": "object"
     },
     "SeriesPoint": {
-      "additionalProperties": false,
+      "description": "Series point for the cockpit.",
       "properties": {
         "day": {
+          "description": "Day for this record.",
           "format": "int64",
           "type": "integer"
         },
         "value": {
+          "description": "Value for this record.",
           "format": "int64",
           "type": "integer"
         }
@@ -4155,35 +5302,44 @@
       "type": "object"
     },
     "SettingsView": {
-      "additionalProperties": false,
+      "description": "Editable cockpit preferences and decision rights.",
       "properties": {
         "briefsPerDay": {
+          "description": "Briefs per day for this record.",
           "format": "int64",
+          "maximum": 3,
+          "minimum": 1,
           "type": "integer"
         },
         "chatMode": {
-          "$ref": "#/$defs/ChatMode"
+          "$ref": "#/$defs/ChatMode",
+          "description": "Chat mode for this record."
         },
         "decisionRights": {
+          "description": "Decision rights for this record.",
           "items": {
             "$ref": "#/$defs/DecisionRight"
           },
           "type": "array"
         },
         "interruptOnlyUrgent": {
+          "description": "Interrupt only urgent for this record.",
           "type": "boolean"
         },
         "layout": {
-          "$ref": "#/$defs/Layout"
+          "$ref": "#/$defs/Layout",
+          "description": "Sizes of the cockpit panes."
         },
         "modules": {
+          "description": "Modules for this record.",
           "items": {
             "$ref": "#/$defs/ModuleCard"
           },
           "type": "array"
         },
         "theme": {
-          "$ref": "#/$defs/Theme"
+          "$ref": "#/$defs/Theme",
+          "description": "Theme for this record."
         }
       },
       "required": [
@@ -4198,19 +5354,23 @@
       "type": "object"
     },
     "SharedResource": {
-      "additionalProperties": false,
+      "description": "Shared resource for the cockpit.",
       "properties": {
         "icon": {
+          "description": "Icon for this record.",
           "type": "string"
         },
         "lanes": {
+          "description": "Lanes for this record.",
           "format": "int64",
           "type": "integer"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "rule": {
+          "description": "Rule for this record.",
           "type": "string"
         }
       },
@@ -4223,18 +5383,22 @@
       "type": "object"
     },
     "SidebarGroup": {
-      "additionalProperties": false,
+      "description": "Sidebar group for the cockpit.",
       "properties": {
         "icon": {
+          "description": "Icon for this record.",
           "type": "string"
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Stable identifier for this record."
         },
         "kind": {
-          "$ref": "#/$defs/GroupKind"
+          "$ref": "#/$defs/GroupKind",
+          "description": "Kind for this record."
         },
         "lanes": {
+          "description": "Lanes for this record.",
           "items": {
             "$ref": "#/$defs/SidebarLane"
           },
@@ -4248,15 +5412,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Mark for this record."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "open": {
+          "description": "Open for this record.",
           "type": "boolean"
         },
         "stateWord": {
+          "description": "State word for this record.",
           "type": "string"
         }
       },
@@ -4273,21 +5441,26 @@
       "type": "object"
     },
     "SidebarLane": {
-      "additionalProperties": false,
+      "description": "Sidebar lane for the cockpit.",
       "properties": {
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/LaneId",
+          "description": "Stable identifier for this record."
         },
         "leadName": {
+          "description": "Lead name for this record.",
           "type": "string"
         },
         "state": {
-          "$ref": "#/$defs/LaneState"
+          "$ref": "#/$defs/LaneState",
+          "description": "Current state of the record."
         },
         "stateWord": {
+          "description": "State word for this record.",
           "type": "string"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -4301,33 +5474,39 @@
       "type": "object"
     },
     "SidebarView": {
-      "additionalProperties": false,
+      "description": "Navigation, open lanes and ordered pins.",
       "properties": {
         "groups": {
+          "description": "Groups for this record.",
           "items": {
             "$ref": "#/$defs/SidebarGroup"
           },
           "type": "array"
         },
         "kindWord": {
+          "description": "Kind word for this record.",
           "type": "string"
         },
         "managerLanes": {
+          "description": "Manager lanes for this record.",
           "items": {
             "$ref": "#/$defs/SidebarLane"
           },
           "type": "array"
         },
         "pinnable": {
+          "description": "Pinnable for this record.",
           "items": {
             "$ref": "#/$defs/Pin"
           },
           "type": "array"
         },
         "pins": {
+          "description": "Pins for this record.",
           "items": {
             "$ref": "#/$defs/Pin"
           },
+          "maxItems": 12,
           "type": "array"
         }
       },
@@ -4341,15 +5520,17 @@
       "type": "object"
     },
     "SinceSummary": {
-      "additionalProperties": false,
+      "description": "Since summary for the cockpit.",
       "properties": {
         "lines": {
+          "description": "Lines for this record.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "seen": {
+          "description": "Seen for this record.",
           "type": "string"
         }
       },
@@ -4360,12 +5541,14 @@
       "type": "object"
     },
     "Skill": {
-      "additionalProperties": false,
+      "description": "Skill for the cockpit.",
       "properties": {
         "enabled": {
+          "description": "Enabled for this record.",
           "type": "boolean"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "needsKey": {
@@ -4376,12 +5559,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Needs key for this record."
         },
         "summary": {
+          "description": "Summary for this record.",
           "type": "string"
         },
         "topics": {
+          "description": "Topics for this record.",
           "type": "string"
         }
       },
@@ -4394,30 +5580,40 @@
       ],
       "type": "object"
     },
+    "SkillId": {
+      "description": "Identifier of a runnable skill.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "SkillsView": {
-      "additionalProperties": false,
+      "description": "Runnable skills, service connections and standing guardrails.",
       "properties": {
         "builtIn": {
+          "description": "Built in for this record.",
           "format": "int64",
           "type": "integer"
         },
         "connected": {
+          "description": "Connected for this record.",
           "format": "int64",
           "type": "integer"
         },
         "connections": {
+          "description": "Connections for this record.",
           "items": {
             "$ref": "#/$defs/Connection"
           },
           "type": "array"
         },
         "guardrails": {
+          "description": "Guardrails for this record.",
           "items": {
             "$ref": "#/$defs/GuardrailSwitch"
           },
           "type": "array"
         },
         "intro": {
+          "description": "Intro for this record.",
           "type": "string"
         },
         "rulesNote": {
@@ -4428,9 +5624,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Rules note for this record."
         },
         "skills": {
+          "description": "Skills for this record.",
           "items": {
             "$ref": "#/$defs/Skill"
           },
@@ -4449,19 +5647,19 @@
       "type": "object"
     },
     "SpendLine": {
-      "additionalProperties": false,
+      "description": "Spend line for the cockpit.",
       "properties": {
         "cap": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/$defs/Money",
+          "description": "Cap for this record."
         },
         "overnight": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/$defs/Money",
+          "description": "Overnight for this record."
         },
         "week": {
-          "format": "int64",
-          "type": "integer"
+          "$ref": "#/$defs/Money",
+          "description": "Week for this record."
         }
       },
       "required": [
@@ -4472,7 +5670,7 @@
       "type": "object"
     },
     "Stage": {
-      "additionalProperties": false,
+      "description": "Stage for the cockpit.",
       "properties": {
         "alt": {
           "anyOf": [
@@ -4482,25 +5680,31 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Alt for this record."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "percent": {
+          "description": "Percent for this record.",
           "format": "int64",
           "type": "integer"
         },
         "rows": {
+          "description": "Rows for this record.",
           "items": {
             "$ref": "#/$defs/StageRow"
           },
           "type": "array"
         },
         "state": {
-          "type": "string"
+          "$ref": "#/$defs/StageState",
+          "description": "Current state of the record."
         },
         "summary": {
+          "description": "Summary for this record.",
           "type": "string"
         }
       },
@@ -4515,10 +5719,11 @@
       "type": "object"
     },
     "StageAlt": {
-      "additionalProperties": false,
+      "description": "Stage alt for the cockpit.",
       "properties": {
         "decisionId": {
-          "type": "string"
+          "$ref": "#/$defs/DecisionId",
+          "description": "Identifier of the associated decision."
         },
         "percent": {
           "anyOf": [
@@ -4529,17 +5734,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Percent for this record."
         },
         "state": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/StageState"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Current state of the record."
         },
         "summary": {
           "anyOf": [
@@ -4549,7 +5756,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Summary for this record."
         }
       },
       "required": [
@@ -4561,7 +5769,7 @@
       "type": "object"
     },
     "StageRow": {
-      "additionalProperties": false,
+      "description": "Stage row for the cockpit.",
       "properties": {
         "alt": {
           "anyOf": [
@@ -4571,33 +5779,27 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Alt for this record."
         },
         "avatar": {
+          "description": "Avatar for this record.",
           "type": "string"
         },
-        "href": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ]
-        },
         "kind": {
-          "$ref": "#/$defs/ActorKind"
+          "$ref": "#/$defs/ActorKind",
+          "description": "Kind for this record."
         },
         "laneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated lane."
         },
         "percent": {
           "anyOf": [
@@ -4608,18 +5810,34 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Percent for this record."
         },
         "state": {
-          "type": "string"
+          "$ref": "#/$defs/LaneState",
+          "description": "Current state of the record."
+        },
+        "target": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Target"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Destination to open in the cockpit."
         },
         "text": {
+          "description": "Text shown to the reader.",
           "type": "string"
         },
         "when": {
+          "description": "When for this record.",
           "type": "string"
         },
         "who": {
+          "description": "Who for this record.",
           "type": "string"
         }
       },
@@ -4631,19 +5849,32 @@
         "text",
         "when",
         "percent",
-        "href",
+        "target",
         "laneId",
         "alt"
       ],
       "type": "object"
     },
+    "StageState": {
+      "description": "Progress of a stage in a topic plan.",
+      "enum": [
+        "done",
+        "next",
+        "now",
+        "wait",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "Standing": {
-      "additionalProperties": false,
+      "description": "Standing for the cockpit.",
       "properties": {
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
         "headline": {
+          "description": "Headline for this record.",
           "type": "string"
         }
       },
@@ -4654,9 +5885,10 @@
       "type": "object"
     },
     "Stat": {
-      "additionalProperties": false,
+      "description": "Stat for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "sub": {
@@ -4667,9 +5899,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Sub for this record."
         },
         "value": {
+          "description": "Value for this record.",
           "type": "string"
         }
       },
@@ -4681,15 +5915,18 @@
       "type": "object"
     },
     "Step": {
-      "additionalProperties": false,
+      "description": "Step for the cockpit.",
       "properties": {
         "kind": {
-          "$ref": "#/$defs/StepKind"
+          "$ref": "#/$defs/StepKind",
+          "description": "Kind for this record."
         },
         "text": {
+          "description": "Text shown to the reader.",
           "type": "string"
         },
         "who": {
+          "description": "Who for this record.",
           "type": "string"
         }
       },
@@ -4701,41 +5938,48 @@
       "type": "object"
     },
     "StepKind": {
+      "description": "Step kind for the cockpit.",
       "enum": [
         "ok",
         "now",
-        "todo"
+        "todo",
+        "unknown"
       ],
       "type": "string"
     },
     "StripItem": {
-      "additionalProperties": false,
+      "description": "Strip item for the cockpit.",
       "properties": {
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
+        },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "text": {
-          "type": "string"
-        },
-        "time": {
+          "description": "Text shown to the reader.",
           "type": "string"
         }
       },
       "required": [
-        "time",
+        "at",
         "name",
         "text"
       ],
       "type": "object"
     },
     "StuckAction": {
-      "additionalProperties": false,
+      "description": "Stuck action for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "tone": {
-          "type": "string"
+          "$ref": "#/$defs/ActionTone",
+          "description": "Tone for this record."
         }
       },
       "required": [
@@ -4745,9 +5989,10 @@
       "type": "object"
     },
     "StuckReport": {
-      "additionalProperties": false,
+      "description": "Stuck report for the cockpit.",
       "properties": {
         "actions": {
+          "description": "Actions for this record.",
           "items": {
             "$ref": "#/$defs/StuckAction"
           },
@@ -4761,15 +6006,18 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Blocks for this record."
         },
         "checks": {
+          "description": "Checks for this record.",
           "items": {
             "$ref": "#/$defs/CheckResult"
           },
           "type": "array"
         },
         "detail": {
+          "description": "Explanation shown alongside the summary.",
           "type": "string"
         },
         "log": {
@@ -4780,7 +6028,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Log for this record."
         },
         "note": {
           "anyOf": [
@@ -4790,12 +6039,15 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Note for this record."
         },
         "since": {
+          "description": "Since for this record.",
           "type": "string"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -4811,13 +6063,60 @@
       ],
       "type": "object"
     },
+    "Target": {
+      "description": "An internal link resolved by the client.",
+      "properties": {
+        "id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Destination record identifier, or null for a top-level surface."
+        },
+        "kind": {
+          "$ref": "#/$defs/TargetKind",
+          "description": "Surface or record type to open."
+        }
+      },
+      "required": [
+        "kind",
+        "id"
+      ],
+      "type": "object"
+    },
+    "TargetKind": {
+      "description": "Destination category for navigation within the cockpit.",
+      "enum": [
+        "topic",
+        "lane",
+        "decision",
+        "thread",
+        "person",
+        "draft",
+        "skill",
+        "pull",
+        "manager",
+        "brief",
+        "drafts",
+        "skills",
+        "settings",
+        "unknown"
+      ],
+      "type": "string"
+    },
     "TaskRow": {
-      "additionalProperties": false,
+      "description": "Task row for the cockpit.",
       "properties": {
         "lane": {
+          "description": "Lane for this record.",
           "type": "string"
         },
         "next": {
+          "description": "Next for this record.",
           "type": "string"
         },
         "reason": {
@@ -4828,15 +6127,19 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Reason for this record."
         },
         "state": {
-          "type": "string"
+          "$ref": "#/$defs/LaneState",
+          "description": "Current state of the record."
         },
         "stateWord": {
+          "description": "State word for this record.",
           "type": "string"
         },
         "task": {
+          "description": "Task for this record.",
           "type": "string"
         }
       },
@@ -4851,20 +6154,39 @@
       "type": "object"
     },
     "Theme": {
-      "additionalProperties": false,
+      "description": "Theme for the cockpit.",
       "properties": {
-        "glass": {
+        "effectiveGlass": {
+          "description": "Effective glass for this record.",
           "format": "int64",
           "type": "integer"
         },
+        "glass": {
+          "anyOf": [
+            {
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Glass for this record."
+        },
         "id": {
-          "$ref": "#/$defs/ThemeId"
+          "$ref": "#/$defs/ThemeId",
+          "description": "Stable identifier for this record."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "strength": {
+          "description": "Strength for this record.",
           "format": "int64",
+          "maximum": 100,
+          "minimum": 0,
           "type": "integer"
         }
       },
@@ -4872,11 +6194,13 @@
         "id",
         "name",
         "strength",
-        "glass"
+        "glass",
+        "effectiveGlass"
       ],
       "type": "object"
     },
     "ThemeId": {
+      "description": "Theme id for the cockpit.",
       "enum": [
         "ink",
         "ember",
@@ -4885,7 +6209,8 @@
         "tide",
         "sky",
         "iris",
-        "rose"
+        "rose",
+        "unknown"
       ],
       "type": "string"
     },
@@ -4894,27 +6219,36 @@
       "description": "Partial theme written by `prefs.set`. Every field may be omitted.",
       "properties": {
         "glass": {
-          "default": null,
-          "format": "int64",
-          "type": [
-            "integer",
-            "null"
-          ]
-        },
-        "id": {
           "anyOf": [
             {
-              "$ref": "#/$defs/ThemeId"
+              "maximum": 100,
+              "minimum": 0,
+              "type": "integer"
             },
             {
               "type": "null"
             }
           ],
-          "default": null
+          "description": "Glass for this record."
+        },
+        "id": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KnownThemeId"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Stable identifier for this record."
         },
         "strength": {
           "default": null,
+          "description": "Strength for this record.",
           "format": "int64",
+          "maximum": 100,
+          "minimum": 0,
           "type": [
             "integer",
             "null"
@@ -4924,31 +6258,40 @@
       "type": "object"
     },
     "ThreadCard": {
-      "additionalProperties": false,
+      "description": "Thread card for the cockpit.",
       "properties": {
         "laneId": {
-          "type": "string"
+          "$ref": "#/$defs/LaneId",
+          "description": "Identifier of the associated lane."
         },
         "owner": {
+          "description": "Owner for this record.",
           "type": "string"
         },
-        "state": {
+        "stateWord": {
+          "description": "Current state of the record.",
           "type": "string"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
       "required": [
         "title",
         "owner",
-        "state",
+        "stateWord",
         "laneId"
       ],
       "type": "object"
     },
+    "ThreadId": {
+      "description": "Identifier of a conversation.",
+      "pattern": "^(?:manager|general|(?:topic|lane|decision):[a-z0-9][a-z0-9-]{0,199})$",
+      "type": "string"
+    },
     "ThreadView": {
-      "additionalProperties": false,
+      "description": "A page of conversation and its reading context.",
       "properties": {
         "agents": {
           "anyOf": [
@@ -4958,16 +6301,30 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Agents for this record."
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/ThreadId",
+          "description": "Stable identifier for this record."
         },
         "messages": {
+          "description": "Messages for this record.",
           "items": {
             "$ref": "#/$defs/Message"
           },
           "type": "array"
+        },
+        "nextCursor": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Opaque cursor for the following page, or null at the end."
         },
         "pinned": {
           "anyOf": [
@@ -4977,9 +6334,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Pinned for this record."
         },
         "placeholder": {
+          "description": "Placeholder for this record.",
           "type": "string"
         },
         "reading": {
@@ -4990,7 +6349,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Reading for this record."
         },
         "since": {
           "anyOf": [
@@ -5000,7 +6360,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Since for this record."
         },
         "sub": {
           "anyOf": [
@@ -5010,15 +6371,18 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Sub for this record."
         },
         "suggestions": {
+          "description": "Suggestions for this record.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -5032,17 +6396,20 @@
         "pinned",
         "agents",
         "suggestions",
-        "messages"
+        "messages",
+        "nextCursor"
       ],
       "type": "object"
     },
     "Thumb": {
-      "additionalProperties": false,
+      "description": "Thumb for the cockpit.",
       "properties": {
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         },
         "passed": {
+          "description": "Passed for this record.",
           "type": "boolean"
         },
         "reason": {
@@ -5053,7 +6420,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Reason for this record."
         }
       },
       "required": [
@@ -5064,13 +6432,15 @@
       "type": "object"
     },
     "Tick": {
-      "additionalProperties": false,
+      "description": "Tick for the cockpit.",
       "properties": {
         "day": {
+          "description": "Day for this record.",
           "format": "int64",
           "type": "integer"
         },
         "label": {
+          "description": "Label for this record.",
           "type": "string"
         }
       },
@@ -5080,32 +6450,50 @@
       ],
       "type": "object"
     },
+    "Timestamp": {
+      "description": "A point in time with an RFC 3339 UTC offset.",
+      "format": "date-time",
+      "type": "string"
+    },
+    "TopicId": {
+      "description": "Identifier of a topic or project.",
+      "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+      "type": "string"
+    },
     "TopicKind": {
+      "description": "Topic kind for the cockpit.",
       "enum": [
         "topic",
-        "project"
+        "project",
+        "unknown"
       ],
       "type": "string"
     },
     "TopicLane": {
-      "additionalProperties": false,
+      "description": "Topic lane for the cockpit.",
       "properties": {
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/LaneId",
+          "description": "Stable identifier for this record."
         },
         "leadName": {
+          "description": "Lead name for this record.",
           "type": "string"
         },
         "next": {
+          "description": "Next for this record.",
           "type": "string"
         },
         "state": {
-          "$ref": "#/$defs/LaneState"
+          "$ref": "#/$defs/LaneState",
+          "description": "Current state of the record."
         },
         "stateWord": {
+          "description": "State word for this record.",
           "type": "string"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         }
       },
@@ -5120,7 +6508,7 @@
       "type": "object"
     },
     "TopicMeta": {
-      "additionalProperties": false,
+      "description": "Topic meta for the cockpit.",
       "properties": {
         "askedBy": {
           "anyOf": [
@@ -5130,7 +6518,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Asked by for this record."
         },
         "nextReport": {
           "anyOf": [
@@ -5140,7 +6529,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Next report for this record."
         },
         "ownerLine": {
           "anyOf": [
@@ -5150,9 +6540,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Owner line for this record."
         },
         "parts": {
+          "description": "Parts for this record.",
           "items": {
             "type": "string"
           },
@@ -5168,21 +6560,25 @@
       "type": "object"
     },
     "TopicView": {
-      "additionalProperties": false,
+      "description": "Progress, work and conversation context for one topic or project.",
       "properties": {
         "chatSub": {
+          "description": "Chat sub for this record.",
           "type": "string"
         },
         "crew": {
+          "description": "Crew for this record.",
           "items": {
             "$ref": "#/$defs/Actor"
           },
           "type": "array"
         },
         "crumb": {
+          "description": "Crumb for this record.",
           "type": "string"
         },
         "facts": {
+          "description": "Facts for this record.",
           "items": {
             "$ref": "#/$defs/Fact"
           },
@@ -5191,12 +6587,13 @@
         "focusLaneId": {
           "anyOf": [
             {
-              "type": "string"
+              "$ref": "#/$defs/LaneId"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Identifier of the associated focus lane."
         },
         "goal": {
           "anyOf": [
@@ -5206,7 +6603,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Goal for this record."
         },
         "health": {
           "anyOf": [
@@ -5216,37 +6614,45 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Health for this record."
         },
         "history": {
           "anyOf": [
             {
-              "$ref": "#/$defs/History"
+              "$ref": "#/$defs/HistoryPage"
             },
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "History for this record."
         },
         "icon": {
+          "description": "Icon for this record.",
           "type": "string"
         },
         "id": {
-          "type": "string"
+          "$ref": "#/$defs/TopicId",
+          "description": "Stable identifier for this record."
         },
         "intro": {
+          "description": "Intro for this record.",
           "type": "string"
         },
         "jobs": {
+          "description": "Jobs for this record.",
           "items": {
             "$ref": "#/$defs/Job"
           },
           "type": "array"
         },
         "kind": {
-          "$ref": "#/$defs/TopicKind"
+          "$ref": "#/$defs/TopicKind",
+          "description": "Kind for this record."
         },
         "lanes": {
+          "description": "Lanes for this record.",
           "items": {
             "$ref": "#/$defs/TopicLane"
           },
@@ -5260,9 +6666,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Meta for this record."
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "noGoal": {
@@ -5273,9 +6681,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "No goal for this record."
         },
         "open": {
+          "description": "Open for this record.",
           "type": "boolean"
         },
         "plan": {
@@ -5286,7 +6696,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Plan for this record."
         },
         "spend": {
           "anyOf": [
@@ -5296,7 +6707,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Spend for this record."
         },
         "stuck": {
           "anyOf": [
@@ -5306,9 +6718,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Stuck for this record."
         },
         "tasks": {
+          "description": "Tasks for this record.",
           "items": {
             "$ref": "#/$defs/TaskRow"
           },
@@ -5322,7 +6736,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "When for this record."
         }
       },
       "required": [
@@ -5353,29 +6768,34 @@
       "type": "object"
     },
     "Trajectory": {
-      "additionalProperties": false,
+      "description": "Trajectory for the cockpit.",
       "properties": {
         "actual": {
+          "description": "Actual for this record.",
           "items": {
             "$ref": "#/$defs/SeriesPoint"
           },
           "type": "array"
         },
         "days": {
+          "description": "Days for this record.",
           "format": "int64",
           "type": "integer"
         },
         "expected": {
+          "description": "Expected for this record.",
           "items": {
             "$ref": "#/$defs/SeriesPoint"
           },
           "type": "array"
         },
         "goal": {
+          "description": "Goal for this record.",
           "format": "int64",
           "type": "integer"
         },
         "high": {
+          "description": "High for this record.",
           "items": {
             "$ref": "#/$defs/SeriesPoint"
           },
@@ -5389,9 +6809,11 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Key for this record."
         },
         "low": {
+          "description": "Low for this record.",
           "items": {
             "$ref": "#/$defs/SeriesPoint"
           },
@@ -5405,19 +6827,23 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "No forecast for this record."
         },
         "now": {
+          "description": "Now for this record.",
           "format": "int64",
           "type": "integer"
         },
         "plan": {
+          "description": "Plan for this record.",
           "items": {
             "$ref": "#/$defs/SeriesPoint"
           },
           "type": "array"
         },
         "start": {
+          "description": "Start for this record.",
           "type": "string"
         },
         "step": {
@@ -5429,15 +6855,18 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Step for this record."
         },
         "ticks": {
+          "description": "Ticks for this record.",
           "items": {
             "$ref": "#/$defs/Tick"
           },
           "type": "array"
         },
         "title": {
+          "description": "Title displayed above the record.",
           "type": "string"
         },
         "unit": {
@@ -5448,7 +6877,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Unit for this record."
         }
       },
       "required": [
@@ -5471,19 +6901,22 @@
       "type": "object"
     },
     "UsageAccount": {
-      "additionalProperties": false,
+      "description": "Usage account for the cockpit.",
       "properties": {
         "lanes": {
+          "description": "Lanes for this record.",
           "format": "int64",
           "type": "integer"
         },
         "meters": {
+          "description": "Meters for this record.",
           "items": {
             "$ref": "#/$defs/Meter"
           },
           "type": "array"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "note": {
@@ -5494,7 +6927,8 @@
             {
               "type": "null"
             }
-          ]
+          ],
+          "description": "Note for this record."
         }
       },
       "required": [
@@ -5506,24 +6940,28 @@
       "type": "object"
     },
     "UsageView": {
-      "additionalProperties": false,
+      "description": "Provider usage and capacity for the workspace.",
       "properties": {
-        "asOf": {
-          "type": "string"
+        "at": {
+          "$ref": "#/$defs/Timestamp",
+          "description": "Time the record was created or observed."
         },
         "keys": {
+          "description": "Keys for this record.",
           "items": {
             "$ref": "#/$defs/UsageAccount"
           },
           "type": "array"
         },
         "missing": {
+          "description": "Missing for this record.",
           "items": {
             "type": "string"
           },
           "type": "array"
         },
         "subscriptions": {
+          "description": "Subscriptions for this record.",
           "items": {
             "$ref": "#/$defs/UsageAccount"
           },
@@ -5531,7 +6969,7 @@
         }
       },
       "required": [
-        "asOf",
+        "at",
         "subscriptions",
         "keys",
         "missing"
@@ -5539,18 +6977,22 @@
       "type": "object"
     },
     "Verdict": {
-      "additionalProperties": false,
+      "description": "Verdict for the cockpit.",
       "properties": {
         "action": {
+          "description": "Action for this record.",
           "type": "string"
         },
         "state": {
-          "$ref": "#/$defs/HealthState"
+          "$ref": "#/$defs/HealthState",
+          "description": "Current state of the record."
         },
         "text": {
+          "description": "Text shown to the reader.",
           "type": "string"
         },
         "word": {
+          "description": "Word for this record.",
           "type": "string"
         }
       },
@@ -5563,16 +7005,19 @@
       "type": "object"
     },
     "WorkspaceInfo": {
-      "additionalProperties": false,
+      "description": "Identity and appearance of the workspace.",
       "properties": {
         "id": {
+          "description": "Stable identifier for this record.",
           "type": "string"
         },
         "name": {
+          "description": "Name shown to the reader.",
           "type": "string"
         },
         "theme": {
-          "$ref": "#/$defs/Theme"
+          "$ref": "#/$defs/Theme",
+          "description": "Theme for this record."
         }
       },
       "required": [
@@ -5583,25 +7028,40 @@
       "type": "object"
     },
     "WorkspaceView": {
-      "additionalProperties": false,
+      "description": "Workspace identity, reader and presentation settings.",
       "properties": {
         "chatMode": {
-          "$ref": "#/$defs/ChatMode"
+          "$ref": "#/$defs/ChatMode",
+          "description": "Chat mode for this record."
+        },
+        "contractVersion": {
+          "description": "Version of the contract served by the hub.",
+          "type": "string"
         },
         "layout": {
-          "$ref": "#/$defs/Layout"
+          "$ref": "#/$defs/Layout",
+          "description": "Sizes of the cockpit panes."
         },
         "me": {
-          "$ref": "#/$defs/Actor"
+          "$ref": "#/$defs/Actor",
+          "description": "Me for this record."
         },
         "module": {
-          "$ref": "#/$defs/ModuleInfo"
+          "$ref": "#/$defs/ModuleInfo",
+          "description": "Module for this record."
+        },
+        "timezone": {
+          "description": "IANA time zone used by the workspace.",
+          "type": "string"
         },
         "workspace": {
-          "$ref": "#/$defs/WorkspaceInfo"
+          "$ref": "#/$defs/WorkspaceInfo",
+          "description": "Workspace for this record."
         }
       },
       "required": [
+        "contractVersion",
+        "timezone",
         "workspace",
         "module",
         "me",
@@ -5611,5 +7071,7 @@
       "type": "object"
     }
   },
-  "$schema": "https://json-schema.org/draft/2020-12/schema"
+  "$id": "urn:morndo:cockpit-api:1",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "x-contract-version": "1.0.0"
 }

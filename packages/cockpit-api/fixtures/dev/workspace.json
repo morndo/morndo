@@ -6,7 +6,8 @@
       "id": "ink",
       "name": "Ink",
       "strength": 55,
-      "glass": 25
+      "glass": 25,
+      "effectiveGlass": 25
     }
   },
   "module": {
@@ -33,5 +34,7 @@
     "sidebarWidth": 236,
     "chatWidth": 380
   },
-  "chatMode": "floating"
+  "chatMode": "floating",
+  "contractVersion": "1.0.0",
+  "timezone": "Europe/Berlin"
 }

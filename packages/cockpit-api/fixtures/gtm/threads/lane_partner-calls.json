@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_partner-calls-0",
+      "id": "m1",
       "author": {
         "id": "notetaker",
         "name": "Notetaker",
@@ -25,13 +25,13 @@
         "engine": null,
         "record": null
       },
-      "time": "13 Nov",
       "text": "Halden call: they want a referral deal and a joint webinar. Next step is an offer this week. I opened a lane for it and named Jonas.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-13T00:00:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

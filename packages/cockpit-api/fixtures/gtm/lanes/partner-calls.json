@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 10 Nov",
-  "closed": null,
   "next": "Today, 16:00",
   "afterNext": null,
   "decisionId": null,
@@ -122,21 +120,23 @@
       "icon": "file",
       "title": "Brief: Brightmoor Retail",
       "detail": "Ready 13:00",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "Notes: Halden Freight Network",
       "detail": "They want a referral deal for 2,400 customers",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "Notes: Kestrel Parcel",
       "detail": "Budget frozen until spring",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-10T00:00:00+01:00",
+  "closedAt": null
 }

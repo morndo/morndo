@@ -8,7 +8,6 @@
       "projectName": "API",
       "number": 412,
       "author": "Builder",
-      "opened": "yesterday 17:20",
       "title": "Write big exports in chunks",
       "summary": "Fixes the export that times out for the 14 largest accounts.",
       "gates": [
@@ -34,7 +33,12 @@
         }
       ],
       "verdict": "Ready, yours to release",
-      "href": "#decision"
+      "url": "https://code.example.test/pulls/412",
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "openedAt": "2026-11-15T17:20:00+01:00"
     },
     {
       "id": "96",
@@ -42,7 +46,6 @@
       "projectName": "Billing",
       "number": 96,
       "author": "Builder",
-      "opened": "Friday",
       "title": "Tax rates per country",
       "summary": "Adds the rates table and a migration that fills 48,000 invoices.",
       "gates": [
@@ -68,7 +71,9 @@
         }
       ],
       "verdict": "Ready, the migration waits for you",
-      "href": null
+      "url": "https://code.example.test/pulls/96",
+      "target": null,
+      "openedAt": "2026-11-13T00:00:00+01:00"
     },
     {
       "id": "731",
@@ -76,7 +81,6 @@
       "projectName": "Web app",
       "number": 731,
       "author": "Builder",
-      "opened": "Saturday",
       "title": "Shipment filters",
       "summary": "Filter the shipment list by carrier, status and date.",
       "gates": [
@@ -102,7 +106,12 @@
         }
       ],
       "verdict": "Blocked by red main",
-      "href": "#topic/web"
+      "url": "https://code.example.test/pulls/731",
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "openedAt": "2026-11-14T00:00:00+01:00"
     },
     {
       "id": "58",
@@ -110,7 +119,6 @@
       "projectName": "Mobile",
       "number": 58,
       "author": "Builder",
-      "opened": "today 06:10",
       "title": "Keep scans made without a signal",
       "summary": "Scans are stored on the phone and sent when it is online again.",
       "gates": [
@@ -136,7 +144,9 @@
         }
       ],
       "verdict": "In review",
-      "href": null
+      "url": "https://code.example.test/pulls/58",
+      "target": null,
+      "openedAt": "2026-11-16T06:10:00+01:00"
     },
     {
       "id": "413",
@@ -144,7 +154,6 @@
       "projectName": "API",
       "number": 413,
       "author": "Builder",
-      "opened": "today 06:55",
       "title": "Document the export limits",
       "summary": "Docs only: the new limits and how to ask for a bigger export.",
       "gates": [
@@ -165,7 +174,9 @@
         }
       ],
       "verdict": "Merges by itself at 09:00, docs only",
-      "href": null
+      "url": "https://code.example.test/pulls/413",
+      "target": null,
+      "openedAt": "2026-11-16T06:55:00+01:00"
     }
   ]
 }

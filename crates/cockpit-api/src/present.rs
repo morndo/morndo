@@ -8,15 +8,21 @@ use std::borrow::Cow;
 use schemars::{JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Serialize};
 
+/// Required wire field carrying a value or null.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Present<T>(pub Option<T>);
+pub struct Present<T>(
+    /// Value present in the record.
+    pub Option<T>,
+);
 
 impl<T> Present<T> {
+    /// Construct a field containing a value.
     pub fn some(value: T) -> Self {
         Self(Some(value))
     }
 
+    /// Construct a field containing null.
     pub fn none() -> Self {
         Self(None)
     }

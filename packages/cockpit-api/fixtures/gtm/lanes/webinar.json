@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Thursday",
-  "closed": null,
   "next": "Now, needs your call",
   "afterNext": null,
   "decisionId": null,
@@ -162,15 +160,20 @@
       "icon": "file",
       "title": "Promo text",
       "detail": "120 words, approved Friday",
-      "href": null
+      "target": null
     },
     {
       "icon": "image",
       "title": "6 images",
       "detail": "4 pass the brand check, 2 fail",
-      "href": "#topic/content"
+      "target": {
+        "kind": "topic",
+        "id": "content"
+      }
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-12T00:00:00+01:00",
+  "closedAt": null
 }

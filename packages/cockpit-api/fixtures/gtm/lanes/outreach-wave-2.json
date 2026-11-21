@@ -32,8 +32,6 @@
     "engine": null,
     "record": null
   },
-  "opened": "Opened today, 02:10",
-  "closed": null,
   "next": "After Lea's check",
   "afterNext": null,
   "decisionId": null,
@@ -126,19 +124,21 @@
       "icon": "file",
       "title": "24 drafted emails",
       "detail": "Retail brands, from your mail",
-      "href": null
+      "target": null
     }
   ],
   "handover": {
-    "when": "Today 05:05",
     "match": false,
     "why": "Sender's session restarted after the machine updated overnight.",
-    "state": "24 emails drafted for retail brands; none sent.",
     "open": "Lea checks the 24 by 11:00; the other 16 wait for their contacts.",
     "risk": "Emails go out before Lea has checked them.",
     "ifSo": "Stop sending, tell Lea and you, and list every email that went out.",
     "restated": "“24 drafts are ready; send 20 a day from 09:00.”",
-    "fixed": "Lea's check was missing. The Manager compared the read-back with the lane's records, put the check back as the next step and held sending. Nothing went out."
+    "fixed": "Lea's check was missing. The Manager compared the read-back with the lane's records, put the check back as the next step and held sending. Nothing went out.",
+    "at": "2026-11-16T05:05:00+01:00",
+    "summary": "24 emails drafted for retail brands; none sent."
   },
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-16T02:10:00+01:00",
+  "closedAt": null
 }

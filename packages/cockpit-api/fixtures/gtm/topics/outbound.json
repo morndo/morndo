@@ -217,25 +217,26 @@
         "name": "Sequence A, logistics ops",
         "confidence": "Done",
         "close": null,
-        "at": 5,
         "stage": "Finished today",
         "short": "9 meetings; forecast was 8",
         "laneId": "sequence-a",
-        "href": "#lane/sequence-a",
         "evidence": "960 emails, 52 replies, 9 meetings. Its forecast at the start was 8.",
         "next": null,
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "sequence-a"
+        },
+        "chartDay": 5
       },
       {
         "name": "Sequence B, fintech ops",
         "confidence": "Likely",
         "close": null,
-        "at": 2,
         "stage": "Pilot done, waits for your OK",
         "short": "Pilot booked 2; your OK tomorrow",
         "laneId": "sequence-b",
-        "href": "#lane/sequence-b",
         "evidence": "The pilot of 30 booked 2 meetings. The other 150 at that rate bring 10.",
         "next": "your OK, then 60 a day from 10:00.",
         "value": null,
@@ -244,21 +245,29 @@
           "stage": "Sending, 60 a day",
           "short": "First 60 go out at 10:00",
           "next": "replies sorted every morning; meetings reported Friday."
-        }
+        },
+        "target": {
+          "kind": "lane",
+          "id": "sequence-b"
+        },
+        "chartDay": 2
       },
       {
         "name": "Logistics ops, round 2",
         "confidence": "Early",
         "close": null,
-        "at": 0,
         "stage": "List being built",
         "short": "List of 400 due Thursday",
         "laneId": "logistics-round-2",
-        "href": "#lane/logistics-round-2",
         "evidence": "Same segment as sequence A, which booked 9 from 960. 400 new leads at that rate bring about 4; the plan needs 9.",
         "next": "the list on Thursday, then a pilot of 30 from Monday 23 November.",
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "logistics-round-2"
+        },
+        "chartDay": 0
       }
     ],
     "guardrails": {
@@ -321,8 +330,11 @@
         "what": null,
         "why": null,
         "who": "Jonas Falk",
-        "href": "#lane/reply-handling",
-        "laneId": "reply-handling"
+        "laneId": "reply-handling",
+        "target": {
+          "kind": "lane",
+          "id": "reply-handling"
+        }
       },
       {
         "state": "warn",
@@ -330,8 +342,11 @@
         "what": null,
         "why": null,
         "who": "Sender",
-        "href": "#lane/sequence-a",
-        "laneId": "sequence-a"
+        "laneId": "sequence-a",
+        "target": {
+          "kind": "lane",
+          "id": "sequence-a"
+        }
       }
     ],
     "routine": null,
@@ -418,7 +433,9 @@
   "plan": null,
   "focusLaneId": "sequence-b",
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the topic began on 26 October.",
     "days": [
@@ -427,7 +444,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "08:52",
             "actor": {
               "id": "prospector",
               "name": "Prospector",
@@ -449,11 +465,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:52:00+01:00"
           },
           {
             "kind": "event",
-            "time": "08:40",
             "actor": {
               "id": "replies",
               "name": "Replies",
@@ -475,11 +491,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:40:00+01:00"
           },
           {
             "kind": "event",
-            "time": "08:20",
             "actor": {
               "id": "replies",
               "name": "Replies",
@@ -501,11 +517,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:20:00+01:00"
           },
           {
             "kind": "event",
-            "time": "08:05",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -531,7 +547,8 @@
               "Pinecrest Cold Chain · head of operations",
               "Velmont Freight · COO"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:05:00+01:00"
           }
         ]
       },
@@ -540,7 +557,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "19:30",
             "actor": {
               "id": "prospector",
               "name": "Prospector",
@@ -562,14 +578,14 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T19:30:00+01:00"
           },
           {
             "kind": "seen"
           },
           {
             "kind": "event",
-            "time": "10:15",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -595,7 +611,8 @@
               "Calder Yards · head of logistics",
               "Holmfield Carriers · COO"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T10:15:00+01:00"
           }
         ]
       },
@@ -604,7 +621,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "17:14",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -626,11 +642,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T17:14:00+01:00"
           },
           {
             "kind": "event",
-            "time": "17:10",
             "actor": {
               "id": "sender",
               "name": "Sender",
@@ -656,11 +672,11 @@
               "Quillon Pay · head of operations",
               "Tessaly Bank · ops manager"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T17:10:00+01:00"
           },
           {
             "kind": "event",
-            "time": "15:00",
             "actor": {
               "id": "jonas-falk",
               "name": "Jonas Falk",
@@ -682,7 +698,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T15:00:00+01:00"
           }
         ]
       },
@@ -691,7 +708,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "09:05",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -713,11 +729,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-11T09:05:00+01:00"
           },
           {
             "kind": "event",
-            "time": "08:30",
             "actor": {
               "id": "prospector",
               "name": "Prospector",
@@ -739,11 +755,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-11T08:30:00+01:00"
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null
   },
   "crew": [
     {
@@ -890,8 +908,14 @@
     }
   ],
   "spend": {
-    "spent": 17,
-    "cap": 40
+    "spent": {
+      "amountMinor": 1700,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 4000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
   "tasks": []

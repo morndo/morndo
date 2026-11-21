@@ -187,42 +187,57 @@
     {
       "id": "ask-retail",
       "quote": "Retail first. Send wave 2 to the retail brands first.",
-      "when": "Today 08:30",
       "chat": "in the Partnerships chat",
       "went": "thread Outreach, wave 2 · Sender owns it",
-      "href": "#lane/outreach-wave-2"
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-2"
+      },
+      "at": "2026-11-16T08:30:00+01:00"
     },
     {
       "id": "ask-partners",
       "quote": "Tom wants partnerships with big brands. Set it up; I lead it, Lea and Jonas help.",
-      "when": "Monday 19 October",
       "chat": "Partnerships",
       "went": "a topic of its own · you lead",
-      "href": "#topic/partnerships"
+      "target": {
+        "kind": "topic",
+        "id": "partnerships"
+      },
+      "at": "2026-10-19T00:00:00+02:00"
     },
     {
       "id": "ask-budget",
       "quote": "LinkedIn leads cost too much. Find where the budget works best and propose a shift.",
-      "when": "Friday 10:20",
       "chat": "Paid",
       "went": "lane Search budget shift · Paid buyer leads",
-      "href": "#lane/search-budget"
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      },
+      "at": "2026-11-13T10:20:00+01:00"
     },
     {
       "id": "ask-webinar",
       "quote": "Get the webinar promo out on Monday.",
-      "when": "Thursday 17:40",
       "chat": "Content",
       "went": "lane Webinar on Thursday · Visuals leads",
-      "href": "#lane/webinar"
+      "target": {
+        "kind": "lane",
+        "id": "webinar"
+      },
+      "at": "2026-11-12T17:40:00+01:00"
     },
     {
       "id": "ask-sequence",
       "quote": "Start writing to fintech ops people once the pilot shows it works.",
-      "when": "Wednesday 09:05",
       "chat": "Outbound",
       "went": "lane Sequence B, fintech ops · Sender leads",
-      "href": "#lane/sequence-b"
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      },
+      "at": "2026-11-11T09:05:00+01:00"
     }
   ],
   "since": [

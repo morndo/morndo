@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened today, 06:30",
-  "closed": "closed today, 07:10",
   "next": null,
   "afterNext": null,
   "decisionId": null,
@@ -84,15 +82,17 @@
       "icon": "file",
       "title": "Customer profile",
       "detail": "4 segments, fintech ops first",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "What changed",
       "detail": "Fintech ops moved up, retail moved down",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-16T06:30:00+01:00",
+  "closedAt": "2026-11-16T07:10:00+01:00"
 }

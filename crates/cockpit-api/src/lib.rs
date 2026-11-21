@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 //! The cockpit API: the views, commands and events the screens share.
 //!
 //! JSON is camelCase. A field that is sometimes absent is still sent, as null, so every client
@@ -35,12 +33,12 @@ pub use brief::{
 };
 pub use command::{Attachment, Command, CommandResult};
 pub use decision::{
-    DecisionQueueView, DecisionState, DecisionView, NextStep, Proof, Provenance, QueueItem, Scenario,
-    Stat,
+    DecisionQueueView, DecisionState, DecisionView, NextStep, Proof, Provenance, QueueItem,
+    Scenario, Stat,
 };
 pub use drafts::{Draft, DraftsView};
-pub use error::{ApiError, ErrorBody};
-pub use event::Event;
+pub use error::{ApiError, ErrorCode, FieldError};
+pub use event::{Event, FeedEvent};
 pub use lane::{
     AskedMeta, Handover, LaneAct, LaneState, LaneView, MadeItem, Standing, Step, StepKind, Thumb,
 };
@@ -56,14 +54,25 @@ pub use settings::{
 pub use sidebar::{GroupKind, Pin, PinKind, SidebarGroup, SidebarLane, SidebarView};
 pub use skills::{Connection, ConnectionState, GuardrailSwitch, Skill, SkillsView};
 pub use thread::{
-    AgentsStrip, LabelKind, Message, MessageAction, MessageLabel, PinState, PinnedDecision, ReadBack,
-    SinceSummary, StripItem, ThreadCard, ThreadView,
+    AgentsStrip, LabelKind, Message, MessageAction, MessageLabel, PinState, PinnedDecision,
+    ReadBack, SinceSummary, StripItem, ThreadCard, ThreadView,
 };
 pub use topic::{
     AgentSpend, Blocker, CheckResult, Deal, DealAlt, Fact, Figure, Funnel, FunnelStep, Gap, Goal,
-    GoalDecision, GuardrailItem, Guardrails, Health, HealthState, History, HistoryDay, HistoryEntry,
-    Job, LadderRung, NightStat, Plan, RowsHeading, SeriesPoint, Stage, StageAlt, StageRow, StuckAction,
-    StuckReport, TaskRow, Tick, TopicKind, TopicLane, TopicMeta, TopicView, Trajectory, Verdict,
+    GoalDecision, GuardrailItem, Guardrails, Health, HealthState, HistoryDay, HistoryEntry,
+    HistoryPage, Job, LadderRung, NightStat, Plan, RowsHeading, SeriesPoint, Stage, StageAlt,
+    StageRow, StuckAction, StuckReport, TaskRow, Tick, TopicKind, TopicLane, TopicMeta, TopicView,
+    Trajectory, Verdict,
 };
 pub use usage::{Meter, UsageAccount, UsageView};
 pub use workspace::{ModuleId, ModuleInfo, WorkspaceInfo, WorkspaceView};
+
+pub mod wire;
+pub use wire::*;
+
+pub mod routes;
+
+pub mod models;
+pub use models::{Model, ModelState, ModelsView};
+
+pub mod input;

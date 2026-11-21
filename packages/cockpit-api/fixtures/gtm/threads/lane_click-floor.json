@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_click-floor-0",
+      "id": "m1",
       "author": {
         "id": "paid-buyer",
         "name": "Paid buyer",
@@ -25,13 +25,13 @@
         "engine": null,
         "record": null
       },
-      "time": "08:30",
       "text": "3 ads off. If you want one back, undo it in the brief and I will turn it on again.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:30:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_fenwick-0",
+      "id": "m1",
       "author": {
         "id": "writer",
         "name": "Writer",
@@ -25,16 +25,15 @@
         "engine": null,
         "record": null
       },
-      "time": "Fri 16:30",
       "text": "Fenwick signed off the text and the quote. One thing is left: the 38% number. It is theirs, from their Q3 report, but it is a claim we publish.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-13T16:30:00+01:00"
     },
     {
-      "id": "lane_fenwick-1",
+      "id": "m2",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -49,16 +48,15 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "Is the 38% before and after us, or just this year?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     },
     {
-      "id": "lane_fenwick-2",
+      "id": "m3",
       "author": {
         "id": "writer",
         "name": "Writer",
@@ -73,13 +71,13 @@
         "engine": null,
         "record": null
       },
-      "time": "Fri 16:41",
       "text": "Before and after: March, the month before they started, against September. The story says exactly that.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-13T16:41:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

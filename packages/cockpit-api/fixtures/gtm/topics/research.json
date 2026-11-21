@@ -28,7 +28,9 @@
   "plan": null,
   "focusLaneId": null,
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the topic began on 20 October.",
     "days": [
@@ -37,7 +39,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "07:10",
             "actor": {
               "id": "researcher",
               "name": "Researcher",
@@ -59,11 +60,11 @@
             "undoable": true,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:10:00+01:00"
           },
           {
             "kind": "event",
-            "time": "06:40",
             "actor": {
               "id": "researcher",
               "name": "Researcher",
@@ -85,7 +86,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T06:40:00+01:00"
           }
         ]
       },
@@ -94,7 +96,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "21:30",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -116,7 +117,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T21:30:00+01:00"
           },
           {
             "kind": "seen"
@@ -128,7 +130,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "15:00",
             "actor": {
               "id": "researcher",
               "name": "Researcher",
@@ -150,11 +151,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-12T15:00:00+01:00"
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null
   },
   "crew": [
     {
@@ -193,8 +196,14 @@
     }
   ],
   "spend": {
-    "spent": 3,
-    "cap": 20
+    "spent": {
+      "amountMinor": 300,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 2000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
   "tasks": []

@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 30 Oct",
-  "closed": null,
   "next": "Today, 18:00",
   "afterNext": null,
   "decisionId": null,
@@ -103,15 +101,17 @@
       "icon": "file",
       "title": "Brand list in HubSpot",
       "detail": "160 brands, 64 marked as a fit",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "Why each brand fits",
       "detail": "One line per brand, from the partner profile",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-10-30T00:00:00+01:00",
+  "closedAt": null
 }

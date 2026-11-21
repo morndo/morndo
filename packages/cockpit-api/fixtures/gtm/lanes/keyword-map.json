@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened 2 Nov",
-  "closed": "closed 4 Nov",
   "next": null,
   "afterNext": null,
   "decisionId": null,
@@ -84,9 +82,11 @@
       "icon": "file",
       "title": "Keyword map",
       "detail": "5 pages, 410 to 1,300 searches a month each",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-02T00:00:00+01:00",
+  "closedAt": "2026-11-04T00:00:00+01:00"
 }

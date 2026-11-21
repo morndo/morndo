@@ -13,7 +13,7 @@
   ],
   "messages": [
     {
-      "id": "decision_d1-0",
+      "id": "m1",
       "author": {
         "id": "timo-varga",
         "name": "Timo Varga",
@@ -28,16 +28,15 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "What happens to exports that are running during the release?",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     },
     {
-      "id": "decision_d1-1",
+      "id": "m2",
       "author": {
         "id": "manager",
         "name": "Manager",
@@ -52,13 +51,13 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "They finish on the old version. The rollout replaces one server at a time and waits for running exports, up to 5 minutes each.\nChecked on staging: 3 exports ran through a rollout and all 3 files were complete.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened this week",
-  "closed": null,
   "next": "After your pick",
   "afterNext": null,
   "decisionId": "d3",
@@ -76,5 +74,7 @@
   ],
   "made": [],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-16T00:00:00+01:00",
+  "closedAt": null
 }

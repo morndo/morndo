@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_partner-stack-0",
+      "id": "m1",
       "author": {
         "id": "jonas-falk",
         "name": "Jonas Falk",
@@ -25,13 +25,13 @@
         "engine": null,
         "record": null
       },
-      "time": "29 Oct",
       "text": "Test run done: 10 brands found in Clay, 9 contacts in Apollo, all landed in HubSpot. Agents can't send anything from there.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-10-29T00:00:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

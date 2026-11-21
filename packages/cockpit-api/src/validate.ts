@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { FormatsPlugin } from "ajv-formats";
 
 interface SchemaError {
   instancePath?: string;
@@ -19,6 +20,7 @@ interface NumberFormat {
 }
 
 interface Ajv2020 {
+  addKeyword(name: string): void;
   addSchema(schema: unknown, key?: string): void;
   compile(schema: unknown): ValidateFn;
   getSchema(key: string): ValidateFn | undefined;
@@ -62,16 +64,23 @@ function double(value: number): boolean {
 }
 
 const schemaPath = join(dirname(fileURLToPath(import.meta.url)), "../schema/cockpit.schema.json");
-const schema: unknown = JSON.parse(readFileSync(schemaPath, "utf8"));
-const ajv = new Ajv2020({ allErrors: true, strict: false });
+const schema = JSON.parse(readFileSync(schemaPath, "utf8")) as { "x-contract-version": string };
+
+export const contractVersion = schema["x-contract-version"];
+const ajv = new Ajv2020({ allErrors: false, strict: true });
+const addFormats = require("ajv-formats") as FormatsPlugin;
+addFormats(ajv as Parameters<FormatsPlugin>[0], ["date-time", "uri"]);
 const formats: readonly (readonly [string, (value: number) => boolean])[] = [
   ["int32", int32],
   ["uint32", uint32],
+  ["uint16", (value) => Number.isInteger(value) && value >= 0 && value <= 65535],
+  ["uint8", (value) => Number.isInteger(value) && value >= 0 && value <= 255],
   ["int64", int64],
   ["uint64", uint64],
   ["double", double],
 ];
 for (const [name, check] of formats) ajv.addFormat(name, { type: "number", validate: check });
+ajv.addKeyword("x-contract-version");
 ajv.addSchema(schema, "cockpit");
 
 export interface ValidationOk<T> {

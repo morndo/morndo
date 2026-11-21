@@ -18,14 +18,14 @@
     "summary": "Agents · 2 updates since yesterday at 18:20, nothing needs you",
     "items": [
       {
-        "time": "07:10",
         "name": "Researcher",
-        "text": "saved the rebuilt customer profile to memory; the Manager checked it against Supabase"
+        "text": "saved the rebuilt customer profile to memory; the Manager checked it against Supabase",
+        "at": "2026-11-16T07:10:00+01:00"
       },
       {
-        "time": "06:40",
         "name": "Researcher",
-        "text": "read 212 won deals from Supabase, read only"
+        "text": "read 212 won deals from Supabase, read only",
+        "at": "2026-11-16T06:40:00+01:00"
       }
     ]
   },
@@ -35,7 +35,7 @@
   ],
   "messages": [
     {
-      "id": "topic_research-0",
+      "id": "m1",
       "author": {
         "id": "researcher",
         "name": "Researcher",
@@ -50,13 +50,13 @@
         "engine": null,
         "record": null
       },
-      "time": "07:10",
       "text": "The customer profile is rebuilt from 212 won deals. The biggest change: fintech ops teams close fastest, so I moved them to the top.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:10:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

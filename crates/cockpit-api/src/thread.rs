@@ -1,9 +1,12 @@
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
+use crate::{DecisionId, LaneId, MessageId, ThreadId, Timestamp};
+
 use crate::actor::Actor;
 use crate::present::Present;
 
+/// Label kind for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum LabelKind {
@@ -12,106 +15,165 @@ pub enum LabelKind {
     Done,
     Decision,
     GoalChange,
+    #[serde(other)]
+    Unknown,
 }
 
+/// Message label for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageLabel {
+    /// Kind for this record.
     pub kind: LabelKind,
+    /// Corrected for this record.
     pub corrected: bool,
 }
 
+/// Thread card for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadCard {
+    /// Title displayed above the record.
     pub title: String,
+    /// Owner for this record.
     pub owner: String,
-    pub state: String,
-    pub lane_id: String,
+    /// Current state of the record.
+    pub state_word: String,
+    /// Identifier of the associated lane.
+    pub lane_id: LaneId,
 }
 
+/// Read back for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ReadBack {
+    /// Owner for this record.
     pub owner: String,
+    /// Quote for this record.
     pub quote: String,
-    pub time: String,
+    /// Time the record was created or observed.
+    pub at: Timestamp,
 }
 
+/// Message action for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct MessageAction {
+    /// Label for this record.
     pub label: String,
 }
 
+/// Message for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct Message {
-    pub id: String,
+    /// Stable identifier for this record.
+    pub id: MessageId,
+    /// Author for this record.
     pub author: Actor,
-    pub time: String,
+    /// Time the record was created or observed.
+    pub at: Timestamp,
+    /// Text shown to the reader.
     pub text: String,
-    pub own: bool,
+    /// Label for this record.
     pub label: Present<MessageLabel>,
+    /// Thread card for this record.
     pub thread_card: Present<ThreadCard>,
+    /// Read back for this record.
     pub read_back: Present<ReadBack>,
+    /// Actions for this record.
     pub actions: Vec<MessageAction>,
 }
 
+/// Since summary for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct SinceSummary {
+    /// Seen for this record.
     pub seen: String,
+    /// Lines for this record.
     pub lines: Vec<String>,
 }
 
+/// Pin state for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub enum PinState {
     Waiting,
     Approved,
     Stuck,
+    #[serde(other)]
+    Unknown,
 }
 
+/// Pinned decision for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct PinnedDecision {
+    /// Title displayed above the record.
     pub title: String,
+    /// Explanation shown alongside the summary.
     pub detail: String,
+    /// Current state of the record.
     pub state: PinState,
-    pub decision_id: Present<String>,
-    pub lane_id: Present<String>,
+    /// Identifier of the associated decision.
+    pub decision_id: Present<DecisionId>,
+    /// Identifier of the associated lane.
+    pub lane_id: Present<LaneId>,
+    /// Approve label for this record.
     pub approve_label: Present<String>,
 }
 
+/// Strip item for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct StripItem {
-    pub time: String,
+    /// Time the record was created or observed.
+    pub at: Timestamp,
+    /// Name shown to the reader.
     pub name: String,
+    /// Text shown to the reader.
     pub text: String,
 }
 
+/// Agents strip for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct AgentsStrip {
+    /// Seen for this record.
     pub seen: String,
+    /// Count for this record.
     pub count: i64,
+    /// Summary for this record.
     pub summary: String,
+    /// Items for this record.
     pub items: Vec<StripItem>,
 }
 
+/// A page of conversation and its reading context.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
+#[serde(rename_all = "camelCase")]
 pub struct ThreadView {
-    pub id: String,
+    /// Stable identifier for this record.
+    pub id: ThreadId,
+    /// Title displayed above the record.
     pub title: String,
+    /// Sub for this record.
     pub sub: Present<String>,
+    /// Placeholder for this record.
     pub placeholder: String,
+    /// Reading for this record.
     pub reading: Present<String>,
+    /// Since for this record.
     pub since: Present<SinceSummary>,
+    /// Pinned for this record.
     pub pinned: Present<PinnedDecision>,
+    /// Agents for this record.
     pub agents: Present<AgentsStrip>,
+    /// Suggestions for this record.
     pub suggestions: Vec<String>,
+    /// Messages for this record.
     pub messages: Vec<Message>,
+    /// Opaque cursor for the following page, or null at the end.
+    pub next_cursor: Present<String>,
 }

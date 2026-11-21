@@ -17,26 +17,26 @@
     "summary": "Agents · 3 updates since yesterday at 18:20, nothing needs you",
     "items": [
       {
-        "time": "07:50",
         "name": "SEO writer",
-        "text": "agreed to keep the tone fair: every claim about another tool links to its own public page"
+        "text": "agreed to keep the tone fair: every claim about another tool links to its own public page",
+        "at": "2026-11-16T07:50:00+01:00"
       },
       {
-        "time": "07:42",
         "name": "SEO writer",
-        "text": "published pages 1 and 2 and asked Google to index them"
+        "text": "published pages 1 and 2 and asked Google to index them",
+        "at": "2026-11-16T07:42:00+01:00"
       },
       {
-        "time": "07:30",
         "name": "Checker",
-        "text": "passed pages 1 and 2: 34 claims, each with a public source"
+        "text": "passed pages 1 and 2: 34 claims, each with a public source",
+        "at": "2026-11-16T07:30:00+01:00"
       }
     ]
   },
   "suggestions": [],
   "messages": [
     {
-      "id": "topic_seo-0",
+      "id": "m1",
       "author": {
         "id": "seo-writer",
         "name": "SEO writer",
@@ -51,16 +51,15 @@
         "engine": null,
         "record": null
       },
-      "time": "07:42",
       "text": "Pages 1 and 2 are live. Page 3 is half written. I will show it to the checker at 15:00.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:42:00+01:00"
     },
     {
-      "id": "topic_seo-1",
+      "id": "m2",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -75,16 +74,15 @@
         "engine": null,
         "record": null
       },
-      "time": "",
       "text": "Keep the tone fair. No cheap shots at them.",
-      "own": true,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00"
     },
     {
-      "id": "topic_seo-2",
+      "id": "m3",
       "author": {
         "id": "seo-writer",
         "name": "SEO writer",
@@ -99,13 +97,13 @@
         "engine": null,
         "record": null
       },
-      "time": "07:50",
       "text": "Understood. Every claim about them links to their own public page, and the checker refuses any that does not.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:50:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

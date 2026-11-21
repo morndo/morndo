@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_outreach-wave-1-0",
+      "id": "m1",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -25,13 +25,13 @@
         "engine": null,
         "record": null
       },
-      "time": "07:00",
       "text": "Halden and Brightmoor came from this wave. 4 others asked to talk in January; I put a reminder in HubSpot.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T07:00:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

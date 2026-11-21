@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Wednesday",
-  "closed": null,
   "next": "After your decision",
   "afterNext": "Fri 20 Nov, after the first 180",
   "decisionId": "d2",
@@ -127,21 +125,23 @@
       "icon": "file",
       "title": "The 4 emails of sequence B",
       "detail": "Short, one question each, no attachments",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "List of 180 leads",
       "detail": "Fintech ops, 50 to 500 people",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "Pilot results",
       "detail": "30 sent, 6 replies, 2 meetings, 0 bounces",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-11T00:00:00+01:00",
+  "closedAt": null
 }

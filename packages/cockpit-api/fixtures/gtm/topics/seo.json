@@ -110,71 +110,86 @@
         "name": "Tidewell or Quaywright",
         "confidence": "No rank yet",
         "close": null,
-        "at": 3,
         "stage": "Live since 07:42",
         "short": "Live; waiting for Google",
         "laneId": "comparison-pages",
-        "href": "#lane/comparison-pages",
         "evidence": "Live since this morning. Its keyword has 1,300 searches a month; the top 10 today are review sites and Quaywright itself.",
         "next": null,
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 3
       },
       {
         "name": "Tidewell or Dockmere",
         "confidence": "No rank yet",
         "close": null,
-        "at": 3,
         "stage": "Live since 07:42",
         "short": "Live; waiting for Google",
         "laneId": "comparison-pages",
-        "href": "#lane/comparison-pages",
         "evidence": "Live since this morning. 880 searches a month; two of the top 10 are thin pages we can beat.",
         "next": null,
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 3
       },
       {
         "name": "Tidewell or Palletnook",
         "confidence": "Not live",
         "close": null,
-        "at": 0,
         "stage": "Half written",
         "short": "Checker reads it at 15:00",
         "laneId": "comparison-pages",
-        "href": "#lane/comparison-pages",
         "evidence": "Half written. 720 searches a month.",
         "next": null,
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 0
       },
       {
         "name": "Tidewell or Harborline",
         "confidence": "Not live",
         "close": null,
-        "at": 0,
         "stage": "Outline approved",
         "short": "Live Friday",
         "laneId": "comparison-pages",
-        "href": "#lane/comparison-pages",
         "evidence": "Outline approved by you on Friday. 590 searches a month.",
         "next": null,
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 0
       },
       {
         "name": "Tidewell or Keelson",
         "confidence": "Not live",
         "close": null,
-        "at": 0,
         "stage": "Outline approved",
         "short": "Live Friday",
         "laneId": "comparison-pages",
-        "href": "#lane/comparison-pages",
         "evidence": "Outline approved by you on Friday. 410 searches a month.",
         "next": null,
         "value": null,
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 0
       }
     ],
     "guardrails": {
@@ -291,7 +306,9 @@
   "plan": null,
   "focusLaneId": "comparison-pages",
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the topic began on 2 November.",
     "days": [
@@ -300,7 +317,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "07:50",
             "actor": {
               "id": "seo-writer",
               "name": "SEO writer",
@@ -322,11 +338,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:50:00+01:00"
           },
           {
             "kind": "event",
-            "time": "07:42",
             "actor": {
               "id": "seo-writer",
               "name": "SEO writer",
@@ -351,11 +367,11 @@
               "Tidewell or Quaywright · 1,840 words",
               "Tidewell or Dockmere · 1,610 words"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:42:00+01:00"
           },
           {
             "kind": "event",
-            "time": "07:30",
             "actor": {
               "id": "checker",
               "name": "Checker",
@@ -377,7 +393,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:30:00+01:00"
           }
         ]
       },
@@ -389,7 +406,6 @@
           },
           {
             "kind": "event",
-            "time": "16:00",
             "actor": {
               "id": "checker",
               "name": "Checker",
@@ -411,7 +427,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T16:00:00+01:00"
           }
         ]
       },
@@ -420,7 +437,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "14:30",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -442,7 +458,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T14:30:00+01:00"
           }
         ]
       },
@@ -451,7 +468,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "11:00",
             "actor": {
               "id": "checker",
               "name": "Checker",
@@ -473,11 +489,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-04T11:00:00+01:00"
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null
   },
   "crew": [
     {
@@ -573,8 +591,14 @@
     }
   ],
   "spend": {
-    "spent": 14,
-    "cap": 30
+    "spent": {
+      "amountMinor": 1400,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 3000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
   "tasks": []

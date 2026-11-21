@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "lane_webinar-0",
+      "id": "m1",
       "author": {
         "id": "visuals",
         "name": "Visuals",
@@ -25,13 +25,13 @@
         "engine": null,
         "record": null
       },
-      "time": "09:12",
       "text": "Round 3 is done. 4 images pass. I am out of rounds, so I stopped and asked.",
-      "own": false,
       "label": null,
       "threadCard": null,
       "readBack": null,
-      "actions": []
+      "actions": [],
+      "at": "2026-11-16T09:12:00+01:00"
     }
-  ]
+  ],
+  "nextCursor": null
 }

@@ -19,8 +19,6 @@
     "record": "4 of 4 budget calls held up two weeks later"
   },
   "waitsFor": null,
-  "opened": "Opened Fri 13 Nov",
-  "closed": null,
   "next": "Thu 19 Nov, when it ends",
   "afterNext": null,
   "decisionId": null,
@@ -84,9 +82,11 @@
       "icon": "file",
       "title": "2 ads",
       "detail": "The webinar title and one line from the agenda",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null
 }

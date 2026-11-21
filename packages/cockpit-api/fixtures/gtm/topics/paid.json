@@ -244,11 +244,9 @@
         "name": "Google Search",
         "confidence": "€80 a lead",
         "close": null,
-        "at": null,
         "stage": "Two campaigns, €1,600 a week",
         "short": "Cheapest; €1,200 more waits for you",
         "laneId": "search-budget",
-        "href": "#lane/search-budget",
         "evidence": "40 leads for €3,200 in the last 14 days, and €86 a lead in the 14 days before. 35% of them took a sales call.",
         "next": "your decision by 14:00.",
         "value": "40 leads",
@@ -257,17 +255,20 @@
           "stage": "Two campaigns, €2,800 a week",
           "short": "Gets €1,200 more a week from today",
           "next": null
-        }
+        },
+        "target": {
+          "kind": "lane",
+          "id": "search-budget"
+        },
+        "chartDay": null
       },
       {
         "name": "LinkedIn, always on",
         "confidence": "€200 a lead",
         "close": null,
-        "at": null,
         "stage": "€2,400 a week",
         "short": "Costly; the shift cuts it to retargeting",
         "laneId": "search-budget",
-        "href": "#lane/search-budget",
         "evidence": "24 leads for €4,800 in the last 14 days. 25% took a sales call.",
         "next": "cut to the retargeting audience, after your decision.",
         "value": "24 leads",
@@ -276,21 +277,29 @@
           "stage": "€1,200 a week",
           "short": "Cut to retargeting, €1,200 a week",
           "next": null
-        }
+        },
+        "target": {
+          "kind": "lane",
+          "id": "search-budget"
+        },
+        "chartDay": null
       },
       {
         "name": "Webinar campaign",
         "confidence": "€36 a lead",
         "close": null,
-        "at": null,
         "stage": "Its own €400, ends Thursday",
         "short": "Ends Thursday",
         "laneId": "webinar-campaign",
-        "href": "#lane/webinar-campaign",
         "evidence": "11 sign-ups counted as leads for €400 in 7 days. They are cheap because they are sign-ups, not sales leads; only 2 took a call last time.",
         "next": null,
         "value": "11 leads",
-        "alt": null
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "webinar-campaign"
+        },
+        "chartDay": null
       }
     ],
     "guardrails": {
@@ -349,8 +358,11 @@
         "what": null,
         "why": null,
         "who": "Paid buyer",
-        "href": "#lane/search-budget",
-        "laneId": "search-budget"
+        "laneId": "search-budget",
+        "target": {
+          "kind": "lane",
+          "id": "search-budget"
+        }
       },
       {
         "state": "warn",
@@ -358,8 +370,11 @@
         "what": null,
         "why": null,
         "who": "Writer",
-        "href": "#lane/search-budget",
-        "laneId": "search-budget"
+        "laneId": "search-budget",
+        "target": {
+          "kind": "lane",
+          "id": "search-budget"
+        }
       }
     ],
     "routine": null,
@@ -446,7 +461,9 @@
   "plan": null,
   "focusLaneId": "search-budget",
   "history": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "shown": 2,
     "since": "That is everything since the quarter began on 1 October.",
     "days": [
@@ -455,7 +472,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "08:30",
             "actor": {
               "id": "paid-buyer",
               "name": "Paid buyer",
@@ -481,11 +497,11 @@
               "LinkedIn · Webinar teaser · 0.44%",
               "Search · Freight software, broad · 0.52%"
             ],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:30:00+01:00"
           },
           {
             "kind": "event",
-            "time": "08:10",
             "actor": {
               "id": "analyst",
               "name": "Analyst",
@@ -507,11 +523,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T08:10:00+01:00"
           },
           {
             "kind": "event",
-            "time": "07:20",
             "actor": {
               "id": "paid-buyer",
               "name": "Paid buyer",
@@ -533,11 +549,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:20:00+01:00"
           },
           {
             "kind": "event",
-            "time": "07:05",
             "actor": {
               "id": "paid-buyer",
               "name": "Paid buyer",
@@ -559,7 +575,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-16T07:05:00+01:00"
           }
         ]
       },
@@ -568,7 +585,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "18:30",
             "actor": {
               "id": "paid-buyer",
               "name": "Paid buyer",
@@ -590,7 +606,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-15T18:30:00+01:00"
           },
           {
             "kind": "seen"
@@ -602,7 +619,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "10:15",
             "actor": {
               "id": "analyst",
               "name": "Analyst",
@@ -624,7 +640,8 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-14T10:15:00+01:00"
           }
         ]
       },
@@ -633,7 +650,6 @@
         "entries": [
           {
             "kind": "event",
-            "time": "10:20",
             "actor": {
               "id": "mara-lind",
               "name": "Mara Lind",
@@ -655,11 +671,11 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T10:20:00+01:00"
           },
           {
             "kind": "event",
-            "time": "09:00",
             "actor": {
               "id": "paid-buyer",
               "name": "Paid buyer",
@@ -681,11 +697,13 @@
             "undoable": false,
             "count": null,
             "samples": [],
-            "decisionId": null
+            "decisionId": null,
+            "at": "2026-11-13T09:00:00+01:00"
           }
         ]
       }
-    ]
+    ],
+    "nextCursor": null
   },
   "crew": [
     {
@@ -810,8 +828,14 @@
     }
   ],
   "spend": {
-    "spent": 9,
-    "cap": 30
+    "spent": {
+      "amountMinor": 900,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 3000,
+      "currency": "EUR"
+    }
   },
   "stuck": null,
   "tasks": []

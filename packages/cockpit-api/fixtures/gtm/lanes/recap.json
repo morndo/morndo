@@ -19,8 +19,6 @@
     "record": null
   },
   "waitsFor": null,
-  "opened": "Opened Friday",
-  "closed": null,
   "next": "Thu 19 Nov",
   "afterNext": null,
   "decisionId": null,
@@ -103,15 +101,17 @@
       "icon": "file",
       "title": "Summary in 8 points",
       "detail": "From the October recording",
-      "href": null
+      "target": null
     },
     {
       "icon": "file",
       "title": "Draft 1",
       "detail": "Too long at 900 words; draft 2 aims at 350",
-      "href": null
+      "target": null
     }
   ],
   "handover": null,
-  "fresh": false
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null
 }

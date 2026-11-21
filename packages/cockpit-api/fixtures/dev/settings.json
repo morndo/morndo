@@ -39,7 +39,8 @@
     "id": "ink",
     "name": "Ink",
     "strength": 55,
-    "glass": 25
+    "glass": 25,
+    "effectiveGlass": 25
   },
   "chatMode": "floating",
   "layout": {
