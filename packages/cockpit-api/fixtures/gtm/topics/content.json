@@ -27,14 +27,14 @@
       "state": "bad",
       "word": "At risk",
       "action": "Your call by 16:00",
-      "text": "Today's promo post decides which end of the range we land on."
+      "text": null
     },
     "insight": "Today's promo post decides which end of the range we land on.",
-    "asOf": "updated 09:20, forecast down 33 since yesterday · agents €36 of €40 this week",
+    "asOf": "updated 09:20, forecast down 33 since yesterday",
     "decision": {
       "title": "The promo visuals are stuck",
       "detail": "Post at 16:00 · 2 of 6 images fail the brand check",
-      "done": "",
+      "done": null,
       "why": "Details",
       "decisionId": null,
       "laneId": "webinar",
@@ -267,19 +267,22 @@
           "what": "Off-brand posts",
           "value": "0",
           "limit": "none allowed",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         },
         {
           "what": "Newsletter sends",
           "value": "2 this week",
           "limit": "limit 2",
-          "ratio": 1
+          "ratio": 1,
+          "state": "near"
         },
         {
           "what": "Claims without a source",
           "value": "0",
           "limit": "none allowed",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -386,7 +389,8 @@
         "label": "Still missing"
       }
     ],
-    "pathTitle": null
+    "pathTitle": null,
+    "forecastLog": []
   },
   "noGoal": null,
   "facts": [
@@ -443,7 +447,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T09:21:00+01:00"
+            "at": "2026-11-16T09:21:00+01:00",
+            "id": "content-history-1",
+            "undone": false
           },
           {
             "kind": "event",
@@ -469,7 +475,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T09:13:00+01:00"
+            "at": "2026-11-16T09:13:00+01:00",
+            "id": "content-history-2",
+            "undone": false
           },
           {
             "kind": "event",
@@ -495,7 +503,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T09:12:00+01:00"
+            "at": "2026-11-16T09:12:00+01:00",
+            "id": "content-history-3",
+            "undone": false
           },
           {
             "kind": "event",
@@ -521,7 +531,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:00:00+01:00"
+            "at": "2026-11-16T08:00:00+01:00",
+            "id": "content-history-4",
+            "undone": false
           },
           {
             "kind": "event",
@@ -547,7 +559,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:30:00+01:00"
+            "at": "2026-11-16T07:30:00+01:00",
+            "id": "content-history-5",
+            "undone": false
           }
         ]
       },
@@ -578,7 +592,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T17:00:00+01:00"
+            "at": "2026-11-15T17:00:00+01:00",
+            "id": "content-history-6",
+            "undone": false
           },
           {
             "kind": "seen"
@@ -607,7 +623,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T11:40:00+01:00"
+            "at": "2026-11-15T11:40:00+01:00",
+            "id": "content-history-7",
+            "undone": false
           }
         ]
       },
@@ -638,7 +656,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T16:41:00+01:00"
+            "at": "2026-11-13T16:41:00+01:00",
+            "id": "content-history-8",
+            "undone": false
           },
           {
             "kind": "event",
@@ -664,7 +684,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T16:20:00+01:00"
+            "at": "2026-11-13T16:20:00+01:00",
+            "id": "content-history-9",
+            "undone": false
           },
           {
             "kind": "event",
@@ -690,7 +712,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T11:05:00+01:00"
+            "at": "2026-11-13T11:05:00+01:00",
+            "id": "content-history-10",
+            "undone": false
           },
           {
             "kind": "event",
@@ -716,7 +740,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T10:00:00+01:00"
+            "at": "2026-11-13T10:00:00+01:00",
+            "id": "content-history-11",
+            "undone": false
           }
         ]
       },
@@ -747,7 +773,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-12T17:40:00+01:00"
+            "at": "2026-11-12T17:40:00+01:00",
+            "id": "content-history-12",
+            "undone": false
           },
           {
             "kind": "event",
@@ -773,7 +801,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-12T08:00:00+01:00"
+            "at": "2026-11-12T08:00:00+01:00",
+            "id": "content-history-13",
+            "undone": false
           }
         ]
       }
@@ -928,5 +958,11 @@
     }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": []
 }

@@ -27,10 +27,10 @@
       "state": "idle",
       "word": "Too early to tell",
       "action": "Nothing needed today",
-      "text": "Pages 1 and 2 went live this morning. Rankings settle in 2 to 4 weeks; the first reading is on 30 November."
+      "text": null
     },
     "insight": "Pages 1 and 2 went live this morning. Rankings settle in 2 to 4 weeks; the first reading is on 30 November.",
-    "asOf": "updated 07:42 · agents €14 of €30 this week",
+    "asOf": "updated 07:42",
     "decision": null,
     "calm": "Nothing needs you",
     "calmSub": "The first ranking check is Mon 30 Nov. You hear about it in that morning's brief.",
@@ -199,19 +199,22 @@
           "what": "Claims without a public source",
           "value": "0",
           "limit": "none allowed",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         },
         {
           "what": "Pages live without your outline",
           "value": "0",
           "limit": "none allowed",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         },
         {
           "what": "Bought links",
           "value": "0",
           "limit": "never",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -282,7 +285,8 @@
         "label": "Still to rank"
       }
     ],
-    "pathTitle": null
+    "pathTitle": null,
+    "forecastLog": []
   },
   "noGoal": null,
   "facts": [
@@ -339,7 +343,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:50:00+01:00"
+            "at": "2026-11-16T07:50:00+01:00",
+            "id": "seo-history-1",
+            "undone": false
           },
           {
             "kind": "event",
@@ -368,7 +374,9 @@
               "Tidewell or Dockmere · 1,610 words"
             ],
             "decisionId": null,
-            "at": "2026-11-16T07:42:00+01:00"
+            "at": "2026-11-16T07:42:00+01:00",
+            "id": "seo-history-2",
+            "undone": false
           },
           {
             "kind": "event",
@@ -394,7 +402,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:30:00+01:00"
+            "at": "2026-11-16T07:30:00+01:00",
+            "id": "seo-history-3",
+            "undone": false
           }
         ]
       },
@@ -428,7 +438,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T16:00:00+01:00"
+            "at": "2026-11-15T16:00:00+01:00",
+            "id": "seo-history-4",
+            "undone": false
           }
         ]
       },
@@ -459,7 +471,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T14:30:00+01:00"
+            "at": "2026-11-13T14:30:00+01:00",
+            "id": "seo-history-5",
+            "undone": false
           }
         ]
       },
@@ -490,7 +504,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-04T11:00:00+01:00"
+            "at": "2026-11-04T11:00:00+01:00",
+            "id": "seo-history-6",
+            "undone": false
           }
         ]
       }
@@ -601,5 +617,11 @@
     }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": []
 }

@@ -106,23 +106,36 @@
       "icon": "file",
       "title": "Page 1: Tidewell or Quaywright",
       "detail": "Live since 07:42",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "comparison-pages"
+      }
     },
     {
       "icon": "file",
       "title": "Page 2: Tidewell or Dockmere",
       "detail": "Live since 07:42",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "comparison-pages"
+      }
     },
     {
       "icon": "file",
       "title": "Outlines for all 5",
       "detail": "Approved Friday",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "comparison-pages"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-02T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

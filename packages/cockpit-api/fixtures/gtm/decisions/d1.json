@@ -22,23 +22,42 @@
   "numbers": [
     {
       "label": "Cost per lead, LinkedIn",
-      "value": "€200",
-      "sub": "24 leads for €4,800"
+      "value": "",
+      "sub": "24 leads for €4,800",
+      "money": {
+        "amountMinor": 20000,
+        "currency": "EUR"
+      }
     },
     {
       "label": "Cost per lead, Search",
-      "value": "€80",
-      "sub": "40 leads for €3,200"
+      "value": "",
+      "sub": "40 leads for €3,200",
+      "money": {
+        "amountMinor": 8000,
+        "currency": "EUR"
+      }
     },
     {
       "label": "Leads that take a call",
       "value": "25% · 35%",
-      "sub": "LinkedIn · Search"
+      "sub": "LinkedIn · Search",
+      "money": null
     },
     {
       "label": "Sales calls a week",
       "value": "10",
-      "sub": "20 in the last 14 days"
+      "sub": "20 in the last 14 days",
+      "money": null
+    },
+    {
+      "label": "Weekly shift",
+      "value": "",
+      "sub": null,
+      "money": {
+        "amountMinor": 120000,
+        "currency": "EUR"
+      }
     }
   ],
   "proof": null,
@@ -47,14 +66,119 @@
     "label": "Opportunity · the dream output",
     "headline": "14 sales calls a week by week 4",
     "condition": "If a Search lead keeps costing €80.",
-    "summary": "With the shift, sales calls a week rise from 10 now to 14 in week 4. With no change they stay at 10."
+    "summary": "With the shift, sales calls a week rise from 10 now to 14 in week 4. With no change they stay at 10.",
+    "series": [
+      {
+        "x": "Now",
+        "y": 10
+      },
+      {
+        "x": "Wk 1",
+        "y": 11.5
+      },
+      {
+        "x": "Wk 2",
+        "y": 13
+      },
+      {
+        "x": "Wk 3",
+        "y": 13.5
+      },
+      {
+        "x": "Wk 4",
+        "y": 14
+      }
+    ],
+    "baseline": [
+      {
+        "x": "Now",
+        "y": 10
+      },
+      {
+        "x": "Wk 1",
+        "y": 10
+      },
+      {
+        "x": "Wk 2",
+        "y": 10
+      },
+      {
+        "x": "Wk 3",
+        "y": 10
+      },
+      {
+        "x": "Wk 4",
+        "y": 10
+      }
+    ],
+    "axis": [
+      6,
+      10,
+      14
+    ],
+    "unit": "sales calls a week",
+    "marker": null
   },
   "risk": {
     "kind": "risk",
     "label": "Risk · the worst case",
     "headline": "9 calls a week for two weeks",
     "condition": "If a Search lead rises to €130. Then the shift is undone.",
-    "summary": "In the worst case sales calls a week drop from 10 to 9 in weeks 1 and 2, then return to 10 in week 3 when the shift is undone."
+    "summary": "In the worst case sales calls a week drop from 10 to 9 in weeks 1 and 2, then return to 10 in week 3 when the shift is undone.",
+    "series": [
+      {
+        "x": "Now",
+        "y": 10
+      },
+      {
+        "x": "Wk 1",
+        "y": 9
+      },
+      {
+        "x": "Wk 2",
+        "y": 9
+      },
+      {
+        "x": "Wk 3",
+        "y": 10
+      },
+      {
+        "x": "Wk 4",
+        "y": 10
+      }
+    ],
+    "baseline": [
+      {
+        "x": "Now",
+        "y": 10
+      },
+      {
+        "x": "Wk 1",
+        "y": 10
+      },
+      {
+        "x": "Wk 2",
+        "y": 10
+      },
+      {
+        "x": "Wk 3",
+        "y": 10
+      },
+      {
+        "x": "Wk 4",
+        "y": 10
+      }
+    ],
+    "axis": [
+      6,
+      10,
+      14
+    ],
+    "unit": "sales calls a week",
+    "marker": {
+      "x": "Wk 3",
+      "label": "shift undone"
+    }
   },
   "suggestion": "Approve the shift for 3 weeks. Search gets €2,800 a week and LinkedIn keeps €1,200 for people who already know you.",
   "guardrail": "Guardrail: if a Search lead costs more than €110 for 5 days in a row, the Paid agent moves the money back and tells you. The most this can cost is about 2 sales calls.",
@@ -62,30 +186,58 @@
     {
       "step": "Move €1,200 a week to the two Search campaigns",
       "who": "Paid agent",
-      "dueAt": "2026-11-16T17:00:00+01:00"
+      "dueAt": null,
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     },
     {
       "step": "Cut LinkedIn down to the retargeting audience",
       "who": "Paid agent",
-      "dueAt": "2026-11-16T17:00:00+01:00"
+      "dueAt": "2026-11-16T17:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     },
     {
       "step": "Write 3 new Search ads for the extra budget",
       "who": "Content agent",
-      "dueAt": "2026-11-17T17:00:00+01:00"
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     },
     {
       "step": "Check with sales that the new leads are good",
       "who": "Jonas, sales",
-      "dueAt": "2026-11-20T17:00:00+01:00"
+      "dueAt": "2026-11-20T17:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     },
     {
       "step": "Report the result against the dream output",
       "who": "Manager",
-      "dueAt": "2026-12-07T17:00:00+01:00"
+      "dueAt": "2026-12-07T17:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing changes.",
-  "position": "1 of 4 · 4 open",
-  "dueAt": "2026-11-16T14:00:00+01:00"
+  "position": {
+    "index": 1,
+    "of": 4,
+    "open": 4
+  },
+  "dueAt": "2026-11-16T14:00:00+01:00",
+  "shortTitle": "Move budget to Search",
+  "goalChange": null,
+  "release": null,
+  "changeRequest": null
 }

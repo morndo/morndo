@@ -13,7 +13,7 @@
   ],
   "messages": [
     {
-      "id": "m1",
+      "id": "m9",
       "author": {
         "id": "timo-varga",
         "name": "Timo Varga",
@@ -33,10 +33,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m10",
       "author": {
         "id": "manager",
         "name": "Manager",
@@ -56,8 +60,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

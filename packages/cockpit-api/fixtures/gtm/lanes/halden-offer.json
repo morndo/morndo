@@ -45,12 +45,7 @@
     "headline": "It waits for you.",
     "detail": "Halden wants a deal for its 2,400 business customers. Jonas drafted it from the template: 15% of first-year revenue for 12 months and a joint webinar in January. Due Thursday."
   },
-  "acts": [
-    {
-      "label": "Send the offer",
-      "tone": "ink"
-    }
-  ],
+  "acts": [],
   "thumbs": [],
   "steps": [
     {
@@ -134,13 +129,19 @@
       "icon": "file",
       "title": "The offer",
       "detail": "2 pages, from the partner template",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "halden-offer"
+      }
     },
     {
       "icon": "file",
       "title": "Halden call notes",
       "detail": "13 November, 34 minutes",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "halden-offer"
+      }
     },
     {
       "icon": "mail",
@@ -155,5 +156,9 @@
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-13T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

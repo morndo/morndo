@@ -44,6 +44,8 @@ pub struct ModuleInfo {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceView {
+    /// Modules available in the workspace.
+    pub modules: Vec<crate::ModuleCard>,
     /// Version of the contract served by the hub.
     pub contract_version: String,
     /// IANA time zone used by the workspace.

@@ -96,11 +96,18 @@
       "icon": "file",
       "title": "Sign-ups by source",
       "detail": "Newsletter 118, LinkedIn 61, partners 33",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "webinar-reminders"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-12T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

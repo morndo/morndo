@@ -87,17 +87,27 @@
       "icon": "file",
       "title": "Tool comparison",
       "detail": "Clay, Apollo, HubSpot against 3 other setups",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-stack"
+      }
     },
     {
       "icon": "file",
       "title": "Setup notes",
       "detail": "Which agent may do what, in which tool",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-stack"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-10-23T00:00:00+02:00",
-  "closedAt": "2026-10-30T00:00:00+01:00"
+  "closedAt": "2026-10-30T00:00:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

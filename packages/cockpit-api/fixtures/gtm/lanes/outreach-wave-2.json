@@ -57,7 +57,10 @@
   "acts": [
     {
       "label": "Remind Lea",
-      "tone": "quiet"
+      "tone": "quiet",
+      "id": "remind-lea",
+      "personId": "lea-brandt",
+      "target": null
     }
   ],
   "thumbs": [],
@@ -124,7 +127,10 @@
       "icon": "file",
       "title": "24 drafted emails",
       "detail": "Retail brands, from your mail",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-2"
+      }
     }
   ],
   "handover": {
@@ -136,9 +142,14 @@
     "restated": "“24 drafts are ready; send 20 a day from 09:00.”",
     "fixed": "Lea's check was missing. The Manager compared the read-back with the lane's records, put the check back as the next step and held sending. Nothing went out.",
     "at": "2026-11-16T05:05:00+01:00",
-    "summary": "24 emails drafted for retail brands; none sent."
+    "summary": "24 emails drafted for retail brands; none sent.",
+    "confirmedAt": null
   },
   "fresh": false,
   "openedAt": "2026-11-16T02:10:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

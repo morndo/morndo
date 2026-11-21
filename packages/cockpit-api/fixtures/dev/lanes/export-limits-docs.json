@@ -71,5 +71,9 @@
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-16T06:55:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

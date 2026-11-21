@@ -8,7 +8,8 @@
       "target": {
         "kind": "decision",
         "id": "d1"
-      }
+      },
+      "goalChange": null
     },
     {
       "id": "d2",
@@ -16,9 +17,10 @@
       "state": "open",
       "topicName": "Outbound",
       "target": {
-        "kind": "lane",
-        "id": "sequence-b"
-      }
+        "kind": "decision",
+        "id": "d2"
+      },
+      "goalChange": null
     },
     {
       "id": "d3",
@@ -26,9 +28,10 @@
       "state": "open",
       "topicName": "Content",
       "target": {
-        "kind": "lane",
-        "id": "fenwick"
-      }
+        "kind": "decision",
+        "id": "d3"
+      },
+      "goalChange": null
     },
     {
       "id": "d4",
@@ -36,9 +39,10 @@
       "state": "open",
       "topicName": "Partnerships",
       "target": {
-        "kind": "lane",
-        "id": "halden-offer"
-      }
+        "kind": "decision",
+        "id": "d4"
+      },
+      "goalChange": null
     }
   ],
   "open": 4,

@@ -8,7 +8,8 @@
       "target": {
         "kind": "decision",
         "id": "d1"
-      }
+      },
+      "goalChange": null
     },
     {
       "id": "d2",
@@ -16,9 +17,10 @@
       "state": "open",
       "topicName": "Billing",
       "target": {
-        "kind": "lane",
-        "id": "tax-rates"
-      }
+        "kind": "decision",
+        "id": "d2"
+      },
+      "goalChange": null
     },
     {
       "id": "d3",
@@ -26,9 +28,10 @@
       "state": "open",
       "topicName": "Web app",
       "target": {
-        "kind": "lane",
-        "id": "new-sign-in"
-      }
+        "kind": "decision",
+        "id": "d3"
+      },
+      "goalChange": null
     }
   ],
   "open": 3,

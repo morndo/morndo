@@ -21,8 +21,9 @@
         "kind": "all",
         "stages": []
       },
-      "scope": "Owner",
-      "otherTopics": []
+      "scope": "owner",
+      "otherTopics": [],
+      "owner": true
     },
     {
       "person": {
@@ -43,13 +44,14 @@
         "kind": "none",
         "stages": []
       },
-      "scope": "No access",
+      "scope": "no access",
       "otherTopics": [
         {
           "topicId": "content",
           "access": "view"
         }
-      ]
+      ],
+      "owner": false
     },
     {
       "person": {
@@ -70,8 +72,9 @@
         "kind": "none",
         "stages": []
       },
-      "scope": "No access",
-      "otherTopics": []
+      "scope": "no access",
+      "otherTopics": [],
+      "owner": false
     },
     {
       "person": {
@@ -92,7 +95,7 @@
         "kind": "none",
         "stages": []
       },
-      "scope": "No access",
+      "scope": "no access",
       "otherTopics": [
         {
           "topicId": "content",
@@ -106,7 +109,10 @@
           "topicId": "paid",
           "access": "view"
         }
-      ]
+      ],
+      "owner": false
     }
-  ]
+  ],
+  "invitations": [],
+  "statusLink": null
 }

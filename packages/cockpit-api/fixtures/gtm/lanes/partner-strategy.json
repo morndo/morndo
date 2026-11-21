@@ -101,23 +101,36 @@
       "icon": "file",
       "title": "Partner profile",
       "detail": "Freight networks, business banks, ERP vendors first",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-strategy"
+      }
     },
     {
       "icon": "file",
       "title": "Partner offer, one page",
       "detail": "15% of first-year revenue, joint webinar, integration",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-strategy"
+      }
     },
     {
       "icon": "file",
       "title": "Market map",
       "detail": "40 kinds of partner, ranked by reach and fit",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "partner-strategy"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-10-19T00:00:00+02:00",
-  "closedAt": "2026-10-23T00:00:00+02:00"
+  "closedAt": "2026-10-23T00:00:00+02:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

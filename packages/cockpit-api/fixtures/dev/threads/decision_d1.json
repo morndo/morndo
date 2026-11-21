@@ -1,6 +1,6 @@
 {
   "id": "decision:d1",
-  "title": "Release the fix for exports that time out",
+  "title": "Chat",
   "sub": null,
   "placeholder": "Ask about this decision",
   "reading": "Reading this decision and its proof",
@@ -33,7 +33,11 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": "d1",
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
       "id": "m2",
@@ -56,8 +60,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": "d1",
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

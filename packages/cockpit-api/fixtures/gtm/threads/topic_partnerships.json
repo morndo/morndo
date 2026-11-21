@@ -1,11 +1,13 @@
 {
   "id": "topic:partnerships",
-  "title": "Partnerships",
+  "title": "Partnerships chat",
   "sub": "Mara, Lea, Jonas and 6 agents · the Manager reads it, it is not in it",
   "placeholder": "Message Partnerships · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
       "32 brands and 58 contacts came in overnight; 9 brands fit.",
       "Lea asks whether wave 2 goes to retail or finance first.",
@@ -21,7 +23,9 @@
     "approveLabel": "Send the offer"
   },
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 11,
     "summary": "Agents · 11 updates since yesterday at 18:20, nothing needs you",
     "items": [
@@ -85,7 +89,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m47",
       "author": {
         "id": "lea-brandt",
         "name": "Lea Brandt",
@@ -103,15 +107,20 @@
       "text": "Wave 2: retail first or finance first? I check the 24 drafts by 11 either way.",
       "label": {
         "kind": "question",
-        "corrected": false
+        "corrected": false,
+        "pinned": false
       },
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:12:00+01:00"
+      "at": "2026-11-16T08:12:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m48",
       "author": {
         "id": "jonas-falk",
         "name": "Jonas Falk",
@@ -129,15 +138,25 @@
       "text": "The Halden offer is drafted from the template. Mara, it needs your OK.",
       "label": {
         "kind": "decision",
-        "corrected": false
+        "corrected": false,
+        "pinned": true
       },
-      "threadCard": null,
+      "threadCard": {
+        "title": "Outreach, wave 2: retail",
+        "owner": "Sender",
+        "stateWord": "waits for Lea's check",
+        "laneId": "outreach-wave-2"
+      },
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:30:00+01:00"
+      "at": "2026-11-16T08:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m49",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -155,7 +174,8 @@
       "text": "Retail first. Send wave 2 to the retail brands first.",
       "label": {
         "kind": "request",
-        "corrected": false
+        "corrected": false,
+        "pinned": false
       },
       "threadCard": null,
       "readBack": {
@@ -164,10 +184,14 @@
         "at": "2026-11-16T08:31:00+01:00"
       },
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m4",
+      "id": "m50",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -185,15 +209,20 @@
       "text": "Call prep, what do I need to know for Brightmoor at 15:00?",
       "label": {
         "kind": "question",
-        "corrected": false
+        "corrected": false,
+        "pinned": false
       },
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m5",
+      "id": "m51",
       "author": {
         "id": "call-prep",
         "name": "Call prep",
@@ -213,8 +242,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:41:00+01:00"
+      "at": "2026-11-16T08:41:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

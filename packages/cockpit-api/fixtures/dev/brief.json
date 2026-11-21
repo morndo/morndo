@@ -2,20 +2,7 @@
   "title": "The Monday Brief",
   "lede": "Three decisions need you and main is red in the web app. Everything else was built, reviewed and shipped while you slept.",
   "cadence": "Next brief at 13:00. Until then you hear only about what cannot wait.",
-  "spend": {
-    "overnight": {
-      "amountMinor": 0,
-      "currency": "EUR"
-    },
-    "week": {
-      "amountMinor": 0,
-      "currency": "EUR"
-    },
-    "cap": {
-      "amountMinor": 0,
-      "currency": "EUR"
-    }
-  },
+  "spend": null,
   "topics": [
     {
       "id": "web",
@@ -123,10 +110,13 @@
       "title": "Main is red in the web app",
       "detail": "The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit.",
       "target": {
-        "kind": "topic",
-        "id": "web"
+        "kind": "lane",
+        "id": "red-main"
       },
-      "stuckAt": "2026-11-16T06:40:00+01:00"
+      "stuckAt": "2026-11-16T06:40:00+01:00",
+      "laneId": "red-main",
+      "blocks": "Blocks 2 merges",
+      "dueAt": null
     }
   ],
   "overnight": [
@@ -138,7 +128,8 @@
       "text": "API released the rate-limit fix after its review. The check on production passed.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T23:12:00+01:00"
+      "at": "2026-11-16T23:12:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o2",
@@ -148,7 +139,8 @@
       "text": "Billing merged the invoice rounding fix after 2 review rounds.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T01:40:00+01:00"
+      "at": "2026-11-16T01:40:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o3",
@@ -158,7 +150,8 @@
       "text": "Web app updated 6 dependencies and held 1 back because its tests failed.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T03:05:00+01:00"
+      "at": "2026-11-16T03:05:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o4",
@@ -168,7 +161,8 @@
       "text": "Infra renewed the staging certificate, 12 days before it ran out.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T04:30:00+01:00"
+      "at": "2026-11-16T04:30:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o5",
@@ -178,13 +172,14 @@
       "text": "Mobile deleted 4 branches that were already merged.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T05:15:00+01:00"
+      "at": "2026-11-16T05:15:00+01:00",
+      "undoUntilAt": null
     }
   ],
   "drafts": {
     "count": 0,
-    "text": "5 pull requests are open",
-    "detail": "2 are ready and wait for you, 2 are in review, and 1 merges by itself at 09:00 because it only changes docs."
+    "text": "",
+    "detail": ""
   },
   "artwork": {
     "index": 13,
@@ -192,8 +187,23 @@
     "title": "The Muses at sunrise",
     "manner": "early Renaissance frescoes",
     "alt": "The Muses rest on a hillside at sunrise, their lyres laid in the grass and a finished scroll tied with a ribbon.",
-    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes"
+    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes",
+    "src": "/api/cockpit/brief/artwork/13/image",
+    "glass": "/api/cockpit/brief/artwork/13/glass",
+    "position": "center"
   },
   "at": "2026-11-16T07:15:00+01:00",
-  "nextBriefAt": "2026-11-16T13:00:00+01:00"
+  "nextBriefAt": "2026-11-16T13:00:00+01:00",
+  "inWorks": {
+    "count": 5,
+    "ready": 2,
+    "inReview": 2,
+    "autoMergeAt": "2026-11-16T09:00:00+01:00",
+    "target": {
+      "kind": "pull",
+      "id": null
+    }
+  },
+  "overnightSinceAt": "2026-11-15T18:00:00+01:00",
+  "burnsSub": "One thing stops the rest."
 }

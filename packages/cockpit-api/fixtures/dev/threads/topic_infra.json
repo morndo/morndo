@@ -1,6 +1,6 @@
 {
   "id": "topic:infra",
-  "title": "Infra",
+  "title": "Infra chat",
   "sub": "You and the Manager.",
   "placeholder": "Message Infra",
   "reading": null,
@@ -9,5 +9,6 @@
   "agents": null,
   "suggestions": [],
   "messages": [],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

@@ -5,7 +5,9 @@
   "placeholder": "Tell the Manager",
   "reading": null,
   "since": {
-    "seen": "from the topics' records",
+    "seen": {
+      "at": null
+    },
     "lines": [
       "Partnerships: 1 instruction (wave 2 to retail first), 1 question answered in the topic.",
       "Content: the promo is stuck; you decide in the topic.",
@@ -20,7 +22,7 @@
   ],
   "messages": [
     {
-      "id": "m1",
+      "id": "m34",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -40,10 +42,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m35",
       "author": {
         "id": "manager",
         "name": "Manager",
@@ -63,8 +69,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

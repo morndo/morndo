@@ -21,8 +21,11 @@
         "kind": "all",
         "stages": []
       },
-      "scope": "Owner",
-      "otherTopics": []
+      "scope": "owner",
+      "otherTopics": [],
+      "owner": true
     }
-  ]
+  ],
+  "invitations": [],
+  "statusLink": null
 }

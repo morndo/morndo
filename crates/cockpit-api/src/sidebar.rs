@@ -32,6 +32,8 @@ pub enum PinKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarLane {
+    /// Fresh for this record.
+    pub fresh: bool,
     /// Stable identifier for this record.
     pub id: LaneId,
     /// Title displayed above the record.
@@ -96,6 +98,8 @@ pub struct Pin {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SidebarView {
+    /// Pin limit for this record.
+    pub pin_limit: i64,
     /// Kind word for this record.
     pub kind_word: String,
     /// Groups for this record.

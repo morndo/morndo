@@ -44,15 +44,27 @@
   "acts": [
     {
       "label": "Pin the old session library",
-      "tone": "ink"
+      "tone": "ink",
+      "id": "pin-the-old-session-library",
+      "personId": null,
+      "target": null
     },
     {
       "label": "Allow one more try",
-      "tone": "quiet"
+      "tone": "quiet",
+      "id": "allow-one-more-try",
+      "personId": null,
+      "target": null
     },
     {
       "label": "Open the run",
-      "tone": "quiet"
+      "tone": "quiet",
+      "id": "open-the-run",
+      "personId": null,
+      "target": {
+        "kind": "thread",
+        "id": "lane:red-main"
+      }
     }
   ],
   "thumbs": [],
@@ -89,5 +101,9 @@
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-16T06:55:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

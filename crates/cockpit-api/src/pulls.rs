@@ -34,6 +34,16 @@ pub struct Gate {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct PullRequest {
+    /// Current state of the record.
+    pub state: PullState,
+    /// Identifier of the associated decision.
+    pub decision_id: Present<crate::DecisionId>,
+    /// Identifier of the associated lane.
+    pub lane_id: Present<crate::LaneId>,
+    /// Time associated with auto merge.
+    pub auto_merge_at: Present<Timestamp>,
+    /// Held for this record.
+    pub held: bool,
     /// Stable identifier for this record.
     pub id: PullId,
     /// Identifier of the associated project.
@@ -70,4 +80,19 @@ pub struct PullsView {
     pub summary: Present<String>,
     /// Items for this record.
     pub items: Vec<PullRequest>,
+}
+
+/// Position of a pull request in the review and release flow.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum PullState {
+    Ready,
+    Blocked,
+    InReview,
+    AutoMerge,
+    Releasing,
+    Released,
+    Held,
+    #[serde(other)]
+    Unknown,
 }

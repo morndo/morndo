@@ -15,42 +15,48 @@
           "title": "Outreach, wave 2: retail",
           "state": "warn",
           "stateWord": "Waits for Lea",
-          "leadName": "Sender"
+          "leadName": "Sender",
+          "fresh": false
         },
         {
           "id": "halden-offer",
           "title": "Offer for Halden Freight Network",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Jonas"
+          "leadName": "Jonas",
+          "fresh": false
         },
         {
           "id": "brand-list",
           "title": "200 brands that fit",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Brand scout"
+          "leadName": "Brand scout",
+          "fresh": false
         },
         {
           "id": "contact-data",
           "title": "Who decides at each brand",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Contact finder"
+          "leadName": "Contact finder",
+          "fresh": false
         },
         {
           "id": "outreach-wave-1",
           "title": "Outreach, wave 1",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Sender"
+          "leadName": "Sender",
+          "fresh": false
         },
         {
           "id": "partner-calls",
           "title": "Partnership calls",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "You"
+          "leadName": "You",
+          "fresh": false
         }
       ]
     },
@@ -68,28 +74,32 @@
           "title": "Webinar on Thursday",
           "state": "bad",
           "stateWord": "Stuck",
-          "leadName": "Visuals"
+          "leadName": "Visuals",
+          "fresh": false
         },
         {
           "id": "fenwick",
           "title": "Fenwick customer story",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Writer"
+          "leadName": "Writer",
+          "fresh": false
         },
         {
           "id": "recap",
           "title": "Webinar recap post",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Writer"
+          "leadName": "Writer",
+          "fresh": false
         },
         {
           "id": "webinar-reminders",
           "title": "Webinar invites and reminder",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Publisher"
+          "leadName": "Publisher",
+          "fresh": false
         }
       ]
     },
@@ -107,21 +117,24 @@
           "title": "Sequence B, fintech ops",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Sender"
+          "leadName": "Sender",
+          "fresh": false
         },
         {
           "id": "reply-handling",
           "title": "Meetings from replies",
           "state": "warn",
           "stateWord": "Waits for Jonas",
-          "leadName": "Replies"
+          "leadName": "Replies",
+          "fresh": false
         },
         {
           "id": "logistics-round-2",
           "title": "Logistics ops, round 2",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Prospector"
+          "leadName": "Prospector",
+          "fresh": false
         }
       ]
     },
@@ -139,14 +152,16 @@
           "title": "Search budget shift",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Paid buyer"
+          "leadName": "Paid buyer",
+          "fresh": false
         },
         {
           "id": "webinar-campaign",
           "title": "Webinar sign-up campaign",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Paid buyer"
+          "leadName": "Paid buyer",
+          "fresh": false
         }
       ]
     },
@@ -164,7 +179,8 @@
           "title": "Comparison pages",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "SEO writer"
+          "leadName": "SEO writer",
+          "fresh": false
         }
       ]
     },
@@ -465,5 +481,6 @@
       "pinned": false,
       "target": null
     }
-  ]
+  ],
+  "pinLimit": 12
 }

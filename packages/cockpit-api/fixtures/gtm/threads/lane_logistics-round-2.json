@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m15",
       "author": {
         "id": "prospector",
         "name": "Prospector",
@@ -30,8 +30,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-15T19:30:00+01:00"
+      "at": "2026-11-15T19:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

@@ -9,6 +9,7 @@ use crate::input::{self, Known};
 use crate::present::Present;
 use crate::settings::{ChatMode, DailyLimit, Decider, DecisionRule, LayoutPatch, ThemePatch};
 use crate::thread::{LabelKind, Message};
+use crate::{ConnectionId, InvitationId, ModelId, ModuleId, PullId, Target};
 
 /// A file or link dropped onto a topic, or attached to a filed lane.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
@@ -75,6 +76,12 @@ pub enum Command {
     },
     #[serde(rename = "lane.file")]
     LaneFile {
+        /// To manager for this record.
+        #[serde(default)]
+        to_manager: bool,
+        /// Model for this record.
+        #[serde(default)]
+        model: Option<ModelId>,
         /// Text shown to the reader.
         #[schemars(length(min = 1, max = 4000))]
         #[serde(deserialize_with = "input::text")]
@@ -122,6 +129,15 @@ pub enum Command {
     },
     #[serde(rename = "message.send")]
     MessageSend {
+        /// Attachment for this record.
+        #[serde(default)]
+        attachment: Option<AttachmentInput>,
+        /// Page for this record.
+        #[serde(default)]
+        page: Option<TargetInput>,
+        /// Model for this record.
+        #[serde(default)]
+        model: Option<ModelId>,
         /// Identifier of the associated thread.
         thread_id: ThreadId,
         /// Text shown to the reader.
@@ -155,6 +171,9 @@ pub enum Command {
     },
     #[serde(rename = "prefs.set")]
     PrefsSet {
+        /// Identifier of the associated device.
+        #[serde(default)]
+        device_id: Option<String>,
         /// Theme for this record.
         #[serde(default)]
         theme: Option<ThemePatch>,
@@ -185,6 +204,9 @@ pub enum Command {
     },
     #[serde(rename = "skill.run")]
     SkillRun {
+        /// Model for this record.
+        #[serde(default)]
+        model: Option<ModelId>,
         /// Skill for this record.
         skill: SkillId,
         /// Text shown to the reader.
@@ -210,12 +232,83 @@ pub enum Command {
         #[serde(deserialize_with = "input::name")]
         name_or_email: String,
     },
+    #[serde(rename = "pin.move")]
+    PinMove {
+        /// Identifier of the associated pin.
+        pin_id: PinId,
+        /// To for this record.
+        to: u8,
+    },
+    #[serde(rename = "topic.seen")]
+    TopicSeen {
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+    },
+    #[serde(rename = "stage.assign")]
+    StageAssign {
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+        /// Stage for this record.
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::name")]
+        stage: String,
+        /// Identifier of the associated person.
+        person_id: PersonId,
+    },
+    #[serde(rename = "access.revoke")]
+    AccessRevoke {
+        /// Identifier of the associated invitation.
+        invitation_id: InvitationId,
+    },
+    #[serde(rename = "access.statusLink")]
+    AccessStatusLink {
+        /// Identifier of the associated topic.
+        topic_id: TopicId,
+    },
+    #[serde(rename = "skill.create")]
+    SkillCreate {
+        /// Description for this record.
+        #[schemars(length(min = 1, max = 4000))]
+        #[serde(deserialize_with = "input::text")]
+        description: String,
+    },
+    #[serde(rename = "guardrail.set")]
+    GuardrailSet {
+        /// Name shown to the reader.
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::name")]
+        name: String,
+        /// On for this record.
+        on: bool,
+    },
+    #[serde(rename = "pull.hold")]
+    PullHold {
+        /// Identifier of the associated pull.
+        pull_id: PullId,
+    },
+    #[serde(rename = "connection.connect")]
+    ConnectionConnect {
+        /// Identifier of the associated connection.
+        connection_id: ConnectionId,
+    },
+    #[serde(rename = "module.switch")]
+    ModuleSwitch {
+        /// Identifier of the associated module.
+        module_id: Known<ModuleId>,
+    },
+    #[serde(rename = "handover.confirm")]
+    HandoverConfirm {
+        /// Identifier of the associated lane.
+        lane_id: LaneId,
+    },
 }
 
 /// Receipt and sequenced updates produced by an accepted command.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct CommandResult {
+    /// Receipt for this record.
+    pub receipt: Present<Receipt>,
     /// Ok for this record.
     pub ok: bool,
     /// Events for this record.
@@ -224,4 +317,30 @@ pub struct CommandResult {
     pub lane_id: Present<LaneId>,
     /// Message for this record.
     pub message: Present<Message>,
+}
+
+/// Context supplied by a composer when sending a message.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TargetInput {
+    /// Kind for this record.
+    pub kind: Known<crate::TargetKind>,
+    /// Stable identifier for this record.
+    pub id: Present<String>,
+}
+
+/// Where the Manager filed a request.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Receipt {
+    /// Text shown to the reader.
+    pub text: String,
+    /// Filed under for this record.
+    pub filed_under: Present<Target>,
+    /// Lead for this record.
+    pub lead: crate::Actor,
+    /// Chain for this record.
+    pub chain: bool,
+    /// Identifier of the associated lane.
+    pub lane_id: LaneId,
 }

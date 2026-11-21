@@ -7,63 +7,99 @@
       "summary": "Rebuild your customer profile from won deals.",
       "topics": "Research · Supabase",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "icp-refresh",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/linkedin-post",
       "summary": "Write a post in your voice from a link or notes.",
       "topics": "Content",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "linkedin-post",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/brand-visual",
       "summary": "Make images and check them against your brand rules.",
       "topics": "Content · GPT Image",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "brand-visual",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/carousel",
       "summary": "Turn one idea into a carousel of 5 to 8 slides.",
       "topics": "Content · GPT Image, Adobe",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "carousel",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/product-clip",
       "summary": "Make a short product video from a script.",
       "topics": "Content",
       "needsKey": "Seedance",
-      "enabled": false
+      "enabled": false,
+      "id": "product-clip",
+      "engine": "Seedance",
+      "asksFirst": true,
+      "builtIn": true
     },
     {
       "name": "/outbound-sequence",
       "summary": "Draft a 4-step email sequence for one segment.",
       "topics": "Outbound",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "outbound-sequence",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/ad-variants",
       "summary": "Write 6 ad variants and test them against a goal.",
       "topics": "Paid",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "ad-variants",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/weekly-summary",
       "summary": "Write the weekly update and put it in your drafts.",
       "topics": "All topics · Mail",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "weekly-summary",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/decision-brief",
       "summary": "Put an open question into your decision format.",
       "topics": "All topics",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "decision-brief",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     }
   ],
   "connections": [
@@ -71,37 +107,43 @@
       "name": "OpenAI",
       "purpose": "Text and images",
       "state": "connected",
-      "capacity": null
+      "capacity": null,
+      "id": "openai"
     },
     {
       "name": "Adobe",
       "purpose": "Edit and export visuals",
       "state": "connected",
-      "capacity": null
+      "capacity": null,
+      "id": "adobe"
     },
     {
       "name": "Supabase",
       "purpose": "Customers and deals, read only",
       "state": "connected",
-      "capacity": null
+      "capacity": null,
+      "id": "supabase"
     },
     {
       "name": "Obsidian",
       "purpose": "Memory and notes",
       "state": "connected",
-      "capacity": null
+      "capacity": null,
+      "id": "obsidian"
     },
     {
       "name": "Mail",
       "purpose": "Writes drafts, never sends",
       "state": "connected",
-      "capacity": null
+      "capacity": null,
+      "id": "mail"
     },
     {
       "name": "Seedance",
       "purpose": "Video",
       "state": "addKey",
-      "capacity": null
+      "capacity": null,
+      "id": "seedance"
     }
   ],
   "connected": 5,

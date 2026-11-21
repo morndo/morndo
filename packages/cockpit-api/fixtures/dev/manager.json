@@ -10,7 +10,8 @@
       "leadName": "Builder",
       "state": "bad",
       "stateWord": "Stuck",
-      "next": "Now, needs your call"
+      "next": "Now, needs your call",
+      "reason": null
     },
     {
       "id": "export-for-big-accounts",
@@ -20,7 +21,8 @@
       "leadName": "Release",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null
     },
     {
       "id": "tax-rates",
@@ -30,7 +32,8 @@
       "leadName": "Builder",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null
     },
     {
       "id": "new-sign-in",
@@ -40,7 +43,8 @@
       "leadName": "Builder",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your pick"
+      "next": "After your pick",
+      "reason": null
     },
     {
       "id": "shipment-filters",
@@ -50,7 +54,8 @@
       "leadName": "Reviewer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 11:30"
+      "next": "Today, 11:30",
+      "reason": null
     },
     {
       "id": "keep-scans",
@@ -60,7 +65,8 @@
       "leadName": "Builder",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 15:00"
+      "next": "Today, 15:00",
+      "reason": null
     },
     {
       "id": "upgrade-node-24",
@@ -70,7 +76,8 @@
       "leadName": "Builder",
       "state": "parked",
       "stateWord": "Parked until Thu",
-      "next": "Thu 19 Nov"
+      "next": "Thu 19 Nov",
+      "reason": "The session library supports Node 24 from Thursday’s release."
     }
   ],
   "sharedResources": [],

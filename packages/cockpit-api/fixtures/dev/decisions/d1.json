@@ -25,22 +25,26 @@
       {
         "label": "Tests",
         "value": "214 pass",
-        "sub": "6 are new and failed before the fix"
+        "sub": "6 are new and failed before the fix",
+        "money": null
       },
       {
         "label": "Fresh review",
         "value": "2 rounds",
-        "sub": "3 findings, all fixed"
+        "sub": "3 findings, all fixed",
+        "money": null
       },
       {
         "label": "Run on staging",
         "value": "48 s",
-        "sub": "Fenwick's 1.2 GB export, a timeout before"
+        "sub": "Fenwick's 1.2 GB export, a timeout before",
+        "money": null
       },
       {
         "label": "Checks",
         "value": "5 of 5",
-        "sub": "Green on the version to release"
+        "sub": "Green on the version to release",
+        "money": null
       }
     ],
     "meta": [
@@ -56,14 +60,119 @@
     "label": "Opportunity · the dream output",
     "headline": "No failed exports from Tuesday",
     "condition": "Failed exports a day, if the fix holds on live data as it did on staging.",
-    "summary": "With the release, failed exports a day fall from 23 today to 0 from Tuesday. With no change they stay at 23."
+    "summary": "With the release, failed exports a day fall from 23 today to 0 from Tuesday. With no change they stay at 23.",
+    "series": [
+      {
+        "x": "Today",
+        "y": 23
+      },
+      {
+        "x": "Tue",
+        "y": 0
+      },
+      {
+        "x": "Wed",
+        "y": 0
+      },
+      {
+        "x": "Thu",
+        "y": 0
+      },
+      {
+        "x": "Fri",
+        "y": 0
+      }
+    ],
+    "baseline": [
+      {
+        "x": "Today",
+        "y": 23
+      },
+      {
+        "x": "Tue",
+        "y": 23
+      },
+      {
+        "x": "Wed",
+        "y": 23
+      },
+      {
+        "x": "Thu",
+        "y": 23
+      },
+      {
+        "x": "Fri",
+        "y": 23
+      }
+    ],
+    "axis": [
+      0,
+      10,
+      20
+    ],
+    "unit": "failed exports a day",
+    "marker": null
   },
   "risk": {
     "kind": "risk",
     "label": "Risk · the worst case",
     "headline": "1 in 7 exports fails for 2 minutes",
     "condition": "Share of exports failing, if the new code breaks on live data. Only the first 10% of accounts get it.",
-    "summary": "In the worst case the share of exports that fail rises from 4% to 14% for two minutes after the rollout starts, then returns to 4% when the release is rolled back."
+    "summary": "In the worst case the share of exports that fail rises from 4% to 14% for two minutes after the rollout starts, then returns to 4% when the release is rolled back.",
+    "series": [
+      {
+        "x": "Start",
+        "y": 4
+      },
+      {
+        "x": "1 min",
+        "y": 14
+      },
+      {
+        "x": "3 min",
+        "y": 14
+      },
+      {
+        "x": "4 min",
+        "y": 4
+      },
+      {
+        "x": "8 min",
+        "y": 4
+      }
+    ],
+    "baseline": [
+      {
+        "x": "Start",
+        "y": 4
+      },
+      {
+        "x": "1 min",
+        "y": 4
+      },
+      {
+        "x": "3 min",
+        "y": 4
+      },
+      {
+        "x": "4 min",
+        "y": 4
+      },
+      {
+        "x": "8 min",
+        "y": 4
+      }
+    ],
+    "axis": [
+      0,
+      10,
+      20
+    ],
+    "unit": "% of exports failing",
+    "marker": {
+      "x": "4 min",
+      "label": "rolled back"
+    }
   },
   "suggestion": "Release tonight at 22:00, when few exports run. The first 10% of accounts get it for 30 minutes, then everyone.",
   "guardrail": "Guardrail: if exports fail more often than today during the watch, the Release lane rolls back on its own and tells you. Rolling back takes about 2 minutes and loses no data.",
@@ -71,35 +180,74 @@
     {
       "step": "Merge pull request 412",
       "who": "Release lane",
-      "dueAt": "2026-11-16T17:00:00+01:00"
+      "dueAt": null,
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     },
     {
       "step": "Roll out to 10% of accounts and watch for 30 minutes",
       "who": "Release lane",
-      "dueAt": "2026-11-16T22:00:00+01:00"
+      "dueAt": "2026-11-16T22:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     },
     {
       "step": "Roll out to everyone",
       "who": "Release lane",
-      "dueAt": "2026-11-16T22:30:00+01:00"
+      "dueAt": "2026-11-16T22:30:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     },
     {
       "step": "Run Fenwick's export on production and compare the file",
       "who": "QA lane",
-      "dueAt": "2026-11-16T22:45:00+01:00"
+      "dueAt": "2026-11-16T22:45:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     },
     {
       "step": "Draft the \"it is fixed\" note to Fenwick Freight",
       "who": "Writer, go-to-market",
-      "dueAt": "2026-11-17T17:00:00+01:00"
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     },
     {
       "step": "Report the result against the dream output",
       "who": "Manager",
-      "dueAt": "2026-11-17T09:00:00+01:00"
+      "dueAt": "2026-11-17T09:00:00+01:00",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing is released.",
-  "position": "1 of 3 · 3 open",
-  "dueAt": "2026-11-16T14:00:00+01:00"
+  "position": {
+    "index": 1,
+    "of": 3,
+    "open": 3
+  },
+  "dueAt": "2026-11-16T14:00:00+01:00",
+  "shortTitle": "Release the export fix",
+  "goalChange": null,
+  "release": {
+    "pullId": "412",
+    "stage": "scheduled",
+    "percent": 10,
+    "watchMinutes": 30,
+    "rollbackTrigger": "Exports fail more often than today during the watch.",
+    "startedAt": null
+  },
+  "changeRequest": null
 }

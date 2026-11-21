@@ -101,13 +101,19 @@
       "icon": "file",
       "title": "The 52 emails",
       "detail": "Each with one line about the brand",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-1"
+      }
     },
     {
       "icon": "file",
       "title": "Replies",
       "detail": "11: 5 calls, 4 later, 2 no",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-1"
+      }
     }
   ],
   "handover": {
@@ -119,9 +125,14 @@
     "restated": "“Follow up the 32 without a reply, never one that replied; January reminders for 4.”",
     "fixed": null,
     "at": "2026-11-15T21:10:00+01:00",
-    "summary": "52 sent, 11 replies, 5 calls booked; follow-ups 20 of 52 done."
+    "summary": "52 sent, 11 replies, 5 calls booked; follow-ups 20 of 52 done.",
+    "confirmedAt": null
   },
   "fresh": false,
   "openedAt": "2026-11-06T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

@@ -10,7 +10,8 @@
       "leadName": "Visuals",
       "state": "bad",
       "stateWord": "Stuck",
-      "next": "Now, needs your call"
+      "next": "Now, needs your call",
+      "reason": null
     },
     {
       "id": "outreach-wave-2",
@@ -20,7 +21,8 @@
       "leadName": "Sender",
       "state": "warn",
       "stateWord": "Waits for Lea",
-      "next": "After Lea's check"
+      "next": "After Lea's check",
+      "reason": null
     },
     {
       "id": "halden-offer",
@@ -30,7 +32,8 @@
       "leadName": "Jonas",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your OK"
+      "next": "After your OK",
+      "reason": null
     },
     {
       "id": "fenwick",
@@ -40,7 +43,8 @@
       "leadName": "Writer",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your OK"
+      "next": "After your OK",
+      "reason": null
     },
     {
       "id": "sequence-b",
@@ -50,7 +54,8 @@
       "leadName": "Sender",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null
     },
     {
       "id": "search-budget",
@@ -60,7 +65,8 @@
       "leadName": "Paid buyer",
       "state": "warn",
       "stateWord": "Needs you",
-      "next": "After your decision"
+      "next": "After your decision",
+      "reason": null
     },
     {
       "id": "reply-handling",
@@ -70,7 +76,8 @@
       "leadName": "Replies",
       "state": "warn",
       "stateWord": "Waits for Jonas",
-      "next": "Today, once Jonas answers"
+      "next": "Today, once Jonas answers",
+      "reason": null
     },
     {
       "id": "brand-list",
@@ -80,7 +87,8 @@
       "leadName": "Brand scout",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 18:00"
+      "next": "Today, 18:00",
+      "reason": null
     },
     {
       "id": "contact-data",
@@ -90,7 +98,8 @@
       "leadName": "Contact finder",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Tomorrow, 08:00"
+      "next": "Tomorrow, 08:00",
+      "reason": null
     },
     {
       "id": "outreach-wave-1",
@@ -100,7 +109,8 @@
       "leadName": "Sender",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Wed 18 Nov"
+      "next": "Wed 18 Nov",
+      "reason": null
     },
     {
       "id": "partner-calls",
@@ -110,7 +120,8 @@
       "leadName": "You",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 16:00"
+      "next": "Today, 16:00",
+      "reason": null
     },
     {
       "id": "recap",
@@ -120,7 +131,8 @@
       "leadName": "Writer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov"
+      "next": "Thu 19 Nov",
+      "reason": null
     },
     {
       "id": "comparison-pages",
@@ -130,7 +142,8 @@
       "leadName": "SEO writer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 15:00"
+      "next": "Today, 15:00",
+      "reason": null
     },
     {
       "id": "webinar-reminders",
@@ -140,7 +153,8 @@
       "leadName": "Publisher",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Wed 18 Nov, 09:00"
+      "next": "Wed 18 Nov, 09:00",
+      "reason": null
     },
     {
       "id": "logistics-round-2",
@@ -150,7 +164,8 @@
       "leadName": "Prospector",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov"
+      "next": "Thu 19 Nov",
+      "reason": null
     },
     {
       "id": "webinar-campaign",
@@ -160,7 +175,8 @@
       "leadName": "Paid buyer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov, when it ends"
+      "next": "Thu 19 Nov, when it ends",
+      "reason": null
     }
   ],
   "sharedResources": [

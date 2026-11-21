@@ -33,7 +33,7 @@
       "text": "The forecast reaches 1 signed partner by 31 January, 0 to 2 at the edges; the plan needs 3. Halden is the only likely deal, and nothing else has reached a qualified call yet."
     },
     "insight": "Only Halden is likely. Two more deals need an offer by early January.",
-    "asOf": "updated 07:45, forecast unchanged since yesterday · agents €38 of €60 this week",
+    "asOf": "updated 07:45, forecast unchanged since yesterday",
     "decision": {
       "title": "Approve the Halden offer",
       "detail": "Due Thursday · their budget is set on 1 December",
@@ -221,25 +221,29 @@
           "what": "Bounces",
           "value": "1.2%",
           "limit": "limit 4%",
-          "ratio": 0.3
+          "ratio": 0.3,
+          "state": "held"
         },
         {
           "what": "Asked to stop",
           "value": "0 of 52",
           "limit": "limit 2%",
-          "ratio": 0
+          "ratio": 0,
+          "state": "held"
         },
         {
           "what": "Sent unchecked",
           "value": "0",
           "limit": "none allowed",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         },
         {
           "what": "Terms",
           "value": "standard 15%",
           "limit": "no discount without you",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -379,7 +383,8 @@
         "label": "Still unsecured"
       }
     ],
-    "pathTitle": "Path to three"
+    "pathTitle": "Path to three",
+    "forecastLog": []
   },
   "noGoal": null,
   "facts": [
@@ -696,7 +701,9 @@
             "count": null,
             "samples": [],
             "decisionId": "d4",
-            "at": "2026-11-16T08:45:00+01:00"
+            "at": "2026-11-16T08:45:00+01:00",
+            "id": "partnerships-history-1",
+            "undone": false
           },
           {
             "kind": "event",
@@ -722,7 +729,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:41:00+01:00"
+            "at": "2026-11-16T08:41:00+01:00",
+            "id": "partnerships-history-2",
+            "undone": false
           },
           {
             "kind": "event",
@@ -748,7 +757,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:30:00+01:00"
+            "at": "2026-11-16T08:30:00+01:00",
+            "id": "partnerships-history-3",
+            "undone": false
           },
           {
             "kind": "event",
@@ -774,7 +785,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:12:00+01:00"
+            "at": "2026-11-16T08:12:00+01:00",
+            "id": "partnerships-history-4",
+            "undone": false
           },
           {
             "kind": "event",
@@ -804,7 +817,9 @@
               "Brookmere Foods · to the partnerships lead"
             ],
             "decisionId": null,
-            "at": "2026-11-16T08:00:00+01:00"
+            "at": "2026-11-16T08:00:00+01:00",
+            "id": "partnerships-history-5",
+            "undone": false
           },
           {
             "kind": "event",
@@ -830,7 +845,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:20:00+01:00"
+            "at": "2026-11-16T07:20:00+01:00",
+            "id": "partnerships-history-6",
+            "undone": false
           },
           {
             "kind": "event",
@@ -856,7 +873,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:00:00+01:00"
+            "at": "2026-11-16T07:00:00+01:00",
+            "id": "partnerships-history-7",
+            "undone": false
           },
           {
             "kind": "event",
@@ -886,7 +905,9 @@
               "Quillon Pay · partnerships lead"
             ],
             "decisionId": null,
-            "at": "2026-11-16T06:10:00+01:00"
+            "at": "2026-11-16T06:10:00+01:00",
+            "id": "partnerships-history-8",
+            "undone": false
           },
           {
             "kind": "event",
@@ -916,7 +937,9 @@
               "Marlow Kitchens · does not fit: consumers only"
             ],
             "decisionId": null,
-            "at": "2026-11-16T05:40:00+01:00"
+            "at": "2026-11-16T05:40:00+01:00",
+            "id": "partnerships-history-9",
+            "undone": false
           },
           {
             "kind": "event",
@@ -942,7 +965,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T05:05:00+01:00"
+            "at": "2026-11-16T05:05:00+01:00",
+            "id": "partnerships-history-10",
+            "undone": false
           },
           {
             "kind": "event",
@@ -972,7 +997,9 @@
               "Southgate Supply · 69 words"
             ],
             "decisionId": null,
-            "at": "2026-11-16T04:30:00+01:00"
+            "at": "2026-11-16T04:30:00+01:00",
+            "id": "partnerships-history-11",
+            "undone": false
           },
           {
             "kind": "event",
@@ -998,7 +1025,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T02:10:00+01:00"
+            "at": "2026-11-16T02:10:00+01:00",
+            "id": "partnerships-history-12",
+            "undone": false
           }
         ]
       },
@@ -1029,7 +1058,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T21:40:00+01:00"
+            "at": "2026-11-15T21:40:00+01:00",
+            "id": "partnerships-history-13",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1055,7 +1086,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T21:10:00+01:00"
+            "at": "2026-11-15T21:10:00+01:00",
+            "id": "partnerships-history-14",
+            "undone": false
           },
           {
             "kind": "seen"
@@ -1088,7 +1121,9 @@
               "Linden Pay · to the partnerships lead"
             ],
             "decisionId": null,
-            "at": "2026-11-15T17:10:00+01:00"
+            "at": "2026-11-15T17:10:00+01:00",
+            "id": "partnerships-history-15",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1114,7 +1149,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T15:20:00+01:00"
+            "at": "2026-11-15T15:20:00+01:00",
+            "id": "partnerships-history-16",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1140,7 +1177,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T11:05:00+01:00"
+            "at": "2026-11-15T11:05:00+01:00",
+            "id": "partnerships-history-17",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1166,7 +1205,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T09:30:00+01:00"
+            "at": "2026-11-15T09:30:00+01:00",
+            "id": "partnerships-history-18",
+            "undone": false
           }
         ]
       },
@@ -1197,7 +1238,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T17:30:00+01:00"
+            "at": "2026-11-13T17:30:00+01:00",
+            "id": "partnerships-history-19",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1223,7 +1266,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T16:40:00+01:00"
+            "at": "2026-11-13T16:40:00+01:00",
+            "id": "partnerships-history-20",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1249,7 +1294,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T14:05:00+01:00"
+            "at": "2026-11-13T14:05:00+01:00",
+            "id": "partnerships-history-21",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1275,7 +1322,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T13:00:00+01:00"
+            "at": "2026-11-13T13:00:00+01:00",
+            "id": "partnerships-history-22",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1301,7 +1350,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T12:20:00+01:00"
+            "at": "2026-11-13T12:20:00+01:00",
+            "id": "partnerships-history-23",
+            "undone": false
           }
         ]
       },
@@ -1332,7 +1383,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-12T16:00:00+01:00"
+            "at": "2026-11-12T16:00:00+01:00",
+            "id": "partnerships-history-24",
+            "undone": false
           },
           {
             "kind": "event",
@@ -1362,7 +1415,9 @@
               "Northvale Bank · to the partnerships lead"
             ],
             "decisionId": null,
-            "at": "2026-11-12T10:00:00+01:00"
+            "at": "2026-11-12T10:00:00+01:00",
+            "id": "partnerships-history-25",
+            "undone": false
           }
         ]
       }
@@ -1576,5 +1631,73 @@
     }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [
+    {
+      "name": "Strategy",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Stack",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Brands",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Outreach",
+      "access": "work",
+      "runBy": {
+        "id": "lea-brandt",
+        "name": "Lea Brandt",
+        "shortName": "Lea",
+        "kind": "person",
+        "avatar": "L",
+        "role": "GTM associate",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      }
+    },
+    {
+      "name": "Calls",
+      "access": "work",
+      "runBy": null
+    },
+    {
+      "name": "Offers",
+      "access": "work",
+      "runBy": {
+        "id": "jonas-falk",
+        "name": "Jonas Falk",
+        "shortName": "Jonas",
+        "kind": "person",
+        "avatar": "J",
+        "role": "Partner operations",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      }
+    },
+    {
+      "name": "Signed",
+      "access": "work",
+      "runBy": null
+    }
+  ]
 }

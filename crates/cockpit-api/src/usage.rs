@@ -9,6 +9,10 @@ use crate::present::Present;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Meter {
+    /// Spend for this record.
+    pub spend: Present<crate::Money>,
+    /// Cap for this record.
+    pub cap: Present<crate::Money>,
     /// What for this record.
     pub what: String,
     /// Time associated with resets.
@@ -16,7 +20,7 @@ pub struct Meter {
     /// Used for this record.
     pub used: f64,
     /// Value for this record.
-    pub value: String,
+
     /// Note for this record.
     pub note: Present<String>,
 }
@@ -25,6 +29,10 @@ pub struct Meter {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct UsageAccount {
+    /// Current state of the record.
+    pub state: UsageState,
+    /// Fails over to for this record.
+    pub fails_over_to: Present<String>,
     /// Name shown to the reader.
     pub name: String,
     /// Lanes for this record.
@@ -47,4 +55,16 @@ pub struct UsageView {
     pub keys: Vec<UsageAccount>,
     /// Missing for this record.
     pub missing: Vec<String>,
+}
+
+/// How close a usage account is to its current limit.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum UsageState {
+    Ok,
+    Near,
+    Limit,
+    StandingBy,
+    #[serde(other)]
+    Unknown,
 }

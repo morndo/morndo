@@ -19,6 +19,14 @@ pub enum ConnectionState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Skill {
+    /// Stable identifier for this record.
+    pub id: crate::SkillId,
+    /// Engine for this record.
+    pub engine: Present<String>,
+    /// Asks first for this record.
+    pub asks_first: bool,
+    /// Built in for this record.
+    pub built_in: bool,
     /// Name shown to the reader.
     pub name: String,
     /// Summary for this record.
@@ -35,6 +43,8 @@ pub struct Skill {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Connection {
+    /// Stable identifier for this record.
+    pub id: crate::ConnectionId,
     /// Name shown to the reader.
     pub name: String,
     /// Purpose for this record.

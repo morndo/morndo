@@ -12,6 +12,7 @@ pub enum DecisionState {
     Open,
     Approved,
     Declined,
+    Expired,
     #[serde(other)]
     Unknown,
 }
@@ -20,6 +21,8 @@ pub enum DecisionState {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Stat {
+    /// Money for this record.
+    pub money: Present<crate::Money>,
     /// Label for this record.
     pub label: String,
     /// Value for this record.
@@ -44,6 +47,16 @@ pub struct Proof {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Scenario {
+    /// Series for this record.
+    pub series: Vec<ChartPoint>,
+    /// Baseline for this record.
+    pub baseline: Vec<ChartPoint>,
+    /// Unit for this record.
+    pub unit: String,
+    /// Axis for this record.
+    pub axis: Vec<f64>,
+    /// Marker for this record.
+    pub marker: Present<ChartMarker>,
     /// Kind for this record.
     pub kind: ScenarioKind,
     /// Label for this record.
@@ -60,6 +73,8 @@ pub struct Scenario {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NextStep {
+    /// Destination to open in the cockpit.
+    pub target: Present<Target>,
     /// Step for this record.
     pub step: String,
     /// Who for this record.
@@ -88,6 +103,8 @@ pub struct Provenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueItem {
+    /// Goal change for this record.
+    pub goal_change: Present<GoalChange>,
     /// Stable identifier for this record.
     pub id: DecisionId,
     /// Title displayed above the record.
@@ -116,6 +133,14 @@ pub struct DecisionQueueView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionView {
+    /// Short title for this record.
+    pub short_title: String,
+    /// Goal change for this record.
+    pub goal_change: Present<GoalChange>,
+    /// Release for this record.
+    pub release: Present<Release>,
+    /// Change request for this record.
+    pub change_request: Present<String>,
     /// Stable identifier for this record.
     pub id: DecisionId,
     /// Title displayed above the record.
@@ -163,7 +188,7 @@ pub struct DecisionView {
     /// If no answer for this record.
     pub if_no_answer: Present<String>,
     /// Position for this record.
-    pub position: String,
+    pub position: DecisionPosition,
 }
 
 /// Which side of the forecast the chart describes.
@@ -174,4 +199,93 @@ pub enum ScenarioKind {
     Risk,
     #[serde(other)]
     Unknown,
+}
+
+/// A point displayed in a decision chart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartPoint {
+    /// X for this record.
+    pub x: String,
+    /// Y for this record.
+    pub y: f64,
+}
+
+/// Annotation at a category on the chart.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct ChartMarker {
+    /// X for this record.
+    pub x: String,
+    /// Label for this record.
+    pub label: String,
+}
+
+/// Position within the decision queue as seen by this reader.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct DecisionPosition {
+    /// Index for this record.
+    pub index: i64,
+    /// Of for this record.
+    pub of: i64,
+    /// Open for this record.
+    pub open: i64,
+}
+
+/// Proposed change to the numeric goal for a topic.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GoalChange {
+    /// Identifier of the associated topic.
+    pub topic_id: TopicId,
+    /// Field for this record.
+    pub field: GoalField,
+    /// From for this record.
+    pub from: i64,
+    /// To for this record.
+    pub to: i64,
+    /// Affected topics for this record.
+    pub affected_topics: Vec<TopicId>,
+}
+
+/// Goal field being edited.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum GoalField {
+    Target,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Rollout lifecycle for a release decision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum ReleaseStage {
+    Scheduled,
+    Rolling,
+    Watching,
+    Done,
+    Held,
+    RolledBack,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Staged rollout linked to the decision.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Release {
+    /// Identifier of the associated pull.
+    pub pull_id: crate::PullId,
+    /// Stage for this record.
+    pub stage: ReleaseStage,
+    /// Percent for this record.
+    pub percent: i64,
+    /// Watch minutes for this record.
+    pub watch_minutes: i64,
+    /// Rollback trigger for this record.
+    pub rollback_trigger: String,
+    /// Time associated with started.
+    pub started_at: Present<Timestamp>,
 }

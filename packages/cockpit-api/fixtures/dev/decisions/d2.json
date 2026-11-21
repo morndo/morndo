@@ -21,6 +21,14 @@
   "guardrail": null,
   "nextSteps": [],
   "ifNoAnswer": null,
-  "position": "2 of 3 · 3 open",
-  "dueAt": "2026-11-17T17:00:00+01:00"
+  "position": {
+    "index": 2,
+    "of": 3,
+    "open": 3
+  },
+  "dueAt": "2026-11-17T17:00:00+01:00",
+  "shortTitle": "Run the tax migration",
+  "goalChange": null,
+  "release": null,
+  "changeRequest": null
 }

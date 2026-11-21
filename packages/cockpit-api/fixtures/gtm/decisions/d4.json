@@ -21,6 +21,14 @@
   "guardrail": null,
   "nextSteps": [],
   "ifNoAnswer": null,
-  "position": "4 of 4 · 4 open",
-  "dueAt": "2026-11-19T17:00:00+01:00"
+  "position": {
+    "index": 4,
+    "of": 4,
+    "open": 4
+  },
+  "dueAt": "2026-11-19T17:00:00+01:00",
+  "shortTitle": "Send the Halden offer",
+  "goalChange": null,
+  "release": null,
+  "changeRequest": null
 }

@@ -1,11 +1,13 @@
 {
   "id": "topic:content",
-  "title": "Content",
+  "title": "Content chat",
   "sub": "Mara and 3 agents · the Manager reads it, it is not in it",
   "placeholder": "Message Content · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
       "Agents: 6 updates, the latest: Visuals asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3."
     ]
@@ -19,7 +21,9 @@
     "approveLabel": null
   },
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 6,
     "summary": "Agents · 6 updates since yesterday at 18:20, nothing needs you",
     "items": [
@@ -58,7 +62,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m36",
       "author": {
         "id": "visuals",
         "name": "Visuals",
@@ -78,10 +82,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T09:12:00+01:00"
+      "at": "2026-11-16T09:12:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m37",
       "author": {
         "id": "publisher",
         "name": "Publisher",
@@ -101,10 +109,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T09:13:00+01:00"
+      "at": "2026-11-16T09:13:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m38",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -124,10 +136,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m4",
+      "id": "m39",
       "author": {
         "id": "visuals",
         "name": "Visuals",
@@ -148,14 +164,25 @@
       "readBack": null,
       "actions": [
         {
-          "label": "Run one more round"
+          "label": "Run one more round",
+          "id": "one-more-round",
+          "laneId": "webinar",
+          "personId": null
         },
         {
-          "label": "Post the 4"
+          "label": "Post the 4",
+          "id": "post-passing",
+          "laneId": "webinar",
+          "personId": null
         }
       ],
-      "at": "2026-11-16T09:21:00+01:00"
+      "at": "2026-11-16T09:21:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

@@ -1,18 +1,22 @@
 {
   "id": "topic:seo",
-  "title": "SEO",
+  "title": "SEO chat",
   "sub": "Mara and 2 agents · the Manager reads it, it is not in it",
   "placeholder": "Message SEO · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
-      "Agents: 3 updates, the latest: SEO agreed to keep the tone fair: every claim about another tool links to its own public page."
+      "Agents: 3 updates, the latest: SEO writer agreed to keep the tone fair: every claim about another tool links to its own public page."
     ]
   },
   "pinned": null,
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 3,
     "summary": "Agents · 3 updates since yesterday at 18:20, nothing needs you",
     "items": [
@@ -36,7 +40,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m53",
       "author": {
         "id": "seo-writer",
         "name": "SEO writer",
@@ -56,10 +60,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T07:42:00+01:00"
+      "at": "2026-11-16T07:42:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m54",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -79,10 +87,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m55",
       "author": {
         "id": "seo-writer",
         "name": "SEO writer",
@@ -102,8 +114,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T07:50:00+01:00"
+      "at": "2026-11-16T07:50:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

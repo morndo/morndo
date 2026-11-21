@@ -1,6 +1,6 @@
 {
   "id": "decision:d3",
-  "title": "Choose the new sign-in: passkeys or a link by email",
+  "title": "Chat",
   "sub": null,
   "placeholder": "Ask about this decision",
   "reading": null,
@@ -9,5 +9,6 @@
   "agents": null,
   "suggestions": [],
   "messages": [],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

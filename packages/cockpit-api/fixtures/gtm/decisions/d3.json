@@ -21,6 +21,14 @@
   "guardrail": null,
   "nextSteps": [],
   "ifNoAnswer": null,
-  "position": "3 of 4 · 4 open",
-  "dueAt": "2026-11-18T17:00:00+01:00"
+  "position": {
+    "index": 3,
+    "of": 4,
+    "open": 4
+  },
+  "dueAt": "2026-11-18T17:00:00+01:00",
+  "shortTitle": "Publish the Fenwick story",
+  "goalChange": null,
+  "release": null,
+  "changeRequest": null
 }

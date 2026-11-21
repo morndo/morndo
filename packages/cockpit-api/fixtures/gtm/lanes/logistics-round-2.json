@@ -87,11 +87,18 @@
       "icon": "file",
       "title": "Lead list, round 2",
       "detail": "120 so far, logistics ops, 50 to 500 people",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "logistics-round-2"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-15T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

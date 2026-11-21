@@ -1,6 +1,6 @@
 {
   "id": "topic:api",
-  "title": "API",
+  "title": "API chat",
   "sub": "You, Builder and Release.",
   "placeholder": "Message API",
   "reading": null,
@@ -9,5 +9,6 @@
   "agents": null,
   "suggestions": [],
   "messages": [],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

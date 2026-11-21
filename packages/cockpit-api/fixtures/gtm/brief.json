@@ -147,10 +147,13 @@
       "title": "The webinar promo visuals are stuck",
       "detail": "Visuals used its 3 feedback rounds. 4 of 6 images pass the brand check, 2 still fail.",
       "target": {
-        "kind": "topic",
-        "id": "content"
+        "kind": "lane",
+        "id": "webinar"
       },
-      "stuckAt": "2026-11-16T09:12:00+01:00"
+      "stuckAt": "2026-11-16T09:12:00+01:00",
+      "laneId": "webinar",
+      "blocks": "The webinar promo goes out today.",
+      "dueAt": "2026-11-16T16:00:00+01:00"
     }
   ],
   "overnight": [
@@ -162,7 +165,8 @@
       "text": "Research rebuilt the customer profile from 212 won deals and saved it to memory.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T07:10:00+01:00"
+      "at": "2026-11-16T07:10:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o2",
@@ -172,7 +176,8 @@
       "text": "Partnerships added 32 brands from Clay, found 58 contacts in Apollo and drafted 24 emails for Lea to check.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T07:30:00+01:00"
+      "at": "2026-11-16T07:30:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o3",
@@ -182,7 +187,8 @@
       "text": "SEO published the 2 comparison pages you approved on Friday.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T07:42:00+01:00"
+      "at": "2026-11-16T07:42:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o4",
@@ -192,7 +198,8 @@
       "text": "Outbound stopped sequence A for the 14 people who replied.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T08:05:00+01:00"
+      "at": "2026-11-16T08:05:00+01:00",
+      "undoUntilAt": null
     },
     {
       "id": "o5",
@@ -202,7 +209,8 @@
       "text": "Paid switched off 3 ads that fell below the click floor.",
       "undoable": true,
       "undone": false,
-      "at": "2026-11-16T08:30:00+01:00"
+      "at": "2026-11-16T08:30:00+01:00",
+      "undoUntilAt": null
     }
   ],
   "drafts": {
@@ -216,8 +224,14 @@
     "title": "The Muses at sunrise",
     "manner": "early Renaissance frescoes",
     "alt": "The Muses rest on a hillside at sunrise, their lyres laid in the grass and a finished scroll tied with a ribbon.",
-    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes"
+    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes",
+    "src": "/api/cockpit/brief/artwork/13/image",
+    "glass": "/api/cockpit/brief/artwork/13/glass",
+    "position": "center"
   },
   "at": "2026-11-16T07:15:00+01:00",
-  "nextBriefAt": "2026-11-16T13:00:00+01:00"
+  "nextBriefAt": "2026-11-16T13:00:00+01:00",
+  "inWorks": null,
+  "overnightSinceAt": "2026-11-15T18:20:00+01:00",
+  "burnsSub": "This needs your call."
 }

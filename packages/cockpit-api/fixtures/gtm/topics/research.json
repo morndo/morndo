@@ -8,7 +8,10 @@
   "meta": null,
   "intro": "Nothing is open. The customer profile was rebuilt this morning; Outbound already works from it.",
   "when": null,
-  "health": null,
+  "health": {
+    "state": "idle",
+    "word": "No goal set"
+  },
   "goal": null,
   "noGoal": "Research answers asks from the other topics. A goal needs a measure and a date, for example: the profile refreshed every month.",
   "facts": [
@@ -61,7 +64,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:10:00+01:00"
+            "at": "2026-11-16T07:10:00+01:00",
+            "id": "research-history-1",
+            "undone": false
           },
           {
             "kind": "event",
@@ -87,7 +92,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T06:40:00+01:00"
+            "at": "2026-11-16T06:40:00+01:00",
+            "id": "research-history-2",
+            "undone": false
           }
         ]
       },
@@ -118,7 +125,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T21:30:00+01:00"
+            "at": "2026-11-15T21:30:00+01:00",
+            "id": "research-history-3",
+            "undone": false
           },
           {
             "kind": "seen"
@@ -152,7 +161,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-12T15:00:00+01:00"
+            "at": "2026-11-12T15:00:00+01:00",
+            "id": "research-history-4",
+            "undone": false
           }
         ]
       }
@@ -206,5 +217,11 @@
     }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": []
 }

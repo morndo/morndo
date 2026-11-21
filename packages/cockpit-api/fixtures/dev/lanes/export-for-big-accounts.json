@@ -44,7 +44,13 @@
   "acts": [
     {
       "label": "Open the decision",
-      "tone": "ink"
+      "tone": "ink",
+      "id": "open-the-decision",
+      "personId": null,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     }
   ],
   "thumbs": [],
@@ -150,24 +156,34 @@
       "detail": "Write big exports in chunks · ready",
       "target": {
         "kind": "pull",
-        "id": null
+        "id": "412"
       }
     },
     {
       "icon": "file",
       "title": "Staging run",
       "detail": "Fenwick's export: 48 seconds, file complete",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     },
     {
       "icon": "file",
       "title": "Review notes",
       "detail": "2 rounds, 3 findings, all fixed",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-12T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

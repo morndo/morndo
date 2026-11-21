@@ -35,6 +35,13 @@ export type ActionTone = "ink" | "quiet" | "unknown";
  */
 export type ActorKind = "person" | "agent" | "unknown";
 /**
+ * A point in time with an RFC 3339 UTC offset.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Timestamp".
+ */
+export type Timestamp = string;
+/**
  * Identifier of a lane.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -118,9 +125,17 @@ export type Command =
        */
       leadId?: PersonId | null;
       /**
+       * Model for this record.
+       */
+      model?: ModelId | null;
+      /**
        * Text shown to the reader.
        */
       text: string;
+      /**
+       * To manager for this record.
+       */
+      toManager?: boolean;
       /**
        * Identifier of the associated topic.
        */
@@ -175,6 +190,18 @@ export type Command =
       type: "goal.ask";
     }
   | {
+      /**
+       * Attachment for this record.
+       */
+      attachment?: AttachmentInput | null;
+      /**
+       * Model for this record.
+       */
+      model?: ModelId | null;
+      /**
+       * Page for this record.
+       */
+      page?: TargetInput | null;
       /**
        * Text shown to the reader.
        */
@@ -231,6 +258,10 @@ export type Command =
        */
       chatMode?: KnownChatMode | null;
       /**
+       * Identifier of the associated device.
+       */
+      deviceId?: string | null;
+      /**
        * Interrupt only urgent for this record.
        */
       interruptOnlyUrgent?: boolean | null;
@@ -260,6 +291,10 @@ export type Command =
       who: "you" | "agent";
     }
   | {
+      /**
+       * Model for this record.
+       */
+      model?: ModelId | null;
       /**
        * Skill for this record.
        */
@@ -292,6 +327,99 @@ export type Command =
        */
       topicId: string;
       type: "access.invite";
+    }
+  | {
+      /**
+       * Identifier of the associated pin.
+       */
+      pinId: string;
+      /**
+       * To for this record.
+       */
+      to: number;
+      type: "pin.move";
+    }
+  | {
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "topic.seen";
+    }
+  | {
+      /**
+       * Identifier of an actor, whether a person or an agent.
+       */
+      personId: string;
+      /**
+       * Stage for this record.
+       */
+      stage: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "stage.assign";
+    }
+  | {
+      /**
+       * Identifier of the associated invitation.
+       */
+      invitationId: string;
+      type: "access.revoke";
+    }
+  | {
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "access.statusLink";
+    }
+  | {
+      /**
+       * Description for this record.
+       */
+      description: string;
+      type: "skill.create";
+    }
+  | {
+      /**
+       * Name shown to the reader.
+       */
+      name: string;
+      /**
+       * On for this record.
+       */
+      on: boolean;
+      type: "guardrail.set";
+    }
+  | {
+      /**
+       * Identifier of the associated pull.
+       */
+      pullId: string;
+      type: "pull.hold";
+    }
+  | {
+      /**
+       * Identifier of the associated connection.
+       */
+      connectionId: string;
+      type: "connection.connect";
+    }
+  | {
+      /**
+       * Identifier of the associated module.
+       */
+      moduleId: "gtm" | "dev";
+      type: "module.switch";
+    }
+  | {
+      /**
+       * Identifier of a lane.
+       */
+      laneId: string;
+      type: "handover.confirm";
     };
 /**
  * Identifier of an actor, whether a person or an agent.
@@ -300,6 +428,13 @@ export type Command =
  * via the `definition` "PersonId".
  */
 export type PersonId = string;
+/**
+ * Identifier of a selectable model.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ModelId".
+ */
+export type ModelId = string;
 /**
  * Chat mode for the cockpit.
  *
@@ -329,7 +464,7 @@ export type DailyLimit = 5 | 20 | 60;
  */
 export type FeedEvent = {
   /**
-   * Time the hub published the event.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
   /**
@@ -346,10 +481,14 @@ export type FeedEvent1 =
       /**
        * Current state of the record.
        */
-      state: "open" | "approved" | "declined" | "unknown";
+      state: "open" | "approved" | "declined" | "expired" | "unknown";
       type: "decision.changed";
     }
   | {
+      /**
+       * Chain for this record.
+       */
+      chain: boolean;
       /**
        * Identifier of a lane.
        */
@@ -400,11 +539,72 @@ export type FeedEvent1 =
       type: "agentAction.changed";
     }
   | {
+      decisionId: DecisionId;
+      type: "decision.expired";
+    }
+  | {
+      laneId: LaneId;
+      type: "lane.removed";
+    }
+  | {
+      threadId: ThreadId;
+      type: "thread.changed";
+    }
+  | {
+      topicId: TopicId;
+      type: "topic.changed";
+    }
+  | {
+      type: "drafts.changed";
+    }
+  | {
+      type: "brief.published";
+    }
+  | {
+      reason: string;
+      target: Target;
+      type: "attention.raised";
+    }
+  | {
+      name: string;
+      topicId: TopicId | null;
+      type: "guardrail.breached";
+    }
+  | {
+      type: "usage.changed";
+    }
+  | {
+      decisionId: DecisionId;
+      type: "release.changed";
+    }
+  | {
+      pullId: PullId;
+      type: "pull.changed";
+    }
+  | {
+      laneId: LaneId;
+      type: "handover.changed";
+    }
+  | {
+      type: "skills.changed";
+    }
+  | {
+      moduleId: ModuleId;
+      type: "module.changed";
+    }
+  | {
       type: "feed.reset";
     }
   | {
       type: "Unknown";
     };
+/**
+ * Identifier of a decision.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "DecisionId".
+ */
+export type DecisionId = string;
 /**
  * Identifier of a sidebar pin.
  *
@@ -412,6 +612,34 @@ export type FeedEvent1 =
  * via the `definition` "PinId".
  */
 export type PinId = string;
+/**
+ * Identifier of a conversation.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ThreadId".
+ */
+export type ThreadId = string;
+/**
+ * Identifier of a pull request.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "PullId".
+ */
+export type PullId = string;
+/**
+ * Available cockpit modules.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ModuleId".
+ */
+export type ModuleId = "gtm" | "dev" | "unknown";
+/**
+ * Identifier of a service connection.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ConnectionId".
+ */
+export type ConnectionId = string;
 /**
  * Connection state for the cockpit.
  *
@@ -427,13 +655,6 @@ export type ConnectionState = "connected" | "signedIn" | "addKey" | "signIn" | "
  */
 export type Decider = "you" | "agent" | "unknown";
 /**
- * Identifier of a decision.
- *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "DecisionId".
- */
-export type DecisionId = string;
-/**
  * Decision rule for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -447,14 +668,7 @@ export type DecisionRule =
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
  * via the `definition` "DecisionState".
  */
-export type DecisionState = "open" | "approved" | "declined" | "unknown";
-/**
- * A point in time with an RFC 3339 UTC offset.
- *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "Timestamp".
- */
-export type Timestamp = string;
+export type DecisionState = "open" | "approved" | "declined" | "expired" | "unknown";
 /**
  * Identifier of a draft.
  *
@@ -489,16 +703,20 @@ export type ErrorCode =
 export type Event =
   | {
       /**
-       * Identifier of the associated decision.
+       * Identifier of a decision.
        */
       decisionId: string;
       /**
        * Current state of the record.
        */
-      state: "open" | "approved" | "declined" | "unknown";
+      state: "open" | "approved" | "declined" | "expired" | "unknown";
       type: "decision.changed";
     }
   | {
+      /**
+       * Chain for this record.
+       */
+      chain: boolean;
       /**
        * Identifier of a lane.
        */
@@ -519,7 +737,7 @@ export type Event =
   | {
       message: Message2;
       /**
-       * Identifier of the associated thread.
+       * Identifier of a conversation.
        */
       threadId: string;
       type: "message.posted";
@@ -549,6 +767,60 @@ export type Event =
       type: "agentAction.changed";
     }
   | {
+      decisionId: DecisionId;
+      type: "decision.expired";
+    }
+  | {
+      laneId: LaneId;
+      type: "lane.removed";
+    }
+  | {
+      threadId: ThreadId;
+      type: "thread.changed";
+    }
+  | {
+      topicId: TopicId;
+      type: "topic.changed";
+    }
+  | {
+      type: "drafts.changed";
+    }
+  | {
+      type: "brief.published";
+    }
+  | {
+      reason: string;
+      target: Target;
+      type: "attention.raised";
+    }
+  | {
+      name: string;
+      topicId: TopicId | null;
+      type: "guardrail.breached";
+    }
+  | {
+      type: "usage.changed";
+    }
+  | {
+      decisionId: DecisionId;
+      type: "release.changed";
+    }
+  | {
+      pullId: PullId;
+      type: "pull.changed";
+    }
+  | {
+      laneId: LaneId;
+      type: "handover.changed";
+    }
+  | {
+      type: "skills.changed";
+    }
+  | {
+      moduleId: ModuleId;
+      type: "module.changed";
+    }
+  | {
       type: "feed.reset";
     }
   | {
@@ -569,6 +841,13 @@ export type HealthState = "ok" | "warn" | "bad" | "idle" | "unknown";
  */
 export type GateState = "pass" | "running" | "todo" | "fail" | "skipped" | "unknown";
 /**
+ * Goal field being edited.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "GoalField".
+ */
+export type GoalField = "target" | "unknown";
+/**
  * Group kind for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -576,6 +855,14 @@ export type GateState = "pass" | "running" | "todo" | "fail" | "skipped" | "unkn
  */
 export type GroupKind = "topic" | "project" | "unknown";
 /**
+ * Evaluation of a guardrail at the current reading.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "GuardrailState".
+ */
+export type GuardrailState = "held" | "near" | "breached" | "unknown";
+/**
+ * History entry for the cockpit.
  * History entry for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -586,7 +873,7 @@ export type HistoryEntry =
       kind: "seen";
     }
   | {
-      actor: Actor3;
+      actor: Actor4;
       /**
        * A point in time with an RFC 3339 UTC offset.
        */
@@ -603,6 +890,10 @@ export type HistoryEntry =
        * Identifier of the associated decision.
        */
       decisionId: DecisionId | null;
+      /**
+       * Stable identifier for this record.
+       */
+      id: string;
       kind: "event";
       /**
        * Identifier of the associated lane.
@@ -624,10 +915,28 @@ export type HistoryEntry =
        * Undoable for this record.
        */
       undoable: boolean;
+      /**
+       * Undone for this record.
+       */
+      undone: boolean;
     }
   | {
       kind: "unknown";
     };
+/**
+ * Identifier of a sharing invitation.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "InvitationId".
+ */
+export type InvitationId = string;
+/**
+ * Progress of an invitation.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "InvitationState".
+ */
+export type InvitationState = "pending" | "accepted" | "unknown";
 /**
  * Access kind for the cockpit.
  *
@@ -657,6 +966,33 @@ export type KnownDecisionRule = "inYourName" | "hardToUndo" | "onlyYouKnow" | "i
  */
 export type KnownLabelKind = "question" | "request" | "done" | "decision" | "goalChange";
 /**
+ * Available cockpit modules.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "KnownModuleId".
+ */
+export type KnownModuleId = "gtm" | "dev";
+/**
+ * Destination category for navigation within the cockpit.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "KnownTargetKind".
+ */
+export type KnownTargetKind =
+  | "topic"
+  | "lane"
+  | "decision"
+  | "thread"
+  | "person"
+  | "draft"
+  | "skill"
+  | "pull"
+  | "manager"
+  | "brief"
+  | "drafts"
+  | "skills"
+  | "settings";
+/**
  * Label kind for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -671,26 +1007,12 @@ export type LabelKind = "question" | "request" | "done" | "decision" | "goalChan
  */
 export type MessageId = string;
 /**
- * Identifier of a selectable model.
- *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "ModelId".
- */
-export type ModelId = string;
-/**
  * Availability of an engine in the model picker.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
  * via the `definition` "ModelState".
  */
 export type ModelState = "unknown" | "default" | "connected" | "addKey" | "signIn";
-/**
- * Available cockpit modules.
- *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "ModuleId".
- */
-export type ModuleId = "gtm" | "dev" | "unknown";
 /**
  * Pin kind for the cockpit.
  *
@@ -704,7 +1026,7 @@ export type PinKind = "page" | "topic" | "project" | "skill" | "unknown";
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
  * via the `definition` "PinState".
  */
-export type PinState = "waiting" | "approved" | "stuck" | "unknown";
+export type PinState = "waiting" | "approved" | "declined" | "expired" | "stuck" | "unknown";
 /**
  * Progress of a stage in a topic plan.
  *
@@ -713,12 +1035,19 @@ export type PinState = "waiting" | "approved" | "stuck" | "unknown";
  */
 export type StageState = "done" | "next" | "now" | "wait" | "unknown";
 /**
- * Identifier of a pull request.
+ * Position of a pull request in the review and release flow.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "PullId".
+ * via the `definition` "PullState".
  */
-export type PullId = string;
+export type PullState = "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held" | "unknown";
+/**
+ * Rollout lifecycle for a release decision.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ReleaseStage".
+ */
+export type ReleaseStage = "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack" | "unknown";
 /**
  * Which side of the forecast the chart describes.
  *
@@ -734,12 +1063,39 @@ export type ScenarioKind = "opportunity" | "risk" | "unknown";
  */
 export type SearchKind = "topic" | "lane" | "person" | "decision" | "skill" | "unknown";
 /**
+ * Status of a result, interpreted in the context of its kind.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "SearchState".
+ */
+export type SearchState =
+  | "open"
+  | "approved"
+  | "declined"
+  | "expired"
+  | "new"
+  | "ok"
+  | "warn"
+  | "bad"
+  | "done"
+  | "idle"
+  | "next"
+  | "parked"
+  | "unknown";
+/**
  * Identifier of a runnable skill.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
  * via the `definition` "SkillId".
  */
 export type SkillId = string;
+/**
+ * Access a reader has to one stage.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "StageAccess".
+ */
+export type StageAccess = "work" | "view" | "locked" | "unknown";
 /**
  * Step kind for the cockpit.
  *
@@ -776,19 +1132,26 @@ export type TargetKind =
  */
 export type ThemeId = "ink" | "ember" | "sand" | "moss" | "tide" | "sky" | "iris" | "rose" | "unknown";
 /**
- * Identifier of a conversation.
- *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "ThreadId".
- */
-export type ThreadId = string;
-/**
  * Topic kind for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
  * via the `definition` "TopicKind".
  */
 export type TopicKind = "topic" | "project" | "unknown";
+/**
+ * How close a usage account is to its current limit.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "UsageState".
+ */
+export type UsageState = "ok" | "near" | "limit" | "standingBy" | "unknown";
+/**
+ * Access level applied to a topic view.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ViewerRole".
+ */
+export type ViewerRole = "owner" | "all" | "stages" | "view" | "unknown";
 
 export interface UrnMorndoCockpitApi1 {
   [k: string]: unknown | undefined;
@@ -837,6 +1200,10 @@ export interface AccessPerson {
    * Other topics for this record.
    */
   otherTopics: OtherTopicAccess[];
+  /**
+   * Owner for this record.
+   */
+  owner: boolean;
   person: Actor;
   /**
    * Scope for this record.
@@ -933,9 +1300,17 @@ export interface Actor {
  */
 export interface AccessView {
   /**
+   * Invitations for this record.
+   */
+  invitations: Invitation[];
+  /**
    * People for this record.
    */
   people: AccessPerson[];
+  /**
+   * Status link for this record.
+   */
+  statusLink: StatusLink | null;
   /**
    * Identifier of the associated topic.
    */
@@ -944,6 +1319,46 @@ export interface AccessView {
    * Topic name for this record.
    */
   topicName: string;
+}
+/**
+ * A request to share the topic with someone.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Invitation".
+ */
+export interface Invitation {
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Time associated with invited.
+   */
+  invitedAt: string;
+  /**
+   * Name or email for this record.
+   */
+  nameOrEmail: string;
+  /**
+   * Current state of the record.
+   */
+  state: "pending" | "accepted" | "unknown";
+}
+/**
+ * A link showing status without names, lanes or chat.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "StatusLink".
+ */
+export interface StatusLink {
+  /**
+   * Org only for this record.
+   */
+  orgOnly: boolean;
+  /**
+   * Url for this record.
+   */
+  url: string;
 }
 /**
  * A person or agent, resolved to the record the screens show.
@@ -1053,10 +1468,7 @@ export interface AgentsStrip {
    * Items for this record.
    */
   items: StripItem[];
-  /**
-   * Seen for this record.
-   */
-  seen: string;
+  seen: SeenMarker;
   /**
    * Summary for this record.
    */
@@ -1081,6 +1493,15 @@ export interface StripItem {
    * Text shown to the reader.
    */
   text: string;
+}
+/**
+ * Seen for this record.
+ */
+export interface SeenMarker {
+  /**
+   * Time of the visit.
+   */
+  at: Timestamp | null;
 }
 /**
  * Answer for the cockpit.
@@ -1207,6 +1628,10 @@ export interface Artwork {
    */
   credit: string;
   /**
+   * Glass for this record.
+   */
+  glass: string;
+  /**
    * Index for this record.
    */
   index: number;
@@ -1214,6 +1639,14 @@ export interface Artwork {
    * Manner for this record.
    */
   manner: string;
+  /**
+   * Position for this record.
+   */
+  position: string;
+  /**
+   * Src for this record.
+   */
+  src: string;
   /**
    * Title displayed above the record.
    */
@@ -1231,7 +1664,7 @@ export interface Artwork {
  */
 export interface Ask {
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
   /**
@@ -1294,6 +1727,22 @@ export interface AskedMeta {
    * Source for this record.
    */
   source: string;
+}
+/**
+ * A file or link dropped onto a topic, or attached to a filed lane.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Attachment".
+ */
+export interface Attachment {
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Url for this record.
+   */
+  url: string;
 }
 /**
  * File or link supplied with a new request.
@@ -1387,7 +1836,7 @@ export interface BriefDecision {
    */
   doneNote: string;
   /**
-   * Time an answer or action is due.
+   * A point in time with an RFC 3339 UTC offset.
    */
   dueAt: string;
   /**
@@ -1405,7 +1854,7 @@ export interface BriefDecision {
   /**
    * Current state of the record.
    */
-  state: "open" | "approved" | "declined" | "unknown";
+  state: "open" | "approved" | "declined" | "expired" | "unknown";
   /**
    * Title displayed above the record.
    */
@@ -1474,13 +1923,17 @@ export interface Money2 {
 export interface BriefView {
   artwork: Artwork1;
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
   /**
    * Burns for this record.
    */
   burns: Burn[];
+  /**
+   * Burns sub for this record.
+   */
+  burnsSub: string | null;
   /**
    * Cadence for this record.
    */
@@ -1491,6 +1944,10 @@ export interface BriefView {
   decisions: BriefDecision[];
   drafts: DraftsSummary;
   /**
+   * In works for this record.
+   */
+  inWorks: InWorks | null;
+  /**
    * Lede for this record.
    */
   lede: string;
@@ -1499,7 +1956,7 @@ export interface BriefView {
    */
   minutes: number;
   /**
-   * Time associated with next brief.
+   * A point in time with an RFC 3339 UTC offset.
    */
   nextBriefAt: string;
   /**
@@ -1510,7 +1967,14 @@ export interface BriefView {
    * Overnight for this record.
    */
   overnight: OvernightAction[];
-  spend: SpendLine;
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  overnightSinceAt: string;
+  /**
+   * Spend for this record.
+   */
+  spend: SpendLine | null;
   /**
    * Title displayed above the record.
    */
@@ -1533,6 +1997,10 @@ export interface Artwork1 {
    */
   credit: string;
   /**
+   * Glass for this record.
+   */
+  glass: string;
+  /**
    * Index for this record.
    */
   index: number;
@@ -1540,6 +2008,14 @@ export interface Artwork1 {
    * Manner for this record.
    */
   manner: string;
+  /**
+   * Position for this record.
+   */
+  position: string;
+  /**
+   * Src for this record.
+   */
+  src: string;
   /**
    * Title displayed above the record.
    */
@@ -1557,11 +2033,23 @@ export interface Artwork1 {
  */
 export interface Burn {
   /**
+   * Blocks for this record.
+   */
+  blocks: string | null;
+  /**
    * Explanation shown alongside the summary.
    */
   detail: string;
   /**
-   * Time associated with stuck.
+   * Time an answer or action is due.
+   */
+  dueAt: Timestamp | null;
+  /**
+   * Identifier of a lane.
+   */
+  laneId: string;
+  /**
+   * A point in time with an RFC 3339 UTC offset.
    */
   stuckAt: string;
   target: Target3;
@@ -1623,6 +2111,58 @@ export interface DraftsSummary {
   text: string;
 }
 /**
+ * Pull requests still in progress, grouped by what happens next.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "InWorks".
+ */
+export interface InWorks {
+  /**
+   * Time associated with auto merge.
+   */
+  autoMergeAt: Timestamp | null;
+  /**
+   * Count for this record.
+   */
+  count: number;
+  /**
+   * In review for this record.
+   */
+  inReview: number;
+  /**
+   * Ready for this record.
+   */
+  ready: number;
+  target: Target4;
+}
+/**
+ * An internal link resolved by the client.
+ */
+export interface Target4 {
+  /**
+   * Destination record identifier, or null for a top-level surface.
+   */
+  id: string | null;
+  /**
+   * Surface or record type to open.
+   */
+  kind:
+    | "topic"
+    | "lane"
+    | "decision"
+    | "thread"
+    | "person"
+    | "draft"
+    | "skill"
+    | "pull"
+    | "manager"
+    | "brief"
+    | "drafts"
+    | "skills"
+    | "settings"
+    | "unknown";
+}
+/**
  * Overnight action for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -1630,7 +2170,7 @@ export interface DraftsSummary {
  */
 export interface OvernightAction {
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
   /**
@@ -1654,6 +2194,10 @@ export interface OvernightAction {
    */
   topicName: string;
   /**
+   * Time associated with undo until.
+   */
+  undoUntilAt: Timestamp | null;
+  /**
    * Undoable for this record.
    */
   undoable: boolean;
@@ -1663,7 +2207,10 @@ export interface OvernightAction {
   undone: boolean;
 }
 /**
- * Spend for this record.
+ * Spend line for the cockpit.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "SpendLine".
  */
 export interface SpendLine {
   cap: Money3;
@@ -1710,6 +2257,38 @@ export interface Money5 {
   currency: string;
 }
 /**
+ * Annotation at a category on the chart.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ChartMarker".
+ */
+export interface ChartMarker {
+  /**
+   * Label for this record.
+   */
+  label: string;
+  /**
+   * X for this record.
+   */
+  x: string;
+}
+/**
+ * A point displayed in a decision chart.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ChartPoint".
+ */
+export interface ChartPoint {
+  /**
+   * X for this record.
+   */
+  x: string;
+  /**
+   * Y for this record.
+   */
+  y: number;
+}
+/**
  * Check result for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -1724,6 +2303,35 @@ export interface CheckResult {
    * Passed for this record.
    */
   passed: boolean;
+}
+/**
+ * Context supplied by a composer when sending a message.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "TargetInput".
+ */
+export interface TargetInput {
+  /**
+   * Stable identifier for this record.
+   */
+  id: string | null;
+  /**
+   * Kind for this record.
+   */
+  kind:
+    | "topic"
+    | "lane"
+    | "decision"
+    | "thread"
+    | "person"
+    | "draft"
+    | "skill"
+    | "pull"
+    | "manager"
+    | "brief"
+    | "drafts"
+    | "skills"
+    | "settings";
 }
 /**
  * Partial layout written by `prefs.set`.
@@ -1749,6 +2357,7 @@ export interface LayoutPatch {
  */
 export interface ThemePatch {
   /**
+   * Glass for this record.
    * Glass for this record.
    */
   glass?: number | null;
@@ -1797,6 +2406,10 @@ export interface CommandResult {
    * Ok for this record.
    */
   ok: boolean;
+  /**
+   * Receipt for this record.
+   */
+  receipt: Receipt | null;
 }
 /**
  * Message for this record.
@@ -1807,10 +2420,18 @@ export interface Message {
    */
   actions: MessageAction[];
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
+  /**
+   * Attachment for this record.
+   */
+  attachment: Attachment | null;
   author: Actor2;
+  /**
+   * Identifier of the associated decision.
+   */
+  decisionId: DecisionId | null;
   /**
    * Stable identifier for this record.
    */
@@ -1819,6 +2440,14 @@ export interface Message {
    * Label for this record.
    */
   label: MessageLabel | null;
+  /**
+   * Model for this record.
+   */
+  model: ModelId | null;
+  /**
+   * Page for this record.
+   */
+  page: Target | null;
   /**
    * Read back for this record.
    */
@@ -1840,9 +2469,21 @@ export interface Message {
  */
 export interface MessageAction {
   /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
    * Label for this record.
    */
   label: string;
+  /**
+   * Identifier of a lane.
+   */
+  laneId: string;
+  /**
+   * Identifier of the associated person.
+   */
+  personId: PersonId | null;
 }
 /**
  * Author for this record.
@@ -1912,6 +2553,10 @@ export interface MessageLabel {
    * Kind for this record.
    */
   kind: "question" | "request" | "done" | "decision" | "goalChange" | "unknown";
+  /**
+   * Pinned for this record.
+   */
+  pinned: boolean;
 }
 /**
  * Read back for the cockpit.
@@ -1921,7 +2566,7 @@ export interface MessageLabel {
  */
 export interface ReadBack {
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
   /**
@@ -1969,10 +2614,18 @@ export interface Message1 {
    */
   actions: MessageAction[];
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
+  /**
+   * Attachment for this record.
+   */
+  attachment: Attachment | null;
   author: Actor2;
+  /**
+   * Identifier of the associated decision.
+   */
+  decisionId: DecisionId | null;
   /**
    * Stable identifier for this record.
    */
@@ -1981,6 +2634,14 @@ export interface Message1 {
    * Label for this record.
    */
   label: MessageLabel | null;
+  /**
+   * Model for this record.
+   */
+  model: ModelId | null;
+  /**
+   * Page for this record.
+   */
+  page: Target | null;
   /**
    * Read back for this record.
    */
@@ -1995,6 +2656,84 @@ export interface Message1 {
   threadCard: ThreadCard | null;
 }
 /**
+ * Where the Manager filed a request.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Receipt".
+ */
+export interface Receipt {
+  /**
+   * Chain for this record.
+   */
+  chain: boolean;
+  /**
+   * Filed under for this record.
+   */
+  filedUnder: Target | null;
+  /**
+   * Identifier of a lane.
+   */
+  laneId: string;
+  lead: Actor3;
+  /**
+   * Text shown to the reader.
+   */
+  text: string;
+}
+/**
+ * Lead for this record.
+ */
+export interface Actor3 {
+  /**
+   * Avatar for this record.
+   */
+  avatar: string | null;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Kind for this record.
+   */
+  kind: "person" | "agent" | "unknown";
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Record for this record.
+   */
+  record: string | null;
+  /**
+   * Role for this record.
+   */
+  role: string | null;
+  /**
+   * Short name for this record.
+   */
+  shortName: string;
+  /**
+   * Skill for this record.
+   */
+  skill: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: LaneState | null;
+  /**
+   * Text shown to the reader.
+   */
+  text: string | null;
+  /**
+   * Word for this record.
+   */
+  word: string | null;
+}
+/**
  * Connection for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -2005,6 +2744,10 @@ export interface Connection {
    * Capacity for this record.
    */
   capacity: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
   /**
    * Name shown to the reader.
    */
@@ -2065,7 +2808,7 @@ export interface Deal {
    * Stage for this record.
    */
   stage: string;
-  target: Target4;
+  target: Target5;
   /**
    * Value for this record.
    */
@@ -2079,7 +2822,7 @@ export interface Deal {
  */
 export interface DealAlt {
   /**
-   * Identifier of the associated decision.
+   * Identifier of a decision.
    */
   decisionId: string;
   /**
@@ -2098,7 +2841,7 @@ export interface DealAlt {
 /**
  * An internal link resolved by the client.
  */
-export interface Target4 {
+export interface Target5 {
   /**
    * Destination record identifier, or null for a top-level surface.
    */
@@ -2121,6 +2864,26 @@ export interface Target4 {
     | "skills"
     | "settings"
     | "unknown";
+}
+/**
+ * Position within the decision queue as seen by this reader.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "DecisionPosition".
+ */
+export interface DecisionPosition {
+  /**
+   * Index for this record.
+   */
+  index: number;
+  /**
+   * Of for this record.
+   */
+  of: number;
+  /**
+   * Open for this record.
+   */
+  open: number;
 }
 /**
  * Decision queue view for the cockpit.
@@ -2150,14 +2913,18 @@ export interface DecisionQueueView {
  */
 export interface QueueItem {
   /**
-   * Stable identifier for this record.
+   * Goal change for this record.
+   */
+  goalChange: GoalChange | null;
+  /**
+   * Identifier of a decision.
    */
   id: string;
   /**
    * Current state of the record.
    */
-  state: "open" | "approved" | "declined" | "unknown";
-  target: Target5;
+  state: "open" | "approved" | "declined" | "expired" | "unknown";
+  target: Target6;
   /**
    * Title displayed above the record.
    */
@@ -2168,9 +2935,37 @@ export interface QueueItem {
   topicName: string;
 }
 /**
+ * Proposed change to the numeric goal for a topic.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "GoalChange".
+ */
+export interface GoalChange {
+  /**
+   * Affected topics for this record.
+   */
+  affectedTopics: TopicId[];
+  /**
+   * Field for this record.
+   */
+  field: "target" | "unknown";
+  /**
+   * From for this record.
+   */
+  from: number;
+  /**
+   * To for this record.
+   */
+  to: number;
+  /**
+   * Identifier of a topic or project.
+   */
+  topicId: string;
+}
+/**
  * An internal link resolved by the client.
  */
-export interface Target5 {
+export interface Target6 {
   /**
    * Destination record identifier, or null for a top-level surface.
    */
@@ -2242,6 +3037,10 @@ export interface DecisionView {
    */
   cardContext: string;
   /**
+   * Change request for this record.
+   */
+  changeRequest: string | null;
+  /**
    * Context for this record.
    */
   context: string | null;
@@ -2254,15 +3053,19 @@ export interface DecisionView {
    */
   doneNote: string;
   /**
-   * Time an answer or action is due.
+   * A point in time with an RFC 3339 UTC offset.
    */
   dueAt: string;
+  /**
+   * Goal change for this record.
+   */
+  goalChange: GoalChange | null;
   /**
    * Guardrail for this record.
    */
   guardrail: string | null;
   /**
-   * Stable identifier for this record.
+   * Identifier of a decision.
    */
   id: string;
   /**
@@ -2289,10 +3092,7 @@ export interface DecisionView {
    * Opportunity for this record.
    */
   opportunity: Scenario | null;
-  /**
-   * Position for this record.
-   */
-  position: string;
+  position: DecisionPosition1;
   /**
    * Proof for this record.
    */
@@ -2302,13 +3102,21 @@ export interface DecisionView {
    */
   provenance: Provenance | null;
   /**
+   * Release for this record.
+   */
+  release: Release | null;
+  /**
    * Risk for this record.
    */
   risk: Scenario | null;
   /**
+   * Short title for this record.
+   */
+  shortTitle: string;
+  /**
    * Current state of the record.
    */
-  state: "open" | "approved" | "declined" | "unknown";
+  state: "open" | "approved" | "declined" | "expired" | "unknown";
   /**
    * Suggestion for this record.
    */
@@ -2346,6 +3154,10 @@ export interface NextStep {
    */
   step: string;
   /**
+   * Destination to open in the cockpit.
+   */
+  target: Target | null;
+  /**
    * Who for this record.
    */
   who: string;
@@ -2362,6 +3174,10 @@ export interface Stat {
    */
   label: string;
   /**
+   * Money for this record.
+   */
+  money: Money6 | null;
+  /**
    * Sub for this record.
    */
   sub: string | null;
@@ -2371,12 +3187,36 @@ export interface Stat {
   value: string;
 }
 /**
+ * A currency amount in the currency's minor units.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Money".
+ */
+export interface Money6 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
+}
+/**
  * One possible outcome shown in the decision forecast.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
  * via the `definition` "Scenario".
  */
 export interface Scenario {
+  /**
+   * Axis for this record.
+   */
+  axis: number[];
+  /**
+   * Baseline for this record.
+   */
+  baseline: ChartPoint[];
   /**
    * Condition for this record.
    */
@@ -2394,9 +3234,38 @@ export interface Scenario {
    */
   label: string;
   /**
+   * Marker for this record.
+   */
+  marker: ChartMarker | null;
+  /**
+   * Series for this record.
+   */
+  series: ChartPoint[];
+  /**
    * Summary for this record.
    */
   summary: string;
+  /**
+   * Unit for this record.
+   */
+  unit: string;
+}
+/**
+ * Position for this record.
+ */
+export interface DecisionPosition1 {
+  /**
+   * Index for this record.
+   */
+  index: number;
+  /**
+   * Of for this record.
+   */
+  of: number;
+  /**
+   * Open for this record.
+   */
+  open: number;
 }
 /**
  * Proof for the cockpit.
@@ -2447,6 +3316,38 @@ export interface Provenance {
   writtenBy: string;
 }
 /**
+ * Staged rollout linked to the decision.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Release".
+ */
+export interface Release {
+  /**
+   * Percent for this record.
+   */
+  percent: number;
+  /**
+   * Identifier of a pull request.
+   */
+  pullId: string;
+  /**
+   * Rollback trigger for this record.
+   */
+  rollbackTrigger: string;
+  /**
+   * Stage for this record.
+   */
+  stage: "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack" | "unknown";
+  /**
+   * Time associated with started.
+   */
+  startedAt: Timestamp | null;
+  /**
+   * Watch minutes for this record.
+   */
+  watchMinutes: number;
+}
+/**
  * Draft for the cockpit.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
@@ -2461,6 +3362,14 @@ export interface Draft {
    * Stable identifier for this record.
    */
   id: string;
+  /**
+   * Identifier of the associated lane.
+   */
+  laneId: LaneId | null;
+  /**
+   * Open url for this record.
+   */
+  openUrl: string;
   /**
    * Skill for this record.
    */
@@ -2527,10 +3436,18 @@ export interface Message2 {
    */
   actions: MessageAction[];
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
+  /**
+   * Attachment for this record.
+   */
+  attachment: Attachment | null;
   author: Actor2;
+  /**
+   * Identifier of the associated decision.
+   */
+  decisionId: DecisionId | null;
   /**
    * Stable identifier for this record.
    */
@@ -2539,6 +3456,14 @@ export interface Message2 {
    * Label for this record.
    */
   label: MessageLabel | null;
+  /**
+   * Model for this record.
+   */
+  model: ModelId | null;
+  /**
+   * Page for this record.
+   */
+  page: Target | null;
   /**
    * Read back for this record.
    */
@@ -2619,6 +3544,26 @@ export interface Figure {
    * Value for this record.
    */
   value: string;
+}
+/**
+ * Forecast and its later outcome, for calibration.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Forecast".
+ */
+export interface Forecast {
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  givenAt: string;
+  /**
+   * Outcome for this record.
+   */
+  outcome: string;
+  /**
+   * Word for this record.
+   */
+  word: string;
 }
 /**
  * Funnel for the cockpit.
@@ -2744,6 +3689,10 @@ export interface Goal {
    */
   figures: Figure[];
   /**
+   * Forecast log for this record.
+   */
+  forecastLog: Forecast[];
+  /**
    * Funnel for this record.
    */
   funnel: Funnel | null;
@@ -2828,7 +3777,7 @@ export interface GoalDecision {
   /**
    * Done for this record.
    */
-  done: string;
+  done: string | null;
   /**
    * Identifier of the associated lane.
    */
@@ -2873,6 +3822,10 @@ export interface GuardrailItem {
    * Ratio for this record.
    */
   ratio: number | null;
+  /**
+   * Current state of the record.
+   */
+  state: "held" | "near" | "breached" | "unknown";
   /**
    * Value for this record.
    */
@@ -3026,7 +3979,7 @@ export interface Verdict {
   /**
    * Text shown to the reader.
    */
-  text: string;
+  text: string | null;
   /**
    * Word for this record.
    */
@@ -3063,6 +4016,10 @@ export interface Handover {
    * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
+  /**
+   * Time associated with confirmed.
+   */
+  confirmedAt: Timestamp | null;
   /**
    * Fixed for this record.
    */
@@ -3131,7 +4088,7 @@ export interface HistoryDay {
 /**
  * Actor for this record.
  */
-export interface Actor3 {
+export interface Actor4 {
   /**
    * Avatar for this record.
    */
@@ -3196,7 +4153,7 @@ export interface HistoryPage {
    * Opaque cursor for the following page, or null at the end.
    */
   nextCursor: string | null;
-  seen: SeenMarker;
+  seen: SeenMarker1;
   /**
    * Shown for this record.
    */
@@ -3209,7 +4166,7 @@ export interface HistoryPage {
 /**
  * Seen for this record.
  */
-export interface SeenMarker {
+export interface SeenMarker1 {
   /**
    * Time of the visit.
    */
@@ -3251,9 +4208,21 @@ export interface Job {
  */
 export interface LaneAct {
   /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
    * Label for this record.
    */
   label: string;
+  /**
+   * Identifier of the associated person.
+   */
+  personId: PersonId | null;
+  /**
+   * Destination to open in the cockpit.
+   */
+  target: Target | null;
   /**
    * Tone for this record.
    */
@@ -3292,6 +4261,14 @@ export interface LaneView {
   asked: string;
   askedMeta: AskedMeta1;
   /**
+   * Attachment for this record.
+   */
+  attachment: Attachment | null;
+  /**
+   * Chain for this record.
+   */
+  chain: boolean;
+  /**
    * Checks for this record.
    */
   checks: string[];
@@ -3327,11 +4304,15 @@ export interface LaneView {
    * Identifier of a lane.
    */
   id: string;
-  lead: Actor4;
+  lead: Actor5;
   /**
    * Made for this record.
    */
   made: MadeItem[];
+  /**
+   * Model for this record.
+   */
+  model: ModelId | null;
   /**
    * Next for this record.
    */
@@ -3344,6 +4325,10 @@ export interface LaneView {
    * Recommendation for this record.
    */
   recommendation: string | null;
+  /**
+   * Reminder for this record.
+   */
+  reminder: Reminder | null;
   /**
    * Short for this record.
    */
@@ -3407,7 +4392,7 @@ export interface AskedMeta1 {
  * A person or agent, resolved to the record the screens show.
  * Fields a particular card does not carry are null.
  */
-export interface Actor4 {
+export interface Actor5 {
   /**
    * Avatar for this record.
    */
@@ -3480,6 +4465,22 @@ export interface MadeItem {
    * Title displayed above the record.
    */
   title: string;
+}
+/**
+ * A reminder to the person holding up a lane.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "Reminder".
+ */
+export interface Reminder {
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  at: string;
+  /**
+   * Identifier of an actor, whether a person or an agent.
+   */
+  personId: string;
 }
 /**
  * Standing for this record.
@@ -3570,6 +4571,10 @@ export interface ManagerLane {
    */
   next: string;
   /**
+   * Reason for this record.
+   */
+  reason: string | null;
+  /**
    * Lane state for the cockpit.
    */
   state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked" | "unknown";
@@ -3654,6 +4659,11 @@ export interface SharedResource {
  */
 export interface Meter {
   /**
+   * Cap for this record.
+   */
+  cap: Money6 | null;
+  /**
+   * Value for this record.
    * Note for this record.
    */
   note: string | null;
@@ -3662,13 +4672,13 @@ export interface Meter {
    */
   resetsAt: Timestamp | null;
   /**
+   * Spend for this record.
+   */
+  spend: Money6 | null;
+  /**
    * Used for this record.
    */
   used: number;
-  /**
-   * Value for this record.
-   */
-  value: string;
   /**
    * What for this record.
    */
@@ -3682,7 +4692,7 @@ export interface Meter {
  */
 export interface Model {
   /**
-   * Identifier passed with a command.
+   * Identifier of a selectable model.
    */
   id: string;
   /**
@@ -3746,7 +4756,7 @@ export interface ModuleInfo {
    */
   icon: string;
   /**
-   * Stable identifier for this record.
+   * Available cockpit modules.
    */
   id: "gtm" | "dev" | "unknown";
   /**
@@ -3757,22 +4767,6 @@ export interface ModuleInfo {
    * Name shown to the reader.
    */
   name: string;
-}
-/**
- * A currency amount in the currency's minor units.
- *
- * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "Money".
- */
-export interface Money6 {
-  /**
-   * Amount in cents for currencies with two fractional digits.
-   */
-  amountMinor: number;
-  /**
-   * ISO 4217 alphabetic currency code.
-   */
-  currency: string;
 }
 /**
  * Night stat for the cockpit.
@@ -3864,7 +4858,7 @@ export interface PinnedDecision {
   /**
    * Current state of the record.
    */
-  state: "waiting" | "approved" | "stuck" | "unknown";
+  state: "waiting" | "approved" | "declined" | "expired" | "stuck" | "unknown";
   /**
    * Title displayed above the record.
    */
@@ -4026,13 +5020,29 @@ export interface PullRequest {
    */
   author: string;
   /**
+   * Time associated with auto merge.
+   */
+  autoMergeAt: Timestamp | null;
+  /**
+   * Identifier of the associated decision.
+   */
+  decisionId: DecisionId | null;
+  /**
    * Gates for this record.
    */
   gates: Gate[];
   /**
-   * Stable identifier for this record.
+   * Held for this record.
+   */
+  held: boolean;
+  /**
+   * Identifier of a pull request.
    */
   id: string;
+  /**
+   * Identifier of the associated lane.
+   */
+  laneId: LaneId | null;
   /**
    * Number for this record.
    */
@@ -4049,6 +5059,10 @@ export interface PullRequest {
    * Project name for this record.
    */
   projectName: string;
+  /**
+   * Current state of the record.
+   */
+  state: "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held" | "unknown";
   /**
    * Summary for this record.
    */
@@ -4134,19 +5148,31 @@ export interface SearchResult {
    */
   kind: "topic" | "lane" | "person" | "decision" | "skill" | "unknown";
   /**
+   * Lead for this record.
+   */
+  lead: Actor1 | null;
+  /**
+   * Current state of the record.
+   */
+  state: SearchState | null;
+  /**
    * Sub for this record.
    */
   sub: string | null;
-  target: Target6;
+  target: Target7;
   /**
    * Title displayed above the record.
    */
   title: string;
+  /**
+   * Topics for this record.
+   */
+  topics: TopicId[];
 }
 /**
  * An internal link resolved by the client.
  */
-export interface Target6 {
+export interface Target7 {
   /**
    * Destination record identifier, or null for a top-level surface.
    */
@@ -4204,7 +5230,7 @@ export interface SearchView {
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
  * via the `definition` "SeenMarker".
  */
-export interface SeenMarker1 {
+export interface SeenMarker2 {
   /**
    * Time of the visit.
    */
@@ -4326,6 +5352,10 @@ export interface SidebarGroup {
  */
 export interface SidebarLane {
   /**
+   * Fresh for this record.
+   */
+  fresh: boolean;
+  /**
    * Identifier of a lane.
    */
   id: string;
@@ -4366,6 +5396,10 @@ export interface SidebarView {
    */
   managerLanes: SidebarLane[];
   /**
+   * Pin limit for this record.
+   */
+  pinLimit: number;
+  /**
    * Pinnable for this record.
    */
   pinnable: Pin[];
@@ -4400,10 +5434,16 @@ export interface SinceSummary {
    * Lines for this record.
    */
   lines: string[];
+  seen: SeenMarker3;
+}
+/**
+ * Seen for this record.
+ */
+export interface SeenMarker3 {
   /**
-   * Seen for this record.
+   * Time of the visit.
    */
-  seen: string;
+  at: Timestamp | null;
 }
 /**
  * Skill for the cockpit.
@@ -4413,9 +5453,25 @@ export interface SinceSummary {
  */
 export interface Skill {
   /**
+   * Asks first for this record.
+   */
+  asksFirst: boolean;
+  /**
+   * Built in for this record.
+   */
+  builtIn: boolean;
+  /**
    * Enabled for this record.
    */
   enabled: boolean;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
   /**
    * Name shown to the reader.
    */
@@ -4470,15 +5526,20 @@ export interface SkillsView {
   skills: Skill[];
 }
 /**
- * Spend line for the cockpit.
+ * Aggregated progress in one stage, without names or work records.
  *
  * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
- * via the `definition` "SpendLine".
+ * via the `definition` "StageStatus".
  */
-export interface SpendLine1 {
-  cap: Money3;
-  overnight: Money4;
-  week: Money5;
+export interface StageStatus {
+  /**
+   * Name of the stage.
+   */
+  name: string;
+  /**
+   * Progress from 0 to 100.
+   */
+  percent: number;
 }
 /**
  * Standing for the cockpit.
@@ -4504,9 +5565,21 @@ export interface Standing1 {
  */
 export interface StuckAction {
   /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
    * Label for this record.
    */
   label: string;
+  /**
+   * Identifier of a lane.
+   */
+  laneId: string;
+  /**
+   * Destination to open in the cockpit.
+   */
+  target: Target | null;
   /**
    * Tone for this record.
    */
@@ -4563,6 +5636,10 @@ export interface TaskRow {
    * Lane for this record.
    */
   lane: string;
+  /**
+   * Identifier of the associated lane.
+   */
+  laneId: LaneId | null;
   /**
    * Next for this record.
    */
@@ -4624,7 +5701,7 @@ export interface ThreadView {
    */
   agents: AgentsStrip | null;
   /**
-   * Stable identifier for this record.
+   * Identifier of a conversation.
    */
   id: string;
   /**
@@ -4647,6 +5724,10 @@ export interface ThreadView {
    * Reading for this record.
    */
   reading: string | null;
+  /**
+   * Scope for this record.
+   */
+  scope: string | null;
   /**
    * Since for this record.
    */
@@ -4719,6 +5800,22 @@ export interface TopicMeta {
    * Parts for this record.
    */
   parts: string[];
+}
+/**
+ * Redacted progress shared through an organization-only status link.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "TopicStatusView".
+ */
+export interface TopicStatusView {
+  /**
+   * Topic progress in the current reporting period.
+   */
+  health: Health | null;
+  /**
+   * Stages with their aggregate progress only.
+   */
+  stages: StageStatus[];
 }
 /**
  * Progress, work and conversation context for one topic or project.
@@ -4808,6 +5905,10 @@ export interface TopicView {
    */
   spend: AgentSpend | null;
   /**
+   * Stages for this record.
+   */
+  stages: ViewerStage[];
+  /**
    * Stuck for this record.
    */
   stuck: StuckReport | null;
@@ -4815,10 +5916,68 @@ export interface TopicView {
    * Tasks for this record.
    */
   tasks: TaskRow[];
+  viewer: TopicViewer;
   /**
    * When for this record.
    */
   when: string | null;
+}
+/**
+ * One handover stage and what the current reader can do in it.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "ViewerStage".
+ */
+export interface ViewerStage {
+  /**
+   * Access for this record.
+   */
+  access: "work" | "view" | "locked" | "unknown";
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Run by for this record.
+   */
+  runBy: Actor1 | null;
+}
+/**
+ * Viewer for this record.
+ */
+export interface TopicViewer {
+  /**
+   * Role for this record.
+   */
+  role: "owner" | "all" | "stages" | "view" | "unknown";
+  /**
+   * Shared by for this record.
+   */
+  sharedBy: Actor1 | null;
+  /**
+   * Stages for this record.
+   */
+  stages: string[];
+}
+/**
+ * Effective topic access for the current reader.
+ *
+ * This interface was referenced by `UrnMorndoCockpitApi1`'s JSON-Schema
+ * via the `definition` "TopicViewer".
+ */
+export interface TopicViewer1 {
+  /**
+   * Role for this record.
+   */
+  role: "owner" | "all" | "stages" | "view" | "unknown";
+  /**
+   * Shared by for this record.
+   */
+  sharedBy: Actor1 | null;
+  /**
+   * Stages for this record.
+   */
+  stages: string[];
 }
 /**
  * Trajectory for the cockpit.
@@ -4896,6 +6055,10 @@ export interface Trajectory1 {
  */
 export interface UsageAccount {
   /**
+   * Fails over to for this record.
+   */
+  failsOverTo: string | null;
+  /**
    * Lanes for this record.
    */
   lanes: number;
@@ -4911,6 +6074,10 @@ export interface UsageAccount {
    * Note for this record.
    */
   note: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: "ok" | "near" | "limit" | "standingBy" | "unknown";
 }
 /**
  * Provider usage and capacity for the workspace.
@@ -4954,7 +6121,7 @@ export interface Verdict1 {
   /**
    * Text shown to the reader.
    */
-  text: string;
+  text: string | null;
   /**
    * Word for this record.
    */
@@ -5018,8 +6185,12 @@ export interface WorkspaceView {
    */
   contractVersion: string;
   layout: Layout2;
-  me: Actor5;
+  me: Actor6;
   module: ModuleInfo1;
+  /**
+   * Modules available in the workspace.
+   */
+  modules: ModuleCard[];
   /**
    * IANA time zone used by the workspace.
    */
@@ -5043,7 +6214,7 @@ export interface Layout2 {
  * A person or agent, resolved to the record the screens show.
  * Fields a particular card does not carry are null.
  */
-export interface Actor5 {
+export interface Actor6 {
   /**
    * Avatar for this record.
    */
@@ -5102,7 +6273,7 @@ export interface ModuleInfo1 {
    */
   icon: string;
   /**
-   * Stable identifier for this record.
+   * Available cockpit modules.
    */
   id: "gtm" | "dev" | "unknown";
   /**

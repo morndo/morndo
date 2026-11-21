@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m21",
       "author": {
         "id": "researcher",
         "name": "Researcher",
@@ -30,8 +30,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-10-20T00:00:00+02:00"
+      "at": "2026-10-20T00:00:00+02:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

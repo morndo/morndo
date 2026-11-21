@@ -44,7 +44,10 @@
   "acts": [
     {
       "label": "Approve",
-      "tone": "ink"
+      "tone": "ink",
+      "id": "approve",
+      "personId": null,
+      "target": null
     }
   ],
   "thumbs": [],
@@ -81,5 +84,9 @@
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-13T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

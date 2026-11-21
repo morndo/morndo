@@ -153,6 +153,7 @@ pub struct ThemePatch {
         skip_serializing_if = "Option::is_none",
         deserialize_with = "present_glass"
     )]
+    /// Glass for this record.
     pub glass: Option<Present<i64>>,
 }
 

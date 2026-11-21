@@ -21,8 +21,9 @@
         "kind": "all",
         "stages": []
       },
-      "scope": "Owner",
-      "otherTopics": []
+      "scope": "owner",
+      "otherTopics": [],
+      "owner": true
     },
     {
       "person": {
@@ -51,7 +52,8 @@
           "topicId": "content",
           "access": "view"
         }
-      ]
+      ],
+      "owner": false
     },
     {
       "person": {
@@ -75,7 +77,8 @@
         ]
       },
       "scope": "Offers",
-      "otherTopics": []
+      "otherTopics": [],
+      "owner": false
     },
     {
       "person": {
@@ -96,7 +99,7 @@
         "kind": "view",
         "stages": []
       },
-      "scope": "Status only",
+      "scope": "status only",
       "otherTopics": [
         {
           "topicId": "content",
@@ -110,7 +113,10 @@
           "topicId": "paid",
           "access": "view"
         }
-      ]
+      ],
+      "owner": false
     }
-  ]
+  ],
+  "invitations": [],
+  "statusLink": null
 }

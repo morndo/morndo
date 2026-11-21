@@ -96,7 +96,7 @@ pub struct Verdict {
     /// Action for this record.
     pub action: String,
     /// Text shown to the reader.
-    pub text: String,
+    pub text: Present<String>,
 }
 
 /// Series point for the cockpit.
@@ -203,6 +203,8 @@ pub struct Deal {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardrailItem {
+    /// Current state of the record.
+    pub state: GuardrailState,
     /// What for this record.
     pub what: String,
     /// Value for this record.
@@ -310,7 +312,7 @@ pub struct GoalDecision {
     /// Explanation shown alongside the summary.
     pub detail: String,
     /// Done for this record.
-    pub done: String,
+    pub done: Present<String>,
     /// Why for this record.
     pub why: Present<String>,
     /// Identifier of the associated decision.
@@ -325,6 +327,8 @@ pub struct GoalDecision {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Goal {
+    /// Forecast log for this record.
+    pub forecast_log: Vec<Forecast>,
     /// Destination to open in the cockpit.
     pub target: i64,
     /// Signed for this record.
@@ -476,11 +480,16 @@ pub struct Plan {
     rename_all = "camelCase",
     rename_all_fields = "camelCase"
 )]
+/// History entry for the cockpit.
 pub enum HistoryEntry {
     #[serde(rename = "seen")]
     Seen,
     #[serde(rename = "event")]
     Event {
+        /// Stable identifier for this record.
+        id: crate::ActionId,
+        /// Undone for this record.
+        undone: bool,
         /// Time the record was created or observed.
         at: Timestamp,
         /// Actor for this record.
@@ -598,6 +607,12 @@ pub struct FailingTest {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StuckAction {
+    /// Stable identifier for this record.
+    pub id: crate::ActionId,
+    /// Identifier of the associated lane.
+    pub lane_id: LaneId,
+    /// Destination to open in the cockpit.
+    pub target: Present<Target>,
     /// Label for this record.
     pub label: String,
     /// Tone for this record.
@@ -630,6 +645,8 @@ pub struct StuckReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskRow {
+    /// Identifier of the associated lane.
+    pub lane_id: Present<LaneId>,
     /// Task for this record.
     pub task: String,
     /// Lane for this record.
@@ -648,6 +665,10 @@ pub struct TaskRow {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicView {
+    /// Viewer for this record.
+    pub viewer: crate::access::TopicViewer,
+    /// Stages for this record.
+    pub stages: Vec<crate::access::ViewerStage>,
     /// Stable identifier for this record.
     pub id: TopicId,
     /// Name shown to the reader.
@@ -713,4 +734,27 @@ pub enum StageState {
     Wait,
     #[serde(other)]
     Unknown,
+}
+
+/// Evaluation of a guardrail at the current reading.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum GuardrailState {
+    Held,
+    Near,
+    Breached,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Forecast and its later outcome, for calibration.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Forecast {
+    /// Word for this record.
+    pub word: String,
+    /// Time associated with given.
+    pub given_at: Timestamp,
+    /// Outcome for this record.
+    pub outcome: String,
 }

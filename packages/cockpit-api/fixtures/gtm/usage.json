@@ -8,18 +8,22 @@
         {
           "what": "5 hours",
           "used": 0.86,
-          "value": "86%",
           "note": null,
-          "resetsAt": "2026-11-16T14:20:00+01:00"
+          "resetsAt": "2026-11-16T14:20:00+01:00",
+          "spend": null,
+          "cap": null
         },
         {
           "what": "Week",
           "used": 0.41,
-          "value": "41%",
           "note": null,
-          "resetsAt": "2026-11-16T17:00:00+01:00"
+          "resetsAt": "2026-11-16T17:00:00+01:00",
+          "spend": null,
+          "cap": null
         }
-      ]
+      ],
+      "state": "near",
+      "failsOverTo": "Anthropic API"
     },
     {
       "name": "ChatGPT Pro · Codex",
@@ -29,18 +33,22 @@
         {
           "what": "5 hours",
           "used": 0.18,
-          "value": "18%",
           "note": null,
-          "resetsAt": "2026-11-16T12:05:00+01:00"
+          "resetsAt": "2026-11-16T12:05:00+01:00",
+          "spend": null,
+          "cap": null
         },
         {
           "what": "Week",
           "used": 0.33,
-          "value": "33%",
           "note": null,
-          "resetsAt": "2026-11-19T17:00:00+01:00"
+          "resetsAt": "2026-11-19T17:00:00+01:00",
+          "spend": null,
+          "cap": null
         }
-      ]
+      ],
+      "state": "ok",
+      "failsOverTo": null
     },
     {
       "name": "Cursor Pro",
@@ -50,11 +58,14 @@
         {
           "what": "Requests this month",
           "used": 0.62,
-          "value": "312 of 500",
           "note": null,
-          "resetsAt": "2026-12-01T17:00:00+01:00"
+          "resetsAt": "2026-12-01T17:00:00+01:00",
+          "spend": null,
+          "cap": null
         }
-      ]
+      ],
+      "state": "ok",
+      "failsOverTo": null
     }
   ],
   "keys": [
@@ -66,11 +77,20 @@
         {
           "what": "This month",
           "used": 0.64,
-          "value": "€96 of €150",
           "note": null,
-          "resetsAt": null
+          "resetsAt": null,
+          "spend": {
+            "amountMinor": 9600,
+            "currency": "EUR"
+          },
+          "cap": {
+            "amountMinor": 15000,
+            "currency": "EUR"
+          }
         }
-      ]
+      ],
+      "state": "standingBy",
+      "failsOverTo": null
     },
     {
       "name": "OpenAI API",
@@ -80,11 +100,20 @@
         {
           "what": "This month",
           "used": 0.71,
-          "value": "€212 of €300",
           "note": "GPT agents and GPT Image",
-          "resetsAt": null
+          "resetsAt": null,
+          "spend": {
+            "amountMinor": 21200,
+            "currency": "EUR"
+          },
+          "cap": {
+            "amountMinor": 30000,
+            "currency": "EUR"
+          }
         }
-      ]
+      ],
+      "state": "ok",
+      "failsOverTo": null
     }
   ],
   "missing": [

@@ -1,11 +1,13 @@
 {
   "id": "topic:outbound",
-  "title": "Outbound",
+  "title": "Outbound chat",
   "sub": "Mara, Jonas and 3 agents · the Manager reads it, it is not in it",
   "placeholder": "Message Outbound · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
       "Agents: 5 updates, the latest: Prospector answered why fintech ops: they close fastest, 41 of 212 won deals in 19 days."
     ]
@@ -19,7 +21,9 @@
     "approveLabel": "Start sequence B"
   },
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 5,
     "summary": "Agents · 5 updates since yesterday at 18:20, nothing needs you",
     "items": [
@@ -53,7 +57,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m40",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -73,10 +77,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:05:00+01:00"
+      "at": "2026-11-16T08:05:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m41",
       "author": {
         "id": "replies",
         "name": "Replies",
@@ -96,10 +104,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:40:00+01:00"
+      "at": "2026-11-16T08:40:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m42",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -119,10 +131,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m4",
+      "id": "m43",
       "author": {
         "id": "prospector",
         "name": "Prospector",
@@ -142,8 +158,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:52:00+01:00"
+      "at": "2026-11-16T08:52:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

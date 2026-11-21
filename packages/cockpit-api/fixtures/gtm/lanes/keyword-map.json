@@ -82,11 +82,18 @@
       "icon": "file",
       "title": "Keyword map",
       "detail": "5 pages, 410 to 1,300 searches a month each",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "keyword-map"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-02T00:00:00+01:00",
-  "closedAt": "2026-11-04T00:00:00+01:00"
+  "closedAt": "2026-11-04T00:00:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

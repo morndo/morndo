@@ -98,6 +98,7 @@ fn export() -> Value {
         CommandResult,
         Event,
         FeedEvent,
+        cockpit_api::access::TopicStatusView,
         ApiError,
     );
     let defs = generator.take_definitions(true);

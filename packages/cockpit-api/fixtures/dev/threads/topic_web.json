@@ -1,6 +1,6 @@
 {
   "id": "topic:web",
-  "title": "Web app",
+  "title": "Web app chat",
   "sub": "You, Builder, Reviewer and QA. Nothing else lives here.",
   "placeholder": "Message Web app",
   "reading": null,
@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m11",
       "author": {
         "id": "builder",
         "name": "Builder",
@@ -30,10 +30,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T07:20:00+01:00"
+      "at": "2026-11-16T07:20:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m12",
       "author": {
         "id": "qa",
         "name": "QA",
@@ -53,10 +57,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T07:21:00+01:00"
+      "at": "2026-11-16T07:21:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m13",
       "author": {
         "id": "timo-varga",
         "name": "Timo Varga",
@@ -76,10 +84,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m4",
+      "id": "m14",
       "author": {
         "id": "builder",
         "name": "Builder",
@@ -100,14 +112,25 @@
       "readBack": null,
       "actions": [
         {
-          "label": "Pin it"
+          "label": "Pin it",
+          "id": "pin-it",
+          "laneId": "red-main",
+          "personId": null
         },
         {
-          "label": "One more try"
+          "label": "One more try",
+          "id": "one-more-try",
+          "laneId": "red-main",
+          "personId": null
         }
       ],
-      "at": "2026-11-16T07:26:00+01:00"
+      "at": "2026-11-16T07:26:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

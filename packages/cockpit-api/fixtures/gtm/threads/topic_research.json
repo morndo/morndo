@@ -1,19 +1,23 @@
 {
   "id": "topic:research",
-  "title": "Research",
+  "title": "Research chat",
   "sub": "1 agent · the Manager reads it, it is not in it",
   "placeholder": "Message Research · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
-      "Mara ran /icp-refresh from your pins.",
+      "You ran /icp-refresh from your pins.",
       "Agents: 2 updates, the latest: Researcher saved the rebuilt customer profile to memory; the Manager checked it against Supabase."
     ]
   },
   "pinned": null,
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 2,
     "summary": "Agents · 2 updates since yesterday at 18:20, nothing needs you",
     "items": [
@@ -35,7 +39,7 @@
   ],
   "messages": [
     {
-      "id": "m1",
+      "id": "m52",
       "author": {
         "id": "researcher",
         "name": "Researcher",
@@ -55,8 +59,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T07:10:00+01:00"
+      "at": "2026-11-16T07:10:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

@@ -82,17 +82,27 @@
       "icon": "file",
       "title": "Customer profile",
       "detail": "4 segments, fintech ops first",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "customer-profile"
+      }
     },
     {
       "icon": "file",
       "title": "What changed",
       "detail": "Fintech ops moved up, retail moved down",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "customer-profile"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-16T06:30:00+01:00",
-  "closedAt": "2026-11-16T07:10:00+01:00"
+  "closedAt": "2026-11-16T07:10:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

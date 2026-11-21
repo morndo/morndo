@@ -1,13 +1,15 @@
 {
   "id": "topic:paid",
-  "title": "Paid",
+  "title": "Paid chat",
   "sub": "Mara and 3 agents · the Manager reads it, it is not in it",
   "placeholder": "Message Paid · its manager sorts it",
   "reading": null,
   "since": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "lines": [
-      "Agents: 5 updates, the latest: Paid switched off 3 ads below the click floor of 0.6%; they cost €140 last week and brought no lead."
+      "Agents: 5 updates, the latest: Paid buyer switched off 3 ads below the click floor of 0.6%; they cost €140 last week and brought no lead."
     ]
   },
   "pinned": {
@@ -19,7 +21,9 @@
     "approveLabel": "Approve the shift"
   },
   "agents": {
-    "seen": "yesterday at 18:20",
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
     "count": 5,
     "summary": "Agents · 5 updates since yesterday at 18:20, nothing needs you",
     "items": [
@@ -53,7 +57,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m44",
       "author": {
         "id": "paid-buyer",
         "name": "Paid buyer",
@@ -73,10 +77,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:30:00+01:00"
+      "at": "2026-11-16T08:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m45",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -96,10 +104,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m46",
       "author": {
         "id": "paid-buyer",
         "name": "Paid buyer",
@@ -119,8 +131,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T09:02:00+01:00"
+      "at": "2026-11-16T09:02:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

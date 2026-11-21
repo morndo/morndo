@@ -57,6 +57,12 @@ pub struct Standing {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LaneAct {
+    /// Stable identifier for this record.
+    pub id: crate::ActionId,
+    /// Identifier of the associated person.
+    pub person_id: Present<crate::PersonId>,
+    /// Destination to open in the cockpit.
+    pub target: Present<Target>,
     /// Label for this record.
     pub label: String,
     /// Tone for this record.
@@ -105,6 +111,8 @@ pub struct MadeItem {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Handover {
+    /// Time associated with confirmed.
+    pub confirmed_at: Present<Timestamp>,
     /// Time the record was created or observed.
     pub at: Timestamp,
     /// Matched for this record.
@@ -130,6 +138,14 @@ pub struct Handover {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LaneView {
+    /// Attachment for this record.
+    pub attachment: Present<crate::Attachment>,
+    /// Model for this record.
+    pub model: Present<crate::ModelId>,
+    /// Chain for this record.
+    pub chain: bool,
+    /// Reminder for this record.
+    pub reminder: Present<Reminder>,
     /// Stable identifier for this record.
     pub id: LaneId,
     /// Identifier of the associated topic.
@@ -206,4 +222,14 @@ pub enum ActionTone {
     Quiet,
     #[serde(other)]
     Unknown,
+}
+
+/// A reminder to the person holding up a lane.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Reminder {
+    /// Identifier of the associated person.
+    pub person_id: crate::PersonId,
+    /// Time the record was created or observed.
+    pub at: Timestamp,
 }

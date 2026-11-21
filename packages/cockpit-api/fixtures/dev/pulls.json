@@ -38,7 +38,12 @@
         "kind": "decision",
         "id": "d1"
       },
-      "openedAt": "2026-11-15T17:20:00+01:00"
+      "openedAt": "2026-11-15T17:20:00+01:00",
+      "state": "ready",
+      "decisionId": "d1",
+      "laneId": "export-for-big-accounts",
+      "held": false,
+      "autoMergeAt": null
     },
     {
       "id": "96",
@@ -72,8 +77,16 @@
       ],
       "verdict": "Ready, the migration waits for you",
       "url": "https://code.example.test/pulls/96",
-      "target": null,
-      "openedAt": "2026-11-13T00:00:00+01:00"
+      "target": {
+        "kind": "decision",
+        "id": "d2"
+      },
+      "openedAt": "2026-11-13T00:00:00+01:00",
+      "state": "ready",
+      "decisionId": "d2",
+      "laneId": "tax-rates",
+      "held": false,
+      "autoMergeAt": null
     },
     {
       "id": "731",
@@ -111,7 +124,12 @@
         "kind": "topic",
         "id": "web"
       },
-      "openedAt": "2026-11-14T00:00:00+01:00"
+      "openedAt": "2026-11-14T00:00:00+01:00",
+      "state": "blocked",
+      "decisionId": null,
+      "laneId": "shipment-filters",
+      "held": false,
+      "autoMergeAt": null
     },
     {
       "id": "58",
@@ -146,7 +164,12 @@
       "verdict": "In review",
       "url": "https://code.example.test/pulls/58",
       "target": null,
-      "openedAt": "2026-11-16T06:10:00+01:00"
+      "openedAt": "2026-11-16T06:10:00+01:00",
+      "state": "inReview",
+      "decisionId": null,
+      "laneId": "keep-scans",
+      "held": false,
+      "autoMergeAt": null
     },
     {
       "id": "413",
@@ -176,7 +199,12 @@
       "verdict": "Merges by itself at 09:00, docs only",
       "url": "https://code.example.test/pulls/413",
       "target": null,
-      "openedAt": "2026-11-16T06:55:00+01:00"
+      "openedAt": "2026-11-16T06:55:00+01:00",
+      "state": "autoMerge",
+      "decisionId": null,
+      "laneId": "export-limits-docs",
+      "held": false,
+      "autoMergeAt": "2026-11-16T09:00:00+01:00"
     }
   ]
 }

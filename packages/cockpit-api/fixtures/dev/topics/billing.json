@@ -48,5 +48,11 @@
   ],
   "spend": null,
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": []
 }

@@ -137,15 +137,27 @@
     "actions": [
       {
         "label": "Pin the old session library",
-        "tone": "ink"
+        "tone": "ink",
+        "id": "pin-the-old-session-library",
+        "laneId": "red-main",
+        "target": null
       },
       {
         "label": "Allow one more try",
-        "tone": "quiet"
+        "tone": "quiet",
+        "id": "allow-one-more-try",
+        "laneId": "red-main",
+        "target": null
       },
       {
         "label": "Open the run",
-        "tone": "quiet"
+        "tone": "quiet",
+        "id": "open-the-run",
+        "laneId": "red-main",
+        "target": {
+          "kind": "thread",
+          "id": "lane:red-main"
+        }
       }
     ],
     "note": "Pinning takes about 3 minutes and turns main green"
@@ -157,7 +169,8 @@
       "state": "bad",
       "stateWord": "Stuck",
       "next": "Now, needs your call",
-      "reason": null
+      "reason": null,
+      "laneId": null
     },
     {
       "task": "New sign-in",
@@ -165,7 +178,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "next": "After your pick",
-      "reason": null
+      "reason": null,
+      "laneId": null
     },
     {
       "task": "Shipment filters",
@@ -173,7 +187,8 @@
       "state": "ok",
       "stateWord": "Working",
       "next": "Today, 11:30",
-      "reason": null
+      "reason": null,
+      "laneId": null
     },
     {
       "task": "Upgrade to Node 24",
@@ -181,7 +196,8 @@
       "state": "parked",
       "stateWord": "Parked",
       "next": "Thu 19 Nov",
-      "reason": "Parked: the session library supports Node 24 from Thursday's release."
+      "reason": "Parked: the session library supports Node 24 from Thursday's release.",
+      "laneId": null
     },
     {
       "task": "Dependency updates",
@@ -189,7 +205,14 @@
       "state": "done",
       "stateWord": "Done",
       "next": "Merged today, 03:05",
-      "reason": null
+      "reason": null,
+      "laneId": null
     }
-  ]
+  ],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": []
 }

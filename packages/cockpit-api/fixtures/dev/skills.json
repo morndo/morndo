@@ -7,63 +7,99 @@
       "summary": "Fix a bug: first a test that fails, then the fix.",
       "topics": "All projects",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "fix-with-proof",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/build-feature",
       "summary": "Build from a short spec, in small reviewed steps.",
       "topics": "All projects",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "build-feature",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/review",
       "summary": "A fresh reviewer reads a change and lists what is wrong.",
       "topics": "All projects · Codex",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "review",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/qa-by-hand",
       "summary": "Click through a change in a real browser, with screenshots.",
       "topics": "Web app, Mobile · Cursor",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "qa-by-hand",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/release",
       "summary": "Roll out in steps, watch it, and roll back if it goes wrong.",
       "topics": "Asks first",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "release",
+      "engine": "Auto",
+      "asksFirst": true,
+      "builtIn": true
     },
     {
       "name": "/red-main",
       "summary": "Find why main is red and fix it, or say what stops it.",
       "topics": "All projects",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "red-main",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/upgrade",
       "summary": "Update dependencies one at a time, with tests after each.",
       "topics": "All projects",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "upgrade",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     },
     {
       "name": "/what-broke",
       "summary": "Read production errors and say what broke and since when.",
       "topics": "All projects",
       "needsKey": "Sentry",
-      "enabled": false
+      "enabled": false,
+      "id": "what-broke",
+      "engine": "Sentry",
+      "asksFirst": true,
+      "builtIn": true
     },
     {
       "name": "/decision-brief",
       "summary": "Put an open question into your decision format.",
       "topics": "All projects",
       "needsKey": null,
-      "enabled": true
+      "enabled": true,
+      "id": "decision-brief",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
     }
   ],
   "connections": [
@@ -71,37 +107,43 @@
       "name": "GitHub",
       "purpose": "Code, pull requests and checks",
       "state": "connected",
-      "capacity": null
+      "capacity": null,
+      "id": "github"
     },
     {
       "name": "Claude Code",
       "purpose": "Agent, builds and fixes",
       "state": "signedIn",
-      "capacity": null
+      "capacity": null,
+      "id": "claude-code"
     },
     {
       "name": "Codex",
       "purpose": "Agent, does the fresh reviews",
       "state": "signedIn",
-      "capacity": null
+      "capacity": null,
+      "id": "codex"
     },
     {
       "name": "Cursor",
       "purpose": "Agent, does QA in the browser",
       "state": "signedIn",
-      "capacity": null
+      "capacity": null,
+      "id": "cursor"
     },
     {
       "name": "Your server",
       "purpose": "Lanes run here",
       "state": "connected",
-      "capacity": "3 of 8 busy"
+      "capacity": "3 of 8 busy",
+      "id": "your-server"
     },
     {
       "name": "Sentry",
       "purpose": "Errors from production",
       "state": "addKey",
-      "capacity": null
+      "capacity": null,
+      "id": "sentry"
     }
   ],
   "connected": 5,
@@ -132,5 +174,5 @@
       "on": true
     }
   ],
-  "rulesNote": null
+  "rulesNote": "On from the start. Agents cannot change them. You can."
 }

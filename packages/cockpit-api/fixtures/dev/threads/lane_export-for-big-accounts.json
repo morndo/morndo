@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m4",
       "author": {
         "id": "builder",
         "name": "Builder",
@@ -30,10 +30,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-13T11:40:00+01:00"
+      "at": "2026-11-13T11:40:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m5",
       "author": {
         "id": "qa",
         "name": "QA",
@@ -53,10 +57,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-15T18:05:00+01:00"
+      "at": "2026-11-15T18:05:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m6",
       "author": {
         "id": "timo-varga",
         "name": "Timo Varga",
@@ -76,10 +84,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m4",
+      "id": "m7",
       "author": {
         "id": "release",
         "name": "Release",
@@ -99,8 +111,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T07:12:00+01:00"
+      "at": "2026-11-16T07:12:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

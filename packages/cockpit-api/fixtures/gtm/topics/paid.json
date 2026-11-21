@@ -28,10 +28,10 @@
       "state": "warn",
       "word": "Over cost",
       "action": "Decide by 14:00",
-      "text": "The count is on plan; the cost is not. Search brings a lead for €80, LinkedIn for €200."
+      "text": null
     },
     "insight": "The count is on plan; the cost is not. Search brings a lead for €80, LinkedIn for €200.",
-    "asOf": "updated 07:05, forecast unchanged since Friday · agents €9 of €30 this week",
+    "asOf": "updated 07:05, forecast unchanged since Friday",
     "decision": {
       "title": "Move €1,200 a week to Search",
       "detail": "Due today, 14:00 · a lead costs more than its guardrail",
@@ -309,25 +309,29 @@
           "what": "Cost per lead",
           "value": "€114",
           "limit": "limit €100",
-          "ratio": 1.14
+          "ratio": 1.14,
+          "state": "breached"
         },
         {
           "what": "Weekly spend",
           "value": "€3,640",
           "limit": "limit €4,000",
-          "ratio": 0.91
+          "ratio": 0.91,
+          "state": "near"
         },
         {
           "what": "Changes over €500 without you",
           "value": "0",
           "limit": "none allowed",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         },
         {
           "what": "Customer data in ads",
           "value": "none",
           "limit": "never",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -437,7 +441,8 @@
         "label": "Still missing"
       }
     ],
-    "pathTitle": null
+    "pathTitle": null,
+    "forecastLog": []
   },
   "noGoal": null,
   "facts": [
@@ -498,7 +503,9 @@
               "Search · Freight software, broad · 0.52%"
             ],
             "decisionId": null,
-            "at": "2026-11-16T08:30:00+01:00"
+            "at": "2026-11-16T08:30:00+01:00",
+            "id": "paid-history-1",
+            "undone": false
           },
           {
             "kind": "event",
@@ -524,7 +531,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:10:00+01:00"
+            "at": "2026-11-16T08:10:00+01:00",
+            "id": "paid-history-2",
+            "undone": false
           },
           {
             "kind": "event",
@@ -550,7 +559,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:20:00+01:00"
+            "at": "2026-11-16T07:20:00+01:00",
+            "id": "paid-history-3",
+            "undone": false
           },
           {
             "kind": "event",
@@ -576,7 +587,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T07:05:00+01:00"
+            "at": "2026-11-16T07:05:00+01:00",
+            "id": "paid-history-4",
+            "undone": false
           }
         ]
       },
@@ -607,7 +620,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T18:30:00+01:00"
+            "at": "2026-11-15T18:30:00+01:00",
+            "id": "paid-history-5",
+            "undone": false
           },
           {
             "kind": "seen"
@@ -641,7 +656,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-14T10:15:00+01:00"
+            "at": "2026-11-14T10:15:00+01:00",
+            "id": "paid-history-6",
+            "undone": false
           }
         ]
       },
@@ -672,7 +689,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T10:20:00+01:00"
+            "at": "2026-11-13T10:20:00+01:00",
+            "id": "paid-history-7",
+            "undone": false
           },
           {
             "kind": "event",
@@ -698,7 +717,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T09:00:00+01:00"
+            "at": "2026-11-13T09:00:00+01:00",
+            "id": "paid-history-8",
+            "undone": false
           }
         ]
       }
@@ -838,5 +859,11 @@
     }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": []
 }

@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m28",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -30,10 +30,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-13T17:10:00+01:00"
+      "at": "2026-11-13T17:10:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m29",
       "author": {
         "id": "mara-lind",
         "name": "Mara Lind",
@@ -53,10 +57,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:45:00+01:00"
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m3",
+      "id": "m30",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -76,8 +84,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-13T17:14:00+01:00"
+      "at": "2026-11-13T17:14:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

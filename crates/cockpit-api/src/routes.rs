@@ -63,6 +63,17 @@ pub const ROUTES: &[Route] = &[
         Artwork,
         query("index", json!({"type": "integer", "minimum": 1}))
     ),
+    read!(
+        "/brief/artwork/{index}/{variant}",
+        Artwork,
+        parameter("index", "path", json!({"type": "integer", "minimum": 1})),
+        parameter(
+            "variant",
+            "path",
+            json!({"type": "string", "enum": ["image", "glass"]})
+        )
+    ),
+    read!("/topics/{id}/status", TopicStatusView, id("TopicId")),
     read!("/decisions", DecisionQueueView),
     read!("/decisions/{id}", DecisionView, id("DecisionId")),
     read!("/topics/{id}", TopicView, id("TopicId")),
@@ -141,6 +152,12 @@ pub fn openapi_paths() -> Value {
         if feed {
             responses["101"] = json!({
                 "description": "Upgraded to a WebSocket carrying sequenced cockpit events.",
+                "headers": response_headers(false)
+            });
+        } else if route.path == "/brief/artwork/{index}/{variant}" {
+            responses["200"] = json!({
+                "description": "Brief artwork image",
+                "content": {"image/webp": {}},
                 "headers": response_headers(false)
             });
         } else {

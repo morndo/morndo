@@ -23,6 +23,8 @@ pub enum LabelKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageLabel {
+    /// Pinned for this record.
+    pub pinned: bool,
     /// Kind for this record.
     pub kind: LabelKind,
     /// Corrected for this record.
@@ -59,6 +61,12 @@ pub struct ReadBack {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MessageAction {
+    /// Stable identifier for this record.
+    pub id: crate::ActionId,
+    /// Identifier of the associated lane.
+    pub lane_id: crate::LaneId,
+    /// Identifier of the associated person.
+    pub person_id: Present<crate::PersonId>,
     /// Label for this record.
     pub label: String,
 }
@@ -67,6 +75,14 @@ pub struct MessageAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Message {
+    /// Identifier of the associated decision.
+    pub decision_id: Present<DecisionId>,
+    /// Attachment for this record.
+    pub attachment: Present<crate::Attachment>,
+    /// Model for this record.
+    pub model: Present<crate::ModelId>,
+    /// Page for this record.
+    pub page: Present<crate::Target>,
     /// Stable identifier for this record.
     pub id: MessageId,
     /// Author for this record.
@@ -90,7 +106,7 @@ pub struct Message {
 #[serde(rename_all = "camelCase")]
 pub struct SinceSummary {
     /// Seen for this record.
-    pub seen: String,
+    pub seen: crate::topic::SeenMarker,
     /// Lines for this record.
     pub lines: Vec<String>,
 }
@@ -101,6 +117,8 @@ pub struct SinceSummary {
 pub enum PinState {
     Waiting,
     Approved,
+    Declined,
+    Expired,
     Stuck,
     #[serde(other)]
     Unknown,
@@ -141,7 +159,7 @@ pub struct StripItem {
 #[serde(rename_all = "camelCase")]
 pub struct AgentsStrip {
     /// Seen for this record.
-    pub seen: String,
+    pub seen: crate::topic::SeenMarker,
     /// Count for this record.
     pub count: i64,
     /// Summary for this record.
@@ -154,6 +172,8 @@ pub struct AgentsStrip {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ThreadView {
+    /// Scope for this record.
+    pub scope: Present<String>,
     /// Stable identifier for this record.
     pub id: ThreadId,
     /// Title displayed above the record.

@@ -10,6 +10,12 @@ use crate::present::Present;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Artwork {
+    /// Src for this record.
+    pub src: String,
+    /// Glass for this record.
+    pub glass: String,
+    /// Position for this record.
+    pub position: String,
     /// Index for this record.
     pub index: i64,
     /// Total for this record.
@@ -86,6 +92,12 @@ pub struct BriefDecision {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Burn {
+    /// Identifier of the associated lane.
+    pub lane_id: crate::LaneId,
+    /// Blocks for this record.
+    pub blocks: Present<String>,
+    /// Time an answer or action is due.
+    pub due_at: Present<Timestamp>,
     /// Identifier of the associated topic.
     pub topic_id: TopicId,
     /// Topic name for this record.
@@ -104,6 +116,8 @@ pub struct Burn {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct OvernightAction {
+    /// Time associated with undo until.
+    pub undo_until_at: Present<Timestamp>,
     /// Stable identifier for this record.
     pub id: ActionId,
     /// Identifier of the associated topic.
@@ -138,6 +152,12 @@ pub struct DraftsSummary {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BriefView {
+    /// In works for this record.
+    pub in_works: Present<InWorks>,
+    /// Time associated with overnight since.
+    pub overnight_since_at: Timestamp,
+    /// Burns sub for this record.
+    pub burns_sub: Present<String>,
     /// Time the record was created or observed.
     pub at: Timestamp,
     /// Title displayed above the record.
@@ -149,7 +169,7 @@ pub struct BriefView {
     /// Cadence for this record.
     pub cadence: String,
     /// Spend for this record.
-    pub spend: SpendLine,
+    pub spend: Present<SpendLine>,
     /// Topics for this record.
     pub topics: Vec<BriefTopic>,
     /// Decisions for this record.
@@ -166,4 +186,20 @@ pub struct BriefView {
     pub drafts: DraftsSummary,
     /// Artwork for this record.
     pub artwork: Artwork,
+}
+
+/// Pull requests still in progress, grouped by what happens next.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct InWorks {
+    /// Count for this record.
+    pub count: i64,
+    /// Ready for this record.
+    pub ready: i64,
+    /// In review for this record.
+    pub in_review: i64,
+    /// Time associated with auto merge.
+    pub auto_merge_at: Present<Timestamp>,
+    /// Destination to open in the cockpit.
+    pub target: Target,
 }

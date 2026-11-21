@@ -15,28 +15,32 @@
           "title": "Red main",
           "state": "bad",
           "stateWord": "Stuck",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         },
         {
           "id": "new-sign-in",
           "title": "New sign-in",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         },
         {
           "id": "shipment-filters",
           "title": "Shipment filters",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Reviewer"
+          "leadName": "Reviewer",
+          "fresh": false
         },
         {
           "id": "upgrade-node-24",
           "title": "Upgrade to Node 24",
           "state": "parked",
           "stateWord": "Parked until Thu",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -54,14 +58,16 @@
           "title": "Export for big accounts",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Release"
+          "leadName": "Release",
+          "fresh": false
         },
         {
           "id": "export-limits-docs",
           "title": "Export limits in the docs",
           "state": "next",
           "stateWord": "Merges by itself at 09:00",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -79,7 +85,8 @@
           "title": "Tax rates per country",
           "state": "warn",
           "stateWord": "Needs you",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -97,7 +104,8 @@
           "title": "Keep scans without a signal",
           "state": "ok",
           "stateWord": "Working",
-          "leadName": "Builder"
+          "leadName": "Builder",
+          "fresh": false
         }
       ]
     },
@@ -386,5 +394,6 @@
       "pinned": false,
       "target": null
     }
-  ]
+  ],
+  "pinLimit": 12
 }

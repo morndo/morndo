@@ -36,5 +36,19 @@
   },
   "chatMode": "floating",
   "contractVersion": "1.0.0",
-  "timezone": "Europe/Berlin"
+  "timezone": "Europe/Berlin",
+  "modules": [
+    {
+      "id": "gtm",
+      "name": "Go-to-market",
+      "summary": "Content, outbound, paid, SEO and research",
+      "here": false
+    },
+    {
+      "id": "dev",
+      "name": "Development",
+      "summary": "Projects, pull requests, reviews and releases",
+      "here": true
+    }
+  ]
 }

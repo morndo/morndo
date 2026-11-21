@@ -22,6 +22,12 @@ pub enum SearchKind {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchResult {
+    /// Current state of the record.
+    pub state: Present<SearchState>,
+    /// Lead for this record.
+    pub lead: Present<crate::Actor>,
+    /// Topics for this record.
+    pub topics: Vec<crate::TopicId>,
     /// Kind for this record.
     pub kind: SearchKind,
     /// Stable identifier for this record.
@@ -60,4 +66,24 @@ pub struct SearchView {
     pub answer: Present<Answer>,
     /// Opaque cursor for the following page, or null at the end.
     pub next_cursor: Present<String>,
+}
+
+/// Status of a result, interpreted in the context of its kind.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub enum SearchState {
+    Open,
+    Approved,
+    Declined,
+    Expired,
+    New,
+    Ok,
+    Warn,
+    Bad,
+    Done,
+    Idle,
+    Next,
+    Parked,
+    #[serde(other)]
+    Unknown,
 }

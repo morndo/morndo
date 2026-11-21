@@ -9,6 +9,10 @@ use crate::present::Present;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Draft {
+    /// Open url for this record.
+    pub open_url: String,
+    /// Identifier of the associated lane.
+    pub lane_id: Present<crate::LaneId>,
     /// Stable identifier for this record.
     pub id: DraftId,
     /// To for this record.

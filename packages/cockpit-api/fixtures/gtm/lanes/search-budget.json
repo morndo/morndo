@@ -44,11 +44,13 @@
   "acts": [
     {
       "label": "Open the decision",
-      "tone": "quiet"
-    },
-    {
-      "label": "Approve the shift",
-      "tone": "ink"
+      "tone": "quiet",
+      "id": "open-the-decision",
+      "personId": null,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
     }
   ],
   "thumbs": [],
@@ -138,17 +140,27 @@
       "icon": "file",
       "title": "The 14-day numbers",
       "detail": "24 leads on LinkedIn, 40 on Search",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     },
     {
       "icon": "file",
       "title": "The 14 days before",
       "detail": "For comparison: 22 leads on LinkedIn, 36 on Search",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "search-budget"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-13T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

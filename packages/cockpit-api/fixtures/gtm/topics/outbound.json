@@ -27,10 +27,10 @@
       "state": "ok",
       "word": "Ahead of plan",
       "action": "Round 2 decides December",
-      "text": "Sequence B carries the forecast; round 2 has to bring the last 9."
+      "text": null
     },
     "insight": "Sequence B carries the forecast; round 2 has to bring the last 9.",
-    "asOf": "updated 08:40, forecast up 2 since Friday · agents €17 of €40 this week",
+    "asOf": "updated 08:40, forecast up 2 since Friday",
     "decision": {
       "title": "Start sequence B",
       "detail": "Due tomorrow · the list goes stale in 2 weeks",
@@ -277,25 +277,29 @@
           "what": "Bounces",
           "value": "1.8%",
           "limit": "limit 4%",
-          "ratio": 0.45
+          "ratio": 0.45,
+          "state": "held"
         },
         {
           "what": "Asked to stop",
           "value": "1.1%",
           "limit": "11 of 990 · limit 2%",
-          "ratio": 0.56
+          "ratio": 0.56,
+          "state": "held"
         },
         {
           "what": "Sends a day",
           "value": "60",
           "limit": "limit 60",
-          "ratio": 1
+          "ratio": 1,
+          "state": "near"
         },
         {
           "what": "Spam complaints",
           "value": "0",
           "limit": "none allowed",
-          "ratio": null
+          "ratio": null,
+          "state": "held"
         }
       ]
     },
@@ -409,7 +413,8 @@
         "label": "Still unsecured"
       }
     ],
-    "pathTitle": null
+    "pathTitle": null,
+    "forecastLog": []
   },
   "noGoal": null,
   "facts": [
@@ -466,7 +471,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:52:00+01:00"
+            "at": "2026-11-16T08:52:00+01:00",
+            "id": "outbound-history-1",
+            "undone": false
           },
           {
             "kind": "event",
@@ -492,7 +499,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:40:00+01:00"
+            "at": "2026-11-16T08:40:00+01:00",
+            "id": "outbound-history-2",
+            "undone": false
           },
           {
             "kind": "event",
@@ -518,7 +527,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-16T08:20:00+01:00"
+            "at": "2026-11-16T08:20:00+01:00",
+            "id": "outbound-history-3",
+            "undone": false
           },
           {
             "kind": "event",
@@ -548,7 +559,9 @@
               "Velmont Freight · COO"
             ],
             "decisionId": null,
-            "at": "2026-11-16T08:05:00+01:00"
+            "at": "2026-11-16T08:05:00+01:00",
+            "id": "outbound-history-4",
+            "undone": false
           }
         ]
       },
@@ -579,7 +592,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-15T19:30:00+01:00"
+            "at": "2026-11-15T19:30:00+01:00",
+            "id": "outbound-history-5",
+            "undone": false
           },
           {
             "kind": "seen"
@@ -612,7 +627,9 @@
               "Holmfield Carriers · COO"
             ],
             "decisionId": null,
-            "at": "2026-11-15T10:15:00+01:00"
+            "at": "2026-11-15T10:15:00+01:00",
+            "id": "outbound-history-6",
+            "undone": false
           }
         ]
       },
@@ -643,7 +660,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T17:14:00+01:00"
+            "at": "2026-11-13T17:14:00+01:00",
+            "id": "outbound-history-7",
+            "undone": false
           },
           {
             "kind": "event",
@@ -673,7 +692,9 @@
               "Tessaly Bank · ops manager"
             ],
             "decisionId": null,
-            "at": "2026-11-13T17:10:00+01:00"
+            "at": "2026-11-13T17:10:00+01:00",
+            "id": "outbound-history-8",
+            "undone": false
           },
           {
             "kind": "event",
@@ -699,7 +720,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-13T15:00:00+01:00"
+            "at": "2026-11-13T15:00:00+01:00",
+            "id": "outbound-history-9",
+            "undone": false
           }
         ]
       },
@@ -730,7 +753,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-11T09:05:00+01:00"
+            "at": "2026-11-11T09:05:00+01:00",
+            "id": "outbound-history-10",
+            "undone": false
           },
           {
             "kind": "event",
@@ -756,7 +781,9 @@
             "count": null,
             "samples": [],
             "decisionId": null,
-            "at": "2026-11-11T08:30:00+01:00"
+            "at": "2026-11-11T08:30:00+01:00",
+            "id": "outbound-history-11",
+            "undone": false
           }
         ]
       }
@@ -918,5 +945,11 @@
     }
   },
   "stuck": null,
-  "tasks": []
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": []
 }

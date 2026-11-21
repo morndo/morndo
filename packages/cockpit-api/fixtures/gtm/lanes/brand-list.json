@@ -101,17 +101,27 @@
       "icon": "file",
       "title": "Brand list in HubSpot",
       "detail": "160 brands, 64 marked as a fit",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "brand-list"
+      }
     },
     {
       "icon": "file",
       "title": "Why each brand fits",
       "detail": "One line per brand, from the partner profile",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "brand-list"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-10-30T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

@@ -41,12 +41,7 @@
     "headline": "It waits for you.",
     "detail": "The pilot of 30 emails got 6 replies and 2 meetings. Starting sends to 180 fintech ops leads at 60 a day. Due tomorrow."
   },
-  "acts": [
-    {
-      "label": "Start sequence B",
-      "tone": "ink"
-    }
-  ],
+  "acts": [],
   "thumbs": [],
   "steps": [
     {
@@ -125,23 +120,36 @@
       "icon": "file",
       "title": "The 4 emails of sequence B",
       "detail": "Short, one question each, no attachments",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      }
     },
     {
       "icon": "file",
       "title": "List of 180 leads",
       "detail": "Fintech ops, 50 to 500 people",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      }
     },
     {
       "icon": "file",
       "title": "Pilot results",
       "detail": "30 sent, 6 replies, 2 meetings, 0 bounces",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-11T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

@@ -20,6 +20,8 @@ pub enum Event {
     },
     #[serde(rename = "lane.filed")]
     LaneFiled {
+        /// Chain for this record.
+        chain: bool,
         /// Identifier of the associated lane.
         lane_id: LaneId,
         /// Identifier of the associated topic.
@@ -54,6 +56,40 @@ pub enum Event {
         /// Identifier of the associated action.
         action_id: ActionId,
     },
+    #[serde(rename = "decision.expired")]
+    DecisionExpired { decision_id: DecisionId },
+    #[serde(rename = "lane.removed")]
+    LaneRemoved { lane_id: LaneId },
+    #[serde(rename = "thread.changed")]
+    ThreadChanged { thread_id: ThreadId },
+    #[serde(rename = "topic.changed")]
+    TopicChanged { topic_id: TopicId },
+    #[serde(rename = "drafts.changed")]
+    DraftsChanged {},
+    #[serde(rename = "brief.published")]
+    BriefPublished {},
+    #[serde(rename = "attention.raised")]
+    AttentionRaised {
+        target: crate::Target,
+        reason: String,
+    },
+    #[serde(rename = "guardrail.breached")]
+    GuardrailBreached {
+        topic_id: Present<TopicId>,
+        name: String,
+    },
+    #[serde(rename = "usage.changed")]
+    UsageChanged {},
+    #[serde(rename = "release.changed")]
+    ReleaseChanged { decision_id: DecisionId },
+    #[serde(rename = "pull.changed")]
+    PullChanged { pull_id: crate::PullId },
+    #[serde(rename = "handover.changed")]
+    HandoverChanged { lane_id: LaneId },
+    #[serde(rename = "skills.changed")]
+    SkillsChanged {},
+    #[serde(rename = "module.changed")]
+    ModuleChanged { module_id: crate::ModuleId },
     #[serde(rename = "feed.reset")]
     FeedReset {},
     #[serde(other)]

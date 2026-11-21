@@ -82,11 +82,18 @@
       "icon": "file",
       "title": "What changed in November",
       "detail": "2 price changes, 1 feature, with sources",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "competitor-watch"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-09T00:00:00+01:00",
-  "closedAt": "2026-11-12T00:00:00+01:00"
+  "closedAt": "2026-11-12T00:00:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

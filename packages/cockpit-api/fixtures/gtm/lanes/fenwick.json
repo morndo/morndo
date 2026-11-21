@@ -41,12 +41,7 @@
     "headline": "It waits for you.",
     "detail": "Fenwick signed off the quote. The claim of 38% fewer manual hand-offs comes from their own Q3 report and needs your OK. Due Wednesday."
   },
-  "acts": [
-    {
-      "label": "Approve the story",
-      "tone": "ink"
-    }
-  ],
+  "acts": [],
   "thumbs": [],
   "steps": [
     {
@@ -111,7 +106,10 @@
       "icon": "file",
       "title": "The story",
       "detail": "1,100 words, signed off by Fenwick",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "fenwick"
+      }
     },
     {
       "icon": "mail",
@@ -126,11 +124,18 @@
       "icon": "file",
       "title": "Source for the 38%",
       "detail": "Fenwick's Q3 ops report, page 4",
-      "target": null
+      "target": {
+        "kind": "lane",
+        "id": "fenwick"
+      }
     }
   ],
   "handover": null,
   "fresh": false,
   "openedAt": "2026-11-09T00:00:00+01:00",
-  "closedAt": null
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null
 }

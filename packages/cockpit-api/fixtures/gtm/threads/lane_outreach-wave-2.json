@@ -10,7 +10,7 @@
   "suggestions": [],
   "messages": [
     {
-      "id": "m1",
+      "id": "m17",
       "author": {
         "id": "sender",
         "name": "Sender",
@@ -30,10 +30,14 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T04:30:00+01:00"
+      "at": "2026-11-16T04:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     },
     {
-      "id": "m2",
+      "id": "m18",
       "author": {
         "id": "lea-brandt",
         "name": "Lea Brandt",
@@ -53,8 +57,13 @@
       "threadCard": null,
       "readBack": null,
       "actions": [],
-      "at": "2026-11-16T08:12:00+01:00"
+      "at": "2026-11-16T08:12:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null
     }
   ],
-  "nextCursor": null
+  "nextCursor": null,
+  "scope": null
 }

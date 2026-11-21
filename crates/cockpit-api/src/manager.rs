@@ -10,6 +10,8 @@ use crate::present::Present;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagerLane {
+    /// Reason for this record.
+    pub reason: Present<String>,
     /// Stable identifier for this record.
     pub id: LaneId,
     /// Title displayed above the record.

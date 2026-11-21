@@ -41,6 +41,8 @@ function read(path: string | URL): Contract {
 function branchKey(shape: Shape): string {
   const tag = shape.properties?.type?.const ?? shape.properties?.kind?.const;
   if (tag !== undefined) return `tag:${JSON.stringify(tag)}`;
+  if (shape.const !== undefined) return `const:${JSON.stringify(shape.const)}`;
+  if (shape.enum) return `enum:${JSON.stringify(shape.type)}`;
   if (shape.$ref) return `ref:${shape.$ref}`;
   return `type:${JSON.stringify(shape.type)}`;
 }
