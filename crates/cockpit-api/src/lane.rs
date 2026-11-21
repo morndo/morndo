@@ -142,6 +142,10 @@ pub struct Handover {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LaneView {
+    /// Time for the next step after approval.
+    pub after_next_at: Present<Timestamp>,
+    /// Time the next report or action is due.
+    pub next_at: Present<Timestamp>,
     /// Attachment for this record.
     pub attachment: Present<crate::Attachment>,
     /// Model for this record.

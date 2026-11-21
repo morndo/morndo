@@ -15,7 +15,12 @@
     "nextReportAt": "2026-11-23T17:00:00+01:00"
   },
   "intro": "€4,000 a week across LinkedIn and Google Search. The goal: 450 leads this quarter, at €100 or less each.",
-  "when": "Week 7 of 13",
+"when": {
+    "kind": "count",
+    "value": 7,
+    "of": 13,
+    "unit": "weeks"
+  },
   "health": null,
   "goal": {
     "target": 450,
@@ -239,14 +244,19 @@
     "deals": [
       {
         "name": "Google Search",
-        "confidence": "€80 a lead",
+        "confidence": null,
         "close": null,
         "stage": "Two campaigns, €1,600 a week",
         "short": "Cheapest; €1,200 more waits for you",
         "laneId": "search-budget",
         "evidence": "40 leads for €3,200 in the last 14 days, and €86 a lead in the 14 days before. 35% of them took a sales call.",
         "next": "your decision by 14:00.",
-        "value": "40 leads",
+        "value": {
+          "kind": "count",
+          "value": 40,
+          "of": null,
+          "unit": "leads"
+        },
         "alt": {
           "decisionId": "d1",
           "stage": "Two campaigns, €2,800 a week",
@@ -257,18 +267,27 @@
           "kind": "lane",
           "id": "search-budget"
         },
-        "chartDay": null
+        "chartDay": null,
+        "costPerLead": {
+          "amountMinor": 8000,
+          "currency": "EUR"
+        }
       },
       {
         "name": "LinkedIn, always on",
-        "confidence": "€200 a lead",
+        "confidence": null,
         "close": null,
         "stage": "€2,400 a week",
         "short": "Costly; the shift cuts it to retargeting",
         "laneId": "search-budget",
         "evidence": "24 leads for €4,800 in the last 14 days. 25% took a sales call.",
         "next": "cut to the retargeting audience, after your decision.",
-        "value": "24 leads",
+        "value": {
+          "kind": "count",
+          "value": 24,
+          "of": null,
+          "unit": "leads"
+        },
         "alt": {
           "decisionId": "d1",
           "stage": "€1,200 a week",
@@ -279,24 +298,37 @@
           "kind": "lane",
           "id": "search-budget"
         },
-        "chartDay": null
+        "chartDay": null,
+        "costPerLead": {
+          "amountMinor": 20000,
+          "currency": "EUR"
+        }
       },
       {
         "name": "Webinar campaign",
-        "confidence": "€36 a lead",
+        "confidence": null,
         "close": null,
         "stage": "Its own €400, ends Thursday",
         "short": "Ends Thursday",
         "laneId": "webinar-campaign",
         "evidence": "11 sign-ups counted as leads for €400 in 7 days. They are cheap because they are sign-ups, not sales leads; only 2 took a call last time.",
         "next": null,
-        "value": "11 leads",
+        "value": {
+          "kind": "count",
+          "value": 11,
+          "of": null,
+          "unit": "leads"
+        },
         "alt": null,
         "target": {
           "kind": "lane",
           "id": "webinar-campaign"
         },
-        "chartDay": null
+        "chartDay": null,
+        "costPerLead": {
+          "amountMinor": 3600,
+          "currency": "EUR"
+        }
       }
     ],
     "guardrails": {
@@ -429,44 +461,85 @@
     "routine": null,
     "funnel": {
       "title": "Funnel",
-      "since": "Since 1 October · change this week · rate against the plan",
+      "since": "change this week · rate against the plan",
       "steps": [
         {
-          "count": "6,480",
+          "count": 6480,
           "what": "clicks",
-          "change": "+910",
+          "change": {
+            "kind": "count",
+            "value": 910,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "214",
+          "count": 214,
           "what": "leads",
-          "change": "+32",
-          "rate": "3.3% · plan 3%",
+          "change": {
+            "kind": "count",
+            "value": 32,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 3.3,
+            "planPercent": 3.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "64",
+          "count": 64,
           "what": "took a call",
-          "change": "+10",
-          "rate": "30% · plan 30%",
+          "change": {
+            "kind": "count",
+            "value": 10,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 30.0,
+            "planPercent": 30.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "38",
+          "count": 38,
           "what": "qualified",
-          "change": "+6",
-          "rate": "59% · plan 60%",
+          "change": {
+            "kind": "count",
+            "value": 6,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 59.0,
+            "planPercent": 60.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "4",
+          "count": 4,
           "what": "won",
           "change": null,
-          "rate": "plan 6 by 31 Dec",
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 6,
+            "dueAt": "2026-12-31T17:00:00+01:00"
+          },
           "state": "warn"
         }
-      ]
+      ],
+      "sinceAt": "2026-10-01T00:00:00+02:00"
     },
     "restSub": null,
     "figures": [
@@ -915,7 +988,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Paid buyer",
-      "next": "After your decision"
+      "next": "After your decision",
+      "nextAt": null
     },
     {
       "id": "webinar-campaign",
@@ -923,7 +997,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Paid buyer",
-      "next": "Thu 19 Nov, when it ends"
+      "next": "when it ends",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "click-floor",
@@ -931,7 +1006,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Paid buyer",
-      "next": "closed today, 08:30"
+      "next": "",
+      "nextAt": "2026-11-16T08:30:00+01:00"
     }
   ],
   "spend": {

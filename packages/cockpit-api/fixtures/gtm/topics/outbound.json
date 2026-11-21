@@ -15,7 +15,12 @@
     "nextReportAt": "2026-11-20T17:00:00+01:00"
   },
   "intro": "Cold email to ops teams, from your mail, never more than 60 a day. The goal: 30 sales meetings by 18 December.",
-  "when": "Week 4 of 8",
+"when": {
+    "kind": "count",
+    "value": 4,
+    "of": 8,
+    "unit": "weeks"
+  },
   "health": null,
   "goal": {
     "target": 30,
@@ -226,7 +231,8 @@
           "kind": "lane",
           "id": "sequence-a"
         },
-        "chartDay": 5
+        "chartDay": 5,
+        "costPerLead": null
       },
       {
         "name": "Sequence B, fintech ops",
@@ -248,7 +254,8 @@
           "kind": "lane",
           "id": "sequence-b"
         },
-        "chartDay": 2
+        "chartDay": 2,
+        "costPerLead": null
       },
       {
         "name": "Logistics ops, round 2",
@@ -265,7 +272,8 @@
           "kind": "lane",
           "id": "logistics-round-2"
         },
-        "chartDay": 0
+        "chartDay": 0,
+        "costPerLead": null
       }
     ],
     "guardrails": {
@@ -390,44 +398,85 @@
     "routine": null,
     "funnel": {
       "title": "Funnel",
-      "since": "Since 26 October · change this week · rate against the plan",
+      "since": "change this week · rate against the plan",
       "steps": [
         {
-          "count": "990",
+          "count": 990,
           "what": "emails sent",
-          "change": "+30",
+          "change": {
+            "kind": "count",
+            "value": 30,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "58",
+          "count": 58,
           "what": "replied",
-          "change": "+14",
-          "rate": "5.9% · plan 5%",
+          "change": {
+            "kind": "count",
+            "value": 14,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 5.9,
+            "planPercent": 5.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "21",
+          "count": 21,
           "what": "positive",
-          "change": "+5",
-          "rate": "36% · plan 40%",
+          "change": {
+            "kind": "count",
+            "value": 5,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 36.0,
+            "planPercent": 40.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": "warn"
         },
         {
-          "count": "11",
+          "count": 11,
           "what": "meetings booked",
-          "change": "+3",
-          "rate": "52% · plan 50%",
+          "change": {
+            "kind": "count",
+            "value": 3,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 52.0,
+            "planPercent": 50.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "6",
+          "count": 6,
           "what": "meetings held",
-          "change": "+2",
+          "change": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         }
-      ]
+      ],
+      "sinceAt": "2026-10-26T00:00:00+01:00"
     },
     "restSub": null,
     "figures": [
@@ -973,7 +1022,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Sender",
-      "next": "After your decision"
+      "next": "After your decision",
+      "nextAt": null
     },
     {
       "id": "reply-handling",
@@ -981,7 +1031,8 @@
       "state": "warn",
       "stateWord": "Waits for Jonas",
       "leadName": "Replies",
-      "next": "Today, once Jonas answers"
+      "next": "once Jonas answers",
+      "nextAt": "2026-11-16T17:00:00+01:00"
     },
     {
       "id": "logistics-round-2",
@@ -989,7 +1040,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Prospector",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "sequence-a",
@@ -997,7 +1049,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Sender",
-      "next": "closed today, 08:05"
+      "next": "",
+      "nextAt": "2026-11-16T08:05:00+01:00"
     }
   ],
   "spend": {

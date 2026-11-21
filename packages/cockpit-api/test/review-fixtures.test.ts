@@ -1,7 +1,27 @@
 import { expect, it } from "vitest";
-import { loadFixtures, type BriefView, type DecisionView, type LaneView, type SidebarView, type SkillsView, type ThreadView, type TopicView, type WorkspaceView } from "../src/index.ts";
+import { loadFixtures, type BriefView, type DecisionView, type LaneView, type ManagerView, type SidebarView, type SkillsView, type ThreadView, type TopicView, type WorkspaceView } from "../src/index.ts";
 
 const now = Date.parse("2026-11-16T08:45:00+01:00");
+
+it("keeps dates, quantities and currency in machine-readable fixture fields", () => {
+  const files = loadFixtures("gtm");
+  const paid = files.find(item => item.path === "topics/paid.json")?.value as TopicView;
+  const manager = files.find(item => item.path === "manager.json")?.value as ManagerView;
+  expect(paid.jobs[0]).toMatchObject({ dueAt: "2026-11-16T14:00:00+01:00", completedAt: null });
+  expect(paid.jobs[0]).not.toHaveProperty("due");
+  expect(paid.goal).toMatchObject({ updatedAt: "2026-11-16T07:05:00+01:00", unit: "Leads" });
+  expect(paid.goal).not.toHaveProperty("asOf");
+  expect(paid.facts[0]?.value).toEqual({
+    kind: "money", money: { amountMinor: 364000, currency: "EUR" }, cap: { amountMinor: 400000, currency: "EUR" },
+  });
+  expect(paid.goal?.guardrails?.items[0]).toMatchObject({
+    value: { kind: "money", money: { amountMinor: 11400, currency: "EUR" } },
+    limit: { kind: "money", money: { amountMinor: 10000, currency: "EUR" } },
+  });
+  expect(paid.goal?.funnel?.steps[1]).toMatchObject({ count: 214, rate: { percent: 3.3, planPercent: 3 } });
+  expect(paid.when).toEqual({ kind: "count", value: 7, of: 13, unit: "weeks" });
+  expect(manager.lanes.find(lane => lane.id === "brand-list")?.nextAt).toBe("2026-11-16T18:00:00+01:00");
+});
 
 for (const module of ["gtm", "dev"] as const) {
   const files = loadFixtures(module);

@@ -135,7 +135,12 @@
       "name": "Your server",
       "purpose": "Lanes run here",
       "state": "connected",
-      "capacity": "3 of 8 busy",
+      "capacity": {
+        "kind": "count",
+        "value": 3,
+        "of": 8,
+        "unit": "busy"
+      },
       "id": "your-server"
     },
     {

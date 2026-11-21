@@ -180,7 +180,9 @@ pub struct Deal {
     /// Name shown to the reader.
     pub name: String,
     /// Confidence for this record.
-    pub confidence: String,
+    pub confidence: Present<String>,
+    /// Unit cost when the cohort is measured by cost per lead.
+    pub cost_per_lead: Present<crate::Money>,
     /// Close for this record.
     pub close: Present<String>,
     /// Chart day for this record.
@@ -198,7 +200,7 @@ pub struct Deal {
     /// Next for this record.
     pub next: Present<String>,
     /// Value for this record.
-    pub value: Present<String>,
+    pub value: Present<MeasuredValue>,
     /// Alt for this record.
     pub alt: Present<DealAlt>,
 }
@@ -274,13 +276,13 @@ pub struct Blocker {
 #[serde(rename_all = "camelCase")]
 pub struct FunnelStep {
     /// Count for this record.
-    pub count: String,
+    pub count: u64,
     /// What for this record.
     pub what: String,
     /// Change for this record.
-    pub change: Present<String>,
+    pub change: Present<MeasuredValue>,
     /// Rate for this record.
-    pub rate: Present<String>,
+    pub rate: Present<FunnelRate>,
     /// Current state of the record.
     pub state: Present<HealthState>,
 }
@@ -293,6 +295,8 @@ pub struct Funnel {
     pub title: String,
     /// Since for this record.
     pub since: String,
+    /// Start of the period measured by this funnel.
+    pub since_at: Timestamp,
     /// Steps for this record.
     pub steps: Vec<FunnelStep>,
 }
@@ -412,7 +416,7 @@ pub struct RowAlt {
     /// Text shown to the reader.
     pub text: Present<String>,
     /// When for this record.
-    pub when: Present<String>,
+    pub when: Present<MeasuredValue>,
     /// Current state of the record.
     pub state: Present<LaneState>,
 }
@@ -432,7 +436,7 @@ pub struct StageRow {
     /// Text shown to the reader.
     pub text: String,
     /// When for this record.
-    pub when: String,
+    pub when: MeasuredValue,
     /// Percent for this record.
     pub percent: Present<i64>,
     /// Destination to open in the cockpit.
@@ -466,7 +470,7 @@ pub struct Stage {
 #[serde(rename_all = "camelCase")]
 pub struct NightStat {
     /// Value for this record.
-    pub value: String,
+    pub value: MeasuredValue,
     /// Label for this record.
     pub label: String,
 }
@@ -577,6 +581,8 @@ pub struct Job {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicLane {
+    /// Time the next report or action is due.
+    pub next_at: Present<Timestamp>,
     /// Stable identifier for this record.
     pub id: LaneId,
     /// Title displayed above the record.
@@ -639,8 +645,8 @@ pub struct StuckAction {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct StuckReport {
-    /// Since for this record.
-    pub since: String,
+    /// Time the blocker first appeared.
+    pub since_at: Timestamp,
     /// Title displayed above the record.
     pub title: String,
     /// Explanation shown alongside the summary.
@@ -661,6 +667,8 @@ pub struct StuckReport {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TaskRow {
+    /// Time the next report or action is due.
+    pub next_at: Present<Timestamp>,
     /// Identifier of the associated lane.
     pub lane_id: Present<LaneId>,
     /// Task for this record.
@@ -705,8 +713,8 @@ pub struct TopicView {
     pub meta: Present<TopicMeta>,
     /// Intro for this record.
     pub intro: String,
-    /// When for this record.
-    pub when: Present<String>,
+    /// Progress through the planning period, or the date of its next milestone.
+    pub when: Present<MeasuredValue>,
     /// Health for this record.
     pub health: Present<Health>,
     /// Goal for this record.
@@ -851,4 +859,18 @@ pub enum JobCadence {
     #[serde(other)]
     #[schemars(skip)]
     Unknown,
+}
+
+/// Conversion rate or plan for a funnel stage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct FunnelRate {
+    /// Observed conversion percentage.
+    pub percent: Present<f64>,
+    /// Planned conversion percentage.
+    pub plan_percent: Present<f64>,
+    /// Planned count by the milestone date.
+    pub planned_count: Present<u64>,
+    /// Time the plan’s count is due.
+    pub due_at: Present<Timestamp>,
 }

@@ -54,7 +54,7 @@ pub struct Connection {
     /// Current state of the record.
     pub state: ConnectionState,
     /// Capacity for this record.
-    pub capacity: Present<String>,
+    pub capacity: Present<crate::topic::MeasuredValue>,
 }
 
 /// Guardrail switch for the cockpit.

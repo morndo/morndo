@@ -20,7 +20,7 @@
   },
   "waitsFor": null,
   "next": "After your decision",
-  "afterNext": "Fri 20 Nov, after the first 180",
+  "afterNext": "after the first 180",
   "decisionId": "d2",
   "short": "Sequence B",
   "ask": "180 fintech ops leads at 60 a day · due tomorrow",
@@ -151,5 +151,7 @@
   "attachment": null,
   "model": null,
   "chain": false,
-  "reminder": null
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": "2026-11-20T17:00:00+01:00"
 }

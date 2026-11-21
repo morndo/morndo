@@ -15,7 +15,12 @@
     "nextReportAt": "2026-11-30T17:00:00+01:00"
   },
   "intro": "Five comparison pages against the tools we lose deals to. The goal: three of them in Google's top 10 by 31 December.",
-  "when": "Week 3 of 9",
+"when": {
+    "kind": "count",
+    "value": 3,
+    "of": 9,
+    "unit": "weeks"
+  },
   "health": null,
   "goal": {
     "target": 3,
@@ -119,7 +124,8 @@
           "kind": "lane",
           "id": "comparison-pages"
         },
-        "chartDay": 3
+        "chartDay": 3,
+        "costPerLead": null
       },
       {
         "name": "Tidewell or Dockmere",
@@ -136,7 +142,8 @@
           "kind": "lane",
           "id": "comparison-pages"
         },
-        "chartDay": 3
+        "chartDay": 3,
+        "costPerLead": null
       },
       {
         "name": "Tidewell or Palletnook",
@@ -153,7 +160,8 @@
           "kind": "lane",
           "id": "comparison-pages"
         },
-        "chartDay": 0
+        "chartDay": 0,
+        "costPerLead": null
       },
       {
         "name": "Tidewell or Harborline",
@@ -170,7 +178,8 @@
           "kind": "lane",
           "id": "comparison-pages"
         },
-        "chartDay": 0
+        "chartDay": 0,
+        "costPerLead": null
       },
       {
         "name": "Tidewell or Keelson",
@@ -187,7 +196,8 @@
           "kind": "lane",
           "id": "comparison-pages"
         },
-        "chartDay": 0
+        "chartDay": 0,
+        "costPerLead": null
       }
     ],
     "guardrails": {
@@ -266,34 +276,59 @@
       "since": "Change against last week",
       "steps": [
         {
-          "count": "2,310",
+          "count": 2310,
           "what": "visits from search",
-          "change": "+18%",
+          "change": {
+            "kind": "rate",
+            "percent": 18.0,
+            "standard": false
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "41",
+          "count": 41,
           "what": "keywords in the top 10",
-          "change": "+3",
+          "change": {
+            "kind": "count",
+            "value": 3,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "2",
+          "count": 2,
           "what": "pages live",
-          "change": "+2",
-          "rate": "plan 5 by 20 Nov",
+          "change": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 5,
+            "dueAt": "2026-11-20T17:00:00+01:00"
+          },
           "state": null
         },
         {
-          "count": "0",
+          "count": 0,
           "what": "pages in the top 10",
           "change": null,
-          "rate": "plan 1 by 10 Dec",
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 1,
+            "dueAt": "2026-12-10T17:00:00+01:00"
+          },
           "state": null
         }
-      ]
+      ],
+      "sinceAt": "2026-11-02T00:00:00+01:00"
     },
     "restSub": "Why there is no forecast yet, and what each page has going for it",
     "figures": [
@@ -654,7 +689,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "SEO writer",
-      "next": "Today, 15:00"
+      "next": "",
+      "nextAt": "2026-11-16T15:00:00+01:00"
     },
     {
       "id": "keyword-map",
@@ -662,7 +698,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Checker",
-      "next": "closed 4 Nov"
+      "next": "",
+      "nextAt": "2026-11-04T17:00:00+01:00"
     }
   ],
   "spend": {

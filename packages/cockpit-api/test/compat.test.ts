@@ -9,6 +9,7 @@ interface Shape {
   enum?: string[];
   properties?: Record<string, Shape>;
   required?: string[];
+  maxLength?: number;
 }
 
 const released = new URL("../schema/released/1.json", import.meta.url);
@@ -117,4 +118,31 @@ it("declares device layouts, lane history and the new composer routes", () => {
   expect(routes.paths["/api/cockpit/topics/{id}/history"]?.get?.parameters.map(item => item.name)).toContain("laneId");
   expect(routes.paths["/api/cockpit/uploads"]?.post).toBeDefined();
   expect(routes.paths["/api/cockpit/recent"]?.get).toBeDefined();
+});
+
+it("rejects required upload fields and narrowed upload limits as input changes", () => {
+  const contract = JSON.parse(readFileSync(released, "utf8")) as { $defs: Record<string, Shape> };
+  const upload = contract.$defs.UploadInput;
+  if (!upload?.properties?.name) throw new Error("Missing upload input");
+  const folder = mkdtempSync(join(tmpdir(), "cockpit-upload-compat-"));
+  try {
+    const path = join(folder, "schema.json");
+    const compare = () => {
+      writeFileSync(path, JSON.stringify(contract));
+      return spawnSync(process.execPath, [compat.pathname, "--current", path], { encoding: "utf8" });
+    };
+    const required = upload.required ?? [];
+    upload.properties.kind = { type: "string" };
+    upload.required = [...required, "kind"];
+    const newField = compare();
+    expect(newField.status).toBe(1);
+    expect(newField.stderr).toContain("UploadInput.kind: new required input");
+    upload.required = required;
+    upload.properties.name = { ...upload.properties.name, maxLength: 10 };
+    const narrower = compare();
+    expect(narrower.status).toBe(1);
+    expect(narrower.stderr).toContain("UploadInput.name: maxLength decreased");
+  } finally {
+    rmSync(folder, { recursive: true, force: true });
+  }
 });

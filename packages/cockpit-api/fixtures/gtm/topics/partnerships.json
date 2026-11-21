@@ -15,7 +15,12 @@
     "nextReportAt": "2026-11-20T08:00:00+01:00"
   },
   "intro": "Partnerships with big brands that bring us customers we cannot reach alone. You do the calls and the deals; Lea and Jonas run the rest; agents do the list work around the clock.",
-  "when": "Week 5 of 15",
+"when": {
+    "kind": "count",
+    "value": 5,
+    "of": 15,
+    "unit": "weeks"
+  },
   "health": {
     "state": "ok",
     "word": "On track"
@@ -175,7 +180,8 @@
           "kind": "lane",
           "id": "halden-offer"
         },
-        "chartDay": 3
+        "chartDay": 3,
+        "costPerLead": null
       },
       {
         "name": "Brightmoor Retail",
@@ -192,7 +198,8 @@
           "kind": "lane",
           "id": "partner-calls"
         },
-        "chartDay": 1
+        "chartDay": 1,
+        "costPerLead": null
       },
       {
         "name": "Northvale or Corvane",
@@ -209,7 +216,8 @@
           "kind": "lane",
           "id": "partner-calls"
         },
-        "chartDay": 1
+        "chartDay": 1,
+        "costPerLead": null
       }
     ],
     "guardrails": {
@@ -344,58 +352,99 @@
     "routine": "On schedule: Jonas, partner contract template with legal (Wed) · you, Brightmoor call at 15:00, brief ready at 13:00 · 4 agents working, none stuck.",
     "funnel": {
       "title": "Funnel",
-      "since": "Since 6 November · change this week · rate against the plan",
+      "since": "change this week · rate against the plan",
       "steps": [
         {
-          "count": "64",
+          "count": 64,
           "what": "brands fit",
-          "change": "+9",
+          "change": {
+            "kind": "count",
+            "value": 9,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "52",
+          "count": 52,
           "what": "written to",
           "change": null,
           "rate": null,
           "state": null
         },
         {
-          "count": "11",
+          "count": 11,
           "what": "replied",
-          "change": "+2",
-          "rate": "21% · plan 15%",
+          "change": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 21.0,
+            "planPercent": 15.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "5",
+          "count": 5,
           "what": "calls booked",
-          "change": "+1",
-          "rate": "45% · plan 50%",
+          "change": {
+            "kind": "count",
+            "value": 1,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 45.0,
+            "planPercent": 50.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": "warn"
         },
         {
-          "count": "2",
+          "count": 2,
           "what": "calls held",
           "change": null,
           "rate": null,
           "state": null
         },
         {
-          "count": "1",
+          "count": 1,
           "what": "offer",
-          "change": "+1",
-          "rate": "plan 2 by 30 Nov",
+          "change": {
+            "kind": "count",
+            "value": 1,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 2,
+            "dueAt": "2026-11-30T17:00:00+01:00"
+          },
           "state": "warn"
         },
         {
-          "count": "0",
+          "count": 0,
           "what": "signed",
           "change": null,
-          "rate": "plan 1 by 18 Dec",
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 1,
+            "dueAt": "2026-12-18T17:00:00+01:00"
+          },
           "state": null
         }
-      ]
+      ],
+      "sinceAt": "2026-10-19T00:00:00+02:00"
     },
     "restSub": null,
     "figures": [
@@ -472,7 +521,12 @@
             "kind": "agent",
             "state": "ok",
             "text": "finds brands in Clay",
-            "when": "160 of 200",
+            "when": {
+              "kind": "count",
+              "value": 160,
+              "of": 200,
+              "unit": null
+            },
             "percent": 80,
             "laneId": "brand-list",
             "alt": null,
@@ -487,7 +541,12 @@
             "kind": "agent",
             "state": "ok",
             "text": "finds decision-makers in Apollo",
-            "when": "96 of 160",
+            "when": {
+              "kind": "count",
+              "value": 96,
+              "of": 160,
+              "unit": null
+            },
             "percent": 60,
             "laneId": "contact-data",
             "alt": null,
@@ -511,7 +570,10 @@
             "kind": "person",
             "state": "warn",
             "text": "checks 24 emails for wave 2",
-            "when": "by 11:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T11:00:00+01:00"
+            },
             "percent": null,
             "laneId": "outreach-wave-2",
             "alt": null,
@@ -526,7 +588,12 @@
             "kind": "agent",
             "state": "ok",
             "text": "follows up on wave 1",
-            "when": "38 of 52",
+            "when": {
+              "kind": "count",
+              "value": 38,
+              "of": 52,
+              "unit": null
+            },
             "percent": 73,
             "laneId": "outreach-wave-1",
             "alt": null,
@@ -541,7 +608,10 @@
             "kind": "agent",
             "state": "next",
             "text": "sends wave 2, 20 a day",
-            "when": "after Lea",
+            "when": {
+              "kind": "policy",
+              "text": "after Lea"
+            },
             "percent": null,
             "laneId": "outreach-wave-2",
             "alt": null,
@@ -565,7 +635,10 @@
             "kind": "person",
             "state": "ok",
             "text": "call with Brightmoor Retail",
-            "when": "today 15:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T15:00:00+01:00"
+            },
             "percent": null,
             "laneId": "partner-calls",
             "alt": null,
@@ -580,7 +653,10 @@
             "kind": "agent",
             "state": "ok",
             "text": "writes the Brightmoor brief",
-            "when": "ready 13:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T13:00:00+01:00"
+            },
             "percent": null,
             "laneId": "partner-calls",
             "alt": null,
@@ -595,7 +671,10 @@
             "kind": "agent",
             "state": "next",
             "text": "notes and the follow-up draft",
-            "when": "today 16:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-16T16:00:00+01:00"
+            },
             "percent": null,
             "laneId": "partner-calls",
             "alt": null,
@@ -610,7 +689,10 @@
             "kind": "person",
             "state": "next",
             "text": "calls with Northvale Bank and Corvane ERP",
-            "when": "Wed, Thu",
+            "when": {
+              "kind": "policy",
+              "text": "Wed, Thu"
+            },
             "percent": null,
             "laneId": "partner-calls",
             "alt": null,
@@ -634,13 +716,19 @@
             "kind": "person",
             "state": "warn",
             "text": "approve the offer to Halden",
-            "when": "due Thu",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-19T17:00:00+01:00"
+            },
             "percent": null,
             "laneId": "halden-offer",
             "alt": {
               "decisionId": "d4",
               "text": "approved the offer to Halden",
-              "when": "goes out 09:00",
+              "when": {
+                "kind": "time",
+                "at": "2026-11-16T09:00:00+01:00"
+              },
               "state": null
             },
             "target": {
@@ -654,7 +742,10 @@
             "kind": "person",
             "state": "ok",
             "text": "partner contract template, with legal",
-            "when": "Wed",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-18T17:00:00+01:00"
+            },
             "percent": null,
             "laneId": "halden-offer",
             "alt": null,
@@ -683,7 +774,10 @@
             "kind": "agent",
             "state": "next",
             "text": "weekly partner report for Tom, as a draft",
-            "when": "Fri 08:00",
+            "when": {
+              "kind": "time",
+              "at": "2026-11-20T08:00:00+01:00"
+            },
             "percent": null,
             "laneId": null,
             "alt": null,
@@ -698,15 +792,30 @@
     ],
     "night": [
       {
-        "value": "+32",
+        "value": {
+          "kind": "count",
+          "value": 32,
+          "of": null,
+          "unit": null
+        },
         "label": "brands"
       },
       {
-        "value": "+58",
+        "value": {
+          "kind": "count",
+          "value": 58,
+          "of": null,
+          "unit": null
+        },
         "label": "contacts"
       },
       {
-        "value": "24",
+        "value": {
+          "kind": "count",
+          "value": 24,
+          "of": null,
+          "unit": null
+        },
         "label": "emails drafted"
       }
     ]
@@ -1607,7 +1716,8 @@
       "state": "warn",
       "stateWord": "Waits for Lea",
       "leadName": "Sender",
-      "next": "After Lea's check"
+      "next": "After Lea's check",
+      "nextAt": null
     },
     {
       "id": "halden-offer",
@@ -1615,7 +1725,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Jonas",
-      "next": "After your OK"
+      "next": "After your OK",
+      "nextAt": null
     },
     {
       "id": "brand-list",
@@ -1623,7 +1734,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Brand scout",
-      "next": "Today, 18:00"
+      "next": "",
+      "nextAt": "2026-11-16T18:00:00+01:00"
     },
     {
       "id": "contact-data",
@@ -1631,7 +1743,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Contact finder",
-      "next": "Tomorrow, 08:00"
+      "next": "",
+      "nextAt": "2026-11-17T08:00:00+01:00"
     },
     {
       "id": "outreach-wave-1",
@@ -1639,7 +1752,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Sender",
-      "next": "Wed 18 Nov"
+      "next": "",
+      "nextAt": "2026-11-18T17:00:00+01:00"
     },
     {
       "id": "partner-calls",
@@ -1647,7 +1761,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "You",
-      "next": "Today, 16:00"
+      "next": "",
+      "nextAt": "2026-11-16T16:00:00+01:00"
     },
     {
       "id": "partner-strategy",
@@ -1655,7 +1770,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "You",
-      "next": "closed 23 Oct"
+      "next": "",
+      "nextAt": "2026-10-23T17:00:00+02:00"
     },
     {
       "id": "partner-stack",
@@ -1663,7 +1779,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Jonas",
-      "next": "closed 30 Oct"
+      "next": "",
+      "nextAt": "2026-10-30T17:00:00+01:00"
     }
   ],
   "spend": {

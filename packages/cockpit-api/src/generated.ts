@@ -679,6 +679,61 @@ export type PullId = string;
  */
 export type ModuleId = "gtm" | "dev";
 /**
+ * Numeric or machine-readable value rendered according to its measurement kind.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MeasuredValue".
+ */
+export type MeasuredValue =
+  | {
+      kind: "count";
+      /**
+       * Total, when presented as a fraction.
+       */
+      of: number | null;
+      /**
+       * Count unit or interval.
+       */
+      unit: string | null;
+      /**
+       * Observed count.
+       */
+      value: number;
+    }
+  | {
+      kind: "rate";
+      /**
+       * Percentage points, e.g. 1.2 for 1.2%.
+       */
+      percent: number;
+      /**
+       * Whether the rate is the standard policy.
+       */
+      standard: boolean;
+    }
+  | {
+      /**
+       * Budget cap, when applicable.
+       */
+      cap: Money6 | null;
+      kind: "money";
+      money: Money7;
+    }
+  | {
+      /**
+       * A point in time with an RFC 3339 UTC offset.
+       */
+      at: string;
+      kind: "time";
+    }
+  | {
+      kind: "policy";
+      /**
+       * Rule expressed in words when it has no measurable threshold.
+       */
+      text: string;
+    };
+/**
  * Identifier of a service connection.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -1200,61 +1255,6 @@ export type KnownTargetKind =
  * via the `definition` "LabelKind".
  */
 export type LabelKind = "question" | "request" | "done" | "decision" | "goalChange";
-/**
- * Numeric or machine-readable value rendered according to its measurement kind.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "MeasuredValue".
- */
-export type MeasuredValue =
-  | {
-      kind: "count";
-      /**
-       * Total, when presented as a fraction.
-       */
-      of: number | null;
-      /**
-       * Count unit or interval.
-       */
-      unit: string | null;
-      /**
-       * Observed count.
-       */
-      value: number;
-    }
-  | {
-      kind: "rate";
-      /**
-       * Percentage points, e.g. 1.2 for 1.2%.
-       */
-      percent: number;
-      /**
-       * Whether the rate is the standard policy.
-       */
-      standard: boolean;
-    }
-  | {
-      /**
-       * Budget cap, when applicable.
-       */
-      cap: Money6 | null;
-      kind: "money";
-      money: Money7;
-    }
-  | {
-      /**
-       * A point in time with an RFC 3339 UTC offset.
-       */
-      at: string;
-      kind: "time";
-    }
-  | {
-      kind: "policy";
-      /**
-       * Rule expressed in words when it has no measurable threshold.
-       */
-      text: string;
-    };
 /**
  * Audience allowed to receive a message in a topic.
  *
@@ -3227,7 +3227,7 @@ export interface Connection {
   /**
    * Capacity for this record.
    */
-  capacity: string | null;
+  capacity: MeasuredValue | null;
   /**
    * Stable identifier for this record.
    */
@@ -3244,6 +3244,35 @@ export interface Connection {
    * Current state of the record.
    */
   state: "connected" | "signedIn" | "addKey" | "signIn";
+}
+/**
+ * A currency amount in the currency's minor units.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "Money".
+ */
+export interface Money6 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
+}
+/**
+ * A currency amount in the currency's minor units.
+ */
+export interface Money7 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
 }
 /**
  * Deal for the cockpit.
@@ -3267,7 +3296,11 @@ export interface Deal {
   /**
    * Confidence for this record.
    */
-  confidence: string;
+  confidence: string | null;
+  /**
+   * Unit cost when the cohort is measured by cost per lead.
+   */
+  costPerLead: Money6 | null;
   /**
    * Evidence for this record.
    */
@@ -3296,7 +3329,7 @@ export interface Deal {
   /**
    * Value for this record.
    */
-  value: string | null;
+  value: MeasuredValue | null;
 }
 /**
  * Deal alt for the cockpit.
@@ -3697,22 +3730,6 @@ export interface Stat {
   value: string;
 }
 /**
- * A currency amount in the currency's minor units.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "Money".
- */
-export interface Money6 {
-  /**
-   * Amount in cents for currencies with two fractional digits.
-   */
-  amountMinor: number;
-  /**
-   * ISO 4217 alphabetic currency code.
-   */
-  currency: string;
-}
-/**
  * One possible outcome shown in the decision forecast.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -4035,7 +4052,7 @@ export interface Fact {
    */
   label: string;
   /**
-   * Value for this record.
+   * Numeric or machine-readable value rendered according to its measurement kind.
    */
   value:
     | {
@@ -4086,19 +4103,6 @@ export interface Fact {
          */
         text: string;
       };
-}
-/**
- * A currency amount in the currency's minor units.
- */
-export interface Money7 {
-  /**
-   * Amount in cents for currencies with two fractional digits.
-   */
-  amountMinor: number;
-  /**
-   * ISO 4217 alphabetic currency code.
-   */
-  currency: string;
 }
 /**
  * Failing test for the cockpit.
@@ -4184,6 +4188,10 @@ export interface Funnel {
    */
   since: string;
   /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  sinceAt: string;
+  /**
    * Steps for this record.
    */
   steps: FunnelStep[];
@@ -4202,15 +4210,15 @@ export interface FunnelStep {
   /**
    * Change for this record.
    */
-  change: string | null;
+  change: MeasuredValue | null;
   /**
    * Count for this record.
    */
-  count: string;
+  count: number;
   /**
    * Rate for this record.
    */
-  rate: string | null;
+  rate: FunnelRate | null;
   /**
    * Current state of the record.
    */
@@ -4219,6 +4227,30 @@ export interface FunnelStep {
    * What for this record.
    */
   what: string;
+}
+/**
+ * Conversion rate or plan for a funnel stage.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "FunnelRate".
+ */
+export interface FunnelRate {
+  /**
+   * Time the plan’s count is due.
+   */
+  dueAt: Timestamp | null;
+  /**
+   * Observed conversion percentage.
+   */
+  percent: number | null;
+  /**
+   * Planned conversion percentage.
+   */
+  planPercent: number | null;
+  /**
+   * Planned count by the milestone date.
+   */
+  plannedCount: number | null;
 }
 /**
  * Gap for the cockpit.
@@ -4430,7 +4462,7 @@ export interface Guardrails {
  */
 export interface GuardrailItem {
   /**
-   * Limit for this record.
+   * Numeric or machine-readable value rendered according to its measurement kind.
    */
   limit:
     | {
@@ -4490,7 +4522,7 @@ export interface GuardrailItem {
    */
   state: "held" | "near" | "breached";
   /**
-   * Value for this record.
+   * Numeric or machine-readable value rendered according to its measurement kind.
    */
   value:
     | {
@@ -4959,6 +4991,10 @@ export interface LaneView {
    */
   afterNext: string | null;
   /**
+   * Time for the next step after approval.
+   */
+  afterNextAt: Timestamp | null;
+  /**
    * Approve label for this record.
    */
   approveLabel: string | null;
@@ -5028,6 +5064,10 @@ export interface LaneView {
    * Next for this record.
    */
   next: string | null;
+  /**
+   * Time the next report or action is due.
+   */
+  nextAt: Timestamp | null;
   /**
    * A point in time with an RFC 3339 UTC offset.
    */
@@ -5286,6 +5326,10 @@ export interface ManagerLane {
    */
   next: string;
   /**
+   * Time the next report or action is due.
+   */
+  nextAt: Timestamp | null;
+  /**
    * Reason for this record.
    */
   reason: string | null;
@@ -5514,9 +5558,57 @@ export interface NightStat {
    */
   label: string;
   /**
-   * Value for this record.
+   * Numeric or machine-readable value rendered according to its measurement kind.
    */
-  value: string;
+  value:
+    | {
+        kind: "count";
+        /**
+         * Total, when presented as a fraction.
+         */
+        of: number | null;
+        /**
+         * Count unit or interval.
+         */
+        unit: string | null;
+        /**
+         * Observed count.
+         */
+        value: number;
+      }
+    | {
+        kind: "rate";
+        /**
+         * Percentage points, e.g. 1.2 for 1.2%.
+         */
+        percent: number;
+        /**
+         * Whether the rate is the standard policy.
+         */
+        standard: boolean;
+      }
+    | {
+        /**
+         * Budget cap, when applicable.
+         */
+        cap: Money6 | null;
+        kind: "money";
+        money: Money7;
+      }
+    | {
+        /**
+         * A point in time with an RFC 3339 UTC offset.
+         */
+        at: string;
+        kind: "time";
+      }
+    | {
+        kind: "policy";
+        /**
+         * Rule expressed in words when it has no measurable threshold.
+         */
+        text: string;
+      };
 }
 /**
  * Pin for the cockpit.
@@ -5714,9 +5806,57 @@ export interface StageRow {
    */
   text: string;
   /**
-   * When for this record.
+   * Numeric or machine-readable value rendered according to its measurement kind.
    */
-  when: string;
+  when:
+    | {
+        kind: "count";
+        /**
+         * Total, when presented as a fraction.
+         */
+        of: number | null;
+        /**
+         * Count unit or interval.
+         */
+        unit: string | null;
+        /**
+         * Observed count.
+         */
+        value: number;
+      }
+    | {
+        kind: "rate";
+        /**
+         * Percentage points, e.g. 1.2 for 1.2%.
+         */
+        percent: number;
+        /**
+         * Whether the rate is the standard policy.
+         */
+        standard: boolean;
+      }
+    | {
+        /**
+         * Budget cap, when applicable.
+         */
+        cap: Money6 | null;
+        kind: "money";
+        money: Money7;
+      }
+    | {
+        /**
+         * A point in time with an RFC 3339 UTC offset.
+         */
+        at: string;
+        kind: "time";
+      }
+    | {
+        kind: "policy";
+        /**
+         * Rule expressed in words when it has no measurable threshold.
+         */
+        text: string;
+      };
   /**
    * Who for this record.
    */
@@ -5744,7 +5884,7 @@ export interface RowAlt {
   /**
    * When for this record.
    */
-  when: string | null;
+  when: MeasuredValue | null;
 }
 /**
  * Pull request for the cockpit.
@@ -6422,9 +6562,9 @@ export interface StuckReport {
    */
   note: string | null;
   /**
-   * Since for this record.
+   * A point in time with an RFC 3339 UTC offset.
    */
-  since: string;
+  sinceAt: string;
   /**
    * Title displayed above the record.
    */
@@ -6449,6 +6589,10 @@ export interface TaskRow {
    * Next for this record.
    */
   next: string;
+  /**
+   * Time the next report or action is due.
+   */
+  nextAt: Timestamp | null;
   /**
    * Reason for this record.
    */
@@ -6569,6 +6713,10 @@ export interface TopicLane {
    * Next for this record.
    */
   next: string;
+  /**
+   * Time the next report or action is due.
+   */
+  nextAt: Timestamp | null;
   /**
    * Lane state for the cockpit.
    */
@@ -6747,9 +6895,9 @@ export interface TopicView {
   tasks: TaskRow[];
   viewer: TopicViewer;
   /**
-   * When for this record.
+   * Progress through the planning period, or the date of its next milestone.
    */
-  when: string | null;
+  when: MeasuredValue | null;
 }
 /**
  * One handover stage and what the current reader can do in it.

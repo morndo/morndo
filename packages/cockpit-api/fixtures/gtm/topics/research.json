@@ -209,7 +209,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Researcher",
-      "next": "closed today, 07:10"
+      "next": "",
+      "nextAt": "2026-11-16T07:10:00+01:00"
     },
     {
       "id": "competitor-watch",
@@ -217,7 +218,8 @@
       "state": "done",
       "stateWord": "Done",
       "leadName": "Researcher",
-      "next": "closed Thu 12 Nov"
+      "next": "",
+      "nextAt": "2026-11-12T17:00:00+01:00"
     }
   ],
   "spend": {

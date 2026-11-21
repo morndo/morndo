@@ -2074,7 +2074,7 @@
           "capacity": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/MeasuredValue"
               },
               {
                 "type": "null"
@@ -2171,8 +2171,26 @@
             "description": "Close for this record."
           },
           "confidence": {
-            "description": "Confidence for this record.",
-            "type": "string"
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Confidence for this record."
+          },
+          "costPerLead": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Unit cost when the cohort is measured by cost per lead."
           },
           "evidence": {
             "description": "Evidence for this record.",
@@ -2219,7 +2237,7 @@
           "value": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/MeasuredValue"
               },
               {
                 "type": "null"
@@ -2231,6 +2249,7 @@
         "required": [
           "name",
           "confidence",
+          "costPerLead",
           "close",
           "chartDay",
           "stage",
@@ -3881,6 +3900,10 @@
             "description": "Since for this record.",
             "type": "string"
           },
+          "sinceAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Start of the period measured by this funnel."
+          },
           "steps": {
             "description": "Steps for this record.",
             "items": {
@@ -3896,7 +3919,68 @@
         "required": [
           "title",
           "since",
+          "sinceAt",
           "steps"
+        ],
+        "type": "object"
+      },
+      "FunnelRate": {
+        "description": "Conversion rate or plan for a funnel stage.",
+        "properties": {
+          "dueAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the plan’s count is due."
+          },
+          "percent": {
+            "anyOf": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Observed conversion percentage."
+          },
+          "planPercent": {
+            "anyOf": [
+              {
+                "format": "double",
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Planned conversion percentage."
+          },
+          "plannedCount": {
+            "anyOf": [
+              {
+                "format": "uint64",
+                "minimum": 0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Planned count by the milestone date."
+          }
+        },
+        "required": [
+          "percent",
+          "planPercent",
+          "plannedCount",
+          "dueAt"
         ],
         "type": "object"
       },
@@ -3906,7 +3990,7 @@
           "change": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/MeasuredValue"
               },
               {
                 "type": "null"
@@ -3916,12 +4000,14 @@
           },
           "count": {
             "description": "Count for this record.",
-            "type": "string"
+            "format": "uint64",
+            "minimum": 0,
+            "type": "integer"
           },
           "rate": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/FunnelRate"
               },
               {
                 "type": "null"
@@ -5253,6 +5339,17 @@
             ],
             "description": "After next for this record."
           },
+          "afterNextAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time for the next step after approval."
+          },
           "approveLabel": {
             "anyOf": [
               {
@@ -5401,6 +5498,17 @@
             ],
             "description": "Next for this record."
           },
+          "nextAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the next report or action is due."
+          },
           "openedAt": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "Time associated with opened."
@@ -5518,6 +5626,8 @@
           }
         },
         "required": [
+          "afterNextAt",
+          "nextAt",
           "attachment",
           "model",
           "chain",
@@ -5661,6 +5771,17 @@
             "description": "Next for this record.",
             "type": "string"
           },
+          "nextAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the next report or action is due."
+          },
           "reason": {
             "anyOf": [
               {
@@ -5701,6 +5822,7 @@
           }
         },
         "required": [
+          "nextAt",
           "reason",
           "id",
           "title",
@@ -6506,8 +6628,8 @@
             "type": "string"
           },
           "value": {
-            "description": "Value for this record.",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasuredValue",
+            "description": "Value for this record."
           }
         },
         "required": [
@@ -7406,7 +7528,7 @@
           "when": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/MeasuredValue"
               },
               {
                 "type": "null"
@@ -8468,8 +8590,8 @@
             "type": "string"
           },
           "when": {
-            "description": "When for this record.",
-            "type": "string"
+            "$ref": "#/components/schemas/MeasuredValue",
+            "description": "When for this record."
           },
           "who": {
             "description": "Who for this record.",
@@ -8749,9 +8871,9 @@
             ],
             "description": "Note for this record."
           },
-          "since": {
-            "description": "Since for this record.",
-            "type": "string"
+          "sinceAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Time the blocker first appeared."
           },
           "title": {
             "description": "Title displayed above the record.",
@@ -8759,7 +8881,7 @@
           }
         },
         "required": [
-          "since",
+          "sinceAt",
           "title",
           "detail",
           "blocks",
@@ -8863,6 +8985,17 @@
             "description": "Next for this record.",
             "type": "string"
           },
+          "nextAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the next report or action is due."
+          },
           "reason": {
             "anyOf": [
               {
@@ -8888,6 +9021,7 @@
           }
         },
         "required": [
+          "nextAt",
           "laneId",
           "task",
           "lane",
@@ -9241,6 +9375,17 @@
             "description": "Next for this record.",
             "type": "string"
           },
+          "nextAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the next report or action is due."
+          },
           "state": {
             "$ref": "#/components/schemas/LaneState",
             "description": "Current state of the record."
@@ -9255,6 +9400,7 @@
           }
         },
         "required": [
+          "nextAt",
           "id",
           "title",
           "state",
@@ -9595,13 +9741,13 @@
           "when": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/components/schemas/MeasuredValue"
               },
               {
                 "type": "null"
               }
             ],
-            "description": "When for this record."
+            "description": "Progress through the planning period, or the date of its next milestone."
           }
         },
         "required": [

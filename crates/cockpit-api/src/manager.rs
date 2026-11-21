@@ -10,6 +10,8 @@ use crate::present::Present;
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct ManagerLane {
+    /// Time the next report or action is due.
+    pub next_at: Present<Timestamp>,
     /// Reason for this record.
     pub reason: Present<String>,
     /// Stable identifier for this record.

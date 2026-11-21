@@ -11,7 +11,8 @@
       "state": "bad",
       "stateWord": "Stuck",
       "next": "Now, needs your call",
-      "reason": null
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "outreach-wave-2",
@@ -22,7 +23,8 @@
       "state": "warn",
       "stateWord": "Waits for Lea",
       "next": "After Lea's check",
-      "reason": null
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "halden-offer",
@@ -33,7 +35,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "next": "After your OK",
-      "reason": null
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "fenwick",
@@ -44,7 +47,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "next": "After your OK",
-      "reason": null
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "sequence-b",
@@ -55,7 +59,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "next": "After your decision",
-      "reason": null
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "search-budget",
@@ -66,7 +71,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "next": "After your decision",
-      "reason": null
+      "reason": null,
+      "nextAt": null
     },
     {
       "id": "reply-handling",
@@ -76,8 +82,9 @@
       "leadName": "Replies",
       "state": "warn",
       "stateWord": "Waits for Jonas",
-      "next": "Today, once Jonas answers",
-      "reason": null
+      "next": "once Jonas answers",
+      "reason": null,
+      "nextAt": "2026-11-16T17:00:00+01:00"
     },
     {
       "id": "brand-list",
@@ -87,8 +94,9 @@
       "leadName": "Brand scout",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 18:00",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T18:00:00+01:00"
     },
     {
       "id": "contact-data",
@@ -98,8 +106,9 @@
       "leadName": "Contact finder",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Tomorrow, 08:00",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-17T08:00:00+01:00"
     },
     {
       "id": "outreach-wave-1",
@@ -109,8 +118,9 @@
       "leadName": "Sender",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Wed 18 Nov",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-18T17:00:00+01:00"
     },
     {
       "id": "partner-calls",
@@ -120,8 +130,9 @@
       "leadName": "You",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 16:00",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T16:00:00+01:00"
     },
     {
       "id": "recap",
@@ -131,8 +142,9 @@
       "leadName": "Writer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "comparison-pages",
@@ -142,8 +154,9 @@
       "leadName": "SEO writer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Today, 15:00",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T15:00:00+01:00"
     },
     {
       "id": "webinar-reminders",
@@ -153,8 +166,9 @@
       "leadName": "Publisher",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Wed 18 Nov, 09:00",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-18T09:00:00+01:00"
     },
     {
       "id": "logistics-round-2",
@@ -164,8 +178,9 @@
       "leadName": "Prospector",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov",
-      "reason": null
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "webinar-campaign",
@@ -175,8 +190,9 @@
       "leadName": "Paid buyer",
       "state": "ok",
       "stateWord": "Working",
-      "next": "Thu 19 Nov, when it ends",
-      "reason": null
+      "next": "when it ends",
+      "reason": null,
+      "nextAt": "2026-11-19T17:00:00+01:00"
     }
   ],
   "sharedResources": [

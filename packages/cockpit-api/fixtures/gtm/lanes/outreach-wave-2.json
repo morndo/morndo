@@ -151,5 +151,7 @@
   "attachment": null,
   "model": null,
   "chain": false,
-  "reminder": null
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
 }

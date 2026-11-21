@@ -20,7 +20,7 @@
   },
   "waitsFor": null,
   "next": "After your OK",
-  "afterNext": "Wed 18 Nov, when it is published",
+  "afterNext": "when it is published",
   "decisionId": "d3",
   "short": null,
   "ask": null,
@@ -137,5 +137,7 @@
   "attachment": null,
   "model": null,
   "chain": false,
-  "reminder": null
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": "2026-11-18T17:00:00+01:00"
 }

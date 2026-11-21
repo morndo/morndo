@@ -15,7 +15,10 @@
     "nextReportAt": "2026-11-20T17:00:00+01:00"
   },
   "intro": "Everything we publish: the webinar on Thursday and its promo, the recap post, one customer story and a carousel. The goal this week is the webinar's sign-ups.",
-  "when": "3 days to the webinar",
+"when": {
+    "kind": "time",
+    "at": "2026-11-19T17:00:00+01:00"
+  },
   "health": null,
   "goal": {
     "target": 300,
@@ -221,7 +224,8 @@
           "kind": "lane",
           "id": "webinar-reminders"
         },
-        "chartDay": 4
+        "chartDay": 4,
+        "costPerLead": null
       },
       {
         "name": "LinkedIn promo post",
@@ -238,7 +242,8 @@
           "kind": "lane",
           "id": "webinar"
         },
-        "chartDay": 1
+        "chartDay": 1,
+        "costPerLead": null
       },
       {
         "name": "Fenwick shares it",
@@ -255,7 +260,8 @@
           "kind": "lane",
           "id": "fenwick"
         },
-        "chartDay": 0
+        "chartDay": 0,
+        "costPerLead": null
       }
     ],
     "guardrails": {
@@ -367,37 +373,58 @@
     "routine": null,
     "funnel": {
       "title": "Funnel",
-      "since": "Since 5 November · change today · rate against the plan",
+      "since": "change today · rate against the plan",
       "steps": [
         {
-          "count": "4,200",
+          "count": 4200,
           "what": "emails sent",
           "change": null,
           "rate": null,
           "state": null
         },
         {
-          "count": "1,890",
+          "count": 1890,
           "what": "opened",
           "change": null,
-          "rate": "45% · plan 40%",
+          "rate": {
+            "percent": 45.0,
+            "planPercent": 40.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": null
         },
         {
-          "count": "1,840",
+          "count": 1840,
           "what": "page visits",
-          "change": "+310",
+          "change": {
+            "kind": "count",
+            "value": 310,
+            "of": null,
+            "unit": null
+          },
           "rate": null,
           "state": null
         },
         {
-          "count": "212",
+          "count": 212,
           "what": "signed up",
-          "change": "+22",
-          "rate": "11.5% · plan 15%",
+          "change": {
+            "kind": "count",
+            "value": 22,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": 11.5,
+            "planPercent": 15.0,
+            "plannedCount": null,
+            "dueAt": null
+          },
           "state": "warn"
         }
-      ]
+      ],
+      "sinceAt": "2026-11-05T00:00:00+01:00"
     },
     "restSub": null,
     "figures": [
@@ -984,7 +1011,8 @@
       "state": "bad",
       "stateWord": "Stuck",
       "leadName": "Visuals",
-      "next": "Now, needs your call"
+      "next": "Now, needs your call",
+      "nextAt": null
     },
     {
       "id": "fenwick",
@@ -992,7 +1020,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Writer",
-      "next": "After your OK"
+      "next": "After your OK",
+      "nextAt": null
     },
     {
       "id": "recap",
@@ -1000,7 +1029,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Writer",
-      "next": "Thu 19 Nov"
+      "next": "",
+      "nextAt": "2026-11-19T17:00:00+01:00"
     },
     {
       "id": "webinar-reminders",
@@ -1008,7 +1038,8 @@
       "state": "ok",
       "stateWord": "Working",
       "leadName": "Publisher",
-      "next": "Wed 18 Nov, 09:00"
+      "next": "",
+      "nextAt": "2026-11-18T09:00:00+01:00"
     }
   ],
   "spend": {

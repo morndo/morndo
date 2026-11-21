@@ -19,7 +19,7 @@
     "record": null
   },
   "waitsFor": null,
-  "next": "Tomorrow, 08:00",
+  "next": null,
   "afterNext": null,
   "decisionId": null,
   "short": null,
@@ -100,5 +100,7 @@
   "attachment": null,
   "model": null,
   "chain": false,
-  "reminder": null
+  "reminder": null,
+  "nextAt": "2026-11-17T08:00:00+01:00",
+  "afterNextAt": null
 }

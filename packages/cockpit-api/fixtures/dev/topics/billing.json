@@ -43,7 +43,8 @@
       "state": "warn",
       "stateWord": "Needs you",
       "leadName": "Builder",
-      "next": "After your decision"
+      "next": "After your decision",
+      "nextAt": null
     }
   ],
   "spend": null,

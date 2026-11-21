@@ -20,7 +20,7 @@
   },
   "waitsFor": null,
   "next": "After your decision",
-  "afterNext": "Mon 7 Dec, with the result",
+  "afterNext": "with the result",
   "decisionId": "d1",
   "short": "Search budget shift",
   "ask": "€1,200 a week from LinkedIn to Search · by 14:00",
@@ -162,5 +162,7 @@
   "attachment": null,
   "model": null,
   "chain": false,
-  "reminder": null
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": "2026-12-07T17:00:00+01:00"
 }
