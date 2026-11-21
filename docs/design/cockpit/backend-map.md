@@ -248,7 +248,7 @@ merged into this order rather than run beside it.
 Decided by the owner on 21 November: **D1 yes** (team), **D2 yes** (the hub stores history and chat text), **D3**
 headless runs or lanes in a terminal, whichever fits the job, with a more reliable lane runtime of our own (C26,
 section 8). Also decided on 21 November: **D4** own connectors for every write, **D5** every tool the mockups name
-(the mail provider and the deploy target still to be named), **D6** both ways to sign the Mac in (a passkey with the
+(mail: Gmail / Google Workspace; the deploy target for the development module is still open), **D6** both ways to sign the Mac in (a passkey with the
 token in the Keychain, and pairing by QR from a signed-in device), **D7** the Rust types are the source and the
 TypeScript types and runtime checks are generated from them.
 
