@@ -1,0 +1,45 @@
+{
+  "id": "lane:recap",
+  "title": "Webinar recap post",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m22",
+      "author": {
+        "id": "writer",
+        "name": "Writer",
+        "shortName": "Writer",
+        "kind": "agent",
+        "avatar": "W",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Draft 1 was too long. Draft 2 keeps the 3 points people asked about most in the Q&A.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

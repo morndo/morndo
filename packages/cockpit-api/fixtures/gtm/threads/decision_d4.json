@@ -1,0 +1,14 @@
+{
+  "id": "decision:d4",
+  "title": "Chat",
+  "sub": null,
+  "placeholder": "Ask about this decision",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
+}

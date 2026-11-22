@@ -1,0 +1,50 @@
+{
+  "items": [
+    {
+      "id": "d1",
+      "title": "Move €1,200 a week from LinkedIn to Google Search",
+      "state": "open",
+      "topicName": "Paid",
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "goalChange": null
+    },
+    {
+      "id": "d2",
+      "title": "Start sequence B for 180 fintech ops leads",
+      "state": "open",
+      "topicName": "Outbound",
+      "target": {
+        "kind": "decision",
+        "id": "d2"
+      },
+      "goalChange": null
+    },
+    {
+      "id": "d3",
+      "title": "Publish the Fenwick Freight customer story",
+      "state": "open",
+      "topicName": "Content",
+      "target": {
+        "kind": "decision",
+        "id": "d3"
+      },
+      "goalChange": null
+    },
+    {
+      "id": "d4",
+      "title": "Send the referral offer to Halden Freight Network",
+      "state": "open",
+      "topicName": "Partnerships",
+      "target": {
+        "kind": "decision",
+        "id": "d4"
+      },
+      "goalChange": null
+    }
+  ],
+  "open": 4,
+  "total": 4
+}

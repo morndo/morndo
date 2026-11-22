@@ -1,0 +1,324 @@
+<!-- @@ css -->
+/* Proposal: three ways to share a topic with teammates. Only in gtm-sharing.html. */
+.proposal{position:fixed;z-index:40;left:50%;bottom:16px;transform:translateX(-50%);display:flex;flex-direction:column;align-items:center;gap:6px;max-width:calc(100% - 24px);padding:8px 10px 9px;background:color-mix(in srgb,var(--raised) 96%,transparent);border:1px solid var(--rim);border-radius:var(--r-2xl);box-shadow:var(--sh-pop)}
+.proposal .pr-row{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 10px}
+.proposal .pr-row>span{width:62px;text-align:right;font-size:var(--fs-2xs);font-weight:600;color:var(--muted)}
+.proposal .seg button{height:26px;padding:0 11px;font-size:var(--fs-xs)}
+.proposal p{font-size:var(--fs-xs);color:var(--text-2);text-align:center}
+.shtoast{position:fixed;z-index:41;left:50%;bottom:112px;transform:translateX(-50%);max-width:min(560px,calc(100% - 24px));padding:10px 16px;border-radius:var(--r-lg);background:var(--raised);border:1px solid var(--rim);font-size:var(--fs-ui);color:var(--text);box-shadow:var(--sh-pop)}
+.topic header.sec{position:relative}
+.sharerow{position:absolute;right:0;bottom:2px;display:flex;align-items:center;gap:12px}
+.seen{display:flex;align-items:center}
+.seen .av{width:26px;height:26px;font-size:var(--fs-3xs);margin-left:-6px;box-shadow:0 0 0 2px var(--bg),inset 0 0 0 1px var(--line-2,var(--line))}
+.seen .av:first-child{margin-left:0}
+.seen .av.watch{opacity:.6}
+.team{display:flex;align-items:center;gap:6px}
+.team>span{font-size:var(--fs-2xs);color:var(--muted);margin-right:2px}
+.team .av{width:26px;height:26px;font-size:var(--fs-3xs);cursor:grab}
+.stage.drop{background:var(--fill-hover);outline:1.5px dashed var(--ok);outline-offset:-2px}
+.stage.locked{cursor:default;opacity:.5}.stage.locked:hover,.stage.ro:hover{background:none}.stage.ro{cursor:default}
+.stage .av.lead{box-shadow:0 0 0 1.5px var(--text)}
+.runby{display:inline-flex;align-items:center;gap:8px;margin-left:10px;font-size:var(--fs-xs);color:var(--muted)}
+.runby select,.sharepop select{height:28px;padding:0 8px;border-radius:var(--r-sm);background:var(--fill);border:1px solid var(--line-2);color:var(--text);font:inherit;font-size:var(--fs-sm)}
+.sharepop{position:absolute;z-index:8;right:0;top:calc(100% + 10px);width:min(440px,calc(100vw - 32px));display:flex;flex-direction:column;gap:12px;padding:16px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-pop)}
+.sharepop h3{font-size:var(--fs-md);font-weight:600}
+.sharepop ul{display:flex;flex-direction:column;gap:4px}
+.sharepop li{display:grid;grid-template-columns:26px minmax(0,1fr) auto;gap:10px;align-items:center;min-height:38px}
+.sharepop li .av{width:26px;height:26px;font-size:var(--fs-3xs)}
+.sharepop li b{display:block;font-size:var(--fs-ui);font-weight:600}.sharepop li small{font-size:var(--fs-2xs);color:var(--muted)}
+.sharepop .fixed{font-size:var(--fs-sm);color:var(--muted);padding-right:8px}
+.sharepop form{display:flex;gap:8px}
+.sharepop input{flex:1;min-width:0;height:32px;padding:0 12px;border-radius:var(--r-md);background:var(--fill);border:1px solid var(--line-2);color:var(--text);font:inherit;font-size:var(--fs-ui)}
+.sharepop .note{font-size:var(--fs-xs);line-height:1.45;color:var(--muted);text-wrap:pretty}
+.accessdlg{width:min(1000px,calc(100vw - 32px));max-height:calc(100vh - 48px);padding:0;background:var(--surface);color:var(--text);border:1px solid var(--edge);border-radius:var(--r-xl);box-shadow:0 30px 90px rgba(0,0,0,.65)}
+.accessdlg::backdrop{background:rgba(0,0,0,.55)}
+.accessdlg .in{display:flex;flex-direction:column;gap:16px;padding:22px 24px 20px}
+.accessdlg header{display:flex;align-items:flex-start;gap:12px}
+.accessdlg header div{flex:1}.accessdlg h2{font:500 var(--fs-xl)/1.2 var(--serif)}.accessdlg header p{font-size:var(--fs-sm);color:var(--muted);margin-top:4px}
+.accessdlg .wrap{overflow-x:auto}
+.mx{border-collapse:separate;border-spacing:0;font-size:var(--fs-sm);min-width:760px;width:100%}
+.mx th,.mx td{padding:0 6px;height:40px;text-align:center;border-bottom:1px solid var(--line);white-space:nowrap}
+.mx thead th{height:auto;padding:6px;font-size:var(--fs-2xs);font-weight:500;color:var(--muted);vertical-align:bottom}
+.mx thead tr:first-child th{color:var(--text-2);font-weight:600;border-bottom:0;padding-bottom:0}
+.mx th[scope=row]{text-align:left;padding-left:2px}
+.mx th[scope=row]>span{display:flex;align-items:center;gap:9px;font-weight:600}.mx th[scope=row] small{font-weight:400;color:var(--muted)}
+.mx .gsep{border-left:1px solid var(--line)}
+.cell{width:30px;height:26px;border-radius:var(--r-sm);display:inline-grid;place-items:center}
+.cell:hover{background:var(--fill)}
+.cell i{width:10px;height:10px;border-radius:50%;border:1.5px solid var(--line-2,var(--muted))}
+.cell.work i{background:var(--ok);border-color:var(--ok)}
+.cell.watch i{border-color:var(--text-2)}
+.cell.implied i{background:color-mix(in srgb,var(--ok) 40%,transparent);border-color:transparent}
+.cell[disabled]{cursor:default}.cell[disabled]:hover{background:none}
+.accessdlg footer{display:flex;flex-wrap:wrap;align-items:center;gap:10px 18px}
+.accessdlg footer .mxkey{display:flex;gap:16px;font-size:var(--fs-xs);color:var(--muted)}.accessdlg footer .mxkey span{display:inline-flex;align-items:center;gap:6px}
+.accessdlg footer .mxkey i{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--text-2)}.accessdlg footer .mxkey i.w{background:var(--ok);border-color:var(--ok)}
+.accessdlg footer .btn{margin-left:auto}
+.viewnote{display:flex;align-items:center;gap:10px;font-size:var(--fs-ui);color:var(--text-2)}
+.blank{padding:28px;text-align:center;color:var(--text-2)}
+html[data-as]:not([data-as="mara"]) #pins,html[data-as]:not([data-as="mara"]) .row.mgr,html[data-as]:not([data-as="mara"]) #mgr-lanes{display:none}
+@container (max-width:720px){.sharerow{position:static;margin-top:8px}}
+<!-- @@ js -->
+  // This proposal shares a topic stage by stage, so it keeps the stage view of the topic's glance.
+  PAGES.stageGlance = true;
+  // ---- Proposal: three ways to share a topic. Only in gtm-sharing.html. ----
+  // Mara owns Partnerships. Lea runs Outreach, Jonas helps on Offers, Tom (the CEO) watches the status.
+  // All three variants change the same access; "See it as" shows what each person then gets.
+  const TEAM = {
+    Mara: { av: "M", name: "Mara Lind", role: "Head of GTM, owner" },
+    Lea: { av: "L", name: "Lea Brandt", role: "GTM associate" },
+    Jonas: { av: "J", name: "Jonas Falk", role: "Partner operations" },
+    Tom: { av: "T", name: "Tom Ahrens", role: "CEO" },
+  };
+  const SHARED = "partnerships";
+  const SH = {
+    variant: 2, as: "Mara", pop: null,
+    access: { Lea: { kind: "stages", stages: [3] }, Jonas: { kind: "stages", stages: [5] }, Tom: { kind: "view" } },
+    other: { Lea: { content: "view" }, Jonas: {}, Tom: { content: "view", outbound: "view", paid: "view" } },
+  };
+  const VARIANTS = [
+    ["Share button", "A Share button on the topic: one role per person, set where the work is."],
+    ["Hand over a stage", "Give someone a stage and they get its lanes, agents and chat. Watchers get the status."],
+    ["People table", "One table for the whole workspace: who works on or sees what."],
+  ];
+  // What a teammate sees of a lane that waits for them: their own ask, in one line.
+  const MINE = {
+    "outreach-wave-2": { short: "Wave 2: 24 emails", ask: "check them before they go out · by 11:00", acts: '<button class="btn ink" data-share-toast="Wave 2 goes out at 20 a day. Mara sees it in her brief.">Send wave 2</button>' },
+  };
+  const CHATS = {
+    Lea: ["You, Mara and Sender. The Outreach thread.", `<div class="msg"><span class="av">S</span><div class="who">Sender<time>02:10</time></div><p>24 emails for wave 2 are drafted, one per brand. Nothing goes out before you check them.</p></div>
+      <div class="msg"><span class="av person">M</span><div class="who">Mara<time>08:05</time></div><p>Lea, you run Outreach from here. Ask me only if a brand wants a call.</p></div>`],
+    Jonas: ["You, Mara and the offer agents. The Offers thread.", `<div class="msg"><span class="av person">M</span><div class="who">Mara<time>08:31</time></div><p>Thanks for the Halden draft. I send it once legal is happy with the template.</p></div>`],
+    Tom: ["You and Mara.", `<div class="msg"><span class="av person">M</span><div class="who">Mara<time>Mon</time></div><p>Tom, this is where Partnerships stands, live. The weekly report still comes on Friday.</p></div>`],
+  };
+  const sharedTopic = () => PAGES.topics.find(t => t.id === SHARED);
+  const stagesOf = () => sharedTopic().plan.stages;
+  const workStages = () => stagesOf().map((s, i) => (s[1] === "done" ? -1 : i)).filter(i => i >= 0);
+  const laneIdsOf = s => (s[4] || []).map(r => String(r[7] || "")).filter(h => h.startsWith("#lane/")).map(h => h.slice(6));
+  const accessOf = who => (who === "Mara" ? { kind: "all" } : SH.access[who] || { kind: "none" });
+  const openStages = who => { const a = accessOf(who); return a.kind === "all" ? stagesOf().map((_, i) => i) : a.kind === "stages" ? a.stages : []; };
+  const scopeWords = who => {
+    const a = accessOf(who);
+    return who === "Mara" ? "owner" : a.kind === "all" ? "everything" : a.kind === "stages" ? a.stages.map(i => stagesOf()[i][0]).join(", ") : a.kind === "view" ? "status only" : "no access";
+  };
+  const ownerOf = i => Object.keys(SH.access).find(w => SH.access[w].kind === "stages" && SH.access[w].stages.includes(i)) || "Mara";
+  const face = (who, cls = "") => `<span class="av person ${cls}" title="${esc(TEAM[who].name + " · " + scopeWords(who))}">${TEAM[who].av}</span>`;
+  function withData(topics, lanes, fn) {
+    const a = PAGES.topics, b = PAGES.lanes;
+    PAGES.topics = topics; PAGES.lanes = lanes;
+    try { return fn(); } finally { PAGES.topics = a; PAGES.lanes = b; }
+  }
+  function toast(text) {
+    let el = $(".shtoast");
+    if (!el) { el = document.createElement("div"); el.className = "shtoast"; el.setAttribute("role", "status"); document.body.append(el); }
+    el.textContent = text; el.hidden = false;
+    clearTimeout(toast.t); toast.t = setTimeout(() => (el.hidden = true), 4200);
+  }
+
+  // What one person may see: the lanes of their stages, with their own asks turned to them.
+  function lanesFor(who) {
+    if (who === "Mara") return PAGES.lanes;
+    const a = accessOf(who);
+    if (a.kind === "none" || a.kind === "view") return [];
+    const ids = a.kind === "all" ? null : new Set(a.stages.flatMap(i => laneIdsOf(stagesOf()[i])));
+    return PAGES.lanes.filter(l => l.topic === SHARED && (!ids || ids.has(l.id))).map(l =>
+      l.waits === who ? { ...l, waits: undefined, ...(MINE[l.id] || {}) } : l.decision ? { ...l, waits: "Mara" } : l);
+  }
+  function topicFor(t, who) {
+    const open = openStages(who), a = accessOf(who), first = n => n.split(" ")[0];
+    const swap = w => (w === "You" ? "Mara" : w);
+    const stages = t.plan.stages.map((s, i) => [s[0], s[1], s[2], s[3], open.includes(i) ? (s[4] || []).map(r => [r[0], swap(r[1]), ...r.slice(2)]) : [], s[5]]);
+    const whos = new Set(open.flatMap(i => (t.plan.stages[i][4] || []).map(r => r[1])));
+    const agents = a.kind === "view" ? [] : t.agents
+      .filter(g => g[0] === "M" && g[7] === "p" || whos.has(g[1]) || whos.has(first(g[1])))
+      .map(g => [g[0], g[1] === "Mara Lind, you" ? "Mara Lind" : first(g[1]) === who ? g[1] + ", you" : g[1], ...g.slice(2)]);
+    const mine = lanesFor(who).find(l => MINE[l.id] && PAGES.lanes.find(o => o.id === l.id).waits === who);
+    const [chatSub, chat] = a.kind === "all" ? [t.chatSub, t.chat] : CHATS[who] || ["You and Mara.", ""];
+    const does = a.kind === "all" ? "You work on all of it" : a.kind === "stages" ? "You run " + scopeWords(who) : "You see the status";
+    // The history follows the same scope: a stage's lanes only, and none for someone who sees the status.
+    const seen = new Set(lanesFor(who).map(l => l.id));
+    const history = a.kind === "all" ? t.history : a.kind === "stages" && t.history
+      ? { ...t.history, days: t.history.days.map(([d, rows]) => [d, rows.filter(r => r === "seen" || seen.has(r[5])).map(r => (r === "seen" ? r : [r[0], r[1], swap(r[2]), r[3], r[4].replace(/your mail/g, "Mara's mail"), ...r.slice(5)]))]) }
+      : null;
+    return { ...t, meta: `<b>Shared by Mara Lind</b><i>·</i><span>${does}</span>`, plan: { ...t.plan, stages }, agents, focusLane: mine ? mine.id : null, chat, chatSub, history };
+  }
+
+  // Who can see this topic, on the topic itself: a face for each, read-only for everyone but the owner.
+  const seenBy = () => `<span class="seen" aria-label="Who can see this topic">${["Mara", ...Object.keys(SH.access)].filter(w => TEAM[w] && accessOf(w).kind !== "none").map(w => face(w, accessOf(w).kind === "view" ? "watch" : "")).join("")}</span>`;
+
+  function sharePop() {
+    const opts = who => {
+      const a = accessOf(who), cur = a.kind === "stages" ? (a.stages.length === 1 ? "s" + a.stages[0] : "multi") : a.kind;
+      const o = (v, label) => `<option value="${v}"${cur === v ? " selected" : ""}>${label}</option>`;
+      return o("all", "Can work: everything") + workStages().map(i => o("s" + i, "Can work: " + stagesOf()[i][0])).join("") + (cur === "multi" ? o("multi", "Can work: " + scopeWords(who)) : "") + o("view", "Can view: status only") + o("none", "No access");
+    };
+    const rows = Object.keys(SH.access).filter(w => TEAM[w]).map(w => `<li>${face(w)}<div><b>${TEAM[w].name}</b><small>${TEAM[w].role}</small></div><select data-share-role="${w}" aria-label="What ${TEAM[w].name} can do">${opts(w)}</select></li>`).join("");
+    return `<div class="sharepop" role="dialog" aria-label="Share Partnerships"><h3>Share Partnerships</h3><ul><li>${face("Mara")}<div><b>Mara Lind, you</b><small>Head of GTM</small></div><span class="fixed">Owner</span></li>${rows}</ul>
+      <form data-share-invite><input placeholder="Add someone by name or email" aria-label="Add someone"><button class="btn quiet s">Invite</button></form>
+      <p class="note">Each person sees only what their role covers; the rest of the topic shows as bars. The chat follows the role: Lea gets the Outreach thread, not yours.</p></div>`;
+  }
+  function statusPop() {
+    const viewers = Object.keys(SH.access).filter(w => TEAM[w] && SH.access[w].kind === "view");
+    return `<div class="sharepop" role="dialog" aria-label="Share the status"><h3>Share the status</h3>
+      <p class="note">They see the numbers, the stage bars and whether it is on track. No lanes, no chat, no names of brands.</p>
+      <ul>${viewers.map(w => `<li>${face(w)}<div><b>${TEAM[w].name}</b><small>${TEAM[w].role} · sees the status</small></div><button class="btn quiet s" data-share-stop="${w}">Stop</button></li>`).join("")}</ul>
+      <form data-share-invite><input placeholder="Add someone by name or email" aria-label="Add someone"><button class="btn quiet s">Add</button></form>
+      <button class="btn quiet s" style="align-self:flex-start" data-share-toast="Link copied. Only people at Tidewell can open it, and they see the status only.">Copy status link</button></div>`;
+  }
+  function accessDialog() {
+    let d = $(".accessdlg");
+    if (!d) { d = document.createElement("dialog"); d.className = "accessdlg"; d.setAttribute("aria-label", "People and access"); document.body.append(d); }
+    const ws = workStages(), others = [["content", "Content"], ["outbound", "Outbound"], ["paid", "Paid"]];
+    const cell = (who, key, state, label) => `<td${key === "all" || key.startsWith("t:") && key === "t:content" ? ' class="gsep"' : ""}><button class="cell ${state}" data-cell="${who}|${key}"${who === "Mara" ? " disabled" : ""} aria-label="${esc(TEAM[who].name + ", " + label + ": " + (state.includes("work") ? "works on it" : state === "watch" ? "sees it" : "no access"))}"><i></i></button></td>`;
+    const row = who => {
+      const a = accessOf(who), o = SH.other[who] || {};
+      const st = i => (a.kind === "all" ? "work implied" : a.kind === "stages" && a.stages.includes(i) ? "work" : a.kind === "view" ? "watch" : "");
+      return `<tr><th scope="row"><span>${face(who)}<span>${TEAM[who].name}<br><small>${TEAM[who].role}</small></span></span></th>${cell(who, "all", a.kind === "all" ? "work" : "", "all of Partnerships")}${ws.map(i => cell(who, "s" + i, st(i), stagesOf()[i][0])).join("")}${cell(who, "view", a.kind === "view" ? "watch" : "", "Partnerships status")}${others.map(([id, n]) => cell(who, "t:" + id, who === "Mara" ? "work" : o[id] === "view" ? "watch" : o[id] || "", n)).join("")}</tr>`;
+    };
+    d.innerHTML = `<div class="in"><header><div><h2>People and access</h2><p>Tidewell · go-to-market. A dot is work: its lanes, agents and chat. A ring is view: the status only.</p></div><button class="btn quiet s" data-access-close aria-label="Close"><svg class="i sm"><use href="#x"/></svg></button></header>
+      <div class="wrap"><table class="mx"><thead><tr><th></th><th class="gsep" colspan="${ws.length + 2}">Partnerships</th><th class="gsep" colspan="3">Other topics</th></tr>
+      <tr><th></th><th class="gsep">All</th>${ws.map(i => `<th>${stagesOf()[i][0]}</th>`).join("")}<th>Status</th>${others.map(([, n], k) => `<th${k === 0 ? ' class="gsep"' : ""}>${n}</th>`).join("")}</tr></thead>
+      <tbody>${["Mara", ...Object.keys(SH.access)].filter(w => TEAM[w]).map(row).join("")}</tbody></table></div>
+      <footer><span class="mxkey"><span><i class="w"></i>Works on it</span><span><i></i>Sees the status</span></span><button class="btn ink" data-access-close>Done</button></footer></div>`;
+    if (!d.open) d.showModal();
+  }
+
+  // The owner's controls on the topic, one set per variant.
+  function ownerControls(t) {
+    const head = $("#v-area header.sec");
+    if (!head) return;
+    let right = "";
+    if (SH.variant === 1) right = `${seenBy()}<button class="btn quiet" data-share-open="share" aria-expanded="${SH.pop === "share"}"><svg class="i"><use href="#user"/></svg>Share</button>`;
+    if (SH.variant === 2) right = `<span class="team" title="Drag a face onto a stage to hand it over"><span>Team</span>${["Mara", "Lea", "Jonas"].map(w => `<span class="av person" draggable="true" data-team="${w}" title="${TEAM[w].name}: drag onto a stage">${TEAM[w].av}</span>`).join("")}</span><button class="btn quiet" data-share-open="status" aria-expanded="${SH.pop === "status"}"><svg class="i"><use href="#user"/></svg>Share status</button>`;
+    if (SH.variant === 3) right = `${seenBy()}<button class="btn quiet" data-access-open>Manage access</button>`;
+    head.insertAdjacentHTML("beforeend", `<div class="sharerow">${right}${SH.pop === "share" && SH.variant === 1 ? sharePop() : SH.pop === "status" && SH.variant === 2 ? statusPop() : ""}</div>`);
+    if (SH.variant !== 2) return;
+    // Who runs each stage: their face is ringed, and an open stage can be handed to someone else.
+    workStages().forEach(i => {
+      const who = ownerOf(i), crew = $(`[data-stage="${SHARED}/${i}"] .crew`), key = who === "Mara" ? "You" : who;
+      if (!crew || who === "Mara") return;
+      const mine = $$(".av", crew).find(a => (a.getAttribute("aria-label") || "").startsWith(key + ":"));
+      if (mine) mine.classList.add("lead"); else crew.insertAdjacentHTML("afterbegin", `<span class="av sm person lead" title="${TEAM[who].name} runs it">${TEAM[who].av}</span>`);
+    });
+    const sel = ui.stage[SHARED], tray = $(`#tray-${SHARED} > p`);
+    if (tray && sel != null && workStages().includes(sel)) tray.insertAdjacentHTML("beforeend", `<label class="runby">Run by<select data-runby="${sel}">${["Mara", "Lea", "Jonas"].map(w => `<option value="${w}"${ownerOf(sel) === w ? " selected" : ""}>${w === "Mara" ? "Mara (you)" : TEAM[w].name}</option>`).join("")}</select></label>`);
+  }
+
+  function handStage(i, who) {
+    Object.keys(SH.access).forEach(w => {
+      const a = SH.access[w];
+      if (a.kind === "stages" && w !== who) { a.stages = a.stages.filter(x => x !== i); if (!a.stages.length) SH.access[w] = { kind: "view" }; }
+    });
+    if (who !== "Mara") {
+      const a = SH.access[who];
+      if (!a || a.kind === "none" || a.kind === "view") SH.access[who] = { kind: "stages", stages: [i] };
+      else if (a.kind === "stages" && !a.stages.includes(i)) a.stages.push(i);
+    }
+    const n = stagesOf()[i][0];
+    toast(who === "Mara" ? `You run ${n} again.` : `${TEAM[who].name} now runs ${n}: its lanes, agents and chat. The rest of the topic shows as bars.`);
+    refresh(); drawBar();
+  }
+
+  const drawTopicBase = drawTopic, drawTreeBase = drawTree;
+  drawTopic = t => {
+    if (SH.as === "Mara") { drawTopicBase(t); if (t.id === SHARED) ownerControls(t); return; }
+    const who = SH.as, a = accessOf(who), v = $("#v-area");
+    if (t.id !== SHARED || a.kind === "none") {
+      v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide topic"><div class="box blank">Nothing here is shared with ${TEAM[who].name}.</div></div></div><template class="chat-src" data-title="Chat" data-sub="" data-placeholder="Message"></template></div>`;
+      return;
+    }
+    const open = openStages(who);
+    if (!open.includes(ui.stage[SHARED])) ui.stage[SHARED] = null;
+    const t2 = topicFor(t, who);
+    withData(PAGES.topics, lanesFor(who), () => drawTopicBase(t2));
+    $$("#v-area [data-stage]").forEach(b => { if (!open.includes(+b.dataset.stage.split("/")[1])) { b.disabled = true; b.classList.add(a.kind === "view" ? "ro" : "locked"); } });
+    $("#v-area header.sec").insertAdjacentHTML("beforeend", `<div class="sharerow">${seenBy()}</div>`);
+    if (a.kind === "view") {
+      const more = $("#v-area details.more");
+      if (more) more.outerHTML = `<p class="viewnote"><svg class="i sm"><use href="#user"/></svg>Mara shares the status of this topic with you. The weekly report comes on Friday at 08:00.</p>`;
+    }
+  };
+  drawTree = () => {
+    if (SH.as === "Mara") return drawTreeBase();
+    const a = accessOf(SH.as);
+    withData(a.kind === "none" ? [] : [sharedTopic()], lanesFor(SH.as), drawTreeBase);
+  };
+
+  // The proposal bar: which variant, and whose eyes.
+  const bar = document.createElement("div");
+  bar.className = "proposal";
+  bar.setAttribute("aria-label", "Proposal: sharing a topic");
+  function drawBar() {
+    bar.innerHTML = `<div class="pr-row"><span>Sharing</span><div class="seg">${VARIANTS.map(([n], k) => `<button data-variant="${k + 1}" aria-pressed="${SH.variant === k + 1}">${k + 1} · ${n}</button>`).join("")}</div>
+</div><div class="pr-row"><span>See it as</span><div class="seg">${["Mara", "Lea", "Tom"].map(w => `<button data-as="${w}" aria-pressed="${SH.as === w}">${w} · ${scopeWords(w)}</button>`).join("")}</div></div><p>${VARIANTS[SH.variant - 1][1]}</p>`;
+  }
+  document.body.append(bar);
+  drawBar();
+  const again = () => { drawTree(); show("topic/" + SHARED); drawBar(); };
+  bar.addEventListener("click", e => {
+    const b = e.target.closest("button");
+    if (!b) return;
+    if (b.dataset.variant) { SH.variant = +b.dataset.variant; SH.pop = null; SH.as = "Mara"; }
+    if (b.dataset.as) SH.as = b.dataset.as;
+    document.documentElement.dataset.as = SH.as.toLowerCase();
+    $(".row.me .grow").textContent = TEAM[SH.as].name;
+    $(".row.me").setAttribute("aria-label", "Settings and account: " + TEAM[SH.as].name);
+    history.replaceState(null, "", "#topic/" + SHARED);
+    again();
+  });
+  document.addEventListener("click", e => {
+    const t = e.target.closest("[data-share-open],[data-share-stop],[data-share-toast],[data-access-open],[data-access-close],[data-cell]");
+    if (!t) { if (SH.pop && !e.target.closest(".sharepop")) { SH.pop = null; refresh(); } return; }
+    if (t.dataset.shareOpen) { SH.pop = SH.pop === t.dataset.shareOpen ? null : t.dataset.shareOpen; refresh(); }
+    else if (t.dataset.shareStop) { SH.access[t.dataset.shareStop] = { kind: "none" }; toast(TEAM[t.dataset.shareStop].name + " no longer sees Partnerships."); refresh(); drawBar(); }
+    else if (t.dataset.shareToast) toast(t.dataset.shareToast);
+    else if (t.matches("[data-access-open]")) accessDialog();
+    else if (t.matches("[data-access-close]")) $(".accessdlg").close();
+    else if (t.dataset.cell) {
+      const [who, key] = t.dataset.cell.split("|"), a = accessOf(who);
+      if (key === "all") SH.access[who] = a.kind === "all" ? { kind: "none" } : { kind: "all" };
+      else if (key === "view") SH.access[who] = a.kind === "view" ? { kind: "none" } : { kind: "view" };
+      else if (key.startsWith("t:")) { const o = (SH.other[who] = SH.other[who] || {}), id = key.slice(2); o[id] = { "": "view", view: "work", work: "" }[o[id] || ""]; }
+      else {
+        const i = +key.slice(1), cur = a.kind === "all" ? workStages() : a.kind === "stages" ? a.stages : [];
+        const next = cur.includes(i) ? cur.filter(x => x !== i) : cur.concat(i).sort();
+        SH.access[who] = next.length ? { kind: "stages", stages: next } : { kind: "none" };
+      }
+      accessDialog(); refresh(); drawBar();
+      $(`[data-cell="${who}|${key}"]`).focus();
+    }
+  });
+  document.addEventListener("change", e => {
+    const t = e.target;
+    if (t.dataset.shareRole) {
+      const w = t.dataset.shareRole, v = t.value;
+      SH.access[w] = v === "all" ? { kind: "all" } : v === "view" ? { kind: "view" } : v === "none" ? { kind: "none" } : v === "multi" ? SH.access[w] : { kind: "stages", stages: [+v.slice(1)] };
+      toast(`${TEAM[w].name}: ${scopeWords(w)}.`);
+      refresh(); drawBar();
+      $(`[data-share-role="${w}"]`).focus();
+    }
+    else if (t.dataset.runby) handStage(+t.dataset.runby, t.value);
+  });
+  document.addEventListener("submit", e => {
+    if (!e.target.matches("[data-share-invite]")) return;
+    e.preventDefault();
+    const name = $("input", e.target).value.trim();
+    if (!name) return;
+    const key = name.split(/[\s@]/)[0].replace(/^./, c => c.toUpperCase());
+    TEAM[key] = TEAM[key] || { av: key[0], name, role: "Invited" };
+    SH.access[key] = { kind: "view" };
+    toast(`${name} is invited and sees the status. Give them more from the list.`);
+    refresh();
+  });
+  // Handing over by dragging a face onto a stage.
+  document.addEventListener("dragstart", e => { const f = e.target.closest && e.target.closest("[data-team]"); if (f) e.dataTransfer.setData("text/plain", f.dataset.team); });
+  document.addEventListener("dragover", e => { const s = e.target.closest && e.target.closest(".stage:not(.s-done)"); if (s && SH.variant === 2 && SH.as === "Mara") { e.preventDefault(); $$(".stage.drop").forEach(x => x !== s && x.classList.remove("drop")); s.classList.add("drop"); } });
+  document.addEventListener("dragleave", e => { const s = e.target.closest && e.target.closest(".stage"); if (s && !s.contains(e.relatedTarget)) s.classList.remove("drop"); });
+  document.addEventListener("drop", e => {
+    const s = e.target.closest && e.target.closest(".stage:not(.s-done)"), who = e.dataTransfer.getData("text/plain");
+    $$(".stage.drop").forEach(x => x.classList.remove("drop"));
+    if (s && TEAM[who]) { e.preventDefault(); handStage(+s.dataset.stage.split("/")[1], who); }
+  });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && SH.pop) { SH.pop = null; refresh(); } });
+  document.documentElement.dataset.as = "mara";
+  if (!location.hash) history.replaceState(null, "", "#topic/" + SHARED);

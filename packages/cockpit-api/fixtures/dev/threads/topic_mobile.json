@@ -1,0 +1,14 @@
+{
+  "id": "topic:mobile",
+  "title": "Mobile chat",
+  "sub": "You and Builder.",
+  "placeholder": "Message Mobile",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
+}

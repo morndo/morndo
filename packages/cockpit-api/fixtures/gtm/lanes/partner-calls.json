@@ -1,0 +1,157 @@
+{
+  "id": "partner-calls",
+  "topicId": "partnerships",
+  "title": "Partnership calls",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "mara-lind",
+    "name": "Mara Lind",
+    "shortName": "Mara",
+    "kind": "person",
+    "avatar": "M",
+    "role": "Head of GTM",
+    "state": "ok",
+    "word": "Leads",
+    "text": "Brightmoor at 15:00",
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Book me calls with the brands that reply. Brief me before, take the notes after.",
+  "askedMeta": {
+    "source": "You to the Manager, 10 November",
+    "note": "You lead; Call prep and Notetaker work around each call."
+  },
+  "status": "5 calls booked, 2 held. Next: Brightmoor Retail today at 15:00; the brief is ready at 13:00.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "5 calls booked, 2 held. Next: Brightmoor Retail today at 15:00; the brief is ready at 13:00."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Call 1, Kestrel Parcel: not before spring",
+      "who": "You · 12 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Call 2, Halden Freight Network: they want an offer",
+      "who": "You · 13 Nov"
+    },
+    {
+      "kind": "now",
+      "text": "Call 3, Brightmoor Retail",
+      "who": "You · today 15:00"
+    },
+    {
+      "kind": "todo",
+      "text": "Call 4, Northvale Bank",
+      "who": "You · Wed"
+    },
+    {
+      "kind": "todo",
+      "text": "Call 5, Corvane ERP",
+      "who": "You · Thu"
+    }
+  ],
+  "doneNote": "Every call gets a brief before and notes after. You only talk; the agents do the rest.",
+  "crew": [
+    {
+      "id": "mara-lind",
+      "name": "Mara Lind",
+      "shortName": "Mara",
+      "kind": "person",
+      "avatar": "M",
+      "role": "Head of GTM",
+      "state": "ok",
+      "word": "Leads",
+      "text": "Brightmoor at 15:00",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "call-prep",
+      "name": "Call prep",
+      "shortName": "Call",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Brightmoor brief, ready 13:00",
+      "skill": "/call-brief",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "notetaker",
+      "name": "Notetaker",
+      "shortName": "Notetaker",
+      "kind": "agent",
+      "avatar": "N",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Notes and follow-up after 15:00",
+      "skill": "/call-notes",
+      "engine": "Claude",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Brief: Brightmoor Retail",
+      "detail": "Ready 13:00",
+      "target": {
+        "kind": "lane",
+        "id": "partner-calls"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Notes: Halden Freight Network",
+      "detail": "They want a referral deal for 2,400 customers",
+      "target": {
+        "kind": "lane",
+        "id": "partner-calls"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Notes: Kestrel Parcel",
+      "detail": "Budget frozen until spring",
+      "target": {
+        "kind": "lane",
+        "id": "partner-calls"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-10T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-16T16:00:00+01:00",
+  "afterNextAt": null
+}

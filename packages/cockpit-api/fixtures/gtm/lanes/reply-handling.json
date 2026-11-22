@@ -1,0 +1,141 @@
+{
+  "id": "reply-handling",
+  "topicId": "outbound",
+  "title": "Meetings from replies",
+  "state": "warn",
+  "stateWord": "Waits for Jonas",
+  "lead": {
+    "id": "replies",
+    "name": "Replies",
+    "shortName": "Replies",
+    "kind": "agent",
+    "avatar": "R",
+    "role": null,
+    "state": "warn",
+    "word": "Leads",
+    "text": "Waits for Jonas's times",
+    "skill": "/reply-triage",
+    "engine": "GPT",
+    "record": "52 of 53 replies sorted right; Jonas moved 1"
+  },
+  "waitsFor": {
+    "id": "jonas-falk",
+    "name": "Jonas Falk",
+    "shortName": "Jonas",
+    "kind": "person",
+    "avatar": "J",
+    "role": "Sales",
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "next": "once Jonas answers",
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "When someone says yes, get them a meeting with Jonas within a day.",
+  "askedMeta": {
+    "source": "You to the Manager, Monday 2 November",
+    "note": "Replies leads; Jonas takes the meetings."
+  },
+  "status": "2 people said yes this morning: an ops lead at Ostrand Haulage and the COO of Velmont Freight. Replies asked Jonas for times at 08:20; nothing is booked until he answers.",
+  "standing": {
+    "headline": "It waits for Jonas.",
+    "detail": "2 people said yes this morning: an ops lead at Ostrand Haulage and the COO of Velmont Freight. Replies asked Jonas for times at 08:20; nothing is booked until he answers."
+  },
+  "acts": [
+    {
+      "label": "Remind Jonas",
+      "tone": "quiet",
+      "id": "remind-jonas",
+      "personId": "jonas-falk",
+      "target": null
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Every positive reply answered within a day: 19 of 19",
+      "who": "Replies · since 2 Nov"
+    },
+    {
+      "kind": "now",
+      "text": "Times from Jonas for Ostrand and Velmont",
+      "who": "Jonas · today"
+    },
+    {
+      "kind": "todo",
+      "text": "Invites sent from your mail",
+      "who": "Replies · after Jonas"
+    },
+    {
+      "kind": "todo",
+      "text": "Meetings reported",
+      "who": "Manager · Fri 20 Nov"
+    }
+  ],
+  "doneNote": "This lane runs as long as the sequences do. The Manager checks every Friday that no yes waited more than a day.",
+  "crew": [
+    {
+      "id": "replies",
+      "name": "Replies",
+      "shortName": "Replies",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "warn",
+      "word": "Leads",
+      "text": "Waits for Jonas's times",
+      "skill": "/reply-triage",
+      "engine": "GPT",
+      "record": "52 of 53 replies sorted right; Jonas moved 1"
+    },
+    {
+      "id": "jonas-falk",
+      "name": "Jonas Falk",
+      "shortName": "Jonas",
+      "kind": "person",
+      "avatar": "J",
+      "role": "Sales",
+      "state": "warn",
+      "word": "Asked",
+      "text": "2 meeting times",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "mail",
+      "title": "2 invite drafts",
+      "detail": "In your drafts, times left open",
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-02T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-16T17:00:00+01:00",
+  "afterNextAt": null
+}

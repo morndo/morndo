@@ -1,0 +1,251 @@
+{
+  "title": "The Monday Brief",
+  "lede": "Four decisions need you and one thing is stuck. Everything else moved on its own while you slept.",
+  "cadence": "Until then you hear only about what cannot wait.",
+  "spend": {
+    "overnight": {
+      "amountMinor": 2100,
+      "currency": "EUR"
+    },
+    "week": {
+      "amountMinor": 11700,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 22000,
+      "currency": "EUR"
+    }
+  },
+  "topics": [
+    {
+      "id": "content",
+      "name": "Content",
+      "state": "bad",
+      "verdict": "At risk",
+      "progress": "212 of 300 signed up",
+      "spend": {
+        "amountMinor": 3600,
+        "currency": "EUR"
+      }
+    },
+    {
+      "id": "partnerships",
+      "name": "Partnerships",
+      "state": "warn",
+      "verdict": "Behind plan",
+      "progress": "0 of 3 signed",
+      "spend": {
+        "amountMinor": 3800,
+        "currency": "EUR"
+      }
+    },
+    {
+      "id": "paid",
+      "name": "Paid",
+      "state": "warn",
+      "verdict": "Over cost",
+      "progress": "214 of 450 leads since 1 October",
+      "spend": {
+        "amountMinor": 900,
+        "currency": "EUR"
+      }
+    },
+    {
+      "id": "outbound",
+      "name": "Outbound",
+      "state": "ok",
+      "verdict": "Ahead of plan",
+      "progress": "11 of 30 meetings booked",
+      "spend": {
+        "amountMinor": 1700,
+        "currency": "EUR"
+      }
+    },
+    {
+      "id": "seo",
+      "name": "SEO",
+      "state": "idle",
+      "verdict": "Too early to tell",
+      "progress": "0 of 3 pages in the top 10",
+      "spend": {
+        "amountMinor": 1400,
+        "currency": "EUR"
+      }
+    },
+    {
+      "id": "research",
+      "name": "Research",
+      "state": "idle",
+      "verdict": "No goal set",
+      "progress": "Answers asks from the other topics",
+      "spend": {
+        "amountMinor": 300,
+        "currency": "EUR"
+      }
+    }
+  ],
+  "decisions": [
+    {
+      "id": "d1",
+      "topicId": "paid",
+      "topicName": "Paid",
+      "whyYours": "Yours: over €500",
+      "title": "Move €1,200 a week from LinkedIn to Google Search",
+      "context": "A lead costs €200 on LinkedIn and €80 on Search. The weekly budget stays at €4,000.",
+      "minutes": 2,
+      "doneNote": "Approved. The Paid agent starts now.",
+      "laneId": "search-budget",
+      "state": "open",
+      "dueAt": "2026-11-16T14:00:00+01:00",
+      "rule": "overWeeklyCap"
+    },
+    {
+      "id": "d2",
+      "topicId": "outbound",
+      "topicName": "Outbound",
+      "whyYours": "Yours: in your name",
+      "title": "Start sequence B for 180 fintech ops leads",
+      "context": "The pilot of 30 emails got 6 replies and 2 meetings. Sending stays at 60 a day.",
+      "minutes": 2,
+      "doneNote": "Approved. The first 60 emails go out at 10:00.",
+      "laneId": "sequence-b",
+      "state": "open",
+      "dueAt": "2026-11-17T17:00:00+01:00",
+      "rule": "inYourName"
+    },
+    {
+      "id": "d3",
+      "topicId": "content",
+      "topicName": "Content",
+      "whyYours": "Yours: a public claim",
+      "title": "Publish the Fenwick Freight customer story",
+      "context": "Fenwick signed off the quote. The claim of 38% fewer manual hand-offs still needs your OK.",
+      "minutes": 3,
+      "doneNote": "Approved. The story is scheduled for Wednesday.",
+      "laneId": "fenwick",
+      "state": "open",
+      "dueAt": "2026-11-18T17:00:00+01:00",
+      "rule": "inYourName"
+    },
+    {
+      "id": "d4",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "whyYours": "Yours: binding terms",
+      "title": "Send the referral offer to Halden Freight Network",
+      "context": "Halden wants a deal for its 2,400 business customers: 15% of first-year revenue for 12 months. Jonas drafted it from the template.",
+      "minutes": 3,
+      "doneNote": "Approved. The offer goes out tomorrow at 09:00.",
+      "laneId": "halden-offer",
+      "state": "open",
+      "dueAt": "2026-11-19T17:00:00+01:00",
+      "rule": "hardToUndo"
+    }
+  ],
+  "openCount": 4,
+  "minutes": 10,
+  "burns": [
+    {
+      "topicId": "content",
+      "topicName": "Content",
+      "title": "The webinar promo visuals are stuck",
+      "detail": "Visuals used its 3 feedback rounds. 4 of 6 images pass the brand check, 2 still fail.",
+      "target": {
+        "kind": "lane",
+        "id": "webinar"
+      },
+      "stuckAt": "2026-11-16T08:44:50+01:00",
+      "laneId": "webinar",
+      "blocks": "The webinar promo goes out today.",
+      "dueAt": "2026-11-16T16:00:00+01:00"
+    }
+  ],
+  "overnight": [
+    {
+      "id": "o1",
+      "topicId": "research",
+      "topicName": "Research",
+      "laneId": "customer-profile",
+      "text": "Research rebuilt the customer profile from 212 won deals and saved it to memory.",
+      "undoable": true,
+      "undone": false,
+      "at": "2026-11-16T07:10:00+01:00",
+      "undoUntilAt": null,
+      "relatedLaneIds": []
+    },
+    {
+      "id": "o2",
+      "topicId": "partnerships",
+      "topicName": "Partnerships",
+      "laneId": "brand-list",
+      "text": "Partnerships added 32 brands from Clay, found 58 contacts in Apollo and drafted 24 emails for Lea to check.",
+      "undoable": true,
+      "undone": false,
+      "at": "2026-11-16T07:30:00+01:00",
+      "undoUntilAt": null,
+      "relatedLaneIds": [
+        "contact-data",
+        "outreach-wave-2"
+      ]
+    },
+    {
+      "id": "o3",
+      "topicId": "seo",
+      "topicName": "SEO",
+      "laneId": "comparison-pages",
+      "text": "SEO published the 2 comparison pages you approved on Friday.",
+      "undoable": true,
+      "undone": false,
+      "at": "2026-11-16T07:42:00+01:00",
+      "undoUntilAt": null,
+      "relatedLaneIds": []
+    },
+    {
+      "id": "o4",
+      "topicId": "outbound",
+      "topicName": "Outbound",
+      "laneId": "sequence-a",
+      "text": "Outbound stopped sequence A for the 14 people who replied.",
+      "undoable": true,
+      "undone": false,
+      "at": "2026-11-16T08:05:00+01:00",
+      "undoUntilAt": null,
+      "relatedLaneIds": []
+    },
+    {
+      "id": "o5",
+      "topicId": "paid",
+      "topicName": "Paid",
+      "laneId": "click-floor",
+      "text": "Paid switched off 3 ads that fell below the click floor.",
+      "undoable": true,
+      "undone": false,
+      "at": "2026-11-16T08:30:00+01:00",
+      "undoUntilAt": null,
+      "relatedLaneIds": []
+    }
+  ],
+  "drafts": {
+    "count": 4,
+    "text": "4 drafts wait in your mail",
+    "detail": "The team update, the board note and 2 customer replies. Nothing is sent until you send it."
+  },
+  "artwork": {
+    "index": 13,
+    "total": 14,
+    "title": "The Muses at sunrise",
+    "manner": "early Renaissance frescoes",
+    "alt": "The Muses rest on a hillside at sunrise, their lyres laid in the grass and a finished scroll tied with a ribbon.",
+    "credit": "Generated for Morndo, in the manner of early Renaissance frescoes",
+    "src": "/api/cockpit/brief/artwork/13/image",
+    "glass": "/api/cockpit/brief/artwork/13/glass",
+    "position": "center"
+  },
+  "at": "2026-11-16T07:15:00+01:00",
+  "nextBriefAt": "2026-11-16T13:00:00+01:00",
+  "inWorks": null,
+  "overnightSinceAt": "2026-11-15T18:00:00+01:00",
+  "burnsSub": "This needs your call.",
+  "settledBurns": [],
+  "sharedTopics": []
+}

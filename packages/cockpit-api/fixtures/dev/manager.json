@@ -1,0 +1,127 @@
+{
+  "intro": "Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane in the right project and names who leads it. It comes back to you only for decisions.",
+  "summary": "7 lanes in 4 projects · 3 wait for you",
+  "lanes": [
+    {
+      "id": "red-main",
+      "title": "Red main",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Builder",
+      "state": "bad",
+      "stateWord": "Stuck",
+      "next": "Now, needs your call",
+      "reason": null,
+      "nextAt": null
+    },
+    {
+      "id": "export-for-big-accounts",
+      "title": "Export for big accounts",
+      "topicId": "api",
+      "topicName": "API",
+      "leadName": "Release",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your decision",
+      "reason": null,
+      "nextAt": null
+    },
+    {
+      "id": "tax-rates",
+      "title": "Tax rates per country",
+      "topicId": "billing",
+      "topicName": "Billing",
+      "leadName": "Builder",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your decision",
+      "reason": null,
+      "nextAt": null
+    },
+    {
+      "id": "new-sign-in",
+      "title": "New sign-in",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Builder",
+      "state": "warn",
+      "stateWord": "Needs you",
+      "next": "After your pick",
+      "reason": null,
+      "nextAt": null
+    },
+    {
+      "id": "shipment-filters",
+      "title": "Shipment filters",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Reviewer",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T11:30:00+01:00"
+    },
+    {
+      "id": "keep-scans",
+      "title": "Keep scans without a signal",
+      "topicId": "mobile",
+      "topicName": "Mobile",
+      "leadName": "Builder",
+      "state": "ok",
+      "stateWord": "Working",
+      "next": "",
+      "reason": null,
+      "nextAt": "2026-11-16T15:00:00+01:00"
+    },
+    {
+      "id": "upgrade-node-24",
+      "title": "Upgrade to Node 24",
+      "topicId": "web",
+      "topicName": "Web app",
+      "leadName": "Builder",
+      "state": "parked",
+      "stateWord": "Parked until Thu",
+      "next": "",
+      "reason": "The session library supports Node 24 from Thursday’s release.",
+      "nextAt": "2026-11-19T17:00:00+01:00"
+    }
+  ],
+  "sharedResources": [],
+  "asks": [
+    {
+      "id": "ask-red",
+      "quote": "Stop the red main from blocking everyone.",
+      "chat": "Web app",
+      "went": "lane Red main · Builder leads",
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "at": "2026-11-16T06:55:00+01:00"
+    },
+    {
+      "id": "ask-node",
+      "quote": "Move us to Node 24 when it is safe.",
+      "chat": "Web app",
+      "went": "lane Upgrade to Node 24 · parked until Thursday",
+      "target": {
+        "kind": "lane",
+        "id": "upgrade-node-24"
+      },
+      "at": "2026-11-13T09:30:00+01:00"
+    },
+    {
+      "id": "ask-export",
+      "quote": "Fenwick says the export times out for their account. Fix it and prove it works on their data.",
+      "chat": "API",
+      "went": "lane Export for big accounts · Release leads",
+      "target": {
+        "kind": "lane",
+        "id": "export-for-big-accounts"
+      },
+      "at": "2026-11-12T16:10:00+01:00"
+    }
+  ],
+  "since": []
+}

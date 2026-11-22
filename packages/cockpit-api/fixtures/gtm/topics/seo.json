@@ -1,0 +1,726 @@
+{
+  "id": "seo",
+  "name": "SEO",
+  "kind": "topic",
+  "icon": "search",
+  "crumb": "Comparison pages",
+  "open": false,
+  "meta": {
+    "askedBy": "Asked by you",
+    "ownerLine": "SEO writer leads; Checker checks every claim",
+    "parts": [
+      "Asked by you",
+      "SEO writer leads; Checker checks every claim"
+    ],
+    "nextReportAt": "2026-11-30T17:00:00+01:00"
+  },
+  "intro": "Five comparison pages against the tools we lose deals to. The goal: three of them in Google's top 10 by 31 December.",
+"when": {
+    "kind": "count",
+    "value": 3,
+    "of": 9,
+    "unit": "weeks"
+  },
+  "health": null,
+  "goal": {
+    "target": 3,
+    "signed": 0,
+    "likely": null,
+    "unit": "Pages in the top 10",
+    "verdict": {
+      "state": "idle",
+      "word": "Too early to tell",
+      "action": "Nothing needed today",
+      "text": null
+    },
+    "insight": "Pages 1 and 2 went live this morning. Rankings settle in 2 to 4 weeks; the first reading is on 30 November.",
+    "decision": null,
+    "calm": "Nothing needs you",
+    "calmSub": "The first ranking check is Mon 30 Nov. You hear about it in that morning's brief.",
+    "trajectory": {
+      "start": "2026-11-02",
+      "days": 59,
+      "now": 14,
+      "goal": 3,
+      "step": null,
+      "unit": "Pages in the top 10",
+      "key": "In the top 10",
+      "ticks": [
+        {
+          "day": 0,
+          "label": "2 Nov"
+        },
+        {
+          "day": 14,
+          "label": "Today"
+        },
+        {
+          "day": 28,
+          "label": "30 Nov"
+        },
+        {
+          "day": 59,
+          "label": "31 Dec"
+        }
+      ],
+      "plan": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 38,
+          "value": 1
+        },
+        {
+          "day": 48,
+          "value": 2
+        },
+        {
+          "day": 59,
+          "value": 3
+        }
+      ],
+      "actual": [
+        {
+          "day": 0,
+          "value": 0
+        },
+        {
+          "day": 14,
+          "value": 0
+        }
+      ],
+      "expected": [],
+      "low": [],
+      "high": [],
+      "noForecast": "First reading 30 Nov",
+      "title": "Progress vs plan"
+    },
+    "milestones": [
+      "Written",
+      "Checked",
+      "Live",
+      "Indexed",
+      "Top 10"
+    ],
+    "rows": {
+      "title": "Pages",
+      "sub": "Five pages for three places · written to the top 10"
+    },
+    "deals": [
+      {
+        "name": "Tidewell or Quaywright",
+        "confidence": "No rank yet",
+        "close": null,
+        "stage": "Live since 07:42",
+        "short": "Live; waiting for Google",
+        "laneId": "comparison-pages",
+        "evidence": "Live since this morning. Its keyword has 1,300 searches a month; the top 10 today are review sites and Quaywright itself.",
+        "next": null,
+        "value": null,
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 3,
+        "costPerLead": null
+      },
+      {
+        "name": "Tidewell or Dockmere",
+        "confidence": "No rank yet",
+        "close": null,
+        "stage": "Live since 07:42",
+        "short": "Live; waiting for Google",
+        "laneId": "comparison-pages",
+        "evidence": "Live since this morning. 880 searches a month; two of the top 10 are thin pages we can beat.",
+        "next": null,
+        "value": null,
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 3,
+        "costPerLead": null
+      },
+      {
+        "name": "Tidewell or Palletnook",
+        "confidence": "Not live",
+        "close": null,
+        "stage": "Half written",
+        "short": "Checker reads it at 15:00",
+        "laneId": "comparison-pages",
+        "evidence": "Half written. 720 searches a month.",
+        "next": null,
+        "value": null,
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 0,
+        "costPerLead": null
+      },
+      {
+        "name": "Tidewell or Harborline",
+        "confidence": "Not live",
+        "close": null,
+        "stage": "Outline approved",
+        "short": "Live Friday",
+        "laneId": "comparison-pages",
+        "evidence": "Outline approved by you on Friday. 590 searches a month.",
+        "next": null,
+        "value": null,
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 0,
+        "costPerLead": null
+      },
+      {
+        "name": "Tidewell or Keelson",
+        "confidence": "Not live",
+        "close": null,
+        "stage": "Outline approved",
+        "short": "Live Friday",
+        "laneId": "comparison-pages",
+        "evidence": "Outline approved by you on Friday. 410 searches a month.",
+        "next": null,
+        "value": null,
+        "alt": null,
+        "target": {
+          "kind": "lane",
+          "id": "comparison-pages"
+        },
+        "chartDay": 0,
+        "costPerLead": null
+      }
+    ],
+    "guardrails": {
+      "sub": "What ranking must not cost",
+      "items": [
+        {
+          "what": "Claims without a public source",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "ratio": null,
+          "state": "held"
+        },
+        {
+          "what": "Pages live without your outline",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "ratio": null,
+          "state": "held"
+        },
+        {
+          "what": "Bought links",
+          "value": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "limit": {
+            "kind": "count",
+            "value": 0,
+            "of": null,
+            "unit": null
+          },
+          "ratio": null,
+          "state": "held"
+        }
+      ]
+    },
+    "ladder": [
+      {
+        "word": "In the top 10",
+        "fact": "Google's own Search Console position, read every Monday."
+      },
+      {
+        "word": "Forecast",
+        "fact": "None until the first reading. A number before then would be invented."
+      }
+    ],
+    "calibration": "Nothing to score yet.",
+    "outside": null,
+    "gap": null,
+    "blockers": [],
+    "routine": null,
+    "funnel": {
+      "title": "Signals",
+      "since": "Change against last week",
+      "steps": [
+        {
+          "count": 2310,
+          "what": "visits from search",
+          "change": {
+            "kind": "rate",
+            "percent": 18.0,
+            "standard": false
+          },
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": 41,
+          "what": "keywords in the top 10",
+          "change": {
+            "kind": "count",
+            "value": 3,
+            "of": null,
+            "unit": null
+          },
+          "rate": null,
+          "state": null
+        },
+        {
+          "count": 2,
+          "what": "pages live",
+          "change": {
+            "kind": "count",
+            "value": 2,
+            "of": null,
+            "unit": null
+          },
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 5,
+            "dueAt": "2026-11-20T17:00:00+01:00"
+          },
+          "state": null
+        },
+        {
+          "count": 0,
+          "what": "pages in the top 10",
+          "change": null,
+          "rate": {
+            "percent": null,
+            "planPercent": null,
+            "plannedCount": 1,
+            "dueAt": "2026-12-10T17:00:00+01:00"
+          },
+          "state": null
+        }
+      ],
+      "sinceAt": "2026-11-02T00:00:00+01:00"
+    },
+    "restSub": "Why there is no forecast yet, and what each page has going for it",
+    "figures": [
+      {
+        "value": 0,
+        "of": 3,
+        "label": "Pages in the top 10"
+      },
+      {
+        "value": null,
+        "of": null,
+        "label": "Forecast from 30 Nov"
+      },
+      {
+        "value": 3,
+        "of": null,
+        "label": "Still to rank"
+      }
+    ],
+    "pathTitle": null,
+    "forecastLog": [],
+    "deadlineAt": null,
+    "updatedAt": "2026-11-16T07:42:00+01:00",
+    "forecastNote": null
+  },
+  "noGoal": null,
+  "facts": [
+    {
+      "value": {
+        "kind": "count",
+        "value": 2310,
+        "of": null,
+        "unit": null
+      },
+      "label": "visits from search this week"
+    },
+    {
+      "value": {
+        "kind": "rate",
+        "percent": 18.0,
+        "standard": false
+      },
+      "label": "against last week"
+    },
+    {
+      "value": {
+        "kind": "count",
+        "value": 41,
+        "of": null,
+        "unit": null
+      },
+      "label": "keywords in the top 10"
+    },
+    {
+      "value": {
+        "kind": "count",
+        "value": 2,
+        "of": 5,
+        "unit": null
+      },
+      "label": "comparison pages live"
+    }
+  ],
+  "plan": null,
+  "focusLaneId": "comparison-pages",
+  "history": {
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
+    "shown": 2,
+    "since": "That is everything since the topic began on 2 November.",
+    "days": [
+      {
+        "label": "Today",
+        "entries": [
+          {
+            "kind": "event",
+            "actor": {
+              "id": "seo-writer",
+              "name": "SEO writer",
+              "shortName": "SEO",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "agreed to keep the tone fair: every claim about another tool links to its own public page",
+            "laneId": "comparison-pages",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null,
+            "at": "2026-11-16T07:50:00+01:00",
+            "id": "seo-history-1",
+            "undone": false
+          },
+          {
+            "kind": "event",
+            "actor": {
+              "id": "seo-writer",
+              "name": "SEO writer",
+              "shortName": "SEO",
+              "kind": "agent",
+              "avatar": "S",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "published pages 1 and 2 and asked Google to index them",
+            "laneId": "comparison-pages",
+            "decision": false,
+            "sentOutside": true,
+            "undoable": false,
+            "count": 2,
+            "samples": [
+              "Tidewell or Quaywright · 1,840 words",
+              "Tidewell or Dockmere · 1,610 words"
+            ],
+            "decisionId": null,
+            "at": "2026-11-16T07:42:00+01:00",
+            "id": "seo-history-2",
+            "undone": false
+          },
+          {
+            "kind": "event",
+            "actor": {
+              "id": "checker",
+              "name": "Checker",
+              "shortName": "Checker",
+              "kind": "agent",
+              "avatar": "C",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "passed pages 1 and 2: 34 claims, each with a public source",
+            "laneId": "comparison-pages",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null,
+            "at": "2026-11-16T07:30:00+01:00",
+            "id": "seo-history-3",
+            "undone": false
+          }
+        ]
+      },
+      {
+        "label": "Yesterday",
+        "entries": [
+          {
+            "kind": "seen"
+          },
+          {
+            "kind": "event",
+            "actor": {
+              "id": "checker",
+              "name": "Checker",
+              "shortName": "Checker",
+              "kind": "agent",
+              "avatar": "C",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "sent back 3 claims on page 2 that had no public source",
+            "laneId": "comparison-pages",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null,
+            "at": "2026-11-15T16:00:00+01:00",
+            "id": "seo-history-4",
+            "undone": false
+          }
+        ]
+      },
+      {
+        "label": "Friday, 13 November",
+        "entries": [
+          {
+            "kind": "event",
+            "actor": {
+              "id": "mara-lind",
+              "name": "Mara Lind",
+              "shortName": "Mara",
+              "kind": "person",
+              "avatar": "M",
+              "role": "Head of GTM",
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "approved the outlines for all 5 pages",
+            "laneId": "comparison-pages",
+            "decision": true,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null,
+            "at": "2026-11-13T14:30:00+01:00",
+            "id": "seo-history-5",
+            "undone": false
+          }
+        ]
+      },
+      {
+        "label": "Wednesday, 4 November",
+        "entries": [
+          {
+            "kind": "event",
+            "actor": {
+              "id": "checker",
+              "name": "Checker",
+              "shortName": "Checker",
+              "kind": "agent",
+              "avatar": "C",
+              "role": null,
+              "state": null,
+              "word": null,
+              "text": null,
+              "skill": null,
+              "engine": null,
+              "record": null
+            },
+            "text": "mapped the keywords for the 5 tools we lose deals to",
+            "laneId": "keyword-map",
+            "decision": false,
+            "sentOutside": false,
+            "undoable": false,
+            "count": null,
+            "samples": [],
+            "decisionId": null,
+            "at": "2026-11-04T11:00:00+01:00",
+            "id": "seo-history-6",
+            "undone": false
+          }
+        ]
+      }
+    ],
+    "nextCursor": null,
+    "newSince": 0
+  },
+  "crew": [
+    {
+      "id": "mara-lind",
+      "name": "Mara Lind",
+      "shortName": "Mara",
+      "kind": "person",
+      "avatar": "M",
+      "role": "Head of GTM",
+      "state": "ok",
+      "word": "Owns it",
+      "text": "Approves every outline",
+      "skill": null,
+      "engine": null,
+      "record": null
+    },
+    {
+      "id": "seo-writer",
+      "name": "SEO writer",
+      "shortName": "SEO",
+      "kind": "agent",
+      "avatar": "S",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Page 3: Tidewell or Palletnook",
+      "skill": "/seo-page",
+      "engine": "Claude",
+      "record": "2 of 2 pages passed the checker on the second read"
+    },
+    {
+      "id": "checker",
+      "name": "Checker",
+      "shortName": "Checker",
+      "kind": "agent",
+      "avatar": "C",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Checks facts and links before a page goes live",
+      "skill": "/fact-check",
+      "engine": "GPT",
+      "record": "Caught 3 claims without a source; none went live"
+    }
+  ],
+  "jobs": [
+    {
+      "job": "Page 3 written and checked",
+      "agent": "SEO writer",
+      "state": "ok",
+      "laneId": "comparison-pages",
+      "dueAt": "2026-11-16T15:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
+    },
+    {
+      "job": "Pages 4 and 5 live",
+      "agent": "SEO writer",
+      "state": "next",
+      "laneId": "comparison-pages",
+      "dueAt": "2026-11-20T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
+    },
+    {
+      "job": "Pages 1 and 2 published",
+      "agent": "SEO writer",
+      "state": "done",
+      "laneId": "comparison-pages",
+      "dueAt": null,
+      "completedAt": "2026-11-16T07:42:00+01:00",
+      "cadence": null
+    },
+    {
+      "job": "First ranking check",
+      "agent": "Checker",
+      "state": "next",
+      "laneId": null,
+      "dueAt": "2026-11-30T17:00:00+01:00",
+      "completedAt": null,
+      "cadence": null
+    }
+  ],
+  "chatSub": "Mara and 2 agents · the Manager reads it, it is not in it",
+  "lanes": [
+    {
+      "id": "comparison-pages",
+      "title": "Comparison pages",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "SEO writer",
+      "next": "",
+      "nextAt": "2026-11-16T15:00:00+01:00"
+    },
+    {
+      "id": "keyword-map",
+      "title": "Keywords for the comparison pages",
+      "state": "done",
+      "stateWord": "Done",
+      "leadName": "Checker",
+      "next": "",
+      "nextAt": "2026-11-04T17:00:00+01:00"
+    }
+  ],
+  "spend": {
+    "spent": {
+      "amountMinor": 1400,
+      "currency": "EUR"
+    },
+    "cap": {
+      "amountMinor": 3000,
+      "currency": "EUR"
+    }
+  },
+  "stuck": null,
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
+}

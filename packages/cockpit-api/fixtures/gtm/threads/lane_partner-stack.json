@@ -1,0 +1,45 @@
+{
+  "id": "lane:partner-stack",
+  "title": "Tools for partner outreach",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m20",
+      "author": {
+        "id": "jonas-falk",
+        "name": "Jonas Falk",
+        "shortName": "Jonas",
+        "kind": "person",
+        "avatar": "J",
+        "role": "Partner operations",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Test run done: 10 brands found in Clay, 9 contacts in Apollo, all landed in HubSpot. Agents can't send anything from there.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-10-29T00:00:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

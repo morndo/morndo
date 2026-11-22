@@ -1,0 +1,449 @@
+{
+  "kindWord": "Project",
+  "groups": [
+    {
+      "id": "web",
+      "name": "Web app",
+      "kind": "project",
+      "icon": "window",
+      "stateWord": "Stuck",
+      "mark": "bad",
+      "open": true,
+      "lanes": [
+        {
+          "id": "red-main",
+          "title": "Red main",
+          "state": "bad",
+          "stateWord": "Stuck",
+          "leadName": "Builder",
+          "fresh": false
+        },
+        {
+          "id": "new-sign-in",
+          "title": "New sign-in",
+          "state": "warn",
+          "stateWord": "Needs you",
+          "leadName": "Builder",
+          "fresh": false
+        },
+        {
+          "id": "shipment-filters",
+          "title": "Shipment filters",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Reviewer",
+          "fresh": false
+        },
+        {
+          "id": "upgrade-node-24",
+          "title": "Upgrade to Node 24",
+          "state": "parked",
+          "stateWord": "Parked until Thu",
+          "leadName": "Builder",
+          "fresh": false
+        }
+      ]
+    },
+    {
+      "id": "api",
+      "name": "API",
+      "kind": "project",
+      "icon": "braces",
+      "stateWord": "Needs you",
+      "mark": "warn",
+      "open": false,
+      "lanes": [
+        {
+          "id": "export-for-big-accounts",
+          "title": "Export for big accounts",
+          "state": "warn",
+          "stateWord": "Needs you",
+          "leadName": "Release",
+          "fresh": false
+        },
+        {
+          "id": "export-limits-docs",
+          "title": "Export limits in the docs",
+          "state": "next",
+          "stateWord": "Merges by itself at 09:00",
+          "leadName": "Builder",
+          "fresh": false
+        }
+      ]
+    },
+    {
+      "id": "billing",
+      "name": "Billing",
+      "kind": "project",
+      "icon": "card",
+      "stateWord": "Needs you",
+      "mark": "warn",
+      "open": false,
+      "lanes": [
+        {
+          "id": "tax-rates",
+          "title": "Tax rates per country",
+          "state": "warn",
+          "stateWord": "Needs you",
+          "leadName": "Builder",
+          "fresh": false
+        }
+      ]
+    },
+    {
+      "id": "mobile",
+      "name": "Mobile",
+      "kind": "project",
+      "icon": "phone",
+      "stateWord": "Working",
+      "mark": "ok",
+      "open": false,
+      "lanes": [
+        {
+          "id": "keep-scans",
+          "title": "Keep scans without a signal",
+          "state": "ok",
+          "stateWord": "Working",
+          "leadName": "Builder",
+          "fresh": false
+        }
+      ]
+    },
+    {
+      "id": "infra",
+      "name": "Infra",
+      "kind": "project",
+      "icon": "server",
+      "stateWord": "Idle",
+      "mark": null,
+      "open": false,
+      "lanes": []
+    }
+  ],
+  "managerLanes": [],
+  "pins": [
+    {
+      "id": "t-brief",
+      "kind": "page",
+      "label": "Brief",
+      "name": null,
+      "note": null,
+      "icon": "sun",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "t-decide",
+      "kind": "page",
+      "label": "Decide",
+      "name": null,
+      "note": null,
+      "icon": "decide",
+      "run": null,
+      "badge": true,
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "badgeCount": 3
+    },
+    {
+      "id": "t-pulls",
+      "kind": "page",
+      "label": "PRs",
+      "name": "Pull requests",
+      "note": null,
+      "icon": "pr",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "pull",
+        "id": null
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "t-skills",
+      "kind": "page",
+      "label": "Skills",
+      "name": null,
+      "note": null,
+      "icon": "star",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "p-web",
+      "kind": "project",
+      "label": "Web app",
+      "name": null,
+      "note": null,
+      "icon": "window",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "s-review",
+      "kind": "skill",
+      "label": "Review",
+      "name": "/review",
+      "note": "A fresh review of a change",
+      "icon": "play",
+      "run": "/review",
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "skill",
+        "id": "review"
+      },
+      "badgeCount": null
+    }
+  ],
+  "pinnable": [
+    {
+      "id": "t-brief",
+      "kind": "page",
+      "label": "Brief",
+      "name": null,
+      "note": null,
+      "icon": "sun",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "brief",
+        "id": null
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "t-decide",
+      "kind": "page",
+      "label": "Decide",
+      "name": null,
+      "note": null,
+      "icon": "decide",
+      "run": null,
+      "badge": true,
+      "pinned": true,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "badgeCount": 3
+    },
+    {
+      "id": "t-pulls",
+      "kind": "page",
+      "label": "PRs",
+      "name": "Pull requests",
+      "note": null,
+      "icon": "pr",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "pull",
+        "id": null
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "t-skills",
+      "kind": "page",
+      "label": "Skills",
+      "name": null,
+      "note": null,
+      "icon": "star",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "skills",
+        "id": null
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "p-web",
+      "kind": "project",
+      "label": "Web app",
+      "name": null,
+      "note": null,
+      "icon": "window",
+      "run": null,
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "p-api",
+      "kind": "project",
+      "label": "API",
+      "name": null,
+      "note": null,
+      "icon": "braces",
+      "run": null,
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "api"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "p-billing",
+      "kind": "project",
+      "label": "Billing",
+      "name": null,
+      "note": null,
+      "icon": "card",
+      "run": null,
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "billing"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "p-mobile",
+      "kind": "project",
+      "label": "Mobile",
+      "name": null,
+      "note": null,
+      "icon": "phone",
+      "run": null,
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "mobile"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "p-infra",
+      "kind": "project",
+      "label": "Infra",
+      "name": null,
+      "note": null,
+      "icon": "server",
+      "run": null,
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "topic",
+        "id": "infra"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "s-review",
+      "kind": "skill",
+      "label": "Review",
+      "name": "/review",
+      "note": "A fresh review of a change",
+      "icon": "play",
+      "run": "/review",
+      "badge": false,
+      "pinned": true,
+      "target": {
+        "kind": "skill",
+        "id": "review"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "s-red-main",
+      "kind": "skill",
+      "label": "Fix main",
+      "name": "/red-main",
+      "note": "Find why main is red",
+      "icon": "play",
+      "run": "/red-main",
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "red-main"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "s-release",
+      "kind": "skill",
+      "label": "Release",
+      "name": "/release",
+      "note": "Roll out, watch, roll back",
+      "icon": "play",
+      "run": "/release",
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "release"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "s-qa",
+      "kind": "skill",
+      "label": "QA",
+      "name": "/qa-by-hand",
+      "note": "Click through a change",
+      "icon": "play",
+      "run": "/qa-by-hand",
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "qa-by-hand"
+      },
+      "badgeCount": null
+    },
+    {
+      "id": "s-upgrade",
+      "kind": "skill",
+      "label": "Upgrade",
+      "name": "/upgrade",
+      "note": "Update dependencies",
+      "icon": "play",
+      "run": "/upgrade",
+      "badge": false,
+      "pinned": false,
+      "target": {
+        "kind": "skill",
+        "id": "upgrade"
+      },
+      "badgeCount": null
+    }
+  ],
+  "pinLimit": 12
+}

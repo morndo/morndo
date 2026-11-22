@@ -1,0 +1,14 @@
+{
+  "id": "topic:billing",
+  "title": "Billing chat",
+  "sub": "You and Builder.",
+  "placeholder": "Message Billing",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
+}

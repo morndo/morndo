@@ -1,0 +1,129 @@
+{
+  "id": "recap",
+  "topicId": "content",
+  "title": "Webinar recap post",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "writer",
+    "name": "Writer",
+    "shortName": "Writer",
+    "kind": "agent",
+    "avatar": "W",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "Draft 2 of 3",
+    "skill": "/linkedin-post",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Turn the October webinar into a post people can read in two minutes.",
+  "askedMeta": {
+    "source": "You to the Manager, Friday 11:05",
+    "note": "The Manager filed it under Content and named Writer to lead."
+  },
+  "status": "Draft 2 of 3 is being written. It reaches you only if it quotes a customer by name.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "Draft 2 of 3 is being written. It reaches you only if it quotes a customer by name."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "The 52-minute recording summed up in 8 points",
+      "who": "Writer · Saturday"
+    },
+    {
+      "kind": "now",
+      "text": "Draft 2 of 3, shorter and with one chart",
+      "who": "Writer · now"
+    },
+    {
+      "kind": "todo",
+      "text": "Checked against the recording",
+      "who": "Checker · Wed 18 Nov"
+    },
+    {
+      "kind": "todo",
+      "text": "Posted on LinkedIn",
+      "who": "Publisher · Thu 19 Nov"
+    }
+  ],
+  "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "writer",
+      "name": "Writer",
+      "shortName": "Writer",
+      "kind": "agent",
+      "avatar": "W",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "Draft 2 of 3",
+      "skill": "/linkedin-post",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "checker",
+      "name": "Checker",
+      "shortName": "Checker",
+      "kind": "agent",
+      "avatar": "C",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Compares every quote with the recording",
+      "skill": "/fact-check",
+      "engine": "GPT",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Summary in 8 points",
+      "detail": "From the October recording",
+      "target": {
+        "kind": "lane",
+        "id": "recap"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Draft 1",
+      "detail": "Too long at 900 words; draft 2 aims at 350",
+      "target": {
+        "kind": "lane",
+        "id": "recap"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-19T17:00:00+01:00",
+  "afterNextAt": null
+}

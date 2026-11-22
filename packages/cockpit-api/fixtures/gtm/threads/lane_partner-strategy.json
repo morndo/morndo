@@ -1,0 +1,45 @@
+{
+  "id": "lane:partner-strategy",
+  "title": "Partner strategy",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m21",
+      "author": {
+        "id": "researcher",
+        "name": "Researcher",
+        "shortName": "Researcher",
+        "kind": "agent",
+        "avatar": "R",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Freight networks and business banks reach the most of our kind of customer. ERP vendors are slower to sign but stay longest.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-10-20T00:00:00+02:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

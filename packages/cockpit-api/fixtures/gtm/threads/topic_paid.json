@@ -1,0 +1,152 @@
+{
+  "id": "topic:paid",
+  "title": "Paid chat",
+  "sub": "Mara and 3 agents · the Manager reads it, it is not in it",
+  "placeholder": "Message Paid · its manager sorts it",
+  "reading": null,
+  "since": {
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
+    "lines": [
+      "Agents: 5 updates, the latest: Paid buyer switched off 3 ads below the click floor of 0.6%; they cost €140 last week and brought no lead."
+    ]
+  },
+  "pinned": {
+    "title": "Search budget shift",
+    "detail": "Waits for you · €1,200 a week from LinkedIn to Search · by 14:00",
+    "state": "waiting",
+    "decisionId": "d1",
+    "laneId": "search-budget",
+    "approveLabel": "Approve the shift"
+  },
+  "agents": {
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
+    "count": 5,
+    "summary": "Agents · 5 updates since yesterday at 18:20, nothing needs you",
+    "items": [
+      {
+        "name": "Paid buyer",
+        "text": "switched off 3 ads below the click floor of 0.6%; they cost €140 last week and brought no lead",
+        "at": "2026-11-16T08:30:00+01:00"
+      },
+      {
+        "name": "Analyst",
+        "text": "checked every running ad against the click floor",
+        "at": "2026-11-16T08:10:00+01:00"
+      },
+      {
+        "name": "Paid buyer",
+        "text": "answered: Search has been cheaper for a month, €86 a lead the 14 days before",
+        "at": "2026-11-16T07:20:00+01:00"
+      },
+      {
+        "name": "Paid buyer",
+        "text": "wrote the decision brief with the best and the worst case and put it in Decide",
+        "at": "2026-11-16T07:05:00+01:00"
+      },
+      {
+        "name": "Paid buyer",
+        "text": "kept the webinar campaign at its own €400 for the last 4 days",
+        "at": "2026-11-15T18:30:00+01:00"
+      }
+    ]
+  },
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m44",
+      "author": {
+        "id": "paid-buyer",
+        "name": "Paid buyer",
+        "shortName": "Paid",
+        "kind": "agent",
+        "avatar": "B",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "I switched off 3 ads that fell below the click floor of 0.6%. Together they cost €140 last week and brought no lead.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m45",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Will the shift hurt LinkedIn reach for the webinar?",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:44:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m46",
+      "author": {
+        "id": "paid-buyer",
+        "name": "Paid buyer",
+        "shortName": "Paid",
+        "kind": "agent",
+        "avatar": "B",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "No. The webinar campaign keeps its own €400. The shift only takes from the always-on lead campaign.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

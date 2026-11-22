@@ -1,0 +1,129 @@
+{
+  "id": "brand-list",
+  "topicId": "partnerships",
+  "title": "200 brands that fit",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "brand-scout",
+    "name": "Brand scout",
+    "shortName": "Brand",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "Batch 4 in Clay",
+    "skill": "/find-brands",
+    "engine": "Clay",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Find 200 brands that fit the partner profile.",
+  "askedMeta": {
+    "source": "Lea to the Manager, 30 October",
+    "note": "The Manager filed it under Partnerships and named Brand scout to lead. Lea checks every batch."
+  },
+  "status": "160 of 200 found in Clay, 64 fit the profile so far. Lea checks each batch of 40 before it moves on to Contact finder.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "160 of 200 found in Clay, 64 fit the profile so far. Lea checks each batch of 40 before it moves on to Contact finder."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Batches 1 to 3: 120 brands, checked by Lea",
+      "who": "Lea · Friday"
+    },
+    {
+      "kind": "now",
+      "text": "Batch 4: 40 brands, 32 of them added overnight",
+      "who": "Brand scout · now"
+    },
+    {
+      "kind": "todo",
+      "text": "Batch 5: the last 40",
+      "who": "Brand scout · Wed"
+    },
+    {
+      "kind": "todo",
+      "text": "Lea checks batches 4 and 5",
+      "who": "Lea · Thu"
+    }
+  ],
+  "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "brand-scout",
+      "name": "Brand scout",
+      "shortName": "Brand",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "Batch 4 in Clay",
+      "skill": "/find-brands",
+      "engine": "Clay",
+      "record": null
+    },
+    {
+      "id": "lea-brandt",
+      "name": "Lea Brandt",
+      "shortName": "Lea",
+      "kind": "person",
+      "avatar": "L",
+      "role": "GTM associate",
+      "state": "warn",
+      "word": "Checks",
+      "text": "Batch 4 after the wave 2 emails",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Brand list in HubSpot",
+      "detail": "160 brands, 64 marked as a fit",
+      "target": {
+        "kind": "lane",
+        "id": "brand-list"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Why each brand fits",
+      "detail": "One line per brand, from the partner profile",
+      "target": {
+        "kind": "lane",
+        "id": "brand-list"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-10-30T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-16T18:00:00+01:00",
+  "afterNextAt": null
+}

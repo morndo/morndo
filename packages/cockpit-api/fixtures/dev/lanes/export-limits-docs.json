@@ -1,0 +1,81 @@
+{
+  "id": "export-limits-docs",
+  "topicId": "api",
+  "title": "Export limits in the docs",
+  "state": "next",
+  "stateWord": "Merges by itself at 09:00",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "next",
+    "word": "Up next",
+    "text": "Docs only",
+    "skill": "/upgrade",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Document the export limits.",
+  "askedMeta": {
+    "source": "Builder to the Manager, today 06:55",
+    "note": "Docs only, so it merges by itself at 09:00."
+  },
+  "status": "Docs only: the new limits and how to ask for a bigger export.",
+  "standing": {
+    "headline": "Up next.",
+    "detail": "Docs only: the new limits and how to ask for a bigger export."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "now",
+      "text": "Merges by itself at 09:00",
+      "who": "Builder · 09:00"
+    }
+  ],
+  "doneNote": "Done means all 1. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Docs only",
+      "skill": "/upgrade",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-16T06:55:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-16T09:00:00+01:00",
+  "afterNextAt": null
+}

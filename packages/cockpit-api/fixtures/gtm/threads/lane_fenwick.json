@@ -1,0 +1,105 @@
+{
+  "id": "lane:fenwick",
+  "title": "Fenwick customer story",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m10",
+      "author": {
+        "id": "writer",
+        "name": "Writer",
+        "shortName": "Writer",
+        "kind": "agent",
+        "avatar": "W",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Fenwick signed off the text and the quote. One thing is left: the 38% number. It is theirs, from their Q3 report, but it is a claim we publish.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-13T16:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m11",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Is the 38% before and after us, or just this year?",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-13T16:40:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m12",
+      "author": {
+        "id": "writer",
+        "name": "Writer",
+        "shortName": "Writer",
+        "kind": "agent",
+        "avatar": "W",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Before and after: March, the month before they started, against September. The story says exactly that.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-13T16:41:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

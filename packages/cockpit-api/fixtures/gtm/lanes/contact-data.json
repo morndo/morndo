@@ -1,0 +1,106 @@
+{
+  "id": "contact-data",
+  "topicId": "partnerships",
+  "title": "Who decides at each brand",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "contact-finder",
+    "name": "Contact finder",
+    "shortName": "Contact",
+    "kind": "agent",
+    "avatar": "C",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "Batch 4 in Apollo",
+    "skill": "/find-contacts",
+    "engine": "Apollo",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Find the person who decides on partnerships at each brand, with an email we can trust.",
+  "askedMeta": {
+    "source": "Lea to the Manager, 2 November",
+    "note": "The Manager filed it under Partnerships and named Contact finder to lead."
+  },
+  "status": "96 of 160 brands have a named decision-maker and a checked email. Apollo had nobody for 11; Contact finder looks for those on the brands' own pages.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "96 of 160 brands have a named decision-maker and a checked email. Apollo had nobody for 11; Contact finder looks for those on the brands' own pages."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Contacts for batches 1 to 3",
+      "who": "Contact finder · Friday"
+    },
+    {
+      "kind": "now",
+      "text": "Contacts for batch 4: 58 found overnight",
+      "who": "Contact finder · now"
+    },
+    {
+      "kind": "todo",
+      "text": "The 11 brands Apollo did not know",
+      "who": "Contact finder · Wed"
+    },
+    {
+      "kind": "todo",
+      "text": "Every email checked before it is used",
+      "who": "Contact finder · Thu"
+    }
+  ],
+  "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "contact-finder",
+      "name": "Contact finder",
+      "shortName": "Contact",
+      "kind": "agent",
+      "avatar": "C",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "Batch 4 in Apollo",
+      "skill": "/find-contacts",
+      "engine": "Apollo",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Contacts in HubSpot",
+      "detail": "96 decision-makers, 92 emails checked",
+      "target": {
+        "kind": "lane",
+        "id": "contact-data"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-02T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-17T08:00:00+01:00",
+  "afterNextAt": null
+}

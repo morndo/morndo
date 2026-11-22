@@ -255,3 +255,53 @@ jobs:
 
       - name: Updater units on arm64
         run: npx vitest run --project=units apps/updater/test
+
+  cockpit-contract:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: package.json # engines.node
+          cache: npm
+
+      - run: npm ci
+
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry/cache
+            ~/.cargo/registry/index
+            ~/.cargo/git/db
+            target
+          key: cockpit-rust-${{ runner.os }}-${{ hashFiles('rust-toolchain.toml', 'Cargo.lock') }}
+
+      - run: cargo fmt --all --check
+
+      - run: cargo clippy --workspace --locked -- -D warnings
+
+      - run: cargo test --workspace --locked
+
+      - run: cargo run --locked -p cockpit-api --bin export-schema -- --check
+
+      - run: node scripts/cockpit-contract-check.ts
+
+      - name: Check compatibility and released baselines
+        env:
+          COCKPIT_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          # Fetch the base revision, or main when a push has none (a new branch).
+          if [ -n "$COCKPIT_BASE" ] && [ "$COCKPIT_BASE" != "0000000000000000000000000000000000000000" ] \
+            && git fetch --no-tags --depth=1 origin "$COCKPIT_BASE"; then
+            node packages/cockpit-api/scripts/compat.ts --base-ref FETCH_HEAD
+          else
+            git fetch --no-tags --depth=1 origin main
+            node packages/cockpit-api/scripts/compat.ts --base-ref FETCH_HEAD
+          fi
+
+      - run: node scripts/cockpit-contract-v2-check.ts

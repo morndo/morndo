@@ -1,0 +1,45 @@
+{
+  "id": "lane:logistics-round-2",
+  "title": "Logistics ops, round 2",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m15",
+      "author": {
+        "id": "prospector",
+        "name": "Prospector",
+        "shortName": "Prospector",
+        "kind": "agent",
+        "avatar": "P",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Started round 2. I match the profile of the 9 who booked in sequence A: ops leads at carriers with 50 to 500 people.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-15T19:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

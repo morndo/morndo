@@ -1,0 +1,537 @@
+<!-- @@ tree -->
+    <h2 data-kind="Project">Projects</h2>
+    <div class="grp" id="p-web" data-unfolded>
+      <div class="row proj"><button class="tog" aria-expanded="true" aria-label="Web app: show or hide its lanes"><svg class="i ic"><use href="#window"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><a class="grow" href="#area" data-nav="area">Web app</a><span class="word">Stuck</span><i class="dot bad"></i></div>
+      <div class="kids">
+        <a class="row kid" href="#area"><i class="dot bad"></i><span class="grow">Red main</span><span class="word"><span class="sr">Stuck. </span>Builder leads</span></a>
+        <button class="row kid"><i class="dot warn"></i><span class="grow">New sign-in</span><span class="word"><span class="sr">Needs you. </span>Builder leads</span></button>
+        <button class="row kid"><i class="dot ok"></i><span class="grow">Shipment filters</span><span class="word"><span class="sr">Working. </span>Reviewer leads</span></button>
+        <button class="row kid art"><svg class="i sm"><use href="#pause"/></svg><span class="grow">Upgrade to Node 24</span><span class="word">Parked until Thu</span></button>
+      </div>
+    </div>
+    <div class="grp" id="p-api">
+      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="API: show or hide its lanes"><svg class="i ic"><use href="#braces"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">API</button><span class="word">Needs you</span><i class="dot warn"></i></div>
+      <div class="kids">
+        <a class="row kid" href="#lane" data-nav="lane"><i class="dot warn"></i><span class="grow">Export for big accounts</span><span class="word"><span class="sr">Needs you. </span>Release leads</span></a>
+        <button class="row kid"><i class="dot hollow"></i><span class="grow">Export limits in the docs</span><span class="word"><span class="sr">Merges by itself at 09:00. </span>Builder leads</span></button>
+      </div>
+    </div>
+    <div class="grp" id="p-billing">
+      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="Billing: show or hide its lanes"><svg class="i ic"><use href="#card"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">Billing</button><span class="word">Needs you</span><i class="dot warn"></i></div>
+      <div class="kids">
+        <button class="row kid"><i class="dot warn"></i><span class="grow">Tax rates per country</span><span class="word"><span class="sr">Needs you. </span>Builder leads</span></button>
+      </div>
+    </div>
+    <div class="grp" id="p-mobile">
+      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="Mobile: show or hide its lanes"><svg class="i ic"><use href="#phone"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">Mobile</button><span class="word">Working</span></div>
+      <div class="kids">
+        <button class="row kid"><i class="dot ok"></i><span class="grow">Keep scans without a signal</span><span class="word"><span class="sr">Working. </span>Builder leads</span></button>
+      </div>
+    </div>
+    <div class="grp" id="p-infra">
+      <div class="row proj"><button class="tog" aria-expanded="false" aria-label="Infra: show or hide its lanes"><svg class="i ic"><use href="#server"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><button class="grow">Infra</button><span class="word">Idle</span></div>
+      <div class="kids"></div>
+    </div>
+<!-- @@ me -->
+  <div class="me"><a class="row" href="#settings" data-nav="settings" aria-label="Settings and account: Timo Varga"><span class="av"><svg class="i sm"><use href="#user"/></svg></span><span class="grow" style="color:var(--text)">Timo Varga</span></a><button class="ib" data-usage aria-expanded="false" aria-controls="usagepop" aria-label="Usage" title="Usage"><svg class="i"><use href="#usage"/></svg></button><a class="ib" href="#settings" aria-label="Settings" title="Settings"><svg class="i"><use href="#sliders"/></svg></a></div>
+<!-- @@ lede -->
+          <p class="lede">Three decisions need you and main is red in the web app. Everything else was built, reviewed and shipped while you slept.</p>
+<!-- @@ cards -->
+
+          <section class="card" style="--n:0">
+            <header>
+              <h2>Yours to decide</h2>
+              <p class="sub" id="decide-sub">3 open · about 8 minutes</p>
+              <div class="num" aria-hidden="true"><svg class="i" id="decide-em"><use href="#decide"/></svg><span data-open>3</span></div>
+            </header>
+            <div>
+              <article class="item decision" id="d1" data-min="3">
+                <div class="txt">
+                  <div class="meta"><b>API</b><i>·</i><span><i class="dot warn"></i>Due today, 14:00</span><i>·</i><span>3 min</span></div>
+                  <h3>Release the fix for exports that time out</h3>
+                  <p>Exports fail for the 14 largest accounts. The fix passed its tests, a fresh review and a run on staging. Rolling back takes 2 minutes.</p>
+                </div>
+                <div class="acts"><a class="btn quiet" href="#decision">Open brief</a><button class="btn ink" data-approve>Approve</button></div>
+                <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The Release lane rolls out at 22:00 and watches for 30 minutes.<button class="link" data-undo>Undo</button></div>
+              </article>
+              <article class="item decision" id="d2" data-min="2">
+                <div class="txt">
+                  <div class="meta"><b>Billing</b><i>·</i><span>Due tomorrow</span><i>·</i><span>2 min</span></div>
+                  <h3>Run the tax-rate migration on the production database</h3>
+                  <p>It adds 2 columns and fills 48,000 invoices. A backup comes first. The dry run on a copy took 41 seconds.</p>
+                </div>
+                <div class="acts"><button class="btn quiet">Open brief</button><button class="btn ink" data-approve>Approve</button></div>
+                <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The migration runs tonight at 23:00, after the backup.<button class="link" data-undo>Undo</button></div>
+              </article>
+              <article class="item decision" id="d3" data-min="3">
+                <div class="txt">
+                  <div class="meta"><b>Web app</b><i>·</i><span>Due Wednesday</span><i>·</i><span>3 min</span></div>
+                  <h3>Choose the new sign-in: passkeys or a link by email</h3>
+                  <p>Both are built behind a switch and passed QA. Passkeys take 2 screens, the email link takes 4. The lane suggests passkeys.</p>
+                </div>
+                <div class="acts"><button class="btn quiet">Open brief</button><button class="btn ink" data-approve>Approve</button></div>
+                <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. Passkeys go to staging today, with the email link as the fallback.<button class="link" data-undo>Undo</button></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="card" style="--n:1">
+            <header>
+              <h2>Where it burns</h2>
+              <p class="sub">One thing an agent could not fix on its own</p>
+              <div class="num" aria-hidden="true"><svg class="i"><use href="#flame"/></svg><span>1</span></div>
+            </header>
+            <div>
+              <article class="item">
+                <div class="txt">
+                  <div class="meta"><b>Web app</b><i>·</i><span><svg class="i sm bad"><use href="#flame"/></svg>Red since 06:40</span><i>·</i><span>Blocks the shipment filters</span></div>
+                  <h3>Main is red in the web app</h3>
+                  <p>The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit.</p>
+                </div>
+                <div class="acts"><a class="btn quiet" href="#area">Go to Web app<svg class="i sm"><use href="#go"/></svg></a></div>
+              </article>
+            </div>
+          </section>
+
+          <section class="card" style="--n:2">
+            <header>
+              <h2>Shipped while you slept</h2>
+              <p class="sub">Since yesterday 18:00, all inside your guardrails</p>
+              <div class="num" aria-hidden="true"><svg class="i"><use href="#moon"/></svg><span>5</span></div>
+            </header>
+            <ul class="log">
+              <li><svg class="i ok"><use href="#check"/></svg><span><b>API</b> released the rate-limit fix after its review. The check on production passed.</span><button class="btn quiet s" data-undo-log>Undo</button><time>23:12</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><b>Billing</b> merged the invoice rounding fix after 2 review rounds.</span><button class="btn quiet s" data-undo-log>Undo</button><time>01:40</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><b>Web app</b> updated 6 dependencies and held 1 back because its tests failed.</span><button class="btn quiet s" data-undo-log>Undo</button><time>03:05</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><b>Infra</b> renewed the staging certificate, 12 days before it ran out.</span><button class="btn quiet s" data-undo-log>Undo</button><time>04:30</time></li>
+              <li><svg class="i ok"><use href="#check"/></svg><span><b>Mobile</b> deleted 4 branches that were already merged.</span><button class="btn quiet s" data-undo-log>Undo</button><time>05:15</time></li>
+            </ul>
+          </section>
+
+          <section class="card" style="--n:3">
+            <header>
+              <h2>Still in the works</h2>
+              <p class="sub">What your agents have open right now</p>
+              <div class="num" aria-hidden="true"><svg class="i"><use href="#pr"/></svg><span>5</span></div>
+            </header>
+            <div>
+              <article class="item">
+                <div class="txt">
+                  <h3>5 pull requests are open</h3>
+                  <p>2 are ready and wait for you, 2 are in review, and 1 merges by itself at 09:00 because it only changes docs.</p>
+                </div>
+                <div class="acts"><a class="btn quiet" href="#pulls">Open pull requests<svg class="i sm"><use href="#go"/></svg></a></div>
+              </article>
+            </div>
+          </section>
+
+<!-- @@ views -->
+    <!-- 2. One decision -->
+    <section class="view" id="v-decision" aria-label="Decision brief" hidden>
+      <div class="split">
+        <div class="scroll">
+          <article class="doc">
+            <header class="sec">
+              <div class="meta"><span class="chip">API</span><span><i class="dot warn"></i>Due today, 14:00</span><i>·</i><span>3 min to read</span><i>·</i><span>1 of 3</span></div>
+              <h1 class="h1">Release the fix for exports that time out</h1>
+              <p class="meta">Part of the lane <a class="link" href="#lane">Export for big accounts</a><i>·</i>written by Release<i>·</i>proof checked by the Manager at 07:05</p>
+            </header>
+
+            <section class="sec">
+              <h2 class="label"><b>1</b>Context</h2>
+              <p class="prose">Exports for accounts with more than 200,000 shipments stop after 30 seconds. Fenwick Freight reported it on Thursday. 14 accounts are affected, and 23 of about 580 exports failed yesterday. The fix writes the file in chunks of 5,000 rows instead of building it in memory.</p>
+            </section>
+
+            <section class="sec">
+              <h2 class="label"><b>2</b>Proof</h2>
+              <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))">
+                <div class="box stat"><span>Tests</span><strong>214 pass</strong><span>6 are new and failed before the fix</span></div>
+                <div class="box stat"><span>Fresh review</span><strong>2 rounds</strong><span>3 findings, all fixed</span></div>
+                <div class="box stat"><span>Run on staging</span><strong>48 s</strong><span>Fenwick's 1.2 GB export, a timeout before</span></div>
+                <div class="box stat"><span>Checks</span><strong>5 of 5</strong><span>Green on the version to release</span></div>
+              </div>
+              <p class="meta"><span class="mono">#412</span><i>·</i><span class="mono">9 files, +312 −87</span><i>·</i><span>No database change</span><i>·</i><span>Rollback tried on staging: 2 minutes</span></p>
+              <p class="unchecked"><i class="dot hollow"></i><span><b>Not checked:</b> exports larger than 5 GB. The largest account today has 1.2 GB.</span></p>
+            </section>
+
+            <section class="sec">
+              <h2 class="label"><b>3</b>Opportunity and risk<em>· exports that fail</em></h2>
+              <div class="grid" style="grid-template-columns:repeat(auto-fit,minmax(min(280px,100%),1fr))">
+                <figure class="box fig">
+                  <figcaption><span>Opportunity · the dream output</span><strong>No failed exports from Tuesday</strong><small>Failed exports a day, if the fix holds on live data as it did on staging.</small></figcaption>
+                  <svg viewBox="0 0 300 142" role="img" aria-label="Line chart. With the release, failed exports a day fall from 23 today to 0 from Tuesday. With no change they stay at 23.">
+                    <path class="cg" d="M34 114H250M34 50H250"/>
+                    <text class="ct te" x="26" y="117.5">0</text><text class="ct te" x="26" y="85.5">10</text><text class="ct te" x="26" y="53.5">20</text>
+                    <path class="cb" d="M34 40.4H250"/>
+                    <path class="cl" d="M34 40.4L88 114L142 114L196 114L250 114" style="stroke:var(--best)"/>
+                    <circle class="cm" cx="250" cy="114" r="4.5" style="fill:var(--best)"/>
+                    <text class="cv" x="261" y="118">0</text><text class="ct" x="261" y="44">23</text>
+                    <text class="ct tm" x="34" y="134">Today</text><text class="ct tm" x="88" y="134">Tue</text><text class="ct tm" x="142" y="134">Wed</text><text class="ct tm" x="196" y="134">Thu</text><text class="ct tm" x="250" y="134">Fri</text>
+                  </svg>
+                  <div class="legend"><span><i style="background:var(--best)"></i>With the release</span><span><i class="d"></i>No change</span></div>
+                </figure>
+                <figure class="box fig">
+                  <figcaption><span>Risk · the worst case</span><strong>1 in 7 exports fails for 2 minutes</strong><small>Share of exports failing, if the new code breaks on live data. Only the first 10% of accounts get it.</small></figcaption>
+                  <svg viewBox="0 0 300 142" role="img" aria-label="Line chart. In the worst case the share of exports that fail rises from 4% to 14% for two minutes after the rollout starts, then returns to 4% when the release is rolled back.">
+                    <path class="cg" d="M34 114H250M34 34H250"/>
+                    <text class="ct te" x="26" y="117.5">0%</text><text class="ct te" x="26" y="77.5">10%</text><text class="ct te" x="26" y="37.5">20%</text>
+                    <path class="cb" d="M34 98H250"/>
+                    <path class="cl" d="M34 98L61 58L115 58L142 98L250 98" style="stroke:var(--worst)"/>
+                    <circle class="cm" cx="142" cy="98" r="4.5" style="fill:var(--worst)"/>
+                    <text class="cv tm" x="88" y="50">14%</text><text class="ct" x="151" y="90">rolled back</text><text class="cv" x="261" y="102">4%</text>
+                    <text class="ct tm" x="34" y="134">Start</text><text class="ct tm" x="88" y="134">2 min</text><text class="ct tm" x="142" y="134">4 min</text><text class="ct tm" x="196" y="134">6 min</text><text class="ct tm" x="250" y="134">8 min</text>
+                  </svg>
+                  <div class="legend"><span><i style="background:var(--worst)"></i>Worst case</span><span><i class="d"></i>No change</span></div>
+                </figure>
+              </div>
+            </section>
+
+            <section class="sec">
+              <h2 class="label"><b>4</b>Suggestion</h2>
+              <div class="suggest">
+                <p class="big">Release tonight at 22:00, when few exports run. The first 10% of accounts get it for 30 minutes, then everyone.</p>
+                <p class="guard"><svg class="i dim"><use href="#shield"/></svg><span>Guardrail: if exports fail more often than today during the watch, the Release lane rolls back on its own and tells you. Rolling back takes about 2 minutes and loses no data.</span></p>
+              </div>
+            </section>
+
+            <section class="sec">
+              <h2 class="label"><b>5</b>Next steps</h2>
+              <div class="box tbl">
+                <table>
+                  <thead><tr><th scope="col">Step</th><th scope="col">Who</th><th scope="col">By when</th></tr></thead>
+                  <tbody>
+                    <tr><td>Merge pull request 412</td><td>Release lane</td><td>Today, after your OK</td></tr>
+                    <tr><td>Roll out to 10% of accounts and watch for 30 minutes</td><td>Release lane</td><td>Today, 22:00</td></tr>
+                    <tr><td>Roll out to everyone</td><td>Release lane</td><td>Today, 22:30</td></tr>
+                    <tr><td>Run Fenwick's export on production and compare the file</td><td>QA lane</td><td>Today, 22:45</td></tr>
+                    <tr><td>Draft the "it is fixed" note to Fenwick Freight</td><td>Writer, go-to-market</td><td>Tue 17 Nov</td></tr>
+                    <tr><td>Report the result against the dream output</td><td>Manager</td><td>Tue 17 Nov, 09:00</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+
+            <footer class="decidebar">
+              <p>If you do not answer by 14:00, nothing is released.</p>
+              <div class="acts">
+                <a class="btn quiet" href="#brief">Decline</a>
+                <button class="btn quiet">Change something</button>
+                <a class="btn ink" href="#brief" data-approve-id="d1"><svg class="i"><use href="#check"/></svg>Approve the release</a>
+              </div>
+            </footer>
+          </article>
+        </div>
+
+        <template class="chat-src" data-title="Chat" data-placeholder="Ask about this decision">
+          <div class="ctx"><svg class="i sm"><use href="#decide"/></svg>Reading this decision and its proof</div>
+          <p class="said">What happens to exports that are running during the release?</p>
+          <div class="answer">
+            <p>They finish on the old version. The rollout replaces one server at a time and waits for running exports, up to 5 minutes each.</p>
+            <p>Checked on staging: 3 exports ran through a rollout and all 3 files were complete.</p>
+          </div>
+          <div class="sugg"><button>Show what changed</button><button>Release to Fenwick only first</button></div>
+        </template>
+      </div>
+    </section>
+
+    <!-- 3. Inside one project -->
+    <section class="view" id="v-area" aria-label="Web app project" hidden>
+      <div class="split">
+        <div class="scroll">
+          <div class="doc wide" style="gap:28px">
+            <header class="sec" style="gap:6px">
+              <h1 class="h1">Web app</h1>
+              <p class="intro">This week: the shipment filters, the new sign-in and the dependency updates.</p>
+            </header>
+
+            <section class="box stuck">
+              <div class="top">
+                <span class="flame"><svg class="i lg"><use href="#flame"/></svg></span>
+                <div>
+                  <div class="meta">Red since 06:40 · blocks the shipment filters</div>
+                  <h2>Main is red and needs your call</h2>
+                  <p>The nightly run fails at sign-in since the dependency update at 03:05. Builder tried 3 fixes and stopped at its limit: the new session library signs cookies differently, so saved sessions are refused.</p>
+                </div>
+              </div>
+              <div class="checks">
+                <span><svg class="i sm ok"><use href="#check"/></svg>Build</span>
+                <span><svg class="i sm ok"><use href="#check"/></svg>Types</span>
+                <span><svg class="i sm ok"><use href="#check"/></svg>Unit tests</span>
+                <span><svg class="i sm ok"><use href="#check"/></svg>Checkout, end to end</span>
+                <span class="fail"><svg class="i sm bad"><use href="#x"/></svg>Sign-in, end to end</span>
+              </div>
+              <pre class="logbox"><b>✗ sign-in › keeps a saved session after a restart</b>
+  expected status 200, got 401
+  <i>at tests/e2e/sign-in.spec.ts:48 · 3 runs, 3 failures</i></pre>
+              <div class="acts">
+                <button class="btn ink">Pin the old session library</button>
+                <button class="btn quiet">Allow one more try</button>
+                <button class="btn quiet">Open the run</button>
+                <small>Pinning takes about 3 minutes and turns main green</small>
+              </div>
+            </section>
+
+            <section class="sec">
+              <h2 class="h2">Lanes</h2>
+              <div class="grid agents">
+                <article class="box agent"><div class="top"><span class="av">B</span><h3>Builder</h3><span class="st"><svg class="i sm bad"><use href="#flame"/></svg>Stuck</span></div><p>Red main, out of tries</p><footer><span class="cmd">/red-main</span><i>·</i><span>Claude Code</span></footer></article>
+                <article class="box agent"><div class="top"><span class="av">R</span><h3>Reviewer</h3><span class="st"><i class="dot ok"></i>Working</span></div><p>Shipment filters, review round 2</p><footer><span class="cmd">/review</span><i>·</i><span>Codex</span></footer></article>
+                <article class="box agent"><div class="top"><span class="av">Q</span><h3>QA</h3><span class="st"><i class="dot warn"></i>Waiting</span></div><p>Holding the filters walk-through for a green main</p><footer><span class="cmd">/qa-by-hand</span><i>·</i><span>Cursor</span></footer></article>
+              </div>
+            </section>
+
+            <section class="sec">
+              <h2 class="h2">Tasks this week</h2>
+              <div class="box tbl">
+                <table class="jobs">
+                  <thead><tr><th scope="col">Task</th><th scope="col">Lane</th><th scope="col">State</th><th scope="col">Next report</th></tr></thead>
+                  <tbody>
+                    <tr><td>Fix red main</td><td>Builder</td><td><span class="st"><svg class="i sm bad"><use href="#flame"/></svg>Stuck</span></td><td>Now, needs your call</td></tr>
+                    <tr><td>New sign-in</td><td>Builder</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your pick</td></tr>
+                    <tr><td>Shipment filters</td><td>Reviewer</td><td><span class="st"><i class="dot ok"></i>Working</span></td><td>Today, 11:30</td></tr>
+                    <tr><td>Upgrade to Node 24<small>Parked: the session library supports Node 24 from Thursday's release.</small></td><td>Builder</td><td><span class="st"><svg class="i sm dim"><use href="#pause"/></svg>Parked</span></td><td>Thu 19 Nov</td></tr>
+                    <tr><td>Dependency updates</td><td>Builder</td><td><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Done</span></td><td>Merged today, 03:05</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+        </div>
+
+        <template class="chat-src" data-title="Web app chat" data-sub="You, Builder, Reviewer and QA. Nothing else lives here." data-placeholder="Message Web app">
+          <div class="msg"><span class="av">B</span><div class="who">Builder<time>07:20</time></div><p>Main is red since 06:40. I tried 3 fixes and none worked: the new session library signs cookies differently, so saved sessions get a 401. I am out of tries, so I stopped.</p></div>
+          <div class="msg"><span class="av">Q</span><div class="who">QA<time>07:21</time></div><p>I am holding the filters walk-through until main is green.</p></div>
+          <p class="said">Can you pin the old version for now and do the upgrade properly later?</p>
+          <div class="msg"><span class="av">B</span><div class="who">Builder<time>07:26</time></div><p>Yes. Pinning takes about 3 minutes. I will file the proper upgrade as its own task, with a test for saved sessions. It changes main directly, so I need your OK.</p><div class="acts"><button class="btn ink s">Pin it</button><button class="btn quiet s">One more try</button></div></div>
+        </template>
+      </div>
+    </section>
+
+    <!-- 4. Skills and setup -->
+    <section class="view scroll" id="v-skills" aria-label="Skills and setup" hidden>
+      <div class="doc wide" style="gap:28px">
+        <header class="sec" style="gap:6px">
+          <h1 class="h1">Skills and setup</h1>
+          <p class="intro">Morndo comes set up for software work. Connect your code and your agents once and the lanes can work. You can change everything later.</p>
+        </header>
+        <div class="cols">
+          <section class="main sec">
+            <div class="headrow"><h2 class="h2">Skills</h2><span>9 built in · type / in any chat to use one</span></div>
+            <div class="grid skills">
+              <article class="box skill"><div class="top"><h3>/fix-with-proof</h3><button class="btn ink s">Run</button></div><p>Fix a bug: first a test that fails, then the fix.</p><footer>All projects</footer></article>
+              <article class="box skill"><div class="top"><h3>/build-feature</h3><button class="btn ink s">Run</button></div><p>Build from a short spec, in small reviewed steps.</p><footer>All projects</footer></article>
+              <article class="box skill"><div class="top"><h3>/review</h3><button class="btn ink s">Run</button></div><p>A fresh reviewer reads a change and lists what is wrong.</p><footer>All projects · Codex</footer></article>
+              <article class="box skill"><div class="top"><h3>/qa-by-hand</h3><button class="btn ink s">Run</button></div><p>Click through a change in a real browser, with screenshots.</p><footer>Web app, Mobile · Cursor</footer></article>
+              <article class="box skill"><div class="top"><h3>/release</h3><button class="btn ink s">Run</button></div><p>Roll out in steps, watch it, and roll back if it goes wrong.</p><footer>Asks first</footer></article>
+              <article class="box skill"><div class="top"><h3>/red-main</h3><button class="btn ink s">Run</button></div><p>Find why main is red and fix it, or say what stops it.</p><footer>All projects</footer></article>
+              <article class="box skill"><div class="top"><h3>/upgrade</h3><button class="btn ink s">Run</button></div><p>Update dependencies one at a time, with tests after each.</p><footer>All projects</footer></article>
+              <article class="box skill"><div class="top"><h3>/what-broke</h3></div><p>Read production errors and say what broke and since when.</p><footer style="color:var(--text-2)"><svg class="i sm warn"><use href="#plug"/></svg>Needs a Sentry key</footer></article>
+              <article class="box skill"><div class="top"><h3>/decision-brief</h3><button class="btn ink s">Run</button></div><p>Put an open question into your decision format.</p><footer>All projects</footer></article>
+              <button class="box skill own"><strong><svg class="i"><use href="#plus"/></svg>Make your own</strong><span>Say what you want in plain words. Morndo writes the skill and asks before the first run.</span></button>
+            </div>
+          </section>
+
+          <div class="aside">
+            <section class="sec">
+              <div class="headrow"><h2 class="h2">Connections</h2><span>5 of 6 connected</span></div>
+              <ul class="box list">
+                <li><span class="lt">G</span><div><b>GitHub</b><span>Code, pull requests and checks</span></div><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Connected</span></li>
+                <li><span class="lt">C</span><div><b>Claude Code</b><span>Agent, builds and fixes</span></div><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Signed in</span></li>
+                <li><span class="lt">C</span><div><b>Codex</b><span>Agent, does the fresh reviews</span></div><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Signed in</span></li>
+                <li><span class="lt">C</span><div><b>Cursor</b><span>Agent, does QA in the browser</span></div><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Signed in</span></li>
+                <li><span class="lt">S</span><div><b>Your server</b><span>Lanes run here · 3 of 8 busy</span></div><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Connected</span></li>
+                <li><span class="lt">S</span><div><b>Sentry</b><span>Errors from production</span></div><button class="btn ink s">Add key</button></li>
+              </ul>
+            </section>
+            <section class="sec">
+              <div style="padding:0 2px"><h2 class="h2" style="display:flex;align-items:center;gap:7px;padding:0"><svg class="i sm"><use href="#shield"/></svg>Guardrails</h2><p style="font-size:12.5px;color:var(--muted);margin-top:2px">On from the start. Agents cannot change them. You can.</p></div>
+              <ul class="box list">
+                <li><div><b>Production</b><span>Ask me before anything is released</span></div><button class="sw" role="switch" aria-checked="true" aria-label="Production guardrail"></button></li>
+                <li><div><b>Database</b><span>Backup first, and ask me before a change</span></div><button class="sw" role="switch" aria-checked="true" aria-label="Database guardrail"></button></li>
+                <li><div><b>Merging</b><span>Tests and one fresh review before any merge</span></div><button class="sw" role="switch" aria-checked="true" aria-label="Merging guardrail"></button></li>
+                <li><div><b>Tries</b><span>3 tries at a fix, then stop and ask</span></div><button class="sw" role="switch" aria-checked="true" aria-label="Tries guardrail"></button></li>
+                <li><div><b>Keys</b><span>Stay in the vault, never in a chat</span></div><button class="sw" role="switch" aria-checked="true" aria-label="Keys guardrail"></button></li>
+              </ul>
+            </section>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 5. Pull requests -->
+    <section class="view scroll" id="v-pulls" aria-label="Pull requests" hidden>
+      <div class="doc" style="gap:26px">
+        <header class="sec" style="gap:6px">
+          <h1 class="h1">Pull requests</h1>
+          <p class="intro">Everything your agents have open. A change merges only after its tests, a fresh review and green checks. Production always waits for you.</p>
+        </header>
+        <div class="grid">
+          <article class="box draft"><div class="meta"><b>API</b><i>·</i><span class="mono">#412</span><i>·</i><span>opened by Builder, yesterday 17:20</span></div><h3>Write big exports in chunks</h3><p>Fixes the export that times out for the 14 largest accounts.</p><div class="acts"><a class="btn ink" href="#decision">Open brief</a></div>
+            <div class="gate"><span><svg class="i sm ok"><use href="#check"/></svg>Tests</span><span><svg class="i sm ok"><use href="#check"/></svg>Fresh review</span><span><svg class="i sm ok"><use href="#check"/></svg>QA by hand</span><span><svg class="i sm ok"><use href="#check"/></svg>Checks</span><span class="verdict">Ready, yours to release</span></div></article>
+          <article class="box draft"><div class="meta"><b>Billing</b><i>·</i><span class="mono">#96</span><i>·</i><span>opened by Builder, Friday</span></div><h3>Tax rates per country</h3><p>Adds the rates table and a migration that fills 48,000 invoices.</p><div class="acts"><button class="btn ink">Open brief</button></div>
+            <div class="gate"><span><svg class="i sm ok"><use href="#check"/></svg>Tests</span><span><svg class="i sm ok"><use href="#check"/></svg>Fresh review</span><span><svg class="i sm ok"><use href="#check"/></svg>QA by hand</span><span><svg class="i sm ok"><use href="#check"/></svg>Checks</span><span class="verdict">Ready, the migration waits for you</span></div></article>
+          <article class="box draft"><div class="meta"><b>Web app</b><i>·</i><span class="mono">#731</span><i>·</i><span>opened by Builder, Saturday</span></div><h3>Shipment filters</h3><p>Filter the shipment list by carrier, status and date.</p><div class="acts"><a class="btn quiet" href="#area">Go to Web app</a></div>
+            <div class="gate"><span><svg class="i sm ok"><use href="#check"/></svg>Tests</span><span><i class="spin"></i>Fresh review, round 2</span><span class="todo"><i class="dot hollow"></i>QA by hand</span><span><svg class="i sm bad"><use href="#x"/></svg>Checks</span><span class="verdict">Blocked by red main</span></div></article>
+          <article class="box draft"><div class="meta"><b>Mobile</b><i>·</i><span class="mono">#58</span><i>·</i><span>opened by Builder, today 06:10</span></div><h3>Keep scans made without a signal</h3><p>Scans are stored on the phone and sent when it is online again.</p><div class="acts"><button class="btn quiet">Open on GitHub</button></div>
+            <div class="gate"><span><svg class="i sm ok"><use href="#check"/></svg>Tests</span><span><i class="spin"></i>Fresh review, round 1</span><span class="todo"><i class="dot hollow"></i>QA by hand</span><span><svg class="i sm ok"><use href="#check"/></svg>Checks</span><span class="verdict">In review</span></div></article>
+          <article class="box draft"><div class="meta"><b>API</b><i>·</i><span class="mono">#413</span><i>·</i><span>opened by Builder, today 06:55</span></div><h3>Document the export limits</h3><p>Docs only: the new limits and how to ask for a bigger export.</p><div class="acts"><button class="btn quiet">Hold</button></div>
+            <div class="gate"><span><svg class="i sm ok"><use href="#check"/></svg>Fresh review</span><span><svg class="i sm ok"><use href="#check"/></svg>Checks</span><span class="todo"><i class="dot hollow"></i>No tests needed</span><span class="verdict">Merges by itself at 09:00, docs only</span></div></article>
+        </div>
+      </div>
+    </section>
+
+    <!-- 6. The manager: everything starts here -->
+    <section class="view scroll" id="v-manager" aria-label="Manager" hidden>
+      <div class="doc" style="gap:26px">
+        <header class="sec" style="gap:6px">
+          <h1 class="h1">Manager</h1>
+          <p class="intro">Your chief of staff. Tell it what you want. It turns each ask into a lane, puts the lane in the right project and names who leads it. It comes back to you only for decisions.</p>
+        </header>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Everything in motion</h2><span>7 lanes in 4 projects · 3 wait for you</span></div>
+          <div class="box tbl">
+            <table class="jobs">
+              <thead><tr><th scope="col">Lane</th><th scope="col">Project</th><th scope="col">Lead</th><th scope="col">State</th><th scope="col">Next report</th></tr></thead>
+              <tbody>
+                <tr><td><a href="#area">Red main</a></td><td>Web app</td><td>Builder</td><td><span class="st"><svg class="i sm bad"><use href="#flame"/></svg>Stuck</span></td><td>Now, needs your call</td></tr>
+                <tr><td><a href="#lane">Export for big accounts</a></td><td>API</td><td>Release</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your decision</td></tr>
+                <tr><td>Tax rates per country</td><td>Billing</td><td>Builder</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your decision</td></tr>
+                <tr><td>New sign-in</td><td>Web app</td><td>Builder</td><td><span class="st"><i class="dot warn"></i>Needs you</span></td><td>After your pick</td></tr>
+                <tr><td>Shipment filters</td><td>Web app</td><td>Reviewer</td><td><span class="st"><i class="dot ok"></i>Working</span></td><td>Today, 11:30</td></tr>
+                <tr><td>Keep scans without a signal</td><td>Mobile</td><td>Builder</td><td><span class="st"><i class="dot ok"></i>Working</span></td><td>Today, 15:00</td></tr>
+                <tr><td>Upgrade to Node 24<small>Parked: the session library supports Node 24 from Thursday's release.</small></td><td>Web app</td><td>Builder</td><td><span class="st"><svg class="i sm dim"><use href="#pause"/></svg>Parked</span></td><td>Thu 19 Nov</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">What you told it last</h2><span>and where each ask went</span></div>
+          <ul class="box list asks">
+            <li><div><b>“Stop the red main from blocking everyone.”</b><span>Today 06:55 · Web app · lane Red main · Builder leads</span></div><a class="btn quiet s" href="#area">Open</a></li>
+            <li><div><b>“Move us to Node 24 when it is safe.”</b><span>Friday 09:30 · Web app · lane Upgrade to Node 24 · parked until Thursday</span></div></li>
+            <li><div><b>“Fenwick says the export times out for their account. Fix it and prove it works on their data.”</b><span>Thursday 16:10 · API · lane Export for big accounts · Release leads</span></div><a class="btn quiet s" href="#lane">Open</a></li>
+          </ul>
+        </section>
+      </div>
+      <div class="dock"><div class="composer">
+        <button class="ib" aria-label="Add a file or a link"><svg class="i lg"><use href="#plus"/></svg></button>
+        <label><span class="sr">Tell the Manager</span><input type="text" placeholder="Tell the Manager what to do" autocomplete="off"></label>
+        <button class="model" data-palette>Auto<svg class="i sm"><use href="#down"/></svg></button>
+        <button class="sendb" data-file aria-label="Send"><svg class="i lg"><use href="#up"/></svg></button>
+      </div></div>
+      <template class="chat-src" data-title="Manager" data-sub="Your chief of staff. It knows every project and every lane." data-placeholder="Tell the Manager">
+        <p class="said">What is still open on the Fenwick export?</p>
+        <div class="answer">
+          <p>One thing: your OK to release it. The fix passed its tests, a fresh review and a run on Fenwick's own data on staging.</p>
+          <p>It is the lane Export for big accounts, in API. Release leads it and holds it until 14:00.</p>
+        </div>
+        <div class="sugg"><button>Show what waits for me</button><button>What is parked, and why?</button></div>
+      </template>
+    </section>
+
+    <!-- 7. One lane: where you check one piece of work -->
+    <section class="view" id="v-lane" aria-label="Lane: Export for big accounts" hidden>
+      <div class="split">
+        <div class="scroll">
+          <article class="doc" style="gap:28px">
+            <header class="sec">
+              <div class="meta"><span class="chip">API</span><span><i class="dot warn"></i>Needs you</span><i>·</i><span>Release leads</span><i>·</i><span>Opened Thursday</span></div>
+              <h1 class="h1">Export for big accounts</h1>
+            </header>
+
+            <section class="sec">
+              <h2 class="label"><b>1</b>What you asked</h2>
+              <blockquote class="asked">Fenwick says the export times out for their account. Fix it and prove it works on their data.</blockquote>
+              <p class="meta">You to the Manager, Thursday 16:10<i>·</i>The Manager filed it under API. Builder led the fix, Release leads now.</p>
+            </section>
+
+            <section class="sec">
+              <h2 class="label"><b>2</b>Where it stands</h2>
+              <div class="box wait"><i class="dot warn"></i><p><b>It waits for you.</b> The fix is ready and proven on staging. Releasing it to production needs your OK, by 14:00 today.</p><a class="btn ink" href="#decision">Open the decision</a></div>
+              <ul class="steps">
+                <li><svg class="i ok"><use href="#check"/></svg><span>A test that fails before the fix and passes after</span><small>Builder · Friday</small></li>
+                <li><svg class="i ok"><use href="#check"/></svg><span>One fresh review, every finding fixed</span><small>Reviewer · Saturday</small></li>
+                <li><svg class="i ok"><use href="#check"/></svg><span>Fenwick's 1.2 GB export runs on staging</span><small>QA · Sunday</small></li>
+                <li class="now"><i class="dot warn"></i><span>Released to production</span><small>Release · waits for you</small></li>
+                <li class="todo"><i class="dot hollow"></i><span>Fenwick's export runs on production</span><small>QA · after the release</small></li>
+              </ul>
+              <p class="meta">Done means all five. The Manager set them when it opened the lane.</p>
+            </section>
+
+            <section class="sec">
+              <h2 class="label"><b>3</b>Who is on it</h2>
+              <div class="grid agents">
+                <article class="box agent"><div class="top"><span class="av">R</span><h3>Release</h3><span class="st"><i class="dot warn"></i>Leads</span></div><p>Holds the release until you decide</p><footer><span class="cmd">/release</span><i>·</i><span>Claude Code</span></footer></article>
+                <article class="box agent"><div class="top"><span class="av">B</span><h3>Builder</h3><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Done</span></div><p>Wrote the fix and its 6 tests</p><footer><span class="cmd">/fix-with-proof</span><i>·</i><span>Claude Code</span></footer></article>
+                <article class="box agent"><div class="top"><span class="av">R</span><h3>Reviewer</h3><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Done</span></div><p>Fresh review, 2 rounds, 3 findings</p><footer><span class="cmd">/review</span><i>·</i><span>Codex</span></footer></article>
+                <article class="box agent"><div class="top"><span class="av">Q</span><h3>QA</h3><span class="st"><i class="dot hollow"></i>Up next</span></div><p>Ran the export on staging, repeats it after the release</p><footer><span class="cmd">/qa-by-hand</span><i>·</i><span>Cursor</span></footer></article>
+              </div>
+            </section>
+
+            <section class="sec">
+              <h2 class="label"><b>4</b>What it made</h2>
+              <ul class="box list">
+                <li><span class="lt"><svg class="i sm"><use href="#decide"/></svg></span><div><b>Decision brief</b><span>Release the fix for exports that time out · due today, 14:00</span></div><a class="btn quiet s" href="#decision">Open</a></li>
+                <li><span class="lt"><svg class="i sm"><use href="#pr"/></svg></span><div><b>Pull request 412</b><span>Write big exports in chunks · ready</span></div><a class="btn quiet s" href="#pulls">Open</a></li>
+                <li><span class="lt"><svg class="i sm"><use href="#file"/></svg></span><div><b>Staging run</b><span>Fenwick's export: 48 seconds, file complete</span></div><button class="btn quiet s">Open</button></li>
+                <li><span class="lt"><svg class="i sm"><use href="#file"/></svg></span><div><b>Review notes</b><span>2 rounds, 3 findings, all fixed</span></div><button class="btn quiet s">Open</button></li>
+              </ul>
+            </section>
+          </article>
+        </div>
+        <template class="chat-src" data-title="Export for big accounts" data-sub="You, the Manager and this lane's agents. Nothing else lives here." data-placeholder="Message this lane">
+          <div class="msg"><span class="av">B</span><div class="who">Builder<time>Fri 11:40</time></div><p>Found it: the export builds the whole file in memory. I am changing it to write 5,000 rows at a time, with a test on a 400,000-row account.</p></div>
+          <div class="msg"><span class="av">Q</span><div class="who">QA<time>Sun 18:05</time></div><p>Fenwick's export ran on staging in 48 seconds. I compared the file with their data: every row is there.</p></div>
+          <p class="said">Can Fenwick get it before everyone else?</p>
+          <div class="msg"><span class="av">R</span><div class="who">Release<time>07:12</time></div><p>Yes. I can put Fenwick in the first 10% of accounts, so they have it tonight at 22:00. It is in the decision brief as an option.</p></div>
+        </template>
+      </div>
+    </section>
+<!-- @@ palette_rows -->
+      <h3>Engines</h3>
+      <button class="pr on" data-close><span class="lt ink"><svg class="i sm"><use href="#star"/></svg></span><b style="font-weight:600">Auto</b><span class="g" style="color:var(--text-2)">Morndo picks the agent for each task</span><span class="st" style="color:var(--text-2)">Default</span><kbd style="background:var(--edge)">↵</kbd></button>
+      <button class="pr" data-close><span class="lt">Cl</span><b>Claude Code</b><span class="g">Anthropic</span><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Signed in</span></button>
+      <button class="pr" data-close><span class="lt">Co</span><b>Codex</b><span class="g">OpenAI</span><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Signed in</span></button>
+      <button class="pr" data-close><span class="lt">Cu</span><b>Cursor</b><span class="g">Anysphere</span><span class="st"><svg class="i sm ok"><use href="#check"/></svg>Signed in</span></button>
+      <button class="pr" data-close><span class="lt">Ge</span><b>Gemini CLI</b><span class="g">Google</span><span class="st" style="color:var(--text-2)">Sign in</span></button>
+      <h3>Projects · talk to one project only</h3>
+      <a class="pr" href="#area"><svg class="i" style="margin:0 3px"><use href="#window"/></svg><b>Web app</b><span class="g">Builder, Reviewer, QA</span></a>
+      <button class="pr" data-close><svg class="i" style="margin:0 3px"><use href="#braces"/></svg><b>API</b><span class="g">Builder, Release</span></button>
+      <button class="pr" data-close><svg class="i" style="margin:0 3px"><use href="#card"/></svg><b>Billing</b><span class="g">Builder, Reviewer</span></button>
+      <h3>Skills</h3>
+      <button class="pr" data-close><span class="cmd">/fix-with-proof</span><span class="g">Fix a bug: first a test that fails, then the fix</span></button>
+      <button class="pr" data-close><span class="cmd">/review</span><span class="g">A fresh reviewer reads a change and lists what is wrong</span></button>
+<!-- @@ palette_keys -->
+      <span><kbd>↵</kbd>File it</span><span><kbd>Tab</kbd>Next engine</span><button data-close><kbd>Esc</kbd>Close</button>
+<!-- @@ pinnable -->
+    { id: "t-brief", kind: "Pages", label: "Brief", icon: "sun", href: "#brief", pinned: true },
+    { id: "t-decide", kind: "Pages", label: "Decide", icon: "decide", href: "#decision", badge: true, pinned: true },
+    { id: "t-pulls", kind: "Pages", label: "PRs", name: "Pull requests", icon: "pr", href: "#pulls", pinned: true },
+    { id: "t-skills", kind: "Pages", label: "Skills", icon: "star", href: "#skills", pinned: true },
+    { id: "p-web", kind: "Projects", label: "Web app", icon: "window", href: "#area", pinned: true },
+    { id: "p-api", kind: "Projects", label: "API", icon: "braces" },
+    { id: "p-billing", kind: "Projects", label: "Billing", icon: "card" },
+    { id: "p-mobile", kind: "Projects", label: "Mobile", icon: "phone" },
+    { id: "p-infra", kind: "Projects", label: "Infra", icon: "server" },
+    { id: "s-review", kind: "Skills, as one-click macros", label: "Review", name: "/review", note: "A fresh review of a change", icon: "play", run: "/review", pinned: true },
+    { id: "s-red-main", kind: "Skills, as one-click macros", label: "Fix main", name: "/red-main", note: "Find why main is red", icon: "play", run: "/red-main" },
+    { id: "s-release", kind: "Skills, as one-click macros", label: "Release", name: "/release", note: "Roll out, watch, roll back", icon: "play", run: "/release" },
+    { id: "s-qa", kind: "Skills, as one-click macros", label: "QA", name: "/qa-by-hand", note: "Click through a change", icon: "play", run: "/qa-by-hand" },
+    { id: "s-upgrade", kind: "Skills, as one-click macros", label: "Upgrade", name: "/upgrade", note: "Update dependencies", icon: "play", run: "/upgrade" },
+<!-- @@ pages -->
+    // Development keeps its fixed project and lane pages for now.
+<!-- @@ crumbs -->
+    brief: ["Brief", "Monday 16 November"],
+    decision: ["Decide", "Release the export fix"],
+    manager: ["Manager", "Everything in motion"],
+    area: ["Web app", "This week"],
+    lane: ["API", "Export for big accounts"],
+    skills: ["Skills", "Skills and setup"],
+    pulls: ["Pull requests", "5 open"],
+    settings: ["Settings", "Workspace"],
+<!-- @@ routes -->
+    { id: "p-web", lead: "Builder", re: /\bmain\b|\bred\b|sign-?in|login|nightly|session|filter|\bnode\b|upgrade|dependenc/i },
+    { id: "p-api", lead: "Builder", re: /export|time ?out|fenwick|chunk|\bapi\b|rate.?limit/i },
+    { id: "p-billing", lead: "Builder", re: /\btax|billing|invoice|migration/i },
+    { id: "p-mobile", lead: "Builder", re: /mobile|phone|\bscans?\b|offline/i },
+    { id: "p-infra", lead: "Builder", re: /server|certificate|deploy|backup|staging/i },

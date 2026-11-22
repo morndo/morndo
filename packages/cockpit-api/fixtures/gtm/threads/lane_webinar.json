@@ -1,0 +1,45 @@
+{
+  "id": "lane:webinar",
+  "title": "Webinar on Thursday",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m33",
+      "author": {
+        "id": "visuals",
+        "name": "Visuals",
+        "shortName": "Visuals",
+        "kind": "agent",
+        "avatar": "V",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Round 3 is done. 4 images pass. I am out of rounds, so I stopped and asked.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

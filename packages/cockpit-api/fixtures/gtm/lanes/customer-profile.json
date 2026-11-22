@@ -1,0 +1,110 @@
+{
+  "id": "customer-profile",
+  "topicId": "research",
+  "title": "Customer profile refresh",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "researcher",
+    "name": "Researcher",
+    "shortName": "Researcher",
+    "kind": "agent",
+    "avatar": "R",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Rebuilt the profile",
+    "skill": "/icp-refresh",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Rebuild the customer profile from what we actually won.",
+  "askedMeta": {
+    "source": "Pinned macro /icp-refresh, run by you on Sunday evening",
+    "note": "The Manager filed it under Research."
+  },
+  "status": "The profile is rebuilt from 212 won deals and saved to memory. Outbound already works from it.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "The profile is rebuilt from 212 won deals and saved to memory. Outbound already works from it."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "212 won deals read from Supabase, read only",
+      "who": "Researcher · 06:40"
+    },
+    {
+      "kind": "ok",
+      "text": "4 segments, ranked by how fast they close",
+      "who": "Researcher · 07:00"
+    },
+    {
+      "kind": "ok",
+      "text": "Saved to memory and checked by the Manager",
+      "who": "Manager · 07:10"
+    }
+  ],
+  "doneNote": "Done means all three. No customer data left Supabase: the guardrail keeps it away from other models.",
+  "crew": [
+    {
+      "id": "researcher",
+      "name": "Researcher",
+      "shortName": "Researcher",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Rebuilt the profile",
+      "skill": "/icp-refresh",
+      "engine": "Claude",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Customer profile",
+      "detail": "4 segments, fintech ops first",
+      "target": {
+        "kind": "lane",
+        "id": "customer-profile"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "What changed",
+      "detail": "Fintech ops moved up, retail moved down",
+      "target": {
+        "kind": "lane",
+        "id": "customer-profile"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-16T06:30:00+01:00",
+  "closedAt": "2026-11-16T07:10:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

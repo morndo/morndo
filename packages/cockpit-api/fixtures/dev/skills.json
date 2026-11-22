@@ -1,0 +1,183 @@
+{
+  "intro": "Morndo comes set up for software work. Connect your code and your agents once and the lanes can work. You can change everything later.",
+  "builtIn": 9,
+  "skills": [
+    {
+      "name": "/fix-with-proof",
+      "summary": "Fix a bug: first a test that fails, then the fix.",
+      "topics": "All projects",
+      "needsKey": null,
+      "enabled": true,
+      "id": "fix-with-proof",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
+    },
+    {
+      "name": "/build-feature",
+      "summary": "Build from a short spec, in small reviewed steps.",
+      "topics": "All projects",
+      "needsKey": null,
+      "enabled": true,
+      "id": "build-feature",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
+    },
+    {
+      "name": "/review",
+      "summary": "A fresh reviewer reads a change and lists what is wrong.",
+      "topics": "All projects · Codex",
+      "needsKey": null,
+      "enabled": true,
+      "id": "review",
+      "engine": "Codex",
+      "asksFirst": false,
+      "builtIn": true
+    },
+    {
+      "name": "/qa-by-hand",
+      "summary": "Click through a change in a real browser, with screenshots.",
+      "topics": "Web app, Mobile · Cursor",
+      "needsKey": null,
+      "enabled": true,
+      "id": "qa-by-hand",
+      "engine": "Cursor",
+      "asksFirst": false,
+      "builtIn": true
+    },
+    {
+      "name": "/release",
+      "summary": "Roll out in steps, watch it, and roll back if it goes wrong.",
+      "topics": "Asks first",
+      "needsKey": null,
+      "enabled": true,
+      "id": "release",
+      "engine": "Auto",
+      "asksFirst": true,
+      "builtIn": true
+    },
+    {
+      "name": "/red-main",
+      "summary": "Find why main is red and fix it, or say what stops it.",
+      "topics": "All projects",
+      "needsKey": null,
+      "enabled": true,
+      "id": "red-main",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
+    },
+    {
+      "name": "/upgrade",
+      "summary": "Update dependencies one at a time, with tests after each.",
+      "topics": "All projects",
+      "needsKey": null,
+      "enabled": true,
+      "id": "upgrade",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
+    },
+    {
+      "name": "/what-broke",
+      "summary": "Read production errors and say what broke and since when.",
+      "topics": "All projects",
+      "needsKey": "Sentry",
+      "enabled": false,
+      "id": "what-broke",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
+    },
+    {
+      "name": "/decision-brief",
+      "summary": "Put an open question into your decision format.",
+      "topics": "All projects",
+      "needsKey": null,
+      "enabled": true,
+      "id": "decision-brief",
+      "engine": "Auto",
+      "asksFirst": false,
+      "builtIn": true
+    }
+  ],
+  "connections": [
+    {
+      "name": "GitHub",
+      "purpose": "Code, pull requests and checks",
+      "state": "connected",
+      "capacity": null,
+      "id": "github"
+    },
+    {
+      "name": "Claude Code",
+      "purpose": "Agent, builds and fixes",
+      "state": "signedIn",
+      "capacity": null,
+      "id": "claude-code"
+    },
+    {
+      "name": "Codex",
+      "purpose": "Agent, does the fresh reviews",
+      "state": "signedIn",
+      "capacity": null,
+      "id": "codex"
+    },
+    {
+      "name": "Cursor",
+      "purpose": "Agent, does QA in the browser",
+      "state": "signedIn",
+      "capacity": null,
+      "id": "cursor"
+    },
+    {
+      "name": "Your server",
+      "purpose": "Lanes run here",
+      "state": "connected",
+      "capacity": {
+        "kind": "count",
+        "value": 3,
+        "of": 8,
+        "unit": "busy"
+      },
+      "id": "your-server"
+    },
+    {
+      "name": "Sentry",
+      "purpose": "Errors from production",
+      "state": "addKey",
+      "capacity": null,
+      "id": "sentry"
+    }
+  ],
+  "connected": 5,
+  "guardrails": [
+    {
+      "name": "Production",
+      "detail": "Ask me before anything is released",
+      "on": true
+    },
+    {
+      "name": "Database",
+      "detail": "Backup first, and ask me before a change",
+      "on": true
+    },
+    {
+      "name": "Merging",
+      "detail": "Tests and one fresh review before any merge",
+      "on": true
+    },
+    {
+      "name": "Tries",
+      "detail": "3 tries at a fix, then stop and ask",
+      "on": true
+    },
+    {
+      "name": "Keys",
+      "detail": "Stay in the vault, never in a chat",
+      "on": true
+    }
+  ],
+  "rulesNote": "On from the start. Agents cannot change them. You can."
+}

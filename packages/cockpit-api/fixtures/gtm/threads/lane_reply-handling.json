@@ -1,0 +1,45 @@
+{
+  "id": "lane:reply-handling",
+  "title": "Meetings from replies",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m23",
+      "author": {
+        "id": "replies",
+        "name": "Replies",
+        "shortName": "Replies",
+        "kind": "agent",
+        "avatar": "R",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Jonas, two yeses this morning: Ostrand Haulage and Velmont Freight. Both asked for this week. Which slots can I offer?",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:20:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

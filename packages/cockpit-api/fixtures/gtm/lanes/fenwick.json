@@ -1,0 +1,143 @@
+{
+  "id": "fenwick",
+  "topicId": "content",
+  "title": "Fenwick customer story",
+  "state": "warn",
+  "stateWord": "Needs you",
+  "lead": {
+    "id": "writer",
+    "name": "Writer",
+    "shortName": "Writer",
+    "kind": "agent",
+    "avatar": "W",
+    "role": null,
+    "state": "warn",
+    "word": "Leads",
+    "text": "Waits for your OK on one number",
+    "skill": "/customer-story",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": "After your OK",
+  "afterNext": "when it is published",
+  "decisionId": "d3",
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": "It publishes a number as our claim, and a published claim is hard to take back.",
+  "checks": [],
+  "delay": null,
+  "approveLabel": "Approve the story",
+  "after": "The story is scheduled for Wednesday 09:00. Publisher shares it on LinkedIn the same morning.",
+  "asked": "Write a customer story with Fenwick Freight once they agree to be named.",
+  "askedMeta": {
+    "source": "You to the Manager, Monday 9 November",
+    "note": "The Manager filed it under Content and named Writer to lead."
+  },
+  "status": "Fenwick signed off the quote. The claim of 38% fewer manual hand-offs comes from their own Q3 report and needs your OK. Due Wednesday.",
+  "standing": {
+    "headline": "It waits for you.",
+    "detail": "Fenwick signed off the quote. The claim of 38% fewer manual hand-offs comes from their own Q3 report and needs your OK. Due Wednesday."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Interview with Fenwick's ops lead, written up",
+      "who": "Writer · Tue 10 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Draft signed off by Fenwick, quote included",
+      "who": "Fenwick · Friday"
+    },
+    {
+      "kind": "now",
+      "text": "Your OK on the 38% claim",
+      "who": "You · by Wednesday"
+    },
+    {
+      "kind": "todo",
+      "text": "Published on the site",
+      "who": "Publisher · Wed 18 Nov"
+    },
+    {
+      "kind": "todo",
+      "text": "Shared on LinkedIn and in the newsletter",
+      "who": "Publisher · Wed 18 Nov"
+    }
+  ],
+  "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "writer",
+      "name": "Writer",
+      "shortName": "Writer",
+      "kind": "agent",
+      "avatar": "W",
+      "role": null,
+      "state": "warn",
+      "word": "Leads",
+      "text": "Waits for your OK on one number",
+      "skill": "/customer-story",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "publisher",
+      "name": "Publisher",
+      "shortName": "Publisher",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Publishes once you say yes",
+      "skill": "/schedule-post",
+      "engine": "Asks first",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "The story",
+      "detail": "1,100 words, signed off by Fenwick",
+      "target": {
+        "kind": "lane",
+        "id": "fenwick"
+      }
+    },
+    {
+      "icon": "mail",
+      "title": "Fenwick's sign-off",
+      "detail": "From their ops lead, Friday 16:20",
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Source for the 38%",
+      "detail": "Fenwick's Q3 ops report, page 4",
+      "target": {
+        "kind": "lane",
+        "id": "fenwick"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-09T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": "2026-11-18T17:00:00+01:00"
+}

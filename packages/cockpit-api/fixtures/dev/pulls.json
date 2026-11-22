@@ -1,0 +1,210 @@
+{
+  "intro": "Everything your agents have open. A change merges only after its tests, a fresh review and green checks. Production always waits for you.",
+  "summary": "2 are ready and wait for you, 2 are in review, and 1 merges by itself at 09:00 because it only changes docs.",
+  "items": [
+    {
+      "id": "412",
+      "projectId": "api",
+      "projectName": "API",
+      "number": 412,
+      "author": "Builder",
+      "title": "Write big exports in chunks",
+      "summary": "Fixes the export that times out for the 14 largest accounts.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "QA by hand",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        }
+      ],
+      "verdict": "Ready, yours to release",
+      "url": "https://code.example.test/pulls/412",
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      },
+      "openedAt": "2026-11-15T17:20:00+01:00",
+      "state": "ready",
+      "decisionId": "d1",
+      "laneId": "export-for-big-accounts",
+      "held": false,
+      "autoMergeAt": null
+    },
+    {
+      "id": "96",
+      "projectId": "billing",
+      "projectName": "Billing",
+      "number": 96,
+      "author": "Builder",
+      "title": "Tax rates per country",
+      "summary": "Adds the rates table and a migration that fills 48,000 invoices.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "QA by hand",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        }
+      ],
+      "verdict": "Ready, the migration waits for you",
+      "url": "https://code.example.test/pulls/96",
+      "target": {
+        "kind": "decision",
+        "id": "d2"
+      },
+      "openedAt": "2026-11-13T00:00:00+01:00",
+      "state": "ready",
+      "decisionId": "d2",
+      "laneId": "tax-rates",
+      "held": false,
+      "autoMergeAt": null
+    },
+    {
+      "id": "731",
+      "projectId": "web",
+      "projectName": "Web app",
+      "number": 731,
+      "author": "Builder",
+      "title": "Shipment filters",
+      "summary": "Filter the shipment list by carrier, status and date.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "running",
+          "detail": "round 2"
+        },
+        {
+          "name": "QA by hand",
+          "state": "todo",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "fail",
+          "detail": null
+        }
+      ],
+      "verdict": "Blocked by red main",
+      "url": "https://code.example.test/pulls/731",
+      "target": {
+        "kind": "topic",
+        "id": "web"
+      },
+      "openedAt": "2026-11-14T00:00:00+01:00",
+      "state": "blocked",
+      "decisionId": null,
+      "laneId": "shipment-filters",
+      "held": false,
+      "autoMergeAt": null
+    },
+    {
+      "id": "58",
+      "projectId": "mobile",
+      "projectName": "Mobile",
+      "number": 58,
+      "author": "Builder",
+      "title": "Keep scans made without a signal",
+      "summary": "Scans are stored on the phone and sent when it is online again.",
+      "gates": [
+        {
+          "name": "Tests",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Fresh review",
+          "state": "running",
+          "detail": "round 1"
+        },
+        {
+          "name": "QA by hand",
+          "state": "todo",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        }
+      ],
+      "verdict": "In review",
+      "url": "https://code.example.test/pulls/58",
+      "target": null,
+      "openedAt": "2026-11-16T06:10:00+01:00",
+      "state": "inReview",
+      "decisionId": null,
+      "laneId": "keep-scans",
+      "held": false,
+      "autoMergeAt": null
+    },
+    {
+      "id": "413",
+      "projectId": "api",
+      "projectName": "API",
+      "number": 413,
+      "author": "Builder",
+      "title": "Document the export limits",
+      "summary": "Docs only: the new limits and how to ask for a bigger export.",
+      "gates": [
+        {
+          "name": "Fresh review",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "Checks",
+          "state": "pass",
+          "detail": null
+        },
+        {
+          "name": "No tests needed",
+          "state": "skipped",
+          "detail": null
+        }
+      ],
+      "verdict": "Merges by itself at 09:00, docs only",
+      "url": "https://code.example.test/pulls/413",
+      "target": null,
+      "openedAt": "2026-11-16T06:55:00+01:00",
+      "state": "autoMerge",
+      "decisionId": null,
+      "laneId": "export-limits-docs",
+      "held": false,
+      "autoMergeAt": "2026-11-16T09:00:00+01:00"
+    }
+  ]
+}

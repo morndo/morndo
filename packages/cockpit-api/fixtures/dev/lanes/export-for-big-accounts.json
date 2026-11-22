@@ -1,0 +1,191 @@
+{
+  "id": "export-for-big-accounts",
+  "topicId": "api",
+  "title": "Export for big accounts",
+  "state": "warn",
+  "stateWord": "Needs you",
+  "lead": {
+    "id": "release",
+    "name": "Release",
+    "shortName": "Release",
+    "kind": "agent",
+    "avatar": "R",
+    "role": null,
+    "state": "warn",
+    "word": "Leads",
+    "text": "Holds the release until you decide",
+    "skill": "/release",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": "After your decision",
+  "afterNext": null,
+  "decisionId": "d1",
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Fenwick says the export times out for their account. Fix it and prove it works on their data.",
+  "askedMeta": {
+    "source": "You to the Manager, Thursday 16:10",
+    "note": "The Manager filed it under API. Builder led the fix, Release leads now."
+  },
+  "status": "The fix is ready and proven on staging. Releasing it to production needs your OK, by 14:00 today.",
+  "standing": {
+    "headline": "It waits for you.",
+    "detail": "The fix is ready and proven on staging. Releasing it to production needs your OK, by 14:00 today."
+  },
+  "acts": [
+    {
+      "label": "Open the decision",
+      "tone": "ink",
+      "id": "open-the-decision",
+      "personId": null,
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "A test that fails before the fix and passes after",
+      "who": "Builder · Friday"
+    },
+    {
+      "kind": "ok",
+      "text": "One fresh review, every finding fixed",
+      "who": "Reviewer · Saturday"
+    },
+    {
+      "kind": "ok",
+      "text": "Fenwick's 1.2 GB export runs on staging",
+      "who": "QA · Sunday"
+    },
+    {
+      "kind": "now",
+      "text": "Released to production",
+      "who": "Release · waits for you"
+    },
+    {
+      "kind": "todo",
+      "text": "Fenwick's export runs on production",
+      "who": "QA · after the release"
+    }
+  ],
+  "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "release",
+      "name": "Release",
+      "shortName": "Release",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "warn",
+      "word": "Leads",
+      "text": "Holds the release until you decide",
+      "skill": "/release",
+      "engine": "Claude Code",
+      "record": null
+    },
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Wrote the fix and its 6 tests",
+      "skill": "/fix-with-proof",
+      "engine": "Claude Code",
+      "record": null
+    },
+    {
+      "id": "reviewer",
+      "name": "Reviewer",
+      "shortName": "Reviewer",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Fresh review, 2 rounds, 3 findings",
+      "skill": "/review",
+      "engine": "Codex",
+      "record": null
+    },
+    {
+      "id": "qa",
+      "name": "QA",
+      "shortName": "QA",
+      "kind": "agent",
+      "avatar": "Q",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Ran the export on staging, repeats it after the release",
+      "skill": "/qa-by-hand",
+      "engine": "Cursor",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "decide",
+      "title": "Decision brief",
+      "detail": "Release the fix for exports that time out · due today, 14:00",
+      "target": {
+        "kind": "decision",
+        "id": "d1"
+      }
+    },
+    {
+      "icon": "pr",
+      "title": "Pull request 412",
+      "detail": "Write big exports in chunks · ready",
+      "target": {
+        "kind": "pull",
+        "id": "412"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Staging run",
+      "detail": "Fenwick's export: 48 seconds, file complete",
+      "target": {
+        "kind": "run",
+        "id": "export-staging"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Review notes",
+      "detail": "2 rounds, 3 findings, all fixed",
+      "target": {
+        "kind": "review",
+        "id": "export-review"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-12T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

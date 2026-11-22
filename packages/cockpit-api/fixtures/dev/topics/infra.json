@@ -1,0 +1,37 @@
+{
+  "id": "infra",
+  "name": "Infra",
+  "kind": "project",
+  "icon": "server",
+  "crumb": "Idle",
+  "open": false,
+  "meta": null,
+  "intro": "Servers, certificates and deploys.",
+  "when": null,
+  "health": {
+    "state": "idle",
+    "word": "Idle"
+  },
+  "goal": null,
+  "noGoal": null,
+  "facts": [],
+  "plan": null,
+  "focusLaneId": null,
+  "history": null,
+  "crew": [],
+  "jobs": [],
+  "chatSub": "You and the Manager.",
+  "lanes": [],
+  "spend": null,
+  "stuck": null,
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
+}

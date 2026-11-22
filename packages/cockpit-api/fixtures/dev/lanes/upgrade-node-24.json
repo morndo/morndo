@@ -1,0 +1,81 @@
+{
+  "id": "upgrade-node-24",
+  "topicId": "web",
+  "title": "Upgrade to Node 24",
+  "state": "parked",
+  "stateWord": "Parked until Thu",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "idle",
+    "word": "Parked",
+    "text": "Waits for Thursday's release",
+    "skill": "/upgrade",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Move us to Node 24 when it is safe.",
+  "askedMeta": {
+    "source": "You to the Manager, Friday 09:30",
+    "note": "The Manager filed it under Web app and parked it until Thursday."
+  },
+  "status": "Parked: the session library supports Node 24 from Thursday's release.",
+  "standing": {
+    "headline": "Parked.",
+    "detail": "Parked: the session library supports Node 24 from Thursday's release."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "todo",
+      "text": "Upgrade once the session library supports Node 24",
+      "who": "Builder · Thu 19 Nov"
+    }
+  ],
+  "doneNote": "Done means all 1. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "idle",
+      "word": "Parked",
+      "text": "Waits for Thursday's release",
+      "skill": "/upgrade",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-13T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-19T17:00:00+01:00",
+  "afterNextAt": null
+}

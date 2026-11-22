@@ -1,0 +1,2065 @@
+<!doctype html>
+<html lang="en" data-module="@@MODULE_ID@@">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Brief · Morndo</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'%3E%3Cpath fill='%23e7e9ef' fill-rule='evenodd' d='M0 0L48 0L48 48L0 48ZM8 26A16 16 0 0 1 40 26A16 16 0 0 1 8 26ZM0 27L48 27L48 33L0 33Z'/%3E%3C/svg%3E">
+<!--
+  Morndo cockpit, @@MODULE_NAME@@ module: a design mockup in one file. Nothing here talks to a server; every name and
+  number is made up. Built from src/shell.html and src/@@MODULE_ID@@.blocks.html by src/build.py; edit those, not this file.
+  Hero artworks: fourteen images generated for Morndo with ChatGPT, each in the manner of a historical style.
+  Typefaces: Newsreader and Schibsted Grotesk, both under the SIL Open Font License, embedded below.
+-->
+<style>
+@font-face{font-family:"Newsreader";font-style:normal;font-weight:400 600;font-display:swap;src:url(data:font/woff2;base64,@@FONT_SERIF@@) format("woff2")}
+@font-face{font-family:"Newsreader";font-style:italic;font-weight:400 600;font-display:swap;src:url(data:font/woff2;base64,@@FONT_SERIF_ITALIC@@) format("woff2")}
+@font-face{font-family:"Schibsted Grotesk";font-style:normal;font-weight:400 700;font-display:swap;src:url(data:font/woff2;base64,@@FONT_SANS@@) format("woff2")}
+
+/* Design tokens, in three layers. Primitives are the raw values: one neutral grey ramp and the status hues. Semantic
+   tokens say what a value is for (a surface, a kind of text, a line) and are what rules use. Scales set type, space,
+   radius, size, shadow and motion. A rule uses semantic tokens and scales only, so a colour theme, the web app or the
+   native app can take the whole look over by tokens. The grey ramp, the reading grey and the proportions (body text at
+   a long line height, item titles a step above it, serif italic section names, one card at most, hairlines instead of
+   boxes) are measured from Dia's own pages. */
+:root{
+  /* Primitives */
+  --grey-100:#111111;--grey-150:#171717;--grey-200:#1d1d1d;--grey-250:#242424;--grey-300:#2a2a2a;--grey-350:#333333;
+  --grey-400:#3a3a3a;--grey-500:#4a4a4a;--grey-600:#555555;--grey-700:#9a9a9a;--grey-800:#c4c4c4;--grey-900:#ececec;
+  --white:#ffffff;--paper-grey:#a39e95;
+  --art-wait:#1e2b29;   /* behind the brief's picture until it loads */
+  --teal:#3dc8b5;--apricot:#ffd1a9;--coral:#f46974;--coral-deep:#361618;--blue:#3987e5;--rust:#d95926;--sunrise:#f2dc8a;
+  /* The cool slate of the window frame, and the cool greys of the text on it */
+  --slate-100:#1c1f26;--slate-150:#262931;--slate-200:#272a32;--slate-250:#2c2f38;--slate-300:#343741;
+  --cool-700:#9b9ea7;--cool-650:#a9acb5;--cool-800:#cdd0d8;--cool-900:#e7e9ef;
+
+  /* The window frame: it keeps its own cool ink under the glass. */
+  --frame:var(--slate-100);--tile:var(--slate-200);--tile-on:var(--slate-300);--row-hover:var(--slate-150);--row-on:var(--slate-250);
+
+  /* Surfaces, from back to front */
+  --bg:var(--grey-100);        /* the page */
+  --surface:var(--grey-200);   /* a card on the page */
+  --raised:#262626;            /* popovers, menus, the chat */
+  --field:#2b2b2b;             /* the composer and other inputs */
+  --fill:rgba(255,255,255,.075);      /* quiet buttons, chips: a light laid on whatever is under it */
+  --fill-hover:rgba(255,255,255,.12);
+  /* Lines: hairlines that separate, edges that must show, the faint light rim of a raised surface */
+  --line:var(--grey-250);--line-2:#2e2e2e;--line-soft:#1e1e1e;
+  --edge:var(--grey-400);--edge-2:var(--grey-500);
+  --rim:rgba(255,255,255,.08);
+  --hover:rgba(255,255,255,.06);--selected:rgba(255,255,255,.1);   /* light laid on a raised surface */
+  /* Text: titles, normal, secondary, reading text, quiet, and decoration only (never for words that carry meaning) */
+  --text-hi:var(--white);--text:var(--grey-900);--text-2:var(--grey-800);--prose:var(--paper-grey);--muted:var(--grey-700);--faint:var(--grey-600);
+  --ink:#f5f5f5;--ink-hover:#dcdcdc;--ink-fg:var(--grey-100);
+  /* Status, charts, and the brief's sunrise */
+  --ok:var(--teal);--warn:var(--apricot);--bad:var(--coral);--bad-bg:var(--coral-deep);
+  --best:var(--blue);--worst:var(--rust);
+  --sun:var(--sunrise);
+
+  /* Type */
+  --serif:"Newsreader","Iowan Old Style","Palatino Linotype",Georgia,serif;
+  --sans:"Schibsted Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --fs-3xs:10px;--fs-2xs:11.5px;--fs-xs:12px;--fs-sm:12.5px;--fs-ui:13px;--fs-md:14px;--fs-lg:16px;--fs-title:18px;
+  --fs-xl:21px;--fs-2xl:28px;--fs-3xl:34px;--fs-4xl:40px;--fs-5xl:44px;--fs-6xl:64px;
+  --lh-tight:1.15;--lh-snug:1.3;--lh-ui:1.45;--lh-body:1.55;--lh-read:1.75;
+  /* Space, on a 4 px grid */
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-7:32px;--sp-8:40px;--sp-9:56px;--sp-10:72px;
+  /* Radius */
+  --r-xs:4px;--r-sm:8px;--r-md:10px;--r-lg:12px;--r-xl:16px;--r-2xl:20px;--r-pill:999px;
+  /* Sizes */
+  --h-bar:48px;--h-row:32px;--h-ctl:32px;--h-ctl-s:28px;--h-ctl-l:38px;--w-read:680px;
+  /* Shadow */
+  --sh-pop:0 20px 56px rgba(0,0,0,.5);--sh-float:0 28px 80px rgba(0,0,0,.62),0 2px 12px rgba(0,0,0,.4);
+  /* Motion */
+  --ease:cubic-bezier(.2,.8,.2,1);--ease-pop:cubic-bezier(.2,.9,.3,1.1);--t-fast:.15s;--t-move:.28s;
+}
+/* Workspace colour. Ink (above) is the monochrome default. A named theme re-derives the same lightness steps in its
+   own hue, so contrast stays where it was; --k (0 subtle to 1 bold) sets how much colour the steps carry. */
+:root{--k:.55}
+/* Glass: the window frame lets the brief's artwork shine through, as Dia's sidebar does with the desktop behind it.
+   The picture is a 64 px wide, already blurred image (src/glass.sh) that the browser only stretches: no blur filter,
+   no backdrop-filter and nothing that keeps moving, so it costs one paint.
+   --glass (0 to 1) is how much of the picture comes through; the user sets it (default: a quarter in Ink, half in a
+   colour theme). A veil of the frame's own colour covers the rest. In Ink nearly the whole frame can turn to glass; a coloured workspace keeps its own colour in charge.
+   Text stays readable at every setting by construction, not by tuning: the veil can only bring the frame closer to
+   its plain colour, the pictures have a fixed lightest tone (glass.sh), and on glass the sidebar's grey text is a
+   step lighter, enough for 4.5:1 on that lightest tone with no veil at all. */
+:root{--glass:.25;--veil:calc(100% - var(--glass)*92%)}
+:root[data-theme]{--veil:calc(100% - var(--glass)*55%)}
+.glass{position:fixed;inset:0;z-index:0;overflow:hidden;pointer-events:none}
+.glass i{position:absolute;inset:0;background:center/cover no-repeat;opacity:0;transition:opacity 1.1s ease}
+.glass i.on{opacity:1}
+.glass::after{content:"";position:absolute;inset:0;background:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .04 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),linear-gradient(color-mix(in srgb,var(--frame) var(--veil),transparent),color-mix(in srgb,var(--frame) var(--veil),transparent))}
+:root[data-glass="off"] .glass{display:none}
+/* On glass, the sidebar's own surfaces are glass too: a little light laid over whatever is behind them. */
+@media (min-width:901px){:root:not([data-glass="off"]) .side{--muted:var(--cool-650);--tile:rgba(255,255,255,.075);--tile-on:rgba(255,255,255,.16);--row-hover:rgba(255,255,255,.06);--row-on:rgba(255,255,255,.15)}}
+
+/* The two sidebars' widths. The user can drag both; the choice is kept. */
+:root{--side-w:236px;--chat-w:380px}
+:root[data-theme]{
+  --cf:calc(.018 + .045*var(--k));--cp:calc(.012 + .014*var(--k));
+  --frame:oklch(.239 var(--cf) var(--h));
+  --frame-bg:linear-gradient(168deg,oklch(.262 calc(var(--cf)*1.2) var(--h)),oklch(.228 var(--cf) calc(var(--h) + 14)) 70%);
+  --tile:oklch(.305 var(--cf) var(--h));--tile-on:oklch(.365 calc(var(--cf)*1.15) var(--h));
+  --row-hover:oklch(.3 var(--cf) var(--h));--row-on:oklch(.33 calc(var(--cf)*1.1) var(--h));
+  --bg:oklch(.178 var(--cp) var(--h));--surface:oklch(.231 var(--cp) var(--h));--raised:oklch(.269 var(--cp) var(--h));--field:oklch(.293 var(--cp) var(--h));
+  --line:oklch(.26 var(--cp) var(--h));--line-2:oklch(.301 var(--cp) var(--h));--line-soft:oklch(.234 var(--cp) var(--h));
+  --edge:oklch(.348 var(--cp) var(--h));--edge-2:oklch(.409 var(--cp) var(--h));
+  --accent:oklch(.87 calc(.07 + .07*var(--k)) var(--h));--sun:var(--accent);
+  --ink:oklch(.93 calc(.015 + .04*var(--k)) var(--h));--ink-hover:oklch(.875 calc(.02 + .045*var(--k)) var(--h));--ink-fg:oklch(.17 .02 var(--h));
+}
+:root[data-theme="ember"]{--h:48}:root[data-theme="sand"]{--h:85}:root[data-theme="moss"]{--h:150}:root[data-theme="tide"]{--h:200}:root[data-theme="sky"]{--h:250}:root[data-theme="iris"]{--h:295}:root[data-theme="rose"]{--h:5}
+/* Where a colour theme shows beyond the surfaces: what is selected, the workspace mark, the brief's command bar, receipts. */
+:root[data-theme] .tile[aria-current],:root[data-theme] .row[aria-current]{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 42%,transparent)}
+:root[data-theme] .ws .mark,:root[data-theme] .pop .mark{color:var(--accent)}
+:root[data-theme] .dock .composer{border-color:color-mix(in srgb,var(--accent) 26%,var(--line-2))}
+:root[data-theme] .dock::after{content:"";position:absolute;z-index:-1;left:50%;bottom:2px;width:min(520px,62%);height:36px;border-radius:50%;background:var(--accent);filter:blur(30px);opacity:.3;transform:translateX(-50%);animation:breathe 5s ease-in-out infinite alternate;pointer-events:none}
+@keyframes breathe{to{opacity:.13;transform:translateX(-50%) scaleX(.84)}}
+:root[data-theme] .receipt{border-color:color-mix(in srgb,var(--accent) 32%,var(--tile-on))}
+*{box-sizing:border-box;scrollbar-width:thin;scrollbar-color:var(--tile-on) transparent}
+html,body{height:100%;overflow:hidden;overscroll-behavior:none}
+body{margin:0;background:var(--frame-bg,var(--frame));color:var(--text);font:var(--fs-ui)/var(--lh-ui) var(--sans);-webkit-font-smoothing:antialiased;text-rendering:optimizeLegibility}
+a{color:inherit;text-decoration:none}
+button{font:inherit;color:inherit;background:none;border:0;padding:0;margin:0;cursor:pointer;text-align:left}
+input{font:inherit;color:inherit}
+h1,h2,h3,p,ul,figure{margin:0}
+ul{list-style:none;padding:0}
+:focus-visible{outline:2px solid var(--text);outline-offset:2px;border-radius:var(--r-sm)}
+[hidden]{display:none!important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.i{width:16px;height:16px;flex:none;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round}
+.i.sm{width:13px;height:13px}.i.lg{width:18px;height:18px}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.dim{color:var(--muted)}
+.dot{width:7px;height:7px;border-radius:50%;flex:none;background:var(--muted)}
+.dot.ok{background:var(--ok)}.dot.warn{background:var(--warn)}.dot.bad{background:var(--bad)}.dot.hollow{background:none;border:1.5px solid var(--muted)}
+kbd{font:500 var(--fs-2xs) var(--sans);color:var(--text-2);background:var(--tile);border-radius:var(--r-xs);padding:1px 6px}
+code,.cmd{font-family:var(--mono)}
+
+/* Shell */
+.app{position:fixed;inset:0;display:grid;grid-template-columns:var(--side-w) minmax(0,1fr);gap:var(--sp-2);padding:var(--sp-2);transition:grid-template-columns var(--t-move) var(--ease),gap var(--t-move) var(--ease)}
+.app.side-off{grid-template-columns:0 minmax(0,1fr);gap:0}
+@media (min-width:901px){
+  .side{width:var(--side-w);transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s}
+  .app.side-off .side{transform:translateX(calc(-8px - var(--side-w)));visibility:hidden;transition:transform .28s cubic-bezier(.2,.8,.2,1),visibility 0s .28s}
+}
+/* The sidebar keeps its own cool ink, which belongs with the frame and the glass behind it. */
+.side{--text:var(--cool-900);--text-2:var(--cool-800);--muted:var(--cool-700);min-width:0;overflow:hidden auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:14px;padding:0 var(--sp-1) 2px}
+.row{display:flex;align-items:center;gap:9px;width:100%;height:var(--h-row);padding:0 var(--sp-2);border-radius:var(--r-sm);color:var(--text-2);font-weight:500;white-space:nowrap}
+.row:hover{background:var(--row-hover)}
+.row[aria-current]{background:var(--row-on);color:var(--text);font-weight:600}
+.row .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.row .state{display:flex;align-items:center;gap:6px;font-size:var(--fs-2xs);font-weight:500;color:var(--muted)}
+.row.plain{font-weight:400}
+.ws{height:34px;color:var(--text-hi);font-size:var(--fs-md);font-weight:600;letter-spacing:-.005em}
+.mark{width:18px;height:18px;border-radius:var(--r-xs);flex:none}
+.tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.tile{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;height:54px;border-radius:var(--r-md);background:var(--tile);color:var(--text-2);font-size:var(--fs-2xs);font-weight:500;transition:background .15s}
+.tile:hover{background:color-mix(in srgb,var(--tile) 55%,var(--tile-on))}
+.tile[aria-current]{background:var(--tile-on);color:var(--text)}
+.badge{position:absolute;top:3px;right:2px;min-width:15px;height:15px;padding:0 4px;border-radius:var(--r-sm);background:var(--ink);color:var(--ink-fg);font-size:var(--fs-3xs);font-weight:700;line-height:15px;text-align:center}
+.side h2{padding:0 8px 4px;font-size:var(--fs-2xs);font-weight:600;color:var(--muted)}
+.side .group{display:flex;flex-direction:column;gap:2px}
+/* The workspace name and the pins stay at the top and the account row at the bottom; only the tree between them
+   scrolls. Its own padding keeps focus rings from being clipped. */
+.side{overflow:hidden}
+#tree{flex:1 1 auto;min-height:0;overflow:hidden auto;overscroll-behavior:contain;margin:0 calc(-1*var(--sp-1));padding:2px var(--sp-1)}
+.me{flex:none}
+/* The sidebar is for finding your way, not for reading status: a row is one icon and one name. A colour mark appears
+   only where you are needed (red: stuck, amber: waiting for you) or where work is running (green). The word for a
+   row's state is there for screen readers and shows when you point at the row. */
+.side .word{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+.side .row:hover>.word,.side .row:focus-visible>.word{position:static;width:auto;height:auto;overflow:visible;clip-path:none;font-size:var(--fs-2xs);font-weight:400;color:var(--text-2)}
+.side kbd{padding:0;background:none;font-weight:400;color:var(--muted)}
+/* A pointed-at row is a little lighter than what is around it, so the small text on it steps up as well. */
+.side .row:hover kbd,.side .row:hover>.mark{color:var(--text-2)}
+.me{margin-top:auto;height:40px;display:flex;align-items:center;gap:2px}
+.me>.row{flex:1;min-width:0;height:40px}
+.me>.ib[aria-expanded="true"]{background:var(--row-on);color:var(--text)}
+.me .av{width:24px;height:24px;border-radius:var(--r-sm);background:var(--tile-on);display:grid;place-items:center;flex:none}
+
+/* The page sits flush with the window, as Dia's does: no inset, no border, no corner. Where the frame ends and the page
+   begins is said by the change of surface alone. */
+.pane{position:relative;min-width:0;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:var(--h-bar) minmax(0,1fr);margin:calc(-1*var(--sp-2));margin-left:calc(-1*var(--sp-1));background:var(--bg);overflow:hidden}
+.bar{grid-column:1;grid-row:1;display:flex;align-items:center;gap:2px;padding:0 var(--sp-3) 0 var(--sp-2);border-bottom:1px solid var(--line)}
+.ib{width:30px;height:30px;border-radius:var(--r-sm);display:grid;place-items:center;color:var(--muted)}
+.ib:hover{background:var(--fill);color:var(--text)}
+/* Where you are: the place above in a quiet grey, then the page itself, brighter. */
+.crumb{display:flex;align-items:center;gap:6px;margin-left:var(--sp-3);min-width:0;font-size:var(--fs-md);white-space:nowrap}
+.crumb b{font-weight:400;color:var(--muted)}.crumb b::after{content:"/";margin-left:6px}
+.crumb span{font-weight:500;color:var(--text-2);overflow:hidden;text-overflow:ellipsis}
+/* A button in the toolbar is a soft rectangle, not a pill, as Dia's Share. */
+.chatbtn{margin-left:auto;display:flex;align-items:center;gap:7px;height:30px;padding:0 12px 0 10px;border-radius:var(--r-sm);background:var(--surface);color:var(--text-2);font-weight:500}
+.chatbtn:hover,.chatbtn[aria-pressed="true"]{background:var(--fill);color:var(--text)}
+.views{grid-column:1;grid-row:2;min-width:0;min-height:0;container:page/inline-size}
+.view{height:100%}
+
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:var(--h-ctl);padding:0 15px;border-radius:var(--r-pill);font-size:var(--fs-ui);font-weight:500;white-space:nowrap;transition:background var(--t-fast),transform var(--t-fast)}
+.btn:active{transform:scale(.97)}
+.btn.ink{background:var(--ink);color:var(--ink-fg);font-weight:600}.btn.ink:hover{background:var(--ink-hover)}
+.btn.quiet{background:var(--fill);color:var(--text)}.btn.quiet:hover{background:var(--fill-hover)}
+.btn.s{height:var(--h-ctl-s);padding:0 11px;border-radius:var(--r-pill);font-size:var(--fs-xs)}
+.link{color:var(--text);text-decoration:underline;text-underline-offset:3px;font-weight:500}
+
+/* The composer, as Dia's: a field of its own, the words on top and the tools in a row under them. */
+.composer{position:relative;display:grid;grid-template-columns:auto minmax(0,1fr) auto auto;grid-template-areas:"in in in in" "add . model send";align-items:center;gap:var(--sp-1);padding:var(--sp-2);background:var(--field);border:1px solid var(--rim);border-radius:var(--r-xl)}
+.composer label{grid-area:in;position:relative;min-width:0;display:flex;padding:0 var(--sp-2)}
+.composer input{flex:1;min-width:0;height:40px;background:none;border:0;font-size:var(--fs-lg);outline:0}
+.composer input::placeholder{color:var(--muted)}
+.composer:focus-within{border-color:var(--edge)}
+.addf{grid-area:add;display:inline-flex;align-items:center;gap:6px;height:var(--h-ctl-s);padding:0 12px 0 9px;border:1px solid var(--edge);border-radius:var(--r-pill);font-size:var(--fs-sm);color:var(--text-2);white-space:nowrap}
+.addf:hover{background:var(--fill-hover);color:var(--text)}
+.addf.icon{width:var(--h-ctl-s);padding:0;justify-content:center}
+.model{grid-area:model;display:inline-flex;align-items:center;gap:5px;height:var(--h-ctl-s);padding:0 10px;border-radius:var(--r-pill);color:var(--text-2);font-weight:500}
+.model:hover{background:var(--fill-hover)}
+.sendb{grid-area:send;width:var(--h-ctl);height:var(--h-ctl);border-radius:var(--r-pill);background:var(--ink);color:var(--ink-fg);display:grid;place-items:center;flex:none;transition:background var(--t-fast),color var(--t-fast)}
+/* Until there is something to send, the send button stays grey. */
+.composer:has(input:placeholder-shown) .sendb{background:var(--fill-hover);color:var(--muted)}
+.composer.s{padding:6px;border-radius:var(--r-xl)}
+.composer.s input{height:34px;font-size:var(--fs-md)}.composer.s .sendb{width:var(--h-ctl-s);height:var(--h-ctl-s)}.composer.s .model{font-size:var(--fs-sm)}
+
+/* The brief */
+.brief{overflow:hidden auto;overscroll-behavior:contain}
+.sheet{display:grid;grid-template-columns:minmax(72px,1fr) minmax(0,940px) minmax(72px,1fr);padding:14px 0 0}
+.sheet>*{grid-column:2}
+.rail{grid-row:1;display:grid;place-items:center;font:italic 500 var(--fs-3xl)/1 var(--serif);letter-spacing:.015em;white-space:nowrap;user-select:none}
+.rail span{writing-mode:vertical-rl}
+.rail.l{grid-column:1}.rail.l span{transform:rotate(180deg)}
+.rail.r{grid-column:3}
+.hero{grid-row:1;position:relative;container-type:inline-size;aspect-ratio:16/9.3;overflow:hidden;border-radius:var(--r-xs);background:var(--art-wait)}
+.hero img{display:block;width:100%;height:100%;object-fit:cover;object-position:50% 30%}
+.pager{position:absolute;z-index:2;right:10px;bottom:10px;display:flex;align-items:center;gap:2px;padding:3px;border-radius:var(--r-xl);background:rgba(10,12,16,.62);backdrop-filter:blur(8px);font-size:var(--fs-xs);color:var(--cool-900);opacity:0;transition:opacity .2s}
+.hero:hover .pager,.pager:focus-within{opacity:1}
+@media (hover:none){.pager{opacity:1}}
+.pager button{width:26px;height:26px;border-radius:var(--r-pill);display:grid;place-items:center}
+.pager button:hover{background:rgba(255,255,255,.16)}
+.pager span{min-width:46px;text-align:center}
+.hero::after{content:"";position:absolute;inset:0;background:linear-gradient(180deg,rgba(9,16,18,.5),rgba(9,16,18,.12) 38%,rgba(9,16,18,0) 55%);pointer-events:none}
+.masthead{position:absolute;z-index:1;left:0;right:0;top:6.5%;text-align:center;color:var(--sun);font:500 clamp(44px,8vw,104px)/.9 var(--serif);font-size:clamp(44px,11cqw,104px);letter-spacing:-.024em;text-shadow:0 2px 28px rgba(6,12,14,.5)}
+.masthead i{display:block;font-weight:400;font-size:.45em;line-height:1.05;letter-spacing:-.01em}
+.under{display:flex;justify-content:space-between;align-items:flex-start;gap:12px 32px;padding:12px 2px 0}
+.cadence{display:flex;align-items:center;gap:6px;margin-top:var(--sp-3);font-size:var(--fs-sm);color:var(--muted)}
+.lede{max-width:430px;font:italic 400 var(--fs-lg)/1.42 var(--serif);color:var(--prose);text-wrap:pretty}
+.credit{max-width:300px;font:var(--fs-2xs)/1.45 var(--mono);color:var(--muted);text-align:right}
+.minidate{display:none}
+/* The brief reads like Dia's: the first section is the one card on the page; every later one stands on the page itself,
+   in the same two columns, with room around it instead of a box. */
+.cards{display:flex;flex-direction:column;gap:var(--sp-9);margin-top:var(--sp-8)}
+.card{display:grid;grid-template-columns:240px minmax(0,1fr);gap:var(--sp-5) var(--sp-8);padding:var(--sp-7) var(--sp-7) var(--sp-7) 34px;background:var(--surface);border-radius:var(--r-lg)}
+.card+.card{padding-top:0;padding-bottom:0;background:none}
+.card>header{display:flex;flex-direction:column;gap:8px;min-height:100%}
+.card h2{font:italic 400 var(--fs-2xl)/var(--lh-tight) var(--serif);letter-spacing:-.01em;color:var(--text)}
+.card .sub{font-size:var(--fs-sm);color:var(--muted);text-wrap:pretty}
+.num{margin-top:auto;padding-top:14px;display:flex;align-items:flex-end;gap:12px;font:italic 400 var(--fs-5xl)/.86 var(--serif);color:var(--sun);font-variant-numeric:lining-nums}
+.num .i{width:30px;height:30px;margin-bottom:4px;stroke-width:1.5}
+.num span{display:inline-block}
+.item{display:grid;grid-template-columns:minmax(0,1fr);gap:var(--sp-3);padding:var(--sp-5) 0}
+.item>.acts{flex-wrap:wrap;margin-top:2px}
+.item:first-child{padding-top:0}.item:last-child{padding-bottom:0}
+.cards>.card:first-child .item{padding:var(--sp-6) 0}.cards>.card:first-child .item:first-child{padding-top:0}.cards>.card:first-child .item:last-child{padding-bottom:0}
+.item .txt{display:flex;flex-direction:column;gap:var(--sp-1);min-width:0}
+.meta{display:flex;flex-wrap:wrap;align-items:center;gap:7px;font-size:var(--fs-xs);color:var(--muted)}
+.meta b{color:var(--text-2);font-weight:500}.meta span{display:inline-flex;align-items:center;gap:6px}
+.item h3{font:600 var(--fs-title)/var(--lh-snug) var(--sans);letter-spacing:-.012em;color:var(--text-hi);text-wrap:balance}
+.item p{font-size:var(--fs-lg);line-height:var(--lh-read);color:var(--prose);text-wrap:pretty}
+/* Where a brief item comes from is named in serif italic, as Dia tags its updates. */
+.item .meta{gap:6px;font-size:var(--fs-sm)}
+.item .meta b{font:italic 400 var(--fs-md)/1 var(--serif);color:var(--text-2)}
+.acts{display:flex;gap:8px}
+.done-note{display:none;grid-column:1/-1;align-items:center;gap:8px;font-size:var(--fs-ui);color:var(--text-2)}
+.decision.done .acts{display:none}.decision.done .done-note{display:flex;animation:rise .3s ease-out}
+.decision.done .txt{opacity:.5}
+/* A log counts its lines in a faint mono, the way Dia numbers its updates. */
+.log{counter-reset:line}
+.log li{display:grid;grid-template-columns:22px minmax(0,1fr) auto auto;gap:var(--sp-3);align-items:baseline;margin:0 -10px;padding:var(--sp-2) 10px;border-radius:var(--r-md);font-size:var(--fs-lg);line-height:var(--lh-read);color:var(--prose)}
+.log li::before{counter-increment:line;content:counter(line,decimal-leading-zero);font:var(--fs-xs)/1 var(--mono);letter-spacing:.06em;color:var(--faint)}
+.log li>.i{display:none}
+.log li:hover{background:var(--surface)}
+.log b{color:var(--text-hi);font-weight:600}
+.log time{font-size:var(--fs-xs);color:var(--muted)}
+.log .btn{opacity:0}.log li:hover .btn,.log li:focus-within .btn{opacity:1}
+.log li.undone{color:var(--muted);text-decoration:line-through}
+.dock{position:sticky;bottom:0;z-index:3;margin-top:8px;padding:48px 0 16px;background:linear-gradient(180deg,transparent,var(--bg) 44px);pointer-events:none}
+.dock .composer{max-width:720px;margin:0 auto;pointer-events:auto;box-shadow:0 10px 36px rgba(0,0,0,.45)}
+
+/* Views with a chat beside them */
+.split{height:100%}
+.split>.scroll{height:100%}
+.pane.chat-off .chat{display:none}
+.scroll{min-height:0;overflow:hidden auto;overscroll-behavior:contain}
+.doc{max-width:832px;margin:0 auto;padding:var(--sp-8) 36px var(--sp-7);display:flex;flex-direction:column;gap:var(--sp-8)}
+.doc.wide{max-width:none}
+.h1{font:400 var(--fs-4xl)/1.1 var(--serif);letter-spacing:-.02em;color:var(--text-hi);text-wrap:balance}
+.intro{font-size:var(--fs-lg);line-height:var(--lh-read);color:var(--prose);max-width:var(--w-read);text-wrap:pretty}
+.chip{display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:var(--r-pill);background:var(--fill);color:var(--text);font-weight:500}
+.sec{display:flex;flex-direction:column;gap:var(--sp-3)}
+/* A section's name, as Dia sets them: serif italic, led by its number in a faint mono (01, 02). */
+.label{display:flex;align-items:baseline;gap:var(--sp-3);font:italic 400 var(--fs-xl)/var(--lh-tight) var(--serif);letter-spacing:-.005em;color:var(--text)}
+.label b{font:400 var(--fs-xs)/1 var(--mono);letter-spacing:.06em;color:var(--faint)}.label b::before{content:"0"}
+.label em{font:400 var(--fs-sm)/1 var(--sans);color:var(--muted)}
+.h2{font:italic 400 var(--fs-xl)/var(--lh-tight) var(--serif);letter-spacing:-.005em;color:var(--text);padding:0 2px}
+.prose{max-width:var(--w-read);font-size:var(--fs-lg);line-height:var(--lh-read);color:var(--prose);text-wrap:pretty}
+.grid{display:grid;gap:10px}
+/* A box is a surface and nothing else: no outline, as Dia's cards. The border is there, unseen, for hover states. */
+.box{background:var(--surface);border:1px solid transparent;border-radius:var(--r-lg)}
+.stat{display:flex;flex-direction:column;gap:5px;padding:15px 16px}
+.stat span{font-size:var(--fs-xs);color:var(--muted)}
+.stat strong{font:500 var(--fs-2xl)/1.15 var(--serif);letter-spacing:-.015em;font-variant-numeric:lining-nums;white-space:nowrap}
+.fig{display:flex;flex-direction:column;gap:12px;padding:18px}
+.fig figcaption{display:flex;flex-direction:column;gap:3px}
+.fig figcaption span{font-size:var(--fs-xs);color:var(--muted)}
+.fig figcaption strong{font:500 var(--fs-xl)/1.25 var(--serif);letter-spacing:-.008em}
+.fig figcaption small{font-size:var(--fs-sm);color:var(--text-2)}
+.fig svg{display:block;width:100%;height:auto}
+.cg{fill:none;stroke:var(--line);stroke-width:1}
+.cb{fill:none;stroke:var(--muted);stroke-width:1.5;stroke-dasharray:3 4;stroke-linecap:round}
+.cl{fill:none;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.cm{stroke:var(--surface);stroke-width:2}
+.ct{font:var(--fs-3xs) var(--sans);fill:var(--muted)}.cv{font:600 var(--fs-2xs) var(--sans);fill:var(--text)}
+.te{text-anchor:end}.legend{display:flex;flex-wrap:wrap;gap:6px 16px;font-size:var(--fs-2xs);color:var(--muted)}
+.legend span{display:inline-flex;align-items:center;gap:6px}
+.legend i{width:14px;height:2px;border-radius:var(--r-pill)}.legend i.d{height:0;border-top:2px dotted var(--muted)}
+.suggest{display:flex;flex-direction:column;gap:12px;padding:22px 24px;background:var(--surface);border-radius:var(--r-lg)}
+.suggest .big{font:400 var(--fs-xl)/1.34 var(--serif);letter-spacing:-.006em;text-wrap:pretty}
+.suggest .guard{display:flex;gap:9px;color:var(--text-2);text-wrap:pretty}.suggest .guard .i{margin-top:2px}
+.tbl{overflow-x:auto}
+table{width:100%;min-width:520px;border-collapse:collapse;font-size:var(--fs-ui)}
+th{text-align:left;padding:10px 16px;font-size:var(--fs-xs);font-weight:500;color:var(--muted);border-bottom:1px solid var(--line)}
+td{padding:11px 16px;border-bottom:1px solid var(--line-soft);color:var(--text-2);white-space:nowrap}
+td:first-child{color:var(--text);white-space:normal}tr:last-child td{border-bottom:0}
+td .st{display:inline-flex;align-items:center;gap:7px}
+.jobs td:first-child{font-weight:500}
+.decidebar{position:sticky;bottom:16px;z-index:3;container:bar/inline-size;display:flex;flex-wrap:wrap;align-items:center;gap:10px 16px;padding:10px;background:color-mix(in srgb,var(--field) 94%,transparent);backdrop-filter:blur(14px);border:1px solid var(--rim);border-radius:29px;box-shadow:0 14px 44px rgba(0,0,0,.5)}
+/* Narrow (the floating chat takes the right side): the sentence gets its own line, the buttons one row below it,
+   Approve on the right. 29px is the pill's own radius at one row, so the wide bar looks the same; two rows read as a card. */
+@container bar (max-width:620px){.decidebar p{flex-basis:100%;padding:4px 10px 0}.decidebar .acts{flex:1 1 100%;flex-wrap:nowrap}.decidebar .btn{padding:0 14px}.decidebar .btn.ink{margin-left:auto}}
+/* Very narrow: Approve gets the whole first row, Decline and Change share the second. */
+@container bar (max-width:420px){.decidebar .acts{flex-wrap:wrap}.decidebar .btn{flex:1 1 auto;min-width:0;justify-content:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.decidebar .btn.ink{order:-1;flex-basis:100%;margin-left:0}}
+.decidebar p{flex:1 1 220px;padding-left:10px;color:var(--muted)}
+.decidebar .acts{flex-wrap:wrap}.decidebar .btn{height:38px;border-radius:var(--r-pill);padding:0 17px}
+
+/* The chat is one panel for the whole window. By default it floats over the page at the bottom right, as Dia's does:
+   it opens on demand and never pushes the page aside. As a sidebar (further down) it stays open at full height. */
+.chat{position:absolute;z-index:6;right:14px;bottom:14px;width:min(440px,calc(100% - 28px));height:min(720px,calc(100% - 72px));display:flex;flex-direction:column;gap:14px;padding:14px 16px 16px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-2xl);box-shadow:0 28px 80px rgba(0,0,0,.62),0 2px 12px rgba(0,0,0,.4);transform-origin:100% 100%}
+.thread{flex:1;min-height:0;display:flex;flex-direction:column;gap:17px;margin:0 -16px;padding:2px 16px;overflow:hidden auto;overscroll-behavior:contain}
+/* On a decision the answer must stay in reach: while the chat is open, the answer bar ends where the chat begins.
+   846px is half the document's width (416) plus the chat's width and gaps (454 + 12) minus the document's padding (36). */
+.split{container-type:inline-size}
+.decidebar{transition:margin-right .28s cubic-bezier(.2,.8,.2,1)}
+@container (min-width:800px){.pane:not(.chat-off) .decidebar{margin-right:max(0px,min(430px,calc(846px - 50cqw)))}}
+/* Below 800px the document fills the page (18px padding), so the bar ends 448px short: the chat's 454 plus the gap, minus the padding. */
+@container (min-width:600px) and (max-width:799.98px){.pane:not(.chat-off) .decidebar{margin-right:448px}}
+/* The brief has its own command bar. While the chat floats open, the bar steps aside instead of sitting under it. */
+.pane:not(.chat-off) .dock{visibility:hidden}
+
+/* The chat as a sidebar: full height beside the page, always open, so the Chat button and the close button go. */
+@media (min-width:901px){
+  :root[data-chat="side"] .pane{grid-template-columns:minmax(0,1fr) var(--chat-w)}
+  :root[data-chat="side"] .pane .chat{position:relative;z-index:auto;grid-column:2;grid-row:1/3;right:auto;bottom:auto;display:flex;width:auto;height:auto;min-height:0;padding-top:8px;border:0;border-left:1px solid var(--line);border-radius:0;box-shadow:none;animation:none}
+  :root[data-chat="side"] .chatbtn,:root[data-chat="side"] .chat [data-chat]{display:none}
+  :root[data-chat="side"] .chat .grip{display:block}
+  :root[data-chat="side"] .pane .decidebar{margin-right:0}
+  :root[data-chat="side"] .pane .dock{visibility:visible}
+}
+
+/* Both sidebars can be resized: drag the edge, or double-click it to put the width back. */
+.grip{position:absolute;z-index:7;top:0;bottom:0;width:10px;cursor:col-resize;touch-action:none;outline:0}
+.grip::after{content:"";position:absolute;top:10px;bottom:10px;left:4px;width:2px;border-radius:var(--r-pill);background:var(--edge-2);opacity:0;transition:opacity .15s}
+.grip:hover::after,.grip:focus-visible::after,.grip.on::after{opacity:1}
+.grip.nav{top:0;bottom:0;left:calc(var(--side-w) + 2px)}
+.app.side-off .grip.nav{display:none}
+.chat .grip{left:-5px;display:none}
+.app.resizing{cursor:col-resize;user-select:none;transition:none}
+.app.resizing .side{transition:none}
+.seg,.setrow>.seg{display:inline-flex;flex:none;gap:2px;padding:3px;border-radius:var(--r-xl);background:var(--fill)}
+.seg button{height:28px;padding:0 14px;border-radius:var(--r-pill);font-weight:500;color:var(--text-2)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--ink-fg);font-weight:600}
+.chat header{display:flex;align-items:flex-start;gap:8px}
+.chat header div{flex:1;min-width:0}
+.chat header h2{font-size:var(--fs-ui);font-weight:600;line-height:28px}.chat header p{font-size:var(--fs-xs);color:var(--muted);margin-top:-3px}
+.ctx{align-self:flex-start;max-width:100%;display:flex;align-items:center;gap:7px;height:28px;padding:0 10px;border-radius:var(--r-sm);background:var(--fill);font-size:var(--fs-xs);color:var(--text-2)}
+.said{align-self:flex-end;max-width:86%;padding:9px 13px;border-radius:var(--r-xl);background:var(--fill);font-size:var(--fs-md)}
+.answer{display:flex;flex-direction:column;gap:8px;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose);text-wrap:pretty}
+.msg{display:grid;grid-template-columns:24px minmax(0,1fr);gap:3px 10px}
+.av{width:24px;height:24px;border-radius:var(--r-sm);background:var(--text-2);color:var(--ink-fg);font-size:var(--fs-2xs);font-weight:700;display:grid;place-items:center}
+.msg .who{display:flex;align-items:baseline;gap:7px;font-weight:600}.msg .who time{font-size:var(--fs-2xs);font-weight:400;color:var(--muted)}
+.msg p{grid-column:2;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose);text-wrap:pretty}
+.msg .acts{grid-column:2;flex-wrap:wrap;margin-top:6px}
+.sugg{display:flex;flex-wrap:wrap;gap:6px}
+.sugg button{height:30px;padding:0 12px;border-radius:var(--r-pill);border:1px solid var(--line-2);font-size:var(--fs-sm);color:var(--text-2)}
+.sugg button:hover{background:var(--fill)}
+.chat .composer{margin-top:auto}
+
+/* Topic or project page */
+.stuck{display:flex;flex-direction:column;gap:16px;padding:18px}
+.stuck .top{display:flex;gap:14px}
+.flame{width:36px;height:36px;border-radius:var(--r-md);background:var(--bad-bg);color:var(--bad);display:grid;place-items:center;flex:none}
+.stuck h2{font:500 var(--fs-xl)/1.25 var(--serif);letter-spacing:-.008em}
+.stuck .top p{max-width:620px;color:var(--text-2);margin-top:4px;text-wrap:pretty}
+.thumbs{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(96px,100%),1fr));gap:8px}
+.thumbs div{aspect-ratio:4/5;border-radius:var(--r-md);background:var(--fill);border:1px solid transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;color:var(--muted);font-size:var(--fs-2xs)}
+.thumbs .fail div{border-color:var(--bad)}
+.thumbs figcaption{display:flex;align-items:center;gap:5px;margin-top:6px;font-size:var(--fs-xs);color:var(--text-2)}
+.thumbs .fail figcaption{color:var(--text)}
+.stuck .acts{flex-wrap:wrap;align-items:center}.stuck .acts small{margin-left:auto;font-size:var(--fs-xs);color:var(--muted)}
+.agents{grid-template-columns:repeat(auto-fit,minmax(min(200px,100%),1fr))}
+.agent{display:flex;flex-direction:column;gap:10px;padding:14px 16px}
+.agent .top{display:flex;align-items:center;gap:9px}
+.agent .av{width:26px;height:26px;border-radius:var(--r-sm);font-size:var(--fs-xs)}
+.agent h3{flex:1;font-size:var(--fs-md);font-weight:600}
+.agent .st{display:flex;align-items:center;gap:6px;font-size:var(--fs-xs);color:var(--text-2)}
+.agent p{color:var(--text-2)}
+.agent footer{display:flex;flex-wrap:wrap;gap:6px;font-size:var(--fs-2xs);color:var(--muted)}.agent footer .cmd{color:var(--text-2)}
+/* An agent's record: how often its work held when someone else checked it, so trust follows what it has shown. */
+.agent .trk{font-size:var(--fs-xs);color:var(--text-2)}.agent .trk b{font-weight:500;color:var(--muted)}
+
+/* Skills and setup */
+.cols{display:flex;flex-wrap:wrap;align-items:flex-start;gap:28px}
+.cols>.main{flex:999 1 480px;min-width:0}.cols>.aside{flex:1 1 340px;min-width:0;display:flex;flex-direction:column;gap:24px}
+.headrow{display:flex;align-items:baseline;gap:8px;min-height:24px;padding:0 2px}
+.headrow span{font-size:var(--fs-sm);color:var(--muted)}
+.skills{grid-template-columns:repeat(auto-fit,minmax(min(220px,100%),1fr))}
+.skill{display:flex;flex-direction:column;gap:6px;min-height:112px;padding:14px 16px;transition:border-color .15s}
+.skill:hover{border-color:var(--edge)}
+.skill .top{display:flex;align-items:center;gap:8px;min-height:24px}
+.skill h3{flex:1;font:600 var(--fs-ui) var(--mono)}
+.skill p{flex:1;font-size:var(--fs-sm);color:var(--text-2);text-wrap:pretty}
+.skill footer{display:flex;align-items:center;gap:6px;font-size:var(--fs-2xs);color:var(--muted)}
+.skill .btn{opacity:0}.skill:hover .btn,.skill:focus-within .btn{opacity:1}
+.skill.own{border:1px dashed var(--edge-2);background:none;justify-content:center}
+.skill.own strong{display:flex;align-items:center;gap:7px;font-size:var(--fs-ui)}
+.skill.own span{font-size:var(--fs-sm);color:var(--text-2);text-wrap:pretty}
+.list{padding:4px 0}
+.list li{display:flex;align-items:center;gap:11px;min-height:52px;padding:0 14px}
+.list li>div{flex:1;min-width:0}.list li>div b{display:block;font-weight:500}.list li>div span{font-size:var(--fs-xs);color:var(--muted)}
+.list .lt{width:28px;height:28px;border-radius:var(--r-sm);background:var(--fill);font-size:var(--fs-xs);font-weight:700;display:grid;place-items:center;flex:none}
+.list li>.seg{flex:none}
+.list .st{display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--text-2)}
+/* A topic's numbers: four at most, each one figure and what it counts. */
+.facts{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
+.fact{display:flex;flex-direction:column;gap:4px;padding:14px 16px}
+.fact b{font:400 var(--fs-2xl)/1.1 var(--serif);letter-spacing:-.01em;color:var(--text)}.fact span{font-size:var(--fs-xs);color:var(--muted)}
+.list li>div b a:hover,.jobs td a:hover{text-decoration:underline;text-underline-offset:3px}
+.wait>.i{flex:none}.wait .acts{flex-wrap:wrap}
+/* A topic at a glance: whether it is on track, the number that matters, each stage with who is in it, and the one
+   thing that waits for you. Words come only on a click: a stage opens who does what in it, Details opens the rest.
+   People are round, agents are square; the dot on an avatar is its state. */
+.doc.topic{max-width:980px}
+.glance{display:flex;flex-direction:column;gap:20px;padding:20px 22px 18px}
+.gl-top{display:flex;flex-wrap:wrap;align-items:flex-end;gap:14px 44px}
+.kpi{display:flex;flex-direction:column;gap:6px}
+.kpi b{font:400 var(--fs-4xl)/1 var(--serif);letter-spacing:-.015em;color:var(--text)}
+.kpi b small{font-size:.6em;color:var(--muted);letter-spacing:0}
+.kpi span{font-size:var(--fs-xs);color:var(--muted)}
+.gl-side{display:flex;flex-wrap:wrap;align-items:center;justify-content:flex-end;gap:10px 14px;margin-left:auto}
+.health{display:inline-flex;align-items:center;gap:7px;height:28px;padding:0 12px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-sm);font-weight:600;white-space:nowrap}
+.health small{font-size:var(--fs-xs);font-weight:400;color:var(--muted)}
+.dot.still::after{display:none}
+.crew{display:flex;flex-wrap:wrap;gap:7px;min-height:20px}
+.av.sm{position:relative}
+.av>i.dot{position:absolute;right:-3px;bottom:-3px;width:8px;height:8px;box-shadow:0 0 0 2px var(--surface)}
+.av>i.dot.hollow{background:var(--surface);border-width:1.5px}
+.stages{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:4px;margin:0 -8px;padding:0;list-style:none}
+.stage{display:flex;flex-direction:column;align-items:stretch;gap:8px;width:100%;min-width:0;padding:8px 8px 9px;border-radius:var(--r-md);text-align:left;transition:background .15s}
+.stage:hover,.stage[aria-expanded="true"]{background:var(--fill)}
+.stage .bar{display:block;padding:0;height:6px;border-radius:var(--r-pill);background:color-mix(in srgb,var(--text) 9%,transparent);overflow:hidden}
+.stage .bar i{display:block;height:100%;border-radius:inherit;background:var(--ok)}
+.stage.s-done .bar i{background:var(--text-2)}.stage.s-wait .bar i{background:var(--warn)}
+.stage b{display:flex;align-items:center;gap:5px;font-size:var(--fs-sm);font-weight:500;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.stage.s-now b,.stage.s-wait b{color:var(--text);font-weight:600}.stage.s-next b{color:var(--muted)}
+.stage .crew{gap:6px}.stage .av.sm{width:22px;height:22px;font-size:var(--fs-3xs)}
+.tray{display:flex;flex-direction:column;gap:4px;padding-top:14px;border-top:1px solid var(--line)}
+.tray>p{padding-bottom:4px;font-size:var(--fs-sm);color:var(--muted)}.tray>p b{font-weight:600;color:var(--text)}
+.tray li{display:grid;grid-template-columns:20px minmax(0,1fr) auto;gap:11px;align-items:center;min-height:32px;font-size:var(--fs-ui)}
+.tray .t{min-width:0;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;color:var(--text-2)}
+.tray .t b{font-weight:600;color:var(--text)}
+.tray a.t:hover{color:var(--text)}
+.tray small{display:flex;align-items:center;gap:7px;font-size:var(--fs-2xs);color:var(--muted);white-space:nowrap}
+.tray li.later .t,.tray li.did .t{color:var(--muted)}.tray li.later .t b{color:var(--text-2)}
+.mini{width:44px;height:4px;border-radius:var(--r-pill);background:var(--fill);overflow:hidden}.mini i{display:block;height:100%;background:var(--ok)}
+.av.sm{width:20px;height:20px;border-radius:var(--r-sm);font-size:var(--fs-3xs)}
+.av.person{border-radius:50%;background:var(--raised);color:var(--text);box-shadow:inset 0 0 0 1px var(--line-2,var(--line))}
+.night{display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;font-size:var(--fs-sm);color:var(--muted)}.night .i{flex:none;margin-right:-6px}
+.night b{margin-right:4px;font-weight:600;color:var(--text)}
+/* The one thing on a topic that waits for you: one line and its button. The full story is on the lane. */
+/* It stands on the page, not in a box: the topic's glance is the page's one card. */
+.askline{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:0 0 0 22px}.box.askline{background:none}
+.askline>.i,.askline>.dot{flex:none}
+.askline p{flex:1 1 260px;display:flex;flex-wrap:wrap;align-items:baseline;gap:2px 10px;font-size:var(--fs-md)}
+.askline p b{font-weight:600}.askline p span{font-size:var(--fs-sm);color:var(--muted)}
+.askline .acts{flex-wrap:wrap}.askline .btn{height:30px;padding:0 13px;border-radius:var(--r-pill);font-size:var(--fs-sm)}
+.askline.done p b{color:var(--text-2)}
+/* Everything else on a topic stays closed until asked for. */
+.more>summary{display:flex;align-items:center;gap:8px;width:max-content;max-width:100%;height:32px;margin-left:-4px;padding:0 13px 0 9px;border-radius:var(--r-pill);font-size:var(--fs-ui);font-weight:500;color:var(--text-2);cursor:pointer;list-style:none}
+.more>summary::-webkit-details-marker{display:none}
+.more>summary:hover{background:var(--fill);color:var(--text)}
+.more>summary small{font-size:var(--fs-xs);font-weight:400;color:var(--muted)}
+.more>summary .i{transition:transform .15s}.more[open]>summary .i{transform:rotate(180deg)}
+.more .body{display:flex;flex-direction:column;gap:28px;margin-top:20px}
+/* History: who did what and when, newest first, closed until asked for. A person's action is a line; an agent's batch
+   is one line with its count. Each line opens the lane it happened in; what can be undone has Undo. */
+.more .body.hbody{gap:4px;margin-top:14px}
+.hist-f{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:6px}
+.hist-f button{height:28px;padding:0 12px;border-radius:var(--r-pill);border:1px solid var(--line-2);font-size:var(--fs-sm);font-weight:500;color:var(--text-2)}
+.hist-f button:hover{background:var(--fill);color:var(--text)}
+.hist-f button[aria-pressed="true"]{background:var(--ink);border-color:var(--ink);color:var(--ink-fg);font-weight:600}
+.hist h3{display:flex;align-items:center;gap:10px;margin:14px 0 4px;font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.hist h3::after,.hist .seenmark::after{content:"";flex:1;height:1px;background:var(--line)}
+.hist ul{display:flex;flex-direction:column}
+.hist>ul>li{display:grid;grid-template-columns:44px 20px minmax(0,1fr) 64px 124px;gap:4px 11px;align-items:center;min-height:36px;margin:0 -10px;padding:4px 10px;border-radius:var(--r-md);font-size:var(--fs-md);color:var(--text-2)}
+.hist>ul>li:hover{background:var(--fill)}
+.hist time{font-size:var(--fs-xs);color:var(--muted);font-variant-numeric:tabular-nums}
+.hist .t{min-width:0}.hist .t b{font-weight:600;color:var(--text)}
+.hist .marks,.hist .end{display:flex;align-items:center;justify-content:flex-end;gap:8px;color:var(--muted)}
+.hist .hn{height:22px;min-width:30px;padding:0 9px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-xs);font-weight:600;color:var(--text-2)}
+.hist>ul>li:hover .hn{background:var(--fill-hover)}.hist>ul>li .hn[aria-expanded="true"]{background:var(--ink);color:var(--ink-fg)}
+.hist .end .btn{opacity:0}.hist>ul>li:hover .btn,.hist>ul>li:focus-within .btn{opacity:1}
+.hist>ul>li.undone .t,.hist>ul>li.undone .t b{color:var(--muted);text-decoration:line-through}
+.hist>ul>li.subs{display:block;min-height:0;padding:0 10px 8px 85px;font-size:var(--fs-sm);color:var(--muted)}
+.hist>ul>li.subs:hover{background:none}
+.hist .subs li{padding:3px 0 3px 12px;border-left:1px solid var(--line-2)}
+.hist .subs a{text-decoration:underline;text-underline-offset:2px}
+.hist .seenmark{display:flex;align-items:center;gap:10px;margin:6px 0;font-size:var(--fs-xs);font-weight:600;color:var(--sun)}
+.hist .seenmark::after{background:color-mix(in srgb,var(--sun) 40%,transparent)}
+.hist-end{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;margin-top:12px;font-size:var(--fs-sm);color:var(--muted)}
+/* A topic that brings a forecast is read the way its owner is asked about it: will we make it, what needs you, what
+   moved, who does what today. Every number names what it counts and over which time. */
+.doc.topic .h1.sm{font-size:var(--fs-3xl)}
+/* The goal's overview: the verdict and three numbers first, then the trajectory, the deals beside what needs you, and
+   the funnel as one strip. What happened is set upright, what is forecast in italic. */
+.gh{display:flex;flex-direction:column;gap:var(--sp-2)}
+.gh-eye{font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.gh-verdict{display:flex;flex-wrap:wrap;align-items:center;gap:6px 14px;font:400 var(--fs-4xl)/1.1 var(--serif);letter-spacing:-.02em;color:var(--text-hi)}
+.gh-verdict .dot{width:12px;height:12px}
+.gh-verdict small{font:600 var(--fs-md)/1 var(--sans);letter-spacing:0;color:var(--warn)}
+.gh-nums{display:flex;flex-wrap:wrap;gap:var(--sp-4) var(--sp-8);margin-top:var(--sp-4)}
+.gn{display:flex;flex-direction:column;gap:6px}
+.gn b{font:400 var(--fs-6xl)/.9 var(--serif);letter-spacing:-.03em;color:var(--text-hi);font-variant-numeric:lining-nums}
+.gn b small{font-size:.5em;color:var(--muted);letter-spacing:0}
+.gn.fc b{font-style:italic;color:var(--text-2)}
+.gn.first{padding-left:var(--sp-8);border-left:1px solid var(--line)}
+.gn span{font-size:var(--fs-sm);color:var(--muted)}
+.gc{display:flex;flex-direction:column;gap:var(--sp-2)}
+.gc .gc-in{font-size:var(--fs-md);color:var(--text-2)}
+.traj{position:relative;margin:var(--sp-2) 0 0;display:flex;flex-direction:column;gap:var(--sp-2)}
+.traj svg{display:block;width:100%;height:auto;overflow:visible}
+.traj .ct{font-size:var(--fs-2xs)}.traj .cv{font-size:var(--fs-sm)}
+.tr-band{fill:var(--best);opacity:.16}
+.tr-act{stroke:var(--text-2)}.tr-fc{stroke:var(--best)}
+.tr-now{stroke:var(--edge-2);stroke-width:1}.tr-x{stroke:var(--muted);stroke-width:1}
+.tr-dot{fill:var(--text-2);stroke:var(--bg);stroke-width:2}
+.legend .tr-k-act{background:var(--text-2)}.legend .tr-k-fc{height:8px;background:color-mix(in srgb,var(--best) 30%,transparent);box-shadow:inset 0 -2px 0 var(--best),inset 0 2px 0 transparent}
+.tr-tip{position:absolute;top:0;display:flex;flex-direction:column;gap:2px;padding:8px 10px;border-radius:var(--r-sm);background:var(--raised);border:1px solid var(--rim);box-shadow:var(--sh-pop);font-size:var(--fs-xs);color:var(--text-2);pointer-events:none;white-space:nowrap}
+.tr-tip b{color:var(--text-hi);font-weight:600}
+.g2{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:var(--sp-7);align-items:start}
+/* A deal: its name and next step, a track of factual milestones, and its forecast in a word. */
+.dl{display:flex;flex-direction:column}
+.dl>li+li{border-top:1px solid var(--line)}
+/* Name, next step, milestones, forecast word: four columns to scan down. */
+.dl a{display:grid;grid-template-columns:minmax(0,1.1fr) minmax(0,1fr) auto 84px;gap:var(--sp-4);align-items:center;min-height:48px;padding:8px 0}
+.dn{font-weight:600;color:var(--text-hi)}.dx{font-size:var(--fs-md);color:var(--text-2)}
+.dl a:hover .dn{text-decoration:underline;text-underline-offset:3px}
+.cf{justify-self:end;display:inline-flex;align-items:center;height:22px;padding:0 9px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:600;white-space:nowrap}
+.cf-likely{background:var(--ink);color:var(--ink-fg)}.cf-possible{box-shadow:inset 0 0 0 1px var(--edge-2);color:var(--text)}.cf-early{color:var(--muted)}
+.cf-done{color:var(--text-2)}.cf-n{padding:0;font-weight:500;color:var(--text-2)}
+.dv{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap}
+.gh-verdict small.calm{color:var(--text-2)}
+.ny-none{font-size:var(--fs-sm);color:var(--muted)}
+.nogoal p span{color:var(--text-2)}
+.ms{display:flex;flex-direction:column;gap:6px;padding-top:5px}.ms small{font-size:var(--fs-xs);color:var(--text-2)}
+.ms ol{display:flex;align-items:center;margin:0;padding:0;list-style:none}
+.ms li{position:relative;width:10px;height:10px;border-radius:50%;border:1.5px solid var(--edge-2);flex:none}
+.ms li+li{margin-left:14px}.ms li+li::before{content:"";position:absolute;right:calc(100% + 1.5px);top:50%;width:14px;height:1.5px;margin-top:-.75px;background:var(--edge)}
+.ms li.done{background:var(--text-2);border-color:var(--text-2)}.ms li.done+li::before{background:var(--text-2)}
+.ms li.now{border-color:var(--text-hi);box-shadow:0 0 0 3px color-mix(in srgb,var(--text) 18%,transparent)}
+.ms.dots{padding:0}.ms.dots li{width:8px;height:8px}.ms.dots li+li{margin-left:9px}.ms.dots li+li::before{width:9px}
+/* What needs you: the one card on the page. The decision in a row, then the team's blockers, two at most. */
+.ny{display:flex;flex-direction:column;gap:var(--sp-4);padding:var(--sp-5)}
+.ny-h{font:italic 400 var(--fs-xl)/1.1 var(--serif);color:var(--text)}
+.ny-dec{display:grid;grid-template-columns:14px minmax(0,1fr);gap:var(--sp-2) var(--sp-3);align-items:start}
+.ny-dec>.dot{margin-top:7px}.ny-dec>.i{margin-top:2px}
+.ny-dec b{display:block;font-size:var(--fs-lg);font-weight:600;color:var(--text-hi)}.ny-dec span{font-size:var(--fs-sm);color:var(--muted)}
+.ny-dec .acts{grid-column:2;flex-wrap:wrap}
+.ny-bl{display:flex;flex-direction:column;gap:6px;padding-top:var(--sp-4);border-top:1px solid var(--line)}
+.ny-h2{display:flex;align-items:center;gap:8px;font-size:var(--fs-sm);font-weight:600;color:var(--text-2)}
+.ny-n{display:inline-grid;place-items:center;min-width:20px;height:20px;padding:0 6px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-2xs)}
+.ny-bl li a{display:flex;flex-wrap:wrap;gap:0 8px;padding:3px 0;font-size:var(--fs-md)}.ny-bl li b{font-weight:600;color:var(--text-hi)}.ny-bl li span{color:var(--text-2)}
+.ny-bl li a:hover span{color:var(--text)}
+.ny-more{font-size:var(--fs-sm);color:var(--muted)}.ny-more:hover{color:var(--text)}
+/* The funnel in one strip: each step's bar is its share of the first, the count, this week's change, and its rate
+   against the plan where there is one. */
+.fn{display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:var(--sp-3);margin:0;padding:0;list-style:none}
+.fn li{display:flex;flex-direction:column;gap:3px;min-width:0}
+.fn i{display:block;height:6px;margin-bottom:6px;border-radius:var(--r-pill);background:var(--edge-2)}
+.fn .warn i{background:var(--warn)}
+.fn b{display:flex;align-items:baseline;gap:6px;font:400 var(--fs-2xl)/1 var(--serif);color:var(--text-hi);font-variant-numeric:lining-nums}
+.fn b em{font:600 var(--fs-xs)/1 var(--sans);font-style:normal;color:var(--ok)}
+.fn span{font-size:var(--fs-sm);color:var(--text-2)}
+.fn small{display:flex;align-items:center;gap:5px;font-size:var(--fs-xs);color:var(--muted)}.fn .warn small{color:var(--warn)}
+.deals-out{font-size:var(--fs-sm);color:var(--muted)}
+.gap{display:flex;flex-direction:column;gap:6px;margin-top:var(--sp-2);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.gap b{color:var(--text-hi);font-weight:600}
+.gap ol{margin:0;padding:0;list-style:none;counter-reset:g;display:flex;flex-direction:column;gap:4px}
+.gap li{display:grid;grid-template-columns:24px minmax(0,1fr);text-wrap:pretty}
+.gap li::before{counter-increment:g;content:counter(g,decimal-leading-zero);padding-top:4px;font:var(--fs-xs)/1 var(--mono);color:var(--faint)}
+.evl{display:flex;flex-direction:column;gap:var(--sp-2)}
+.evl li{display:grid;grid-template-columns:minmax(140px,200px) minmax(0,1fr);gap:var(--sp-4);font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.evl b{font-weight:600;color:var(--text-hi)}
+/* A decision's reasoning, on its lane: what we recommend and what waiting costs. */
+.rec{display:grid;grid-template-columns:auto minmax(0,1fr);gap:4px var(--sp-3);margin:0;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.rec dt{color:var(--muted)}.rec dd{margin:0;text-wrap:pretty}
+/* The checks at a pause point, before something goes outside. */
+.pp{display:flex;flex-direction:column;gap:2px}.pp li{display:flex;align-items:baseline;gap:7px}.pp .i{flex:none;transform:translateY(2px)}
+/* What a goal must not cost: each guardrail with its reading and its limit, in one line. A breached one is a blocker. */
+.gd{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(140px,100%),1fr));gap:var(--sp-6) var(--sp-5);margin:0;padding:0;list-style:none}
+.gt{display:flex;flex-direction:column;gap:6px;min-width:0}
+.gt-l{font-size:var(--fs-sm);color:var(--text-2)}
+.gt-v{font:400 var(--fs-2xl)/1 var(--serif);color:var(--text-hi);font-variant-numeric:lining-nums}
+.gt.warn .gt-v,.gt.warn small{color:var(--warn)}
+/* The meter: the track runs to 125% of the limit (further if the reading does), the mark is the limit. */
+.gt-bar{position:relative;display:block;height:6px;margin:6px 0 2px;border-radius:var(--r-pill);background:var(--fill)}
+.gt-bar i{position:absolute;left:0;top:0;bottom:0;border-radius:var(--r-pill);background:var(--text-2)}
+.gt.warn .gt-bar i{background:var(--warn)}
+.gt-bar em{position:absolute;top:-4px;bottom:-4px;width:2px;margin-left:-1px;border-radius:1px;background:var(--text-hi)}
+.gt-yes{display:flex;align-items:center;gap:6px;min-height:14px;font-size:var(--fs-sm);font-weight:600;color:var(--text-2)}
+.gt small{font-size:var(--fs-xs);color:var(--muted)}
+@container (max-width:860px){.g2{grid-template-columns:minmax(0,1fr)}.g2 .ny{order:-1}
+  .dl a{grid-template-columns:minmax(0,1fr) auto 84px;row-gap:2px}.dl .dx{grid-column:1;grid-row:2;font-size:var(--fs-sm)}.dl .ms,.dl .cf{grid-row:1/3}.fn{grid-template-columns:repeat(4,minmax(0,1fr));row-gap:var(--sp-5)}.evl li{grid-template-columns:minmax(0,1fr);gap:2px}}
+@container (max-width:560px){.gn.first{padding-left:0;border-left:0}.gn b{font-size:var(--fs-5xl)}}
+@container (max-width:620px){.stages{grid-template-columns:repeat(4,minmax(0,1fr))}.gl-side{margin-left:0;justify-content:flex-start}}
+@container (max-width:760px){.hist>ul>li{grid-template-columns:38px 20px minmax(0,1fr) auto}.hist .end{display:none;grid-column:3/-1;justify-content:flex-start}.hist>ul>li:hover .end,.hist>ul>li:focus-within .end{display:flex}.hist>ul>li.subs{padding-left:79px}}
+.sw{position:relative;width:34px;height:20px;border-radius:var(--r-pill);background:var(--tile-on);flex:none;transition:background .18s}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:var(--muted);transition:transform .18s,background .18s}
+.sw[aria-checked="true"]{background:var(--ink)}.sw[aria-checked="true"]::after{transform:translateX(14px);background:var(--ink-fg)}
+
+/* Drafts */
+.draft{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:6px 20px;align-items:center;padding:18px 20px}
+.draft .meta{grid-column:1/-1}
+.draft h3{font:500 var(--fs-xl)/1.25 var(--serif);letter-spacing:-.006em}
+.draft p{grid-column:1;font-size:var(--fs-md);line-height:1.55;color:var(--text-2);max-width:640px;text-wrap:pretty}
+.draft .acts{grid-column:2;grid-row:2/4}
+
+/* New lane */
+.overlay{position:fixed;inset:0;z-index:50;display:grid;justify-items:center;align-content:start;padding:11vh 16px 16px;background:rgba(0,0,0,.55);animation:fade .16s ease-out}
+.pal{width:100%;max-width:640px;display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-float);overflow:hidden;animation:pop .2s var(--ease-pop)}
+.pal .ask{display:flex;align-items:center;gap:12px;height:56px;padding:0 12px 0 18px}
+.pal .ask input{flex:1;min-width:0;height:40px;background:none;border:0;outline:0;font-size:var(--fs-title)}
+.pal .ask input::placeholder{color:var(--muted)}
+.pal .cur{display:inline-flex;align-items:center;gap:8px;height:30px;padding:0 6px 0 12px;border-radius:var(--r-pill);background:var(--selected);font-weight:500}
+.pal .cur kbd{background:var(--edge);border-radius:var(--r-sm);padding:1px 7px}
+.pal .rows{display:flex;flex-direction:column;padding:0 6px 6px;max-height:min(60vh,520px);overflow:hidden auto;overscroll-behavior:contain}
+.pal h3{padding:10px 10px 4px;font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.pr{display:flex;align-items:center;gap:10px;width:100%;height:36px;padding:0 10px;border-radius:var(--r-sm);font-size:var(--fs-md)}
+.pr:hover,.pr.on{background:var(--selected)}
+.pr b{font-weight:500}.pr .g{flex:1;min-width:0;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pr .lt{width:22px;height:22px;border-radius:var(--r-sm);background:var(--selected);font-size:var(--fs-3xs);font-weight:700;display:grid;place-items:center;flex:none}
+.pr .lt.ink{background:var(--ink);color:var(--ink-fg)}
+.pr .st{display:flex;align-items:center;gap:5px;font-size:var(--fs-2xs);color:var(--muted)}
+.pr .cmd{font-weight:600}
+.pal footer{display:flex;align-items:center;gap:16px;height:40px;margin:0 6px;padding:0 8px;border-top:1px solid var(--rim);font-size:var(--fs-xs);color:var(--muted)}
+.pal footer .g{flex:1;display:flex;align-items:center;gap:8px;color:var(--text-2)}
+.pal footer span,.pal footer button{display:flex;align-items:center;gap:6px}
+.pal footer kbd{background:var(--selected)}
+
+/* Morndo's own icons: one line weight and one solid part each, so they still read at 16 px. */
+.tile .i{width:18px;height:18px;transition:transform .18s cubic-bezier(.2,.8,.2,1)}
+.tile:hover .i{transform:translateY(-1px)}
+:root[data-theme] .tile[aria-current] .i,:root[data-theme] .row[aria-current]>.i{color:var(--accent)}
+
+/* Life, in small doses: the picture drifts, working agents breathe, and your own actions answer back. */
+@keyframes drift{from{transform:scale(1.001)}to{transform:scale(1.045) translate(-.6%,-.5%)}}
+.dot.ok{position:relative}
+.dot.ok::after{content:"";position:absolute;inset:0;border-radius:50%;background:var(--ok);animation:ping 2.8s cubic-bezier(.2,.6,.3,1) infinite}
+@keyframes ping{0%{transform:scale(1);opacity:.5}70%,100%{transform:scale(3);opacity:0}}
+.brief .card .num .i{animation:emin .7s cubic-bezier(.2,.8,.2,1) both;animation-delay:calc(.78s + var(--n,0)*.09s)}
+@keyframes emin{from{opacity:0;transform:scale(.8)}}
+.brief .card .num .i.stamp{animation:stamp .48s cubic-bezier(.3,1.5,.5,1)}
+@keyframes stamp{40%{transform:scale(1.22)}}
+.bump{animation:bump .32s ease-out}
+@keyframes bump{40%{transform:scale(1.3)}}
+.chat{animation:chatin .28s cubic-bezier(.2,.8,.2,1)}
+@keyframes chatin{from{opacity:0;transform:translateY(16px) scale(.96)}}
+
+/* Workspace colour: the quick picker and the settings page */
+.pop{position:fixed;z-index:60;left:12px;top:48px;width:272px;display:flex;flex-direction:column;gap:14px;padding:14px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-pop);animation:pop .18s cubic-bezier(.2,.9,.3,1.1)}
+/* Usage: the floating chat's card, smaller, rising from the account row. Subscriptions (a flat price, limits that reset)
+   and API keys (billed by use, against a budget) are kept apart, and only accounts the workspace added appear. */
+.upop{position:fixed;z-index:60;left:12px;bottom:56px;width:min(340px,calc(100vw - 24px));max-height:calc(100vh - 80px);display:flex;isolation:isolate;overflow:hidden;border:1px solid rgba(255,255,255,.14);border-radius:var(--r-2xl);box-shadow:inset 0 1px 0 rgba(255,255,255,.12),0 28px 80px rgba(0,0,0,.55),0 2px 12px rgba(0,0,0,.35);transform-origin:0 100%;animation:chatin .22s cubic-bezier(.2,.8,.2,1)}
+.upop-in{flex:1;min-width:0;overflow:auto;overscroll-behavior:contain;display:flex;flex-direction:column;gap:var(--sp-5);padding:14px 16px 16px}
+/* Its glass is real: what is under the card (the sidebar, the page) shows through, lightly blurred so it stays
+   recognisable, and darkened to 42% under the card's surface at 42%. Contrast holds on anything by arithmetic: with
+   pure white underneath the card can reach only #4e4e4e, and every text on it is at least #c4c4c4 (a step lighter
+   here, as on the sidebar's glass), which is 4.8:1. Measured on the rendered card: 5.9:1 at the lowest on a wide
+   window, 5.2:1 on a narrow one with page text under it, 6.8:1 on a phone. Solid with the Glass slider at 0, under reduced transparency, or
+   without backdrop-filter. */
+.upop{--muted:var(--grey-800);--text-2:color-mix(in srgb,var(--grey-800) 50%,var(--grey-900));--bad:color-mix(in srgb,var(--coral) 55%,var(--white));--line:rgba(255,255,255,.12);background:color-mix(in srgb,var(--raised) 42%,transparent);-webkit-backdrop-filter:blur(6px) saturate(170%) brightness(.42);backdrop-filter:blur(6px) saturate(170%) brightness(.42)}
+.upop::before{content:"";position:absolute;inset:0;z-index:-1;pointer-events:none;background:linear-gradient(180deg,rgba(255,255,255,.06),rgba(255,255,255,0) 30%)}
+:root[data-glass="off"] .upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}:root[data-glass="off"] .upop::before{display:none}
+@media (prefers-reduced-transparency:reduce){.upop{background:var(--raised);-webkit-backdrop-filter:none;backdrop-filter:none}.upop::before{display:none}}
+@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.upop{background:var(--raised)}.upop::before{display:none}}
+.upop header{display:flex;align-items:flex-start;gap:8px}
+.upop header div{flex:1;min-width:0}
+.upop header h2{font-size:var(--fs-ui);font-weight:600;line-height:28px}.upop header p{margin-top:-3px;font-size:var(--fs-xs);color:var(--muted)}
+.upop section{display:flex;flex-direction:column;gap:var(--sp-3)}
+.ums{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:var(--sp-2) var(--sp-4)}
+.uacct>p.unote{font-size:var(--fs-xs);color:var(--muted)}
+.upop h3{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:var(--fs-xs);font-weight:600;color:var(--text-2)}
+.upop h3 small{font-weight:400;color:var(--muted)}
+.uacct{display:flex;flex-direction:column;gap:var(--sp-2);padding-top:var(--sp-3);border-top:1px solid var(--line)}
+.uacct>p{display:flex;align-items:baseline;gap:8px}
+.uacct>p b{flex:1;min-width:0;font-weight:600;color:var(--text-hi)}.uacct>p span{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.um{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:4px 8px;font-size:var(--fs-sm)}
+.um>span{color:var(--text-2)}.um>b{font-weight:600;color:var(--text);font-variant-numeric:tabular-nums}
+.um>i{grid-column:1/-1;position:relative;display:block;height:5px;border-radius:var(--r-pill);background:var(--fill)}
+.um>i>em{position:absolute;left:0;top:0;bottom:0;border-radius:var(--r-pill);background:var(--text-2)}
+.um>small{grid-column:1/-1;font-size:var(--fs-xs);color:var(--muted)}
+.um.near>b,.um.near>small{color:var(--warn)}.um.near>i>em{background:var(--warn)}
+.um.full>b,.um.full>small{color:var(--bad)}.um.full>i>em{background:var(--bad)}
+.upop footer{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px 12px;font-size:var(--fs-xs);color:var(--muted)}
+.pop .ph{display:flex;align-items:center;gap:10px}
+.pop .ph .mark{width:26px;height:26px;border-radius:var(--r-sm)}
+.pop .ph b{display:block;font-weight:600}.pop .ph span{font-size:var(--fs-xs);color:var(--muted)}
+.swatches{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:7px}
+.dotc{aspect-ratio:1;border-radius:50%;background:linear-gradient(135deg,oklch(.87 .12 var(--h)),oklch(.44 .09 var(--h)));transition:transform .15s}
+.dotc:hover{transform:scale(1.1)}
+.dotc.ink{background:linear-gradient(135deg,var(--grey-900),var(--grey-400))}
+.dotc[aria-pressed="true"]{box-shadow:0 0 0 2px var(--raised),0 0 0 4px var(--text)}
+.strength{display:flex;flex-direction:column;gap:6px;font-size:var(--fs-xs);color:var(--muted)}
+.strength .top{display:flex;justify-content:space-between}
+.strength b{color:var(--text);font-weight:500}
+/* A slider's default is marked by a point under its track. The thumb settles on it when it comes close, and a click
+   on the point goes back to it. */
+.track{position:relative;display:block;padding-bottom:10px}
+.tick{position:absolute;bottom:0;left:calc(9px + (100% - 18px)*var(--d,.5));width:16px;height:12px;margin-left:-8px;display:grid;place-items:center}
+.tick::after{content:"";width:5px;height:5px;border-radius:50%;background:var(--text-2);transition:transform .15s,background .15s}
+.tick:hover::after{background:var(--text);transform:scale(1.5)}
+.track:has(input:disabled) .tick{opacity:.4;pointer-events:none}
+input[type=range]{-webkit-appearance:none;appearance:none;width:100%;height:20px;margin:0;background:none;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:6px;border-radius:var(--r-pill);background:linear-gradient(90deg,var(--fill-hover),var(--accent,var(--muted)))}
+input[type=range]::-moz-range-track{height:6px;border-radius:var(--r-pill);background:linear-gradient(90deg,var(--fill-hover),var(--accent,var(--muted)))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:18px;height:18px;margin-top:-6px;border-radius:50%;background:var(--ink);border:2px solid var(--raised);box-shadow:0 1px 4px rgba(0,0,0,.5)}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:var(--ink);border:2px solid var(--raised)}
+input[type=range]:disabled{opacity:.4;cursor:default}
+.panes{display:flex;flex-wrap:wrap;gap:6px}
+.panes a{display:inline-flex;align-items:center;height:30px;padding:0 13px;border-radius:var(--r-pill);color:var(--text-2);font-weight:500}
+.panes a:hover,.panes a[aria-current]{background:var(--fill);color:var(--text)}
+.themes{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
+.theme{display:flex;flex-direction:column;gap:3px;padding:9px 9px 11px;transition:border-color .15s}
+.theme:hover{border-color:var(--edge-2)}
+.theme[aria-pressed="true"]{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.pv{display:block;position:relative;height:74px;margin-bottom:6px;border-radius:var(--r-sm);overflow:hidden;background:linear-gradient(168deg,oklch(.27 .06 var(--h)),oklch(.225 .05 calc(var(--h) + 14)))}
+.pv::before{content:"";position:absolute;inset:6px 6px 6px 32%;border-radius:var(--r-sm);background:oklch(.17 .022 var(--h))}
+.pv::after{content:"";position:absolute;right:13px;bottom:13px;width:30px;height:9px;border-radius:var(--r-xs);background:oklch(.87 .13 var(--h))}
+.pv i{position:absolute;left:8px;top:10px;width:17%;height:5px;border-radius:var(--r-xs);background:oklch(.87 .13 var(--h));box-shadow:0 11px 0 oklch(.42 .05 var(--h)),0 22px 0 oklch(.42 .05 var(--h))}
+.theme.ink .pv{background:var(--slate-100)}.theme.ink .pv::before{background:var(--grey-100)}
+.theme.ink .pv::after,.theme.ink .pv i{background:var(--grey-900)}.theme.ink .pv i{box-shadow:0 11px 0 var(--slate-300),0 22px 0 var(--slate-300)}
+.theme b{font-weight:600;padding:0 3px}.theme small{font-size:var(--fs-xs);color:var(--muted);padding:0 3px}
+.setrow{display:flex;flex-wrap:wrap;align-items:center;gap:12px 28px;padding:16px 18px}
+.setrow>div{flex:1 1 240px}.setrow>div b{display:block;font-weight:500}.setrow>div span{font-size:var(--fs-sm);color:var(--muted)}
+.setrow .strength{flex:1 1 260px;max-width:360px}
+
+/* Lanes, grouped automatically */
+/* The tree: the manager, then the projects, and inside each project its lanes. */
+/* The manager, pinned at the top of the tree. */
+.mgr{color:var(--text);font-weight:600}
+.mgr .mark{width:16px;height:16px;border-radius:var(--r-xs)}
+.mgr .pin{color:var(--muted)}
+/* The pins. Each is a link or a button inside its tile. The place for the next pin shows when the owner points at the
+   grid, and goes when all twelve are used. Taking a pin off is a right-click (or a long press, or the menu key). */
+.tgo>span{max-width:100%;padding:0 1px;letter-spacing:-.012em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tgo{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;width:100%;height:100%;min-width:0;border-radius:inherit;font:inherit;color:inherit;text-align:center}
+.tile:has(>[aria-current]){background:var(--tile-on);color:var(--text)}
+:root[data-theme] .tile:has(>[aria-current]){box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 42%,transparent)}
+:root[data-theme] .tile:has(>[aria-current]) .i{color:var(--accent)}
+.tile.add{background:none;border:1px dashed var(--edge-2);color:var(--muted);opacity:0;transition:opacity .15s,color .15s}
+.tiles:hover .tile.add,.tile.add:focus-visible,.tile.add[aria-expanded="true"]{opacity:1}
+.tile.add:hover{background:none;color:var(--text)}
+.tiles.full .tile.add{display:none}
+@media (hover:none){.tile.add{opacity:1}}
+/* The right-click menu of a pin, or of a topic or project that can become one. */
+.menu{position:fixed;z-index:70;min-width:184px;padding:5px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-lg);box-shadow:var(--sh-pop);animation:pop .14s ease-out}
+.menu button{display:flex;align-items:center;gap:10px;width:100%;height:32px;padding:0 12px 0 10px;border-radius:var(--r-sm);font-weight:500;white-space:nowrap}
+.menu button:hover,.menu button:focus-visible{background:var(--selected);outline:0}
+.menu button:disabled{background:none;color:var(--muted);cursor:default}
+#pinpop .tip{font-size:var(--fs-xs);line-height:1.45;color:var(--muted);text-wrap:pretty}
+#pinpop{width:252px}
+#pinpop .ph .lt{width:26px;height:26px;border-radius:var(--r-sm);background:var(--fill);display:grid;place-items:center;flex:none}
+#pin-list{display:flex;flex-direction:column;gap:2px;max-height:min(52vh,420px);margin:0 -8px;padding:0 8px;overflow:hidden auto;overscroll-behavior:contain}
+#pin-list h3{padding:6px 0 4px}
+#pin-list .pr{width:auto;height:34px;margin:0 -8px;padding:0 8px}
+#pin-list p{font-size:var(--fs-sm);color:var(--text-2)}
+.side #tree h2{position:relative;margin-top:10px;padding-top:16px}
+.side #tree h2::before{content:"";position:absolute;top:0;left:8px;right:8px;height:1px;background:rgba(255,255,255,.09)}
+.side [data-palette].row{color:var(--muted);font-weight:400}.side [data-palette].row:hover{color:var(--text)}
+.grp{display:flex;flex-direction:column;gap:1px}
+/* A project's row has two parts: its name opens it, its icon folds its lanes away. Pointing at the row turns the
+   icon into the arrow that says so. */
+.proj{padding:0 8px 0 0;gap:0}
+.proj>.grow{align-self:stretch;font:inherit;line-height:32px;color:inherit;text-align:left}
+.proj>.word,.proj>.dot,.proj>.mark{margin-left:9px}
+.proj:has(>[aria-current]){background:var(--row-on);color:var(--text);font-weight:600}
+.tog{position:relative;flex:none;align-self:stretch;width:33px;display:grid;place-items:center;border-radius:var(--r-sm)}
+.tog .caret{position:absolute;color:var(--muted);opacity:0;transition:transform .16s}
+.proj:hover .tog .ic,.tog:focus-visible .ic{opacity:0}
+.proj:hover .tog .caret,.tog:focus-visible .caret{opacity:1}
+.grp:not([data-unfolded]) .caret{transform:rotate(-90deg)}
+.grp:not([data-unfolded])>.kids{display:none}
+/* A closed project carries the mark of what is inside. Open, its lanes show their own, so the project's goes. */
+.proj>.mark{color:var(--muted)}
+.grp[data-unfolded]>.proj>.dot,.grp[data-unfolded]>.proj>.mark{display:none}
+:root[data-theme] .proj:has(>[aria-current]){box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 42%,transparent)}
+:root[data-theme] .proj:has(>[aria-current]) .ic{color:var(--accent)}
+/* Inside a project every lane starts in the same 16px column, under the first letter of the project's name,
+   and leads with its state. */
+.kids{display:flex;flex-direction:column;gap:1px;margin-bottom:8px;padding-left:25px}
+.kids:empty{display:none}
+.kid{height:28px;gap:8px;font-size:var(--fs-sm);font-weight:400}
+.kid>.dot{margin:0 4.5px}.kid>.spin{margin:0 3.5px}.kid>.i{margin:0 1.5px;color:var(--muted)}
+.kid.sub,.kid.art{color:var(--muted)}
+.kid.sub{padding-left:24px}
+.kid:has(>.dot.bad),.kid:has(>.dot.warn),.kid:hover{color:var(--text)}
+.kid.fresh{animation:rise .35s ease-out}
+.spin{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--muted);border-top-color:transparent;animation:turn .8s linear infinite}
+@keyframes turn{to{transform:rotate(360deg)}}
+.receipts{position:fixed;z-index:45;top:62px;right:22px;width:min(340px,calc(100vw - 32px));display:flex;flex-direction:column;gap:8px}
+.receipt{display:flex;flex-direction:column;gap:7px;padding:12px 12px 12px 14px;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-lg);box-shadow:var(--sh-pop);animation:pop .22s cubic-bezier(.2,.9,.3,1.1)}
+.receipt .rh{display:flex;align-items:center;gap:7px;font-size:var(--fs-sm)}
+.receipt .rh b{flex:1;font-weight:600}
+.receipt .rh .ib{width:22px;height:22px}
+.receipt .rt{font-size:var(--fs-ui);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.receipt .rr{font-size:var(--fs-xs);color:var(--muted)}
+.pal .hint{padding:10px 18px 0;font-size:var(--fs-xs);color:var(--muted)}
+
+/* Modules: one workspace, several cockpits */
+.ws .mod{margin-left:7px;font-size:var(--fs-2xs);font-weight:500;color:var(--muted)}
+.pop h3{font-size:var(--fs-2xs);font-weight:600;color:var(--muted)}
+.pop .mods{display:flex;flex-direction:column;gap:2px}
+.pop .mods h3{padding-bottom:4px}
+.pop .mods .pr{width:auto;height:34px;margin:0 -8px;padding:0 8px}
+.pr .here{display:none}
+.pr[aria-current]{background:var(--selected)}.pr[aria-current] .here{display:block}
+.modcards{grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr))}
+.modcard{display:flex;align-items:center;gap:13px;padding:14px 16px;transition:border-color .15s}
+.modcard:hover{border-color:var(--edge-2)}
+.modcard[aria-current]{border-color:var(--text);box-shadow:0 0 0 1px var(--text)}
+.modcard div{flex:1;min-width:0}.modcard b{display:block;font-weight:600}.modcard div span{font-size:var(--fs-sm);color:var(--muted)}
+.modcard .st{font-size:var(--fs-xs);color:var(--text-2)}
+
+/* Development module: code-shaped details */
+.mono{font-family:var(--mono);font-size:.94em;letter-spacing:-.01em}
+.logbox{margin:0;padding:12px 14px;border-radius:var(--r-md);background:var(--bg);border:1px solid var(--line);font:var(--fs-xs)/1.65 var(--mono);color:var(--text-2);overflow-x:auto;white-space:pre}
+.logbox b{font-weight:500;color:var(--bad)}.logbox i{font-style:normal;color:var(--muted)}
+.checks{display:flex;flex-wrap:wrap;gap:6px}
+.checks span{display:inline-flex;align-items:center;gap:6px;height:26px;padding:0 11px 0 8px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-xs);color:var(--text-2)}
+.checks .fail{background:var(--bad-bg);color:var(--text)}
+.gate{grid-column:1/-1;display:flex;flex-wrap:wrap;align-items:center;gap:6px 16px;margin-top:6px;padding-top:12px;border-top:1px solid var(--line-soft);font-size:var(--fs-xs);color:var(--text-2)}
+.gate span{display:inline-flex;align-items:center;gap:5px}
+.gate .todo{color:var(--muted)}
+.gate .verdict{margin-left:auto;color:var(--text);font-weight:500}
+.unchecked{display:flex;align-items:baseline;gap:9px;max-width:670px;font-size:var(--fs-ui);line-height:1.5;color:var(--text-2);text-wrap:pretty}
+.unchecked b{color:var(--text);font-weight:600}
+.unchecked .dot{transform:translateY(-1px)}
+.jobs td small{display:block;margin-top:2px;font-size:var(--fs-xs);font-weight:400;color:var(--muted)}
+
+/* A lane's own page and the manager's: what was asked, where it stands, who leads, what it made. */
+.asked{margin:0;padding:var(--sp-5) var(--sp-6);border-radius:var(--r-lg);background:var(--surface);font:400 var(--fs-xl)/1.4 var(--serif);letter-spacing:-.006em;color:var(--text-hi);text-wrap:pretty}
+.wait{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;padding:14px 16px 14px 18px}
+.wait p{flex:1 1 300px;font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose);text-wrap:pretty}
+.wait p b{color:var(--text);font-weight:600}
+.steps{display:flex;flex-direction:column;gap:2px;padding:0 2px}
+.steps li{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:11px;align-items:center;min-height:38px;font-size:var(--fs-md);color:var(--text-2)}
+.steps li>.dot{justify-self:center}
+.steps small{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.steps .now{color:var(--text);font-weight:500}
+.steps .todo{color:var(--muted)}
+.jobs td a{text-decoration:underline;text-decoration-color:var(--edge-2);text-underline-offset:3px}
+.jobs td a:hover{text-decoration-color:var(--text)}
+.asks li{align-items:flex-start;padding:12px 14px}
+.asks li>div b{font-weight:500;text-wrap:pretty}
+.list .lt .i{color:var(--text-2)}
+.view.scroll>.dock{padding-left:18px;padding-right:18px}
+
+/* Entrance: one orchestrated reveal on the brief */
+@keyframes fade{from{opacity:0}}
+@keyframes pop{from{opacity:0;transform:translateY(-8px) scale(.98)}}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}}
+@keyframes settle{from{opacity:0;transform:scale(1.045)}}
+.brief .hero img{animation:settle 1.1s cubic-bezier(.2,.7,.2,1) both,drift 46s ease-in-out 1.2s infinite alternate}
+.brief .masthead{animation:rise .9s cubic-bezier(.2,.7,.2,1) .18s both}
+.brief .rail{animation:fade .9s ease-out .45s both}
+.brief .under{animation:fade .8s ease-out .55s both}
+.brief .card{animation:rise .7s cubic-bezier(.2,.7,.2,1) both;animation-delay:calc(.6s + var(--n,0)*.09s)}
+.view:not(.brief)>*{animation:fade .22s ease-out}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+
+@media (max-width:900px){
+  .app{grid-template-columns:minmax(0,1fr);gap:0}
+  .pane{margin:calc(-1*var(--sp-2))}
+  .side{position:fixed;z-index:40;inset:0 auto 0 0;width:264px;padding:12px;background:var(--frame);box-shadow:0 0 60px rgba(0,0,0,.6);transform:translateX(-105%);transition:transform .26s cubic-bezier(.2,.8,.2,1);overflow:auto}
+  .app.side-open .side{transform:none}
+  .app.side-off{grid-template-columns:minmax(0,1fr)}
+  .grip.nav,.chat [data-chat-mode]{display:none}
+  .chat{left:8px;right:8px;bottom:8px;width:auto;height:min(78%,640px)}
+}
+/* The page adapts to the room it has, not to the window: the sidebars on both sides can be any width. */
+@container page (max-width:1000px){
+  .card{grid-template-columns:190px minmax(0,1fr);gap:20px 32px;padding:26px 28px}
+}
+@container page (max-width:860px){
+  .sheet{grid-template-columns:16px minmax(0,1fr) 16px;padding-top:6px}
+  .rail{display:none}
+  .minidate{display:flex;justify-content:space-between;padding:0 2px 10px;font:italic 500 var(--fs-title)/1 var(--serif)}
+  .hero{grid-row:auto;aspect-ratio:4/3.4}.masthead{top:8%}
+  .under{flex-direction:column}.credit{text-align:left}
+  .card{grid-template-columns:minmax(0,1fr);padding:22px 20px}
+  .num{display:none}
+  .item{grid-template-columns:minmax(0,1fr)}
+  .doc{padding:22px 18px 24px}.h1{font-size:var(--fs-2xl)}.stat strong{font-size:var(--fs-xl)}.decidebar{padding:10px}.decidebar p{display:none}
+  .draft{grid-template-columns:minmax(0,1fr)}.draft .acts{grid-column:1;grid-row:auto}
+  .log li{grid-template-columns:16px minmax(0,1fr) auto}.log .btn{display:none}
+  .steps li{grid-template-columns:16px minmax(0,1fr);padding:5px 0}.steps small{grid-column:2;white-space:normal}
+}
+@@EXTRA:css@@
+</style>
+<script>
+try {
+  var saved = JSON.parse(localStorage.getItem("morndo.theme") || "{}");
+  if (/^(ember|sand|moss|tide|sky|iris|rose)$/.test(saved.id)) document.documentElement.dataset.theme = saved.id;
+  if (saved.k >= 0 && saved.k <= 1) document.documentElement.style.setProperty("--k", saved.k);
+  var glass = typeof saved.g === "number" && saved.g >= 0 && saved.g <= 1 ? saved.g : /^(ember|sand|moss|tide|sky|iris|rose)$/.test(saved.id) ? 0.5 : 0.25;
+  document.documentElement.style.setProperty("--glass", glass);
+  if (glass === 0) document.documentElement.dataset.glass = "off";
+  var lay = JSON.parse(localStorage.getItem("morndo.layout") || "{}");
+  if (lay.side >= 224 && lay.side <= 380) document.documentElement.style.setProperty("--side-w", lay.side + "px");
+  if (lay.chatW >= 320 && lay.chatW <= 640) document.documentElement.style.setProperty("--chat-w", lay.chatW + "px");
+  if (lay.chat === "side") document.documentElement.dataset.chat = "side";
+} catch (e) {}
+</script>
+</head>
+<body>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <symbol id="mark" viewBox="0 0 48 48"><path fill="currentColor" stroke="none" fill-rule="evenodd" d="M0 0L48 0L48 48L0 48ZM8 26A16 16 0 0 1 40 26A16 16 0 0 1 8 26ZM0 27L48 27L48 33L0 33Z"/></symbol>
+  <symbol id="sun" viewBox="0 0 24 24"><path d="M3 17.5h18M8 21h8M12 6.2v3.300M5.300 9.500 7 11.500M18.700 9.500 17 11.500"/><path fill="currentColor" d="M7 17.500a5 5 0 0 1 10 0z"/></symbol>
+  <symbol id="decide" viewBox="0 0 24 24"><path d="M12 3v2.500M12 13.500V21M9 21h6"/><path fill="currentColor" d="M5.500 6h10l3.500 3.500-3.500 3.500h-10z"/></symbol>
+  <symbol id="mail" viewBox="0 0 24 24"><rect x="3" y="5.500" width="18" height="13.500" rx="2.500"/><path fill="currentColor" d="M5.300 7.700h13.400L12 12.900z"/></symbol>
+  <symbol id="star" viewBox="0 0 24 24"><path fill="currentColor" d="M11 3.500c.5 4.400 2.100 6 6.500 6.500-4.400.5-6 2.100-6.500 6.500-.5-4.400-2.100-6-6.500-6.500 4.400-.5 6-2.100 6.500-6.500z"/><path d="M18.500 15.500v5M16 18h5"/></symbol>
+  <symbol id="pen" viewBox="0 0 24 24"><path d="M4.500 19.500l1.200-4.600L16.600 4a2 2 0 0 1 2.800 0l.6.6a2 2 0 0 1 0 2.800L9.100 18.300z"/><path fill="currentColor" d="M4.500 19.500l1.200-4.600 3.400 3.400z"/><path d="M14.500 6.100l3.400 3.400"/></symbol>
+  <symbol id="send" viewBox="0 0 24 24"><path d="M21 3 3.500 10.200l6.900 3.400 3.400 6.900z"/><path fill="currentColor" d="M21 3 10.400 13.600l3.400 6.900z"/></symbol>
+  <symbol id="horn" viewBox="0 0 24 24"><path d="M7 9.500 19 5v14L7 14.500"/><path fill="currentColor" d="M3.500 9.500H7v5H3.500z"/><path d="M9.500 15.400v2.400a2 2 0 0 0 4 0v-.9"/></symbol>
+  <symbol id="search" viewBox="0 0 24 24"><circle cx="10.500" cy="10.500" r="6.500"/><path d="M15.400 15.400 20.500 20.500"/><circle fill="currentColor" cx="10.500" cy="10.500" r="1.600"/></symbol>
+  <symbol id="partner" viewBox="0 0 24 24"><circle cx="9" cy="10" r="5"/><circle cx="15" cy="14" r="5"/><path fill="currentColor" d="M13.920 9.120a5 5 0 0 1-3.840 5.760 5 5 0 0 1 3.840-5.760z"/></symbol>
+  <symbol id="target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="6.800"/><path d="M12 2v3.200M12 18.800V22M2 12h3.200M18.800 12H22"/><circle fill="currentColor" cx="12" cy="12" r="1.800"/></symbol>
+  <symbol id="plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="chat" viewBox="0 0 24 24"><path d="M5.500 4h13A2.500 2.500 0 0 1 21 6.500v8a2.500 2.500 0 0 1-2.500 2.500H10.500L6 20.500V17h-.500A2.500 2.500 0 0 1 3 14.500v-8A2.500 2.500 0 0 1 5.500 4z"/><circle fill="currentColor" stroke="none" cx="8.200" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="12" cy="10.500" r="1.350"/><circle fill="currentColor" stroke="none" cx="15.800" cy="10.500" r="1.350"/></symbol>
+  <symbol id="down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path d="M9 4v16"/></symbol>
+  <symbol id="dock" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><path fill="currentColor" d="M15 4h3a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3h-3z"/></symbol>
+  <symbol id="float" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="3"/><rect fill="currentColor" stroke="none" x="11.500" y="10" width="7" height="7.500" rx="1.800"/></symbol>
+  <symbol id="up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="go" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="check" viewBox="0 0 24 24"><path d="m5 12.5 4.5 4.5L19 7.5"/></symbol>
+  <symbol id="x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="flame" viewBox="0 0 24 24"><path d="M12 3c.5 3.300 5.500 5.600 5.500 10.600a5.500 5.500 0 0 1-11 0c0-2 .9-3.600 2.200-4.800.2 1.500.9 2.500 2 2.900C10.300 8.700 10.700 5.300 12 3z"/><path fill="currentColor" d="M12 13c1 .9 1.500 1.600 1.500 2.500a1.500 1.500 0 0 1-3 0c0-.9.5-1.600 1.500-2.500z"/></symbol>
+  <symbol id="shield" viewBox="0 0 24 24"><path d="M12 3l7.500 2.800v5.700c0 4.400-3 7.600-7.500 9.500-4.500-1.900-7.500-5.100-7.500-9.500V5.800z"/><path fill="currentColor" d="M12 3v18c-4.500-1.900-7.500-5.100-7.500-9.500V5.800z"/></symbol>
+  <symbol id="plug" viewBox="0 0 24 24"><path d="M9 3v4.500M15 3v4.500M12 17.500V21"/><path fill="currentColor" d="M6.500 8h11v3.500a5.500 5.500 0 0 1-11 0z"/></symbol>
+  <symbol id="image" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="m21 16-5-5-9 9"/></symbol>
+  <symbol id="elbow" viewBox="0 0 24 24"><path d="M6 5v7a3 3 0 0 0 3 3h9"/><path d="m14 11 4 4-4 4"/></symbol>
+  <symbol id="file" viewBox="0 0 24 24"><path d="M7 3h7l5 5v11a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z"/><path fill="currentColor" d="M14 3l5 5h-5z"/></symbol>
+  <symbol id="pr" viewBox="0 0 24 24"><circle cx="6" cy="6" r="2.300"/><circle cx="6" cy="18" r="2.300"/><path d="M6 8.300v7.400M18 15.700V10a3.500 3.500 0 0 0-3.500-3.500H11M13.700 3.800 11 6.500l2.700 2.700"/><circle fill="currentColor" cx="18" cy="18" r="2.300"/></symbol>
+  <symbol id="window" viewBox="0 0 24 24"><rect x="3" y="4.500" width="18" height="15" rx="2.500"/><path fill="currentColor" d="M3 9.500h18V7a2.500 2.500 0 0 0-2.500-2.500h-13A2.500 2.500 0 0 0 3 7z"/></symbol>
+  <symbol id="braces" viewBox="0 0 24 24"><path d="M9 4.500C7 4.500 6.500 5.700 6.500 7.200v2.300C6.500 10.900 5.600 12 4 12c1.600 0 2.500 1.100 2.500 2.500v2.300c0 1.500.5 2.700 2.500 2.700M15 4.500c2 0 2.500 1.200 2.500 2.700v2.300c0 1.400.9 2.500 2.500 2.500-1.600 0-2.500 1.100-2.500 2.500v2.300c0 1.500-.5 2.700-2.500 2.700"/><circle fill="currentColor" cx="12" cy="12" r="1.400"/></symbol>
+  <symbol id="card" viewBox="0 0 24 24"><rect x="3" y="5.500" width="18" height="13" rx="2.500"/><path fill="currentColor" d="M3 9.200h18v3H3z"/><path d="M6.500 15.500H10"/></symbol>
+  <symbol id="phone" viewBox="0 0 24 24"><rect x="7" y="2.500" width="10" height="19" rx="2.500"/><path fill="currentColor" d="M7 16.500h10V19a2.500 2.500 0 0 1-2.500 2.500h-5A2.500 2.500 0 0 1 7 19z"/></symbol>
+  <symbol id="server" viewBox="0 0 24 24"><rect x="3.500" y="4" width="17" height="6.500" rx="2"/><rect x="3.500" y="13.500" width="17" height="6.500" rx="2"/><circle fill="currentColor" stroke="none" cx="7.300" cy="7.250" r="1.350"/><circle fill="currentColor" stroke="none" cx="7.300" cy="16.750" r="1.350"/><path d="M12.500 7.250H17M12.500 16.750H17"/></symbol>
+  <symbol id="pin" viewBox="0 0 24 24"><path d="M12 14.500V21"/><path fill="currentColor" d="M9 3.500h6l-.700 5.200 3.200 3.800v2H6.500v-2l3.200-3.800z"/></symbol>
+  <symbol id="play" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path fill="currentColor" d="M10.300 8.600v6.800l5.400-3.400z"/></symbol>
+  <symbol id="pause" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path d="M10 9v6M14 9v6"/></symbol>
+  <symbol id="moon" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9z"/></symbol>
+  <symbol id="done" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.750"/><path d="m8.200 12.300 2.700 2.700 4.900-5.400"/></symbol>
+  <symbol id="sliders" viewBox="0 0 24 24"><path d="M4 8h3.200M12.800 8H20M4 16h7.200M16.800 16H20"/><circle fill="currentColor" cx="10" cy="8" r="1.900"/><circle fill="currentColor" cx="14" cy="16" r="1.900"/></symbol>
+  <symbol id="usage" viewBox="0 0 24 24"><path d="M4.500 16.500a7.500 7.500 0 0 1 15 0"/><path d="m12 16.500 3.400-4.900"/><circle fill="currentColor" cx="12" cy="16.500" r="1.900"/></symbol>
+  <symbol id="user" viewBox="0 0 24 24"><circle fill="currentColor" cx="12" cy="8" r="2.800"/><path d="M5 20a7 7 0 0 1 14 0"/></symbol>
+</svg>
+
+<!-- The glass behind the window frame: the brief's artwork, already blurred. Two layers, so one can fade into the next. -->
+<div class="glass" aria-hidden="true"><i></i><i></i></div>
+
+<div class="app" id="app">
+
+<nav class="side" id="side" aria-label="Workspace">
+  <button class="row ws" data-wsmenu aria-haspopup="dialog" aria-label="Workspace: Tidewell, @@MODULE_NAME@@. Switch module or change the colour"><svg class="mark"><use href="#mark"/></svg><span class="grow">Tidewell<small class="mod">@@MODULE_NAME@@</small></span><svg class="i sm dim"><use href="#down"/></svg></button>
+
+  <!-- The pins: what the owner keeps one click away, up to twelve (four by three). The module pins four pages to
+       start with; he adds topics or projects and skills himself. A right-click on a pin takes it off, a right-click on a topic or project
+       pins it. The script draws them from the list of what can be pinned. -->
+  <div class="tiles" id="pins">
+    <button class="tile add" data-pin-add aria-haspopup="dialog" aria-label="Pin something here" title="Pin something here"><svg class="i"><use href="#plus"/></svg><span>Pin</span></button>
+  </div>
+
+  <!-- One tree. The manager is pinned on top: everything starts with it. Under it the projects (or topics), and inside
+       each project its lanes. A lane the manager has not placed yet waits under the manager itself. -->
+  <div class="group" id="tree">
+    <a class="row mgr" href="#manager" data-nav="manager"><svg class="mark"><use href="#mark"/></svg><span class="grow">Manager</span><span class="word">Always here</span><svg class="i sm pin"><use href="#pin"/></svg></a>
+    <div class="kids" id="mgr-lanes"></div>
+    <button class="row" data-palette><svg class="i"><use href="#plus"/></svg><span class="grow">New lane</span><kbd>⌘K</kbd></button>
+@@BLOCK:tree@@
+  </div>
+
+@@BLOCK:me@@
+</nav>
+
+<main class="pane chat-off" id="pane">
+  <div class="bar">
+    <button class="ib" data-side aria-label="Show or hide the sidebar"><svg class="i"><use href="#panel"/></svg></button>
+    <button class="ib" data-back aria-label="Back"><svg class="i"><use href="#left"/></svg></button>
+    <button class="ib" data-fwd aria-label="Forward"><svg class="i"><use href="#right"/></svg></button>
+    <div class="crumb"><b id="crumb-a">Brief</b><span id="crumb-b">Monday 16 November</span></div>
+    <button class="chatbtn" data-chat aria-pressed="false"><svg class="i sm"><use href="#chat"/></svg>Chat</button>
+  </div>
+
+  <div class="views">
+
+    <!-- 1. The brief -->
+    <section class="view brief" id="v-brief" aria-label="Morning brief">
+      <div class="sheet">
+        <div class="minidate"><span>16 Nov 2026</span><span>07:15 AM</span></div>
+        <div class="rail l" aria-hidden="true"><span>16 NOV 2026</span></div>
+        <figure class="hero">
+          <img id="hero-img" alt="">
+          <h1 class="masthead"><i>The</i>Monday Brief</h1>
+          <div class="pager"><button data-hero="-1" aria-label="Previous artwork"><svg class="i sm"><use href="#left"/></svg></button><span id="hero-n"></span><button data-hero="1" aria-label="Next artwork"><svg class="i sm"><use href="#right"/></svg></button></div>
+        </figure>
+        <div class="rail r" aria-hidden="true"><span>07:15 AM</span></div>
+
+        <div class="under">
+          <div>
+@@BLOCK:lede@@
+          <p class="cadence"><svg class="i sm"><use href="#sun"/></svg>Next brief at 13:00. Until then you hear only about what cannot wait.</p>
+          </div>
+          <p class="credit"><span id="hero-title"></span><br><span id="hero-manner"></span></p>
+        </div>
+
+        <div class="cards">
+@@BLOCK:cards@@
+        </div>
+
+        <div class="dock"><div class="composer">
+          <label><span class="sr">Message Morndo</span><input type="text" placeholder="Tell Morndo what to do" autocomplete="off"></label>
+          <button class="addf"><svg class="i sm"><use href="#plus"/></svg>Add files or links</button>
+          <button class="model" data-palette>Auto<svg class="i sm"><use href="#down"/></svg></button>
+          <button class="sendb" data-file aria-label="Send"><svg class="i lg"><use href="#up"/></svg></button>
+        </div></div>
+      </div>
+    </section>
+
+@@BLOCK:views@@
+
+
+    <!-- 6. Settings: the workspace's colour -->
+    <section class="view scroll" id="v-settings" aria-label="Settings" hidden>
+      <div class="doc" style="gap:26px">
+        <header class="sec" style="gap:12px">
+          <h1 class="h1">Settings</h1>
+          <nav class="panes" aria-label="Settings sections"><a href="#settings" aria-current="page">Workspace</a><a href="#skills">Connections</a><a href="#skills">Guardrails</a></nav>
+        </header>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Modules</h2><span>2 on · each brings its own topics or projects, decisions and skills</span></div>
+          <div class="grid modcards">
+            <a class="box modcard" href="gtm-cockpit.html" data-module-link="gtm"><svg class="i lg"><use href="#horn"/></svg><div><b>Go-to-market</b><span>Content, outbound, paid, SEO and research</span></div><span class="st" data-here>Open</span></a>
+            <a class="box modcard" href="dev-cockpit.html" data-module-link="dev"><svg class="i lg"><use href="#pr"/></svg><div><b>Development</b><span>Projects, pull requests, reviews and releases</span></div><span class="st" data-here>Open</span></a>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Briefs</h2><span>When Morndo reports to you</span></div>
+          <div class="box setrow">
+            <div><b>How often</b><span>Reports wait for the next brief, so your day is not cut into pieces. Three a day suits most people.</span></div>
+            <div class="seg" role="group" data-pick aria-label="Briefs a day"><button aria-pressed="false">Once</button><button aria-pressed="false">Twice</button><button aria-pressed="true">3 times</button></div>
+          </div>
+          <div class="box setrow">
+            <div><b>Between briefs</b><span>Morndo interrupts you only for a decision due before the next brief, or for something stuck that puts a deadline at risk.</span></div>
+            <button class="sw" role="switch" aria-checked="true" aria-label="Interrupt only for what cannot wait"></button>
+          </div>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Who decides</h2><span>What agents decide alone, they tell you in the next brief, with Undo</span></div>
+          <ul class="box list">
+            <li><div><b>It goes out in your name</b><span>An email, an offer, a post, a release</span></div><div class="seg" role="group" data-pick aria-label="Who decides what goes out in your name"><button aria-pressed="true">You</button><button aria-pressed="false">The agent</button></div></li>
+            <li><div><b>It is hard to undo</b><span>A signed term, a published claim, a deleted record</span></div><div class="seg" role="group" data-pick aria-label="Who decides what is hard to undo"><button aria-pressed="true">You</button><button aria-pressed="false">The agent</button></div></li>
+            <li><div><b>It rests on what only you know</b><span>A call you held, a relationship, a promise</span></div><div class="seg" role="group" data-pick aria-label="Who decides what rests on what only you know"><button aria-pressed="true">You</button><button aria-pressed="false">The agent</button></div></li>
+            <li><div><b>It stays inside the guardrails and can be undone</b><span>A paused ad, a list, a draft, a reminder</span></div><div class="seg" role="group" data-pick aria-label="Who decides what stays inside the guardrails"><button aria-pressed="false">You</button><button aria-pressed="true">The agent</button></div></li>
+          </ul>
+          <p class="intro" style="font-size:13.5px">A decision is worth your time when you know something the agent does not, or when it cannot be taken back. One you would approve without reading is not: the agent takes it and you can undo it.</p>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Workspace colour</h2><span>Now: <span data-theme-name>Ink</span></span></div>
+          <p class="intro" style="font-size:13.5px">The colour belongs to this workspace, so two workspaces never look alike. It tints the window, marks what is selected and colours the brief.</p>
+          <div class="grid themes">
+            <button class="box theme ink" data-theme-set="ink" aria-pressed="true"><span class="pv"><i></i></span><b>Ink</b><small>Monochrome</small></button>
+            <button class="box theme" style="--h:48" data-theme-set="ember" aria-pressed="false"><span class="pv"><i></i></span><b>Ember</b><small>Warm orange</small></button>
+            <button class="box theme" style="--h:85" data-theme-set="sand" aria-pressed="false"><span class="pv"><i></i></span><b>Sand</b><small>Dry gold</small></button>
+            <button class="box theme" style="--h:150" data-theme-set="moss" aria-pressed="false"><span class="pv"><i></i></span><b>Moss</b><small>Soft green</small></button>
+            <button class="box theme" style="--h:200" data-theme-set="tide" aria-pressed="false"><span class="pv"><i></i></span><b>Tide</b><small>Sea teal</small></button>
+            <button class="box theme" style="--h:250" data-theme-set="sky" aria-pressed="false"><span class="pv"><i></i></span><b>Sky</b><small>Clear blue</small></button>
+            <button class="box theme" style="--h:295" data-theme-set="iris" aria-pressed="false"><span class="pv"><i></i></span><b>Iris</b><small>Violet</small></button>
+            <button class="box theme" style="--h:5" data-theme-set="rose" aria-pressed="false"><span class="pv"><i></i></span><b>Rose</b><small>Dusty pink</small></button>
+          </div>
+        </section>
+        <section class="box setrow">
+          <div><b>Strength</b><span>How much colour the window carries. Ink has no colour to turn up.</span></div>
+          <label class="strength"><span class="top"><span>Subtle</span><span>Bold</span></span><span class="track" style="--d:.55"><input type="range" min="0" max="100" value="55" data-strength aria-label="Colour strength"><button type="button" class="tick" data-strength-default title="Default: 55" aria-label="Back to the default colour strength, 55"></button></span></label>
+        </section>
+        <section class="box setrow">
+          <div><b>Glass</b><span>How much of the day's artwork shines through the window frame. All the way left turns it off. The point marks this theme's default.</span></div>
+          <label class="strength"><span class="top"><span>Off</span><span>Strong</span></span><span class="track" style="--d:.25"><input type="range" min="0" max="100" value="25" data-glass-range aria-label="Glass strength"><button type="button" class="tick" data-glass-default title="Default"></button></span></label>
+        </section>
+        <section class="sec">
+          <div class="headrow"><h2 class="h2">Chat</h2><span>Where it sits</span></div>
+          <div class="box setrow">
+            <div><b>Floating or sidebar</b><span>Floating opens over the page when you ask for it. A sidebar stays open beside every page; drag its edge to resize it.</span></div>
+            <div class="seg" role="group" aria-label="Where the chat sits"><button data-chat-set="float" aria-pressed="true">Floating</button><button data-chat-set="side" aria-pressed="false">Sidebar</button></div>
+          </div>
+        </section>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- The chat: one panel for the whole window. A page can bring its own thread (a template.chat-src inside its view);
+       the others share the general one below. It floats by default and can be kept as a sidebar. -->
+  <aside class="chat" aria-label="Chat">
+    <header>
+      <div><h2 id="chat-title">Chat</h2><p id="chat-sub" hidden></p></div>
+      <button class="ib" data-chat-mode aria-label="Keep the chat as a sidebar" title="Keep as a sidebar"><svg class="i"><use href="#dock"/></svg></button>
+      <button class="ib" data-chat aria-label="Close chat"><svg class="i"><use href="#x"/></svg></button>
+    </header>
+    <div class="thread" id="chat-thread"></div>
+    <div class="composer s">
+      <label><span class="sr">Message</span><input id="chat-input" type="text" placeholder="Ask Morndo" autocomplete="off"></label>
+      <button class="addf icon" aria-label="Add a file or a link"><svg class="i sm"><use href="#plus"/></svg></button>
+      <button class="model" data-palette>Auto<svg class="i sm"><use href="#down"/></svg></button>
+      <button class="sendb" aria-label="Send"><svg class="i"><use href="#up"/></svg></button>
+    </div>
+    <div class="grip" data-resize="chat" role="separator" aria-orientation="vertical" aria-label="Resize the chat sidebar" tabindex="0"></div>
+  </aside>
+  <template id="chat-default" data-title="Manager" data-placeholder="Tell the Manager">
+    <div class="ctx"><svg class="i sm"><use href="#file"/></svg>Reading this page</div>
+    <div class="answer"><p>Ask about anything on this page, or say what you want done. A new job becomes its own lane.</p></div>
+    <div class="sugg"><button>What needs me today?</button><button>What is stuck?</button><button>Sum up this page</button></div>
+  </template>
+</main>
+<div class="grip nav" data-resize="side" role="separator" aria-orientation="vertical" aria-label="Resize the sidebar" tabindex="0"></div>
+</div>
+
+<!-- The workspace menu: its modules and its colour. Opens from the workspace name or a right-click on empty sidebar space. -->
+<!-- Usage: opens from the gauge on the account row. Drawn from the accounts the workspace added. -->
+<div class="upop" id="usagepop" role="dialog" aria-label="Usage" hidden><div class="upop-in"></div></div>
+<div class="pop" id="themepop" role="dialog" aria-label="Workspace" hidden>
+  <div class="ph"><svg class="mark"><use href="#mark"/></svg><div><b>Tidewell</b><span>Workspace colour: <span data-theme-name>Ink</span></span></div></div>
+  <div class="mods"><h3>Modules</h3>
+    <a class="pr" href="gtm-cockpit.html" data-module-link="gtm"><svg class="i"><use href="#horn"/></svg><b>Go-to-market</b><span class="g"></span><svg class="i sm here"><use href="#check"/></svg></a>
+    <a class="pr" href="dev-cockpit.html" data-module-link="dev"><svg class="i"><use href="#pr"/></svg><b>Development</b><span class="g"></span><svg class="i sm here"><use href="#check"/></svg></a>
+  </div>
+  <h3>Colour</h3>
+  <div class="swatches"><button class="dotc ink" data-theme-set="ink" aria-pressed="true" aria-label="Ink, monochrome" title="Ink"></button><button class="dotc" style="--h:48" data-theme-set="ember" aria-pressed="false" aria-label="Ember" title="Ember"></button><button class="dotc" style="--h:85" data-theme-set="sand" aria-pressed="false" aria-label="Sand" title="Sand"></button><button class="dotc" style="--h:150" data-theme-set="moss" aria-pressed="false" aria-label="Moss" title="Moss"></button><button class="dotc" style="--h:200" data-theme-set="tide" aria-pressed="false" aria-label="Tide" title="Tide"></button><button class="dotc" style="--h:250" data-theme-set="sky" aria-pressed="false" aria-label="Sky" title="Sky"></button><button class="dotc" style="--h:295" data-theme-set="iris" aria-pressed="false" aria-label="Iris" title="Iris"></button><button class="dotc" style="--h:5" data-theme-set="rose" aria-pressed="false" aria-label="Rose" title="Rose"></button></div>
+  <label class="strength"><span class="top"><b>Strength</b><span>Subtle to bold</span></span><span class="track" style="--d:.55"><input type="range" min="0" max="100" value="55" data-strength aria-label="Colour strength"><button type="button" class="tick" data-strength-default title="Default: 55" aria-label="Back to the default colour strength, 55"></button></span></label>
+  <label class="strength"><span class="top"><b>Glass</b><span>Off to strong</span></span><span class="track" style="--d:.25"><input type="range" min="0" max="100" value="25" data-glass-range aria-label="Glass strength"><button type="button" class="tick" data-glass-default title="Default"></button></span></label>
+  <a class="btn quiet" href="#settings">All settings</a>
+</div>
+
+<!-- New lane: every message is filed as its own lane, under its group -->
+<!-- What can be pinned: the topics or projects, and skills as one-click macros. Opens from the empty place in the pin grid. -->
+<div class="pop" id="pinpop" role="dialog" aria-label="Pin to the top" hidden>
+  <div class="ph"><span class="lt"><svg class="i sm"><use href="#pin"/></svg></span><div><b>Pin to the top</b><span id="pin-room"></span></div></div>
+  <div id="pin-list"></div>
+  <p class="tip">To take a pin off, right-click it. You can also right-click a topic or project in the list on the left to pin it.</p>
+</div>
+<div class="menu" id="pinmenu" role="menu" hidden><button role="menuitem" data-pin-toggle><svg class="i"><use href="#pin"/></svg><span></span></button></div>
+
+<div class="receipts" id="receipts" aria-live="polite"></div>
+<div class="overlay" id="overlay" hidden>
+  <div class="pal" role="dialog" aria-modal="true" aria-label="New lane">
+    <div class="ask">
+      <svg class="i lg dim"><use href="#search"/></svg>
+      <label class="sr" for="ask">Say what you want done</label>
+      <input id="ask" type="text" placeholder="Say what you want done, or type / for a skill" autocomplete="off">
+      <span class="cur">Auto<kbd>Tab</kbd></span>
+    </div>
+    <p class="hint">Each message becomes its own lane, filed under the right group. Send several in a row; they do not mix.</p>
+    <div class="rows">
+@@BLOCK:palette_rows@@
+    </div>
+    <footer>
+      <span class="g"><svg class="mark" style="width:15px;height:15px;border-radius:4px"><use href="#mark"/></svg>New lane</span>
+@@BLOCK:palette_keys@@
+    </footer>
+  </div>
+</div>
+
+<script>
+(() => {
+  const $ = (s, r = document) => r.querySelector(s);
+  const $$ = (s, r = document) => [...r.querySelectorAll(s)];
+  const app = $("#app"), pane = $("#pane"), overlay = $("#overlay");
+  const CRUMBS = {
+@@BLOCK:crumbs@@
+  };
+
+  // The brief's artwork: one of fourteen, picked by the date, so the brief looks different each morning.
+  const HEROES = @@HEROES_JSON@@;
+  const heroImg = $("#hero-img");
+  const dayOfYear = Math.floor((Date.UTC(2026, 10, 16) - Date.UTC(2026, 0, 0)) / 864e5);
+  let heroAt = dayOfYear % HEROES.length;
+  function showHero(i, fade) {
+    heroAt = (i + HEROES.length) % HEROES.length;
+    const h = HEROES[heroAt];
+    heroImg.src = h.src;
+    // The frame's glass follows the artwork: the hidden layer takes the new picture and the two swap by fading.
+    const layers = $$(".glass i"), to = layers.find(l => !l.classList.contains("on")) || layers[0];
+    to.style.backgroundImage = 'url("' + h.glass + '")';
+    layers.forEach(l => l.classList.toggle("on", l === to));
+    heroImg.alt = h.alt;
+    heroImg.style.objectPosition = h.pos || "";
+    $("#hero-title").textContent = h.title;
+    $("#hero-manner").textContent = "Generated for Morndo, in the manner of " + h.manner;
+    $("#hero-n").textContent = heroAt + 1 + " / " + HEROES.length;
+    if (fade && heroImg.animate) heroImg.animate([{ opacity: 0.25 }, { opacity: 1 }], { duration: 380, easing: "ease-out" });
+  }
+
+  // The workspace's colour: one of the presets, and how strong it is. Ink is the monochrome default.
+  const NAMES = { ink: "Ink", ember: "Ember", sand: "Sand", moss: "Moss", tide: "Tide", sky: "Sky", iris: "Iris", rose: "Rose" };
+  const pop = $("#themepop"), root = document.documentElement;
+
+  // Which module this file is. The other one is a file beside it; this one's own link leads back to the brief.
+  $$("[data-module-link]").forEach(a => {
+    if (a.dataset.moduleLink !== root.dataset.module) return;
+    a.setAttribute("aria-current", "true");
+    a.setAttribute("href", "#brief");
+    const here = $("[data-here]", a);
+    if (here) here.textContent = "You are here";
+  });
+  // g is the glass strength the user chose. null means "this theme's default": a quarter in Ink, half in a colour theme.
+  const stored = (() => { try { return JSON.parse(localStorage.getItem("morndo.theme") || "{}"); } catch (e) { return {}; } })();
+  const theme = { id: NAMES[root.dataset.theme] ? root.dataset.theme : "ink", k: Number(root.style.getPropertyValue("--k")) || 0.55,
+                  g: typeof stored.g === "number" && stored.g >= 0 && stored.g <= 1 ? stored.g : null };
+  const K_DEFAULT = 0.55, glassDefault = () => (theme.id === "ink" ? 0.25 : 0.5);
+  function applyTheme(save) {
+    if (theme.id === "ink") root.removeAttribute("data-theme"); else root.dataset.theme = theme.id;
+    root.style.setProperty("--k", theme.k);
+    $$("[data-theme-set]").forEach(b => b.setAttribute("aria-pressed", String(b.dataset.themeSet === theme.id)));
+    $$("[data-strength]").forEach(r => { r.value = Math.round(theme.k * 100); r.disabled = theme.id === "ink"; r.parentElement.style.setProperty("--d", K_DEFAULT); });
+    $$("[data-theme-name]").forEach(n => (n.textContent = NAMES[theme.id]));
+    const def = glassDefault(), glass = theme.g === null ? def : theme.g, pct = Math.round(def * 100);
+    root.style.setProperty("--glass", glass);
+    if (glass > 0) root.removeAttribute("data-glass"); else root.dataset.glass = "off";
+    $$("[data-glass-range]").forEach(r => { r.value = Math.round(glass * 100); r.parentElement.style.setProperty("--d", def); });
+    $$("[data-glass-default]").forEach(b => { b.title = "Default: " + pct; b.setAttribute("aria-label", "Back to the default glass strength, " + pct); });
+    if (save) try { localStorage.setItem("morndo.theme", JSON.stringify(theme)); } catch (e) {}
+  }
+  document.addEventListener("input", e => {
+    // Close to its default a slider settles on it. For glass that also means: follow each theme's default again.
+    const v = e.target.value / 100, near = d => Math.abs(Number(e.target.value) - Math.round(d * 100)) <= 2;
+    if (e.target.matches("[data-strength]")) { theme.k = near(K_DEFAULT) ? K_DEFAULT : v; applyTheme(true); }
+    else if (e.target.matches("[data-glass-range]")) { theme.g = near(glassDefault()) ? null : v; applyTheme(true); }
+  });
+  // What a right-click in the sidebar is on: a pin, or a topic or project that can become one.
+  const pinAt = el => {
+    const tile = el.closest("#pins .tile:not(.add)"), proj = el.closest(".proj");
+    const id = tile ? tile.dataset.pinId : proj ? proj.closest(".grp").id : null;
+    return id && PINNABLE.some(p => p.id === id) ? id : null;
+  };
+  $("#side").addEventListener("contextmenu", e => {
+    const id = pinAt(e.target);
+    if (id) {
+      e.preventDefault();
+      // From the keyboard there is no pointer position: the menu opens at the thing itself.
+      const r = e.target.closest(".tile,.proj").getBoundingClientRect(), byKey = !e.clientX && !e.clientY;
+      openPinMenu(id, byKey ? r.left + 12 : e.clientX, byKey ? r.bottom - 4 : e.clientY);
+      return;
+    }
+    if (e.target.closest("a,button")) return;
+    e.preventDefault();
+    pop.hidden = false;
+    pop.style.left = Math.max(8, Math.min(e.clientX, innerWidth - pop.offsetWidth - 8)) + "px";
+    pop.style.top = Math.max(8, Math.min(e.clientY, innerHeight - pop.offsetHeight - 8)) + "px";
+  });
+
+  // Topic and lane pages. A module that brings its topics and lanes as records gets a page for each one. The tree,
+  // the Manager's table and the pages all read the same records, so a decision taken anywhere shows everywhere.
+  const PAGES = {
+@@BLOCK:pages@@
+  };
+  const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const STATES = { bad: "Stuck", warn: "Needs you", ok: "Working", done: "Done", new: "Starting", idle: "Idle", next: "Up next" };
+  const RANK = { bad: 4, warn: 3, new: 2, ok: 1, done: 0 };
+  const decided = l => !!(l.decision && $("#" + l.decision) && $("#" + l.decision).classList.contains("done"));
+  const stateOf = l => (decided(l) ? "ok" : l.state);
+  const byRank = (a, b) => RANK[stateOf(b)] - RANK[stateOf(a)];
+  const topicOf = l => (PAGES.topics || []).find(t => t.id === l.topic);
+  const laneById = id => (PAGES.lanes || []).find(l => l.id === id);
+  // The small sign for a state: on a page a stuck thing shows its flame and a finished one its check.
+  const sign = st => st === "bad" ? '<svg class="i sm bad"><use href="#flame"/></svg>'
+    : st === "done" ? '<svg class="i sm ok"><use href="#check"/></svg>'
+    : st === "new" ? '<i class="spin"></i>'
+    : st === "idle" || st === "next" ? '<i class="dot hollow"></i>'
+    : '<i class="dot ' + st + '"></i>';
+  // A lane that waits for someone on your team says who; "Needs you" is only for you.
+  const word = l => (stateOf(l) === "warn" && l.waits ? "Waits for " + l.waits : STATES[stateOf(l)]);
+  const leads = l => (l.lead === "You" ? "You lead" : esc(l.lead) + " leads");
+  const isDone = id => !!($("#" + id) && $("#" + id).classList.contains("done"));
+  const kidRow = l => {
+    const st = stateOf(l), dot = st === "new" ? '<i class="spin"></i>' : '<i class="dot ' + st + '"></i>';
+    return `<a class="row kid${l.fresh ? " fresh" : ""}" href="#lane/${l.id}" data-nav="lane/${l.id}">${dot}<span class="grow">${esc(l.title)}</span><span class="word"><span class="sr">${word(l)}. </span>${leads(l)}</span></a>`;
+  };
+  // An agent may carry its record: how often its work held when someone else checked it.
+  const agentCard = ([av, name, st, word, text, cmd, engine, kind, rec]) =>
+    `<article class="box agent"><div class="top"><span class="av${kind === "p" ? " person" : ""}">${av}</span><h3>${name}</h3><span class="st">${sign(st)}${word || STATES[st]}</span></div><p>${text}</p>${rec ? `<p class="trk"><b>Record</b> ${rec}</p>` : ""}<footer>${cmd ? `<span class="cmd">${cmd}</span><i>·</i>` : ""}<span>${engine}</span></footer></article>`;
+
+  function drawTree() {
+    if (!PAGES.topics) return;
+    const tree = $("#tree"), open = new Set($$("#tree .grp[data-unfolded]").map(g => g.id));
+    if (!drawTree.once) { PAGES.topics.forEach(t => t.open && open.add("a-" + t.id)); drawTree.once = true; }
+    $$("#tree .grp").forEach(g => g.remove());
+    PAGES.topics.forEach(t => {
+      const lanes = PAGES.lanes.filter(l => l.topic === t.id && stateOf(l) !== "done").sort(byRank);
+      const worst = lanes.length ? stateOf(lanes[0]) : null, mark = worst === "new" ? "ok" : worst;
+      const g = document.createElement("div");
+      g.className = "grp";
+      g.id = "a-" + t.id;
+      g.innerHTML = `<div class="row proj"><button class="tog" aria-expanded="false" aria-label="${esc(t.name)}: show or hide its lanes"><svg class="i ic"><use href="#${t.icon}"/></svg><svg class="i sm caret"><use href="#down"/></svg></button><a class="grow" href="#topic/${t.id}" data-nav="topic/${t.id}">${esc(t.name)}</a><span class="word">${worst ? STATES[worst] : "Idle"}</span>${mark ? `<i class="dot ${mark}"></i>` : ""}</div><div class="kids">${lanes.map(kidRow).join("")}</div>`;
+      tree.append(g);
+      fold(g, open.has(g.id));
+    });
+    $("#mgr-lanes").innerHTML = PAGES.lanes.filter(l => !l.topic).map(kidRow).join("");
+    PAGES.lanes.forEach(l => delete l.fresh);
+    // The Manager's table: every lane that is still open, the most urgent first.
+    const body = $("[data-lanes]");
+    if (body) {
+      const open = PAGES.lanes.filter(l => stateOf(l) !== "done").sort(byRank);
+      body.innerHTML = open.map(l => {
+        const st = stateOf(l), t = topicOf(l);
+        return `<tr><td><a href="#lane/${l.id}">${esc(l.title)}</a></td><td>${t ? `<a href="#topic/${t.id}">${esc(t.name)}</a>` : "Manager"}</td><td>${esc(l.lead)}</td><td><span class="st">${sign(st)}${word(l)}</span></td><td>${decided(l) ? l.afterNext : l.next}</td></tr>`;
+      }).join("");
+      const topics = new Set(open.map(l => l.topic).filter(Boolean)).size, waiting = open.filter(l => ["warn", "bad"].includes(stateOf(l)) && !l.waits).length;
+      $("[data-lanes-sum]").textContent = `${open.length} lanes in ${topics} topics · ${waiting ? waiting + " wait for you" : "none waits for you"}`;
+    }
+    markCurrent();
+  }
+
+  // Where a lane stands, in one box: what it waits for, and the buttons that settle it.
+  function standing(l, withLink) {
+    const st = stateOf(l), yes = decided(l);
+    const lead = yes ? "You approved it." : st === "warn" && l.waits ? `It waits for ${l.waits}.` : { bad: "It is stuck.", warn: "It waits for you.", ok: "It is working.", done: "Done.", new: "Starting." }[st];
+    const icon = st === "bad" ? '<svg class="i bad"><use href="#flame"/></svg>' : st === "done" || yes ? '<svg class="i ok"><use href="#check"/></svg>' : st === "new" ? '<i class="spin"></i>' : `<i class="dot ${st}"></i>`;
+    let acts = "";
+    if (yes) acts = `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`;
+    else if (st === "warn" && l.decision) acts = (l.decisionHref ? `<a class="btn quiet" href="${l.decisionHref}">Open the decision</a>` : "") + `<button class="btn ink" data-approve-id="${l.decision}"><svg class="i"><use href="#check"/></svg>${l.approve || "Approve"}</button>`;
+    else if (l.acts) acts = l.acts;
+    if (withLink) acts += `<a class="btn quiet" href="#lane/${l.id}">Open the lane</a>`;
+    return `<div class="box wait">${icon}<p><b>${lead}</b> ${yes ? l.after : l.status}</p>${acts ? `<div class="acts">${acts}</div>` : ""}</div>`;
+  }
+
+  // A topic's plan. A stage or a row can name a decision: once it is approved, it shows what happens instead.
+  const CHECK = '<svg class="i sm ok"><use href="#check"/></svg>';
+  const stageOf = ([name, st, pct, sub, rows, alt]) => (alt && isDone(alt.d) ? { name, st: alt.st || st, pct: alt.pct, sub: alt.sub, rows } : { name, st, pct, sub, rows });
+  const rowOf = ([av, who, kind, st, text, when, pct, href, alt]) => (alt && isDone(alt.d)
+    ? { av, who, kind, st: alt.st || "done", text: alt.text, when: alt.when, pct: null, href, did: true }
+    : { av, who, kind, st, text, when, pct, href });
+  // A person or an agent as one small mark. The dot is its state; the name and what it does are in the tooltip.
+  const avatar = (r, label) => `<span class="av sm${r.kind === "p" ? " person" : ""}" role="img" title="${esc(label)}" aria-label="${esc(label)}">${r.av}${r.st && r.st !== "done" ? `<i class="dot ${r.st === "next" || r.st === "idle" ? "hollow" : r.st} still"></i>` : ""}</span>`;
+  // Whoever works in a stage right now, once each.
+  const crewOf = rows => rows.filter(r => r.st !== "next" && r.st !== "done").filter((r, i, all) => all.findIndex(x => x.who === r.who) === i);
+  const ui = { stage: {}, more: {}, hf: {}, hopen: {}, hall: {}, undone: new Set() };
+
+  // A topic's history, newest first. A row: time, avatar, who, person or agent, what, its lane, flags (d: a decision,
+  // o: sent outside, u: can be undone), how many, a few of the single items, and a decision it waits for (the row
+  // shows once that is approved). "seen" marks where you last looked. A lane page shows only its own rows.
+  const HF = [["all", "All"], ["p", "People"], ["a", "Agents"], ["d", "Decisions"], ["o", "Sent outside"]];
+  const histDays = (h, lane, all) => h.days.slice(0, all ? h.days.length : h.shown).map(([day, rows], di) => [day, rows
+    .map((r, i) => (r === "seen" ? r : { id: di + "-" + i, at: r[0], av: r[1], who: r[2], kind: r[3], text: r[4], lane: r[5], flags: r[6] || "", n: r[7], sub: r[8], d: r[9] }))
+    .filter(r => r === "seen" || (!r.d || isDone(r.d)) && (!lane || r.lane === lane))]);
+  const histNew = (h, lane) => {
+    let n = 0;
+    for (const [, rows] of histDays(h, lane, true)) for (const r of rows) { if (r === "seen") return n; n++; }
+    return n;
+  };
+  function historyMore(key, h, lane) {
+    const f = ui.hf[key] || "all", all = !!ui.hall[key] || h.days.length <= h.shown, fresh = histNew(h, lane);
+    const keep = r => f === "all" || (f === "p" || f === "a" ? r.kind === f : r.flags.includes(f));
+    const icon = (id, label) => `<svg class="i sm" role="img" aria-label="${label}"><title>${label}</title><use href="#${id}"/></svg>`;
+    const row = r => {
+      const k = key + "|" + r.id, open = !!ui.hopen[k], off = ui.undone.has(k);
+      const tags = (r.flags.includes("o") ? icon("send", "Sent outside") : "") + (r.flags.includes("d") ? icon("decide", "A decision") : "");
+      const n = r.n ? `<button class="hn" data-hopen="${k}" aria-expanded="${open}" aria-label="${r.n} items, show some">${r.n}</button>` : "";
+      const undo = r.d ? `<button class="btn quiet s" data-undo-id="${r.d}">Undo</button>`
+        : r.flags.includes("u") ? `<button class="btn quiet s" data-hundo="${k}">${off ? "Redo" : "Undo"}</button>` : "";
+      const go = lane ? "" : `<a class="btn quiet s" href="#lane/${r.lane}">Open</a>`;
+      const sub = open && r.sub ? `<li class="subs"><ul>${r.sub.map(s => `<li>${s}</li>`).join("")}${r.n > r.sub.length ? `<li>and ${r.n - r.sub.length} more${lane ? "" : ` <a href="#lane/${r.lane}">in the lane</a>`}</li>` : ""}</ul></li>` : "";
+      return `<li${off ? ' class="undone"' : ""}><time>${r.at}</time>${avatar(r, r.who)}<span class="t"><b>${r.who}</b> ${r.text}</span><span class="marks">${tags}${n}</span><span class="end">${undo}${go}</span></li>${sub}`;
+    };
+    let body = "", shown = 0;
+    histDays(h, lane, all).forEach(([day, rows]) => {
+      const vis = rows.filter(r => r === "seen" || keep(r));
+      if (!vis.some(r => r !== "seen")) return;
+      body += `<h3>${day}</h3><ul>${vis.map(r => {
+        if (r !== "seen") { shown++; return row(r); }
+        return shown ? `<li class="seenmark">You last looked here, ${h.seen}</li>` : "";
+      }).join("")}</ul>`;
+    });
+    const count = histDays(h, lane, true).reduce((s, [, rows]) => s + rows.filter(r => r !== "seen").length, 0);
+    if (!count) return "";
+    const end = all ? `<p class="hist-end">${h.since}</p>` : `<p class="hist-end"><button class="btn quiet s" data-hall="${key}">Earlier days</button></p>`;
+    return `<details class="more" data-more="${key}"${ui.more[key] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>History<small>${fresh ? fresh + " new since " + h.seen : "Nothing new since " + h.seen}</small></summary><div class="body hbody">
+      <div class="hist-f" role="group" aria-label="Show in the history">${HF.map(([v, w]) => `<button data-hf="${key}|${v}" aria-pressed="${f === v}">${w}</button>`).join("")}</div>
+      <div class="hist">${body || '<p class="hist-end">Nothing of this kind in these days.</p>'}</div>${end}</div></details>`;
+  }
+
+  function stagesBox(t) {
+    const p = t.plan, sel = ui.stage[t.id], stages = p.stages.map(stageOf);
+    const btn = (s, i) => {
+      const rows = (s.rows || []).map(rowOf);
+      return `<li><button class="stage s-${s.st}" data-stage="${t.id}/${i}" aria-expanded="${sel === i}" aria-controls="tray-${t.id}" aria-label="${esc(s.name + ": " + s.sub)}"><span class="bar"><i style="width:${s.pct}%"></i></span><b>${s.st === "done" ? '<svg class="i sm"><use href="#check"/></svg>' : ""}${s.name}</b><span class="crew">${crewOf(rows).map(r => avatar(r, r.who + ": " + r.text)).join("")}</span></button></li>`;
+    };
+    let tray = "";
+    if (sel != null && stages[sel]) {
+      const s = stages[sel], rows = (s.rows || []).map(rowOf);
+      const li = r => {
+        const t = `<b>${r.who}</b> ${r.text}`;
+        return `<li class="${r.st === "next" ? "later" : ""}${r.did ? " did" : ""}">${avatar(r, r.who)}${r.href ? `<a class="t" href="${r.href}">${t}</a>` : `<span class="t">${t}</span>`}<small>${r.pct != null ? `<span class="mini"><i style="width:${r.pct}%"></i></span>` : ""}${r.did ? CHECK : ""}${r.when}</small></li>`;
+      };
+      tray = `<div class="tray" id="tray-${t.id}"><p><b>${s.name}</b> · ${s.sub}</p>${rows.length ? `<ul>${rows.map(li).join("")}</ul>` : ""}</div>`;
+    }
+    return `<ol class="stages" style="--n:${stages.length}">${stages.map(btn).join("")}</ol>${tray}`;
+  }
+
+  // The one thing on a topic that waits for you, in one line. A lane that waits for someone else is not shown here.
+  function askLine(l) {
+    if (!l) return "";
+    const st = stateOf(l), yes = decided(l);
+    if (!yes && st !== "bad" && !(st === "warn" && !l.waits)) return "";
+    const icon = yes ? '<svg class="i ok"><use href="#check"/></svg>' : st === "bad" ? '<svg class="i bad"><use href="#flame"/></svg>' : '<i class="dot warn still"></i>';
+    const acts = yes ? `<button class="btn quiet" data-undo-id="${l.decision}">Undo</button>`
+      : l.decision ? `<button class="btn ink" data-approve-id="${l.decision}"><svg class="i"><use href="#check"/></svg>${l.approve || "Approve"}</button>` : l.acts || "";
+    const head = `<p><b>${esc(l.short || l.title)}${yes ? ": you approved it" : ""}</b><span>${yes ? l.shortAfter || "" : (st === "bad" ? "Stuck · " : "Waits for you · ") + (l.ask || "")}</span></p>`;
+    const go = `<a class="btn quiet" href="#lane/${l.id}">Details</a>`;
+    return `<div class="box askline${yes ? " done" : ""}">${icon}${head}<div class="acts">${acts}${go}</div></div>`;
+  }
+
+  // A topic's forecast, pipeline and team today. A slot, a step or a row can name a decision and show what changes once
+  // it is approved.
+  const pick = o => (o && o.alt && isDone(o.alt.d) ? { ...o, ...o.alt } : o);
+  // A topic with a goal is read the way its owner is asked about it each morning: are we going to make it, what needs
+  // me today, and is the way we work fast enough. What happened and what is forecast never share a number, and every
+  // forecast says what it rests on. docs/design/cockpit/topic-status-framework.md has the rules an agent follows.
+  const dayOf = (start, d) => { const x = new Date(start + "T12:00:00Z"); x.setUTCDate(x.getUTCDate() + d); return x.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short", timeZone: "UTC" }); };
+  const valAt = (pts, d) => pts.reduce((v, [x, y]) => (x <= d ? y : v), pts[0][1]);
+  const steps = pts => pts.flatMap(([x, y], i) => (i ? [[x, pts[i - 1][1]], [x, y]] : [[x, y]]));
+  const TG = { W: 900, H: 170, L: 22, R: 120, T: 12, B: 24 };   // the trajectory's drawing area, shared with its hover
+  function trajectory(c) {
+    const { W, H, L, R, T, B } = TG;
+    const X = d => L + (d / c.days) * (W - L - R), Y = v => T + (1 - v / c.goal) * (H - T - B), f = n => n.toFixed(1);
+    const unit = c.unit || "Signed partners", key = c.key || "Signed", step = c.step || 1, fc = !!c.expected;
+    const path = pts => steps(pts).map(([x, y], i) => `${i ? "L" : "M"}${f(X(x))} ${f(Y(y))}`).join("");
+    const band = fc ? steps(c.high).concat(steps(c.low).reverse()).map(([x, y]) => `${f(X(x))},${f(Y(y))}`).join(" ") : "";
+    const grid = [...Array(Math.floor(c.goal / step) + 1).keys()].map(i => i * step).map(v => `<line class="cg" x1="${L}" x2="${W - R}" y1="${f(Y(v))}" y2="${f(Y(v))}"/><text class="ct te" x="${L - 8}" y="${f(Y(v) + 3.5)}">${v}</text>`).join("");
+    const ticks = c.ticks.map(([d, w]) => `<text class="ct tm" x="${f(X(d))}" y="${H - 6}">${w}</text>`).join("");
+    const end = a => a[a.length - 1][1], lo = fc && end(c.low), hi = fc && end(c.high), ex = fc && end(c.expected);
+    // The forecast's label moves below the plan's when the two would touch.
+    const yF = fc ? (Math.abs(Y(ex) - Y(c.goal)) < 18 ? Y(c.goal) + 22 : Y(ex) + 4) : 0;
+    const right = fc ? `<text class="cv" x="${W - R + 8}" y="${f(yF)}">Forecast ${ex}</text><text class="ct" x="${W - R + 8}" y="${f(yF + 14)}">range ${lo} to ${hi}</text>`
+      : `<text class="ct" x="${W - R + 8}" y="${f(Y(c.goal) + 22)}">${c.noForecast || "No forecast yet"}</text>`;
+    const table = c.ticks.map(([d, w]) => `<tr><th scope="row">${w}</th><td>${valAt(c.plan, d)}</td><td>${d <= c.now ? valAt(c.actual, d) : "–"}</td><td>${d < c.now || !fc ? "–" : `${valAt(c.expected, d)} (${valAt(c.low, d)} to ${valAt(c.high, d)})`}</td></tr>`).join("");
+    return `<figure class="traj" data-traj>
+        <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${unit} against the plan: ${end(c.actual)} so far; ${fc ? `forecast ${ex} by ${c.ticks[c.ticks.length - 1][1]}, range ${lo} to ${hi}` : "no forecast yet"}; plan ${c.goal}.">
+          ${grid}${fc ? `<polygon class="tr-band" points="${band}"/>` : ""}<path class="cb" d="${path(c.plan)}"/><path class="cl tr-act" d="${path(c.actual)}"/>${fc ? `<path class="cl tr-fc" d="${path(c.expected)}"/>` : ""}
+          <line class="tr-now" x1="${f(X(c.now))}" x2="${f(X(c.now))}" y1="${T}" y2="${H - B}"/><circle class="tr-dot" cx="${f(X(c.now))}" cy="${f(Y(end(c.actual)))}" r="4"/>
+          <text class="cv" x="${W - R + 8}" y="${f(Y(c.goal) + 4)}">Plan ${c.goal}</text>${right}
+          ${ticks}<line class="tr-x" x1="0" x2="0" y1="${T}" y2="${H - B}" hidden/>
+        </svg>
+        <figcaption class="legend"><span><i class="tr-k-act"></i>${key}</span><span><i class="d"></i>Plan</span>${fc ? '<span><i class="tr-k-fc"></i>Forecast and its range</span>' : ""}</figcaption>
+        <div class="tr-tip" role="status" hidden></div>
+        <table class="sr"><caption>${unit}: plan, actual and forecast</caption><thead><tr><th scope="col">Date</th><th scope="col">Plan</th><th scope="col">${key}</th><th scope="col">Forecast</th></tr></thead><tbody>${table}</tbody></table>
+      </figure>`;
+  }
+  // Pointing at the trajectory shows that day: the plan, what was signed, and the forecast with its range.
+  let trajData = null;
+  document.addEventListener("pointermove", e => {
+    const fig = e.target.closest && e.target.closest("[data-traj]");
+    $$("[data-traj] .tr-tip").forEach(t => { if (!fig || !fig.contains(t)) t.hidden = true; });
+    if (!fig || !trajData) return;
+    const c = trajData, svg = $("svg", fig), box = svg.getBoundingClientRect(), k = box.width / TG.W, span = TG.W - TG.L - TG.R;
+    const d = Math.round(((e.clientX - box.left) / k - TG.L) / span * c.days);
+    const tip = $(".tr-tip", fig), x = $(".tr-x", fig);
+    if (d < 0 || d > c.days) { tip.hidden = true; x.setAttribute("hidden", ""); return; }
+    const px = TG.L + (d / c.days) * span;
+    x.removeAttribute("hidden"); x.setAttribute("x1", px); x.setAttribute("x2", px);
+    tip.hidden = false;
+    tip.innerHTML = `<b>${dayOf(c.start, d)}</b><span>Plan ${valAt(c.plan, d)}</span>${d <= c.now ? `<span>${c.key || "Signed"} ${valAt(c.actual, d)}</span>` : c.expected ? `<span>Forecast ${valAt(c.expected, d)}, range ${valAt(c.low, d)} to ${valAt(c.high, d)}</span>` : `<span>${c.noForecast || "No forecast yet"}</span>`}`;
+    tip.style.left = Math.min(px * k + 12, box.width - tip.offsetWidth) + "px";
+  });
+
+  // The overview holds decisions and exceptions; evidence and explanations are one click away. Mostly numbers, a chart
+  // and short labels; a sentence only where a decision needs it.
+  function goalGlance(t) {
+    const g = t.goal, deals = g.deals.map(pick), l = t.focusLane ? laneById(t.focusLane) : null, yes = !!l && decided(l);
+    const likely = g.likely != null ? g.likely : deals.filter(x => x.conf === "Likely").length, open = Math.max(0, g.target - g.signed - likely);
+    const fmt = n => (typeof n === "number" ? n.toLocaleString("en-GB") : n);
+    const nums = g.nums || [[g.signed, g.target], [likely], [open]], NL = g.labels || ["Signed", "Likely, forecast", "Still unsecured"];
+    trajData = g.trajectory;
+    const head = `<header class="gh">
+        <p class="gh-eye">${t.name} · ${t.when} · ${g.asOf}</p>
+        <h1 class="gh-verdict"><span class="sr">${t.name}: </span><i class="dot ${g.health[0] === "idle" ? "hollow" : g.health[0]} still"></i>${g.health[1]}<small class="${g.health[0] === "warn" || g.health[0] === "bad" ? "" : "calm"}">${g.action}</small></h1>
+        <div class="gh-nums">
+          <div class="gn"><b>${fmt(nums[0][0])}<small>/${fmt(nums[0][1])}</small></b><span>${NL[0]}</span></div>
+          <div class="gn fc first"><b>${fmt(nums[1][0])}</b><span>${NL[1]}</span></div>
+          <div class="gn fc"><b>${fmt(nums[2][0])}</b><span>${NL[2]}</span></div>
+        </div></header>`;
+    const chart = `<section class="gc" aria-label="Forecast against the goal"><div class="headrow"><h2 class="h2">${g.trajectory.expected ? "Forecast vs goal" : "Progress vs plan"}</h2><span class="gc-in">${g.insight}</span></div>${trajectory(g.trajectory)}</section>`;
+    const MS = g.milestones;
+    // A row is one place the result comes from: a deal, a sequence, a channel, a page. It shows a track of factual
+    // milestones, or a value when the topic has none, and its forecast in a neutral word.
+    const CF = ["likely", "possible", "early", "done"];
+    const deal = x => {
+      const track = MS && x.at != null ? `<span class="ms dots" aria-label="${esc(x.stage)}"><ol>${MS.map((m, i) => `<li class="${i < x.at ? "done" : i === x.at ? "now" : ""}" title="${m}"><span class="sr">${m}${i < x.at ? ": done" : i === x.at ? ": now" : ""}</span></li>`).join("")}</ol></span>` : `<span class="dv">${x.val || ""}</span>`;
+      const cf = CF.includes(x.conf.toLowerCase()) ? x.conf.toLowerCase() : "n";
+      return `<li><a href="${x.href}"><b class="dn">${x.name}</b><span class="dx">${x.short}</span>${track}<span class="cf cf-${cf}">${x.conf}</span></a></li>`;
+    };
+    const RW = g.rows || { title: "Deals", sub: `One for each of the ${g.target} · ${MS[0].toLowerCase()} to ${MS[MS.length - 1].toLowerCase()}` };
+    const dealsBox = `<section class="sec" aria-label="${RW.title}"><div class="headrow"><h2 class="h2">${RW.title}</h2><span>${RW.sub}</span></div><ul class="dl">${deals.map(deal).join("")}</ul></section>`;
+    const d = g.decision, att = g.attention || [], top = att.slice(0, 2), more = att.slice(2);
+    let dec;
+    if (!d || !l) dec = `<div class="ny-dec"><svg class="i ok"><use href="#check"/></svg><div><b>${g.calm || "Nothing needs you"}</b><span>${g.calmSub || ""}</span></div></div>`;
+    else {
+      const stuck = !yes && stateOf(l) === "bad";
+      const icon = yes ? '<svg class="i ok"><use href="#check"/></svg>' : stuck ? '<svg class="i bad"><use href="#flame"/></svg>' : '<i class="dot warn still"></i>';
+      const acts = yes ? `<button class="btn quiet s" data-undo-id="${l.decision}">Undo</button>`
+        : l.decision ? `<button class="btn ink s" data-approve-id="${l.decision}"><svg class="i sm"><use href="#check"/></svg>${l.approve}</button>` : (l.acts || "").replace(/class="btn (ink|quiet)"/g, 'class="btn $1 s"');
+      dec = `<div class="ny-dec">${icon}<div><b>${yes ? d.done : d.title}</b><span>${yes ? l.shortAfter : d.sub}</span></div>
+          <div class="acts">${acts}<a class="btn quiet s" href="#lane/${l.id}">${d.why || "Why"}</a></div></div>`;
+    }
+    const needs = `<section class="box ny" aria-label="Needs you"><h2 class="ny-h">Needs you</h2>${dec}
+        <div class="ny-bl"><p class="ny-h2">Team blockers<span class="ny-n">${att.length}</span></p>
+          ${att.length ? `<ul>${top.map(x => `<li><a href="${x.href}"><b>${x.who}</b><span>${x.short}</span></a></li>`).join("")}</ul>` : `<p class="ny-none">None. Everything else is on schedule.</p>`}
+          ${more.length ? `<a class="ny-more" href="${more[0].href}">+${more.length} more</a>` : ""}</div></section>`;
+    const num = v => +String(v).replace(/[^\d.]/g, "");
+    const st = g.funnel.steps, max = Math.max(...st.map(x => num(x.n)));
+    const funnel = `<section class="sec" aria-label="${g.funnel.title || "Funnel"}"><div class="headrow"><h2 class="h2">${g.funnel.title || "Funnel"}</h2><span>${g.funnel.since}</span></div>
+        <ol class="fn" style="--n:${st.length}">${st.map(x => `<li class="${x.st || ""}"><i style="width:${Math.max(3, Math.round(num(x.n) / max * 100))}%"></i><b>${x.n}${x.d ? `<em>${x.d}</em>` : ""}</b><span>${x.what}</span>${x.rate ? `<small>${x.st === "warn" ? '<i class="dot warn still"></i>' : ""}${x.rate}</small>` : ""}</li>`).join("")}</ol></section>`;
+    // A guardrail with a number is a meter: the reading against a marked limit, with room past it, so a breach runs over
+    // the mark in amber. A yes-or-no rule says Held or Breached. Breached ones come first.
+    const gs = g.guards, over = x => x.st === "warn" || (x.p != null && x.p > 1);
+    const bad = gs ? gs.items.filter(over).length : 0;
+    const meter = x => {
+      const o = over(x), cls = o ? " warn" : x.p >= 0.9 ? " near" : "";
+      const head = `<span class="gt-l">${x.what}</span><b class="gt-v">${x.val}</b>`;
+      if (x.p == null) return `<li class="gt${cls}">${head}<span class="gt-yes">${o ? '<i class="dot warn still"></i>Breached' : CHECK + "Held"}</span><small>${x.limit}</small></li>`;
+      const dom = Math.max(1.25, x.p), fill = Math.min(100, (x.p / dom) * 100), lim = 100 / dom;
+      return `<li class="gt${cls}">${head}<span class="gt-bar" role="meter" aria-valuemin="0" aria-valuemax="${dom}" aria-valuenow="${x.p}" aria-label="${esc(x.what)}: ${esc(x.val)}, ${esc(x.limit)}"><i style="width:${fill.toFixed(1)}%"></i><em style="left:${lim.toFixed(1)}%"></em></span><small>${o ? "over the limit · " : x.p >= 1 ? "at the limit · " : x.p >= 0.9 ? "close to the limit · " : ""}${x.limit}</small></li>`;
+    };
+    const guards = gs ? `<section class="sec" aria-label="Guardrails"><div class="headrow"><h2 class="h2">Guardrails</h2><span>${gs.sub} · ${bad ? bad + " breached" : "all held"}</span></div>
+        <ul class="gd">${gs.items.slice().sort((a, b) => over(b) - over(a)).map(meter).join("")}</ul></section>` : "";
+    const rk = "rp:" + t.id;
+    const recovery = `<details class="more" data-more="${rk}"${ui.more[rk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>${g.gap ? "Recovery plan" : "What the forecast rests on"}<small>${g.gap ? `${g.gap.steps.length} steps to reach ${fmt(g.target)}, and what each forecast rests on` : g.restSub || "The evidence behind each row"}</small></summary><div class="body">
+        ${g.gap ? `<div class="gap"><p><b>${g.gap.says}</b></p><ol>${g.gap.steps.map(x => `<li>${x}</li>`).join("")}</ol></div>` : ""}
+        <section class="sec"><h3 class="h2">What each forecast rests on</h3><ul class="evl">${deals.map(x => `<li><b>${x.name}</b><span>${x.stage}. ${x.evidence}${x.next ? " Next: " + x.next : ""}</span></li>`).join("")}</ul>${g.out ? `<p class="deals-out">${g.out}</p>` : ""}</section>
+        ${g.ladder ? `<section class="sec"><h3 class="h2">How a forecast is set</h3><ul class="evl">${g.ladder.map(([w, f]) => `<li><b>${w}</b><span>${f}</span></li>`).join("")}</ul>${g.calib ? `<p class="deals-out">${g.calib}</p>` : ""}</section>` : ""}</div></details>`;
+    return { head, body: chart + `<div class="g2">${dealsBox}${needs}</div>` + funnel + guards + recovery };
+  }
+
+  function drawTopic(t) {
+    const v = $("#v-area"), lanes = PAGES.lanes.filter(l => l.topic === t.id);
+    const open = lanes.filter(l => stateOf(l) !== "done").sort(byRank), done = lanes.filter(l => stateOf(l) === "done");
+    const [hs, hw] = t.health || (open.some(l => stateOf(l) === "bad") ? ["bad", "Stuck"] : open.length ? ["ok", "On track"] : ["idle", "Idle"]);
+    const nums = (t.numbers || (t.facts || []).slice(0, 3)).map(f => f.length === 3
+      ? `<div class="kpi"><b>${f[0]}<small>/${f[1]}</small></b><span>${f[2]}</span></div>`
+      : `<div class="kpi"><b>${f[0]}</b><span>${f[1]}</span></div>`).join("");
+    const people = t.agents.filter(a => a[7] === "p").length, agents = t.agents.length - people;
+    const crew = t.plan ? "" : `<span class="crew">${t.agents.map(([av, name, st, w, text, , , kind]) => avatar({ av, kind, st }, `${name} · ${w || STATES[st]} · ${text}`)).join("")}</span>`;
+    const li = l => {
+      const st = stateOf(l);
+      return `<li><span class="lt">${sign(st)}</span><div><b><a href="#lane/${l.id}">${esc(l.title)}</a></b><span>${leads(l)} · ${st === "done" ? l.closed : "next report " + (decided(l) ? l.afterNext : l.next).replace(/^./, c => c.toLowerCase())}</span></div><span class="st">${word(l)}</span><a class="btn quiet s" href="#lane/${l.id}">Open</a></li>`;
+    };
+    const night = t.plan && t.plan.night ? `<p class="night"><svg class="i sm"><use href="#moon"/></svg><span>Overnight</span>${t.plan.night.map(([n, what]) => `<span><b>${n}</b>${what}</span>`).join("")}</p>` : "";
+    // The sharing proposal keeps the stage view: it shares a topic stage by stage.
+    const g = t.goal && !PAGES.stageGlance ? goalGlance(t) : null;
+    const plan = g && t.plan ? `<section class="sec"><div class="headrow"><h2 class="h2">Plan</h2><span>Stages and who works in each; click one</span></div><div class="box glance">${stagesBox(t)}</div></section>` : "";
+    v.setAttribute("aria-label", t.name + " topic");
+    v.innerHTML = `<div class="split"><div class="scroll"><div class="doc wide topic" style="gap:${g ? "var(--sp-7)" : "22px"}">
+      ${g ? g.head : `<header class="sec" style="gap:6px">${t.meta ? `<div class="meta">${t.meta}</div>` : ""}<h1 class="h1">${t.name}</h1></header>`}
+      ${g ? g.body : `<section class="box glance" aria-label="Where it stands">
+        <div class="gl-top">${nums}<div class="gl-side">${crew}<span class="health"><i class="dot ${hs === "idle" ? "hollow" : hs} still"></i>${hw}${t.when ? `<small>${t.when}</small>` : ""}</span></div></div>
+        ${t.plan ? stagesBox(t) : ""}
+        ${night}
+      </section>
+      ${t.focusLane ? askLine(laneById(t.focusLane)) : ""}
+      ${t.noGoal ? `<div class="box askline nogoal"><i class="dot hollow still"></i><p><b>No goal set</b><span>${t.noGoal}</span></p><div class="acts"><button class="btn quiet" data-ask-goal="${t.id}">Ask for a goal</button></div></div>` : ""}`}
+      <details class="more" data-more="${t.id}"${ui.more[t.id] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Details<small>${lanes.length} lanes · ${people ? people + (people === 1 ? " person, " : " people, ") : ""}${agents} ${agents === 1 ? "agent" : "agents"}</small></summary><div class="body">
+        ${g && t.meta ? `<div class="meta">${t.meta}</div>` : ""}<p class="intro">${t.intro}</p>
+        ${plan}
+        <section class="sec"><div class="headrow"><h2 class="h2">Lanes</h2><span>${open.length ? open.length + " open" : "None open"}${done.length ? " · " + done.length + " done" : ""}</span></div>
+          ${lanes.length ? `<ul class="box list">${open.concat(done).map(li).join("")}</ul>` : ""}
+        </section>
+        <section class="sec"><h2 class="h2">${people ? "People and agents" : "Agents"}</h2><div class="grid agents">${t.agents.map(agentCard).join("")}</div></section>
+        ${t.jobs ? `<section class="sec"><h2 class="h2">Jobs this week</h2><div class="box tbl"><table class="jobs"><thead><tr><th scope="col">Job</th><th scope="col">Agent</th><th scope="col">State</th><th scope="col">Due</th></tr></thead><tbody>${t.jobs.map(([job, agent, st, due, lane]) => `<tr><td>${lane ? `<a href="#lane/${lane}">${job}</a>` : job}</td><td>${agent}</td><td><span class="st">${sign(st)}${STATES[st]}</span></td><td>${due}</td></tr>`).join("")}</tbody></table></div></section>` : ""}
+      </div></details>
+      ${t.history ? historyMore("h:" + t.id, t.history) : ""}
+    </div></div>
+    <template class="chat-src" data-title="${t.name} chat" data-sub="${t.chatSub}" data-placeholder="Message ${t.name}">${t.chat}</template></div>`;
+  }
+
+  function drawLane(l) {
+    const v = $("#v-lane"), st = stateOf(l), t = topicOf(l), yes = decided(l);
+    let promoted = false;
+    const steps = l.steps.map(([kind, text, who]) => {
+      if (yes && kind === "now") kind = "ok";
+      else if (yes && kind === "todo" && !promoted) { kind = "now"; promoted = true; }
+      const mark = kind === "ok" ? '<svg class="i ok"><use href="#check"/></svg>' : kind === "todo" ? '<i class="dot hollow"></i>' : st === "new" ? '<i class="spin"></i>' : `<i class="dot ${yes ? "ok" : st}"></i>`;
+      return `<li${kind === "now" ? ' class="now"' : kind === "todo" ? ' class="todo"' : ""}>${mark}<span>${text}</span><small>${who}</small></li>`;
+    }).join("");
+    // Why the decision is the owner's, and the checks at the pause point before anything goes outside.
+    const why = !yes && (l.rec || l.yours || l.checks) ? `<dl class="rec">${l.rec ? `<dt>We recommend</dt><dd>${l.rec}</dd>` : ""}${l.delay ? `<dt>If it waits</dt><dd>${l.delay}</dd>` : ""}${l.yours ? `<dt>Why it is yours</dt><dd>${l.yours}</dd>` : ""}${l.checks ? `<dt>Checked before it goes out</dt><dd><ul class="pp">${l.checks.map(c => `<li>${CHECK}<span>${c}</span></li>`).join("")}</ul></dd>` : ""}</dl>` : "";
+    // A handover (a restart, a fresh session, a new lead): what was handed over, and the new session's read-back of it,
+    // compared with the lane's records before it may act.
+    const ho = l.handover, hk = "ho:" + l.id;
+    const hand = ho ? `<details class="more" data-more="${hk}"${ui.more[hk] ? " open" : ""}><summary><svg class="i sm"><use href="#down"/></svg>Handover<small>${ho.when} · ${ho.match ? "the read-back matched the records" : "the read-back missed something and was corrected"}</small></summary><div class="body"><dl class="rec">
+        <dt>Why</dt><dd>${ho.why}</dd><dt>Where it stood</dt><dd>${ho.state}</dd><dt>Still open</dt><dd>${ho.open}</dd><dt>What could go wrong</dt><dd>${ho.risk}</dd><dt>If it does</dt><dd>${ho.ifso}</dd><dt>Read back</dt><dd>${ho.restated}</dd>${ho.fixed ? `<dt>Corrected</dt><dd>${ho.fixed}</dd>` : ""}</dl></div></details>` : "";
+    v.setAttribute("aria-label", "Lane: " + l.title);
+    v.innerHTML = `<div class="split"><div class="scroll"><article class="doc" style="gap:28px">
+      <header class="sec"><div class="meta">${t ? `<a class="chip" href="#topic/${t.id}">${esc(t.name)}</a>` : '<a class="chip" href="#manager">With the Manager</a>'}<span>${sign(st)}${yes ? "Working" : word(l)}</span><i>·</i><span>${leads(l)}</span><i>·</i><span>${l.opened}</span></div><h1 class="h1">${esc(l.title)}</h1></header>
+      <section class="sec"><h2 class="label"><b>1</b>What you asked</h2><blockquote class="asked">${l.asked}</blockquote><p class="meta">${l.askedMeta}</p></section>
+      <section class="sec"><h2 class="label"><b>2</b>Where it stands</h2>${standing(l)}${why}${l.extra || ""}<ul class="steps">${steps}</ul><p class="meta">${l.doneNote || `Done means all ${l.steps.length}. The Manager set them when it opened the lane.`}</p></section>
+      <section class="sec"><h2 class="label"><b>3</b>Who is on it</h2><div class="grid agents">${l.agents.map(agentCard).join("")}</div></section>
+      ${l.made && l.made.length ? `<section class="sec"><h2 class="label"><b>4</b>What it made</h2><ul class="box list">${l.made.map(([icon, what, more, href]) => `<li><span class="lt"><svg class="i sm"><use href="#${icon}"/></svg></span><div><b>${what}</b><span>${more}</span></div>${href ? `<a class="btn quiet s" href="${href}">Open</a>` : '<button class="btn quiet s">Open</button>'}</li>`).join("")}</ul></section>` : ""}
+      ${hand}
+      ${t && t.history ? historyMore("h:" + l.id, t.history, l.id) : ""}
+    </article></div>
+    <template class="chat-src" data-title="${esc(l.title)}" data-sub="You, the Manager and this lane's agents. Nothing else lives here." data-placeholder="Message this lane">${l.chat || ""}</template></div>`;
+  }
+
+  // What an address opens. #topic/<id> and #lane/<id> are drawn from the records; anything else is a fixed page.
+  function route(hash) {
+    const [name, arg] = String(hash).split("/");
+    if (PAGES.topics && (name === "topic" || name === "area")) {
+      const t = PAGES.topics.find(x => x.id === arg) || PAGES.topics[0];
+      drawTopic(t);
+      return { view: "area", nav: "topic/" + t.id, crumbs: [t.name, t.crumb] };
+    }
+    if (PAGES.lanes && name === "lane") {
+      const l = laneById(arg) || laneById(PAGES.firstLane);
+      drawLane(l);
+      const t = topicOf(l);
+      return { view: "lane", nav: "lane/" + l.id, crumbs: [t ? t.name : "Manager", l.title] };
+    }
+    const view = CRUMBS[name] ? name : "brief";
+    return { view, nav: view, crumbs: CRUMBS[view] };
+  }
+  function markCurrent() {
+    $$("[data-nav]").forEach(a => (a.dataset.nav === pane.dataset.nav ? a.setAttribute("aria-current", "page") : a.removeAttribute("aria-current")));
+  }
+  // After a decision: the tree, the table and the open page follow, and the page keeps its place.
+  function refresh() {
+    drawTree();
+    if (!["area", "lane"].includes(pane.dataset.view)) return;
+    const box = $("#v-" + pane.dataset.view + " .scroll"), y = box ? box.scrollTop : 0;
+    route(pane.dataset.nav);
+    const again = $("#v-" + pane.dataset.view + " .scroll");
+    if (again) again.scrollTop = y;
+    markCurrent();
+  }
+
+  document.addEventListener("toggle", e => { if (e.target.matches && e.target.matches("[data-more]")) ui.more[e.target.dataset.more] = e.target.open; }, true);
+
+  function show(hash) {
+    const r = route(hash);
+    $$(".view").forEach(v => (v.hidden = v.id !== "v-" + r.view));
+    pane.dataset.view = r.view;
+    pane.dataset.nav = r.nav;
+    markCurrent();
+    $("#crumb-a").textContent = r.crumbs[0];
+    $("#crumb-b").textContent = r.crumbs[1];
+    document.title = r.crumbs[0] + " · Morndo";
+    // The tree shows where you are: the topic or project of the page you opened unfolds.
+    const here = $('#tree .grp [data-nav="' + r.nav + '"]');
+    if (here) fold(here.closest(".grp"), true);
+    fillChat(r.view);
+    pane.classList.toggle("chat-off", !sideChat());
+    syncChat();
+    closePalette();
+    pop.hidden = true;
+    closePins();
+    closePinMenu();
+    app.classList.remove("side-open");
+  }
+
+  // The chat. A sidebar needs room, so on a narrow window it always floats.
+  const wide = matchMedia("(min-width:901px)");
+  const sideChat = () => root.dataset.chat === "side" && wide.matches;
+  function fillChat(view) {
+    const src = $("#v-" + view + " template.chat-src") || $("#chat-default");
+    $("#chat-title").textContent = src.dataset.title || "Chat";
+    $("#chat-sub").textContent = src.dataset.sub || "";
+    $("#chat-sub").hidden = !src.dataset.sub;
+    $("#chat-input").placeholder = src.dataset.placeholder || "Ask Morndo";
+    $("#chat-thread").replaceChildren(src.content.cloneNode(true));
+  }
+  function syncChat() {
+    const side = sideChat();
+    if (side) pane.classList.remove("chat-off");
+    $(".chatbtn").setAttribute("aria-pressed", String(!pane.classList.contains("chat-off")));
+    const mode = $("[data-chat-mode]"), label = side ? "Let the chat float" : "Keep the chat as a sidebar";
+    $("use", mode).setAttribute("href", side ? "#float" : "#dock");
+    mode.setAttribute("aria-label", label);
+    mode.title = label;
+    $$("[data-chat-set]").forEach(b => b.setAttribute("aria-pressed", String((b.dataset.chatSet === "side") === (root.dataset.chat === "side"))));
+  }
+  function setChatMode(mode, open) {
+    if (mode === "side") root.dataset.chat = "side"; else root.removeAttribute("data-chat");
+    layout.chat = mode;
+    saveLayout();
+    pane.classList.toggle("chat-off", !open && !sideChat());
+    syncChat();
+  }
+  wide.addEventListener("change", () => { pane.classList.toggle("chat-off", !sideChat()); syncChat(); });
+
+  // Both sidebars can be dragged wider or narrower. A double-click puts one back to its normal width.
+  const layout = (() => { try { return JSON.parse(localStorage.getItem("morndo.layout") || "{}"); } catch (e) { return {}; } })();
+  const saveLayout = () => { try { localStorage.setItem("morndo.layout", JSON.stringify(layout)); } catch (e) {} };
+  const EDGES = {
+    // Not narrower than 224 px: below that the pins' labels no longer fit.
+    side: { prop: "--side-w", key: "side", min: 224, max: 380, normal: 236, at: x => x - app.getBoundingClientRect().left - 12 },
+    chat: { prop: "--chat-w", key: "chatW", min: 320, max: 640, normal: 380, at: x => pane.getBoundingClientRect().right - x },
+  };
+  function setWidth(which, px, save) {
+    const e = EDGES[which];
+    let w = Math.max(e.min, Math.min(e.max, px));
+    // The page itself always keeps at least 420 px.
+    if (which === "chat") w = Math.max(e.min, Math.min(w, pane.clientWidth - 420));
+    w = Math.round(w);
+    root.style.setProperty(e.prop, w + "px");
+    layout[e.key] = w;
+    $('[data-resize="' + which + '"]').setAttribute("aria-valuenow", w);
+    if (save) saveLayout();
+  }
+  $$("[data-resize]").forEach(grip => {
+    const which = grip.dataset.resize, e = EDGES[which];
+    grip.setAttribute("aria-valuemin", e.min);
+    grip.setAttribute("aria-valuemax", e.max);
+    grip.setAttribute("aria-valuenow", parseFloat(getComputedStyle(root).getPropertyValue(e.prop)));
+    grip.addEventListener("pointerdown", down => {
+      down.preventDefault();
+      grip.setPointerCapture(down.pointerId);
+      grip.classList.add("on");
+      app.classList.add("resizing");
+      const move = ev => setWidth(which, e.at(ev.clientX));
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.classList.remove("on");
+        app.classList.remove("resizing");
+        saveLayout();
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up, { once: true });
+      grip.addEventListener("pointercancel", up, { once: true });
+    });
+    grip.addEventListener("dblclick", () => setWidth(which, e.normal, true));
+    grip.addEventListener("keydown", ev => {
+      if (ev.key !== "ArrowLeft" && ev.key !== "ArrowRight") return;
+      ev.preventDefault();
+      const wider = (ev.key === "ArrowRight") === (which === "side");
+      setWidth(which, parseFloat(getComputedStyle(root).getPropertyValue(e.prop)) + (wider ? 16 : -16), true);
+    });
+  });
+
+  function openPalette() { overlay.hidden = false; $("#ask").value = ""; $("#ask").focus(); }
+  function closePalette() { overlay.hidden = true; }
+
+  // How many decisions are still open, everywhere the number shows.
+  function count(moved) {
+    const open = $$("#v-brief .decision:not(.done)");
+    const minutes = open.reduce((n, d) => n + Number(d.dataset.min), 0);
+    const replay = (el, cls) => { el.classList.remove(cls); void el.getBoundingClientRect(); el.classList.add(cls); };
+    $$("[data-open]").forEach(el => { if (el.textContent !== String(open.length)) { el.textContent = open.length; replay(el, "bump"); } el.hidden = open.length === 0; });
+    const emblem = $("#decide-em"), want = open.length ? "#decide" : "#done";
+    if ($("use", emblem).getAttribute("href") !== want || moved) { $("use", emblem).setAttribute("href", want); replay(emblem, "stamp"); }
+    $("#decide-sub").textContent = open.length ? `${open.length} open · about ${minutes} minutes` : "All decided. Nothing waits for you.";
+  }
+
+  // Folding a project's lanes away or out.
+  function fold(grp, open) {
+    grp.toggleAttribute("data-unfolded", open);
+    $(".tog", grp).setAttribute("aria-expanded", String(open));
+  }
+
+  // The pins. The module brings its own five; the owner adds topics or projects and skills himself, up to twelve in all.
+  const PINNABLE = [
+@@BLOCK:pinnable@@
+  ];
+  const MAX_PINS = 12, pinsKey = "morndo.pins2." + root.dataset.module, pinpop = $("#pinpop"), pinmenu = $("#pinmenu");
+  let pins = (() => {
+    try { const p = JSON.parse(localStorage.getItem(pinsKey)); if (Array.isArray(p)) return p; } catch (e) {}
+    return PINNABLE.filter(p => p.pinned).map(p => p.id);
+  })();
+  function closePins() { pinpop.hidden = true; $("[data-pin-add]").setAttribute("aria-expanded", "false"); }
+  function renderPins(save) {
+    const box = $("#pins"), add = $(".tile.add", box);
+    $$(".tile:not(.add)", box).forEach(t => t.remove());
+    pins = pins.filter(id => PINNABLE.some(p => p.id === id)).slice(0, MAX_PINS);
+    pins.forEach(id => {
+      const p = PINNABLE.find(x => x.id === id), el = document.createElement("div");
+      el.className = "tile";
+      el.dataset.pinId = id;
+      el.innerHTML = (p.href ? '<a class="tgo"></a>' : '<button class="tgo"></button>') + (p.badge ? '<span class="badge" data-open></span>' : "");
+      const go = el.firstChild;
+      go.innerHTML = '<svg class="i"><use href="#' + p.icon + '"/></svg><span></span>';
+      $("span", go).textContent = p.label;
+      if (p.href) { go.href = p.href; go.dataset.nav = p.href.slice(1); }
+      else if (p.run) { go.dataset.run = p.run; go.title = "Run " + p.run; }
+      else go.dataset.unfold = p.id;
+      box.insertBefore(el, add);
+    });
+    const left = MAX_PINS - pins.length;
+    box.classList.toggle("full", left <= 0);
+    $("#pin-room").textContent = left > 0 ? left + " of " + MAX_PINS + " places free" : "All " + MAX_PINS + " places are used";
+    // The list to pin from: whatever is not pinned yet, by kind.
+    const list = $("#pin-list");
+    list.replaceChildren();
+    [...new Set(PINNABLE.map(p => p.kind))].forEach(kind => {
+      const rest = PINNABLE.filter(p => p.kind === kind && !pins.includes(p.id));
+      if (!rest.length) return;
+      const h = document.createElement("h3");
+      h.textContent = kind;
+      list.append(h);
+      rest.forEach(p => {
+        const b = document.createElement("button");
+        b.className = "pr";
+        b.dataset.pin = p.id;
+        b.innerHTML = '<svg class="i"><use href="#' + p.icon + '"/></svg><b></b><span class="g"></span>';
+        $("b", b).textContent = p.name || p.label;
+        $(".g", b).textContent = p.note || "";
+        list.append(b);
+      });
+    });
+    if (!list.children.length) { const none = document.createElement("p"); none.textContent = "Everything that can be pinned is pinned."; list.append(none); }
+    if (pane.dataset.nav) markCurrent();
+    count();
+    if (save) try { localStorage.setItem(pinsKey, JSON.stringify(pins)); } catch (e) {}
+  }
+
+  // The right-click menu: take a pin off, or pin a topic or project.
+  function openPinMenu(id, x, y) {
+    const p = PINNABLE.find(q => q.id === id), on = pins.includes(id), full = pins.length >= MAX_PINS, item = $("button", pinmenu);
+    item.dataset.pinToggle = id;
+    item.disabled = !on && full;
+    $("span", item).textContent = on ? "Unpin " + (p.name || p.label) : full ? "All " + MAX_PINS + " places are used" : "Pin " + (p.name || p.label) + " to the top";
+    closePins();
+    pinmenu.hidden = false;
+    pinmenu.style.left = Math.max(8, Math.min(x, innerWidth - pinmenu.offsetWidth - 8)) + "px";
+    pinmenu.style.top = Math.max(8, Math.min(y, innerHeight - pinmenu.offsetHeight - 8)) + "px";
+    item.focus({ preventScroll: true });
+  }
+  function closePinMenu() { pinmenu.hidden = true; }
+  // On a touch screen there is no right-click: a long press opens the same menu, and the tap that ends it does nothing.
+  let press = 0, pressed = false;
+  $("#side").addEventListener("pointerdown", e => {
+    const id = e.pointerType === "touch" && pinAt(e.target);
+    if (id) press = setTimeout(() => { pressed = true; openPinMenu(id, e.clientX, e.clientY); }, 550);
+  });
+  ["pointerup", "pointercancel", "pointermove"].forEach(type => $("#side").addEventListener(type, () => clearTimeout(press)));
+  $("#side").addEventListener("click", e => { if (pressed) { pressed = false; e.preventDefault(); e.stopPropagation(); } }, true);
+
+  // A stand-in for the manager's intake: in the product it reads the message and the lanes that are open.
+  const ROUTES = [
+@@BLOCK:routes@@
+  ];
+
+  // Usage. Two kinds of account, never mixed: a subscription (Claude, Codex, Cursor) has a flat price and limits that
+  // reset, so it shows how much of each window is used and when it resets; an API key (your own, billed by use) shows
+  // what was spent against the budget you set. Only accounts the workspace added appear; the rest are named once.
+  const USAGE = {
+    asOf: "09:20",
+    subs: [
+      { name: "Claude Max", lanes: 6, note: "At its limit, lanes move to your Anthropic key.", meters: [
+        { what: "5 hours", used: 0.86, val: "86%", note: "resets 14:20" },
+        { what: "Week", used: 0.41, val: "41%", note: "resets Mon" }] },
+      { name: "ChatGPT Pro · Codex", lanes: 3, meters: [
+        { what: "5 hours", used: 0.18, val: "18%", note: "resets 12:05" },
+        { what: "Week", used: 0.33, val: "33%", note: "resets Thu" }] },
+      { name: "Cursor Pro", lanes: 1, meters: [
+        { what: "Requests this month", used: 0.62, val: "312 of 500", note: "resets 1 Dec" }] },
+    ],
+    keys: [
+      { name: "Anthropic API", lanes: 0, note: "Takes over when Claude Max is at its limit.", meters: [
+        { what: "This month", used: 0.64, val: "€96 of €150" }] },
+      { name: "OpenAI API", lanes: 4, meters: [
+        { what: "This month", used: 0.71, val: "€212 of €300", note: "GPT agents and GPT Image" }] },
+    ],
+    missing: ["Gemini", "Grok", "Seedance"],
+  };
+  const usagePop = $("#usagepop");
+  function drawUsage() {
+    const meter = m => {
+      const cls = m.used >= 1 ? " full" : m.used >= 0.8 ? " near" : "";
+      return `<div class="um${cls}"><span>${m.what}</span><b>${m.val}</b><i role="meter" aria-valuemin="0" aria-valuemax="1" aria-valuenow="${m.used}" aria-label="${esc(m.what)}: ${esc(m.val)}"><em style="width:${Math.min(100, m.used * 100).toFixed(0)}%"></em></i>${m.note || m.used >= 0.8 ? `<small>${m.used >= 1 ? "Limit reached" : m.used >= 0.8 ? "Close" : ""}${m.note && m.used >= 0.8 ? " · " : ""}${m.note || ""}</small>` : ""}</div>`;
+    };
+    const acct = a => `<div class="uacct"><p><b>${a.name}</b><span>${a.lanes ? a.lanes + (a.lanes === 1 ? " lane" : " lanes") : "standing by"}</span></p><div class="ums">${a.meters.map(meter).join("")}</div>${a.note ? `<p class="unote">${a.note}</p>` : ""}</div>`;
+    usagePop.firstElementChild.innerHTML = `<header><div><h2>Usage</h2><p>Only accounts you added · ${USAGE.asOf}</p></div><button class="ib" data-usage-close aria-label="Close usage"><svg class="i"><use href="#x"/></svg></button></header>
+      <section aria-label="Subscriptions"><h3>Subscriptions<small>flat price · limits reset on their own</small></h3>${USAGE.subs.map(acct).join("")}</section>
+      <section aria-label="API keys"><h3>API keys<small>your own keys · billed by use</small></h3>${USAGE.keys.map(acct).join("")}</section>
+      <footer><span>Not added, so not shown: ${USAGE.missing.join(", ")}.</span><a class="btn quiet s" href="#skills" data-usage-close>Manage accounts</a></footer>`;
+  }
+  function setUsage(open) {
+    if (open) {
+      drawUsage();
+    }
+    usagePop.hidden = !open;
+    $$("[data-usage]").forEach(b => b.setAttribute("aria-expanded", String(open)));
+  }
+
+  // One message in, one lane out: the manager puts it in a project and names who leads, with a receipt the owner
+  // can correct. What fits no project stays with the manager until it knows where it belongs.
+  function fileDirection(raw) {
+    const text = raw.trim();
+    if (!text) return;
+    const route = ROUTES.find(r => r.re.test(text));
+    if (PAGES.lanes) return fileLane(text, route);
+    const grp = route && $("#" + route.id);
+    const kid = document.createElement("button");
+    kid.className = "row kid fresh";
+    kid.innerHTML = '<i class="spin"></i><span class="grow"></span><span class="word">Starting</span>';
+    $(".grow", kid).textContent = text;
+    $(grp ? ".kids" : "#mgr-lanes", grp || document).prepend(kid);
+    if (grp) fold(grp, true);
+
+    const box = $("#receipts"), el = document.createElement("div");
+    el.className = "receipt";
+    el.innerHTML = '<div class="rh"><svg class="i sm ok"><use href="#check"/></svg><b>Filed as its own lane</b><button class="ib" data-dismiss aria-label="Dismiss"><svg class="i sm"><use href="#x"/></svg></button></div><p class="rt"></p><p class="rr"></p><div class="acts"><button class="btn quiet s" data-dismiss>Move it</button><button class="btn quiet s" data-unfile>Undo</button></div>';
+    $(".rt", el).textContent = text;
+    $(".rr", el).textContent = grp ? $("#tree h2").dataset.kind + ": " + $(".proj .grow", grp).textContent + " · " + route.lead + " leads" : "With the Manager, until it knows where this belongs";
+    $("[data-unfile]", el).addEventListener("click", () => { kid.remove(); el.remove(); });
+    box.prepend(el);
+    while (box.children.length > 3) box.lastChild.remove();
+  }
+
+  // The same, for a module with lane records: the new lane is a record, so it has a page from the first second.
+  let filed = 0;
+  function fileLane(text, route) {
+    const t = route && PAGES.topics.find(x => "a-" + x.id === route.id), lead = t ? route.lead : "Manager";
+    const l = {
+      id: "new-" + ++filed, topic: t ? t.id : null, title: text, state: "new", lead, fresh: true, opened: "Opened just now",
+      next: "Within the hour", asked: esc(text),
+      askedMeta: "You to the Manager, just now<i>·</i>" + (t ? `The Manager filed it under ${t.name} and named ${lead} to lead.` : "The Manager keeps it until it knows where it belongs."),
+      status: t ? `${lead} is reading your ask and will set what done means before starting.` : "The Manager is working out which topic this belongs to. It asks you only if it cannot tell.",
+      steps: [["now", "What done means, set from your ask", lead + " · now"], ["todo", "The work itself", lead], ["todo", "Checked by someone other than " + lead, "Manager"], ["todo", "Reported back to you", "Manager"]],
+      doneNote: "These are the first steps. The lead replaces them with the real ones before it starts.",
+      agents: [[lead[0], lead, "new", "Leads", "Reading your ask", "", "Auto"]],
+      chat: `<p class="said">${esc(text)}</p><div class="msg"><span class="av">${lead[0]}</span><div class="who">${lead}<time>now</time></div><p>Got it. I will set what done means and start. You hear from me when it is done or when I need you.</p></div>`
+    };
+    PAGES.lanes.unshift(l);
+    drawTree();
+    if (t) fold($("#a-" + t.id), true);
+    const box = $("#receipts"), el = document.createElement("div");
+    el.className = "receipt";
+    el.innerHTML = `<div class="rh"><svg class="i sm ok"><use href="#check"/></svg><b>Filed as its own lane</b><button class="ib" data-dismiss aria-label="Dismiss"><svg class="i sm"><use href="#x"/></svg></button></div><p class="rt"></p><p class="rr"></p><div class="acts"><a class="btn quiet s" href="#lane/${l.id}">Open</a><button class="btn quiet s" data-dismiss>Move it</button><button class="btn quiet s" data-unfile>Undo</button></div>`;
+    $(".rt", el).textContent = text;
+    // Work is split into lanes only where the parts can run side by side; steps that build on each other stay in one.
+    const chain = /\b(then|once|after|before)\b/i.test(text) ? " · one lane: the steps build on each other" : "";
+    $(".rr", el).textContent = (t ? $("#tree h2").dataset.kind + ": " + t.name + " · " + lead + " leads" : "With the Manager, until it knows where this belongs") + chain;
+    $("[data-unfile]", el).addEventListener("click", () => {
+      PAGES.lanes.splice(PAGES.lanes.indexOf(l), 1);
+      el.remove();
+      if (pane.dataset.nav === "lane/" + l.id) location.hash = t ? "#topic/" + t.id : "#manager";
+      drawTree();
+    });
+    box.prepend(el);
+    while (box.children.length > 3) box.lastChild.remove();
+  }
+
+  document.addEventListener("click", e => {
+    const t = e.target.closest("a,button");
+    if (!e.target.closest("#themepop,[data-wsmenu]")) pop.hidden = true;
+    if (!e.target.closest("#pinpop,[data-pin-add]")) closePins();
+    if (!e.target.closest("#pinmenu")) closePinMenu();
+    if (!usagePop.hidden && !e.target.closest("#usagepop,[data-usage]")) setUsage(false);
+    if (t && t.matches("[data-usage]")) { setUsage(usagePop.hidden); return; }
+    if (t && t.matches("[data-usage-close]")) setUsage(false);
+    if (!t) { if (e.target === overlay) closePalette(); return; }
+    if (t.matches("[data-wsmenu]")) { pop.style.left = pop.style.top = ""; pop.hidden = !pop.hidden; }
+    else if (t.matches("[data-theme-set]")) { theme.id = t.dataset.themeSet; applyTheme(true); }
+    else if (t.matches("[data-hero]")) showHero(heroAt + Number(t.dataset.hero), true);
+    else if (t.matches("[data-pin-add]")) {
+      pinpop.hidden = !pinpop.hidden;
+      t.setAttribute("aria-expanded", String(!pinpop.hidden));
+      const r = $("#pins").getBoundingClientRect();
+      pinpop.style.left = Math.max(8, r.left) + "px";
+      pinpop.style.top = r.bottom + 8 + "px";
+    }
+    else if (t.matches("[data-pin]")) { pins.push(t.dataset.pin); renderPins(true); if ($("#pins").classList.contains("full")) closePins(); }
+    else if (t.matches("[data-pin-toggle]")) {
+      const id = t.dataset.pinToggle;
+      pins = pins.includes(id) ? pins.filter(x => x !== id) : pins.concat(id);
+      closePinMenu();
+      renderPins(true);
+    }
+    else if (t.matches("[data-run]")) { openPalette(); $("#ask").value = t.dataset.run + " "; }
+    else if (t.matches("[data-unfold]")) { const g = $("#" + t.dataset.unfold); fold(g, true); g.scrollIntoView({ block: "nearest" }); }
+    else if (t.matches(".tog")) fold(t.closest(".grp"), !t.closest(".grp").hasAttribute("data-unfolded"));
+    else if (t.matches(".proj > button.grow")) fold(t.closest(".grp"), !t.closest(".grp").hasAttribute("data-unfolded"));
+    else if (t.matches("[data-dismiss]")) t.closest(".receipt").remove();
+    else if (t.matches("[data-file]")) { const inp = $("input", t.closest(".composer")); fileDirection(inp.value); inp.value = ""; }
+    else if (t.matches("[data-approve]")) { t.closest(".decision").classList.add("done"); count(true); refresh(); }
+    else if (t.matches("[data-undo]")) { t.closest(".decision").classList.remove("done"); count(); refresh(); }
+    else if (t.matches("[data-approve-id]")) { $("#" + t.dataset.approveId).classList.add("done"); count(true); refresh(); }
+    else if (t.matches("[data-undo-id]")) { $("#" + t.dataset.undoId).classList.remove("done"); count(); refresh(); }
+    else if (t.matches("[data-stage]")) { const [id, i] = t.dataset.stage.split("/"); ui.stage[id] = ui.stage[id] === +i ? null : +i; refresh(); $(`[data-stage="${id}/${i}"]`).focus(); }
+    else if (t.matches("[data-hf]")) { const [k, v] = t.dataset.hf.split("|"); ui.hf[k] = v; refresh(); $(`[data-hf="${t.dataset.hf}"]`).focus(); }
+    else if (t.matches("[data-hopen]")) { const k = t.dataset.hopen; ui.hopen[k] = !ui.hopen[k]; refresh(); $(`[data-hopen="${k}"]`).focus(); }
+    else if (t.matches("[data-hundo]")) { const k = t.dataset.hundo; if (!ui.undone.delete(k)) ui.undone.add(k); refresh(); $(`[data-hundo="${k}"]`).focus(); }
+    else if (t.matches("[data-hall]")) { ui.hall[t.dataset.hall] = true; refresh(); }
+    else if (t.matches("[data-undo-log]")) { const li = t.closest("li"); li.classList.toggle("undone"); t.textContent = li.classList.contains("undone") ? "Redo" : "Undo"; }
+    else if (t.matches("[data-palette]")) openPalette();
+    else if (t.matches("[data-close]")) closePalette();
+    else if (t.matches("[data-chat]")) { pane.classList.toggle("chat-off"); syncChat(); if (!pane.classList.contains("chat-off")) $("#chat-input").focus(); }
+    else if (t.matches("[data-chat-mode]")) setChatMode(sideChat() ? "float" : "side", true);
+    else if (t.matches("[data-chat-set]")) setChatMode(t.dataset.chatSet, false);
+    else if (t.matches("[data-side]")) app.classList.toggle(matchMedia("(max-width:900px)").matches ? "side-open" : "side-off");
+    else if (t.matches("[data-back]")) history.back();
+    else if (t.matches("[data-fwd]")) history.forward();
+    else if (t.matches("[data-glass-default]")) { theme.g = null; applyTheme(true); }
+    else if (t.matches("[data-strength-default]")) { theme.k = K_DEFAULT; applyTheme(true); }
+    else if (t.matches("[data-ask-goal]")) { const x = PAGES.topics.find(y => y.id === t.dataset.askGoal); fileDirection(`Propose a goal for ${x.name.toLowerCase()} with a measure and a date`); }
+    else if (t.closest(".seg[data-pick]")) $$("button", t.closest(".seg")).forEach(b => b.setAttribute("aria-pressed", String(b === t)));
+    else if (t.matches(".sw")) t.setAttribute("aria-checked", String(t.getAttribute("aria-checked") !== "true"));
+  });
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Enter" && e.target.matches("#ask, .dock input") && e.target.value.trim()) { fileDirection(e.target.value); e.target.value = ""; closePalette(); }
+    else if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); overlay.hidden ? openPalette() : closePalette(); }
+    else if (e.key === "Escape" && !overlay.hidden) closePalette();
+    else if ((e.key === "ContextMenu" || (e.shiftKey && e.key === "F10")) && e.target.closest && e.target.closest("#side") && pinAt(e.target)) {
+      // The keyboard's way to the same menu: the menu key, or Shift and F10, on a pin, a topic or a project.
+      e.preventDefault();
+      const r = e.target.closest(".tile,.proj").getBoundingClientRect();
+      openPinMenu(pinAt(e.target), r.left + 12, r.bottom - 4);
+    }
+    else if (e.key === "Escape" && !pinmenu.hidden) closePinMenu();
+    else if (e.key === "Escape" && !pinpop.hidden) closePins();
+    else if (e.key === "Escape" && !pop.hidden) pop.hidden = true;
+    else if (e.key === "Escape" && !usagePop.hidden) { setUsage(false); $("[data-usage]").focus(); }
+    else if (e.key === "Escape" && !sideChat()) { pane.classList.add("chat-off"); syncChat(); }
+  });
+
+@@EXTRA:js@@
+  addEventListener("hashchange", () => show(location.hash.slice(1)));
+  drawTree();
+  renderPins(false);
+  show(location.hash.slice(1));
+  count();
+  applyTheme(false);
+  showHero(heroAt, false);
+})();
+</script>
+</body>
+</html>

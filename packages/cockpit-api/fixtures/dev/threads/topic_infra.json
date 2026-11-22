@@ -1,0 +1,14 @@
+{
+  "id": "topic:infra",
+  "title": "Infra chat",
+  "sub": "You and the Manager.",
+  "placeholder": "Message Infra",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [],
+  "nextCursor": null,
+  "scope": null
+}

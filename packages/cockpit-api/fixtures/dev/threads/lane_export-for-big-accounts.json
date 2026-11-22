@@ -1,0 +1,135 @@
+{
+  "id": "lane:export-for-big-accounts",
+  "title": "Export for big accounts",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m4",
+      "author": {
+        "id": "builder",
+        "name": "Builder",
+        "shortName": "Builder",
+        "kind": "agent",
+        "avatar": "B",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Found it: the export builds the whole file in memory. I am changing it to write 5,000 rows at a time, with a test on a 400,000-row account.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-13T11:40:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m5",
+      "author": {
+        "id": "qa",
+        "name": "QA",
+        "shortName": "QA",
+        "kind": "agent",
+        "avatar": "Q",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Fenwick's export ran on staging in 48 seconds. I compared the file with their data: every row is there.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-15T18:05:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m6",
+      "author": {
+        "id": "timo-varga",
+        "name": "Timo Varga",
+        "shortName": "Timo",
+        "kind": "person",
+        "avatar": "T",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Can Fenwick get it before everyone else?",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:11:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m7",
+      "author": {
+        "id": "release",
+        "name": "Release",
+        "shortName": "Release",
+        "kind": "agent",
+        "avatar": "R",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Yes. I can put Fenwick in the first 10% of accounts, so they have it tonight at 22:00. It is in the decision brief as an option.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:12:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

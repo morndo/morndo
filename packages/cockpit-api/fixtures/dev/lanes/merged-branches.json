@@ -1,0 +1,81 @@
+{
+  "id": "merged-branches",
+  "topicId": "mobile",
+  "title": "Merged branches",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Mobile deleted 4 branches that were already merged.",
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Delete the four merged branches.",
+  "askedMeta": {
+    "source": "Mobile",
+    "note": null
+  },
+  "status": "Mobile deleted 4 branches that were already merged.",
+  "standing": {
+    "headline": "Done.",
+    "detail": "Mobile deleted 4 branches that were already merged."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Delete the four merged branches.",
+      "who": "Builder"
+    }
+  ],
+  "doneNote": "Mobile deleted 4 branches that were already merged.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Mobile deleted 4 branches that were already merged.",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-16T05:15:00+01:00",
+  "closedAt": "2026-11-16T05:15:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

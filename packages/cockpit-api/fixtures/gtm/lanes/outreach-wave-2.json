@@ -1,0 +1,157 @@
+{
+  "id": "outreach-wave-2",
+  "topicId": "partnerships",
+  "title": "Outreach, wave 2: retail",
+  "state": "warn",
+  "stateWord": "Waits for Lea",
+  "lead": {
+    "id": "sender",
+    "name": "Sender",
+    "shortName": "Sender",
+    "kind": "agent",
+    "avatar": "S",
+    "role": null,
+    "state": "warn",
+    "word": "Leads",
+    "text": "Waits for Lea's check",
+    "skill": "/outbound-sequence",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": {
+    "id": "lea-brandt",
+    "name": "Lea Brandt",
+    "shortName": "Lea",
+    "kind": "person",
+    "avatar": "L",
+    "role": "GTM associate",
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "next": "After Lea's check",
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Once batch 3 is checked, write to the retail brands.",
+  "askedMeta": {
+    "source": "You in the Partnerships chat, Friday 17:30",
+    "note": "The Partnerships manager opened this thread and named Sender; Lea checks the emails first."
+  },
+  "status": "24 personal emails to retail brands were drafted overnight. Lea checks them at 09:00; then they go out at 20 a day.",
+  "standing": {
+    "headline": "It waits for Lea.",
+    "detail": "24 personal emails to retail brands were drafted overnight. Lea checks them at 09:00; then they go out at 20 a day."
+  },
+  "acts": [
+    {
+      "label": "Remind Lea",
+      "tone": "quiet",
+      "id": "remind-lea",
+      "personId": "lea-brandt",
+      "target": null
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "40 retail brands picked from the checked list",
+      "who": "Brand scout · 02:10"
+    },
+    {
+      "kind": "ok",
+      "text": "24 emails drafted, one line each about the brand",
+      "who": "Sender · 04:30"
+    },
+    {
+      "kind": "now",
+      "text": "Lea checks the 24 emails",
+      "who": "Lea · by 11:00"
+    },
+    {
+      "kind": "todo",
+      "text": "Sent from your mail, 20 a day",
+      "who": "Sender · from today"
+    },
+    {
+      "kind": "todo",
+      "text": "The other 16 drafted once their contacts are in",
+      "who": "Sender · Thu"
+    }
+  ],
+  "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "sender",
+      "name": "Sender",
+      "shortName": "Sender",
+      "kind": "agent",
+      "avatar": "S",
+      "role": null,
+      "state": "warn",
+      "word": "Leads",
+      "text": "Waits for Lea's check",
+      "skill": "/outbound-sequence",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "lea-brandt",
+      "name": "Lea Brandt",
+      "shortName": "Lea",
+      "kind": "person",
+      "avatar": "L",
+      "role": "GTM associate",
+      "state": "warn",
+      "word": "Review due",
+      "text": "24 emails, by 11:00",
+      "skill": null,
+      "engine": null,
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "24 drafted emails",
+      "detail": "Retail brands, from your mail",
+      "target": {
+        "kind": "lane",
+        "id": "outreach-wave-2"
+      }
+    }
+  ],
+  "handover": {
+    "match": false,
+    "why": "Sender's session restarted after the machine updated overnight.",
+    "open": "Lea checks the 24 by 11:00; the other 16 wait for their contacts.",
+    "risk": "Emails go out before Lea has checked them.",
+    "ifSo": "Stop sending, tell Lea and you, and list every email that went out.",
+    "restated": "“24 drafts are ready; send 20 a day from 09:00.”",
+    "fixed": "Lea's check was missing. The Manager compared the read-back with the lane's records, put the check back as the next step and held sending. Nothing went out.",
+    "at": "2026-11-16T05:05:00+01:00",
+    "summary": "24 emails drafted for retail brands; none sent.",
+    "confirmedAt": null
+  },
+  "fresh": false,
+  "openedAt": "2026-11-16T02:10:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

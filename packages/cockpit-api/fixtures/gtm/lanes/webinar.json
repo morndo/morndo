@@ -1,0 +1,194 @@
+{
+  "id": "webinar",
+  "topicId": "content",
+  "title": "Webinar on Thursday",
+  "state": "bad",
+  "stateWord": "Stuck",
+  "lead": {
+    "id": "visuals",
+    "name": "Visuals",
+    "shortName": "Visuals",
+    "kind": "agent",
+    "avatar": "V",
+    "role": null,
+    "state": "bad",
+    "word": "Leads · stuck",
+    "text": "Out of feedback rounds",
+    "skill": "/brand-visual",
+    "engine": "GPT Image",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": "Now, needs your call",
+  "afterNext": null,
+  "decisionId": null,
+  "short": "Webinar promo",
+  "ask": "2 of 6 pictures fail the brand check · post at 16:00",
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Get the webinar promo out on Monday.",
+  "askedMeta": {
+    "source": "You to the Manager, Thursday 17:40",
+    "note": "The Manager filed it under Content and named Visuals to lead."
+  },
+  "status": "Visuals used its 3 feedback rounds. Images 3 and 6 still fail the brand check, and the post goes out at 16:00.",
+  "standing": {
+    "headline": "It is stuck.",
+    "detail": "Visuals used its 3 feedback rounds. Images 3 and 6 still fail the brand check, and the post goes out at 16:00."
+  },
+  "acts": [
+    {
+      "label": "Post with the 4 that pass",
+      "tone": "ink",
+      "id": "post-passing",
+      "personId": null,
+      "target": null
+    },
+    {
+      "label": "Allow one more round",
+      "tone": "quiet",
+      "id": "one-more-round",
+      "personId": null,
+      "target": null
+    }
+  ],
+  "thumbs": [
+    {
+      "label": "Image 1",
+      "passed": true,
+      "reason": null
+    },
+    {
+      "label": "Image 2",
+      "passed": true,
+      "reason": null
+    },
+    {
+      "label": "Image 3",
+      "passed": false,
+      "reason": "Logo unclear"
+    },
+    {
+      "label": "Image 4",
+      "passed": true,
+      "reason": null
+    },
+    {
+      "label": "Image 5",
+      "passed": true,
+      "reason": null
+    },
+    {
+      "label": "Image 6",
+      "passed": false,
+      "reason": "Logo unclear"
+    }
+  ],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Promo text written and approved",
+      "who": "Writer · Friday"
+    },
+    {
+      "kind": "ok",
+      "text": "6 images made",
+      "who": "Visuals · Saturday"
+    },
+    {
+      "kind": "now",
+      "text": "Every image passes the brand check: 4 of 6 so far",
+      "who": "Visuals · stuck since 09:12"
+    },
+    {
+      "kind": "todo",
+      "text": "Post scheduled for 16:00",
+      "who": "Publisher · today"
+    },
+    {
+      "kind": "todo",
+      "text": "Sign-ups reported after the webinar",
+      "who": "Manager · Fri 20 Nov"
+    }
+  ],
+  "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "visuals",
+      "name": "Visuals",
+      "shortName": "Visuals",
+      "kind": "agent",
+      "avatar": "V",
+      "role": null,
+      "state": "bad",
+      "word": "Leads · stuck",
+      "text": "Out of feedback rounds",
+      "skill": "/brand-visual",
+      "engine": "GPT Image",
+      "record": null
+    },
+    {
+      "id": "writer",
+      "name": "Writer",
+      "shortName": "Writer",
+      "kind": "agent",
+      "avatar": "W",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Wrote the promo text",
+      "skill": "/linkedin-post",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "publisher",
+      "name": "Publisher",
+      "shortName": "Publisher",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "warn",
+      "word": "Waiting",
+      "text": "Holds the 16:00 post",
+      "skill": "/schedule-post",
+      "engine": "Asks first",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Promo text",
+      "detail": "120 words, approved Friday",
+      "target": {
+        "kind": "lane",
+        "id": "webinar"
+      }
+    },
+    {
+      "icon": "image",
+      "title": "6 images",
+      "detail": "4 pass the brand check, 2 fail",
+      "target": {
+        "kind": "topic",
+        "id": "content"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-12T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

@@ -1,0 +1,78 @@
+{
+  "id": "decision:d1",
+  "title": "Chat",
+  "sub": null,
+  "placeholder": "Ask about this decision",
+  "reading": "Reading this decision and its proof",
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [
+    "Show what changed",
+    "Release to Fenwick only first"
+  ],
+  "messages": [
+    {
+      "id": "m1",
+      "author": {
+        "id": "timo-varga",
+        "name": "Timo Varga",
+        "shortName": "Timo",
+        "kind": "person",
+        "avatar": "T",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "What happens to exports that are running during the release?",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:44:59+01:00",
+      "decisionId": "d1",
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m2",
+      "author": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "They finish on the old version. The rollout replaces one server at a time and waits for running exports, up to 5 minutes each.\nChecked on staging: 3 exports ran through a rollout and all 3 files were complete.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:45:00+01:00",
+      "decisionId": "d1",
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

@@ -1,0 +1,89 @@
+{
+  "id": "new-sign-in",
+  "topicId": "web",
+  "title": "New sign-in",
+  "state": "warn",
+  "stateWord": "Needs you",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "warn",
+    "word": "Needs you",
+    "text": "Both sign-ins are built",
+    "skill": "/build-feature",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": "After your pick",
+  "afterNext": null,
+  "decisionId": "d3",
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Choose the new sign-in: passkeys or a link by email.",
+  "askedMeta": {
+    "source": "You to the Manager",
+    "note": "The Manager filed it under Web app and named Builder to lead."
+  },
+  "status": "Both are built behind a switch and passed QA. Passkeys take 2 screens, the email link takes 4. The lane suggests passkeys.",
+  "standing": {
+    "headline": "It waits for you.",
+    "detail": "Both are built behind a switch and passed QA. Passkeys take 2 screens, the email link takes 4. The lane suggests passkeys."
+  },
+  "acts": [
+    {
+      "label": "Approve",
+      "tone": "ink",
+      "id": "approve",
+      "personId": null,
+      "target": null
+    }
+  ],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "now",
+      "text": "Your pick: passkeys or a link by email",
+      "who": "You · due Wednesday"
+    }
+  ],
+  "doneNote": "Done means all 1. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "warn",
+      "word": "Needs you",
+      "text": "Both sign-ins are built",
+      "skill": "/build-feature",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-16T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

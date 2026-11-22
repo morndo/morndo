@@ -1,0 +1,161 @@
+<!-- @@ css -->
+/* Proposal: the product review's fixes, laid over the go-to-market module. Only in gtm-cockpit-v2.html. */
+.v2tag{height:24px;display:inline-flex;align-items:center;padding:0 10px;margin-right:var(--sp-2);border-radius:var(--r-pill);box-shadow:inset 0 0 0 1px var(--edge-2);font-size:var(--fs-xs);font-weight:600;color:var(--text-2);white-space:nowrap}
+/* 2. Where each topic stands, at the top of the brief: one row per topic, the worst first. */
+.tstrip{display:flex;flex-direction:column;gap:var(--sp-3)}
+.tstrip h2{font:italic 400 var(--fs-3xl)/1.1 var(--serif);color:var(--text)}
+.tstrip ul{display:flex;flex-direction:column}
+.tstrip li+li{border-top:1px solid var(--line)}
+.tstrip a{display:grid;grid-template-columns:14px minmax(110px,160px) minmax(120px,170px) minmax(0,1fr) auto;gap:var(--sp-4);align-items:center;min-height:46px}
+.tstrip a:hover b{text-decoration:underline;text-underline-offset:3px}
+.tstrip b{font-weight:600;color:var(--text-hi)}.tstrip .tv{color:var(--text)}.tstrip .tn{color:var(--text-2);font-size:var(--fs-md)}
+.tstrip .tc{font-size:var(--fs-sm);color:var(--muted);white-space:nowrap}
+/* On a phone the decisions come first and the strip follows them. */
+@container page (max-width:860px){.cards>.tstrip{order:1}.cards>.card{order:2}.cards>.card.v2-decide{order:0}
+  .tstrip a{grid-template-columns:14px minmax(0,1fr) auto;row-gap:0;padding:6px 0}.tstrip .tv{grid-column:3}.tstrip .tn{grid-column:2/-1;font-size:var(--fs-sm)}.tstrip .tc{display:none}}
+/* 4. The decisions as a queue on the Decide page. */
+.dq{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:var(--sp-2)}
+.dq a{display:inline-flex;align-items:center;gap:7px;height:30px;padding:0 12px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-sm);color:var(--text-2)}
+.dq a:hover{background:var(--fill-hover);color:var(--text)}
+.dq a[aria-current="page"]{background:var(--ink);color:var(--ink-fg);font-weight:600}
+.dq a.did{text-decoration:line-through;text-decoration-color:var(--muted)}
+.dq .i{flex:none}
+/* 5. Handing over something risky asks for a limit first. */
+.cfm{display:flex;flex-wrap:wrap;align-items:center;gap:10px 14px;padding:14px 16px;border-top:1px solid var(--line);font-size:var(--fs-sm);color:var(--text-2)}
+.cfm p{flex:1 1 260px}.cfm b{color:var(--text-hi);font-weight:600}
+.cfm select{height:30px;padding:0 8px;border-radius:var(--r-sm);background:var(--fill);border:1px solid var(--line-2);color:var(--text);font:inherit}
+.rulesnote{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px 16px;padding:16px 18px;font-size:var(--fs-sm);color:var(--text-2)}
+/* 6. Phones: the decisions first, the artwork as a band, the composer in one row, the chart as one line. */
+.traj-m{display:none;font-size:var(--fs-md);color:var(--text-2)}
+@container page (max-width:860px){
+  .brief .hero{aspect-ratio:auto;height:132px}.brief .masthead{top:50%;transform:translateY(-50%);font-size:clamp(34px,11cqw,56px)}
+  .brief .credit{display:none}
+  .dock .composer{grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"in send"}.dock .addf,.dock .model{display:none}
+  .dock{padding-top:28px}
+}
+@container (max-width:560px){.traj svg,.traj .legend{display:none}.traj-m{display:block}}
+<!-- @@ js -->
+  // ---- Proposal: the product review's fixes. Only in gtm-cockpit-v2.html. ----
+  $(".bar .chatbtn").insertAdjacentHTML("beforebegin", '<span class="v2tag" title="The product review\'s fixes on top of the mockup">Review fixes</span>');
+
+  // 1. What the agents cost: each topic's spend this week against its cap, in the as-of line and as a guardrail; the
+  // brief sums it up; Settings holds the rule.
+  const SPEND = { partnerships: [38, 60], content: [36, 40], outbound: [17, 40], paid: [9, 30], seo: [14, 30], research: [3, 20] };
+  const week = Object.values(SPEND).reduce((s, [v]) => s + v, 0), cap = Object.values(SPEND).reduce((s, [, c]) => s + c, 0);
+  PAGES.topics.forEach(t => {
+    const [v, c] = SPEND[t.id] || [0, 0];
+    if (!t.goal) return;
+    t.goal.asOf += ` · agents €${v} of €${c} this week`;
+    (t.goal.guards = t.goal.guards || { sub: "What the goal must not cost", items: [] }).items.push({ what: "Agents this week", val: `€${v}`, limit: `cap €${c}, then they pause and ask`, p: c ? v / c : 0 });
+  });
+  $("#v-brief .cadence").insertAdjacentHTML("afterend", `<p class="cadence"><svg class="i sm"><use href="#card"/></svg>Agents spent €21 overnight · €${week} of €${cap} this week</p>`);
+
+  // 2. Where each topic stands, at the top of the brief, the worst first.
+  const RK = { bad: 0, warn: 1, ok: 2, idle: 3 };
+  const standingOf = t => {
+    if (!t.goal) return { st: "idle", word: "No goal set", n: t.noGoal ? "Answers asks from the other topics" : "" };
+    const g = t.goal, nums = g.nums || [[g.signed, g.target]], L = g.labels || ["Signed"];
+    const fmt = n => (typeof n === "number" ? n.toLocaleString("en-GB") : n);
+    return { st: g.health[0], word: g.health[1], n: `${fmt(nums[0][0])} of ${fmt(nums[0][1])} ${L[0].charAt(0).toLowerCase() + L[0].slice(1)}` };
+  };
+  function drawStrip() {
+    const rows = PAGES.topics.map(t => ({ t, ...standingOf(t) })).sort((a, b) => RK[a.st] - RK[b.st]);
+    const html = `<section class="tstrip" aria-label="Where each topic stands"><h2>Where each topic stands</h2><ul>${rows.map(r => `<li><a href="#topic/${r.t.id}"><i class="dot ${r.st === "idle" ? "hollow" : r.st} still"></i><b>${r.t.name}</b><span class="tv">${r.word}</span><span class="tn">${r.n}</span><span class="tc">€${(SPEND[r.t.id] || [0])[0]} this week</span></a></li>`).join("")}</ul></section>`;
+    const old = $("#v-brief .tstrip");
+    if (old) old.outerHTML = html; else $("#v-brief .cards").insertAdjacentHTML("afterbegin", html);
+  }
+  drawStrip();
+  const decideCard = $$("#v-brief .card").find(c => /Yours to decide/.test(c.textContent));
+  if (decideCard) decideCard.classList.add("v2-decide");
+
+  // 3. The stuck promo's two choices do something, with Undo; "Change something" opens the decision's chat.
+  const web = laneById("webinar"), content = PAGES.topics.find(t => t.id === "content"), burnCard = $$("#v-brief .card").find(c => /Where it burns/.test(c.textContent)), burn = burnCard && $(".item", burnCard);
+  const before = { lane: JSON.stringify(web), goal: JSON.stringify(content.goal), burn: burn && burn.innerHTML };
+  web.acts = '<button class="btn ink" data-web="post">Post with the 4 that pass</button><button class="btn quiet" data-web="round">Allow one more round</button>';
+  const WEB = {
+    post: { did: "posted the promo with the 4 images that pass; 3 and 6 stay out", status: "The promo goes out at 16:00 with the 4 images that pass. Images 3 and 6 stay out.", step: "4 images pass the brand check; 2 left out", receipt: "The promo goes out at 16:00 with 4 images" },
+    round: { did: "allowed one more image round, €0.60", status: "Visuals runs round 4: the photo behind the logo gets darker. You see the 6 images at 09:30; the post still goes out at 16:00.", step: "Round 4 of the images, allowed by you", receipt: "Visuals runs one more round, €0.60" },
+  };
+  function settleWeb(kind) {
+    const w = WEB[kind];
+    web.state = "ok"; web.status = w.status; delete web.acts;
+    web.steps = web.steps.map(s => (s[0] === "now" ? ["ok", w.step, "You · now"] : s));
+    content.goal.health = ["warn", "Behind plan"]; content.goal.action = "Reminder Wednesday";
+    content.goal.decision = null; content.goal.calm = "The promo is settled"; content.goal.calmSub = w.status;
+    content.goal.attention = content.goal.attention.filter(x => x.who !== "Publisher");
+    content.history.days[0][1].unshift(["now", "M", "You", "p", w.did, "webinar", "d"]);
+    if (burn) burn.innerHTML = `<div class="txt"><div class="meta"><b>Content</b><i>·</i><span><svg class="i sm ok"><use href="#check"/></svg>Settled by you</span></div><h3>${w.receipt}</h3><p>Nothing else is stuck.</p></div><div class="acts"><a class="btn quiet" href="#topic/content">Go to Content<svg class="i sm"><use href="#go"/></svg></a></div>`;
+    drawTree(); refresh(); drawStrip();
+    const box = $("#receipts"), el = document.createElement("div");
+    el.className = "receipt";
+    el.innerHTML = `<div class="rh"><svg class="i sm ok"><use href="#check"/></svg><b>${w.receipt}</b><button class="ib" data-dismiss aria-label="Dismiss"><svg class="i sm"><use href="#x"/></svg></button></div><p class="rr">Logged in Content's history</p><div class="acts"><button class="btn quiet s" data-web-undo>Undo</button></div>`;
+    box.prepend(el);
+  }
+  function undoWeb() {
+    Object.assign(web, JSON.parse(before.lane)); content.goal = JSON.parse(before.goal);
+    content.history.days[0][1] = content.history.days[0][1].filter(r => !(r[0] === "now" && r[5] === "webinar"));
+    web.acts = '<button class="btn ink" data-web="post">Post with the 4 that pass</button><button class="btn quiet" data-web="round">Allow one more round</button>';
+    if (burn) burn.innerHTML = before.burn;
+    drawTree(); refresh(); drawStrip();
+  }
+  const changeBtn = $$("#v-decision .decidebar button").find(b => /Change something/.test(b.textContent));
+  if (changeBtn) changeBtn.setAttribute("data-chat", "");
+
+  // 4. Decide shows every open decision as a queue, counted from the same records as the badge.
+  function drawQueue() {
+    const items = $$("#v-brief .decision").map(d => ({ id: d.id, title: $("h3", d).textContent, done: d.classList.contains("done"), href: d.id === "d1" ? "#decision" : $(".acts a", d).getAttribute("href") }));
+    const open = items.filter(x => !x.done).length;
+    let nav = $("#dq");
+    if (!nav) { $("#v-decision .doc").insertAdjacentHTML("afterbegin", '<nav class="dq" id="dq" aria-label="Open decisions"></nav>'); nav = $("#dq"); }
+    nav.innerHTML = items.map(x => `<a href="${x.href}"${x.id === "d1" ? ' aria-current="page"' : ""} class="${x.done ? "did" : ""}">${x.done ? '<svg class="i sm ok"><use href="#check"/></svg>' : '<i class="dot warn still"></i>'}${esc(x.title)}</a>`).join("");
+    const pos = $("#dq-pos") || $$("#v-decision .doc .meta span").find(s => /\bof \d+$/.test(s.textContent));
+    if (pos) { pos.id = "dq-pos"; pos.textContent = `1 of ${items.length} · ${open} open`; }
+  }
+  drawQueue();
+
+  // 5. One place for decision rights. Skills points to it; handing over something risky asks for a limit first.
+  const skillGuards = $$("#v-skills .aside .sec").find(s => /Guardrails/.test(s.textContent));
+  if (skillGuards) $(".box.list", skillGuards).outerHTML = '<div class="box rulesnote"><span>What agents may do on their own is set in one place.</span><a class="btn quiet s" href="#settings">Settings › Who decides</a></div>';
+  const rights = $$("#v-settings .sec").find(s => /Who decides/.test(s.textContent));
+  const rightsList = rights && $(".box.list", rights);
+  if (rightsList) {
+    rightsList.insertAdjacentHTML("beforeend", '<li><div><b>It spends more than a topic\'s weekly cap on agents</b><span>Model and tool costs; the agents pause at the cap and ask</span></div><div class="seg" role="group" data-pick aria-label="Who decides spend over the cap"><button aria-pressed="true">You</button><button aria-pressed="false">The agent</button></div></li>');
+    $$("li", rightsList).forEach((li, i) => { if (i < 3 || i === 4) li.dataset.risk = ["send", "undo", "know", "", "spend"][i]; });
+  }
+  const RISK = {
+    send: "Agents may then send in your name, up to",
+    undo: "Agents may then take steps that are hard to undo, up to",
+    know: "Agents may then decide on what only you know, up to",
+    spend: "Agents may then spend over the cap, up to",
+  };
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-risk] .seg button");
+    if (!b || b.getAttribute("aria-pressed") === "true" || b.textContent !== "The agent") return;
+    e.stopPropagation(); e.preventDefault();
+    const li = b.closest("li"), kind = li.dataset.risk;
+    $$(".cfm", rightsList).forEach(x => x.remove());
+    li.insertAdjacentHTML("afterend", `<li class="cfm"><p>${RISK[kind]} <select aria-label="Limit"><option>5</option><option selected>20</option><option>60</option></select> a day. Each one shows in the next brief, with Undo.</p><button class="btn ink s" data-cfm-ok>Allow</button><button class="btn quiet s" data-cfm-no>Cancel</button></li>`);
+    const box = li.nextElementSibling;
+    $("[data-cfm-ok]", box).addEventListener("click", ev => { ev.stopPropagation(); $$("button", $(".seg", li)).forEach(x => x.setAttribute("aria-pressed", String(x === b))); $("span", li).textContent += ` · agents, up to ${$("select", box).value} a day`; box.remove(); });
+    $("[data-cfm-no]", box).addEventListener("click", ev => { ev.stopPropagation(); box.remove(); });
+  }, true);
+
+  // 6. Phones: the chart becomes one line on narrow pages.
+  const drawTraj = trajectory;
+  trajectory = c => {
+    const end = a => a[a.length - 1][1], last = c.ticks[c.ticks.length - 1][1];
+    const line = c.expected ? `Forecast ${end(c.expected)} by ${last}, range ${end(c.low)} to ${end(c.high)} · plan ${c.goal}` : `${c.noForecast || "No forecast yet"} · plan ${c.goal} by ${last}`;
+    return drawTraj(c).replace('<figure class="traj" data-traj>', `<figure class="traj" data-traj><p class="traj-m">${line}</p>`);
+  };
+
+  // The pins: only the pages; topics are already in the tree below.
+  PINNABLE.forEach(p => { if (p.kind === "Topics") p.pinned = false; });
+  pins = PINNABLE.filter(p => p.pinned).map(p => p.id);
+
+  document.addEventListener("click", e => {
+    const t = e.target.closest && e.target.closest("button");
+    if (!t) return;
+    if (t.matches("[data-web]")) settleWeb(t.dataset.web);
+    else if (t.matches("[data-web-undo]")) { undoWeb(); t.closest(".receipt").remove(); }
+    if (t.matches("[data-approve], [data-approve-id], [data-undo], [data-undo-id]")) setTimeout(drawQueue, 0);
+  });

@@ -1,0 +1,122 @@
+{
+  "topicId": "seo",
+  "topicName": "SEO",
+  "people": [
+    {
+      "person": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "access": {
+        "kind": "all",
+        "stages": []
+      },
+      "scope": "owner",
+      "otherTopics": [],
+      "owner": true,
+      "email": "mara-lind@example.test"
+    },
+    {
+      "person": {
+        "id": "lea-brandt",
+        "name": "Lea Brandt",
+        "shortName": "Lea",
+        "kind": "person",
+        "avatar": "L",
+        "role": "GTM associate",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "access": {
+        "kind": "none",
+        "stages": []
+      },
+      "scope": "no access",
+      "otherTopics": [
+        {
+          "topicId": "content",
+          "access": "view"
+        }
+      ],
+      "owner": false,
+      "email": "lea-brandt@example.test"
+    },
+    {
+      "person": {
+        "id": "jonas-falk",
+        "name": "Jonas Falk",
+        "shortName": "Jonas",
+        "kind": "person",
+        "avatar": "J",
+        "role": "Partner operations",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "access": {
+        "kind": "none",
+        "stages": []
+      },
+      "scope": "no access",
+      "otherTopics": [],
+      "owner": false,
+      "email": "jonas-falk@example.test"
+    },
+    {
+      "person": {
+        "id": "tom-ahrens",
+        "name": "Tom Ahrens",
+        "shortName": "Tom",
+        "kind": "person",
+        "avatar": "T",
+        "role": "CEO",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "access": {
+        "kind": "none",
+        "stages": []
+      },
+      "scope": "no access",
+      "otherTopics": [
+        {
+          "topicId": "content",
+          "access": "view"
+        },
+        {
+          "topicId": "outbound",
+          "access": "view"
+        },
+        {
+          "topicId": "paid",
+          "access": "view"
+        }
+      ],
+      "owner": false,
+      "email": "tom-ahrens@example.test"
+    }
+  ],
+  "invitations": [],
+  "statusLink": null
+}

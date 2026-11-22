@@ -1,0 +1,135 @@
+{
+  "subscriptions": [
+    {
+      "name": "Claude Max",
+      "lanes": 6,
+      "note": "At its limit, lanes move to your Anthropic key.",
+      "meters": [
+        {
+          "what": "5 hours",
+          "used": 0.86,
+          "note": null,
+          "resetsAt": "2026-11-16T14:20:00+01:00",
+          "spend": null,
+          "cap": null,
+          "count": null
+        },
+        {
+          "what": "Week",
+          "used": 0.41,
+          "note": null,
+          "resetsAt": "2026-11-16T17:00:00+01:00",
+          "spend": null,
+          "cap": null,
+          "count": null
+        }
+      ],
+      "state": "near",
+      "failsOverTo": "Anthropic API"
+    },
+    {
+      "name": "ChatGPT Pro · Codex",
+      "lanes": 3,
+      "note": null,
+      "meters": [
+        {
+          "what": "5 hours",
+          "used": 0.18,
+          "note": null,
+          "resetsAt": "2026-11-16T12:05:00+01:00",
+          "spend": null,
+          "cap": null,
+          "count": null
+        },
+        {
+          "what": "Week",
+          "used": 0.33,
+          "note": null,
+          "resetsAt": "2026-11-19T17:00:00+01:00",
+          "spend": null,
+          "cap": null,
+          "count": null
+        }
+      ],
+      "state": "ok",
+      "failsOverTo": null
+    },
+    {
+      "name": "Cursor Pro",
+      "lanes": 1,
+      "note": null,
+      "meters": [
+        {
+          "what": "Requests this month",
+          "used": 0.62,
+          "note": null,
+          "resetsAt": "2026-12-01T17:00:00+01:00",
+          "spend": null,
+          "cap": null,
+          "count": {
+            "used": 312,
+            "of": 500
+          }
+        }
+      ],
+      "state": "ok",
+      "failsOverTo": null
+    }
+  ],
+  "keys": [
+    {
+      "name": "Anthropic API",
+      "lanes": 0,
+      "note": "Takes over when Claude Max is at its limit.",
+      "meters": [
+        {
+          "what": "This month",
+          "used": 0.64,
+          "note": null,
+          "resetsAt": null,
+          "spend": {
+            "amountMinor": 9600,
+            "currency": "EUR"
+          },
+          "cap": {
+            "amountMinor": 15000,
+            "currency": "EUR"
+          },
+          "count": null
+        }
+      ],
+      "state": "standingBy",
+      "failsOverTo": null
+    },
+    {
+      "name": "OpenAI API",
+      "lanes": 4,
+      "note": null,
+      "meters": [
+        {
+          "what": "This month",
+          "used": 0.71,
+          "note": "GPT agents and GPT Image",
+          "resetsAt": null,
+          "spend": {
+            "amountMinor": 21200,
+            "currency": "EUR"
+          },
+          "cap": {
+            "amountMinor": 30000,
+            "currency": "EUR"
+          },
+          "count": null
+        }
+      ],
+      "state": "ok",
+      "failsOverTo": null
+    }
+  ],
+  "missing": [
+    "Gemini",
+    "Grok",
+    "Seedance"
+  ],
+  "at": "2026-11-16T08:45:00+01:00"
+}

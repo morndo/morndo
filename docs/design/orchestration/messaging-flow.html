@@ -1,0 +1,438 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Messaging flow · Morndo</title>
+<!--
+  Proposal, not decided (2026-11-21): how messaging works for the owner of a topic today, and how it would work with
+  eight findings from management and groupware research applied. One made-up morning on Partnerships, six moments.
+  One self-contained file; the flow chart and the effort chart are drawn by the script at the end from the data in
+  MOMENTS. Names and numbers are made up. Colours and sizes follow the cockpit's tokens (docs/design/cockpit/src/shell.html).
+-->
+<style>
+:root{
+  --bg:#111111;--surface:#1d1d1d;--raised:#262626;--fill:rgba(255,255,255,.075);--fill-2:rgba(255,255,255,.12);--line:#242424;--line-2:#2e2e2e;--edge:#3a3a3a;--edge-2:#4a4a4a;
+  --text-hi:#ffffff;--text:#ececec;--text-2:#c4c4c4;--prose:#a39e95;--muted:#9a9a9a;--faint:#555555;
+  --ok:#3dc8b5;--warn:#ffd1a9;--best:#3987e5;--best-soft:rgba(57,135,229,.16);--warn-soft:rgba(255,209,169,.12);
+  --serif:"Newsreader","Iowan Old Style","Palatino Linotype",Georgia,serif;
+  --sans:"Schibsted Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --fs-xs:12px;--fs-sm:12.5px;--fs-md:14px;--fs-lg:16px;--fs-xl:21px;--fs-2xl:28px;--fs-4xl:40px;--fs-5xl:52px;
+  --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-7:32px;--sp-8:40px;--sp-9:56px;
+  --r-sm:8px;--r-md:10px;--r-lg:12px;--r-pill:999px;
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--text);font:var(--fs-md)/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,ul,ol{margin:0}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+.page{max-width:1180px;margin:0 auto;padding:var(--sp-8) var(--sp-6) var(--sp-9);display:flex;flex-direction:column;gap:var(--sp-9)}
+.eye{font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+h1{font:400 var(--fs-4xl)/1.1 var(--serif);letter-spacing:-.02em;color:var(--text-hi)}
+.lede{max-width:760px;margin-top:var(--sp-3);font-size:var(--fs-lg);line-height:1.7;color:var(--prose)}
+.head{display:flex;flex-direction:column;gap:var(--sp-2)}
+.sec{display:flex;flex-direction:column;gap:var(--sp-4)}
+.h2{display:flex;align-items:baseline;gap:var(--sp-3);font:italic 400 var(--fs-2xl)/1.15 var(--serif);color:var(--text)}
+.h2 b{font:400 var(--fs-xs)/1 var(--mono);letter-spacing:.06em;color:var(--faint)}
+.sub{max-width:780px;font-size:var(--fs-md);line-height:1.65;color:var(--prose)}
+.note{font-size:var(--fs-sm);color:var(--muted)}
+
+/* The score: four totals, now against with the research. */
+.score{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp-6)}
+.score div{display:flex;flex-direction:column;gap:4px}
+.score .n{display:flex;align-items:baseline;gap:10px;font:400 var(--fs-5xl)/1 var(--serif);color:var(--text-hi);font-variant-numeric:lining-nums}
+.score .n s{font-size:.5em;color:var(--muted);text-decoration:line-through;text-decoration-color:var(--faint)}
+.score span{font-size:var(--fs-sm);color:var(--text-2)}
+.score small{font-size:var(--fs-xs);color:var(--muted)}
+
+/* The switch between the two flows. */
+.seg{display:inline-flex;gap:2px;padding:3px;border-radius:var(--r-pill);background:var(--fill)}
+.seg button{height:30px;padding:0 16px;border-radius:var(--r-pill);font-weight:500;color:var(--text-2)}
+.seg button[aria-pressed="true"]{background:var(--text-hi);color:var(--bg);font-weight:600}
+.flowhead{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:var(--sp-3)}
+.fig{margin:0;padding:var(--sp-5) var(--sp-4) var(--sp-3);border-radius:var(--r-lg);background:#151515}
+.fig svg{display:block;width:100%;height:auto}
+.key{display:flex;flex-wrap:wrap;gap:6px 20px;margin-top:var(--sp-3);font-size:var(--fs-xs);color:var(--muted)}
+.key span{display:inline-flex;align-items:center;gap:7px}
+.chip{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;border-radius:var(--r-pill);background:var(--best);color:#fff;font:700 10.5px/1 var(--sans)}
+.chip.pain{background:var(--warn);color:#2a1a0d}
+.phone-note{display:none}
+
+/* Flow chart parts. */
+.ln{font:600 11.5px var(--sans);fill:var(--muted)}.lnr{fill:rgba(255,255,255,.025)}.lnr.alt{fill:none}
+.mt{font:600 12.5px var(--sans);fill:var(--text-hi)}.mw{font:11px var(--mono);fill:var(--muted)}
+.bx{fill:var(--raised);stroke:var(--edge)}.bx.pain{stroke:var(--warn);stroke-width:1.2}.bx.gain{stroke:var(--best);stroke-width:1.2}
+.bt{font:11.5px var(--sans);fill:var(--text-2)}.bn{font:600 10px var(--mono);fill:var(--muted)}
+.ar{fill:none;stroke:var(--edge-2);stroke-width:1.3}
+.mk circle{fill:var(--best)}.mk text{font:700 9.5px var(--sans);fill:#fff;text-anchor:middle}
+.mk.pain circle{fill:var(--warn)}.mk.pain text{fill:#2a1a0d}
+.empty{font:italic 11px var(--sans);fill:var(--faint)}
+
+/* Moment by moment. */
+.moments{display:flex;flex-direction:column}
+.mo{display:grid;grid-template-columns:200px minmax(0,1fr) minmax(0,1fr);gap:var(--sp-6);padding:var(--sp-6) 0;border-top:1px solid var(--line)}
+.mo h3{font:italic 400 var(--fs-xl)/1.2 var(--serif);color:var(--text)}
+.mo .when{display:block;margin-top:4px;font:var(--fs-xs) var(--mono);color:var(--muted)}
+.mo .said{display:block;margin-top:8px;font-size:var(--fs-sm);line-height:1.5;color:var(--prose)}
+.col{display:flex;flex-direction:column;gap:var(--sp-3);min-width:0}
+.col h4{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:0;font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.col ol{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;counter-reset:s}
+.col li{display:grid;grid-template-columns:22px 92px minmax(0,1fr);gap:8px;align-items:baseline;font-size:var(--fs-md);line-height:1.45;color:var(--prose)}
+.col li::before{counter-increment:s;content:counter(s);font:600 10.5px var(--mono);color:var(--faint)}
+.col li .who{font-size:var(--fs-xs);color:var(--muted)}
+.col li .tags{display:inline-flex;gap:4px;margin-left:6px;vertical-align:1px}
+.col li .why{display:block;font-size:var(--fs-sm);color:var(--warn)}
+.ms{display:flex;flex-wrap:wrap;gap:4px 14px;padding-top:8px;border-top:1px dashed var(--line-2);font-size:var(--fs-xs);color:var(--muted)}
+.ms b{font-weight:600;color:var(--text)}
+.col.now .ms .bad{color:var(--warn)}
+
+/* Effort chart. */
+.charts{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-6)}
+.chart{position:relative;margin:0;padding:var(--sp-4);border-radius:var(--r-lg);background:#151515}
+.chart figcaption{display:flex;flex-direction:column;gap:2px;margin-bottom:var(--sp-3)}
+.chart figcaption b{font-weight:600;color:var(--text-hi)}.chart figcaption span{font-size:var(--fs-xs);color:var(--muted)}
+.chart svg{display:block;width:100%;height:auto;overflow:visible}
+.cg{stroke:var(--line-2);stroke-width:1}.ct{font:11px var(--sans);fill:var(--muted)}.cv{font:600 11px var(--sans);fill:var(--text-2)}
+.b-now{fill:var(--muted)}.b-new{fill:var(--best)}
+.hit{fill:transparent}
+.tip{position:absolute;pointer-events:none;padding:8px 10px;border-radius:var(--r-sm);background:var(--raised);border:1px solid rgba(255,255,255,.1);box-shadow:0 10px 30px rgba(0,0,0,.5);font-size:var(--fs-xs);color:var(--text-2);white-space:nowrap}
+.tip b{display:block;color:var(--text-hi);font-weight:600}
+.legend{display:flex;gap:16px;margin-top:var(--sp-2);font-size:var(--fs-xs);color:var(--muted)}
+.legend i{display:inline-block;width:10px;height:10px;margin-right:6px;border-radius:2px;vertical-align:-1px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+/* The eight principles. */
+.pr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:var(--sp-4) var(--sp-7);padding:0;list-style:none}
+.pr li{display:grid;grid-template-columns:26px minmax(0,1fr);gap:10px}
+.pr b{display:block;font-weight:600;color:var(--text-hi)}
+.pr p{font-size:var(--fs-md);line-height:1.55;color:var(--prose)}
+.pr cite{display:block;margin-top:2px;font-style:normal;font-size:var(--fs-xs);color:var(--muted)}
+.rec{display:flex;flex-direction:column;gap:var(--sp-3);padding:var(--sp-6);border-radius:var(--r-lg);background:var(--surface)}
+.rec p,.rec li{max-width:820px;font-size:var(--fs-lg);line-height:1.7;color:var(--prose)}.rec b{color:var(--text-hi);font-weight:600}
+.rec ol{padding-left:22px;display:flex;flex-direction:column;gap:4px}
+.src{padding:0;list-style:none;display:flex;flex-direction:column;gap:4px;font-size:var(--fs-sm);color:var(--muted)}
+.src a{color:var(--text-2);text-underline-offset:3px}
+
+@media (max-width:900px){
+  .score{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .mo{grid-template-columns:minmax(0,1fr)}
+  .charts,.pr{grid-template-columns:minmax(0,1fr)}
+  .page{padding:var(--sp-6) var(--sp-4) var(--sp-8)}
+}
+@media (max-width:700px){#flow-fig{display:none}.phone-note{display:block}}
+</style>
+</head>
+<body>
+<main class="page">
+
+  <header class="head">
+    <p class="eye">Morndo · proposal, not decided · 21 November 2026</p>
+    <h1>Messaging, now and with the research</h1>
+    <p class="lede">One made-up morning for Mara, who owns Partnerships, in six moments: catching up, asking, instructing,
+      changing the goal, deciding, and a teammate finishing work. First as it works today (one Manager chat, topic chats
+      that are a plain group chat), then with eight findings from management and groupware research applied. Every
+      number on this page is counted from the flows below; it is an illustration, not a measurement.</p>
+  </header>
+
+  <section class="sec" aria-label="The morning in four numbers">
+    <div class="score" id="score"></div>
+  </section>
+
+  <section class="sec">
+    <div class="flowhead">
+      <h2 class="h2"><b>01</b>Who does what</h2>
+      <div class="seg" role="group" aria-label="Show the flow"><button data-flow="now" aria-pressed="true">Now</button><button data-flow="better" aria-pressed="false">With the research</button></div>
+    </div>
+    <p class="sub">The rows are who acts, the columns the six moments, top to bottom in order. A row with nothing in it is
+      a role that does not exist in that version. Amber marks where the morning goes wrong; a blue number is the finding
+      that fixes it (listed at the end).</p>
+    <figure class="fig" id="flow-fig"><svg id="flow" role="img"></svg>
+      <div class="key"><span><span class="chip pain">!</span>Goes wrong here</span><span><span class="chip">5</span>A finding at work</span><span>1 · 2 · 3 in a box: the order of steps in that moment</span></div>
+    </figure>
+    <p class="phone-note note">On a phone the chart is hidden; the moments below show the same steps.</p>
+  </section>
+
+  <section class="sec">
+    <h2 class="h2"><b>02</b>Moment by moment</h2>
+    <div class="moments" id="moments"></div>
+  </section>
+
+  <section class="sec">
+    <h2 class="h2"><b>03</b>What it costs you</h2>
+    <p class="sub">Per moment, what Mara has to do and what she has to read. Reading drops the most: the topic chat stops
+      being the place where status piles up.</p>
+    <div class="charts">
+      <figure class="chart" data-chart="do"><figcaption><b>Things you do</b><span>Clicks, messages written, checks, per moment</span></figcaption><svg role="img"></svg><div class="legend"><span><i style="background:var(--muted)"></i>Now</span><span><i style="background:var(--best)"></i>With the research</span></div><div class="tip" hidden></div></figure>
+      <figure class="chart" data-chart="read"><figcaption><b>Messages you read</b><span>Per moment</span></figcaption><svg role="img"></svg><div class="legend"><span><i style="background:var(--muted)"></i>Now</span><span><i style="background:var(--best)"></i>With the research</span></div><div class="tip" hidden></div></figure>
+    </div>
+  </section>
+
+  <section class="sec">
+    <h2 class="h2"><b>04</b>The eight findings</h2>
+    <ol class="pr" id="principles"></ol>
+  </section>
+
+  <section class="rec">
+    <h2 class="h2">What we would build</h2>
+    <ol>
+      <li><b>A topic is a group chat</b> for its people and its agents. The Manager is not in it; it reads the shared record.</li>
+      <li><b>Agents speak only to deliver or to ask.</b> Status lives on the topic page, never in the chat.</li>
+      <li><b>Every message is sorted by the topic's manager</b> (question, request, done, decision, change) and shows a small label the person can correct. Nobody picks a category.</li>
+      <li><b>A request becomes a lane thread</b> with an owner and a state, linked from the message; an instruction gets one read-back receipt.</li>
+      <li><b>Decisions are pinned</b> and open as a brief in Decide, with the chat's discussion attached.</li>
+      <li><b>"Since you last looked"</b> opens every topic chat.</li>
+      <li><b>Only the topic's manager speaks outward</b>, and only for what spans topics: goals, priorities, budgets, shared resources. The Manager approves those with you.</li>
+    </ol>
+    <p><b>Open:</b> should agents post in the same stream as people, or in a quieter strip of their own? The research on
+      overload points to a strip.</p>
+  </section>
+
+  <section class="sec">
+    <h2 class="h2"><b>05</b>Sources</h2>
+    <ul class="src">
+      <li>Leavitt 1951, communication networks, as cited in <a href="https://dspace.mit.edu/handle/1721.1/79469">Bavelas &amp; Barrett (MIT)</a>; routine and non-routine tasks in <a href="https://www.cmu.edu/dietrich/psychology/pdf/klahr/PDFs/the-impact-of-computers-of-management-charles-a-myers-r.pdf">Klahr &amp; Leavitt</a></li>
+      <li>Qian et al. 2025, <a href="https://arxiv.org/abs/2406.07155">Scaling LLM-based multi-agent collaboration</a> (ICLR 2025); Kim et al. 2025, <a href="https://arxiv.org/abs/2512.08296">Towards a science of scaling agent systems</a></li>
+      <li>Dourish &amp; Bellotti 1992, <a href="https://www.dourish.com/publications/1992/cscw92-awareness.pdf">Awareness and coordination in shared workspaces</a></li>
+      <li>Flores et al. 1988, <a href="https://www.lri.fr/~mbl/ENS/CSCW/2014/papers/Flores-TOIS88.pdf">Computer systems and the design of organizational interaction</a>; Suchman 1994–95 and Winograd 1994, <a href="https://www.lri.fr/~mbl/ENS/CSCW/2012/papers/Suchman-JCSCW95.pdf">the language/action debate</a></li>
+      <li>Smith, Cadiz &amp; Burkhalter 2000, <a href="https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr-2000-43.pdf">Conversation trees and threaded chats</a></li>
+      <li>Zhang &amp; Cranshaw 2018, <a href="https://homes.cs.washington.edu/~axz/papers/cscw_tilda.pdf">Making sense of group chat through collaborative tagging and summarization</a></li>
+      <li>Härgestam et al. 2013, <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC3808778">closed-loop communication in trauma teams</a>; 2016, <a href="https://pmc.ncbi.nlm.nih.gov/articles/PMC4735161">its effect on decisions</a></li>
+      <li>Daft &amp; Lengel 1986, <a href="https://collablab.northwestern.edu//CollabolabDistro/nucmc/DaftAndLengel-OrgInfoReq-MediaRichnessAndStructuralDesign-MngmtSci-1986.pdf">Organizational information requirements, media richness and structural design</a></li>
+      <li>Tushman 1977, Special boundary roles in the innovation process, <i>Administrative Science Quarterly</i> 22(4) (cited from memory, not checked online)</li>
+    </ul>
+  </section>
+
+</main>
+
+<script>
+// The rows of the flow chart: who acts.
+const LANES = [["people", "You · Lea"], ["chat", "Topic chat"], ["thread", "Lane thread"], ["agents", "Agents"], ["tmgr", "Topic manager"], ["mgr", "Manager"], ["rec", "Shared record"]];
+const LANE_NAME = Object.fromEntries(LANES);
+
+// The eight findings. [short name, the rule for Morndo, source]
+const P = {
+  1: ["A small world", "Everyone talks to everyone inside a topic; between topics, the Manager is the hub. Non-routine work does not centralise; routine coordination does.", "Leavitt 1951; Klahr & Leavitt; Qian et al. 2025; Kim et al. 2025"],
+  2: ["Passive awareness", "The Manager and the people learn from the shared record. Nobody forwards or writes reports.", "Dourish & Bellotti 1992"],
+  3: ["Requests become commitments", "The topic's manager sorts each message and shows a label the person can correct. People never pick a category.", "Winograd & Flores 1986; Suchman 1994"],
+  4: ["Threads for work", "Anything actionable gets its own thread, a lane, so replies stay with what they answer.", "Smith, Cadiz & Burkhalter 2000"],
+  5: ["Catch-up, summarised", "\"Since you last looked\" at the top of every topic chat, written by agents, editable by people.", "Zhang & Cranshaw 2018"],
+  6: ["Read-back, sparingly", "One receipt for an instruction or a decision. No acknowledgement of everything; agents stay quiet otherwise.", "Härgestam et al. 2013, 2016"],
+  7: ["A richer channel for decisions", "Decisions are briefs, pinned, with the discussion attached. Status is on the page, not in the chat.", "Daft & Lengel 1986"],
+  8: ["One voice outward", "The topic's manager speaks for the topic to the Manager and other topics; the other agents do not.", "Tushman 1977"],
+};
+
+// A step: lane, the short label in the chart, the full sentence below it, and either the findings at work (numbers)
+// or what goes wrong (pain).
+const S = (l, s, t, p) => ({ l, s, t, ...(typeof p === "string" ? { pain: p } : { p: p || [] }) });
+const MOMENTS = [
+  { title: "Catch up on Partnerships", short: "Catch up", when: "08:05", said: "Overnight: 3 agent batches, Lea's question, Jonas's offer draft.",
+    now: { steps: [
+      S("people", "Opens the chat", "Opens the Partnerships chat."),
+      S("chat", "42 new, 31 are status", "42 messages since 18:20; 31 of them are agents' status posts.", "Status buries what matters"),
+      S("people", "Scrolls, misses Lea", "Scrolls back and misses Lea's question from 08:12.", "A backlog of 42"),
+      S("mgr", "Rebuilds the night", "She asks the Manager what happened; it rebuilds the night from memory.", "The chat had it; the Manager did not"),
+      S("people", "Reads it 4 min later", "Reads the Manager's answer four minutes later."),
+    ], score: { do: 3, read: 43, wait: 1, mgr: "has to retell", blind: true } },
+    better: { steps: [
+      S("people", "Opens the chat", "Opens the Partnerships chat."),
+      S("chat", "Catch-up: 3 lines", "\"Since you last looked\": 3 lines, the Halden decision pinned on top.", [5, 7]),
+      S("rec", "Summary from record", "The summary is drawn from the shared record.", [2]),
+      S("agents", "Posted nothing", "Agents posted nothing overnight: results are in the summary, status on the page.", [6, 7]),
+      S("people", "Answers Lea", "Sees Lea's question in the summary and answers it."),
+    ], score: { do: 2, read: 4, wait: 0, mgr: "nothing needed" } } },
+
+  { title: "Ask a question", short: "Ask", when: "08:20", said: "\"Where does Halden stand?\"",
+    now: { steps: [
+      S("people", "Asks the Manager", "Asks the Manager."),
+      S("mgr", "Queued behind Paid", "Waits in the Manager's one queue behind Paid's budget brief.", "One queue for every topic"),
+      S("mgr", "Asks lane, answers", "The Manager asks the offer lane and answers."),
+      S("people", "Reads it 6 min later", "Reads the answer six minutes later."),
+    ], score: { do: 1, read: 1, wait: 1, mgr: "busy with it" } },
+    better: { steps: [
+      S("people", "Asks in the chat", "Asks in the Partnerships chat.", [1]),
+      S("tmgr", "A question: answers", "The topic's manager labels it a question and answers from the topic's record.", [3]),
+      S("people", "Reads it in seconds", "Reads the answer within seconds."),
+      S("mgr", "Not involved", "The Manager is not involved: a question changes nothing.", [2]),
+    ], score: { do: 1, read: 1, wait: 0, mgr: "nothing needed" } } },
+
+  { title: "Give an instruction", short: "Instruct", when: "08:30", said: "\"Send wave 2 to the retail brands first.\"",
+    now: { steps: [
+      S("people", "Writes in the chat", "Writes it in the Partnerships chat."),
+      S("agents", "Two agents answer", "Sender and Brand scout both answer. Who owns it?", "No owner"),
+      S("chat", "No read-back", "Nobody says what will happen, and when.", "No read-back"),
+      S("people", "Checks at 11:00", "Checks the lane at 11:00 to be sure."),
+      S("mgr", "Plans as before", "The Manager does not know and still plans wave 2 for Thursday.", "The Manager is blind"),
+    ], score: { do: 2, read: 3, wait: 0, mgr: "does not know", blind: true } },
+    better: { steps: [
+      S("people", "Writes in the chat", "Writes it in the Partnerships chat."),
+      S("tmgr", "Labels it a request", "The topic's manager labels it a request; the label sits under her message and she can correct it.", [3]),
+      S("thread", "Thread, Sender owns", "It opens the thread \"Wave 2: retail first\"; Sender owns it.", [4]),
+      S("chat", "One receipt", "One receipt: \"Retail first, 20 a day from 11:00 · Sender\".", [6]),
+      S("rec", "Logged", "Logged as an instruction inside the topic.", [2]),
+      S("mgr", "Next summary", "The Manager sees it in its next turn's summary.", [2]),
+    ], score: { do: 1, read: 1, wait: 0, mgr: "in its next summary" } } },
+
+  { title: "Change the goal", short: "Change goal", when: "09:10", said: "\"Move the deadline to 28 February.\"",
+    now: { steps: [
+      S("people", "Says it in the chat", "Says it in the Partnerships chat."),
+      S("agents", "Adopt it locally", "The topic's agents adopt the new date."),
+      S("mgr", "Misses the effects", "The Manager does not know; Paid still budgets the partner webinar for January.", "Effects on other topics missed"),
+      S("people", "Tells the Manager too", "Days later she remembers to tell the Manager as well.", "Said twice"),
+    ], score: { do: 2, read: 1, wait: 0, mgr: "finds out late", blind: true } },
+    better: { steps: [
+      S("people", "Says it in the chat", "Says it in the Partnerships chat."),
+      S("tmgr", "A goal change", "The topic's manager labels it a goal change: it affects other topics.", [3]),
+      S("mgr", "Checks the effects", "It proposes the change to the Manager, which checks the effects: Paid's webinar budget, the CEO's report.", [8, 1]),
+      S("people", "One brief, approves", "She gets one brief in Decide with the effects, and approves.", [7]),
+      S("rec", "New goal on record", "The new goal is on record; every topic sees it.", [2]),
+    ], score: { do: 2, read: 1, wait: 0, mgr: "decides with you" } } },
+
+  { title: "Decide", short: "Decide", when: "10:00", said: "Jonas's offer to Halden is ready.",
+    now: { steps: [
+      S("chat", "Offer scrolls away", "Jonas posts \"the offer is in Decide\"; six messages later it has scrolled away.", "A decision in the stream"),
+      S("mgr", "Mentions it again", "The Manager mentions it again in its own chat.", "Two places"),
+      S("people", "Approves in Decide", "She approves in Decide."),
+      S("agents", "Lea asks: approved?", "An hour later Lea asks in the chat whether Mara approved.", "No closing of the loop"),
+    ], score: { do: 1, read: 8, wait: 0, mgr: "knows" } },
+    better: { steps: [
+      S("chat", "Pinned on top", "Pinned on top of the chat: \"Approve the Halden offer · due Thursday\".", [7]),
+      S("people", "Brief with the talk", "She opens the brief; the chat's discussion of it is attached. She approves once.", [7]),
+      S("thread", "Receipt: out 09:00", "A receipt in the offer's thread: \"Approved · goes out tomorrow 09:00\".", [6]),
+      S("rec", "Everyone sees it", "Recorded: Lea and the Manager see it without asking.", [2]),
+    ], score: { do: 2, read: 2, wait: 0, mgr: "sees it" } } },
+
+  { title: "A teammate finishes", short: "Teammate", when: "11:00", said: "Lea has checked the 24 wave 2 emails and changed 2.",
+    now: { steps: [
+      S("people", "Lea writes in the chat", "Lea writes \"checked, changed 2\" in the chat."),
+      S("agents", "Sender misses it", "Sender misses it among the status posts; wave 2 keeps waiting.", "Lost in the stream"),
+      S("people", "You see it at 14:00", "Mara sees it at 14:00, scrolling.", "Three hours late"),
+      S("mgr", "Does not know", "The Manager does not know."),
+    ], score: { do: 1, read: 12, wait: 1, mgr: "does not know", blind: true } },
+    better: { steps: [
+      S("people", "Lea writes in the chat", "Lea writes \"checked, changed 2\" in the chat."),
+      S("tmgr", "Labels it done", "The topic's manager labels it done, on the wave 2 thread.", [3]),
+      S("thread", "Sender starts", "The thread moves on: Sender starts sending.", [4]),
+      S("rec", "Logged", "Logged in the shared record.", [2]),
+      S("chat", "In your summary", "Mara's summary later: \"Lea checked wave 2; sending started\".", [5]),
+      S("mgr", "Next summary", "The Manager sees it in its next summary.", [2]),
+    ], score: { do: 0, read: 1, wait: 0, mgr: "in its next summary" } } },
+];
+
+const $ = (s, el = document) => el.querySelector(s), $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const esc = s => String(s).replace(/[&<>"]/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+const sum = (k, f) => MOMENTS.reduce((n, m) => n + f(m[k].score), 0);
+
+// The score, counted from the flows.
+const T = k => ({ do: sum(k, s => s.do), read: sum(k, s => s.read), wait: sum(k, s => s.wait), blind: sum(k, s => (s.blind ? 1 : 0)) });
+const tn = T("now"), tb = T("better");
+$("#score").innerHTML = [
+  [tb.read, tn.read, "Messages you read", "most of the drop is status leaving the chat"],
+  [tb.do, tn.do, "Things you do", "the same work, fewer checks"],
+  [tb.wait, tn.wait, "Waits in a queue", "nothing waits behind another topic"],
+  [tb.blind, tn.blind, "Times the Manager is blind", "it reads the record instead of being told"],
+].map(([b, n, w, s]) => `<div><p class="n">${b}<s>${n}</s></p><span>${w}</span><small>${s}</small></div>`).join("");
+
+// The flow chart.
+const G = { L: 112, T: 56, CW: 178, RH: 76, PAD: 8 };
+function drawFlow(kind) {
+  const svg = $("#flow"), W = G.L + MOMENTS.length * G.CW, H = G.T + LANES.length * G.RH + 6;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  let out = "";
+  LANES.forEach(([id, name], r) => {
+    const y = G.T + r * G.RH;
+    out += `<rect class="lnr${r % 2 ? " alt" : ""}" x="0" y="${y}" width="${W}" height="${G.RH}" rx="4"/><text class="ln" x="10" y="${y + G.RH / 2 + 4}">${name}</text>`;
+  });
+  const used = new Set();
+  MOMENTS.forEach((m, c) => {
+    const x0 = G.L + c * G.CW, f = m[kind];
+    out += `<text class="mt" x="${x0 + 26}" y="22">${esc(m.title)}</text><text class="mw" x="${x0 + 26}" y="38">${m.when}</text>`;
+    // One box per row in a moment; repeated steps in the same row become numbered lines in it.
+    const boxes = {}, order = [];
+    f.steps.forEach((st, i) => {
+      if (!boxes[st.l]) { boxes[st.l] = { lines: [], pain: false, gain: [] }; order.push(st.l); }
+      const b = boxes[st.l];
+      b.lines.push([i + 1, st.s]);
+      if (st.pain) b.pain = true;
+      (st.p || []).forEach(p => b.gain.includes(p) || b.gain.push(p));
+      used.add(st.l);
+    });
+    const rect = {};
+    Object.entries(boxes).forEach(([lane, b]) => {
+      const r = LANES.findIndex(l => l[0] === lane), y = G.T + r * G.RH + 6, h = G.RH - 12, x = x0 + 26, w = G.CW - 34;
+      rect[lane] = { x, y, w, h };
+      const marks = (b.pain ? [["!", "pain"]] : []).concat(b.gain.map(p => [p, ""]));
+      out += `<rect class="bx${b.pain ? " pain" : b.gain.length ? " gain" : ""}" x="${x}" y="${y}" width="${w}" height="${h}" rx="7"/>`;
+      const lines = b.lines.slice(0, 3);
+      const top = y + h / 2 - (lines.length - 1) * 7 + 4;
+      lines.forEach(([n, s], k) => { out += `<text class="bn" x="${x + 8}" y="${top + k * 14}">${n}</text><text class="bt" x="${x + 20}" y="${top + k * 14}">${esc(s)}</text>`; });
+      marks.forEach(([t, cls], k) => { const cx = x + w - 9 - k * 19; out += `<g class="mk ${cls}"><circle cx="${cx}" cy="${y}" r="8"/><text x="${cx}" y="${y + 3.4}">${t}</text></g>`; });
+    });
+    // Arrows run in the moment's left gutter, from one step's box to the next one's.
+    f.steps.forEach((st, i) => {
+      const nx = f.steps[i + 1];
+      if (!nx || nx.l === st.l) return;
+      const a = rect[st.l], b = rect[nx.l], gx = x0 + 8 + (i % 3) * 5;
+      const ya = a.y + a.h / 2, yb = b.y + b.h / 2;
+      out += `<path class="ar" d="M${a.x} ${ya}H${gx}V${yb}H${b.x - 2}"/><path class="ar" d="M${b.x - 7} ${yb - 3.5}L${b.x - 2} ${yb}L${b.x - 7} ${yb + 3.5}"/>`;
+    });
+  });
+  LANES.forEach(([id], r) => { if (!used.has(id)) out += `<text class="empty" x="${G.L + 26}" y="${G.T + r * G.RH + G.RH / 2 + 4}">Not in this version</text>`; });
+  svg.innerHTML = out;
+  const t = kind === "now" ? tn : tb;
+  svg.setAttribute("aria-label", `${kind === "now" ? "Now" : "With the research"}: six moments of a morning, ${t.do} things to do, ${t.read} messages to read, ${t.wait} waits, the Manager blind ${t.blind} times. The same steps are listed under Moment by moment.`);
+}
+drawFlow("now");
+$$("[data-flow]").forEach(b => b.addEventListener("click", () => {
+  $$("[data-flow]").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  drawFlow(b.dataset.flow);
+}));
+
+// Moment by moment.
+const stepLi = st => `<li><span class="who">${LANE_NAME[st.l]}</span><span>${esc(st.t)}${st.p && st.p.length ? `<span class="tags">${st.p.map(p => `<span class="chip" title="${esc(P[p][0])}">${p}</span>`).join("")}</span>` : ""}${st.pain ? `<span class="why">${esc(st.pain)}</span>` : ""}</span></li>`;
+const ms = (s, now) => `<p class="ms"><span><b>${s.do}</b> to do</span><span><b>${s.read}</b> to read</span><span${now && s.wait ? ' class="bad"' : ""}><b>${s.wait}</b> ${s.wait === 1 ? "wait" : "waits"}</span><span${now && s.blind ? ' class="bad"' : ""}>Manager: ${s.mgr}</span></p>`;
+$("#moments").innerHTML = MOMENTS.map((m, i) => `<article class="mo">
+    <div><h3>${esc(m.title)}</h3><span class="when">${m.when}</span><span class="said">${esc(m.said)}</span></div>
+    <div class="col now"><h4>Now</h4><ol>${m.now.steps.map(stepLi).join("")}</ol>${ms(m.now.score, true)}</div>
+    <div class="col"><h4>With the research</h4><ol>${m.better.steps.map(stepLi).join("")}</ol>${ms(m.better.score, false)}</div>
+  </article>`).join("");
+
+// The effort charts: per moment, now against with the research, one axis each.
+function drawChart(fig) {
+  const key = fig.dataset.chart, svg = $("svg", fig), tip = $(".tip", fig);
+  const W = 520, H = 220, L = 34, R = 8, T = 10, B = 40;
+  const max = Math.max(...MOMENTS.flatMap(m => [m.now.score[key], m.better.score[key]]));
+  const step = max > 20 ? 10 : max > 6 ? 2 : 1, top = Math.ceil(max / step) * step;
+  const X = i => L + (i + .5) * ((W - L - R) / MOMENTS.length), Y = v => T + (1 - v / top) * (H - T - B), bw = 16;
+  let out = "";
+  for (let v = 0; v <= top; v += step) out += `<line class="cg" x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}"/><text class="ct" x="${L - 8}" y="${Y(v) + 4}" text-anchor="end">${v}</text>`;
+  MOMENTS.forEach((m, i) => {
+    const a = m.now.score[key], b = m.better.score[key], cx = X(i);
+    const bar = (v, x, cls) => (v ? `<path class="${cls}" d="M${x} ${Y(0)}V${Y(v) + 4}a4 4 0 0 1 4 -4h${bw - 8}a4 4 0 0 1 4 4V${Y(0)}z"/>` : "");
+    out += bar(a, cx - bw - 1, "b-now") + bar(b, cx + 1, "b-new");
+    const label = m.short;
+    out += `<text class="ct" x="${cx}" y="${H - B + 16}" text-anchor="middle">${esc(label)}</text>`;
+    out += `<rect class="hit" x="${cx - 36}" y="${T}" width="72" height="${H - T - B + 20}" data-i="${i}"/>`;
+  });
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("aria-label", `${$("figcaption b", fig).textContent} per moment, now and with the research. ${MOMENTS.map(m => `${m.title}: ${m.now.score[key]} now, ${m.better.score[key]} with the research`).join("; ")}.`);
+  svg.innerHTML = out;
+  svg.addEventListener("pointermove", e => {
+    const hit = e.target.closest && e.target.closest(".hit");
+    if (!hit) { tip.hidden = true; return; }
+    const m = MOMENTS[+hit.dataset.i], box = fig.getBoundingClientRect();
+    tip.innerHTML = `<b>${esc(m.title)}</b>Now ${m.now.score[key]} · with the research ${m.better.score[key]}`;
+    tip.hidden = false;
+    tip.style.left = Math.min(e.clientX - box.left + 12, box.width - tip.offsetWidth - 8) + "px";
+    tip.style.top = (e.clientY - box.top - 40) + "px";
+  });
+  svg.addEventListener("pointerleave", () => { tip.hidden = true; });
+}
+$$("[data-chart]").forEach(drawChart);
+
+// The findings.
+$("#principles").innerHTML = Object.entries(P).map(([n, [name, rule, src]]) => `<li><span class="chip">${n}</span><div><b>${esc(name)}</b><p>${esc(rule)}</p><cite>${esc(src)}</cite></div></li>`).join("");
+</script>
+</body>
+</html>

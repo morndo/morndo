@@ -1,0 +1,369 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>Manager and lanes on tmux · Morndo</title>
+<!--
+  Proposal, not decided (2026-11-19): three ways to run the manager and its lanes on tmux, and the stability layer all
+  three share. One self-contained file; the diagrams are drawn by the script at the end from plain data. Names, hosts
+  and lanes are made up. Colours and sizes follow the cockpit's tokens (docs/design/cockpit/src/shell.html).
+-->
+<style>
+:root{
+  --bg:#111111;--surface:#1d1d1d;--raised:#262626;--fill:rgba(255,255,255,.075);--line:#242424;--line-2:#2e2e2e;--edge:#3a3a3a;--edge-2:#4a4a4a;
+  --text-hi:#ffffff;--text:#ececec;--text-2:#c4c4c4;--prose:#a39e95;--muted:#9a9a9a;--faint:#555555;
+  --ok:#3dc8b5;--warn:#ffd1a9;--best:#3987e5;
+  --serif:"Newsreader","Iowan Old Style","Palatino Linotype",Georgia,serif;
+  --sans:"Schibsted Grotesk",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+  --fs-xs:12px;--fs-sm:12.5px;--fs-md:14px;--fs-lg:16px;--fs-xl:21px;--fs-2xl:28px;--fs-4xl:40px;
+  --sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:20px;--sp-6:24px;--sp-7:32px;--sp-8:40px;--sp-9:56px;
+  --r-sm:8px;--r-md:10px;--r-lg:12px;--r-pill:999px;
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{margin:0;background:var(--bg);color:var(--text);font:var(--fs-md)/1.5 var(--sans);-webkit-font-smoothing:antialiased}
+h1,h2,h3,p,ul,ol{margin:0}
+.page{max-width:1080px;margin:0 auto;padding:var(--sp-8) var(--sp-6) var(--sp-9);display:flex;flex-direction:column;gap:var(--sp-9)}
+.eye{font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+h1{font:400 var(--fs-4xl)/1.1 var(--serif);letter-spacing:-.02em;color:var(--text-hi)}
+.lede{max-width:720px;margin-top:var(--sp-3);font-size:var(--fs-lg);line-height:1.7;color:var(--prose)}
+.head{display:flex;flex-direction:column;gap:var(--sp-2)}
+.sec{display:flex;flex-direction:column;gap:var(--sp-4)}
+.h2{display:flex;align-items:baseline;gap:var(--sp-3);font:italic 400 var(--fs-2xl)/1.15 var(--serif);color:var(--text)}
+.h2 b{font:400 var(--fs-xs)/1 var(--mono);letter-spacing:.06em;color:var(--faint)}
+.h2 em{font:600 var(--fs-xs)/1 var(--sans);font-style:normal;padding:4px 9px;border-radius:var(--r-pill);background:var(--text-hi);color:var(--bg)}
+.sub{max-width:760px;font-size:var(--fs-md);line-height:1.65;color:var(--prose)}
+.fig{margin:0;padding:var(--sp-5) var(--sp-5) var(--sp-3);border-radius:var(--r-lg);background:#151515}
+.fig svg{display:block;width:100%;height:auto}
+.key{display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:var(--sp-3);font-size:var(--fs-xs);color:var(--muted)}
+.key span{display:inline-flex;align-items:center;gap:7px}
+.key i{display:inline-block;width:18px;height:0;border-top:2px solid var(--best)}.key i.d{border-top-style:dashed;border-color:var(--muted)}.key i.w{border-color:var(--warn)}
+.key s{display:inline-block;width:9px;height:9px;border-radius:50%;background:var(--ok);text-decoration:none}.key s.idle{background:none;box-shadow:inset 0 0 0 1.5px var(--muted)}
+.facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:var(--sp-6)}
+.facts h3{margin-bottom:6px;font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.facts p,.facts li{font-size:var(--fs-md);line-height:1.6;color:var(--prose)}
+.facts ul{padding:0;list-style:none;display:flex;flex-direction:column;gap:4px}
+.facts li::before{content:"– ";color:var(--faint)}
+.facts b{font-weight:600;color:var(--text-hi)}
+.tbl{overflow-x:auto}
+table{width:100%;min-width:760px;border-collapse:collapse;font-size:var(--fs-md)}
+th{padding:10px 14px;text-align:left;font-size:var(--fs-xs);font-weight:600;color:var(--muted);border-bottom:1px solid var(--line-2)}
+td{padding:12px 14px;vertical-align:top;color:var(--prose);border-bottom:1px solid var(--line);line-height:1.5}
+td:first-child{color:var(--text);font-weight:500;white-space:nowrap}
+td.best{color:var(--text-hi)}
+.layer{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:var(--sp-4);counter-reset:n;padding:0;list-style:none}
+.layer li{display:block;font-size:var(--fs-md);line-height:1.55;color:var(--prose)}
+.layer li::before{display:block;margin-bottom:6px;counter-increment:n;content:counter(n,decimal-leading-zero);font:var(--fs-xs)/1 var(--mono);color:var(--faint)}
+.layer b{display:block;margin-bottom:6px;font-weight:600;color:var(--text-hi)}
+.rec{display:flex;flex-direction:column;gap:var(--sp-3);padding:var(--sp-6);border-radius:var(--r-lg);background:var(--surface)}
+.rec p{max-width:780px;font-size:var(--fs-lg);line-height:1.7;color:var(--prose)}.rec p b{color:var(--text-hi);font-weight:600}
+.rec p a{color:var(--text-hi);text-decoration:underline;text-underline-offset:3px}
+.note{font-size:var(--fs-sm);color:var(--muted)}
+code{font:12.5px var(--mono);color:var(--text-2);white-space:nowrap}
+@media (max-width:820px){.facts,.layer{grid-template-columns:minmax(0,1fr)}.page{padding:var(--sp-6) var(--sp-4) var(--sp-8)}}
+/* diagram parts */
+.t1{font:600 13px var(--sans);fill:var(--text-hi)}.t2{font:12px var(--sans);fill:var(--muted)}.t3{font:600 11px var(--sans);fill:var(--muted)}
+.tm{font:11.5px var(--mono);fill:var(--text-2)}.tl{font:11.5px var(--sans);fill:var(--text-2)}
+.cl{fill:var(--raised)}.hb{fill:var(--surface)}.rw{fill:var(--raised)}.nd{fill:none;stroke:var(--edge-2);stroke-dasharray:4 4}
+.ss{fill:rgba(255,255,255,.03);stroke:var(--edge)}.wn{fill:#232323;stroke:var(--edge)}
+.ar{fill:none;stroke:var(--best);stroke-width:1.6}.ar.d{stroke:var(--muted);stroke-dasharray:5 4}.ar.w{stroke:var(--warn)}
+.lb{fill:#151515}
+</style>
+</head>
+<body>
+<main class="page">
+
+  <header class="head">
+    <p class="eye">Morndo · proposal, not decided · 19 November 2026</p>
+    <h1>The manager and its lanes on tmux</h1>
+    <p class="lede">Today one manager, a single Claude Code window, takes every message and every lane event; lanes are
+      tmux windows on any node, reached only through the hub's delivery queue. Three ways to grow that so it stays
+      stable and runs many things at once. All three sit on the same stability layer, at the end. With an API key the
+      shapes stay the same; only what runs in a window changes.</p>
+  </header>
+
+  <!-- A -->
+  <section class="sec" id="a">
+    <h2 class="h2"><b>A</b>One manager, kept quiet</h2>
+    <p class="sub">Today's shape, with the noise taken away. Routine lane events go to the board in the hub; the manager is
+      woken only for your messages and for exceptions. A planned handoff each night starts it fresh from a written state,
+      instead of letting its one conversation grow and compact.</p>
+    <figure class="fig"><svg data-d="a" role="img" aria-label="Architecture A: clients write into one manager thread in the hub; the delivery queue types into one manager window; the manager starts lanes on nodes; lane events go through a filter to the board, and only exceptions reach the manager."></svg>
+      <figcaption class="key"><span><i></i>message or command</span><span><i class="d"></i>starts or steers a lane</span><span><i class="w"></i>event, filtered</span><span><s></s>window working</span><span><s class="idle"></s>window idle</span></figcaption></figure>
+    <div class="facts">
+      <div><h3>Where you write</h3><p>One Manager chat, the same in the Mac app, the web app, the phone and Telegram. All of it lands in one pane.</p></div>
+      <div><h3>What it needs that is new</h3><ul><li>The event filter in the hub</li><li>A nightly handoff: write state, start fresh</li><li>Messages queued while it works, shown as queued</li></ul></div>
+      <div><h3>Good, and what it costs</h3><ul><li><b>Smallest change</b>; one mind sees everything</li><li>Still one queue: a message waits while another topic runs</li><li>One context for every topic; one pane to lose</li></ul></div>
+    </div>
+  </section>
+
+  <!-- B -->
+  <section class="sec" id="b">
+    <h2 class="h2"><b>B</b>A manager per topic<em>Recommended</em></h2>
+    <p class="sub">A chief and one manager window per topic, side by side in one tmux session. The hub routes each message to
+      its topic; each topic manager starts and steers its own lanes. Parallel directions run in parallel, and each
+      manager's context stays small and on one subject.</p>
+    <figure class="fig"><svg data-d="b" role="img" aria-label="Architecture B: clients write into topic chats; the hub routes each message to a topic thread and types it into that topic's manager window; the chief handles anything new; each topic manager runs its own lanes in its own session on a node."></svg>
+      <figcaption class="key"><span><i></i>message or command</span><span><i class="d"></i>starts or steers a lane</span><span><i class="w"></i>event, filtered</span><span><s></s>window working</span><span><s class="idle"></s>window idle</span></figcaption></figure>
+    <div class="facts">
+      <div><h3>Where you write</h3><p>In the topic's own chat, on its page, in any client. Something new goes to the chief or ⌘K, which files it under a topic or opens one. A teammate writes in the topics shared with them and reaches only that topic's manager.</p></div>
+      <div><h3>What it needs that is new</h3><ul><li>A router in the hub: message → topic</li><li>One delivery queue per manager window</li><li>The chief for work across topics</li></ul></div>
+      <div><h3>Good, and what it costs</h3><ul><li><b>No waiting across topics</b>; small, focused contexts</li><li>Matches the cockpit: topic pages, topic chats, sharing by topic</li><li>More live windows: memory and account limits per node</li></ul></div>
+    </div>
+  </section>
+
+  <!-- C -->
+  <section class="sec" id="c">
+    <h2 class="h2"><b>C</b>Short manager runs, long lanes</h2>
+    <p class="sub">No long manager conversation at all. Each direction is a thread with its own record in the hub. A
+      message or an exception becomes a job; a free window from a small pool takes it, reads the record, acts, writes back
+      and ends. Lanes stay long tmux windows, which is where tmux is best: long work you can watch and attach to.</p>
+    <figure class="fig"><svg data-d="c" role="img" aria-label="Architecture C: clients write into threads; each message becomes a job; a pool of short manager runs reads the thread's record, acts, writes back and ends; lanes run long on the nodes and report back."></svg>
+      <figcaption class="key"><span><i></i>message or command</span><span><i class="d"></i>starts or steers a lane</span><span><i class="w"></i>event, filtered</span><span><s></s>window working</span><span><s class="idle"></s>window idle</span></figcaption></figure>
+    <div class="facts">
+      <div><h3>Where you write</h3><p>In any thread, from any client: a topic, a lane, the inbox. The thread is the memory, not a session, so it does not matter which window answers.</p></div>
+      <div><h3>What it needs that is new</h3><ul><li>A record per thread good enough to start from cold</li><li>A job queue and a pool of manager windows</li><li>Your call on "one agent in one window" (modules design, section 6.6)</li></ul></div>
+      <div><h3>Good, and what it costs</h3><ul><li><b>Nothing to compact, nothing waits</b>; a crash loses one run</li><li>Fits API keys best: a run can be a headless call</li><li>Each run re-reads its record: more tokens, seconds to start</li></ul></div>
+    </div>
+  </section>
+
+  <!-- comparison -->
+  <section class="sec">
+    <h2 class="h2">Side by side</h2>
+    <div class="tbl"><table>
+      <thead><tr><th scope="col"></th><th scope="col">A · One manager, quiet</th><th scope="col">B · A manager per topic</th><th scope="col">C · Short runs</th></tr></thead>
+      <tbody>
+        <tr><td>Where you write</td><td>One Manager chat</td><td class="best">Each topic's chat; the chief for new things</td><td>Any thread</td></tr>
+        <tr><td>Several directions at once</td><td>Queued behind each other</td><td class="best">In parallel, one per topic</td><td class="best">In parallel, one run each</td></tr>
+        <tr><td>Context over weeks</td><td>One long conversation, handed off nightly</td><td>One per topic, small</td><td class="best">None kept; the record is the memory</td></tr>
+        <tr><td>When a manager crashes</td><td>Everything waits until it is back</td><td>Only that topic waits</td><td class="best">One run is retried</td></tr>
+        <tr><td>Tokens</td><td class="best">Lowest</td><td>Medium: more contexts, each small</td><td>Highest: every run reads its record</td></tr>
+        <tr><td>Answer time</td><td>Fast when idle, slow when busy</td><td class="best">Fast</td><td>A few seconds to start each run</td></tr>
+        <tr><td>Fits the cockpit and sharing</td><td>Partly: one chat for all</td><td class="best">Directly: topic pages and topic chats</td><td>Well: threads</td></tr>
+        <tr><td>Change from today</td><td class="best">Small</td><td>Medium</td><td>Large</td></tr>
+      </tbody>
+    </table></div>
+  </section>
+
+  <!-- stability layer -->
+  <section class="sec" id="layer">
+    <h2 class="h2">The stability layer, for all three</h2>
+    <p class="sub">What keeps tmux sessions alive and honest, whichever shape is chosen. Parts of it already run today
+      (the stamped tmux server, the delivery queue that waits and checks, turn-end hooks); the rest is new.</p>
+    <figure class="fig"><svg data-d="s" role="img" aria-label="The stability layer: systemd starts the node agent, which owns the stamped tmux server with a manager session and a lanes session; the hub holds each lane's desired state and the agent reconciles the windows to it; every message passes the delivery queue's gate; hooks and health checks report back."></svg></figure>
+    <ol class="layer">
+      <li><b>tmux belongs to the node agent.</b> One server per node, started by the agent's service, stamped so a restart is noticed. Managers and lanes live in separate sessions, so ending work never touches a manager.</li>
+      <li><b>The hub holds the desired state.</b> Each lane is a record: topic, brief, engine, session id. Every few seconds the agent makes the windows match: a missing one is recreated and resumed, with backoff and a limit per hour.</li>
+      <li><b>Nobody types into a pane directly.</b> Every message passes the delivery queue: it waits for the turn to end and the input to be empty, pastes once, and confirms it in the transcript.</li>
+      <li><b>Every turn reports.</b> Hooks mark each turn's end with a status; a lane silent too long is flagged; memory pressure stops new lanes on a node before it swaps.</li>
+      <li><b>You can always look.</b> The cockpit's live terminal, or <code>tmux attach -r</code>, read-only, so watching never types into a lane by accident.</li>
+      <li><b>A handover is read back.</b> When a window is resumed, restarted or started fresh, it gets the lane's handover (where it stood, what is open, what could go wrong, what to do then) and first says it back. The hub compares the read-back with the lane's record; until they match, the lane sends nothing outside.</li>
+      <li><b>Shared things take turns.</b> Your mail, the CRM, a repo, the account pool: the hub gives lanes their turn, so a collision never becomes a manager's problem.</li>
+    </ol>
+  </section>
+
+  <section class="rec">
+    <h2 class="h2">What I would do</h2>
+    <p><b>Build the stability layer first</b>; it pays off in every shape. <b>Then B</b>: it answers "where do people
+      write" the way the cockpit already looks (each topic has its chat, and sharing is by topic), and it removes the
+      waiting across topics without giving up long, attachable sessions. Keep C's idea for the chief later: work across
+      topics is rare, so the chief can run in short runs once threads keep good records.</p>
+    <p>Research points the same way (<a href="management-research.md">management-research.md</a>): a coordinator that
+      checks work keeps errors from compounding (4.4× against 17.2× for agents working alone in one study), and
+      self-contained units cut what has to pass through the top. B keeps both: one manager checks each topic's lanes,
+      and topics do not wait on each other.</p>
+    <p class="note">With an API key instead of a subscription, nothing above changes: a window runs the same Claude Code
+      against the key. In C the manager runs can also be headless calls, with no window at all.</p>
+  </section>
+
+</main>
+
+<script>
+// Each diagram is plain data: boxes (kind, place, title, subtitle) and arrows (from, to, kind, label). Kinds: client,
+// hub (a container), row (inside the hub), node (a machine's tmux server), sess (a tmux session), win (a window).
+const W = 1000;
+const D = {
+  a: { h: 500,
+    boxes: [
+      ["cap", 20, 52, "You write"],
+      ["client", 20, 74, 180, 50, "Mac app", "Manager chat"],
+      ["client", 20, 136, 180, 50, "Web and phone", "Manager chat"],
+      ["client", 20, 198, 180, 50, "Telegram", "pings and replies"],
+      ["hub", 250, 40, 250, 420, "Hub", "control plane"],
+      ["row", 266, 92, 218, 48, "Manager thread", "one, for everything"],
+      ["row", 266, 150, 218, 48, "Delivery queue", "types between turns only"],
+      ["row", 266, 208, 218, 48, "Event filter", "routine to the board"],
+      ["row", 266, 266, 218, 48, "Lane records", "desired state, session ids"],
+      ["row", 266, 324, 218, 48, "Board", "tasks, waits, state"],
+      ["node", 560, 40, 420, 150, "Control plane", "tmux · node agent"],
+      ["sess", 576, 92, 388, 82, "session mgr"],
+      ["win", 592, 120, 220, 38, "manager", "on", "one long conversation"],
+      ["node", 560, 220, 205, 240, "Node A", "tmux · node agent"],
+      ["sess", 574, 270, 177, 174, "session lanes"],
+      ["win", 586, 298, 153, 32, "brand-list", "on"],
+      ["win", 586, 340, 153, 32, "halden-offer", "idle"],
+      ["win", 586, 382, 153, 32, "webinar", "on"],
+      ["node", 775, 220, 205, 240, "Node B", "tmux · node agent"],
+      ["sess", 789, 270, 177, 174, "session lanes"],
+      ["win", 801, 298, 153, 32, "api-export", "on"],
+      ["win", 801, 340, 153, 32, "red-main", "on"],
+    ],
+    arrows: [
+      [[200, 99], [266, 116], ""], [[200, 161], [266, 116], ""], [[200, 223], [266, 116], ""],
+      [[484, 168], [592, 132], "one pane", "", [536, 136]],
+      [[484, 222], [592, 148], "exceptions only", "w", [536, 196]],
+      [[700, 158], [484, 282], "lanes start", "d", [652, 214]],
+      [[484, 298], [574, 356], "reconcile", "d", [529, 336]],
+      [[560, 440], [484, 236], "turn ends", "w", [522, 452]],
+    ] },
+  b: { h: 540,
+    boxes: [
+      ["cap", 20, 52, "You write"],
+      ["client", 20, 74, 180, 50, "Topic chat", "on each topic page"],
+      ["client", 20, 136, 180, 50, "Teammates", "their shared topics"],
+      ["client", 20, 198, 180, 50, "⌘K or the chief", "anything new"],
+      ["client", 20, 260, 180, 50, "Phone", "the same chats"],
+      ["hub", 250, 40, 250, 460, "Hub", "control plane"],
+      ["row", 266, 92, 218, 48, "Router", "message → its topic"],
+      ["row", 266, 150, 218, 48, "Topic threads", "one per topic"],
+      ["row", 266, 208, 218, 48, "Delivery queues", "one per manager window"],
+      ["row", 266, 266, 218, 48, "Event filter", "routine to the board"],
+      ["row", 266, 324, 218, 48, "Lane records", "desired state, by topic"],
+      ["row", 266, 382, 218, 48, "Board", "tasks, waits, state"],
+      ["node", 560, 40, 420, 200, "Control plane", "tmux · node agent"],
+      ["sess", 576, 92, 388, 132, "session mgr"],
+      ["win", 590, 118, 172, 32, "chief", "idle"],
+      ["win", 776, 118, 172, 32, "outbound", "idle"],
+      ["win", 590, 160, 172, 32, "partnerships", "on"],
+      ["win", 776, 160, 172, 32, "content", "on"],
+      ["tl", 590, 214, "one window per topic, each a small context of its own"],
+      ["node", 560, 270, 205, 230, "Node A", "tmux · node agent"],
+      ["sess", 574, 320, 177, 164, "session partnerships"],
+      ["win", 586, 348, 153, 32, "brand-list", "on"],
+      ["win", 586, 390, 153, 32, "halden-offer", "idle"],
+      ["win", 586, 432, 153, 32, "calls", "on"],
+      ["node", 775, 270, 205, 230, "Node B", "tmux · node agent"],
+      ["sess", 789, 320, 177, 164, "session content"],
+      ["win", 801, 348, 153, 32, "webinar", "on"],
+      ["win", 801, 390, 153, 32, "recap", "on"],
+    ],
+    arrows: [
+      [[200, 99], [266, 116], ""], [[200, 161], [266, 116], ""], [[200, 223], [266, 116], ""], [[200, 285], [266, 116], ""],
+      [[484, 226], [590, 134], "", ""], [[484, 232], [590, 176], "to its topic's window", "", [610, 256]],
+      [[740, 192], [740, 320], "its lanes", "d", [700, 252]],
+      [[930, 192], [930, 320], "its lanes", "d", [890, 252]],
+      [[574, 470], [484, 290], "turn ends", "w", [522, 500]],
+    ] },
+  c: { h: 520,
+    boxes: [
+      ["cap", 20, 52, "You write"],
+      ["client", 20, 74, 180, 50, "Any thread", "topic, lane or inbox"],
+      ["client", 20, 136, 180, 50, "Phone and web", "the same threads"],
+      ["client", 20, 198, 180, 50, "Teammates", "their shared threads"],
+      ["hub", 250, 40, 250, 440, "Hub", "control plane"],
+      ["row", 266, 92, 218, 48, "Threads", "the memory: a record each"],
+      ["row", 266, 150, 218, 48, "Job queue", "a job per message or exception"],
+      ["row", 266, 208, 218, 48, "Event filter", "routine to the board"],
+      ["row", 266, 266, 218, 48, "Lane records", "desired state"],
+      ["row", 266, 324, 218, 48, "Board", "tasks, waits, state"],
+      ["node", 560, 40, 420, 190, "Control plane", "tmux · node agent"],
+      ["sess", 576, 92, 388, 122, "session mgr-pool"],
+      ["win", 590, 118, 172, 32, "run 1 · partnerships", "on"],
+      ["win", 776, 118, 172, 32, "run 2 · content", "on"],
+      ["win", 590, 160, 172, 32, "run 3 · free", "idle"],
+      ["tl", 776, 181, "read → act → write → end"],
+      ["node", 560, 260, 205, 220, "Node A", "tmux · node agent"],
+      ["sess", 574, 310, 177, 154, "session lanes"],
+      ["win", 586, 338, 153, 32, "brand-list", "on"],
+      ["win", 586, 380, 153, 32, "halden-offer", "idle"],
+      ["win", 586, 422, 153, 32, "webinar", "on"],
+      ["node", 775, 260, 205, 220, "Node B", "tmux · node agent"],
+      ["sess", 789, 310, 177, 154, "session lanes"],
+      ["win", 801, 338, 153, 32, "api-export", "on"],
+      ["win", 801, 380, 153, 32, "red-main", "on"],
+    ],
+    arrows: [
+      [[200, 99], [266, 116], ""], [[200, 161], [266, 116], ""], [[200, 223], [266, 116], ""],
+      [[375, 140], [375, 150], ""], [[400, 208], [400, 198], "", "w"],
+      [[590, 130], [484, 110], "writes back", "d", [537, 98]],
+      [[484, 176], [590, 176], "takes a job", "", [537, 162]],
+      [[680, 214], [484, 284], "lanes start", "d", [642, 244]],
+      [[484, 298], [574, 350], "reconcile", "d", [529, 330]],
+      [[560, 460], [484, 236], "turn ends", "w", [522, 472]],
+    ] },
+  s: { h: 350,
+    boxes: [
+      ["hub", 20, 30, 240, 300, "Hub", "the desired state"],
+      ["row", 36, 82, 208, 48, "Lane records", "topic, brief, engine, session"],
+      ["row", 36, 140, 208, 48, "Delivery queue", "wait, paste once, confirm"],
+      ["row", 36, 198, 208, 48, "Health", "silent lanes, memory pressure"],
+      ["node", 330, 30, 650, 300, "A node", "the machine"],
+      ["row", 350, 86, 200, 52, "Node agent", "reconciles every few seconds"],
+      ["row", 350, 196, 200, 48, "systemd", "keeps the agent running"],
+      ["row", 350, 262, 340, 48, "Hooks", "every turn ends with a status"],
+      ["sess", 730, 66, 234, 248, "tmux server · stamped"],
+      ["sess", 746, 96, 202, 70, "session mgr"],
+      ["win", 758, 122, 178, 30, "manager", "on"],
+      ["sess", 746, 178, 202, 124, "session lanes"],
+      ["win", 758, 204, 178, 28, "lane", "on"],
+      ["win", 758, 240, 178, 28, "lane", "on"],
+      ["win", 758, 276, 178, 20, "", ""],
+    ],
+    arrows: [
+      [[244, 106], [350, 104], "make it so", "d", [297, 88]],
+      [[244, 164], [350, 122], "messages", "", [297, 150]],
+      [[550, 104], [758, 137], "one paste, when idle", "", [640, 104]],
+      [[550, 124], [746, 230], "recreates a missing window", "d", [640, 178]],
+      [[450, 196], [450, 138], "", ""],
+      [[746, 286], [690, 286], "", "w"], [[350, 286], [244, 222], "status", "w", [297, 266]],
+    ] },
+};
+const NS = "http://www.w3.org/2000/svg";
+const el = (name, attrs, text) => { const e = document.createElementNS(NS, name); for (const k in attrs) e.setAttribute(k, attrs[k]); if (text != null) e.textContent = text; return e; };
+function draw(svg, d) {
+  svg.setAttribute("viewBox", `0 0 ${W} ${d.h}`);
+  const defs = el("defs", {});
+  for (const [id, c] of [["ab", "var(--best)"], ["ad", "var(--muted)"], ["aw", "var(--warn)"]]) {
+    const m = el("marker", { id: svg.dataset.d + id, viewBox: "0 0 10 10", refX: 9, refY: 5, markerWidth: 7, markerHeight: 7, orient: "auto-start-reverse" });
+    m.append(el("path", { d: "M0 1 L9 5 L0 9 z", fill: c })); defs.append(m);
+  }
+  svg.append(defs);
+  const boxes = el("g", {}), arrows = el("g", {}), labels = el("g", {});
+  for (const b of d.boxes) {
+    const [kind, x, y] = b;
+    if (kind === "cap") { boxes.append(el("text", { x, y, class: "t3" }, b[3])); continue; }
+    if (kind === "tl") { boxes.append(el("text", { x, y, class: "tl" }, b[3])); continue; }
+    const [, , , w, h, title, sub, note] = b;
+    if (kind === "client") { boxes.append(el("rect", { x, y, width: w, height: h, rx: 10, class: "cl" })); boxes.append(el("text", { x: x + 14, y: y + 21, class: "t1" }, title)); boxes.append(el("text", { x: x + 14, y: y + 38, class: "t2" }, sub)); }
+    if (kind === "hub") { boxes.append(el("rect", { x, y, width: w, height: h, rx: 12, class: "hb" })); boxes.append(el("text", { x: x + 16, y: y + 28, class: "t1" }, title)); boxes.append(el("text", { x: x + 16 + title.length * 8 + 8, y: y + 28, class: "t2" }, sub)); }
+    if (kind === "row") { boxes.append(el("rect", { x, y, width: w, height: h, rx: 8, class: "rw" })); boxes.append(el("text", { x: x + 12, y: y + 20, class: "t1" }, title)); boxes.append(el("text", { x: x + 12, y: y + 37, class: "t2" }, sub)); }
+    if (kind === "node") { boxes.append(el("rect", { x, y, width: w, height: h, rx: 12, class: "nd" })); boxes.append(el("text", { x: x + 16, y: y + 28, class: "t1" }, title)); boxes.append(el("text", { x: x + 16, y: y + 44, class: "t2" }, sub)); }
+    if (kind === "sess") { boxes.append(el("rect", { x, y, width: w, height: h, rx: 9, class: "ss" })); boxes.append(el("text", { x: x + 12, y: y + 17, class: "tm" }, title)); }
+    if (kind === "win" && !title) { boxes.append(el("text", { x: x + 12, y: y + 14, class: "tl" }, "… recreated if one goes missing")); continue; }
+    if (kind === "win") {
+      boxes.append(el("rect", { x, y, width: w, height: h, rx: 7, class: "wn" }));
+      boxes.append(el("circle", sub === "on" ? { cx: x + 14, cy: y + h / 2, r: 4, fill: "var(--ok)" } : { cx: x + 14, cy: y + h / 2, r: 3.5, fill: "none", stroke: "var(--muted)", "stroke-width": 1.5 }));
+      boxes.append(el("text", { x: x + 26, y: y + h / 2 + 4, class: "tm" }, title));
+      if (note) boxes.append(el("text", { x: x + w + 12, y: y + h / 2 + 4, class: "tl" }, note));
+    }
+  }
+  for (const [a, b, label, kind, at] of d.arrows) {
+    const [x1, y1] = a, [x2, y2] = b, dx = Math.max(30, Math.abs(x2 - x1) / 2), dir = x2 >= x1 ? 1 : -1;
+    const path = Math.abs(x2 - x1) < 4 ? `M${x1} ${y1} L${x2} ${y2}` : `M${x1} ${y1} C${x1 + dir * dx} ${y1} ${x2 - dir * dx} ${y2} ${x2} ${y2}`;
+    arrows.append(el("path", { d: path, class: "ar" + (kind ? " " + kind : ""), "marker-end": `url(#${svg.dataset.d}${kind === "d" ? "ad" : kind === "w" ? "aw" : "ab"})` }));
+    if (label) {
+      const [mx, my] = at || [(x1 + x2) / 2, (y1 + y2) / 2], t = el("text", { x: mx, y: my + 4, class: "tl", "text-anchor": "middle" }, label);
+      labels.append(t);
+      const wpx = label.length * 6.4 + 12;
+      labels.insertBefore(el("rect", { x: mx - wpx / 2, y: my - 9, width: wpx, height: 18, rx: 9, class: "lb" }), t);
+    }
+  }
+  svg.append(boxes, arrows, labels);
+}
+document.querySelectorAll("svg[data-d]").forEach(s => draw(s, D[s.dataset.d]));
+</script>
+</body>
+</html>

@@ -1,0 +1,75 @@
+{
+  "id": "lane:outreach-wave-2",
+  "title": "Outreach, wave 2: retail",
+  "sub": "You, the Manager and this lane's agents. Nothing else lives here.",
+  "placeholder": "Message this lane",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m17",
+      "author": {
+        "id": "sender",
+        "name": "Sender",
+        "shortName": "Sender",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "24 drafts ready for Lea. I kept them under 90 words and named one thing each brand did this year.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T04:30:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m18",
+      "author": {
+        "id": "lea-brandt",
+        "name": "Lea Brandt",
+        "shortName": "Lea",
+        "kind": "person",
+        "avatar": "L",
+        "role": "GTM associate",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "On it after coffee.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T08:12:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

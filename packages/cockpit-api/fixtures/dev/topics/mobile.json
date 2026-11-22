@@ -1,0 +1,62 @@
+{
+  "id": "mobile",
+  "name": "Mobile",
+  "kind": "project",
+  "icon": "phone",
+  "crumb": "Scans",
+  "open": false,
+  "meta": null,
+  "intro": "The phone app.",
+  "when": null,
+  "health": {
+    "state": "ok",
+    "word": "Working"
+  },
+  "goal": null,
+  "noGoal": null,
+  "facts": [],
+  "plan": null,
+  "focusLaneId": null,
+  "history": null,
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "ok",
+      "word": "Working",
+      "text": "Keeps scans made offline",
+      "skill": "/build-feature",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "jobs": [],
+  "chatSub": "You and Builder.",
+  "lanes": [
+    {
+      "id": "keep-scans",
+      "title": "Keep scans without a signal",
+      "state": "ok",
+      "stateWord": "Working",
+      "leadName": "Builder",
+      "next": "",
+      "nextAt": "2026-11-16T15:00:00+01:00"
+    }
+  ],
+  "spend": null,
+  "stuck": null,
+  "tasks": [],
+  "viewer": {
+    "role": "owner",
+    "stages": [],
+    "sharedBy": null
+  },
+  "stages": [],
+  "status": null,
+  "seenBy": [],
+  "appliedGoalChanges": []
+}

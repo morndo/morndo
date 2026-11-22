@@ -1,0 +1,157 @@
+{
+  "id": "sequence-b",
+  "topicId": "outbound",
+  "title": "Sequence B, fintech ops",
+  "state": "warn",
+  "stateWord": "Needs you",
+  "lead": {
+    "id": "sender",
+    "name": "Sender",
+    "shortName": "Sender",
+    "kind": "agent",
+    "avatar": "S",
+    "role": null,
+    "state": "warn",
+    "word": "Leads",
+    "text": "Holds the sequence for your OK",
+    "skill": "/outbound-sequence",
+    "engine": "Claude",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": "After your decision",
+  "afterNext": "after the first 180",
+  "decisionId": "d2",
+  "short": "Sequence B",
+  "ask": "180 fintech ops leads at 60 a day · due tomorrow",
+  "shortAfter": "The first 60 go out at 10:00.",
+  "recommendation": null,
+  "yours": "180 emails go out in your name.",
+  "checks": [],
+  "delay": null,
+  "approveLabel": "Start sequence B",
+  "after": "The first 60 emails go out at 10:00, then 60 a day. Sending pauses on its own at 4% bounces.",
+  "asked": "Start writing to fintech ops people once the pilot shows it works.",
+  "askedMeta": {
+    "source": "You to the Manager, Wednesday 09:05",
+    "note": "The Manager filed it under Outbound and named Sender to lead."
+  },
+  "status": "The pilot of 30 emails got 6 replies and 2 meetings. Starting sends to 180 fintech ops leads at 60 a day. Due tomorrow.",
+  "standing": {
+    "headline": "It waits for you.",
+    "detail": "The pilot of 30 emails got 6 replies and 2 meetings. Starting sends to 180 fintech ops leads at 60 a day. Due tomorrow."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "180 fintech ops leads, built from the new customer profile",
+      "who": "Prospector · Wednesday"
+    },
+    {
+      "kind": "ok",
+      "text": "Pilot of 30 emails: 6 replies, 2 meetings",
+      "who": "Sender · Friday"
+    },
+    {
+      "kind": "now",
+      "text": "Your OK to start",
+      "who": "You · by tomorrow"
+    },
+    {
+      "kind": "todo",
+      "text": "180 emails over 3 days, 60 a day",
+      "who": "Sender · from 10:00"
+    },
+    {
+      "kind": "todo",
+      "text": "Meetings booked and reported",
+      "who": "Manager · Fri 27 Nov"
+    }
+  ],
+  "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "sender",
+      "name": "Sender",
+      "shortName": "Sender",
+      "kind": "agent",
+      "avatar": "S",
+      "role": null,
+      "state": "warn",
+      "word": "Leads",
+      "text": "Holds the sequence for your OK",
+      "skill": "/outbound-sequence",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "prospector",
+      "name": "Prospector",
+      "shortName": "Prospector",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Built and checked the list",
+      "skill": "/icp-refresh",
+      "engine": "Claude",
+      "record": null
+    },
+    {
+      "id": "replies",
+      "name": "Replies",
+      "shortName": "Replies",
+      "kind": "agent",
+      "avatar": "R",
+      "role": null,
+      "state": "next",
+      "word": "Up next",
+      "text": "Answers replies and books meetings",
+      "skill": "/reply-triage",
+      "engine": "GPT",
+      "record": null
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "The 4 emails of sequence B",
+      "detail": "Short, one question each, no attachments",
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "List of 180 leads",
+      "detail": "Fintech ops, 50 to 500 people",
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Pilot results",
+      "detail": "30 sent, 6 replies, 2 meetings, 0 bounces",
+      "target": {
+        "kind": "lane",
+        "id": "sequence-b"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-11T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": "2026-11-20T17:00:00+01:00"
+}

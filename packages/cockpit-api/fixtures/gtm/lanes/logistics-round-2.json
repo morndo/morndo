@@ -1,0 +1,106 @@
+{
+  "id": "logistics-round-2",
+  "topicId": "outbound",
+  "title": "Logistics ops, round 2",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "prospector",
+    "name": "Prospector",
+    "shortName": "Prospector",
+    "kind": "agent",
+    "avatar": "P",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "120 of 400 found",
+    "skill": "/icp-refresh",
+    "engine": "Claude",
+    "record": "Pilot list: 0 bounces in 30"
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Find 400 more logistics ops leads like the ones who booked in sequence A.",
+  "askedMeta": {
+    "source": "The Manager opened it on its own on Sunday, from the plan to reach 30 meetings",
+    "note": "Prospector leads; you approve the pilot before anything is sent."
+  },
+  "status": "120 of 400 leads found. Prospector leaves out every company that was in sequence A.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "120 of 400 leads found. Prospector leaves out every company that was in sequence A."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "now",
+      "text": "400 leads, none from sequence A",
+      "who": "Prospector · 120 of 400"
+    },
+    {
+      "kind": "todo",
+      "text": "Emails checked before use",
+      "who": "Prospector · Thu"
+    },
+    {
+      "kind": "todo",
+      "text": "Pilot of 30, after your OK",
+      "who": "Sender · Mon 23 Nov"
+    },
+    {
+      "kind": "todo",
+      "text": "The rest at 60 a day if the pilot books 2",
+      "who": "Sender · from 30 Nov"
+    }
+  ],
+  "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "prospector",
+      "name": "Prospector",
+      "shortName": "Prospector",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "120 of 400 found",
+      "skill": "/icp-refresh",
+      "engine": "Claude",
+      "record": "Pilot list: 0 bounces in 30"
+    }
+  ],
+  "made": [
+    {
+      "icon": "file",
+      "title": "Lead list, round 2",
+      "detail": "120 so far, logistics ops, 50 to 500 people",
+      "target": {
+        "kind": "lane",
+        "id": "logistics-round-2"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-15T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-19T17:00:00+01:00",
+  "afterNextAt": null
+}

@@ -1,0 +1,148 @@
+{
+  "id": "topic:web",
+  "title": "Web app chat",
+  "sub": "You, Builder, Reviewer and QA. Nothing else lives here.",
+  "placeholder": "Message Web app",
+  "reading": null,
+  "since": null,
+  "pinned": null,
+  "agents": null,
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m11",
+      "author": {
+        "id": "builder",
+        "name": "Builder",
+        "shortName": "Builder",
+        "kind": "agent",
+        "avatar": "B",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Main is red since 06:40. I tried 3 fixes and none worked: the new session library signs cookies differently, so saved sessions get a 401. I am out of tries, so I stopped.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:20:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m12",
+      "author": {
+        "id": "qa",
+        "name": "QA",
+        "shortName": "QA",
+        "kind": "agent",
+        "avatar": "Q",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "I am holding the filters walk-through until main is green.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:21:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m13",
+      "author": {
+        "id": "timo-varga",
+        "name": "Timo Varga",
+        "shortName": "Timo",
+        "kind": "person",
+        "avatar": "T",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Can you pin the old version for now and do the upgrade properly later?",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:25:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m14",
+      "author": {
+        "id": "builder",
+        "name": "Builder",
+        "shortName": "Builder",
+        "kind": "agent",
+        "avatar": "B",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Yes. Pinning takes about 3 minutes. I will file the proper upgrade as its own task, with a test for saved sessions. It changes main directly, so I need your OK.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [
+        {
+          "label": "Pin it",
+          "id": "pin-the-old-session-library",
+          "laneId": "red-main",
+          "personId": null
+        },
+        {
+          "label": "One more try",
+          "id": "allow-one-more-try",
+          "laneId": "red-main",
+          "personId": null
+        }
+      ],
+      "at": "2026-11-16T07:26:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

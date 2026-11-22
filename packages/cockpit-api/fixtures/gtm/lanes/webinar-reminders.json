@@ -1,0 +1,115 @@
+{
+  "id": "webinar-reminders",
+  "topicId": "content",
+  "title": "Webinar invites and reminder",
+  "state": "ok",
+  "stateWord": "Working",
+  "lead": {
+    "id": "publisher",
+    "name": "Publisher",
+    "shortName": "Publisher",
+    "kind": "agent",
+    "avatar": "P",
+    "role": null,
+    "state": "ok",
+    "word": "Leads",
+    "text": "Reminder scheduled for Wednesday",
+    "skill": "/schedule-post",
+    "engine": "Asks first",
+    "record": "31 of 31 posts went out on time"
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Invite the newsletter readers to the webinar, and remind the ones who looked but did not sign up.",
+  "askedMeta": {
+    "source": "You to the Manager, Thursday 12 November",
+    "note": "The Manager filed it under Content and named Publisher to lead."
+  },
+  "status": "Two sends are out and brought 118 sign-ups. The reminder goes on Wednesday at 09:00 to the 3,900 who opened but did not sign up.",
+  "standing": {
+    "headline": "It is working.",
+    "detail": "Two sends are out and brought 118 sign-ups. The reminder goes on Wednesday at 09:00 to the 3,900 who opened but did not sign up."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Invite to 4,200 readers",
+      "who": "Publisher · Thu 12 Nov"
+    },
+    {
+      "kind": "ok",
+      "text": "Newsletter 46 with the webinar on top",
+      "who": "Publisher · today, 08:00"
+    },
+    {
+      "kind": "now",
+      "text": "Reminder to the 3,900 who opened, scheduled",
+      "who": "Publisher · Wed 09:00"
+    },
+    {
+      "kind": "todo",
+      "text": "Sign-ups from email reported",
+      "who": "Manager · Fri 20 Nov"
+    }
+  ],
+  "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
+  "crew": [
+    {
+      "id": "publisher",
+      "name": "Publisher",
+      "shortName": "Publisher",
+      "kind": "agent",
+      "avatar": "P",
+      "role": null,
+      "state": "ok",
+      "word": "Leads",
+      "text": "Reminder scheduled for Wednesday",
+      "skill": "/schedule-post",
+      "engine": "Asks first",
+      "record": "31 of 31 posts went out on time"
+    }
+  ],
+  "made": [
+    {
+      "icon": "mail",
+      "title": "Reminder email",
+      "detail": "90 words, one link, scheduled",
+      "target": {
+        "kind": "drafts",
+        "id": null
+      }
+    },
+    {
+      "icon": "file",
+      "title": "Sign-ups by source",
+      "detail": "Newsletter 118, LinkedIn 61, partners 33",
+      "target": {
+        "kind": "lane",
+        "id": "webinar-reminders"
+      }
+    }
+  ],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-12T00:00:00+01:00",
+  "closedAt": null,
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": "2026-11-18T09:00:00+01:00",
+  "afterNextAt": null
+}

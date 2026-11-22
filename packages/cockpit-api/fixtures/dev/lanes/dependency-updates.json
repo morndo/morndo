@@ -1,0 +1,81 @@
+{
+  "id": "dependency-updates",
+  "topicId": "web",
+  "title": "Dependency updates",
+  "state": "done",
+  "stateWord": "Done",
+  "lead": {
+    "id": "builder",
+    "name": "Builder",
+    "shortName": "Builder",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": "done",
+    "word": "Done",
+    "text": "Dependency updates merged",
+    "skill": "/upgrade",
+    "engine": "Claude Code",
+    "record": null
+  },
+  "waitsFor": null,
+  "next": null,
+  "afterNext": null,
+  "decisionId": null,
+  "short": null,
+  "ask": null,
+  "shortAfter": null,
+  "recommendation": null,
+  "yours": null,
+  "checks": [],
+  "delay": null,
+  "approveLabel": null,
+  "after": null,
+  "asked": "Update the dependencies.",
+  "askedMeta": {
+    "source": "The Web app project",
+    "note": null
+  },
+  "status": "Merged today, 03:05.",
+  "standing": {
+    "headline": "Merged.",
+    "detail": "Dependency updates merged at 03:05."
+  },
+  "acts": [],
+  "thumbs": [],
+  "steps": [
+    {
+      "kind": "ok",
+      "text": "Merge the dependency updates",
+      "who": "Builder"
+    }
+  ],
+  "doneNote": "Dependency updates merged.",
+  "crew": [
+    {
+      "id": "builder",
+      "name": "Builder",
+      "shortName": "Builder",
+      "kind": "agent",
+      "avatar": "B",
+      "role": null,
+      "state": "done",
+      "word": "Done",
+      "text": "Dependency updates merged",
+      "skill": "/upgrade",
+      "engine": "Claude Code",
+      "record": null
+    }
+  ],
+  "made": [],
+  "handover": null,
+  "fresh": false,
+  "openedAt": "2026-11-16T03:05:00+01:00",
+  "closedAt": "2026-11-16T03:05:00+01:00",
+  "attachment": null,
+  "model": null,
+  "chain": false,
+  "reminder": null,
+  "nextAt": null,
+  "afterNextAt": null
+}

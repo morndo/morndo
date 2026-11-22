@@ -1,0 +1,54 @@
+{
+  "workspace": {
+    "id": "tidewell",
+    "name": "Tidewell",
+    "theme": {
+      "id": "ink",
+      "name": "Ink",
+      "strength": 55,
+      "glass": null,
+      "effectiveGlass": 25
+    }
+  },
+  "module": {
+    "id": "gtm",
+    "name": "Go-to-market",
+    "icon": "horn",
+    "kindWord": "Topic"
+  },
+  "me": {
+    "id": "mara-lind",
+    "name": "Mara Lind",
+    "shortName": "Mara",
+    "kind": "person",
+    "avatar": "M",
+    "role": "Head of GTM",
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  },
+  "layout": {
+    "sidebarWidth": 236,
+    "chatWidth": 380
+  },
+  "chatMode": "floating",
+  "contractVersion": "1.0.0",
+  "timezone": "Europe/Berlin",
+  "modules": [
+    {
+      "id": "gtm",
+      "name": "Go-to-market",
+      "summary": "Content, outbound, paid, SEO and research",
+      "here": true
+    },
+    {
+      "id": "dev",
+      "name": "Development",
+      "summary": "Projects, pull requests, reviews and releases",
+      "here": false
+    }
+  ]
+}

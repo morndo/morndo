@@ -1,6 +1,7 @@
 # ADR-0006: A Slack-style desktop client, for agents
 
-- **Status:** Accepted, 2026-10-01. Decided by the owner; built by lane A.
+- **Status:** Accepted, 2026-10-01. Decided by the owner; built by lane A. Superseded on 2026-11-21 by ADR-0044 (the
+  cockpit); it stays in force for the running app until the cockpit replaces it.
 - **Builds on:** ADR-0004 (the web endpoint) and ADR-0005 (stack).
 
 ## Context

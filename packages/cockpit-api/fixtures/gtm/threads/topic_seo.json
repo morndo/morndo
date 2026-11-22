@@ -1,0 +1,135 @@
+{
+  "id": "topic:seo",
+  "title": "SEO chat",
+  "sub": "Mara and 2 agents · the Manager reads it, it is not in it",
+  "placeholder": "Message SEO · its manager sorts it",
+  "reading": null,
+  "since": {
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
+    "lines": [
+      "Agents: 3 updates, the latest: SEO writer agreed to keep the tone fair: every claim about another tool links to its own public page."
+    ]
+  },
+  "pinned": null,
+  "agents": {
+    "seen": {
+      "at": "2026-11-15T18:20:00+01:00"
+    },
+    "count": 3,
+    "summary": "Agents · 3 updates since yesterday at 18:20, nothing needs you",
+    "items": [
+      {
+        "name": "SEO writer",
+        "text": "agreed to keep the tone fair: every claim about another tool links to its own public page",
+        "at": "2026-11-16T07:50:00+01:00"
+      },
+      {
+        "name": "SEO writer",
+        "text": "published pages 1 and 2 and asked Google to index them",
+        "at": "2026-11-16T07:42:00+01:00"
+      },
+      {
+        "name": "Checker",
+        "text": "passed pages 1 and 2: 34 claims, each with a public source",
+        "at": "2026-11-16T07:30:00+01:00"
+      }
+    ]
+  },
+  "suggestions": [],
+  "messages": [
+    {
+      "id": "m53",
+      "author": {
+        "id": "seo-writer",
+        "name": "SEO writer",
+        "shortName": "SEO",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Pages 1 and 2 are live. Page 3 is half written. I will show it to the checker at 15:00.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:42:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m54",
+      "author": {
+        "id": "mara-lind",
+        "name": "Mara Lind",
+        "shortName": "Mara",
+        "kind": "person",
+        "avatar": "M",
+        "role": "Head of GTM",
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Keep the tone fair. No cheap shots at them.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:49:59+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    },
+    {
+      "id": "m55",
+      "author": {
+        "id": "seo-writer",
+        "name": "SEO writer",
+        "shortName": "SEO",
+        "kind": "agent",
+        "avatar": "S",
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "text": "Understood. Every claim about them links to their own public page, and the checker refuses any that does not.",
+      "label": null,
+      "threadCard": null,
+      "readBack": null,
+      "actions": [],
+      "at": "2026-11-16T07:50:00+01:00",
+      "decisionId": null,
+      "attachment": null,
+      "model": null,
+      "page": null,
+      "audience": {
+        "kind": "topic"
+      }
+    }
+  ],
+  "nextCursor": null,
+  "scope": null
+}

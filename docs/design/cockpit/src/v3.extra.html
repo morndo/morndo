@@ -1,0 +1,548 @@
+<!-- @@ css -->
+/* Proposal: messaging, laid over v2. Only in gtm-cockpit-v3.html. A topic's chat is its group chat; its manager sorts
+   every message; requests become threads; agents speak only to deliver or to ask; the Manager reads the record.
+   docs/design/orchestration/messaging-flow.html has the reasons. */
+/* Since you last looked: the first thing in a topic chat. */
+.since{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border-radius:var(--r-lg);background:var(--fill)}
+.since-h{display:flex;align-items:baseline;gap:8px;font-size:var(--fs-xs);color:var(--muted)}
+.since-h b{font-weight:600;color:var(--text)}.since-h .grow{flex:1}
+.since ul{display:flex;flex-direction:column;gap:3px;padding:0;margin:0;list-style:none}
+.since li{position:relative;padding-left:12px;font-size:var(--fs-sm);line-height:1.45;color:var(--prose)}
+.since li::before{content:"";position:absolute;left:0;top:.6em;width:4px;height:4px;border-radius:50%;background:var(--muted)}
+.since li[contenteditable="true"]{outline:1px dashed var(--edge-2);outline-offset:2px;border-radius:2px}
+/* The decision, pinned under it. */
+.pinned{display:grid;grid-template-columns:16px minmax(0,1fr) auto;gap:4px 10px;align-items:center;padding:10px 12px;border-radius:var(--r-lg);box-shadow:inset 0 0 0 1px var(--edge)}
+.pinned b{display:block;font-weight:600;font-size:var(--fs-sm);color:var(--text-hi)}.pinned span{font-size:var(--fs-xs);color:var(--muted)}
+.pinned .acts{display:flex;gap:6px}
+/* The agents' strip: their routine work, folded. */
+.astrip{border-radius:var(--r-lg)}
+.astrip>button{display:flex;align-items:center;gap:8px;width:100%;min-height:32px;padding:0 10px;border-radius:var(--r-md);font-size:var(--fs-xs);color:var(--muted);text-align:left}
+.astrip>button:hover{background:var(--fill);color:var(--text-2)}
+.astrip>button .i{transition:transform .15s}.astrip>button[aria-expanded="true"] .i{transform:rotate(180deg)}
+.astrip ul{display:flex;flex-direction:column;gap:4px;margin:4px 0 0;padding:0 10px 4px 30px;list-style:none}
+.astrip li{font-size:var(--fs-xs);line-height:1.45;color:var(--text-2)}.astrip li time{margin-right:6px;font-family:var(--mono);color:var(--muted)}
+.chatday{align-self:center;font-size:var(--fs-2xs);font-weight:600;color:var(--muted)}
+/* A message's label: what the topic's manager understood. A person can correct it. */
+.lbl{display:inline-flex;align-items:center;gap:5px;height:20px;margin-top:5px;padding:0 8px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-2xs);font-weight:600;color:var(--text-2)}
+.lbl:hover{background:var(--fill-hover);color:var(--text)}
+.lbl.change{background:var(--warn-bg,rgba(255,209,169,.14));color:var(--warn)}
+.lblrow{grid-column:2;display:flex;flex-wrap:wrap;gap:4px;align-items:center}
+.said+.lblrow{align-self:flex-end;margin-top:-12px}
+.lblpick{display:flex;flex-wrap:wrap;gap:4px}
+.lblpick button{height:20px;padding:0 8px;border-radius:var(--r-pill);box-shadow:inset 0 0 0 1px var(--edge-2);font-size:var(--fs-2xs);color:var(--text-2)}
+.lblpick button:hover{background:var(--fill)}
+.lblnote{font-size:var(--fs-2xs);color:var(--muted)}
+/* A request's thread, and its owner's read-back. */
+.tcard{grid-column:2;display:grid;grid-template-columns:16px minmax(0,1fr);gap:2px 8px;align-items:center;margin-top:6px;padding:8px 10px;border-radius:var(--r-md);box-shadow:inset 0 0 0 1px var(--edge)}
+.tcard:hover{background:var(--fill)}
+.tcard b{font-size:var(--fs-sm);font-weight:600;color:var(--text)}.tcard span{grid-column:2;font-size:var(--fs-xs);color:var(--muted)}
+.said~.tcard,.lblrow+.tcard.mine{align-self:flex-end;width:86%}
+.rcpt{display:grid;grid-template-columns:24px minmax(0,1fr);gap:2px 10px;font-size:var(--fs-sm);color:var(--text-2)}
+.rcpt .av{width:20px;height:20px;font-size:var(--fs-3xs);margin:1px 0 0 2px}
+.rcpt q{quotes:"“" "”";color:var(--text)}
+.rcpt small{grid-column:2;font-size:var(--fs-2xs);color:var(--muted)}
+.av.tm{background:var(--ink);color:var(--ink-fg)}
+/* One place to write, chosen 21 November: the chat (floating or as a sidebar, as Settings says). */
+/* One place to write: the brief's and the Manager's own composers go; the chat is the only one. */
+.view .dock{display:none}
+.views .doc{scroll-padding-bottom:120px}
+/* Who you are talking to: this page's owner, or the Manager from anywhere. */
+.to{display:inline-flex;gap:2px;margin-top:8px;padding:2px;border-radius:var(--r-pill);background:var(--fill)}
+.to button{height:24px;padding:0 10px;border-radius:var(--r-pill);font-size:var(--fs-xs);font-weight:500;color:var(--text-2)}
+.to button[aria-pressed="true"]{background:var(--ink);color:var(--ink-fg);font-weight:600}
+/* The command center (21 November): one field to find, ask, start or run. Its entry lives at the top of the sidebar,
+   where a mouse user looks anyway; a click, ⌘K and ⌘N all open the same modal, centred over the dimmed page as ⌘K always did. */
+.cmdrow{display:flex;align-items:center;gap:8px;height:32px;margin:0 2px;padding:0 10px;border-radius:var(--r-md);background:var(--tile);color:var(--muted);font-size:var(--fs-ui);text-align:left;flex:none}
+.cmdrow:hover{background:var(--tile-on);color:var(--text-2)}
+.cmdrow span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cmdrow kbd{padding:0;background:none;font-size:var(--fs-2xs);color:var(--muted)}
+.cmdrow[aria-expanded="true"]{background:var(--tile-on);color:var(--text)}
+#tree>button.row[data-palette]{display:none}
+.cmd-scrim{position:fixed;inset:0;z-index:69;background:rgba(0,0,0,.55);animation:fade .16s ease-out}
+#cmd{font:var(--fs-md)/1.45 var(--sans);color:var(--text);position:fixed;z-index:70;left:0;right:0;margin:0 auto;top:11vh;width:min(640px,calc(100vw - 32px));max-height:min(620px,calc(100vh - 11vh - 16px));display:flex;flex-direction:column;background:var(--raised);border:1px solid var(--rim);border-radius:var(--r-xl);box-shadow:var(--sh-float,0 24px 70px rgba(0,0,0,.6));overflow:hidden;animation:pop .2s var(--ease-pop)}
+.cmd-in{display:flex;align-items:center;gap:8px;min-height:48px;padding:0 14px}
+:where(#cmd) button,:where(#cmd) input{font:inherit;color:inherit}
+.cmd-in input{flex:1;min-width:0;height:46px;background:none;border:0;outline:0;color:var(--text-hi);font:inherit;font-size:var(--fs-lg)}
+.cmd-in input::placeholder{color:var(--muted)}
+#cmd .scope,#cmd .att{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:var(--r-pill);background:var(--fill);font-size:var(--fs-xs);font-weight:600;color:var(--text-2);white-space:nowrap}
+#cmd .scope button{display:grid;place-items:center;width:14px;height:14px;margin-right:-3px;color:var(--muted)}
+.cmd-list{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:4px 6px 8px}
+.cmd-list h3{padding:10px 10px 4px;font-size:var(--fs-xs);font-weight:600;color:var(--muted)}
+.cr{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;min-height:36px;padding:4px 10px;border-radius:var(--r-md);text-align:left;font-size:var(--fs-md);color:var(--text)}
+.cr[aria-selected="true"]{background:var(--fill-hover)}
+.cr .ci{display:grid;place-items:center;color:var(--muted)}
+.cr .ct2{min-width:0}.cr .ct2 b{display:block;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr .ct2 small{display:block;font-size:var(--fs-xs);color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cr .ch{font-size:var(--fs-xs);color:var(--muted);white-space:nowrap}
+.cr.start .ct2 b{color:var(--text-hi)}
+.cans{margin:6px 6px 2px;padding:12px 14px;border-radius:var(--r-lg);background:var(--fill)}
+.cans p{font-size:var(--fs-md);line-height:var(--lh-body);color:var(--prose)}
+.cans p b{color:var(--text-hi);font-weight:600}
+.cans small{display:block;margin-top:4px;font-size:var(--fs-xs);color:var(--muted)}
+.cmd-foot{display:flex;flex-wrap:wrap;gap:4px 16px;padding:8px 14px;border-top:1px solid var(--line);font-size:var(--fs-xs);color:var(--muted)}
+.cmd-foot kbd{margin-right:5px}
+.cmd-none{padding:18px 16px;font-size:var(--fs-sm);color:var(--muted)}
+#tree .grp.drop>.row{background:var(--row-on);box-shadow:inset 0 0 0 1.5px var(--ok)}
+#pinmenu [data-cmd-here]{display:flex;align-items:center;gap:8px}
+<!-- @@ js -->
+  // ---- Proposal: messaging. Only in gtm-cockpit-v3.html. ----
+  const tag = $(".v2tag");
+  if (tag) { tag.textContent = "v3 · messaging"; tag.title = "v2's fixes plus the messaging proposal"; }
+
+  // What a message can be, as the topic's manager sorts it. A person never picks; they can correct.
+  const KINDS = { question: "Question", request: "Request", done: "Done", decision: "Decision", change: "Goal change" };
+  const classify = text => (/\?\s*$/.test(text) ? "question"
+    : /\b(deadline|goal|target|budget|priorit|guardrail)/i.test(text) ? "change"
+    : /\b(done|checked|finished|is ready|are ready)\b/i.test(text) ? "done"
+    : /\b(approve|decide|go with)\b/i.test(text) ? "decision" : "request");
+  const lbl = (kind, extra) => `<div class="lblrow"><button class="lbl${kind === "change" ? " change" : ""}" data-lbl="${kind}" title="What the topic's manager understood. Click to correct.">${KINDS[kind]}${extra ? " · " + extra : ""}</button></div>`;
+  const tmAv = '<span class="av tm" aria-hidden="true"><svg class="i sm"><use href="#mark"/></svg></span>';
+  const nowTime = () => new Date().toTimeString().slice(0, 5);
+
+  // The topic's group chat: who is in it, and that the Manager is not.
+  PAGES.topics.forEach(t => {
+    const people = (t.agents || []).filter(a => a[7] === "p").map(a => a[1].split(",")[0].split(" ")[0]);
+    const agents = (t.agents || []).filter(a => a[7] !== "p").length;
+    t.chatSub = `${people.length ? people.join(", ") + " and " : ""}${agents} ${agents === 1 ? "agent" : "agents"} · the Manager reads it, it is not in it`;
+  });
+
+  // Partnerships' own chat, written the new way: people and deliveries in the stream, labelled; status in the strip.
+  const partner = PAGES.topics.find(t => t.id === "partnerships");
+  partner.chat = `
+    <div class="msg"><span class="av person">L</span><div class="who">Lea<time>08:12</time></div><p>Wave 2: retail first or finance first? I check the 24 drafts by 11 either way.</p>${lbl("question")}</div>
+    <div class="msg"><span class="av person">J</span><div class="who">Jonas<time>08:30</time></div><p>The Halden offer is drafted from the template. Mara, it needs your OK.</p>${lbl("decision", "pinned")}</div>
+    <p class="said">Retail first. Send wave 2 to the retail brands first.</p>${lbl("request")}
+    <a class="tcard mine" href="#lane/outreach-wave-2"><svg class="i sm"><use href="#elbow"/></svg><b>Thread · Outreach, wave 2: retail</b><span>Sender owns it · waits for Lea's check</span></a>
+    <div class="rcpt"><span class="av">S</span><span>Sender: <q>Retail first, 20 a day from 11:00, after Lea's check.</q></span><small>read back 08:31</small></div>
+    <p class="said">Call prep, what do I need to know for Brightmoor at 15:00?</p>${lbl("question")}
+    <div class="msg"><span class="av">P</span><div class="who">Call prep<time>08:41</time></div><p>Brightmoor sells to 9,000 small retailers. Their head of partnerships joined in May from a bank and launched two referral programmes there. The full brief is ready at 13:00.</p></div>`;
+  // Where a thread started, on its lane.
+  const w2 = laneById("outreach-wave-2");
+  if (w2) w2.askedMeta = "You in the Partnerships chat, Friday 17:30<i>·</i>The Partnerships manager opened this thread and named Sender; Lea checks the emails first.";
+
+  // Since you last looked, the pinned decision and the agents' strip, drawn from the topic's history and its records.
+  const SINCE = {
+    partnerships: ["32 brands and 58 contacts came in overnight; 9 brands fit.", "Lea asks whether wave 2 goes to retail or finance first.", "Jonas drafted the Halden offer; it waits for you."],
+  };
+  const newRows = t => {
+    const out = [];
+    for (const [, rows] of (t.history ? t.history.days : [])) for (const r of rows) {
+      if (r === "seen") return out;
+      if (!r[9] || isDone(r[9])) out.push(r);
+    }
+    return out;
+  };
+  const LIVE = {};
+  function chatTop(t) {
+    const rows = newRows(t), seen = t.history ? t.history.seen : "your last visit";
+    const people = rows.filter(r => r[3] === "p"), agents = rows.filter(r => r[3] !== "p");
+    const lines = SINCE[t.id] || people.slice(0, 2).map(r => `${r[2]} ${r[4]}.`).concat(agents.length ? [`Agents: ${agents.length} ${agents.length === 1 ? "update" : "updates"}, the latest: ${agents[0][2]} ${agents[0][4]}.`] : []);
+    const since = `<div class="since"><div class="since-h"><b>Since you last looked</b><span class="grow">${seen}</span><button class="link" data-since-edit>Edit</button></div>${lines.length ? `<ul>${lines.slice(0, 3).map(x => `<li>${esc(x)}</li>`).join("")}</ul>` : '<ul><li>Nothing new.</li></ul>'}</div>`;
+    const l = t.focusLane && laneById(t.focusLane);
+    let pin = "";
+    if (l && l.decision && !decided(l)) pin = `<div class="pinned"><i class="dot warn still"></i><div><b>${esc(l.short || l.title)}</b><span>Waits for you · ${esc(l.ask || "")}</span></div><div class="acts"><a class="btn quiet s" href="${l.decisionHref || "#lane/" + l.id}">Brief</a><button class="btn ink s" data-approve-id="${l.decision}">${esc(l.approve || "Approve")}</button></div></div>`;
+    else if (l && l.decision && decided(l)) pin = `<div class="pinned"><svg class="i sm ok"><use href="#check"/></svg><div><b>${esc(l.short || l.title)}: you approved it</b><span>${esc(l.shortAfter || "")}</span></div><div class="acts"><button class="btn quiet s" data-undo-id="${l.decision}">Undo</button></div></div>`;
+    else if (l && stateOf(l) === "bad") pin = `<div class="pinned"><svg class="i sm bad"><use href="#flame"/></svg><div><b>${esc(l.short || l.title)} is stuck</b><span>${esc(l.ask || "")}</span></div><div class="acts"><a class="btn quiet s" href="#lane/${l.id}">Open</a></div></div>`;
+    const strip = agents.length ? `<div class="astrip"><button data-astrip aria-expanded="false"><svg class="i sm"><use href="#down"/></svg>Agents · ${agents.length} ${agents.length === 1 ? "update" : "updates"} since ${seen}, nothing needs you</button><ul hidden>${agents.map(r => `<li><time>${r[0]}</time><b>${esc(r[2])}</b> ${esc(r[4])}</li>`).join("")}</ul></div>` : "";
+    return since + pin + strip + '<span class="chatday">Today</span>';
+  }
+
+  // Every topic page now brings this chat: the top, then the topic's messages, then what was written live.
+  const drawTopicBefore = drawTopic;
+  drawTopic = t => {
+    drawTopicBefore(t);
+    const src = $("#v-area template.chat-src");
+    if (!src) return;
+    src.dataset.sub = t.chatSub;
+    src.dataset.placeholder = `Message ${t.name} · its manager sorts it`;
+    src.innerHTML = chatTop(t) + (t.chat || "") + (LIVE[t.id] || []).join("");
+  };
+
+  // Writing in a topic chat: the topic's manager sorts it and acts.
+  const topicNow = () => (pane.dataset.nav || "").startsWith("topic/") ? PAGES.topics.find(t => "topic/" + t.id === pane.dataset.nav) : null;
+  function post(t, html) {
+    (LIVE[t.id] = LIVE[t.id] || []).push(html);
+    $("#chat-thread").insertAdjacentHTML("beforeend", html);
+    $("#chat-thread").scrollTop = 1e6;
+  }
+  function answerFor(t, text) {
+    if (t.id === "partnerships" && /halden/i.test(text)) return "From the record: the offer is drafted and waits for your OK, due Thursday. Halden sets its partner budget on 1 December.";
+    if (t.goal) return `From the record: ${t.goal.health[1].toLowerCase()}. ${t.goal.insight}`;
+    return `From the record: ${t.intro}`;
+  }
+  function send(text) {
+    const t = topicNow();
+    if (!t || !text.trim()) return false;
+    const kind = classify(text), who = `${t.name} manager`, time = nowTime();
+    post(t, `<p class="said">${esc(text)}</p>` + lbl(kind));
+    setTimeout(() => {
+      if (kind === "question") post(t, `<div class="msg">${tmAv}<div class="who">${who}<time>${time}</time></div><p>${esc(answerFor(t, text))}</p></div>`);
+      else if (kind === "request") {
+        const route = ROUTES.find(r => r.id === "a-" + t.id);
+        fileLane(text, route);
+        // In a topic chat the thread card is the receipt; the pop-up would say the same thing twice.
+        const pop = $("#receipts .receipt");
+        if (pop) pop.remove();
+        const l = PAGES.lanes[0];
+        l.askedMeta = `You in the ${t.name} chat, just now<i>·</i>The ${t.name} manager opened this thread and named ${esc(l.lead)}.`;
+        post(t, `<a class="tcard mine" href="#lane/${l.id}"><svg class="i sm"><use href="#elbow"/></svg><b>Thread · ${esc(text.length > 48 ? text.slice(0, 46) + "…" : text)}</b><span>${esc(l.lead)} owns it · just opened</span></a>
+          <div class="rcpt"><span class="av">${esc(l.lead[0])}</span><span>${esc(l.lead)}: <q>Got it. I set what done means, start now, and tell you in this thread.</q></span><small>read back ${time}</small></div>`);
+        addAsk(text, t, `a thread · ${l.lead} owns it`);
+      } else if (kind === "change") {
+        proposeChange(t, text);
+        post(t, `<div class="msg">${tmAv}<div class="who">${who}<time>${time}</time></div><p>That changes the goal, and it reaches other topics. I proposed it to the Manager; you get one brief in Decide with what it affects. Nothing changes until you approve it there.</p></div>`);
+        addAsk(text, t, "a goal change · waits for you in Decide");
+      } else if (kind === "done") post(t, `<div class="rcpt">${tmAv}<span>${who}: <q>Logged as done on the thread it belongs to.</q></span><small>${time}</small></div>`);
+      else post(t, `<div class="rcpt">${tmAv}<span>${who}: <q>Noted as a decision and pinned for the team.</q></span><small>${time}</small></div>`);
+    }, 450);
+    return true;
+  }
+  $("#chat-input").addEventListener("keydown", e => {
+    if (e.key === "Enter" && send(e.target.value)) { e.target.value = ""; e.preventDefault(); }
+  });
+  $(".chat .composer .sendb").addEventListener("click", () => { const i = $("#chat-input"); if (send(i.value)) i.value = ""; });
+
+  // A goal change becomes one decision for you, with what it affects.
+  let changes = 0;
+  function proposeChange(t, text) {
+    const id = "dc" + ++changes, list = $("#v-brief .v2-decide > div") || $("#v-brief .card .item.decision").parentElement;
+    list.insertAdjacentHTML("beforeend", `<article class="item decision" id="${id}" data-min="2">
+      <div class="txt"><div class="meta"><b>${esc(t.name)}</b><i>·</i><span>Proposed by the ${esc(t.name)} manager</span><i>·</i><span>Yours: changes a goal</span></div>
+      <h3>${esc(text)}</h3><p>It reaches other topics: Paid's partner budget and the CEO's Friday report follow the new date.</p></div>
+      <div class="acts"><a class="btn quiet" href="#topic/${t.id}">Open ${esc(t.name)}</a><button class="btn ink" data-approve>Approve</button></div>
+      <div class="done-note"><svg class="i ok"><use href="#check"/></svg>Approved. The goal is changed on record; every topic sees it.<button class="link" data-undo>Undo</button></div></article>`);
+    count(true);
+    if (typeof drawQueue === "function") drawQueue();
+  }
+
+  // The Manager page: asks from every chat, and where each went.
+  const asks = $$("#v-manager .sec").find(s => /What you told it last/.test(s.textContent));
+  if (asks) {
+    $(".headrow h2", asks).textContent = "Asks from every chat";
+    $(".headrow span", asks).textContent = "where each was written, and where it went";
+    $(".asks", asks).insertAdjacentHTML("afterbegin", `<li><div><b>“Retail first. Send wave 2 to the retail brands first.”</b><span>Today 08:30 · in the Partnerships chat · thread Outreach, wave 2 · Sender owns it</span></div><a class="btn quiet s" href="#lane/outreach-wave-2">Open</a></li>`);
+  }
+  function addAsk(text, t, went) {
+    if (!asks) return;
+    $(".asks", asks).insertAdjacentHTML("afterbegin", `<li><div><b>“${esc(text)}”</b><span>Just now · in the ${esc(t.name)} chat · ${esc(went)}</span></div><a class="btn quiet s" href="#topic/${t.id}">Open</a></li>`);
+  }
+  // The Manager's own chat opens with what changed in the topics since its last turn.
+  const mgrSrc = $("#v-manager template.chat-src");
+  if (mgrSrc) mgrSrc.innerHTML = `<div class="since"><div class="since-h"><b>Since its last turn</b><span class="grow">from the topics' records</span></div><ul><li>Partnerships: 1 instruction (wave 2 to retail first), 1 question answered in the topic.</li><li>Content: the promo is stuck; you decide in the topic.</li><li>No goal or priority changes wait for you.</li></ul></div>` + mgrSrc.innerHTML;
+
+  // Correcting a label, folding the strip, editing the summary.
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("button");
+    if (!b) return;
+    // An approve or an undo redraws the page; an open topic chat follows, so its pinned decision is current.
+    if (b.matches("[data-approve], [data-approve-id], [data-undo], [data-undo-id]") && topicNow()) setTimeout(() => { fillChat("area"); $("#chat-thread").scrollTop = 0; }, 0);
+    if (b.matches("[data-lbl]")) {
+      const row = b.parentElement;
+      row.innerHTML = `<span class="lblpick">${Object.entries(KINDS).map(([k, w]) => `<button data-lbl-set="${k}"${k === b.dataset.lbl ? ' aria-pressed="true"' : ""}>${w}</button>`).join("")}</span>`;
+    } else if (b.matches("[data-lbl-set]")) {
+      const row = b.closest(".lblrow"), k = b.dataset.lblSet;
+      row.outerHTML = lbl(k).replace("</div>", '<span class="lblnote">Corrected; the topic\'s manager learns from it.</span></div>');
+    } else if (b.matches("[data-astrip]")) {
+      const open = b.getAttribute("aria-expanded") !== "true";
+      b.setAttribute("aria-expanded", String(open));
+      b.nextElementSibling.hidden = !open;
+    } else if (b.matches("[data-since-edit]")) {
+      const lis = $$("li", b.closest(".since")), on = lis[0] && lis[0].getAttribute("contenteditable") !== "true";
+      lis.forEach(li => li.setAttribute("contenteditable", String(on)));
+      b.textContent = on ? "Done" : "Edit";
+      if (on && lis[0]) lis[0].focus();
+    }
+  });
+
+  // ---- One place to write: the chat. The brief's and the Manager page's composers are gone. ----
+
+  // Who you are talking to. The chat belongs to the page; the Manager is one click away from any page.
+  let toMgr = false;
+  const OWN = { brief: "The Manager", decision: "This decision", manager: "The Manager", skills: "The Manager", drafts: "The Manager", settings: "The Manager" };
+  const ownerName = () => { const t = topicNow(); if (t) return t.name; const v = pane.dataset.view; if (v === "lane") return "This lane"; return OWN[v] || "This page"; };
+  const fillChatBefore = fillChat;
+  fillChat = view => {
+    const mine = pane.dataset.view === "manager" || pane.dataset.view === "brief" || !pane.dataset.view;
+    if (mine) toMgr = false;
+    fillChatBefore(toMgr ? "manager" : view);
+    const head = $(".chat header div");
+    $$(".to", head).forEach(x => x.remove());
+    if (!mine) head.insertAdjacentHTML("beforeend", `<div class="to" role="group" aria-label="Talk to"><button data-to="page" aria-pressed="${!toMgr}">${esc(ownerName())}</button><button data-to="mgr" aria-pressed="${toMgr}">The Manager</button></div>`);
+    if (toMgr) { $("#chat-input").placeholder = "Tell the Manager"; $("#chat-sub").hidden = true; }
+    (STORE[storeKey()] || []).forEach(h => $("#chat-thread").insertAdjacentHTML("beforeend", h));
+  };
+  const showBefore = show;
+  show = hash => { toMgr = false; showBefore(hash); };
+
+  // Writing to the Manager or to a lane from any page: the Manager files it as a lane and says where it went.
+  const STORE = {};
+  const storeKey = () => (toMgr || !topicNow() && pane.dataset.view !== "lane" ? "mgr" : pane.dataset.nav);
+  const keep = html => { (STORE[storeKey()] = STORE[storeKey()] || []).push(html); $("#chat-thread").insertAdjacentHTML("beforeend", html); $("#chat-thread").scrollTop = 1e6; };
+  const sendTopic = send;
+  send = text => {
+    if (!text.trim()) return false;
+    if (topicNow() && !toMgr) return sendTopic(text);
+    const time = nowTime();
+    keep(`<p class="said">${esc(text)}</p>`);
+    setTimeout(() => {
+      if (pane.dataset.view === "lane" && !toMgr) {
+        const l = laneById(pane.dataset.nav.split("/")[1]);
+        keep(`<div class="msg"><span class="av">${esc(l.lead[0])}</span><div class="who">${esc(l.lead)}<time>${time}</time></div><p>Got it. I add it to this lane and tell you here when it is done.</p></div>`);
+        return;
+      }
+      fileDirection(text);
+      const pop = $("#receipts .receipt");
+      if (pop) pop.remove();
+      const l = PAGES.lanes[0], t = topicOf(l);
+      keep(`<a class="tcard mine" href="#lane/${l.id}"><svg class="i sm"><use href="#elbow"/></svg><b>Lane · ${esc(text.length > 48 ? text.slice(0, 46) + "…" : text)}</b><span>${t ? esc(t.name) + " · " : ""}${esc(l.lead)} leads · just opened</span></a>
+        <div class="msg">${tmAv}<div class="who">Manager<time>${time}</time></div><p>Filed it as its own lane${t ? ` under ${esc(t.name)}, and named ${esc(l.lead)} to lead` : "; I keep it until I know where it belongs"}. You hear from it there.</p></div>`);
+    }, 400);
+    return true;
+  };
+
+  document.addEventListener("click", e => {
+    const b = e.target.closest && e.target.closest("[data-to]");
+    if (!b) return;
+    toMgr = b.dataset.to === "mgr";
+    fillChat(pane.dataset.view);
+    $("#chat-input").focus();
+  });
+
+  // ---- The command center: find, ask, start or run, from one field. ----
+  // A quiet field at the top of the sidebar replaces "New lane"; ⌘K opens the same panel, ⌘N (⌥N in a browser) opens
+  // it ready to start something. It answers from the records, and before anything is started it says where it goes.
+  const sideEl = $("#side");
+  $(".row.ws", sideEl).insertAdjacentHTML("afterend", '<button class="cmdrow" data-cmd aria-haspopup="dialog" aria-expanded="false" aria-controls="cmd"><svg class="i sm"><use href="#search"/></svg><span>Find, ask or start…</span><kbd>⌘K</kbd></button>');
+  document.body.insertAdjacentHTML("beforeend", `<div class="cmd-scrim" hidden></div><div id="cmd" aria-modal="true" role="dialog" aria-label="Find, ask or start" hidden>
+    <div class="cmd-in"><svg class="i dim"><use href="#search"/></svg><span class="att" hidden></span><span class="scope" hidden></span><label class="sr" for="cmd-q">Find, ask or start</label><input id="cmd-q" autocomplete="off" spellcheck="false" role="combobox" aria-controls="cmd-list" aria-expanded="true"></div>
+    <div class="cmd-list" id="cmd-list" role="listbox"></div>
+    <div class="cmd-foot"><span><kbd>↵</kbd>Open or start</span><span><kbd>Tab</kbd>Another topic</span><span><kbd>/</kbd>Skills</span><span><kbd>Esc</kbd>Close</span></div></div>`);
+  const cmdEl = $("#cmd"), cq = $("#cmd-q"), clist = $("#cmd-list"), scrim = $(".cmd-scrim");
+  const C = { scope: null, start: false, att: null, sel: 0, items: [], target: undefined, recent: [] };
+
+  // Where you have been, for the empty panel.
+  const showCmd = show;
+  show = hash => {
+    showCmd(hash);
+    const h = "#" + (hash || "brief"), deep = /\//.test(pane.dataset.nav || "");
+    const label = $("#crumb-a").textContent + (deep ? " · " + $("#crumb-b").textContent : "");
+    C.recent = [{ h, label, nav: pane.dataset.nav }].concat(C.recent.filter(r => r.h !== h)).slice(0, 6);
+  };
+
+  // What the panel can find.
+  const peopleAll = () => {
+    const m = new Map();
+    PAGES.topics.forEach(t => (t.agents || []).filter(a => a[7] === "p").forEach(a => {
+      const n = a[1].replace(", you", "");
+      if (!m.has(n)) m.set(n, { name: n, role: a[6], topics: [] });
+      m.get(n).topics.push(t);
+    }));
+    return [...m.values()];
+  };
+  const skillsAll = () => $$("#v-skills .skill").filter(s => $("h3", s)).map(s => ({ name: $("h3", s).textContent, what: $("p", s) ? $("p", s).textContent : "" }));
+  const waiting = () => $$("#v-brief .decision:not(.done)").map(d => {
+    const a = $(".acts a", d);
+    return { title: $("h3", d).textContent, topic: $(".meta b", d) ? $(".meta b", d).textContent : "", href: d.id === "d1" ? "#decision" : a ? a.getAttribute("href") : "#decision" };
+  });
+  const STOP = new Set(["with", "that", "this", "from", "have", "will", "them", "they", "what", "when", "next", "week", "more", "into", "about", "please", "their"]);
+  // Who would lead it: the topic's agent whose work is closest to the words, or the topic's usual lead.
+  const leadFor = (t, text) => {
+    const words = (text.toLowerCase().match(/[a-z]{4,}/g) || []).filter(w => !STOP.has(w));
+    let best = null, score = 0;
+    (t.agents || []).filter(a => a[7] !== "p").forEach(a => {
+      const hay = (a[1] + " " + a[4] + " " + (a[5] || "")).toLowerCase();
+      const s = words.filter(w => hay.includes(w.slice(0, 4))).length;
+      if (s > score) { score = s; best = a[1]; }
+    });
+    const r = ROUTES.find(x => x.id === "a-" + t.id);
+    return best || (r ? r.lead : "Manager");
+  };
+  const isQuestion = s => /\?\s*$/.test(s) || /^(where|what|how|who|when|why|which|is|are|does|did|do|can|should)\b/i.test(s);
+  // An answer from the records: a deal, a lane, or a topic's goal; nothing if no record knows.
+  function answerTo(s, scopeT) {
+    const lc = s.toLowerCase();
+    for (const t of PAGES.topics) for (const d0 of (t.goal ? t.goal.deals : [])) {
+      const key = d0.name.split(/[ ,]/)[0].toLowerCase();
+      if (key.length > 3 && lc.includes(key)) {
+        const d = pick(d0);
+        return { text: `<b>${esc(d.name)}</b>: ${esc(d.stage)}. ${d.next ? "Next: " + esc(d.next) : esc(d.short)}`, src: `${t.name} · ${d.conf}`, href: d.href };
+      }
+    }
+    const ln = PAGES.lanes.find(l => l.title.toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length > 4).some(w => lc.includes(w)));
+    if (ln) return { text: `<b>${esc(ln.title)}</b>: ${esc(word(ln))}. ${esc(ln.status)}`, src: `${(topicOf(ln) || { name: "Manager" }).name} · lane`, href: "#lane/" + ln.id };
+    const t = PAGES.topics.find(x => lc.includes(x.name.toLowerCase())) || scopeT;
+    if (t && t.goal) return { text: `<b>${esc(t.name)}</b>: ${esc(t.goal.health[1])}. ${esc(t.goal.insight)}`, src: `${t.name} · ${t.goal.asOf}`, href: "#topic/" + t.id };
+    return null;
+  }
+  // Where new work would go, before it goes: the topic you chose with Tab, the one you are in, or the one the words name.
+  const targetFor = s => {
+    if (C.target !== undefined) return C.target;
+    if (C.scope) return C.scope;
+    const r = ROUTES.find(x => x.re.test(s));
+    return r ? PAGES.topics.find(t => "a-" + t.id === r.id) || null : null;
+  };
+
+  const crow = it => `<button class="cr${it.kind === "start" ? " start" : ""}" role="option" data-ci="${it.i}" aria-selected="false"><span class="ci"><svg class="i sm"><use href="#${it.icon}"/></svg></span><span class="ct2"><b>${esc(it.title)}</b>${it.sub ? `<small>${esc(it.sub)}</small>` : ""}</span><span class="ch">${it.hint || ""}</span></button>`;
+  function buildCmd() {
+    const s = cq.value.trim(), lc = s.toLowerCase(), scopeT = C.scope, out = [];
+    let html = "", sec = null;
+    const add = (name, it) => { if (name !== sec) { html += `<h3>${name}</h3>`; sec = name; } it.i = out.length; out.push(it); html += crow(it); };
+    const has = txt => String(txt || "").toLowerCase().includes(lc);
+    const inScope = l => !scopeT || l.topic === scopeT.id;
+    const startRow = () => {
+      const t = targetFor(s), text = s + (C.att ? ` (with ${C.att})` : "");
+      add("Start", { kind: "start", icon: "plus", topic: t, title: `Start “${s}”`, sub: t ? `New lane under ${t.name} · ${leadFor(t, text)} leads · Tab for another topic` : "With the Manager, until it knows where it belongs · Tab for a topic", hint: "↵" });
+    };
+    if (!s) {
+      if (C.start || C.att) {
+        if (C.att) html += `<div class="cans"><p>Say what should happen with <b>${esc(C.att)}</b>${scopeT ? ` in ${esc(scopeT.name)}` : ""}, and press ↵.</p></div>`;
+        skillsAll().forEach(k => add("Start from a skill", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+      } else {
+        waiting().filter(d => !scopeT || d.topic === scopeT.name).forEach(d => add("Waiting for you", { kind: "go", icon: "decide", title: d.title, sub: d.topic, href: d.href, hint: "Open" }));
+        PAGES.lanes.filter(l => stateOf(l) === "bad" && inScope(l)).forEach(l => add("Waiting for you", { kind: "go", icon: "flame", title: l.title, sub: `${(topicOf(l) || { name: "Manager" }).name} · stuck`, href: "#lane/" + l.id, hint: "Open" }));
+        C.recent.filter(r => r.nav !== pane.dataset.nav).slice(0, 4).forEach(r => add("Recent", { kind: "go", icon: "go", title: r.label, href: r.h }));
+        skillsAll().slice(0, 3).forEach(k => add("Skills", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+      }
+    } else if (/^\/\S*$/.test(s)) {
+      skillsAll().filter(k => k.name.includes(lc)).forEach(k => add("Skills", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+    } else {
+      if (isQuestion(s) && !C.att) {
+        const a = answerTo(s, scopeT);
+        html += a ? `<div class="cans"><p>${a.text}</p><small>From the record · ${esc(a.src)}</small></div>` : `<div class="cans"><p>No record answers that yet.</p></div>`;
+        if (a) add("Answer", { kind: "go", icon: "go", title: "Open it", sub: a.src, href: a.href, hint: "↵" });
+        add("Answer", { kind: "ask", icon: "chat", title: "Ask the Manager instead", sub: "in the chat, with your question" });
+      } else if (/\s/.test(s)) startRow();
+      // A single word is most likely a name: the matches come first, starting it as work comes last.
+      const word1 = !isQuestion(s) && !/\s/.test(s);
+      if (!scopeT) PAGES.topics.filter(t => has(t.name)).forEach(t => add("Topics", { kind: "go", icon: t.icon, title: t.name, sub: t.goal ? t.goal.health[1] : "No goal set", href: "#topic/" + t.id, hint: "Open" }));
+      PAGES.lanes.filter(l => inScope(l) && (has(l.title) || has(l.lead))).slice(0, 5).forEach(l => add("Lanes", { kind: "go", icon: "elbow", title: l.title, sub: `${(topicOf(l) || { name: "Manager" }).name} · ${word(l)} · ${l.lead === "You" ? "you lead" : l.lead + " leads"}`, href: "#lane/" + l.id, hint: "Open" }));
+      peopleAll().filter(p => has(p.name) && (!scopeT || p.topics.includes(scopeT))).forEach(p => add("People", { kind: "go", icon: "user", title: p.name, sub: `${p.role} · ${p.topics.map(t => t.name).join(", ")}`, href: "#topic/" + p.topics[0].id, hint: "Open" }));
+      waiting().filter(d => has(d.title) || has(d.topic)).forEach(d => add("Waiting for you", { kind: "go", icon: "decide", title: d.title, sub: d.topic, href: d.href, hint: "Open" }));
+      skillsAll().filter(k => has(k.name) || has(k.what)).slice(0, 3).forEach(k => add("Skills", { kind: "run", icon: "star", title: k.name, sub: k.what, hint: "Use" }));
+      if (word1) startRow();
+    }
+    clist.innerHTML = html || '<p class="cmd-none">Nothing yet. Type what you are looking for, ask a question, or say what should be done.</p>';
+    C.items = out;
+    C.sel = Math.max(0, Math.min(C.sel, out.length - 1));
+    markCmd();
+  }
+  function markCmd() {
+    $$(".cr", clist).forEach(b => {
+      const on = +b.dataset.ci === C.sel;
+      b.setAttribute("aria-selected", String(on));
+      if (on) { b.scrollIntoView({ block: "nearest" }); cq.setAttribute("aria-activedescendant", b.id = "cr-" + C.sel); }
+    });
+  }
+  function chips() {
+    const sc = $(".scope", cmdEl), at = $(".att", cmdEl);
+    sc.hidden = !C.scope;
+    sc.innerHTML = C.scope ? `in ${esc(C.scope.name)}<button data-cmd-unscope aria-label="Search everywhere" title="Search everywhere"><svg class="i sm"><use href="#x"/></svg></button>` : "";
+    at.hidden = !C.att;
+    at.innerHTML = C.att ? `<svg class="i sm"><use href="#file"/></svg>${esc(C.att)}` : "";
+    cq.placeholder = C.att ? "What should happen with this?" : C.start ? "What should we start?" : C.scope ? `Find, ask or start in ${C.scope.name}` : "Find, ask or start";
+  }
+  function openCmd(o = {}) {
+    C.scope = o.scope !== undefined ? o.scope : topicNow();
+    C.start = !!o.start; C.att = o.att || null; C.target = undefined; C.sel = 0;
+    cq.value = "";
+    chips();
+    const row = $(".cmdrow");
+    closePalette();
+    scrim.hidden = cmdEl.hidden = false;
+    row.setAttribute("aria-expanded", "true");
+    buildCmd();
+    cq.focus();
+  }
+  function closeCmd() { scrim.hidden = cmdEl.hidden = true; $(".cmdrow").setAttribute("aria-expanded", "false"); }
+  function actCmd(it) {
+    const s = cq.value.trim();
+    if (!it) { if (s) actCmd({ kind: "start", topic: targetFor(s) }); return; }
+    if (it.kind === "go") { closeCmd(); location.hash = it.href; }
+    else if (it.kind === "start") {
+      const t = it.topic, text = s + (C.att ? ` (with ${C.att})` : "");
+      closeCmd();
+      fileLane(text, t ? { id: "a-" + t.id, lead: leadFor(t, text) } : null);
+    } else if (it.kind === "run") { cq.value = it.title + " "; C.start = true; chips(); buildCmd(); cq.focus(); }
+    else if (it.kind === "ask") {
+      closeCmd();
+      toMgr = true;
+      pane.classList.remove("chat-off"); syncChat(); fillChat(pane.dataset.view);
+      $("#chat-input").value = s; $("#chat-input").focus();
+    }
+  }
+
+  cq.addEventListener("input", () => { C.sel = 0; buildCmd(); });
+  cq.addEventListener("keydown", e => {
+    if (e.key === "ArrowDown") { e.preventDefault(); C.sel = Math.min(C.items.length - 1, C.sel + 1); markCmd(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); C.sel = Math.max(0, C.sel - 1); markCmd(); }
+    else if (e.key === "Enter") { e.preventDefault(); actCmd(C.items[C.sel]); }
+    else if (e.key === "Escape") { e.preventDefault(); closeCmd(); $(".cmdrow").focus(); }
+    else if (e.key === "Tab" && C.items.some(x => x.kind === "start")) {
+      e.preventDefault();
+      const order = [null, ...PAGES.topics], cur = targetFor(cq.value.trim());
+      C.target = order[(order.indexOf(cur) + (e.shiftKey ? order.length - 1 : 1)) % order.length];
+      buildCmd();
+    } else if (e.key === "Backspace" && !cq.value && (C.scope || C.att)) { if (C.att) C.att = null; else { C.scope = null; C.target = undefined; } chips(); buildCmd(); }
+  });
+  clist.addEventListener("mousemove", e => { const b = e.target.closest(".cr"); if (b && +b.dataset.ci !== C.sel) { C.sel = +b.dataset.ci; markCmd(); } });
+  clist.addEventListener("click", e => { const b = e.target.closest(".cr"); if (b) actCmd(C.items[+b.dataset.ci]); });
+  // ⌘K anywhere; ⌘N to start something (⌥N in a browser, which keeps ⌘N for itself).
+  addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if ((e.metaKey || e.ctrlKey) && k === "k") { e.preventDefault(); e.stopPropagation(); cmdEl.hidden ? openCmd() : closeCmd(); }
+    else if (((e.metaKey || e.ctrlKey) && k === "n") || (e.altKey && e.code === "KeyN")) { e.preventDefault(); e.stopPropagation(); openCmd({ start: true }); }
+  }, true);
+  document.addEventListener("click", e => {
+    if (!cmdEl.hidden && !e.target.closest("#cmd,[data-cmd],#pinmenu")) closeCmd();
+    const b = e.target.closest && e.target.closest("button");
+    if (!b) return;
+    if (b.matches("[data-cmd]")) cmdEl.hidden ? openCmd() : closeCmd();
+    else if (b.matches("[data-cmd-unscope]")) { C.scope = null; C.target = undefined; chips(); buildCmd(); cq.focus(); }
+    else if (b.matches("[data-cmd-here]")) { closePinMenu(); openCmd({ scope: menuTopic }); }
+  });
+
+  // Right-click a topic or a lane in the tree: "Start something here…", in that topic.
+  const pinMenuEl = $("#pinmenu");
+  pinMenuEl.insertAdjacentHTML("beforeend", '<button role="menuitem" data-cmd-here><svg class="i"><use href="#plus"/></svg><span>Start something here…</span></button>');
+  let menuTopic = null;
+  const openPinMenuBefore = openPinMenu;
+  openPinMenu = (id, x, y) => {
+    menuTopic = PAGES.topics.find(t => "a-" + t.id === id) || null;
+    $("[data-pin-toggle]", pinMenuEl).hidden = false;
+    $("[data-cmd-here]", pinMenuEl).hidden = !menuTopic;
+    openPinMenuBefore(id, x, y);
+  };
+  sideEl.addEventListener("contextmenu", e => {
+    const kid = e.target.closest && e.target.closest("#tree a.kid");
+    const l = kid && laneById((kid.dataset.nav || "").split("/")[1]), t = l && topicOf(l);
+    if (!t) return;
+    e.preventDefault(); e.stopPropagation();
+    menuTopic = t;
+    $("[data-pin-toggle]", pinMenuEl).hidden = true;
+    $("[data-cmd-here]", pinMenuEl).hidden = false;
+    closePins();
+    pinMenuEl.hidden = false;
+    pinMenuEl.style.left = Math.max(8, Math.min(e.clientX, innerWidth - pinMenuEl.offsetWidth - 8)) + "px";
+    pinMenuEl.style.top = Math.max(8, Math.min(e.clientY, innerHeight - pinMenuEl.offsetHeight - 8)) + "px";
+    $("[data-cmd-here]", pinMenuEl).focus({ preventScroll: true });
+  }, true);
+
+  // Drop a file or a link on a topic in the tree: the panel opens with it attached, in that topic.
+  const treeEl = $("#tree");
+  treeEl.addEventListener("dragover", e => {
+    const g = e.target.closest(".grp");
+    if (!g) return;
+    e.preventDefault();
+    $$("#tree .grp.drop").forEach(x => x !== g && x.classList.remove("drop"));
+    g.classList.add("drop");
+  });
+  treeEl.addEventListener("dragleave", e => { const g = e.target.closest(".grp"); if (g && !g.contains(e.relatedTarget)) g.classList.remove("drop"); });
+  treeEl.addEventListener("drop", e => {
+    const g = e.target.closest(".grp");
+    if (!g) return;
+    e.preventDefault();
+    g.classList.remove("drop");
+    const t = PAGES.topics.find(x => "a-" + x.id === g.id), f = e.dataTransfer.files[0];
+    const u = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "").split("\n")[0];
+    openCmd({ scope: t, att: f ? f.name : u.replace(/^https?:\/\//, "").slice(0, 60) || "a file" });
+  });
