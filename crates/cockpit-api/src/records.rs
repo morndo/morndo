@@ -39,7 +39,7 @@ pub struct Schedule {
     /// The recurrence in words.
     pub text: String,
     /// Local time of day the schedule fires ("HH:MM"), or null when the rule has no fixed time.
-    pub at: Present<String>,
+    pub time: Present<String>,
     /// Time of the next run, or null when the schedule is off.
     pub next_at: Present<Timestamp>,
     /// Time of the last run, or null when it has not run yet.

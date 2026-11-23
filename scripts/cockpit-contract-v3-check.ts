@@ -214,7 +214,7 @@ slugId("L1", "ScheduleId");
 enumDef("L1", "ScheduleKind", ["lane", "report", "check", "brief"], true);
 objectDef("L1", "Schedule");
 fields("L1", "Schedule", [["id", "req", "#ScheduleId"], ["kind", "req", "#ScheduleKind"], ["title", "req", "string"], ["topicId", "present", "#TopicId"],
-  ["rrule", "req", "string"], ["text", "req", "string"], ["at", "present", "string"], ["nextAt", "present", "#Timestamp"], ["lastAt", "present", "#Timestamp"],
+  ["rrule", "req", "string"], ["text", "req", "string"], ["time", "present", "string"], ["nextAt", "present", "#Timestamp"], ["lastAt", "present", "#Timestamp"],
   ["lastLaneId", "present", "#LaneId"], ["source", "req", "string"], ["opener", "req", "#Actor"], ["on", "req", "boolean"]]);
 field("L1", "ManagerView", "schedules", "vec", "#Schedule");
 field("L1", "LaneView", "scheduleId", "present", "#ScheduleId");
@@ -546,7 +546,7 @@ async function gtmReads(url: string) {
   const kinds = new Set(schedules.map(s => s.kind));
   ok(["lane", "report", "check", "brief"].every(k => kinds.has(k)), `L1 the Manager lists lane, report, check and brief schedules (got ${[...kinds].join(", ")})`);
   ok(schedules.length > 0 && schedules.every(s => /^(RRULE:)?FREQ=(SECONDLY|MINUTELY|HOURLY|DAILY|WEEKLY|MONTHLY|YEARLY)(;|$)/.test(s.rrule)
-    && (s.at === null || /^\d{2}:\d{2}$/.test(s.at))), "L1 every schedule has an RFC 5545 rrule and an HH:MM time or null");
+    && (s.time === null || /^\d{2}:\d{2}$/.test(s.time))), "L1 every schedule has an RFC 5545 rrule and an HH:MM time or null");
   const laneSchedule = async (laneId: string) => by(schedules, "id", (await get(url, `/lanes/${laneId}`)).body?.scheduleId);
   const weekly = await laneSchedule("click-floor");
   ok(weekly?.kind === "lane" && /FREQ=WEEKLY/.test(weekly.rrule) && /BYDAY=([^;]*,)?MO/.test(weekly.rrule), `L1 click-floor opens each Monday from its schedule (${short(weekly)})`);

@@ -6493,10 +6493,6 @@ export interface ManagerView {
  */
 export interface Schedule {
   /**
-   * Local time of day the schedule fires ("HH:MM"), or null when the rule has no fixed time.
-   */
-  at: string | null;
-  /**
    * Identifier of a recurring schedule.
    */
   id: string;
@@ -6533,6 +6529,10 @@ export interface Schedule {
    * The recurrence in words.
    */
   text: string;
+  /**
+   * Local time of day the schedule fires ("HH:MM"), or null when the rule has no fixed time.
+   */
+  time: string | null;
   /**
    * Name of the schedule as the reader sees it.
    */

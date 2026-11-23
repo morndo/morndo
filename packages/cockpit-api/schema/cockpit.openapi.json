@@ -9564,17 +9564,6 @@
       "Schedule": {
         "description": "A recurring rule that files a lane, writes a report, runs a spot check or publishes a brief.",
         "properties": {
-          "at": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Local time of day the schedule fires (\"HH:MM\"), or null when the rule has no fixed time."
-          },
           "id": {
             "$ref": "#/components/schemas/ScheduleId",
             "description": "Stable identifier of the schedule."
@@ -9636,6 +9625,17 @@
             "description": "The recurrence in words.",
             "type": "string"
           },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Local time of day the schedule fires (\"HH:MM\"), or null when the rule has no fixed time."
+          },
           "title": {
             "description": "Name of the schedule as the reader sees it.",
             "type": "string"
@@ -9659,7 +9659,7 @@
           "topicId",
           "rrule",
           "text",
-          "at",
+          "time",
           "nextAt",
           "lastAt",
           "lastLaneId",
