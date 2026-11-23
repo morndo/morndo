@@ -3,9 +3,9 @@ import { createHash } from "node:crypto";
 import { loadFixtures } from "@morndo/cockpit-api";
 import type {
   AccessView, Actor, ApiError, Ask, Attachment, BriefView, Command, CommandResult, DailyLimit,
-  DecisionQueueView, DecisionView, DraftsView, Event, HistoryEntry, HistoryPage, LabelKind, LaneAct,
-  LaneView, MadeRecordView, ManagerView, Message, MessageAudience, ModelId, ModelsView, OvernightAction, PullsView, Receipt,
-  RecentView, SearchView, SettingsView, SidebarView, SkillsView, Target, Theme, ThemePatch, ThreadView,
+  DecisionQueueView, DecisionView, DraftsView, Event, GoalChange, GuardrailChange, HistoryEntry, HistoryPage, LabelKind, LaneAct,
+  LaneView, MadeRecordView, ManagerView, MembersView, Message, MessageAudience, ModelId, ModelsView, OvernightAction, PullsView, Receipt,
+  RecentView, Report, SearchView, SettingsView, SidebarView, SkillsView, SpotCheck, Target, Theme, ThemePatch, ThreadView,
   TopicView, UsageView, WorkspaceView,
 } from "@morndo/cockpit-api";
 import { artwork } from "./artwork.ts";
@@ -83,10 +83,29 @@ function slug(value: string): string {
 
 function classify(text: string): LabelKind {
   if (isQuestion(text)) return "question";
-  if (/\b(change|move|set|raise|lower|extend|reduce|increase|push)\b.*\b(deadline|goal|target|budget|priority|guardrail)\b/i.test(text)) return "goalChange";
+  if (/\b(change|move|set|raise|lower|extend|reduce|increase|push|make)\b.*\b(deadline|goal|target|budget|priority|guardrail)\b/i.test(text)) return "goalChange";
   if (/\b(done|checked|finished|is ready|are ready)\b/i.test(text)) return "done";
   if (/\b(approve|decide|go with)\b/i.test(text)) return "decision";
   return "request";
+}
+
+function splitDeliverables(text: string): [string, string] | null {
+  const match = /^(.*?)\s+and\s+((?:write|draft|add|build|prepare|send|make)\b.*)$/i.exec(text.trim());
+  if (!match?.[1] || !match[2] || !/^(?:write|draft|add|build|prepare|send|make)\b/i.test(match[1].trim())) return null;
+  return [match[1].trim(), match[2].trim()];
+}
+
+function eurosMinor(text: string): number | null {
+  const match = /(\d+)\s*euros?\b/i.exec(text);
+  return match?.[1] ? Number(match[1]) * 100 : null;
+}
+
+function measuredNumber(value: { kind: string; value?: number; money?: { amountMinor: number }; percent?: number } | null | undefined): number | undefined {
+  if (!value) return undefined;
+  if (value.kind === "count") return value.value;
+  if (value.kind === "money") return value.money?.amountMinor;
+  if (value.kind === "rate") return value.percent;
+  return undefined;
 }
 
 function sortLanes(left: LaneView, right: LaneView): number {
@@ -141,6 +160,9 @@ export class World {
   private readonly preferences = new Map<string, Preferences>();
   private readonly layouts = new Map<string, SettingsView["layout"]>();
   private readonly sinceEdits = new Map<string, string[]>();
+  private readonly reports = new Map<string, Report>();
+  private readonly checks = new Map<string, SpotCheck>();
+  private readonly records = new Map<string, MadeRecordView>();
   private serial = 0;
   private messageSerial = 0;
   private now = DEMO_AT;
@@ -223,6 +245,7 @@ export class World {
     for (const row of this.briefBase.overnight.filter(item => item.undoable)) {
       this.rememberOvernight(row);
     }
+    this.prepareRecords();
   }
 
   viewer(id: string | null): Actor {
@@ -276,10 +299,9 @@ export class World {
       };
       case "RecentView": return { items: (this.recent.get(viewer.id) ?? []).filter(item => this.recentTitle(item.target, viewer)) } satisfies RecentView;
       case "MadeRecordView": return requireRecord(this.madeRecord(key, viewer), "record");
-      // Contract 1.1.0 routes: the records and the member list arrive with the stand-in's 1.1.0 behaviour.
-      case "ReportView": throw missing("report");
-      case "CheckView": throw missing("check");
-      case "MembersView": this.requireOwner(viewer); return { items: [], invitations: [] };
+      case "ReportView": return this.reportView(key, viewer);
+      case "CheckView": return this.checkView(key, viewer);
+      case "MembersView": this.requireOwner(viewer); return this.membersView();
       case "ThreadView": return this.threadView(key, viewer, query);
       case "SearchView": return this.search(query, viewer);
       case "RoutePreview": {
@@ -311,10 +333,7 @@ export class World {
       }
       case "agentAction.undo": return this.undo(command.actionId, true, viewer);
       case "agentAction.redo": return this.undo(command.actionId, false, viewer);
-      case "lane.file": {
-        const filed = this.file(command.text, viewer, { ...command, topicId: command.toManager ? null : command.topicId ?? null, route: !command.toManager });
-        return done(filed.events, filed.lane.id, filed.message, filed.receipt);
-      }
+      case "lane.file": return this.fileCommand(command, viewer);
       case "lane.move": return this.move(command.laneId, command.topicId, viewer);
       case "lane.undoFile": return this.undo(`file-${command.laneId}`, true, viewer);
       case "lane.act": return this.laneAct(command.laneId, command.act, viewer);
@@ -346,7 +365,7 @@ export class World {
       case "access.statusLink": return this.statusLink(command.topicId, command.enabled ?? true, viewer);
       case "stage.assign": return this.assign(command.topicId, command.stage, command.personId, viewer);
       case "topic.seen": return this.visit(command.topicId, viewer);
-      case "guardrail.set": return this.guardrail(command.name, command.on, viewer);
+      case "guardrail.set": return this.guardrail(command.name, command.on, viewer, command.id ?? null);
       case "pull.hold": return this.hold(command.pullId, viewer);
       case "pull.unhold": return this.unhold(command.pullId, viewer);
       case "connection.connect": return this.connect(command.connectionId, viewer);
@@ -462,6 +481,7 @@ export class World {
   private projectLane(lane: LaneView, viewer: Actor): LaneView {
     const decision = lane.decisionId ? this.decisions.get(lane.decisionId) : undefined;
     if (viewer.id !== this.owner.id) this.shareLaneCopy(lane);
+    lane.leadName = labelFor(lane, viewer);
     if (decision && (decision.state === "approved" || decision.state === "declined")) {
       const actor = this.history.get(`decision-${decision.id}`)?.row.actor ?? this.owner;
       const verb = decision.state === "approved" ? "approved" : "declined";
@@ -579,6 +599,14 @@ export class World {
             }
             return step;
           });
+          if (lane.id === "tax-rates") {
+            const migration = lane.steps.findIndex(step => /migration runs/i.test(step.text));
+            if (migration >= 0 && !lane.steps.some(step => /back up the production database/i.test(step.text))) {
+              lane.steps.splice(migration, 0, { kind: "ok", text: "Back up the production database", who: "Builder", doneAt: null });
+            }
+            lane.next = "The migration runs tonight at 23:00, after the backup";
+            lane.nextAt = "2026-11-16T23:00:00+01:00";
+          }
         }
       } else {
         const headline = held ? "The pull request is held." : decision.state === "declined" ? "You declined it." : "The decision expired.";
@@ -831,7 +859,14 @@ export class World {
     if (view.goal) {
       const goal = view.goal;
       for (const change of changes) {
-        if (change.topicId === id) this.projectGoalChange(goal, change);
+        if (change.field === "priority" && change.priority?.to === 1 && change.topicId !== id && view.meta?.priority === 1) {
+          view.meta.priority = change.priority.from;
+        }
+        if (change.topicId !== id) continue;
+        if (change.field === "budget" && change.budget && view.spend) view.spend.cap = structuredClone(change.budget.to);
+        else if (change.field === "priority" && change.priority && view.meta) view.meta.priority = change.priority.to;
+        else if (change.field === "guardrail" && change.guardrail) this.applyGuardrailChange(goal, change.guardrail);
+        else if (change.field === "target" || change.field === "deadline" || change.field === "unit") this.projectGoalChange(goal, change);
       }
       const decision = goal.decision?.decisionId && this.decisions.get(goal.decision.decisionId);
       if (goal.decision && decision && decision.state === "approved") {
@@ -883,6 +918,8 @@ export class World {
     const liveLanes = this.module === "dev" ? this.allLanes(this.owner).filter(lane => lane.topicId === id).sort(sortLanes) : [];
     if (goal) {
       view.health = { state: goal.verdict.state, word: goal.verdict.word };
+    } else if (this.module === "gtm") {
+      view.health = this.healthWithoutGoal(id);
     } else if (this.module === "dev" && [...this.decisions.values()].some(decision => decision.topicId === id && decision.state !== "open")) {
       const worst = liveLanes.find(lane => lane.state !== "done" && lane.state !== "parked");
       view.health = { state: worst?.state === "bad" ? "bad" : worst?.state === "warn" ? "warn" : worst ? "ok" : "idle",
@@ -890,12 +927,13 @@ export class World {
     }
     const relatedDeadline = changes.findLast(change => change.topicId !== id && change.deadlineAt)?.deadlineAt;
     const nextReportAt = relatedDeadline ?? view.meta?.nextReportAt ?? null;
+    const nextReportId = stored.meta?.nextReportId ?? null;
     if (view.meta) view.meta.nextReportAt = nextReportAt;
     view.status = { topicId: id, name: view.name, signed: goal?.signed ?? null, goal: goal?.target ?? null,
-      unit: goal?.unit ?? null, health: view.health, nextReportAt, nextReportId: null };
+      unit: goal?.unit ?? null, health: view.health, nextReportAt, nextReportId };
     if (viewer.id !== this.owner.id) {
       const dash = role === "all" ? "You work on all of it" : role === "stages" ? `You run ${stages.join(", ")}` : "You see the status";
-      view.meta = { askedBy: null, ownerLine: null, nextReportAt, nextReportId: null, priority: null, parts: [`Shared by ${this.owner.name}`, dash] };
+      view.meta = { askedBy: null, ownerLine: null, nextReportAt, nextReportId, priority: view.meta?.priority ?? null, parts: [`Shared by ${this.owner.name}`, dash] };
     }
     if (role === "view" || role === "stages") {
       const team = new Set(lanes.flatMap(lane => [lane.lead.id, ...lane.crew.map(actor => actor.id)]));
@@ -1091,6 +1129,7 @@ export class World {
     }
     const edited = this.sinceEdits.get(JSON.stringify([viewer.id, id]));
     if (edited) view.since = { seen: view.since?.seen ?? { at: null }, lines: edited };
+    else if (id === "manager" && this.module === "gtm") view.since = { seen: view.since?.seen ?? { at: null }, lines: this.sinceLines() };
     const pin = view.pinned;
     const decision = pin?.decisionId ? this.decisions.get(pin.decisionId) : undefined;
     if (pin && decision && decision.state !== "open") {
@@ -1111,7 +1150,7 @@ export class World {
         const lane = this.lane(action.laneId);
         return lane && this.sharedLane(lane, viewer) && this.projectLane(lane, viewer).acts.some(choice => choice.id === action.id);
       }),
-    }));
+    })).sort((left, right) => Date.parse(left.at) - Date.parse(right.at) || left.id.localeCompare(right.id));
     const result = page([...view.messages].reverse(), item => item.id, `thread:${id}:${viewer.id}`, query);
     return { ...view, messages: result.items.reverse(), nextCursor: result.nextCursor };
   }
@@ -1279,7 +1318,112 @@ export class World {
     ]);
   }
 
+  private sinceLines(): string[] {
+    const stored = this.threads.get("manager")?.since?.lines ?? [];
+    const lines = stored.filter(line => !(/promo/i.test(line) && /stuck/i.test(line)) && !/no goal or priority changes wait for you/i.test(line));
+    if (this.lane("webinar")?.state === "bad") lines.push("Content: the promo is stuck; you decide in the topic.");
+    const open = [...this.decisions.values()].filter(item => item.state === "open" && item.goalChange);
+    if (open.length === 0) lines.push("No goal or priority changes wait for you.");
+    else for (const item of open) lines.push(`${item.topicName}: a ${item.goalChange?.field === "deadline" ? "deadline" : "goal"} change waits for you.`);
+    return lines;
+  }
+
+  private healthWithoutGoal(topicId: string): NonNullable<TopicView["health"]> {
+    const lanes = this.allLanes(this.owner).filter(lane => lane.topicId === topicId && lane.state !== "done" && lane.state !== "parked" && lane.state !== "idle");
+    if (lanes.some(lane => lane.state === "bad")) return { state: "bad", word: "Stuck" };
+    if (lanes.length > 0) return { state: "ok", word: "On track" };
+    return { state: "idle", word: "Idle" };
+  }
+
+  private applyGuardrailChange(goal: NonNullable<TopicView["goal"]>, change: GuardrailChange): void {
+    const item = goal.guardrails?.items.find(entry => entry.id === change.guardrailId);
+    if (!item) return;
+    item.limit = structuredClone(change.to);
+    const value = measuredNumber(item.value);
+    const limit = measuredNumber(item.limit);
+    if (value === undefined || limit === undefined || limit <= 0) return;
+    item.ratio = value / limit;
+    item.state = value > limit ? "breached" : value / limit >= 0.8 ? "near" : "held";
+  }
+
+  private membersView(): MembersView {
+    const invitations = [...new Map([...this.access.values()].flatMap(view => view.invitations).map(item => [item.id, item])).values()];
+    const items = [...this.people.values()].filter(person => person.kind === "person").map(person => ({
+      person, email: [...this.access.values()].flatMap(view => view.people).find(entry => entry.person.id === person.id)?.email ?? null,
+      role: person.role, owner: person.id === this.owner.id, invitedAt: null, joinedAt: person.membershipState === "invited" ? null : "2026-10-01T09:00:00+02:00",
+      access: [...this.access.keys()].map(topicId => ({
+        topicId, access: this.access.get(topicId)?.people.find(entry => entry.person.id === person.id)?.access.kind ?? "none" as const,
+      })),
+    }));
+    return { items, invitations };
+  }
+
+  private reportView(id: string, viewer: Actor): Report {
+    const report = requireRecord(this.reports.get(id), "report");
+    if (viewer.id === this.owner.id || report.recipients.some(person => person.id === viewer.id)) return report;
+    throw new Problem("forbidden", "This report is not shared with this reader.");
+  }
+
+  private checkView(id: string, viewer: Actor): SpotCheck {
+    const check = requireRecord(this.checks.get(id), "check");
+    if (viewer.id !== this.owner.id && !this.fullTopic(check.topicId, viewer)) {
+      throw new Problem("forbidden", "This check is outside this reader’s access.");
+    }
+    return check;
+  }
+
+  private prepareRecords(): void {
+    for (const lane of this.lanes.values()) {
+      for (const item of lane.made) {
+        const kind = item.target?.kind;
+        const id = item.target?.id;
+        if (!id || (kind !== "file" && kind !== "run" && kind !== "review") || this.records.has(id)) continue;
+        this.records.set(id, {
+          id, kind, laneId: lane.id, title: item.title, detail: item.detail,
+          url: kind === "file" ? `https://files.example.test/${id}` : null,
+          trigger: kind === "run" ? "staging" : null, startedAt: kind === "run" ? lane.openedAt : null,
+          finishedAt: null, state: kind === "run" ? "pass" : null, checks: [], log: null, pullId: null,
+        });
+      }
+    }
+    const stuck = this.topics.get("web")?.stuck;
+    const runId = stuck?.runId;
+    if (stuck && runId && stuck.log) {
+      this.records.set(runId, {
+        id: runId, kind: "run", laneId: stuck.actions.find(action => action.target?.kind === "run")?.laneId ?? "red-main",
+        title: "Nightly checks", detail: stuck.detail, url: `https://files.example.test/runs/${runId}`,
+        trigger: "nightly", startedAt: "2026-11-16T02:10:00+01:00", finishedAt: "2026-11-16T02:18:00+01:00",
+        state: "fail", checks: stuck.checks, log: stuck.log, pullId: null,
+      });
+    }
+    const reporter = this.topics.get("partnerships")?.crew.find(actor => actor.id === "reporter");
+    const tom = this.people.get("tom-ahrens");
+    if (reporter && tom) {
+      this.reports.set("partnerships-weekly", {
+        id: "partnerships-weekly", topicId: "partnerships", title: "Weekly partner report", recipients: [tom], writer: reporter,
+        scheduleId: "partnerships-report", dueAt: "2026-11-20T08:00:00+01:00", state: "scheduled", draftId: null,
+        sentAt: null, checkedBy: null, periodFrom: "2026-11-09T00:00:00+01:00", periodTo: "2026-11-15T23:59:00+01:00",
+      });
+    }
+    const lea = this.people.get("lea-brandt");
+    const checker = [...this.topics.values()].flatMap(topic => topic.crew).find(actor => actor.id === "manager") ?? blankActor("Manager");
+    if (lea) {
+      this.checks.set("batch-3", {
+        id: "batch-3", kind: "random", topicId: "partnerships", laneId: "brand-list", scheduleId: "friday-check",
+        checker, subject: lea, at: "2026-11-16T07:20:00+01:00", rule: "no yes waited more than a day",
+        sample: { kind: "count", value: 5, of: 24, unit: "brands" }, outcome: "held", passed: 5, failed: 0,
+        text: "spot-checked 5 brands of Lea's batch 3 at random: all 5 fit the profile", followUpLaneId: null,
+      });
+    }
+  }
+
   private madeRecord(id: string, viewer: Actor): MadeRecordView | undefined {
+    const built = this.records.get(id);
+    if (built) {
+      const lane = this.lanes.get(built.laneId);
+      if (!lane || this.removed.has(lane.id) || !this.sharedLane(lane, viewer)) return undefined;
+      return built;
+    }
     for (const lane of this.lanes.values()) {
       const kind = lane.made.find(item => item.target?.id === id &&
         (item.target.kind === "run" || item.target.kind === "review"))?.target?.kind;
@@ -1314,7 +1458,6 @@ export class World {
         const record = this.madeRecord(id, viewer);
         return record?.kind === page.kind ? record.title : undefined;
       }
-      // Files, reports and checks have no page to visit until the stand-in serves their records.
       case "file":
       case "report":
       case "check": return undefined;
@@ -1341,26 +1484,31 @@ export class World {
     const name = nameOrEmail.trim();
     if (!name) throw new Problem("badRequest", "Enter a name or email address.");
     const lookup = name.toLowerCase();
+    const known = [...this.access.values()].flatMap(record => record.people)
+      .find(entry => entry.person.name.toLowerCase() === lookup || entry.email?.toLowerCase() === lookup);
+    if (known) {
+      const current = this.accessEntry(id, known.person);
+      const message = this.message(viewer, `${known.person.name} is already in Tidewell; set what they see.`, null);
+      if (current && current.access.kind !== "none") return done([{ type: "access.changed", topicId: id, personId: known.person.id }], null, message);
+      return done([], null, message);
+    }
     const duplicate = access.invitations.find(item => item.nameOrEmail.toLowerCase() === lookup);
     if (duplicate) return done([{ type: "access.changed", topicId: id, personId: duplicate.personId }]);
-    const existing = [...this.access.values()].flatMap(record => record.people)
-      .find(entry => entry.person.name.toLowerCase() === lookup || entry.email?.toLowerCase() === lookup);
-    const current = existing && this.accessEntry(id, existing.person);
-    if (current && current.access.kind !== "none") {
-      return done([{ type: "access.changed", topicId: id, personId: current.person.id }]);
-    }
     const invitationId = `invite-${++this.serial}`;
-    const person = existing?.person ?? { ...blankActor(name.includes("@") ? name.split("@")[0] ?? name : name, "person"),
+    const person = { ...blankActor(name.includes("@") ? name.split("@")[0] ?? name : name, "person"),
       id: invitationId, membershipState: "invited" as const };
     this.people.set(person.id, person);
     this.setAccess(id, person.id, "view", [], viewer);
-    const entry = this.accessEntry(id, person);
-    const email = existing?.email ?? (name.includes("@") ? lookup : undefined);
-    if (entry && email) entry.email = email;
+    const email = name.includes("@") ? lookup : null;
+    for (const record of this.access.values()) {
+      const entry = record.people.find(item => item.person.id === person.id);
+      if (entry) { if (email) entry.email = email; continue; }
+      record.people.push({ person, access: { kind: "none", stages: [] }, owner: false, scope: "", otherTopics: [], email });
+    }
     if (person.membershipState === "invited") {
       access.invitations.push({ id: invitationId, personId: person.id, nameOrEmail: name, state: "pending", invitedAt: this.now, acceptedAt: null, topicId: id, invitedBy: this.owner });
     }
-    return done([{ type: "access.changed", topicId: id, personId: person.id }, { type: "topic.changed", topicId: id }]);
+    return done([{ type: "access.changed", topicId: id, personId: person.id }, { type: "topic.changed", topicId: id }, { type: "members.changed", personId: person.id }]);
   }
 
   private acceptInvitation(id: string, viewer: Actor): Effect {
@@ -1371,9 +1519,13 @@ export class World {
     viewer.membershipState = "active";
     const events: Event[] = [];
     for (const access of records.filter(view => view.people.some(entry => entry.person.id === viewer.id))) {
-      for (const item of access.invitations.filter(item => item.personId === viewer.id)) item.state = "accepted";
+      for (const item of access.invitations.filter(item => item.personId === viewer.id)) {
+        item.state = "accepted";
+        item.acceptedAt = this.now;
+      }
       events.push({ type: "access.changed", topicId: access.topicId, personId: viewer.id }, { type: "topic.changed", topicId: access.topicId });
     }
+    events.push({ type: "members.changed", personId: viewer.id });
     return done(events);
   }
 
@@ -1464,6 +1616,13 @@ export class World {
     const action = requireRecord(this.history.get(this.overnightAliases.get(id) ?? id), "action");
     action.authorize(viewer);
     if (action.row.undone === undone) return done();
+    if (undone) {
+      const overnight = byId(this.briefBase.overnight, action.row.id);
+      if (overnight?.outcome?.sentOutside) throw new Problem("conflict", "An action sent outside the workspace cannot be undone.");
+      if (overnight?.undoUntilAt && Date.parse(overnight.undoUntilAt) <= Date.parse(this.now)) {
+        throw new Problem("conflict", "The undo window for this action has passed.");
+      }
+    }
     const overnight = byId(this.briefBase.overnight, action.row.id);
     const actions = [...this.history.values()].filter(item => item.record === action.record || overnight?.relatedLaneIds?.includes(item.record));
     const later = actions.slice(actions.indexOf(action) + 1);
@@ -1540,7 +1699,36 @@ export class World {
         this.requireOwner(reader);
       }
     });
-    return { lane, receipt, message, events: [filed] };
+    const events: Event[] = [filed];
+    if (this.module === "dev") {
+      const server = this.skills.connections.find(item => item.id === "your-server");
+      if (server?.capacity?.kind === "count") {
+        server.capacity = { ...server.capacity, value: server.capacity.value + 1 };
+        events.push({ type: "skills.changed" });
+      }
+    }
+    return { lane, receipt, message, events };
+  }
+
+  private fileCommand(command: Extract<Command, { type: "lane.file" }>, viewer: Actor): Effect {
+    const options: FileOptions = {
+      topicId: command.toManager ? null : command.topicId ?? null, leadId: command.leadId ?? null,
+      attachment: command.attachment ?? null, model: command.model ?? null, route: !command.toManager,
+    };
+    const parts = splitDeliverables(command.text);
+    if (!parts) {
+      const filed = this.file(command.text, viewer, options);
+      return done(filed.events, filed.lane.id, filed.message, filed.receipt);
+    }
+    const groupId = `group-${++this.serial}`;
+    const filed = parts.map(part => this.file(part, viewer, options));
+    const ids = filed.map(item => item.lane.id);
+    for (const item of filed) {
+      item.lane.groupId = groupId;
+      for (const event of item.events) if (event.type === "lane.filed") event.groupId = groupId;
+    }
+    const first = requireRecord(filed[0], "lane");
+    return done(filed.flatMap(item => item.events), first.lane.id, first.message, { ...first.receipt, laneId: first.lane.id, groupLaneIds: ids });
   }
 
   private move(id: string, topicId: string, viewer: Actor): Effect {
@@ -1603,10 +1791,12 @@ export class World {
     const status = replies[action.id];
     if (!status || lane.state !== "bad") throw new Problem("badRequest", "That choice is not available on this lane.");
     const base = requireRecord(this.lanes.get(id), "lane");
-    const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, nextAt: base.nextAt, standing: base.standing, steps: base.steps, acts: base.acts };
+    const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, nextAt: base.nextAt, standing: base.standing, steps: base.steps, acts: base.acts, tries: structuredClone(base.tries) };
+    const raised = base.tries?.kind === "count" ? { ...base.tries, of: (base.tries.of ?? base.tries.value) + 1 } : base.tries;
     const next = {
-      state: "ok", stateWord: "Working", status, next: status, standing: { headline: "Working again.", detail: status },
+      state: "ok" as const, stateWord: "Working", status, next: status, standing: { headline: "Working again.", detail: status },
       steps: base.steps.map(step => step.kind === "now" ? { ...step, text: status } : step), acts: [] as LaneAct[],
+      tries: action.id === "allow-one-more-try" ? raised : base.tries,
     };
     const apply = (undone: boolean): Event[] => {
       Object.assign(base, undone ? previous : next);
@@ -1623,6 +1813,7 @@ export class World {
     const topicId = requireRecord(base.topicId, "topic");
     const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, nextAt: base.nextAt, standing: base.standing, steps: base.steps, acts: base.acts };
     const id = `action-${++this.serial}`;
+    const forecastId = `forecast-${++this.serial}`;
     const settlement = {
       laneId: lane.id, actionId: id, title: values.receipt, stateWord: "Settled by you",
       detail: "Nothing else is stuck.", target: target("topic", topicId),
@@ -1630,13 +1821,23 @@ export class World {
     const apply = (undone: boolean): Event[] => {
       if (undone) this.settlements.delete(lane.id);
       else this.settlements.set(lane.id, settlement);
+      const goal = this.topics.get(topicId)?.goal;
+      if (goal) {
+        const index = goal.forecastLog.findIndex(item => item.id === forecastId);
+        if (undone) { if (index >= 0) goal.forecastLog.splice(index, 1); }
+        else if (index < 0) goal.forecastLog.push({
+          id: forecastId, word: "Behind plan", givenAt: this.now, outcome: "", value: null, low: null, high: null,
+          scoreAt: null, actual: null, scoredAt: null, held: null,
+        });
+      }
       Object.assign(base, undone ? previous : {
         state: "ok", stateWord: "Working", status: values.status, next: "Promo scheduled",
         nextAt: this.briefBase.burns.find(burn => burn.laneId === lane.id)?.dueAt ?? null, acts: [],
         standing: { headline: "The promo is settled.", detail: values.status },
         steps: previous.steps.map(step => step.kind === "now" ? { kind: "ok", text: values.step, who: "You · now", doneAt: null } : step),
       });
-      return [...laneUpdate(lane.id, topicId), { type: "thread.changed", threadId: `topic:${topicId}` }, { type: "brief.changed" }];
+      return [...laneUpdate(lane.id, topicId), { type: "thread.changed", threadId: `topic:${topicId}` },
+        { type: "thread.changed", threadId: "manager" }, { type: "brief.changed" }];
     };
     const record = this.remember(topicId, lane.id, values.history, viewer, apply, lane.id, id);
     return done([...apply(false), { type: "agentAction.changed", actionId: id }], lane.id, null, {
@@ -1701,10 +1902,11 @@ export class World {
     if (decision.state === "expired" || (state !== "open" && decision.state !== "open")) {
       throw new Problem("conflict", "The decision is already settled.");
     }
-    const actionId = `decision-${id}`;
+    const fixture = state === "approved" ? this.fixtureDecisionRow(decision.topicId, id) : undefined;
+    const actionId = fixture?.id ?? `decision-${id}`;
     if (state === "open") {
       if (decision.release?.stage === "done") throw new Problem("conflict", "The rollout has already finished.");
-      return this.undo(actionId, true, viewer);
+      return this.undo(`decision-${id}`, true, viewer);
     }
     const pull = this.pulls.items.find(item => item.decisionId === id);
     if (state === "approved" && pull?.held) throw new Problem("conflict", "The pull request is held.");
@@ -1726,11 +1928,23 @@ export class World {
       }
       return events;
     };
-    const record = this.remember(decision.topicId, actionId, `${state === "approved" ? "Approved" : "Declined"}: ${decision.title}`, viewer,
-      apply, decision.laneId, actionId, this.now, reader => this.requireDecisionRight(decision, reader));
+    const record = this.remember(decision.topicId, actionId, fixture?.text ?? `${state === "approved" ? "Approved" : "Declined"}: ${decision.title}`, viewer,
+      apply, decision.laneId ?? fixture?.laneId ?? null, actionId, fixture?.at ?? this.now, reader => this.requireDecisionRight(decision, reader));
     record.row.decision = true;
     record.row.decisionId = id;
+    if (fixture) {
+      fixture.undoable = true;
+      this.fixtureActions.add(fixture.id);
+      this.overnightAliases.set(`decision-${id}`, fixture.id);
+    }
     return done(apply(false));
+  }
+
+  private fixtureDecisionRow(topicId: string, decisionId: string): HistoryRow | undefined {
+    for (const day of this.topics.get(topicId)?.history?.days ?? []) {
+      for (const entry of day.entries) if (entry.kind === "event" && entry.decisionId === decisionId) return entry;
+    }
+    return undefined;
   }
 
   private questionReply(topic: TopicView, text: string): string {
@@ -1784,8 +1998,9 @@ export class World {
     if (command.stage) throw new Problem("badRequest", "Choose a topic conversation to post in a stage.");
     const thread = this.writableThread(threadId, viewer);
     const topic = topicId ? this.topicView(topicId, viewer, new URLSearchParams()) : null;
+    const suggested = thread.suggestions.includes(text);
     const kind = scope.kind === "topic" || scope.kind === "manager" || scope.kind === "general"
-      ? command.page && /^(sum up|summari[sz]e)\b/i.test(text) ? "question" : classify(text) : null;
+      ? suggested || (command.page && /^(sum up|summari[sz]e)\b/i.test(text)) ? "question" : classify(text) : null;
     const model = this.model(command.model);
     const sent = this.message(viewer, text, kind);
     sent.attachment = command.attachment ?? null;
@@ -1819,7 +2034,7 @@ export class World {
       const decision = this.proposeGoal(topic, text, sent);
       reply = this.message(blankActor(`${topic.name} manager`), `I put the goal change in Decide. The goal stays as it is until ${this.owner.shortName} approves it.`, null);
       reply.decisionId = decision.id;
-      events.push(...this.decisionEvents(decision));
+      events.push(...this.decisionEvents(decision), { type: "thread.changed", threadId: "manager" });
       if (!this.prefsOf(viewer).interruptOnlyUrgent) events.push({ type: "attention.raised", target: target("decision", decision.id), reason: "A proposed goal change needs a decision." });
     } else if (kind === "done" && topic) {
       reply = this.message(blankActor(`${topic.name} manager`), "Logged as done on the thread it belongs to.", null);
@@ -1886,8 +2101,51 @@ export class World {
     return null;
   }
 
-  private proposeGoal(topic: TopicView, text: string, message: Message): DecisionView {
-    const goal = requireRecord(topic.goal, "goal");
+  private affectedTopicIds(topicId: string): string[] {
+    const found = new Set<string>();
+    if (topicId === "partnerships" && this.topics.has("paid")) found.add("paid");
+    for (const resource of this.managerBase.sharedResources) {
+      const topics = new Set(resource.laneIds.flatMap(id => {
+        const topic = this.lanes.get(id)?.topicId;
+        return topic ? [topic] : [];
+      }));
+      if (!topics.has(topicId)) continue;
+      for (const other of topics) if (other !== topicId) found.add(other);
+    }
+    found.delete(topicId);
+    return [...found];
+  }
+
+  private typedGoalChange(topic: TopicView, goal: NonNullable<TopicView["goal"]>, text: string): GoalChange | null {
+    const field = /\bguardrail\b/i.test(text) ? "guardrail" : /\b(budget|cap)\b/i.test(text) ? "budget" : /\bpriority\b/i.test(text) ? "priority" : null;
+    if (!field) return null;
+    const base = {
+      topicId: topic.id, affectedTopics: this.affectedTopicIds(topic.id), deadlineAt: null, previousDeadlineAt: goal.deadlineAt,
+      unit: null, previousUnit: goal.unit, budget: null, priority: null, guardrail: null,
+    };
+    if (field === "budget") {
+      const amount = eurosMinor(text);
+      const cap = topic.spend?.cap;
+      if (!amount || !cap) throw new Problem("badRequest", "Include the new budget for this goal.");
+      return { ...base, field, from: cap.amountMinor, to: amount, budget: { from: structuredClone(cap), to: { amountMinor: amount, currency: cap.currency }, period: /\b(a|per) week\b/i.test(text) ? "a week" : null } };
+    }
+    if (field === "priority") {
+      const from = topic.meta?.priority ?? null;
+      return { ...base, field, from: from ?? 0, to: 1, priority: { from, to: 1 } };
+    }
+    const item = goal.guardrails?.items.find(entry => text.toLowerCase().includes(entry.what.toLowerCase()));
+    const amount = eurosMinor(text);
+    if (!item?.id || !item.limit || amount === null) throw new Problem("badRequest", "Name the guardrail and its new limit.");
+    const to = item.limit.kind === "money"
+      ? { ...item.limit, money: { amountMinor: amount, currency: item.limit.money.currency } }
+      : item.limit.kind === "count" ? { ...item.limit, value: amount } : item.limit;
+    return {
+      ...base, field, from: measuredNumber(item.limit) ?? 0, to: amount,
+      guardrail: { guardrailId: item.id, name: item.what, from: structuredClone(item.limit), to },
+    };
+  }
+
+  private quantityGoalChange(topic: TopicView, goal: NonNullable<TopicView["goal"]>, text: string): GoalChange {
     const deadlineAt = this.proposalDeadline(text, goal.deadlineAt);
     const dateOnly = /\b(?:deadline|end date|due date)\b/i.test(text) && !/\b(?:target|from)\b/i.test(text);
     const match = dateOnly ? null : /\b(?:to|target is|goal is)\s+(\d+)\b(?:\s+([a-z][a-z -]*?))?(?=\s+by\b|[.!?,]|$)/i.exec(text);
@@ -1898,22 +2156,27 @@ export class World {
     if (!Number.isSafeInteger(to) || to <= 0 || (match === null && !deadlineAt && !unit)) {
       throw new Problem("badRequest", "Include the new target, units or deadline for this goal.");
     }
+    return {
+      topicId: topic.id, field: to !== goal.target ? "target" : deadlineAt ? "deadline" : "unit",
+      from: goal.target, to, affectedTopics: this.affectedTopicIds(topic.id),
+      deadlineAt, previousDeadlineAt: goal.deadlineAt, unit, previousUnit: currentUnit,
+      budget: null, priority: null, guardrail: null,
+    };
+  }
+
+  private proposeGoal(topic: TopicView, text: string, message: Message): DecisionView {
+    const goal = requireRecord(topic.goal, "goal");
+    const goalChange = this.typedGoalChange(topic, goal, text) ?? this.quantityGoalChange(topic, goal, text);
     const id = `dc-${++this.serial}`;
-    const changesPaid = topic.id === "partnerships" && this.topics.has("paid");
-    const detail = changesPaid ? "Paid’s partner budget and the Friday report follow the new goal." : "The new target applies to this topic’s plan.";
+    const detail = goalChange.affectedTopics.includes("paid") ? "Paid’s partner budget and the Friday report follow the new goal." : "The new target applies to this topic’s plan.";
     const decision: DecisionView = {
       id, title: text, shortTitle: `Change the ${topic.name} goal`, state: "open", topicId: topic.id, topicName: topic.name,
       dueAt: this.nextBrief(3), whyYours: "Yours: changes a goal", minutes: 2, contextLine: topic.name, cardContext: detail,
       doneNote: "Approved. The goal is changed on record.", laneId: null, approveLabel: "Approve",
       provenance: null, context: detail, numbers: [], proof: null, opportunity: null, risk: null, suggestion: null,
       guardrail: null, nextSteps: [], ifNoAnswer: "Nothing changes without your answer.", position: { index: 0, of: 0, open: 0 },
-      changeRequest: null, release: null, rule: "hardToUndo", proposer: null,
-      goalChange: {
-        topicId: topic.id, field: to !== goal.target ? "target" : deadlineAt ? "deadline" : "unit",
-        from: goal.target, to, affectedTopics: changesPaid ? ["paid"] : [],
-        deadlineAt, previousDeadlineAt: goal.deadlineAt, unit, previousUnit: currentUnit,
-        budget: null, priority: null, guardrail: null,
-      },
+      changeRequest: null, release: null, rule: "hardToUndo", proposer: blankActor(`${topic.name} manager`),
+      goalChange,
     };
     this.decisions.set(id, decision);
     message.decisionId = id;
@@ -2020,14 +2283,17 @@ export class World {
     return done([{ type: "skills.changed" }, { type: "usage.changed" }]);
   }
 
-  private guardrail(name: string, on: boolean, viewer: Actor): Effect {
+  private guardrail(name: string, on: boolean, viewer: Actor, id: string | null = null): Effect {
     this.requireOwner(viewer);
-    const guardrail = requireRecord(this.skills.guardrails.find(item => item.name === name), "guardrail");
+    const guardrail = requireRecord(
+      (id ? this.skills.guardrails.find(item => item.id === id) : undefined) ?? this.skills.guardrails.find(item => item.name === name),
+      "guardrail",
+    );
     if (guardrail.on === on) return done();
     guardrail.on = on;
     const breached = [...this.topics.values()].flatMap(topic => topic.goal?.guardrails?.items
-      .filter(item => item.what === name && item.state === "breached")
-      .map(() => ({ type: "guardrail.breached", topicId: topic.id, name, guardrailId: slug(name) } as const)) ?? []);
+      .filter(item => item.what === guardrail.name && item.state === "breached")
+      .map(() => ({ type: "guardrail.breached", topicId: topic.id, name: guardrail.name, guardrailId: guardrail.id ?? slug(guardrail.name) } as const)) ?? []);
     return done([{ type: "skills.changed" }, ...(on ? breached : [])]);
   }
 
