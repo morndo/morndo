@@ -136,8 +136,8 @@
       "title": "The offer",
       "detail": "2 pages, from the partner template",
       "target": {
-        "kind": "lane",
-        "id": "halden-offer"
+        "kind": "topic",
+        "id": "partnerships"
       }
     },
     {
@@ -145,8 +145,8 @@
       "title": "Halden call notes",
       "detail": "13 November, 34 minutes",
       "target": {
-        "kind": "lane",
-        "id": "halden-offer"
+        "kind": "topic",
+        "id": "partnerships"
       }
     },
     {

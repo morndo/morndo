@@ -92,8 +92,8 @@
       "title": "Contacts in HubSpot",
       "detail": "96 decision-makers, 92 emails checked",
       "target": {
-        "kind": "lane",
-        "id": "contact-data"
+        "kind": "topic",
+        "id": "partnerships"
       }
     }
   ],

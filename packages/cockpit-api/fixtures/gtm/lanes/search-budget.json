@@ -146,8 +146,8 @@
       "title": "The 14-day numbers",
       "detail": "24 leads on LinkedIn, 40 on Search",
       "target": {
-        "kind": "lane",
-        "id": "search-budget"
+        "kind": "topic",
+        "id": "paid"
       }
     },
     {
@@ -155,8 +155,8 @@
       "title": "The 14 days before",
       "detail": "For comparison: 22 leads on LinkedIn, 36 on Search",
       "target": {
-        "kind": "lane",
-        "id": "search-budget"
+        "kind": "topic",
+        "id": "paid"
       }
     }
   ],

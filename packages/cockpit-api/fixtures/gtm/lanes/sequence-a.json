@@ -106,8 +106,8 @@
       "title": "Results",
       "detail": "960 sent, 52 replies, 9 meetings, 1.8% bounces",
       "target": {
-        "kind": "lane",
-        "id": "sequence-a"
+        "kind": "file",
+        "id": "file-sequence-a-0"
       }
     }
   ],

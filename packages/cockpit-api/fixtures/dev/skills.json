@@ -109,7 +109,7 @@
       "state": "connected",
       "capacity": null,
       "id": "github",
-      "scope": null
+      "scope": "readWrite"
     },
     {
       "name": "Claude Code",
@@ -117,7 +117,7 @@
       "state": "signedIn",
       "capacity": null,
       "id": "claude-code",
-      "scope": null
+      "scope": "agent"
     },
     {
       "name": "Codex",
@@ -125,7 +125,7 @@
       "state": "signedIn",
       "capacity": null,
       "id": "codex",
-      "scope": null
+      "scope": "agent"
     },
     {
       "name": "Cursor",
@@ -133,7 +133,7 @@
       "state": "signedIn",
       "capacity": null,
       "id": "cursor",
-      "scope": null
+      "scope": "agent"
     },
     {
       "name": "Your server",
@@ -146,7 +146,7 @@
         "unit": "busy"
       },
       "id": "your-server",
-      "scope": null
+      "scope": "runsLanes"
     },
     {
       "name": "Sentry",
@@ -154,7 +154,7 @@
       "state": "addKey",
       "capacity": null,
       "id": "sentry",
-      "scope": null
+      "scope": "read"
     }
   ],
   "connected": 5,
@@ -163,45 +163,50 @@
       "name": "Production",
       "detail": "Ask me before anything is released",
       "on": true,
-      "id": null,
+      "id": "production",
       "topicId": null,
-      "action": null,
+      "action": "ask",
       "limit": null
     },
     {
       "name": "Database",
       "detail": "Backup first, and ask me before a change",
       "on": true,
-      "id": null,
+      "id": "database",
       "topicId": null,
-      "action": null,
+      "action": "ask",
       "limit": null
     },
     {
       "name": "Merging",
       "detail": "Tests and one fresh review before any merge",
       "on": true,
-      "id": null,
+      "id": "merging",
       "topicId": null,
-      "action": null,
+      "action": "ask",
       "limit": null
     },
     {
       "name": "Tries",
       "detail": "3 tries at a fix, then stop and ask",
       "on": true,
-      "id": null,
+      "id": "tries",
       "topicId": null,
-      "action": null,
-      "limit": null
+      "action": "stop",
+      "limit": {
+        "kind": "count",
+        "value": 3,
+        "of": 3,
+        "unit": "tries"
+      }
     },
     {
       "name": "Keys",
       "detail": "Stay in the vault, never in a chat",
       "on": true,
-      "id": null,
+      "id": "keys",
       "topicId": null,
-      "action": null,
+      "action": "ask",
       "limit": null
     }
   ],

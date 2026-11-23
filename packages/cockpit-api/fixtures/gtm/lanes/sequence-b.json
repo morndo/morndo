@@ -126,8 +126,8 @@
       "title": "The 4 emails of sequence B",
       "detail": "Short, one question each, no attachments",
       "target": {
-        "kind": "lane",
-        "id": "sequence-b"
+        "kind": "topic",
+        "id": "outbound"
       }
     },
     {
@@ -135,8 +135,8 @@
       "title": "List of 180 leads",
       "detail": "Fintech ops, 50 to 500 people",
       "target": {
-        "kind": "lane",
-        "id": "sequence-b"
+        "kind": "topic",
+        "id": "outbound"
       }
     },
     {
@@ -144,8 +144,8 @@
       "title": "Pilot results",
       "detail": "30 sent, 6 replies, 2 meetings, 0 bounces",
       "target": {
-        "kind": "lane",
-        "id": "sequence-b"
+        "kind": "topic",
+        "id": "outbound"
       }
     }
   ],

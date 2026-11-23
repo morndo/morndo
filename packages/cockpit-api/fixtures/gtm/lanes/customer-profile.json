@@ -86,8 +86,8 @@
       "title": "Customer profile",
       "detail": "4 segments, fintech ops first",
       "target": {
-        "kind": "lane",
-        "id": "customer-profile"
+        "kind": "file",
+        "id": "file-customer-profile-0"
       }
     },
     {
@@ -95,8 +95,8 @@
       "title": "What changed",
       "detail": "Fintech ops moved up, retail moved down",
       "target": {
-        "kind": "lane",
-        "id": "customer-profile"
+        "kind": "file",
+        "id": "file-customer-profile-1"
       }
     }
   ],

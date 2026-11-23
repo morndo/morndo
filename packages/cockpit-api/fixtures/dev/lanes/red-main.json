@@ -62,8 +62,8 @@
       "id": "open-the-run",
       "personId": null,
       "target": {
-        "kind": "thread",
-        "id": "lane:red-main"
+        "kind": "run",
+        "id": "red-main-ci"
       }
     }
   ],
@@ -110,7 +110,12 @@
   "reminder": null,
   "nextAt": null,
   "afterNextAt": null,
-  "tries": null,
+  "tries": {
+    "kind": "count",
+    "value": 3,
+    "of": 3,
+    "unit": "tries"
+  },
   "scheduleId": null,
   "groupId": null,
   "waitsOnResource": null,

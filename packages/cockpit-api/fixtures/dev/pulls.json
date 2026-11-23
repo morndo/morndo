@@ -133,8 +133,21 @@
           "name": "Fresh review",
           "state": "running",
           "detail": "round 2",
-          "round": null,
-          "reviewer": null,
+          "round": 2,
+          "reviewer": {
+            "id": "reviewer",
+            "name": "Reviewer",
+            "shortName": "Reviewer",
+            "kind": "agent",
+            "avatar": "R",
+            "role": null,
+            "state": "ok",
+            "word": "Working",
+            "text": "Shipment filters, review round 2",
+            "skill": "/review",
+            "engine": "Codex",
+            "record": null
+          },
           "runId": null
         },
         {
@@ -188,8 +201,21 @@
           "name": "Fresh review",
           "state": "running",
           "detail": "round 1",
-          "round": null,
-          "reviewer": null,
+          "round": 1,
+          "reviewer": {
+            "id": "reviewer",
+            "name": "Reviewer",
+            "shortName": "Reviewer",
+            "kind": "agent",
+            "avatar": "R",
+            "role": null,
+            "state": "ok",
+            "word": "Working",
+            "text": "Shipment filters, review round 2",
+            "skill": "/review",
+            "engine": "Codex",
+            "record": null
+          },
           "runId": null
         },
         {

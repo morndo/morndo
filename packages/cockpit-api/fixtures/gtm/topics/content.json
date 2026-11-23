@@ -458,7 +458,31 @@
       }
     ],
     "pathTitle": null,
-    "forecastLog": [],
+    "forecastLog": [
+      {
+        "id": "content-webinar",
+        "word": "Last webinar",
+        "givenAt": "2026-11-13T08:00:00+01:00",
+        "outcome": "it got 226",
+        "value": {
+          "kind": "count",
+          "value": 240,
+          "of": null,
+          "unit": "sign-ups"
+        },
+        "low": null,
+        "high": null,
+        "scoreAt": "2026-11-16T08:00:00+01:00",
+        "actual": {
+          "kind": "count",
+          "value": 226,
+          "of": null,
+          "unit": "sign-ups"
+        },
+        "scoredAt": "2026-11-16T08:00:00+01:00",
+        "held": false
+      }
+    ],
     "deadlineAt": "2026-11-19T17:00:00+01:00",
     "updatedAt": "2026-11-16T08:45:00+01:00",
     "forecastNote": "forecast down 33 since yesterday",

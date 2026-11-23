@@ -86,8 +86,8 @@
       "title": "The 3 ads",
       "detail": "LinkedIn: 2, Search: 1 · 0.31% to 0.52% clicks",
       "target": {
-        "kind": "lane",
-        "id": "click-floor"
+        "kind": "file",
+        "id": "file-click-floor-0"
       }
     }
   ],
@@ -102,7 +102,7 @@
   "nextAt": null,
   "afterNextAt": null,
   "tries": null,
-  "scheduleId": null,
+  "scheduleId": "click-floor-weekly",
   "groupId": null,
   "waitsOnResource": null,
   "leadName": null

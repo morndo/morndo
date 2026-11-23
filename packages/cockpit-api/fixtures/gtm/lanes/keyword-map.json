@@ -86,8 +86,8 @@
       "title": "Keyword map",
       "detail": "5 pages, 410 to 1,300 searches a month each",
       "target": {
-        "kind": "lane",
-        "id": "keyword-map"
+        "kind": "file",
+        "id": "file-keyword-map-0"
       }
     }
   ],

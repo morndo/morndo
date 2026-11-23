@@ -105,7 +105,7 @@
     {
       "kind": "now",
       "text": "Every image passes the brand check: 4 of 6 so far",
-      "who": "Visuals · stuck since 09:12",
+      "who": "Visuals · stuck since 08:44",
       "doneAt": null
     },
     {
@@ -172,8 +172,8 @@
       "title": "Promo text",
       "detail": "120 words, approved Friday",
       "target": {
-        "kind": "lane",
-        "id": "webinar"
+        "kind": "topic",
+        "id": "content"
       }
     },
     {

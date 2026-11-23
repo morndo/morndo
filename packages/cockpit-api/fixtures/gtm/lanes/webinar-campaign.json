@@ -86,8 +86,8 @@
       "title": "2 ads",
       "detail": "The webinar title and one line from the agenda",
       "target": {
-        "kind": "lane",
-        "id": "webinar-campaign"
+        "kind": "topic",
+        "id": "paid"
       }
     }
   ],

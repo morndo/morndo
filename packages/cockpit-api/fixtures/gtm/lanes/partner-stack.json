@@ -92,8 +92,8 @@
       "title": "Tool comparison",
       "detail": "Clay, Apollo, HubSpot against 3 other setups",
       "target": {
-        "kind": "lane",
-        "id": "partner-stack"
+        "kind": "file",
+        "id": "file-partner-stack-0"
       }
     },
     {
@@ -101,8 +101,8 @@
       "title": "Setup notes",
       "detail": "Which agent may do what, in which tool",
       "target": {
-        "kind": "lane",
-        "id": "partner-stack"
+        "kind": "file",
+        "id": "file-partner-stack-1"
       }
     }
   ],

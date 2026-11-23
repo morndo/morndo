@@ -356,9 +356,9 @@
           },
           "ratio": 1.14,
           "state": "breached",
-          "id": null,
+          "id": "cost-per-lead",
           "switchId": null,
-          "action": null
+          "action": "ask"
         },
         {
           "what": "Weekly spend",
@@ -458,7 +458,7 @@
           "kind": "lane",
           "id": "search-budget"
         },
-        "guardrailId": null
+        "guardrailId": "cost-per-lead"
       },
       {
         "state": "warn",
@@ -576,7 +576,31 @@
       }
     ],
     "pathTitle": null,
-    "forecastLog": [],
+    "forecastLog": [
+      {
+        "id": "paid-october",
+        "word": "October",
+        "givenAt": "2026-10-01T08:00:00+02:00",
+        "outcome": "came in at 132",
+        "value": {
+          "kind": "count",
+          "value": 140,
+          "of": null,
+          "unit": "leads"
+        },
+        "low": null,
+        "high": null,
+        "scoreAt": "2026-11-01T08:00:00+01:00",
+        "actual": {
+          "kind": "count",
+          "value": 132,
+          "of": null,
+          "unit": "leads"
+        },
+        "scoredAt": "2026-11-01T08:00:00+01:00",
+        "held": false
+      }
+    ],
     "deadlineAt": null,
     "updatedAt": "2026-11-16T07:05:00+01:00",
     "forecastNote": "forecast unchanged since Friday",

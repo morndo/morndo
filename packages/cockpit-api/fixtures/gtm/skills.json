@@ -109,7 +109,7 @@
       "state": "connected",
       "capacity": null,
       "id": "openai",
-      "scope": null
+      "scope": "readWrite"
     },
     {
       "name": "Adobe",
@@ -117,7 +117,7 @@
       "state": "connected",
       "capacity": null,
       "id": "adobe",
-      "scope": null
+      "scope": "readWrite"
     },
     {
       "name": "Supabase",
@@ -125,7 +125,7 @@
       "state": "connected",
       "capacity": null,
       "id": "supabase",
-      "scope": null
+      "scope": "read"
     },
     {
       "name": "Obsidian",
@@ -133,7 +133,7 @@
       "state": "connected",
       "capacity": null,
       "id": "obsidian",
-      "scope": null
+      "scope": "readWrite"
     },
     {
       "name": "Mail",
@@ -141,7 +141,7 @@
       "state": "connected",
       "capacity": null,
       "id": "mail",
-      "scope": null
+      "scope": "draftsOnly"
     },
     {
       "name": "Seedance",
@@ -149,7 +149,7 @@
       "state": "addKey",
       "capacity": null,
       "id": "seedance",
-      "scope": null
+      "scope": "readWrite"
     }
   ],
   "connected": 5,

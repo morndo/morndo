@@ -10,7 +10,7 @@
   "when": null,
   "health": {
     "state": "idle",
-    "word": "No goal set"
+    "word": "Idle"
   },
   "goal": null,
   "noGoal": "Research answers asks from the other topics. A goal needs a measure and a date, for example: the profile refreshed every month.",

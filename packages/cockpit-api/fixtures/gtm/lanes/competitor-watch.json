@@ -86,8 +86,8 @@
       "title": "What changed in November",
       "detail": "2 price changes, 1 feature, with sources",
       "target": {
-        "kind": "lane",
-        "id": "competitor-watch"
+        "kind": "file",
+        "id": "file-competitor-watch-0"
       }
     }
   ],
@@ -102,7 +102,7 @@
   "nextAt": null,
   "afterNextAt": null,
   "tries": null,
-  "scheduleId": null,
+  "scheduleId": "competitor-watch-monthly",
   "groupId": null,
   "waitsOnResource": null,
   "leadName": null

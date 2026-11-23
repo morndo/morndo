@@ -513,7 +513,31 @@
       }
     ],
     "pathTitle": null,
-    "forecastLog": [],
+    "forecastLog": [
+      {
+        "id": "outbound-sequence-a",
+        "word": "Sequence A",
+        "givenAt": "2026-11-01T08:00:00+01:00",
+        "outcome": "it booked 9",
+        "value": {
+          "kind": "count",
+          "value": 8,
+          "of": null,
+          "unit": "meetings"
+        },
+        "low": null,
+        "high": null,
+        "scoreAt": "2026-11-15T18:00:00+01:00",
+        "actual": {
+          "kind": "count",
+          "value": 9,
+          "of": null,
+          "unit": "meetings"
+        },
+        "scoredAt": "2026-11-15T18:00:00+01:00",
+        "held": true
+      }
+    ],
     "deadlineAt": null,
     "updatedAt": "2026-11-16T08:40:00+01:00",
     "forecastNote": "forecast up 2 since Friday",

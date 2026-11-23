@@ -135,9 +135,17 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-15T23:12:00+01:00",
-      "undoUntilAt": null,
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
       "relatedLaneIds": [],
-      "outcome": null,
+      "outcome": {
+        "kind": "released",
+        "count": null,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
       "rule": null
     },
     {
@@ -149,9 +157,17 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T01:40:00+01:00",
-      "undoUntilAt": null,
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
       "relatedLaneIds": [],
-      "outcome": null,
+      "outcome": {
+        "kind": "merged",
+        "count": null,
+        "heldBack": null,
+        "rounds": 2,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
       "rule": null
     },
     {
@@ -163,9 +179,17 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T03:05:00+01:00",
-      "undoUntilAt": null,
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
       "relatedLaneIds": [],
-      "outcome": null,
+      "outcome": {
+        "kind": "updated",
+        "count": 6,
+        "heldBack": 1,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
       "rule": null
     },
     {
@@ -177,9 +201,17 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T04:30:00+01:00",
-      "undoUntilAt": null,
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
       "relatedLaneIds": [],
-      "outcome": null,
+      "outcome": {
+        "kind": "renewed",
+        "count": null,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
       "rule": null
     },
     {
@@ -191,9 +223,17 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T05:15:00+01:00",
-      "undoUntilAt": null,
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
       "relatedLaneIds": [],
-      "outcome": null,
+      "outcome": {
+        "kind": "deleted",
+        "count": 4,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
       "rule": null
     }
   ],
@@ -229,5 +269,8 @@
   "burnsSub": "One thing an agent could not fix on its own",
   "settledBurns": [],
   "sharedTopics": [],
-  "edition": null
+  "edition": {
+    "used": 1,
+    "of": 3
+  }
 }

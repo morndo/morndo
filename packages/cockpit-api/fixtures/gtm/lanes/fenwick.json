@@ -112,8 +112,8 @@
       "title": "The story",
       "detail": "1,100 words, signed off by Fenwick",
       "target": {
-        "kind": "lane",
-        "id": "fenwick"
+        "kind": "topic",
+        "id": "content"
       }
     },
     {
@@ -130,8 +130,8 @@
       "title": "Source for the 38%",
       "detail": "Fenwick's Q3 ops report, page 4",
       "target": {
-        "kind": "lane",
-        "id": "fenwick"
+        "kind": "topic",
+        "id": "content"
       }
     }
   ],
