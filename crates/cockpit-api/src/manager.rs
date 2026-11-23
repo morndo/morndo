@@ -42,8 +42,24 @@ pub struct SharedResource {
     pub icon: String,
     /// Rule for this record.
     pub rule: String,
-    /// Lanes for this record.
+    /// Number of lanes that use the resource. Equals `laneIds.len()`.
     pub lanes: i64,
+    /// Stable identifier of the resource, or null when it has none.
+    pub id: Present<String>,
+    /// Lanes that use the resource.
+    pub lane_ids: Vec<LaneId>,
+    /// Order in which the lanes take their turn.
+    pub order: Vec<LaneId>,
+    /// Lane whose turn it is, or null when the resource is free.
+    pub turn: Present<LaneId>,
+    /// People and agents that write to the resource.
+    pub writers: Vec<crate::actor::Actor>,
+    /// People and agents that only read the resource.
+    pub readers: Vec<crate::actor::Actor>,
+    /// Use of the resource against its quota, for example 18 of 40 sends today, or null when it has none.
+    pub quota: Present<crate::topic::MeasuredValue>,
+    /// Time the quota resets, or null when it does not.
+    pub resets_at: Present<Timestamp>,
 }
 
 /// Ask for the cockpit.
@@ -80,4 +96,6 @@ pub struct ManagerView {
     pub asks: Vec<Ask>,
     /// Since for this record.
     pub since: Vec<String>,
+    /// Recurring schedules of the workspace.
+    pub schedules: Vec<crate::records::Schedule>,
 }

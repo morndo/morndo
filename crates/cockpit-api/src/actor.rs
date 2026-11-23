@@ -29,7 +29,7 @@ pub struct Actor {
     pub id: PersonId,
     /// Name shown to the reader.
     pub name: String,
-    /// Short name for this record.
+    /// Short name. Agents show their full name, people their first name, and the viewer reads "You".
     pub short_name: String,
     /// Kind for this record.
     pub kind: ActorKind,

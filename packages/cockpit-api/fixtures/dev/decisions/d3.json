@@ -52,7 +52,9 @@
         "kind": "lane",
         "id": "new-sign-in"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     }
   ],
   "ifNoAnswer": "The lane waits for your pick.",
@@ -66,5 +68,6 @@
   "goalChange": null,
   "release": null,
   "changeRequest": null,
-  "rule": "onlyYouKnow"
+  "rule": "onlyYouKnow",
+  "proposer": null
 }

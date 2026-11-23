@@ -30,6 +30,12 @@ pub struct Gate {
     pub state: GateState,
     /// Explanation shown alongside the summary.
     pub detail: Present<String>,
+    /// Review round the gate belongs to, or null when it is not a review.
+    pub round: Present<i64>,
+    /// Person or agent that reviewed, or null when the gate is not a review.
+    pub reviewer: Present<crate::actor::Actor>,
+    /// CI run record the gate was read from, or null when it has none.
+    pub run_id: Present<crate::RecordId>,
 }
 
 /// Pull request for the cockpit.

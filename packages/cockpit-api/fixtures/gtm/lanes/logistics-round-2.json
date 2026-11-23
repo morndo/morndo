@@ -47,22 +47,26 @@
     {
       "kind": "now",
       "text": "400 leads, none from sequence A",
-      "who": "Prospector · 120 of 400"
+      "who": "Prospector · 120 of 400",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Emails checked before use",
-      "who": "Prospector · Thu"
+      "who": "Prospector · Thu",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Pilot of 30, after your OK",
-      "who": "Sender · Mon 23 Nov"
+      "who": "Sender · Mon 23 Nov",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "The rest at 60 a day if the pilot books 2",
-      "who": "Sender · from 30 Nov"
+      "who": "Sender · from 30 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
@@ -102,5 +106,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-19T17:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "52 personal emails, approved by Lea",
-      "who": "Lea · 9 Nov"
+      "who": "Lea · 9 Nov",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Sent from your mail, 20 a day",
-      "who": "Sender · 11 Nov"
+      "who": "Sender · 11 Nov",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "One follow-up to everyone without a reply",
-      "who": "Sender · 38 of 52"
+      "who": "Sender · 38 of 52",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Replies turned into calls",
-      "who": "Sender · Wed"
+      "who": "Sender · Wed",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
@@ -136,5 +140,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-18T17:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -17,6 +17,35 @@ pub enum ConnectionState {
     Unknown,
 }
 
+/// What a connection's grant lets agents do. The action gateway refuses a write beyond the scope.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
+pub enum ConnectionScope {
+    Read,
+    DraftsOnly,
+    ReadWrite,
+    RunsLanes,
+    Agent,
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
+}
+
+/// What happens when a guardrail is breached.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
+pub enum GuardrailAction {
+    Ask,
+    Pause,
+    Revert,
+    Stop,
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
+}
+
 /// Skill for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
@@ -55,12 +84,22 @@ pub struct Connection {
     pub state: ConnectionState,
     /// Capacity for this record.
     pub capacity: Present<crate::topic::MeasuredValue>,
+    /// What the grant lets agents do, or null when the connection has no grant. The action gateway refuses a write beyond the scope.
+    pub scope: Present<ConnectionScope>,
 }
 
 /// Guardrail switch for the cockpit.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardrailSwitch {
+    /// Stable identifier of the guardrail, or null when it has none.
+    pub id: Present<String>,
+    /// Topic the guardrail covers, or null when it is workspace-wide.
+    pub topic_id: Present<crate::TopicId>,
+    /// What happens when the guardrail is breached, or null when it only reports.
+    pub action: Present<GuardrailAction>,
+    /// The limit the switch guards, or null when it has none.
+    pub limit: Present<crate::topic::MeasuredValue>,
     /// Name shown to the reader.
     pub name: String,
     /// Explanation shown alongside the summary.

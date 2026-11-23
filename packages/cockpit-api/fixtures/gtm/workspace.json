@@ -35,7 +35,7 @@
     "chatWidth": 380
   },
   "chatMode": "floating",
-  "contractVersion": "1.0.0",
+  "contractVersion": "1.1.0",
   "timezone": "Europe/Berlin",
   "modules": [
     {

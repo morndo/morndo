@@ -108,28 +108,32 @@
       "purpose": "Code, pull requests and checks",
       "state": "connected",
       "capacity": null,
-      "id": "github"
+      "id": "github",
+      "scope": null
     },
     {
       "name": "Claude Code",
       "purpose": "Agent, builds and fixes",
       "state": "signedIn",
       "capacity": null,
-      "id": "claude-code"
+      "id": "claude-code",
+      "scope": null
     },
     {
       "name": "Codex",
       "purpose": "Agent, does the fresh reviews",
       "state": "signedIn",
       "capacity": null,
-      "id": "codex"
+      "id": "codex",
+      "scope": null
     },
     {
       "name": "Cursor",
       "purpose": "Agent, does QA in the browser",
       "state": "signedIn",
       "capacity": null,
-      "id": "cursor"
+      "id": "cursor",
+      "scope": null
     },
     {
       "name": "Your server",
@@ -141,14 +145,16 @@
         "of": 8,
         "unit": "busy"
       },
-      "id": "your-server"
+      "id": "your-server",
+      "scope": null
     },
     {
       "name": "Sentry",
       "purpose": "Errors from production",
       "state": "addKey",
       "capacity": null,
-      "id": "sentry"
+      "id": "sentry",
+      "scope": null
     }
   ],
   "connected": 5,
@@ -156,27 +162,47 @@
     {
       "name": "Production",
       "detail": "Ask me before anything is released",
-      "on": true
+      "on": true,
+      "id": null,
+      "topicId": null,
+      "action": null,
+      "limit": null
     },
     {
       "name": "Database",
       "detail": "Backup first, and ask me before a change",
-      "on": true
+      "on": true,
+      "id": null,
+      "topicId": null,
+      "action": null,
+      "limit": null
     },
     {
       "name": "Merging",
       "detail": "Tests and one fresh review before any merge",
-      "on": true
+      "on": true,
+      "id": null,
+      "topicId": null,
+      "action": null,
+      "limit": null
     },
     {
       "name": "Tries",
       "detail": "3 tries at a fix, then stop and ask",
-      "on": true
+      "on": true,
+      "id": null,
+      "topicId": null,
+      "action": null,
+      "limit": null
     },
     {
       "name": "Keys",
       "detail": "Stay in the vault, never in a chat",
-      "on": true
+      "on": true,
+      "id": null,
+      "topicId": null,
+      "action": null,
+      "limit": null
     }
   ],
   "rulesNote": "On from the start. Agents cannot change them. You can."

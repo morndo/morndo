@@ -31,5 +31,6 @@
   "goalChange": null,
   "release": null,
   "changeRequest": null,
-  "rule": "hardToUndo"
+  "rule": "hardToUndo",
+  "proposer": null
 }

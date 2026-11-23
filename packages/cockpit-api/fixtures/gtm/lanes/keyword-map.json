@@ -47,17 +47,20 @@
     {
       "kind": "ok",
       "text": "The 5 tools we lose deals to, from the lost-deal notes",
-      "who": "Researcher · 2 Nov"
+      "who": "Researcher · 2 Nov",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Searches a month and today's top 10 for each",
-      "who": "Checker · 3 Nov"
+      "who": "Checker · 3 Nov",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "One keyword per page, approved by you",
-      "who": "You · 4 Nov"
+      "who": "You · 4 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all three. You approved the keywords; the Manager closed the lane.",
@@ -97,5 +100,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

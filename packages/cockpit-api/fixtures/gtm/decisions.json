@@ -9,7 +9,8 @@
         "kind": "decision",
         "id": "d1"
       },
-      "goalChange": null
+      "goalChange": null,
+      "proposer": null
     },
     {
       "id": "d2",
@@ -20,7 +21,8 @@
         "kind": "decision",
         "id": "d2"
       },
-      "goalChange": null
+      "goalChange": null,
+      "proposer": null
     },
     {
       "id": "d3",
@@ -31,7 +33,8 @@
         "kind": "decision",
         "id": "d3"
       },
-      "goalChange": null
+      "goalChange": null,
+      "proposer": null
     },
     {
       "id": "d4",
@@ -42,7 +45,8 @@
         "kind": "decision",
         "id": "d4"
       },
-      "goalChange": null
+      "goalChange": null,
+      "proposer": null
     }
   ],
   "open": 4,

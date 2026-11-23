@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "4 setups compared on data, price and what agents can drive",
-      "who": "Jonas · 26 Oct"
+      "who": "Jonas · 26 Oct",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Your choice: Clay, Apollo and HubSpot",
-      "who": "You · 27 Oct"
+      "who": "You · 27 Oct",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Keys added, agents connected, test run of 10 brands",
-      "who": "Jonas · 29 Oct"
+      "who": "Jonas · 29 Oct",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Guardrail: no email leaves without a person's OK",
-      "who": "Manager · 30 Oct"
+      "who": "Manager · 30 Oct",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all four. The test run passed, so the Manager closed the lane.",
@@ -111,5 +115,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

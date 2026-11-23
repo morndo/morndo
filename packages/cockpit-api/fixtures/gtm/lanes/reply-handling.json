@@ -68,22 +68,26 @@
     {
       "kind": "ok",
       "text": "Every positive reply answered within a day: 19 of 19",
-      "who": "Replies · since 2 Nov"
+      "who": "Replies · since 2 Nov",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Times from Jonas for Ostrand and Velmont",
-      "who": "Jonas · today"
+      "who": "Jonas · today",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Invites sent from your mail",
-      "who": "Replies · after Jonas"
+      "who": "Replies · after Jonas",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Meetings reported",
-      "who": "Manager · Fri 20 Nov"
+      "who": "Manager · Fri 20 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "This lane runs as long as the sequences do. The Manager checks every Friday that no yes waited more than a day.",
@@ -137,5 +141,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-16T17:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

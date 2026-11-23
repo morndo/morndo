@@ -47,27 +47,32 @@
     {
       "kind": "ok",
       "text": "180 fintech ops leads, built from the new customer profile",
-      "who": "Prospector · Wednesday"
+      "who": "Prospector · Wednesday",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Pilot of 30 emails: 6 replies, 2 meetings",
-      "who": "Sender · Friday"
+      "who": "Sender · Friday",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Your OK to start",
-      "who": "You · by tomorrow"
+      "who": "You · by tomorrow",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "180 emails over 3 days, 60 a day",
-      "who": "Sender · from 10:00"
+      "who": "Sender · from 10:00",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Meetings booked and reported",
-      "who": "Manager · Fri 27 Nov"
+      "who": "Manager · Fri 27 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
@@ -153,5 +158,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": "2026-11-20T17:00:00+01:00"
+  "afterNextAt": "2026-11-20T17:00:00+01:00",
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

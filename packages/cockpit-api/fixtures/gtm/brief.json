@@ -97,7 +97,8 @@
       "laneId": "search-budget",
       "state": "open",
       "dueAt": "2026-11-16T14:00:00+01:00",
-      "rule": "overWeeklyCap"
+      "rule": "overWeeklyCap",
+      "proposer": null
     },
     {
       "id": "d2",
@@ -111,7 +112,8 @@
       "laneId": "sequence-b",
       "state": "open",
       "dueAt": "2026-11-17T17:00:00+01:00",
-      "rule": "inYourName"
+      "rule": "inYourName",
+      "proposer": null
     },
     {
       "id": "d3",
@@ -125,7 +127,8 @@
       "laneId": "fenwick",
       "state": "open",
       "dueAt": "2026-11-18T17:00:00+01:00",
-      "rule": "inYourName"
+      "rule": "inYourName",
+      "proposer": null
     },
     {
       "id": "d4",
@@ -139,7 +142,8 @@
       "laneId": "halden-offer",
       "state": "open",
       "dueAt": "2026-11-19T17:00:00+01:00",
-      "rule": "hardToUndo"
+      "rule": "hardToUndo",
+      "proposer": null
     }
   ],
   "openCount": 4,
@@ -171,7 +175,9 @@
       "undone": false,
       "at": "2026-11-16T07:10:00+01:00",
       "undoUntilAt": null,
-      "relatedLaneIds": []
+      "relatedLaneIds": [],
+      "outcome": null,
+      "rule": null
     },
     {
       "id": "o2",
@@ -186,7 +192,9 @@
       "relatedLaneIds": [
         "contact-data",
         "outreach-wave-2"
-      ]
+      ],
+      "outcome": null,
+      "rule": null
     },
     {
       "id": "o3",
@@ -198,7 +206,9 @@
       "undone": false,
       "at": "2026-11-16T07:42:00+01:00",
       "undoUntilAt": null,
-      "relatedLaneIds": []
+      "relatedLaneIds": [],
+      "outcome": null,
+      "rule": null
     },
     {
       "id": "o4",
@@ -210,7 +220,9 @@
       "undone": false,
       "at": "2026-11-16T08:05:00+01:00",
       "undoUntilAt": null,
-      "relatedLaneIds": []
+      "relatedLaneIds": [],
+      "outcome": null,
+      "rule": null
     },
     {
       "id": "o5",
@@ -222,7 +234,9 @@
       "undone": false,
       "at": "2026-11-16T08:30:00+01:00",
       "undoUntilAt": null,
-      "relatedLaneIds": []
+      "relatedLaneIds": [],
+      "outcome": null,
+      "rule": null
     }
   ],
   "drafts": {
@@ -247,5 +261,6 @@
   "overnightSinceAt": "2026-11-15T18:00:00+01:00",
   "burnsSub": "This needs your call.",
   "settledBurns": [],
-  "sharedTopics": []
+  "sharedTopics": [],
+  "edition": null
 }

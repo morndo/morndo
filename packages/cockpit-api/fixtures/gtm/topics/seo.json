@@ -12,10 +12,12 @@
       "Asked by you",
       "SEO writer leads; Checker checks every claim"
     ],
-    "nextReportAt": "2026-11-30T17:00:00+01:00"
+    "nextReportAt": "2026-11-30T17:00:00+01:00",
+    "nextReportId": null,
+    "priority": null
   },
   "intro": "Five comparison pages against the tools we lose deals to. The goal: three of them in Google's top 10 by 31 December.",
-"when": {
+  "when": {
     "kind": "count",
     "value": 3,
     "of": 9,
@@ -218,7 +220,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Pages live without your outline",
@@ -235,7 +240,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Bought links",
@@ -252,7 +260,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         }
       ]
     },
@@ -280,7 +291,7 @@
           "what": "visits from search",
           "change": {
             "kind": "rate",
-            "percent": 18.0,
+            "percent": 18,
             "standard": false
           },
           "rate": null,
@@ -352,7 +363,9 @@
     "forecastLog": [],
     "deadlineAt": null,
     "updatedAt": "2026-11-16T07:42:00+01:00",
-    "forecastNote": null
+    "forecastNote": null,
+    "calibrationScore": null,
+    "nextScoreAt": null
   },
   "noGoal": null,
   "facts": [
@@ -368,7 +381,7 @@
     {
       "value": {
         "kind": "rate",
-        "percent": 18.0,
+        "percent": 18,
         "standard": false
       },
       "label": "against last week"
@@ -430,7 +443,8 @@
             "decisionId": null,
             "at": "2026-11-16T07:50:00+01:00",
             "id": "seo-history-1",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -461,7 +475,8 @@
             "decisionId": null,
             "at": "2026-11-16T07:42:00+01:00",
             "id": "seo-history-2",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -489,7 +504,8 @@
             "decisionId": null,
             "at": "2026-11-16T07:30:00+01:00",
             "id": "seo-history-3",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -525,7 +541,8 @@
             "decisionId": null,
             "at": "2026-11-15T16:00:00+01:00",
             "id": "seo-history-4",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -558,7 +575,8 @@
             "decisionId": null,
             "at": "2026-11-13T14:30:00+01:00",
             "id": "seo-history-5",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -591,7 +609,8 @@
             "decisionId": null,
             "at": "2026-11-04T11:00:00+01:00",
             "id": "seo-history-6",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       }
@@ -651,7 +670,8 @@
       "laneId": "comparison-pages",
       "dueAt": "2026-11-16T15:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Pages 4 and 5 live",
@@ -660,7 +680,8 @@
       "laneId": "comparison-pages",
       "dueAt": "2026-11-20T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Pages 1 and 2 published",
@@ -669,7 +690,8 @@
       "laneId": "comparison-pages",
       "dueAt": null,
       "completedAt": "2026-11-16T07:42:00+01:00",
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "First ranking check",
@@ -678,7 +700,8 @@
       "laneId": null,
       "dueAt": "2026-11-30T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     }
   ],
   "chatSub": "Mara and 2 agents · the Manager reads it, it is not in it",

@@ -47,27 +47,32 @@
     {
       "kind": "ok",
       "text": "Outlines for 5 pages, approved by you",
-      "who": "You · Friday"
+      "who": "You · Friday",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Pages 1 and 2 live",
-      "who": "SEO writer · today, 07:42"
+      "who": "SEO writer · today, 07:42",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Page 3 written and checked",
-      "who": "SEO writer · today, 15:00"
+      "who": "SEO writer · today, 15:00",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Pages 4 and 5 live",
-      "who": "SEO writer · Fri 20 Nov"
+      "who": "SEO writer · Fri 20 Nov",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Rankings checked after two weeks",
-      "who": "Checker · Mon 30 Nov"
+      "who": "Checker · Mon 30 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
@@ -139,5 +144,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-16T15:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

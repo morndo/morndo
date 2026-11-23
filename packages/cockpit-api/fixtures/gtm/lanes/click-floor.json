@@ -47,17 +47,20 @@
     {
       "kind": "ok",
       "text": "Every running ad checked against the floor",
-      "who": "Analyst · 08:10"
+      "who": "Analyst · 08:10",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "3 ads switched off, inside your €500 guardrail",
-      "who": "Paid buyer · 08:30"
+      "who": "Paid buyer · 08:30",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Logged in the brief, with Undo",
-      "who": "Manager · 08:30"
+      "who": "Manager · 08:30",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all three. You can undo it from the brief until tonight.",
@@ -97,5 +100,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use crate::Present;
 
 /// Current version of the cockpit wire contract.
-pub const CONTRACT_VERSION: &str = "1.0.0";
+pub const CONTRACT_VERSION: &str = "1.1.0";
 /// Schema identifier for this major version.
 pub const CONTRACT_ID: &str = "urn:morndo:cockpit-api:1";
 
@@ -83,6 +83,9 @@ slug_ids! {
     InvitationId => "Identifier of a sharing invitation.",
     ModelId => "Identifier of a selectable model.",
     RecordId => "Identifier of a staging run or review record.",
+    ScheduleId => "Identifier of a recurring schedule.",
+    ReportId => "Identifier of a status report.",
+    CheckId => "Identifier of a spot check.",
 }
 id!(MessageId, "Identifier of a message.", "^m[0-9]+$");
 id!(
@@ -156,6 +159,9 @@ pub enum TargetKind {
     Pull,
     Run,
     Review,
+    File,
+    Report,
+    Check,
     Manager,
     Brief,
     Drafts,

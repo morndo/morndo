@@ -47,7 +47,8 @@
     {
       "kind": "ok",
       "text": "Delete the four merged branches.",
-      "who": "Builder"
+      "who": "Builder",
+      "doneAt": null
     }
   ],
   "doneNote": "Mobile deleted 4 branches that were already merged.",
@@ -77,5 +78,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

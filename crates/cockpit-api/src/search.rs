@@ -54,7 +54,7 @@ pub struct Answer {
     pub target: Present<Target>,
 }
 
-/// A page of records matching the query and an optional answer.
+/// A page of records matching the query and an optional answer. An empty query returns no results: the client builds the empty panel from /decisions, /brief, /recent and /skills.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct SearchView {

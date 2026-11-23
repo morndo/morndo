@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "Contacts for batches 1 to 3",
-      "who": "Contact finder · Friday"
+      "who": "Contact finder · Friday",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Contacts for batch 4: 58 found overnight",
-      "who": "Contact finder · now"
+      "who": "Contact finder · now",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "The 11 brands Apollo did not know",
-      "who": "Contact finder · Wed"
+      "who": "Contact finder · Wed",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Every email checked before it is used",
-      "who": "Contact finder · Thu"
+      "who": "Contact finder · Thu",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
@@ -102,5 +106,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-17T08:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -12,10 +12,12 @@
       "Asked by you",
       "Writer, Visuals and Publisher work on it"
     ],
-    "nextReportAt": "2026-11-20T17:00:00+01:00"
+    "nextReportAt": "2026-11-20T17:00:00+01:00",
+    "nextReportId": null,
+    "priority": null
   },
   "intro": "Everything we publish: the webinar on Thursday and its promo, the recap post, one customer story and a carousel. The goal this week is the webinar's sign-ups.",
-"when": {
+  "when": {
     "kind": "time",
     "at": "2026-11-19T17:00:00+01:00"
   },
@@ -282,7 +284,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Newsletter sends",
@@ -299,7 +304,10 @@
             "unit": "per week"
           },
           "ratio": 1,
-          "state": "near"
+          "state": "near",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Claims without a source",
@@ -316,7 +324,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         }
       ]
     },
@@ -355,7 +366,8 @@
         "target": {
           "kind": "lane",
           "id": "webinar"
-        }
+        },
+        "guardrailId": null
       },
       {
         "state": "warn",
@@ -367,7 +379,8 @@
         "target": {
           "kind": "lane",
           "id": "recap"
-        }
+        },
+        "guardrailId": null
       }
     ],
     "routine": null,
@@ -387,8 +400,8 @@
           "what": "opened",
           "change": null,
           "rate": {
-            "percent": 45.0,
-            "planPercent": 40.0,
+            "percent": 45,
+            "planPercent": 40,
             "plannedCount": null,
             "dueAt": null
           },
@@ -417,7 +430,7 @@
           },
           "rate": {
             "percent": 11.5,
-            "planPercent": 15.0,
+            "planPercent": 15,
             "plannedCount": null,
             "dueAt": null
           },
@@ -448,7 +461,9 @@
     "forecastLog": [],
     "deadlineAt": "2026-11-19T17:00:00+01:00",
     "updatedAt": "2026-11-16T08:45:00+01:00",
-    "forecastNote": "forecast down 33 since yesterday"
+    "forecastNote": "forecast down 33 since yesterday",
+    "calibrationScore": null,
+    "nextScoreAt": null
   },
   "noGoal": null,
   "facts": [
@@ -527,7 +542,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:44:59+01:00",
             "id": "content-history-1",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -555,7 +571,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:44:51+01:00",
             "id": "content-history-2",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -583,7 +600,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:44:50+01:00",
             "id": "content-history-3",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -611,7 +629,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:00:00+01:00",
             "id": "content-history-4",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -639,7 +658,8 @@
             "decisionId": null,
             "at": "2026-11-16T07:30:00+01:00",
             "id": "content-history-5",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -672,7 +692,8 @@
             "decisionId": null,
             "at": "2026-11-15T17:00:00+01:00",
             "id": "content-history-6",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "seen"
@@ -703,7 +724,8 @@
             "decisionId": null,
             "at": "2026-11-15T11:40:00+01:00",
             "id": "content-history-7",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -736,7 +758,8 @@
             "decisionId": null,
             "at": "2026-11-13T16:41:00+01:00",
             "id": "content-history-8",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -764,7 +787,8 @@
             "decisionId": null,
             "at": "2026-11-13T16:20:00+01:00",
             "id": "content-history-9",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -792,7 +816,8 @@
             "decisionId": null,
             "at": "2026-11-13T11:05:00+01:00",
             "id": "content-history-10",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -820,7 +845,8 @@
             "decisionId": null,
             "at": "2026-11-13T10:00:00+01:00",
             "id": "content-history-11",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -853,7 +879,8 @@
             "decisionId": null,
             "at": "2026-11-12T17:40:00+01:00",
             "id": "content-history-12",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -881,7 +908,8 @@
             "decisionId": null,
             "at": "2026-11-12T08:00:00+01:00",
             "id": "content-history-13",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       }
@@ -955,7 +983,8 @@
       "laneId": "webinar",
       "dueAt": "2026-11-16T16:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Fenwick Freight customer story",
@@ -964,7 +993,8 @@
       "laneId": "fenwick",
       "dueAt": "2026-11-18T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Webinar reminder email",
@@ -973,7 +1003,8 @@
       "laneId": "webinar-reminders",
       "dueAt": "2026-11-18T09:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Webinar recap post",
@@ -982,7 +1013,8 @@
       "laneId": "recap",
       "dueAt": "2026-11-19T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Carousel: 5 signs of ops debt",
@@ -991,7 +1023,8 @@
       "laneId": null,
       "dueAt": "2026-11-20T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Newsletter 46",
@@ -1000,7 +1033,8 @@
       "laneId": null,
       "dueAt": null,
       "completedAt": "2026-11-16T08:00:00+01:00",
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     }
   ],
   "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",

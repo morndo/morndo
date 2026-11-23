@@ -72,12 +72,14 @@
     {
       "kind": "ok",
       "text": "3 fixes tried",
-      "who": "Builder · 06:40"
+      "who": "Builder · 06:40",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Your call: pin the old session library, or allow one more try",
-      "who": "You · now"
+      "who": "You · now",
+      "doneAt": null
     }
   ],
   "doneNote": "Pinning takes about 3 minutes and turns main green.",
@@ -107,5 +109,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

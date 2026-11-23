@@ -89,6 +89,8 @@ pub struct Thumb {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct Step {
+    /// Time the step finished, or null while it is not done.
+    pub done_at: Present<Timestamp>,
     /// Kind for this record.
     pub kind: StepKind,
     /// Text shown to the reader.
@@ -138,7 +140,7 @@ pub struct Handover {
     pub fixed: Present<String>,
 }
 
-/// A work item and its record of progress.
+/// A work item and its record of progress. The lane's chat is shared with whoever works the lane.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct LaneView {
@@ -220,6 +222,16 @@ pub struct LaneView {
     pub handover: Present<Handover>,
     /// Fresh for this record.
     pub fresh: bool,
+    /// Tries used out of the tries allowed, or null when the lane does not retry.
+    pub tries: Present<crate::topic::MeasuredValue>,
+    /// Schedule that filed the lane, or null when it was not filed by one.
+    pub schedule_id: Present<crate::ScheduleId>,
+    /// Group the lane was split into with its sibling lanes, or null when it was not split.
+    pub group_id: Present<String>,
+    /// Shared resource the lane waits on, or null when it waits on none.
+    pub waits_on_resource: Present<String>,
+    /// Name of the lead as a topic's lane row shows it ("Brand scout", "Jonas", "You").
+    pub lead_name: Present<String>,
 }
 
 /// Visual treatment of an action button.

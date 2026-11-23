@@ -47,27 +47,32 @@
     {
       "kind": "ok",
       "text": "Call 1, Kestrel Parcel: not before spring",
-      "who": "You · 12 Nov"
+      "who": "You · 12 Nov",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Call 2, Halden Freight Network: they want an offer",
-      "who": "You · 13 Nov"
+      "who": "You · 13 Nov",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Call 3, Brightmoor Retail",
-      "who": "You · today 15:00"
+      "who": "You · today 15:00",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Call 4, Northvale Bank",
-      "who": "You · Wed"
+      "who": "You · Wed",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Call 5, Corvane ERP",
-      "who": "You · Thu"
+      "who": "You · Thu",
+      "doneAt": null
     }
   ],
   "doneNote": "Every call gets a brief before and notes after. You only talk; the agents do the rest.",
@@ -153,5 +158,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-16T16:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

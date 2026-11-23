@@ -79,6 +79,10 @@ pub struct Scenario {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct NextStep {
+    /// Whether the step is done, under way or still to do, or null when it is not tracked.
+    pub state: Present<crate::lane::StepKind>,
+    /// Time the step finished, or null while it is not done.
+    pub done_at: Present<Timestamp>,
     /// Module to open when the next step crosses into another module.
     pub module_id: Present<crate::ModuleId>,
     /// Destination to open in the cockpit.
@@ -111,6 +115,8 @@ pub struct Provenance {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct QueueItem {
+    /// The manager or agent that proposed this, or null when the reader did.
+    pub proposer: Present<crate::actor::Actor>,
     /// Goal change for this record.
     pub goal_change: Present<GoalChange>,
     /// Stable identifier for this record.
@@ -141,6 +147,8 @@ pub struct DecisionQueueView {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionView {
+    /// The manager or agent that proposed this, or null when the reader did.
+    pub proposer: Present<crate::actor::Actor>,
     /// Decision right that governs approval, decline and Undo.
     pub rule: Present<crate::DecisionRule>,
     /// Short title for this record.
@@ -261,12 +269,54 @@ pub struct GoalChange {
     pub topic_id: TopicId,
     /// Field for this record.
     pub field: GoalField,
-    /// From for this record.
+    /// Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value.
     pub from: i64,
-    /// To for this record.
+    /// Value the proposal asks for, as `from`.
     pub to: i64,
-    /// Affected topics for this record.
+    /// Affected topics for this record. Never the changed topic itself: the other topics that share a budget, a resource or a report with it.
     pub affected_topics: Vec<TopicId>,
+    /// Typed payload of a budget change, or null for any other field.
+    pub budget: Present<BudgetChange>,
+    /// Typed payload of a priority change, or null for any other field.
+    pub priority: Present<PriorityChange>,
+    /// Typed payload of a guardrail change, or null for any other field.
+    pub guardrail: Present<GuardrailChange>,
+}
+
+/// A proposed change to a topic's spend cap.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct BudgetChange {
+    /// Cap before the change.
+    pub from: crate::Money,
+    /// Cap the proposal asks for.
+    pub to: crate::Money,
+    /// Period the cap covers, for example "week", or null when it has none.
+    pub period: Present<String>,
+}
+
+/// A proposed change to a topic's rank among the topics of its module.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PriorityChange {
+    /// Rank before the change (1 is first), or null when the topic had none.
+    pub from: Present<i64>,
+    /// Rank the proposal asks for (1 is first).
+    pub to: i64,
+}
+
+/// A proposed change to the limit of a guardrail.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct GuardrailChange {
+    /// Guardrail the proposal changes.
+    pub guardrail_id: String,
+    /// Name of the guardrail as the reader sees it.
+    pub name: String,
+    /// Limit before the change.
+    pub from: crate::topic::MeasuredValue,
+    /// Limit the proposal asks for.
+    pub to: crate::topic::MeasuredValue,
 }
 
 /// Goal field being edited.
@@ -277,6 +327,9 @@ pub enum GoalField {
     Target,
     Deadline,
     Unit,
+    Budget,
+    Priority,
+    Guardrail,
     #[serde(other)]
     #[schemars(skip)]
     Unknown,

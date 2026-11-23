@@ -58,27 +58,32 @@
     {
       "kind": "ok",
       "text": "14 days of spend and leads, checked against the ad accounts",
-      "who": "Analyst · Saturday"
+      "who": "Analyst · Saturday",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "A decision brief with the best and the worst case",
-      "who": "Paid buyer · today, 07:05"
+      "who": "Paid buyer · today, 07:05",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Your OK for the shift",
-      "who": "You · by 14:00"
+      "who": "You · by 14:00",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Budget moved to the two Search campaigns",
-      "who": "Paid buyer · today"
+      "who": "Paid buyer · today",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "The result reported against the dream output",
-      "who": "Manager · Mon 7 Dec"
+      "who": "Manager · Mon 7 Dec",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all five. The Manager set them when it opened the lane.",
@@ -164,5 +169,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": "2026-12-07T17:00:00+01:00"
+  "afterNextAt": "2026-12-07T17:00:00+01:00",
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

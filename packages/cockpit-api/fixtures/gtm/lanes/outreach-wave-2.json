@@ -68,27 +68,32 @@
     {
       "kind": "ok",
       "text": "40 retail brands picked from the checked list",
-      "who": "Brand scout · 02:10"
+      "who": "Brand scout · 02:10",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "24 emails drafted, one line each about the brand",
-      "who": "Sender · 04:30"
+      "who": "Sender · 04:30",
+      "doneAt": null
     },
     {
       "kind": "now",
       "text": "Lea checks the 24 emails",
-      "who": "Lea · by 11:00"
+      "who": "Lea · by 11:00",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Sent from your mail, 20 a day",
-      "who": "Sender · from today"
+      "who": "Sender · from today",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "The other 16 drafted once their contacts are in",
-      "who": "Sender · Thu"
+      "who": "Sender · Thu",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
@@ -153,5 +158,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

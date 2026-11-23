@@ -106,6 +106,11 @@ fn export() -> Value {
         cockpit_api::extras::MadeRecordView,
         cockpit_api::extras::UploadInput,
         cockpit_api::access::TopicStatusView,
+        ReportView,
+        CheckView,
+        MembersView,
+        Report,
+        SpotCheck,
         ApiError,
     );
     let defs = generator.take_definitions(true);

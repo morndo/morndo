@@ -1,8 +1,8 @@
-use crate::{Target, Timestamp};
+use crate::{Present, Target, Timestamp};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
-/// A staging run or review opened from the work it records.
+/// A staging run, CI run, review or file opened from the work it records. Every target a lane's made items point at resolves to one of these, never to the lane itself.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct MadeRecordView {
@@ -16,6 +16,22 @@ pub struct MadeRecordView {
     pub title: String,
     /// Result shown in the record.
     pub detail: String,
+    /// Link to the file, draft or page the record points at, or null when it has none.
+    pub url: Present<String>,
+    /// What started a run, in words, or null for a review or file.
+    pub trigger: Present<String>,
+    /// Time the run started, or null for a record that is not a run.
+    pub started_at: Present<Timestamp>,
+    /// Time the run finished, or null while it runs or when it is not a run.
+    pub finished_at: Present<Timestamp>,
+    /// Outcome of the run, or null for a record that is not a run.
+    pub state: Present<crate::GateState>,
+    /// Checks the run made; empty for a record that is not a run.
+    pub checks: Vec<crate::topic::CheckResult>,
+    /// The failing test the run stopped on, or null when none failed.
+    pub log: Present<crate::topic::FailingTest>,
+    /// Pull request the run belongs to, or null when it ran outside one.
+    pub pull_id: Present<crate::PullId>,
 }
 
 /// Recent pages for the current reader, newest first.

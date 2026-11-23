@@ -47,7 +47,8 @@
     {
       "kind": "todo",
       "text": "Upgrade once the session library supports Node 24",
-      "who": "Builder · Thu 19 Nov"
+      "who": "Builder · Thu 19 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 1. The Manager set them when it opened the lane.",
@@ -77,5 +78,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-19T17:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

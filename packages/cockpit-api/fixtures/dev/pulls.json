@@ -14,22 +14,34 @@
         {
           "name": "Tests",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Fresh review",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "QA by hand",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Checks",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         }
       ],
       "verdict": "Ready, yours to release",
@@ -57,22 +69,34 @@
         {
           "name": "Tests",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Fresh review",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "QA by hand",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Checks",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         }
       ],
       "verdict": "Ready, the migration waits for you",
@@ -100,22 +124,34 @@
         {
           "name": "Tests",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Fresh review",
           "state": "running",
-          "detail": "round 2"
+          "detail": "round 2",
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "QA by hand",
           "state": "todo",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Checks",
           "state": "fail",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         }
       ],
       "verdict": "Blocked by red main",
@@ -143,22 +179,34 @@
         {
           "name": "Tests",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Fresh review",
           "state": "running",
-          "detail": "round 1"
+          "detail": "round 1",
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "QA by hand",
           "state": "todo",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Checks",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         }
       ],
       "verdict": "In review",
@@ -183,17 +231,26 @@
         {
           "name": "Fresh review",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "Checks",
           "state": "pass",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         },
         {
           "name": "No tests needed",
           "state": "skipped",
-          "detail": null
+          "detail": null,
+          "round": null,
+          "reviewer": null,
+          "runId": null
         }
       ],
       "verdict": "Merges by itself at 09:00, docs only",

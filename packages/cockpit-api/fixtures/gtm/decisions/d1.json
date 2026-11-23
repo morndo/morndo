@@ -195,7 +195,9 @@
         "kind": "lane",
         "id": "search-budget"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Cut LinkedIn down to the retargeting audience",
@@ -205,7 +207,9 @@
         "kind": "lane",
         "id": "search-budget"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Write 3 new Search ads for the extra budget",
@@ -215,7 +219,9 @@
         "kind": "lane",
         "id": "search-budget"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Check with sales that the new leads are good",
@@ -225,7 +231,9 @@
         "kind": "lane",
         "id": "search-budget"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Report the result against the dream output",
@@ -235,7 +243,9 @@
         "kind": "lane",
         "id": "search-budget"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing changes.",
@@ -249,5 +259,6 @@
   "goalChange": null,
   "release": null,
   "changeRequest": null,
-  "rule": "overWeeklyCap"
+  "rule": "overWeeklyCap",
+  "proposer": null
 }

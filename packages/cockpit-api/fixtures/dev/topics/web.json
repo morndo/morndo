@@ -164,7 +164,9 @@
         }
       }
     ],
-    "note": "Pinning takes about 3 minutes and turns main green"
+    "note": "Pinning takes about 3 minutes and turns main green",
+    "runId": null,
+    "tries": null
   },
   "tasks": [
     {

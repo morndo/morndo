@@ -40,6 +40,19 @@ pub(crate) fn text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String,
     bounded_text::<D, 4000>(deserializer)
 }
 
+pub(crate) fn optional_text<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    let value = Option::<String>::deserialize(deserializer)?;
+    if value
+        .as_ref()
+        .is_some_and(|text| text.is_empty() || text.chars().count() > 4000)
+    {
+        return Err(de::Error::custom("expected 1 to 4000 characters"));
+    }
+    Ok(value)
+}
+
 pub(crate) fn name<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     bounded_text::<D, 200>(deserializer)
 }
@@ -157,6 +170,10 @@ pub(crate) fn target_id_schema(_: &mut SchemaGenerator) -> Schema {
         { "type": "string", "minLength": 1, "maxLength": 200 },
         { "type": "null" }
     ] })
+}
+
+pub(crate) fn text_schema(_: &mut SchemaGenerator) -> Schema {
+    schemars::json_schema!({ "type": "string", "minLength": 1, "maxLength": 4000 })
 }
 
 pub(crate) fn stage_names_schema(_: &mut SchemaGenerator) -> Schema {

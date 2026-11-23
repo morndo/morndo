@@ -84,7 +84,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m41",
@@ -114,7 +115,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m42",
@@ -144,7 +146,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m43",
@@ -174,7 +177,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     }
   ],
   "nextCursor": null,

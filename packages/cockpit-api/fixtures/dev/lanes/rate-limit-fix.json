@@ -47,7 +47,8 @@
     {
       "kind": "ok",
       "text": "Release the rate-limit fix after review.",
-      "who": "Release"
+      "who": "Release",
+      "doneAt": null
     }
   ],
   "doneNote": "API released the rate-limit fix after its review. The check on production passed.",
@@ -77,5 +78,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

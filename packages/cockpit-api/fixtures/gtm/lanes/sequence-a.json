@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "Sequence written and approved",
-      "who": "You · 27 Oct"
+      "who": "You · 27 Oct",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "960 emails sent over 3 weeks",
-      "who": "Sender · 13 Nov"
+      "who": "Sender · 13 Nov",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Follow-ups stopped for everyone who replied",
-      "who": "Sender · today, 08:05"
+      "who": "Sender · today, 08:05",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Meetings reported: 9",
-      "who": "Manager · today"
+      "who": "Manager · today",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all four. Someone other than Sender checked each one: the Manager closed the lane at 08:05.",
@@ -116,5 +120,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

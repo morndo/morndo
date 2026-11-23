@@ -103,6 +103,42 @@ pub struct Invitation {
     pub state: InvitationState,
     /// Time associated with invited.
     pub invited_at: Timestamp,
+    /// Time the invitation was accepted, or null while it is pending.
+    pub accepted_at: Present<Timestamp>,
+    /// Topic the invitation is for, or null when it is for the workspace.
+    pub topic_id: Present<TopicId>,
+    /// Person who sent the invitation, or null when it is not recorded.
+    pub invited_by: Present<Actor>,
+}
+
+/// A person in the workspace, with the access they hold.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct Member {
+    /// The person.
+    pub person: Actor,
+    /// Address used for the person's invitations, or null when unknown.
+    pub email: Present<String>,
+    /// Role in the workspace, or null when none is set.
+    pub role: Present<String>,
+    /// Whether the person owns the workspace.
+    pub owner: bool,
+    /// Access the person holds on each topic.
+    pub access: Vec<OtherTopicAccess>,
+    /// Time the person was invited, or null when they were not invited.
+    pub invited_at: Present<Timestamp>,
+    /// Time the person joined, or null while the invitation is pending.
+    pub joined_at: Present<Timestamp>,
+}
+
+/// Everyone in the workspace and the invitations still open. Only the owner can read it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct MembersView {
+    /// Active and invited members.
+    pub items: Vec<Member>,
+    /// Invitations across the workspace.
+    pub invitations: Vec<Invitation>,
 }
 
 /// Progress of an invitation.
@@ -195,6 +231,8 @@ pub struct TopicStatusView {
     pub stages: Vec<StageStatus>,
     /// Topic progress in the current reporting period.
     pub health: Present<crate::Health>,
+    /// Report that is due next, or null when none is scheduled.
+    pub next_report_id: Present<crate::ReportId>,
 }
 
 /// Aggregated progress in one stage, without names or work records.

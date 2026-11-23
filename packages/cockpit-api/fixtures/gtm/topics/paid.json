@@ -12,10 +12,12 @@
       "Asked by you",
       "Paid buyer leads"
     ],
-    "nextReportAt": "2026-11-23T17:00:00+01:00"
+    "nextReportAt": "2026-11-23T17:00:00+01:00",
+    "nextReportId": null,
+    "priority": null
   },
   "intro": "€4,000 a week across LinkedIn and Google Search. The goal: 450 leads this quarter, at €100 or less each.",
-"when": {
+  "when": {
     "kind": "count",
     "value": 7,
     "of": 13,
@@ -353,7 +355,10 @@
             "cap": null
           },
           "ratio": 1.14,
-          "state": "breached"
+          "state": "breached",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Weekly spend",
@@ -374,7 +379,10 @@
             "cap": null
           },
           "ratio": 0.91,
-          "state": "near"
+          "state": "near",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Changes over €500 without you",
@@ -391,7 +399,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Customer data in ads",
@@ -408,7 +419,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         }
       ]
     },
@@ -443,7 +457,8 @@
         "target": {
           "kind": "lane",
           "id": "search-budget"
-        }
+        },
+        "guardrailId": null
       },
       {
         "state": "warn",
@@ -455,7 +470,8 @@
         "target": {
           "kind": "lane",
           "id": "search-budget"
-        }
+        },
+        "guardrailId": null
       }
     ],
     "routine": null,
@@ -486,7 +502,7 @@
           },
           "rate": {
             "percent": 3.3,
-            "planPercent": 3.0,
+            "planPercent": 3,
             "plannedCount": null,
             "dueAt": null
           },
@@ -502,8 +518,8 @@
             "unit": null
           },
           "rate": {
-            "percent": 30.0,
-            "planPercent": 30.0,
+            "percent": 30,
+            "planPercent": 30,
             "plannedCount": null,
             "dueAt": null
           },
@@ -519,8 +535,8 @@
             "unit": null
           },
           "rate": {
-            "percent": 59.0,
-            "planPercent": 60.0,
+            "percent": 59,
+            "planPercent": 60,
             "plannedCount": null,
             "dueAt": null
           },
@@ -563,7 +579,9 @@
     "forecastLog": [],
     "deadlineAt": null,
     "updatedAt": "2026-11-16T07:05:00+01:00",
-    "forecastNote": "forecast unchanged since Friday"
+    "forecastNote": "forecast unchanged since Friday",
+    "calibrationScore": null,
+    "nextScoreAt": null
   },
   "noGoal": null,
   "facts": [
@@ -653,7 +671,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:30:00+01:00",
             "id": "paid-history-1",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -681,7 +700,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:10:00+01:00",
             "id": "paid-history-2",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -709,7 +729,8 @@
             "decisionId": null,
             "at": "2026-11-16T07:20:00+01:00",
             "id": "paid-history-3",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -737,7 +758,8 @@
             "decisionId": null,
             "at": "2026-11-16T07:05:00+01:00",
             "id": "paid-history-4",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -770,7 +792,8 @@
             "decisionId": null,
             "at": "2026-11-15T18:30:00+01:00",
             "id": "paid-history-5",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "seen"
@@ -806,7 +829,8 @@
             "decisionId": null,
             "at": "2026-11-14T10:15:00+01:00",
             "id": "paid-history-6",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -839,7 +863,8 @@
             "decisionId": null,
             "at": "2026-11-13T10:20:00+01:00",
             "id": "paid-history-7",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -867,7 +892,8 @@
             "decisionId": null,
             "at": "2026-11-13T09:00:00+01:00",
             "id": "paid-history-8",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       }
@@ -941,7 +967,8 @@
       "laneId": "search-budget",
       "dueAt": "2026-11-16T14:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Webinar sign-up campaign",
@@ -950,7 +977,8 @@
       "laneId": "webinar-campaign",
       "dueAt": "2026-11-19T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Switch off ads below the click floor",
@@ -959,7 +987,8 @@
       "laneId": "click-floor",
       "dueAt": null,
       "completedAt": "2026-11-16T08:30:00+01:00",
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "3 new Search ads",
@@ -968,7 +997,8 @@
       "laneId": null,
       "dueAt": null,
       "completedAt": null,
-      "cadence": "afterDecision"
+      "cadence": "afterDecision",
+      "scheduleId": null
     },
     {
       "job": "Weekly spend report",
@@ -977,7 +1007,8 @@
       "laneId": null,
       "dueAt": "2026-11-23T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     }
   ],
   "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",

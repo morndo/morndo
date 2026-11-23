@@ -200,19 +200,43 @@
       "name": "Your mail",
       "icon": "mail",
       "rule": "Wave 1 follow-ups and wave 2 share 40 sends a day; wave 1 goes first",
-      "lanes": 2
+      "lanes": 2,
+      "id": null,
+      "laneIds": [],
+      "order": [],
+      "turn": null,
+      "writers": [],
+      "readers": [],
+      "quota": null,
+      "resetsAt": null
     },
     {
       "name": "HubSpot",
       "icon": "partner",
       "rule": "Brand scout, Contact finder and Sender write to it, one at a time per brand",
-      "lanes": 3
+      "lanes": 3,
+      "id": null,
+      "laneIds": [],
+      "order": [],
+      "turn": null,
+      "writers": [],
+      "readers": [],
+      "quota": null,
+      "resetsAt": null
     },
     {
       "name": "The ad accounts",
       "icon": "horn",
       "rule": "Only Paid buyer changes them; Analyst reads",
-      "lanes": 2
+      "lanes": 2,
+      "id": null,
+      "laneIds": [],
+      "order": [],
+      "turn": null,
+      "writers": [],
+      "readers": [],
+      "quota": null,
+      "resetsAt": null
     }
   ],
   "asks": [
@@ -276,5 +300,6 @@
     "Partnerships: 1 instruction (wave 2 to retail first), 1 question answered in the topic.",
     "Content: the promo is stuck; you decide in the topic.",
     "No goal or priority changes wait for you."
-  ]
+  ],
+  "schedules": []
 }

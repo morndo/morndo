@@ -103,6 +103,8 @@ pub struct Message {
     pub read_back: Present<ReadBack>,
     /// Actions for this record.
     pub actions: Vec<MessageAction>,
+    /// Person the message is written to, or null when it is for everyone in the thread. A message written to the previous stage holder names them, so the new holder's client can label it.
+    pub addressee: Present<crate::PersonId>,
 }
 
 /// Since summary for the cockpit.
@@ -111,7 +113,7 @@ pub struct Message {
 pub struct SinceSummary {
     /// Seen for this record.
     pub seen: crate::topic::SeenMarker,
-    /// Lines for this record.
+    /// Lines computed from the current records, not stored: a settled item drops out and an open goal change is named.
     pub lines: Vec<String>,
 }
 
@@ -196,9 +198,9 @@ pub struct ThreadView {
     pub pinned: Present<PinnedDecision>,
     /// Agents for this record.
     pub agents: Present<AgentsStrip>,
-    /// Suggestions for this record.
+    /// Suggestions the composer offers. A suggestion sent as written is answered from the record and never files a lane.
     pub suggestions: Vec<String>,
-    /// Messages for this record.
+    /// Messages on this page, oldest first by `at`. In a lane thread the chat is shared with whoever works the lane.
     pub messages: Vec<Message>,
     /// Opaque cursor for the following page, or null at the end.
     pub next_cursor: Present<String>,

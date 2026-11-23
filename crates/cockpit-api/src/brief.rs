@@ -64,6 +64,8 @@ pub struct BriefTopic {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BriefDecision {
+    /// The manager or agent that proposed this, or null when the reader did.
+    pub proposer: Present<crate::actor::Actor>,
     /// Decision right that governs this request.
     pub rule: Present<crate::DecisionRule>,
     /// Stable identifier for this record.
@@ -121,7 +123,7 @@ pub struct OvernightAction {
     /// Other lanes modified by a grouped action.
     #[serde(default)]
     pub related_lane_ids: Vec<LaneId>,
-    /// Time associated with undo until.
+    /// Time until which the action can be undone. Set on every undoable overnight row. An undo after it, or on a row whose outcome was sent outside, is a conflict.
     pub undo_until_at: Present<Timestamp>,
     /// Stable identifier for this record.
     pub id: ActionId,
@@ -139,6 +141,50 @@ pub struct OvernightAction {
     pub undoable: bool,
     /// Undone for this record.
     pub undone: bool,
+    /// What the action produced, or null when the row carries no count of results.
+    pub outcome: Present<OvernightOutcome>,
+    /// Decision right the action was taken under, or null when none applied.
+    pub rule: Present<crate::DecisionRule>,
+}
+
+/// What an overnight action produced.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct OvernightOutcome {
+    /// What happened to the work.
+    pub kind: OutcomeKind,
+    /// Items the action covered, or null when it is not a count.
+    pub count: Present<i64>,
+    /// Items the action held back, or null when none were.
+    pub held_back: Present<i64>,
+    /// Review rounds it took, or null when it had no review.
+    pub rounds: Present<i64>,
+    /// Checks the action made; empty when it made none.
+    pub checks: Vec<crate::topic::CheckResult>,
+    /// Pull request the action belongs to, or null when it has none.
+    pub pull_id: Present<crate::PullId>,
+    /// Whether the action sent something outside the workspace. Such an action cannot be undone.
+    pub sent_outside: bool,
+}
+
+/// What an overnight action did to the work.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "camelCase")]
+#[schemars(extend("$comment" = "cockpit-reader:enum"))]
+pub enum OutcomeKind {
+    Released,
+    Merged,
+    Updated,
+    Renewed,
+    Deleted,
+    Published,
+    Sent,
+    SwitchedOff,
+    Added,
+    Stopped,
+    #[serde(other)]
+    #[schemars(skip)]
+    Unknown,
 }
 
 /// Drafts summary for the cockpit.
@@ -195,6 +241,8 @@ pub struct BriefView {
     pub drafts: DraftsSummary,
     /// Artwork for this record.
     pub artwork: Artwork,
+    /// Which edition of the day this is, for example 1 of 3, or null when the brief has one.
+    pub edition: Present<crate::usage::MeterCount>,
 }
 
 /// Pull requests still in progress, grouped by what happens next.

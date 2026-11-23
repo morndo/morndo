@@ -47,7 +47,8 @@
     {
       "kind": "ok",
       "text": "Merge the invoice rounding fix after review.",
-      "who": "Builder"
+      "who": "Builder",
+      "doneAt": null
     }
   ],
   "doneNote": "Billing merged the invoice rounding fix after 2 review rounds.",
@@ -77,5 +78,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

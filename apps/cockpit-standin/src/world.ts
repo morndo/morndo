@@ -276,6 +276,10 @@ export class World {
       };
       case "RecentView": return { items: (this.recent.get(viewer.id) ?? []).filter(item => this.recentTitle(item.target, viewer)) } satisfies RecentView;
       case "MadeRecordView": return requireRecord(this.madeRecord(key, viewer), "record");
+      // Contract 1.1.0 routes: the records and the member list arrive with the stand-in's 1.1.0 behaviour.
+      case "ReportView": throw missing("report");
+      case "CheckView": throw missing("check");
+      case "MembersView": this.requireOwner(viewer); return { items: [], invitations: [] };
       case "ThreadView": return this.threadView(key, viewer, query);
       case "SearchView": return this.search(query, viewer);
       case "RoutePreview": {
@@ -638,7 +642,7 @@ export class World {
 
   private queue(viewer: Actor): DecisionQueueView {
     const items = [...this.decisions.values()].filter(d => this.fullTopic(d.topicId, viewer)).map(d => ({
-      id: d.id, title: d.title, state: d.state, topicName: d.topicName, target: target("decision", d.id), goalChange: d.goalChange,
+      id: d.id, title: d.title, state: d.state, topicName: d.topicName, target: target("decision", d.id), goalChange: d.goalChange, proposer: d.proposer,
     }));
     return { items, total: items.length, open: items.filter(item => item.state === "open").length };
   }
@@ -655,7 +659,7 @@ export class World {
     const view = structuredClone(this.briefBase);
     view.decisions = [...this.decisions.values()].filter(d => this.fullTopic(d.topicId, viewer)).map(d => ({
       id: d.id, topicId: d.topicId, topicName: d.topicName, title: d.title, dueAt: d.dueAt, whyYours: d.whyYours ?? "",
-      context: d.cardContext, minutes: d.minutes, doneNote: d.doneNote, laneId: d.laneId, state: d.state, rule: d.rule,
+      context: d.cardContext, minutes: d.minutes, doneNote: d.doneNote, laneId: d.laneId, state: d.state, rule: d.rule, proposer: d.proposer,
     }));
     view.openCount = view.decisions.filter(d => d.state === "open").length;
     view.minutes = view.decisions.filter(d => d.state === "open").reduce((total, d) => total + d.minutes, 0);
@@ -871,6 +875,7 @@ export class World {
           limit: { kind: "money", money: view.spend.cap, cap: null },
           ratio,
           state: ratio >= 1 ? "breached" : ratio >= 0.8 ? "near" : "held",
+          id: null, switchId: null, action: null,
         });
       }
     }
@@ -887,10 +892,10 @@ export class World {
     const nextReportAt = relatedDeadline ?? view.meta?.nextReportAt ?? null;
     if (view.meta) view.meta.nextReportAt = nextReportAt;
     view.status = { topicId: id, name: view.name, signed: goal?.signed ?? null, goal: goal?.target ?? null,
-      unit: goal?.unit ?? null, health: view.health, nextReportAt };
+      unit: goal?.unit ?? null, health: view.health, nextReportAt, nextReportId: null };
     if (viewer.id !== this.owner.id) {
       const dash = role === "all" ? "You work on all of it" : role === "stages" ? `You run ${stages.join(", ")}` : "You see the status";
-      view.meta = { askedBy: null, ownerLine: null, nextReportAt, parts: [`Shared by ${this.owner.name}`, dash] };
+      view.meta = { askedBy: null, ownerLine: null, nextReportAt, nextReportId: null, priority: null, parts: [`Shared by ${this.owner.name}`, dash] };
     }
     if (role === "view" || role === "stages") {
       const team = new Set(lanes.flatMap(lane => [lane.lead.id, ...lane.crew.map(actor => actor.id)]));
@@ -1212,7 +1217,7 @@ export class World {
     if (!this.access.get(id)?.statusLink) throw missing("status link");
     const topic = this.topicView(id, viewer, new URLSearchParams());
     const status = requireRecord(topic.status, "topic status");
-    return { health: topic.health, signed: status.signed, goal: status.goal, unit: status.unit, nextReportAt: status.nextReportAt,
+    return { health: topic.health, signed: status.signed, goal: status.goal, unit: status.unit, nextReportAt: status.nextReportAt, nextReportId: status.nextReportId,
       stages: (topic.plan?.stages ?? []).map(({ name, percent }) => ({ name, percent })) };
   }
 
@@ -1280,7 +1285,10 @@ export class World {
         (item.target.kind === "run" || item.target.kind === "review"))?.target?.kind;
       if (!kind || this.removed.has(lane.id) || !this.sharedLane(lane, viewer)) continue;
       const item = this.visibleLane(lane.id, viewer).made.find(made => made.target?.id === id && made.target.kind === kind);
-      if (item) return { id, kind, laneId: lane.id, title: item.title, detail: item.detail };
+      if (item) return {
+        id, kind, laneId: lane.id, title: item.title, detail: item.detail, url: null, trigger: null, startedAt: null,
+        finishedAt: null, state: null, checks: [], log: null, pullId: null,
+      };
     }
   }
 
@@ -1306,6 +1314,10 @@ export class World {
         const record = this.madeRecord(id, viewer);
         return record?.kind === page.kind ? record.title : undefined;
       }
+      // Files, reports and checks have no page to visit until the stand-in serves their records.
+      case "file":
+      case "report":
+      case "check": return undefined;
       case "manager": return viewer.id === this.owner.id ? "Manager" : undefined;
       case "drafts": return viewer.id === this.owner.id ? "Drafts" : undefined;
       case "skills": return viewer.id === this.owner.id ? "Skills" : undefined;
@@ -1346,7 +1358,7 @@ export class World {
     const email = existing?.email ?? (name.includes("@") ? lookup : undefined);
     if (entry && email) entry.email = email;
     if (person.membershipState === "invited") {
-      access.invitations.push({ id: invitationId, personId: person.id, nameOrEmail: name, state: "pending", invitedAt: this.now });
+      access.invitations.push({ id: invitationId, personId: person.id, nameOrEmail: name, state: "pending", invitedAt: this.now, acceptedAt: null, topicId: id, invitedBy: this.owner });
     }
     return done([{ type: "access.changed", topicId: id, personId: person.id }, { type: "topic.changed", topicId: id }]);
   }
@@ -1406,7 +1418,7 @@ export class World {
     }): HistoryAction {
     const action: HistoryAction = {
       row: { id, kind: "event", at, actor, text, laneId, decision: false, sentOutside: false, undoable: true, undone: false,
-        count: null, samples: [], decisionId: null },
+        count: null, samples: [], decisionId: null, checkId: null },
       topicId, record, apply, authorize,
     };
     this.history.set(id, action);
@@ -1487,17 +1499,18 @@ export class World {
       standing: { headline: "Just opened.", detail: status },
       acts: [{ id: "undo-file", label: "Undo", tone: "quiet", personId: null, target: null }],
       thumbs: [], steps: [
-        { kind: "now", text: "Set what done means", who: lead.name },
-        { kind: "todo", text: "Do the work", who: lead.name },
-        { kind: "todo", text: "Check and report back", who: "Manager" },
+        { kind: "now", text: "Set what done means", who: lead.name, doneAt: null },
+        { kind: "todo", text: "Do the work", who: lead.name, doneAt: null },
+        { kind: "todo", text: "Check and report back", who: "Manager", doneAt: null },
       ],
       doneNote: "The lead sets the steps before it starts.", crew: [lead], made: [], handover: null, fresh: true,
       attachment: options.attachment ?? null, model: model?.id ?? null, chain, reminder: null,
+      tries: null, scheduleId: null, groupId: null, waitsOnResource: null, leadName: null,
     };
     const receipt: Receipt = {
       actionId: `file-${id}`,
       text: askText, filedUnder: topicId ? target("topic", topicId) : target("manager"),
-      lead, chain, laneId: id,
+      lead, chain, laneId: id, groupLaneIds: [],
     };
     const message = this.message(lead, `Filed it. ${note}`, null);
     message.threadCard = { title: text, owner: lead.name, stateWord: "just opened", laneId: id };
@@ -1511,7 +1524,7 @@ export class World {
       id: `lane:${id}`, title: text, sub: topic?.name ?? null, placeholder: "Message the lane",
       reading: null, since: null, pinned: null, agents: null, suggestions: [], messages: [ask, message], scope: null, nextCursor: null,
     });
-    const filed: Event = { type: "lane.filed", laneId: id, topicId, chain };
+    const filed: Event = { type: "lane.filed", laneId: id, topicId, chain, scheduleId: null, groupId: null };
     this.remember(topicId, id, receipt.text, viewer, undone => {
       if (undone) this.removed.add(id);
       else this.removed.delete(id);
@@ -1621,13 +1634,13 @@ export class World {
         state: "ok", stateWord: "Working", status: values.status, next: "Promo scheduled",
         nextAt: this.briefBase.burns.find(burn => burn.laneId === lane.id)?.dueAt ?? null, acts: [],
         standing: { headline: "The promo is settled.", detail: values.status },
-        steps: previous.steps.map(step => step.kind === "now" ? { kind: "ok", text: values.step, who: "You · now" } : step),
+        steps: previous.steps.map(step => step.kind === "now" ? { kind: "ok", text: values.step, who: "You · now", doneAt: null } : step),
       });
       return [...laneUpdate(lane.id, topicId), { type: "thread.changed", threadId: `topic:${topicId}` }, { type: "brief.changed" }];
     };
     const record = this.remember(topicId, lane.id, values.history, viewer, apply, lane.id, id);
     return done([...apply(false), { type: "agentAction.changed", actionId: id }], lane.id, null, {
-      actionId: record.row.id, text: values.receipt, laneId: lane.id, filedUnder: target("topic", topicId), lead: lane.lead, chain: false,
+      actionId: record.row.id, text: values.receipt, laneId: lane.id, filedUnder: target("topic", topicId), lead: lane.lead, chain: false, groupLaneIds: [],
     });
   }
 
@@ -1734,6 +1747,7 @@ export class World {
       id: `m${++this.messageSerial}`, at: this.now, author, text, audience,
       label: kind ? { kind, corrected: false, pinned: kind === "decision" } : null,
       threadCard: null, readBack: null, actions: [], decisionId: null, attachment: null, model: null, page: null,
+      addressee: null,
     };
   }
 
@@ -1893,11 +1907,12 @@ export class World {
       doneNote: "Approved. The goal is changed on record.", laneId: null, approveLabel: "Approve",
       provenance: null, context: detail, numbers: [], proof: null, opportunity: null, risk: null, suggestion: null,
       guardrail: null, nextSteps: [], ifNoAnswer: "Nothing changes without your answer.", position: { index: 0, of: 0, open: 0 },
-      changeRequest: null, release: null, rule: "hardToUndo",
+      changeRequest: null, release: null, rule: "hardToUndo", proposer: null,
       goalChange: {
         topicId: topic.id, field: to !== goal.target ? "target" : deadlineAt ? "deadline" : "unit",
         from: goal.target, to, affectedTopics: changesPaid ? ["paid"] : [],
         deadlineAt, previousDeadlineAt: goal.deadlineAt, unit, previousUnit: currentUnit,
+        budget: null, priority: null, guardrail: null,
       },
     };
     this.decisions.set(id, decision);
@@ -1954,8 +1969,9 @@ export class World {
     }
   }
 
-  private runSkill(id: string, text: string, model: string | null | undefined, explicitTopic: string | null, viewer: Actor): Effect {
+  private runSkill(id: string, input: string | undefined, model: string | null | undefined, explicitTopic: string | null, viewer: Actor): Effect {
     const skill = requireRecord(byId(this.skills.skills, id), "skill");
+    const text = input ?? `Run ${skill.name}`;
     const named = [...this.topics.values()].filter(item => skill.topics.toLowerCase().includes(item.name.toLowerCase()))
       .sort((a, b) => b.name.length - a.name.length)[0]?.id ?? null;
     const topicId = explicitTopic ?? named;
@@ -2011,7 +2027,7 @@ export class World {
     guardrail.on = on;
     const breached = [...this.topics.values()].flatMap(topic => topic.goal?.guardrails?.items
       .filter(item => item.what === name && item.state === "breached")
-      .map(() => ({ type: "guardrail.breached", topicId: topic.id, name } as const)) ?? []);
+      .map(() => ({ type: "guardrail.breached", topicId: topic.id, name, guardrailId: slug(name) } as const)) ?? []);
     return done([{ type: "skills.changed" }, ...(on ? breached : [])]);
   }
 
@@ -2059,7 +2075,7 @@ export class World {
       for (const topic of this.topics.values()) {
         for (const guardrail of topic.goal?.guardrails?.items ?? []) {
           if (guardrail.state === "breached") events.push(
-            { type: "guardrail.breached", topicId: topic.id, name: guardrail.what },
+            { type: "guardrail.breached", topicId: topic.id, name: guardrail.what, guardrailId: slug(guardrail.what) },
             { type: "attention.raised", target: target("topic", topic.id), reason: `${guardrail.what} breached its guardrail.` },
           );
         }

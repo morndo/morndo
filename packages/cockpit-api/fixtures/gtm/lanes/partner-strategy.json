@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "Market map: 40 kinds of partner, ranked",
-      "who": "Researcher · 20 Oct"
+      "who": "Researcher · 20 Oct",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Partner profile: who fits and why",
-      "who": "You · 21 Oct"
+      "who": "You · 21 Oct",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "The offer: 15% of first-year revenue, co-marketing",
-      "who": "You · 22 Oct"
+      "who": "You · 22 Oct",
+      "doneAt": null
     },
     {
       "kind": "ok",
       "text": "Goal agreed with the CEO: 3 signed partners by 31 Jan",
-      "who": "Tom Ahrens · 23 Oct"
+      "who": "Tom Ahrens · 23 Oct",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all four. The CEO signed off the goal; the Manager closed the lane.",
@@ -134,5 +138,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

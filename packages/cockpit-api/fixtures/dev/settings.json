@@ -9,7 +9,9 @@
       "who": "you",
       "dailyLimit": null,
       "risky": true,
-      "personId": null
+      "personId": null,
+      "usedToday": null,
+      "resetsAt": null
     },
     {
       "rule": "hardToUndo",
@@ -18,7 +20,9 @@
       "who": "you",
       "dailyLimit": null,
       "risky": true,
-      "personId": null
+      "personId": null,
+      "usedToday": null,
+      "resetsAt": null
     },
     {
       "rule": "onlyYouKnow",
@@ -27,7 +31,9 @@
       "who": "you",
       "dailyLimit": null,
       "risky": true,
-      "personId": null
+      "personId": null,
+      "usedToday": null,
+      "resetsAt": null
     },
     {
       "rule": "insideGuardrails",
@@ -36,7 +42,9 @@
       "who": "agent",
       "dailyLimit": null,
       "risky": false,
-      "personId": null
+      "personId": null,
+      "usedToday": null,
+      "resetsAt": null
     }
   ],
   "theme": {

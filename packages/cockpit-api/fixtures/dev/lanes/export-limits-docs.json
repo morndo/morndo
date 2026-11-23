@@ -47,7 +47,8 @@
     {
       "kind": "now",
       "text": "Merges by itself at 09:00",
-      "who": "Builder · 09:00"
+      "who": "Builder · 09:00",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 1. The Manager set them when it opened the lane.",
@@ -77,5 +78,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-16T09:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

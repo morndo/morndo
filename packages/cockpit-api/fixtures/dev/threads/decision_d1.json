@@ -40,7 +40,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m2",
@@ -70,7 +71,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     }
   ],
   "nextCursor": null,

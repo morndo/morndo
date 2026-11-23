@@ -55,12 +55,14 @@
     {
       "kind": "now",
       "text": "Your OK to run the migration",
-      "who": "You · due tomorrow"
+      "who": "You · due tomorrow",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "The migration runs tonight at 23:00, after the backup",
-      "who": "Builder"
+      "who": "Builder",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 2. The Manager set them when it opened the lane.",
@@ -90,5 +92,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -47,7 +47,8 @@
     {
       "kind": "ok",
       "text": "Renew the staging certificate before expiry.",
-      "who": "Ops"
+      "who": "Ops",
+      "doneAt": null
     }
   ],
   "doneNote": "Infra renewed the staging certificate, 12 days before it ran out.",
@@ -77,5 +78,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

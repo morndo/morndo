@@ -12,10 +12,12 @@
       "Asked by you",
       "Sender leads; Jonas takes the meetings"
     ],
-    "nextReportAt": "2026-11-20T17:00:00+01:00"
+    "nextReportAt": "2026-11-20T17:00:00+01:00",
+    "nextReportId": null,
+    "priority": null
   },
   "intro": "Cold email to ops teams, from your mail, never more than 60 a day. The goal: 30 sales meetings by 18 December.",
-"when": {
+  "when": {
     "kind": "count",
     "value": 4,
     "of": 8,
@@ -288,11 +290,14 @@
           },
           "limit": {
             "kind": "rate",
-            "percent": 4.0,
+            "percent": 4,
             "standard": false
           },
           "ratio": 0.45,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Asked to stop",
@@ -303,11 +308,14 @@
           },
           "limit": {
             "kind": "rate",
-            "percent": 2.0,
+            "percent": 2,
             "standard": false
           },
           "ratio": 0.56,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Sends a day",
@@ -324,7 +332,10 @@
             "unit": null
           },
           "ratio": 1,
-          "state": "near"
+          "state": "near",
+          "id": null,
+          "switchId": null,
+          "action": null
         },
         {
           "what": "Spam complaints",
@@ -341,7 +352,10 @@
             "unit": null
           },
           "ratio": null,
-          "state": "held"
+          "state": "held",
+          "id": null,
+          "switchId": null,
+          "action": null
         }
       ]
     },
@@ -380,7 +394,8 @@
         "target": {
           "kind": "lane",
           "id": "reply-handling"
-        }
+        },
+        "guardrailId": null
       },
       {
         "state": "warn",
@@ -392,7 +407,8 @@
         "target": {
           "kind": "lane",
           "id": "sequence-a"
-        }
+        },
+        "guardrailId": null
       }
     ],
     "routine": null,
@@ -423,7 +439,7 @@
           },
           "rate": {
             "percent": 5.9,
-            "planPercent": 5.0,
+            "planPercent": 5,
             "plannedCount": null,
             "dueAt": null
           },
@@ -439,8 +455,8 @@
             "unit": null
           },
           "rate": {
-            "percent": 36.0,
-            "planPercent": 40.0,
+            "percent": 36,
+            "planPercent": 40,
             "plannedCount": null,
             "dueAt": null
           },
@@ -456,8 +472,8 @@
             "unit": null
           },
           "rate": {
-            "percent": 52.0,
-            "planPercent": 50.0,
+            "percent": 52,
+            "planPercent": 50,
             "plannedCount": null,
             "dueAt": null
           },
@@ -500,7 +516,9 @@
     "forecastLog": [],
     "deadlineAt": null,
     "updatedAt": "2026-11-16T08:40:00+01:00",
-    "forecastNote": "forecast up 2 since Friday"
+    "forecastNote": "forecast up 2 since Friday",
+    "calibrationScore": null,
+    "nextScoreAt": null
   },
   "noGoal": null,
   "facts": [
@@ -577,7 +595,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:44:59+01:00",
             "id": "outbound-history-1",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -605,7 +624,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:40:00+01:00",
             "id": "outbound-history-2",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -633,7 +653,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:20:00+01:00",
             "id": "outbound-history-3",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -665,7 +686,8 @@
             "decisionId": null,
             "at": "2026-11-16T08:05:00+01:00",
             "id": "outbound-history-4",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -698,7 +720,8 @@
             "decisionId": null,
             "at": "2026-11-15T19:30:00+01:00",
             "id": "outbound-history-5",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "seen"
@@ -733,7 +756,8 @@
             "decisionId": null,
             "at": "2026-11-15T10:15:00+01:00",
             "id": "outbound-history-6",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -766,7 +790,8 @@
             "decisionId": null,
             "at": "2026-11-13T17:14:00+01:00",
             "id": "outbound-history-7",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -798,7 +823,8 @@
             "decisionId": null,
             "at": "2026-11-13T17:10:00+01:00",
             "id": "outbound-history-8",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -826,7 +852,8 @@
             "decisionId": null,
             "at": "2026-11-13T15:00:00+01:00",
             "id": "outbound-history-9",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -859,7 +886,8 @@
             "decisionId": null,
             "at": "2026-11-11T09:05:00+01:00",
             "id": "outbound-history-10",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -887,7 +915,8 @@
             "decisionId": null,
             "at": "2026-11-11T08:30:00+01:00",
             "id": "outbound-history-11",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       }
@@ -975,7 +1004,8 @@
       "laneId": "sequence-b",
       "dueAt": "2026-11-17T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Meeting times for 2 yeses",
@@ -984,7 +1014,8 @@
       "laneId": "reply-handling",
       "dueAt": "2026-11-16T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "List for logistics ops, round 2",
@@ -993,7 +1024,8 @@
       "laneId": "logistics-round-2",
       "dueAt": "2026-11-19T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     },
     {
       "job": "Answer replies from sequence A",
@@ -1002,7 +1034,8 @@
       "laneId": "sequence-a",
       "dueAt": null,
       "completedAt": null,
-      "cadence": "everyMorning"
+      "cadence": "everyMorning",
+      "scheduleId": null
     },
     {
       "job": "Bounce check",
@@ -1011,7 +1044,8 @@
       "laneId": null,
       "dueAt": null,
       "completedAt": "2026-11-16T08:05:00+01:00",
-      "cadence": null
+      "cadence": null,
+      "scheduleId": null
     }
   ],
   "chatSub": "Mara, Jonas and 3 agents · the Manager reads it, it is not in it",

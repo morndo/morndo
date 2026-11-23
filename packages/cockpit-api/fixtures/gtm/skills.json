@@ -108,42 +108,48 @@
       "purpose": "Text and images",
       "state": "connected",
       "capacity": null,
-      "id": "openai"
+      "id": "openai",
+      "scope": null
     },
     {
       "name": "Adobe",
       "purpose": "Edit and export visuals",
       "state": "connected",
       "capacity": null,
-      "id": "adobe"
+      "id": "adobe",
+      "scope": null
     },
     {
       "name": "Supabase",
       "purpose": "Customers and deals, read only",
       "state": "connected",
       "capacity": null,
-      "id": "supabase"
+      "id": "supabase",
+      "scope": null
     },
     {
       "name": "Obsidian",
       "purpose": "Memory and notes",
       "state": "connected",
       "capacity": null,
-      "id": "obsidian"
+      "id": "obsidian",
+      "scope": null
     },
     {
       "name": "Mail",
       "purpose": "Writes drafts, never sends",
       "state": "connected",
       "capacity": null,
-      "id": "mail"
+      "id": "mail",
+      "scope": null
     },
     {
       "name": "Seedance",
       "purpose": "Video",
       "state": "addKey",
       "capacity": null,
-      "id": "seedance"
+      "id": "seedance",
+      "scope": null
     }
   ],
   "connected": 5,
