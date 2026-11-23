@@ -742,7 +742,7 @@ pub struct TopicView {
     pub intro: String,
     /// Progress through the planning period, or the date of its next milestone.
     pub when: Present<MeasuredValue>,
-    /// Health of the topic. With no goal, a bad lane gives Stuck, open lanes give On track, and otherwise the topic is Idle.
+    /// Health of the topic. With no goal, a bad lane gives Stuck, open lanes give On track, and otherwise the topic is Idle. In the dev module a project reads as its lanes: Stuck, Needs you, Working or Idle.
     pub health: Present<Health>,
     /// Goal for this record.
     pub goal: Present<Goal>,

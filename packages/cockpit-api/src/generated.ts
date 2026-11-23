@@ -8546,7 +8546,7 @@ export interface TopicView {
    */
   goal: Goal | null;
   /**
-   * Health of the topic. With no goal, a bad lane gives Stuck, open lanes give On track, and otherwise the topic is Idle.
+   * Health of the topic. With no goal, a bad lane gives Stuck, open lanes give On track, and otherwise the topic is Idle. In the dev module a project reads as its lanes: Stuck, Needs you, Working or Idle.
    */
   health: Health | null;
   /**
