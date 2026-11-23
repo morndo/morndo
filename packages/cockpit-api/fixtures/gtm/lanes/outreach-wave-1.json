@@ -106,8 +106,8 @@
       "title": "The 52 emails",
       "detail": "Each with one line about the brand",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-outreach-wave-1-0"
       }
     },
     {
@@ -115,8 +115,8 @@
       "title": "Replies",
       "detail": "11: 5 calls, 4 later, 2 no",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-outreach-wave-1-1"
       }
     }
   ],

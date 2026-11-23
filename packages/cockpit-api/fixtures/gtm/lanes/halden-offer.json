@@ -136,8 +136,8 @@
       "title": "The offer",
       "detail": "2 pages, from the partner template",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-halden-offer-0"
       }
     },
     {
@@ -145,8 +145,8 @@
       "title": "Halden call notes",
       "detail": "13 November, 34 minutes",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-halden-offer-1"
       }
     },
     {
@@ -154,8 +154,8 @@
       "title": "Cover email",
       "detail": "In your drafts, not sent",
       "target": {
-        "kind": "drafts",
-        "id": null
+        "kind": "draft",
+        "id": "halden-cover"
       }
     }
   ],

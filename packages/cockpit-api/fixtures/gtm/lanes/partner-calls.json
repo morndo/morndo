@@ -126,8 +126,8 @@
       "title": "Brief: Brightmoor Retail",
       "detail": "Ready 13:00",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-partner-calls-0"
       }
     },
     {
@@ -135,8 +135,8 @@
       "title": "Notes: Halden Freight Network",
       "detail": "They want a referral deal for 2,400 customers",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-partner-calls-1"
       }
     },
     {
@@ -144,8 +144,8 @@
       "title": "Notes: Kestrel Parcel",
       "detail": "Budget frozen until spring",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-partner-calls-2"
       }
     }
   ],

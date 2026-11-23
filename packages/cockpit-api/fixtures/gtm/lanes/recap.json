@@ -106,8 +106,8 @@
       "title": "Summary in 8 points",
       "detail": "From the October recording",
       "target": {
-        "kind": "topic",
-        "id": "content"
+        "kind": "file",
+        "id": "file-recap-0"
       }
     },
     {
@@ -115,8 +115,8 @@
       "title": "Draft 1",
       "detail": "Too long at 900 words; draft 2 aims at 350",
       "target": {
-        "kind": "topic",
-        "id": "content"
+        "kind": "file",
+        "id": "file-recap-1"
       }
     }
   ],

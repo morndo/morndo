@@ -1,6 +1,6 @@
 {
   "intro": "Morndo wrote these from this morning's work. They sit in your mail as drafts. Nothing is sent until you send it.",
-  "count": 4,
+  "count": 7,
   "items": [
     {
       "id": "team",
@@ -30,7 +30,7 @@
       "body": "Thank you for signing off the quote. Here is the final text. We plan to publish on Wednesday if the last number is confirmed.",
       "writtenAt": "2026-11-16T08:10:00+01:00",
       "openUrl": "https://mail.example.test/mail/u/0/#drafts/fenwick",
-      "laneId": null
+      "laneId": "fenwick"
     },
     {
       "id": "guest",
@@ -41,6 +41,36 @@
       "writtenAt": "2026-11-16T08:40:00+01:00",
       "openUrl": "https://mail.example.test/mail/u/0/#drafts/guest",
       "laneId": null
+    },
+    {
+      "id": "halden-cover",
+      "to": "ops@example.test",
+      "skill": null,
+      "subject": "The partner offer for Halden Freight Network",
+      "body": "Here is the offer from our call on 13 November. Two pages, from the partner template. It stays in your mail until you send it.",
+      "writtenAt": "2026-11-16T08:15:00+01:00",
+      "openUrl": "https://mail.example.test/mail/u/0/#drafts/halden-cover",
+      "laneId": "halden-offer"
+    },
+    {
+      "id": "reply-invites",
+      "to": "contacts@example.test",
+      "skill": null,
+      "subject": "Two times to talk this week",
+      "body": "Two invite drafts, with the meeting times left open. Jonas asked for two times. Nothing is sent until you send it.",
+      "writtenAt": "2026-11-16T07:40:00+01:00",
+      "openUrl": "https://mail.example.test/mail/u/0/#drafts/reply-invites",
+      "laneId": "reply-handling"
+    },
+    {
+      "id": "webinar-reminder",
+      "to": "guests@example.test",
+      "skill": null,
+      "subject": "The webinar is tomorrow",
+      "body": "A short reminder, about 90 words, with one link to the session. It is scheduled and waits in your mail.",
+      "writtenAt": "2026-11-16T08:00:00+01:00",
+      "openUrl": "https://mail.example.test/mail/u/0/#drafts/webinar-reminder",
+      "laneId": "webinar-reminders"
     }
   ]
 }

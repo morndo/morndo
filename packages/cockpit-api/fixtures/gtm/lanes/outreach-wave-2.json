@@ -133,8 +133,8 @@
       "title": "24 drafted emails",
       "detail": "Retail brands, from your mail",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-outreach-wave-2-0"
       }
     }
   ],

@@ -92,8 +92,8 @@
       "title": "Lead list, round 2",
       "detail": "120 so far, logistics ops, 50 to 500 people",
       "target": {
-        "kind": "topic",
-        "id": "outbound"
+        "kind": "file",
+        "id": "file-logistics-round-2-0"
       }
     }
   ],

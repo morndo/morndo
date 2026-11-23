@@ -92,8 +92,8 @@
       "title": "Reminder email",
       "detail": "90 words, one link, scheduled",
       "target": {
-        "kind": "drafts",
-        "id": null
+        "kind": "draft",
+        "id": "webinar-reminder"
       }
     },
     {
@@ -101,8 +101,8 @@
       "title": "Sign-ups by source",
       "detail": "Newsletter 118, LinkedIn 61, partners 33",
       "target": {
-        "kind": "topic",
-        "id": "content"
+        "kind": "file",
+        "id": "file-webinar-reminders-1"
       }
     }
   ],

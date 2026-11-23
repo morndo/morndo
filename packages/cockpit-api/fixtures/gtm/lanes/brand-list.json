@@ -106,8 +106,8 @@
       "title": "Brand list in HubSpot",
       "detail": "160 brands, 64 marked as a fit",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-brand-list-0"
       }
     },
     {
@@ -115,8 +115,8 @@
       "title": "Why each brand fits",
       "detail": "One line per brand, from the partner profile",
       "target": {
-        "kind": "topic",
-        "id": "partnerships"
+        "kind": "file",
+        "id": "file-brand-list-1"
       }
     }
   ],

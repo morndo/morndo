@@ -172,8 +172,8 @@
       "title": "Promo text",
       "detail": "120 words, approved Friday",
       "target": {
-        "kind": "topic",
-        "id": "content"
+        "kind": "file",
+        "id": "file-webinar-0"
       }
     },
     {
@@ -181,8 +181,8 @@
       "title": "6 images",
       "detail": "4 pass the brand check, 2 fail",
       "target": {
-        "kind": "topic",
-        "id": "content"
+        "kind": "file",
+        "id": "file-webinar-1"
       }
     }
   ],

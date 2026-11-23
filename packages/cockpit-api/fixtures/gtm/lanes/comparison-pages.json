@@ -112,8 +112,8 @@
       "title": "Page 1: Tidewell or Quaywright",
       "detail": "Live since 07:42",
       "target": {
-        "kind": "topic",
-        "id": "seo"
+        "kind": "file",
+        "id": "file-comparison-pages-0"
       }
     },
     {
@@ -121,8 +121,8 @@
       "title": "Page 2: Tidewell or Dockmere",
       "detail": "Live since 07:42",
       "target": {
-        "kind": "topic",
-        "id": "seo"
+        "kind": "file",
+        "id": "file-comparison-pages-1"
       }
     },
     {
@@ -130,8 +130,8 @@
       "title": "Outlines for all 5",
       "detail": "Approved Friday",
       "target": {
-        "kind": "topic",
-        "id": "seo"
+        "kind": "file",
+        "id": "file-comparison-pages-2"
       }
     }
   ],

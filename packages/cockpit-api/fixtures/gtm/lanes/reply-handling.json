@@ -127,8 +127,8 @@
       "title": "2 invite drafts",
       "detail": "In your drafts, times left open",
       "target": {
-        "kind": "drafts",
-        "id": null
+        "kind": "draft",
+        "id": "reply-invites"
       }
     }
   ],
