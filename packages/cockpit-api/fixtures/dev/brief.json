@@ -146,7 +146,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "hardToUndo"
     },
     {
       "id": "o2",
@@ -168,7 +168,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "hardToUndo"
     },
     {
       "id": "o3",
@@ -190,7 +190,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "insideGuardrails"
     },
     {
       "id": "o4",
@@ -212,7 +212,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "insideGuardrails"
     },
     {
       "id": "o5",
@@ -234,7 +234,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "hardToUndo"
     }
   ],
   "drafts": {

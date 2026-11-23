@@ -221,7 +221,7 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
+          "id": "seo-claims-without-a-public-source",
           "switchId": null,
           "action": null
         },
@@ -241,8 +241,8 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
-          "switchId": null,
+          "id": "seo-pages-live-without-your-outline",
+          "switchId": "publishing",
           "action": null
         },
         {
@@ -261,7 +261,7 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
+          "id": "seo-bought-links",
           "switchId": null,
           "action": null
         }

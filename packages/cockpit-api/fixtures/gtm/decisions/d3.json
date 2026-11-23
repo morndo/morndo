@@ -32,5 +32,18 @@
   "release": null,
   "changeRequest": null,
   "rule": "inYourName",
-  "proposer": null
+  "proposer": {
+    "id": "content-manager",
+    "name": "Content manager",
+    "shortName": "Content manager",
+    "kind": "agent",
+    "avatar": "C",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

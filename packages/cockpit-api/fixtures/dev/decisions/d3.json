@@ -69,5 +69,18 @@
   "release": null,
   "changeRequest": null,
   "rule": "onlyYouKnow",
-  "proposer": null
+  "proposer": {
+    "id": "web-app-manager",
+    "name": "Web app manager",
+    "shortName": "Web app manager",
+    "kind": "agent",
+    "avatar": "W",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

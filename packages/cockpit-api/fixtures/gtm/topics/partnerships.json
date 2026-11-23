@@ -239,7 +239,7 @@
           },
           "ratio": 0.3,
           "state": "held",
-          "id": null,
+          "id": "partnerships-bounces",
           "switchId": null,
           "action": null
         },
@@ -258,7 +258,7 @@
           },
           "ratio": 0,
           "state": "held",
-          "id": null,
+          "id": "partnerships-asked-to-stop",
           "switchId": null,
           "action": null
         },
@@ -278,7 +278,7 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
+          "id": "partnerships-sent-unchecked",
           "switchId": null,
           "action": null
         },
@@ -295,7 +295,7 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
+          "id": "partnerships-terms",
           "switchId": null,
           "action": null
         }
@@ -316,7 +316,7 @@
       }
     ],
     "calibration": "No forecast can be scored yet. The first is scored on 18 December; each is kept with what happened, so the ladder learns how often Likely signs.",
-    "outside": "Out of this goal: Kestrel Parcel, budget frozen until spring (call on 12 November).",
+    "outside": "Out of this goal: Kestrel Parcel, budget frozen until spring (call on 12 November). Paid's partner budget line belongs to this goal.",
     "gap": {
       "says": "To reach 3, two more deals must reach an offer in time:",
       "steps": [
@@ -1480,7 +1480,7 @@
             "at": "2026-11-13T16:40:00+01:00",
             "id": "partnerships-history-20",
             "undone": false,
-            "checkId": "batch-3"
+            "checkId": null
           },
           {
             "kind": "event",

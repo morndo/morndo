@@ -295,8 +295,8 @@
           },
           "ratio": 0.45,
           "state": "held",
-          "id": null,
-          "switchId": null,
+          "id": "outbound-bounces",
+          "switchId": "outbound",
           "action": null
         },
         {
@@ -313,8 +313,8 @@
           },
           "ratio": 0.56,
           "state": "held",
-          "id": null,
-          "switchId": null,
+          "id": "outbound-asked-to-stop",
+          "switchId": "outbound",
           "action": null
         },
         {
@@ -333,8 +333,8 @@
           },
           "ratio": 1,
           "state": "near",
-          "id": null,
-          "switchId": null,
+          "id": "outbound-sends-a-day",
+          "switchId": "outbound",
           "action": null
         },
         {
@@ -353,8 +353,8 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
-          "switchId": null,
+          "id": "outbound-spam-complaints",
+          "switchId": "outbound",
           "action": null
         }
       ]

@@ -274,5 +274,18 @@
   },
   "changeRequest": null,
   "rule": "hardToUndo",
-  "proposer": null
+  "proposer": {
+    "id": "api-manager",
+    "name": "API manager",
+    "shortName": "API manager",
+    "kind": "agent",
+    "avatar": "A",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

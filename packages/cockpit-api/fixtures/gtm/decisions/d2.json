@@ -32,5 +32,18 @@
   "release": null,
   "changeRequest": null,
   "rule": "inYourName",
-  "proposer": null
+  "proposer": {
+    "id": "outbound-manager",
+    "name": "Outbound manager",
+    "shortName": "Outbound manager",
+    "kind": "agent",
+    "avatar": "O",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

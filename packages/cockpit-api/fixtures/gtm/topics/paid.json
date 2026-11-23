@@ -357,7 +357,7 @@
           "ratio": 1.14,
           "state": "breached",
           "id": "cost-per-lead",
-          "switchId": null,
+          "switchId": "spend",
           "action": "ask"
         },
         {
@@ -380,8 +380,8 @@
           },
           "ratio": 0.91,
           "state": "near",
-          "id": null,
-          "switchId": null,
+          "id": "paid-weekly-spend",
+          "switchId": "spend",
           "action": null
         },
         {
@@ -400,8 +400,8 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
-          "switchId": null,
+          "id": "paid-changes-over-500-without-you",
+          "switchId": "spend",
           "action": null
         },
         {
@@ -420,8 +420,8 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
-          "switchId": null,
+          "id": "paid-customer-data-in-ads",
+          "switchId": "customer-data",
           "action": null
         }
       ]

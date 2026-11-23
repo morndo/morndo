@@ -81,5 +81,18 @@
   "release": null,
   "changeRequest": null,
   "rule": "hardToUndo",
-  "proposer": null
+  "proposer": {
+    "id": "billing-manager",
+    "name": "Billing manager",
+    "shortName": "Billing manager",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

@@ -260,5 +260,18 @@
   "release": null,
   "changeRequest": null,
   "rule": "overWeeklyCap",
-  "proposer": null
+  "proposer": {
+    "id": "paid-manager",
+    "name": "Paid manager",
+    "shortName": "Paid manager",
+    "kind": "agent",
+    "avatar": "P",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

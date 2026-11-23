@@ -285,8 +285,8 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
-          "switchId": null,
+          "id": "content-off-brand-posts",
+          "switchId": "visuals",
           "action": null
         },
         {
@@ -305,8 +305,8 @@
           },
           "ratio": 1,
           "state": "near",
-          "id": null,
-          "switchId": null,
+          "id": "content-newsletter-sends",
+          "switchId": "publishing",
           "action": null
         },
         {
@@ -325,7 +325,7 @@
           },
           "ratio": null,
           "state": "held",
-          "id": null,
+          "id": "content-claims-without-a-source",
           "switchId": null,
           "action": null
         }

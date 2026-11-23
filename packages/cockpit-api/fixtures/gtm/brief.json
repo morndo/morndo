@@ -185,7 +185,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "insideGuardrails"
     },
     {
       "id": "o2",
@@ -210,7 +210,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "insideGuardrails"
     },
     {
       "id": "o3",
@@ -218,7 +218,7 @@
       "topicName": "SEO",
       "laneId": "comparison-pages",
       "text": "SEO published the 2 comparison pages you approved on Friday.",
-      "undoable": true,
+      "undoable": false,
       "undone": false,
       "at": "2026-11-16T07:42:00+01:00",
       "undoUntilAt": "2026-11-16T23:30:00+01:00",
@@ -232,7 +232,7 @@
         "pullId": null,
         "sentOutside": true
       },
-      "rule": null
+      "rule": "hardToUndo"
     },
     {
       "id": "o4",
@@ -254,7 +254,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "insideGuardrails"
     },
     {
       "id": "o5",
@@ -276,7 +276,7 @@
         "pullId": null,
         "sentOutside": false
       },
-      "rule": null
+      "rule": "insideGuardrails"
     }
   ],
   "drafts": {
