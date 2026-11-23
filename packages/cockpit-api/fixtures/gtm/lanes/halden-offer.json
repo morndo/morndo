@@ -154,8 +154,8 @@
       "title": "Cover email",
       "detail": "In your drafts, not sent",
       "target": {
-        "kind": "draft",
-        "id": "halden-cover"
+        "kind": "drafts",
+        "id": null
       }
     }
   ],

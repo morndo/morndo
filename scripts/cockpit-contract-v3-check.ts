@@ -652,7 +652,8 @@ async function madeAndLeads(module: Module, url: string, owner: string) {
       // R1: a made file or image opens its record; a made mail opens its draft
       const record = ["file", "run", "review", "report", "check"];
       if ((item.icon === "file" || item.icon === "image") && !record.includes(item.target.kind)) notRecord.push(`${id}/${item.title} → ${item.target.kind}`);
-      if (item.icon === "mail" && !(item.target.kind === "draft" && typeof item.target.id === "string")) notRecord.push(`${id}/${item.title} → ${item.target.kind}:${item.target.id}`);
+      // the mockup links a made mail to the Drafts page (#drafts); a single draft listed there is fine too
+      if (item.icon === "mail" && !(item.target.kind === "drafts" || (item.target.kind === "draft" && typeof item.target.id === "string"))) notRecord.push(`${id}/${item.title} → ${item.target.kind}:${item.target.id}`);
     }
     const expected = topicLane.get(id)?.leadName ?? sidebarLane.get(id)?.leadName;
     const lead = lane?.lead;
@@ -661,7 +662,7 @@ async function madeAndLeads(module: Module, url: string, owner: string) {
   }
   ok(checked > 0 && own.length === 0, `R1 ${module}: no "What it made" item targets its own lane (${own.length} do: ${own.slice(0, 3).join("; ")})`);
   ok(checked > 0 && unresolved.length === 0, `R1 ${module}: every "What it made" target resolves (${unresolved.length} do not: ${unresolved.slice(0, 3).join("; ")})`);
-  ok(checked > 0 && notRecord.length === 0, `R1 ${module}: made files and images open their record, made mail its draft (${notRecord.length} do not: ${notRecord.slice(0, 3).join("; ")})`);
+  ok(checked > 0 && notRecord.length === 0, `R1 ${module}: made files and images open their record, made mail the Drafts page or its draft (${notRecord.length} do not: ${notRecord.slice(0, 3).join("; ")})`);
   if (module === "gtm") {
     ok(files.length > 0, "R1 gtm: made files point at file records");
     let bad = 0;
