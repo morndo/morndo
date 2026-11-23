@@ -70,8 +70,9 @@ function requireRecord<T>(record: T | undefined | null, kind: string): T {
 }
 
 function blankActor(name: string, kind: Actor["kind"] = "agent"): Actor {
+  const person = kind === "person";
   return {
-    id: slug(name) || "manager", name, shortName: name.split(" ")[0] ?? name, kind,
+    id: slug(name) || "manager", name, shortName: person ? name.split(" ")[0] ?? name : name, kind,
     avatar: name[0]?.toUpperCase() ?? "?", role: null, state: null, word: null, text: null,
     skill: null, engine: null, record: null,
   };
@@ -83,21 +84,79 @@ function slug(value: string): string {
 
 function classify(text: string): LabelKind {
   if (isQuestion(text)) return "question";
+  if (/\bpriorit/i.test(text)) return "goalChange";
   if (/\b(change|move|set|raise|lower|extend|reduce|increase|push|make)\b.*\b(deadline|goal|target|budget|priority|guardrail)\b/i.test(text)) return "goalChange";
   if (/\b(done|checked|finished|is ready|are ready)\b/i.test(text)) return "done";
   if (/\b(approve|decide|go with)\b/i.test(text)) return "decision";
   return "request";
 }
 
+const DELIVERABLE = /^(?:write|draft|add|build|prepare|send|make|update|book|list|check|fix|review|post|create|open|publish|design|invite|schedule|run|test|ship|rotate|profile|recap|raise|lower|change|move|set|start|stop)\b/i;
+
 function splitDeliverables(text: string): [string, string] | null {
-  const match = /^(.*?)\s+and\s+((?:write|draft|add|build|prepare|send|make)\b.*)$/i.exec(text.trim());
-  if (!match?.[1] || !match[2] || !/^(?:write|draft|add|build|prepare|send|make)\b/i.test(match[1].trim())) return null;
-  return [match[1].trim(), match[2].trim()];
+  const parts = text.trim().split(/\s+and\s+/i);
+  if (parts.length !== 2) return null;
+  const left = parts[0]?.trim() ?? "";
+  const right = parts[1]?.trim() ?? "";
+  if (left.split(/\s+/).length < 3 || right.split(/\s+/).length < 3) return null;
+  if (!DELIVERABLE.test(left) || !DELIVERABLE.test(right)) return null;
+  return [left, right.charAt(0).toUpperCase() + right.slice(1)];
+}
+
+function matchesSuggestion(text: string, suggestions: string[]): boolean {
+  const words = (value: string) => value.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(word => word.length > 2);
+  const have = new Set(words(text));
+  return suggestions.some(suggestion => {
+    const expected = words(suggestion);
+    return expected.length > 0 && expected.every(word => have.has(word));
+  });
 }
 
 function eurosMinor(text: string): number | null {
-  const match = /(\d+)\s*euros?\b/i.exec(text);
-  return match?.[1] ? Number(match[1]) * 100 : null;
+  const thousands = /(\d+(?:\.\d+)?)\s*k\s*euros?\b/i.exec(text);
+  if (thousands?.[1]) return Math.round(Number(thousands[1]) * 1000 * 100);
+  const symbol = /€\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/.exec(text);
+  if (symbol?.[1]) return Math.round(Number(symbol[1].replace(/,/g, "")) * 100);
+  const code = /\bEUR\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/i.exec(text);
+  if (code?.[1]) return Math.round(Number(code[1].replace(/,/g, "")) * 100);
+  const word = /(\d{1,3}(?:,\d{3})+|\d+)\s*euros?\b/i.exec(text);
+  return word?.[1] ? Math.round(Number(word[1].replace(/,/g, "")) * 100) : null;
+}
+
+function countSpoken(text: string): number | null {
+  const unit = /(\d+)\s*(?:emails?|sends?|tries|posts?|leads?|meetings?)\b/i.exec(text);
+  if (unit?.[1]) return Number(unit[1]);
+  const bare = /\b(?:to|at)\s+(\d+)\b/i.exec(text);
+  return bare?.[1] ? Number(bare[1]) : null;
+}
+
+function budgetPeriod(text: string): string | null {
+  if (/\b(?:a|per) month\b/i.test(text)) return "a month";
+  if (/\b(?:a|per) week\b/i.test(text)) return "a week";
+  if (/\b(?:a|per) day\b/i.test(text)) return "a day";
+  return null;
+}
+
+function eurosLabel(minor: number): string {
+  const euros = minor / 100;
+  if (!Number.isInteger(euros)) return `€${euros.toFixed(2)}`;
+  return `€${String(euros).replace(/\B(?=(\d{3})+(?!\d))/g, ",")}`;
+}
+
+function repairAgents(value: unknown, seen = new Set<object>()): void {
+  if (!value || typeof value !== "object" || seen.has(value)) return;
+  seen.add(value);
+  if (value instanceof Map) {
+    for (const item of value.values()) repairAgents(item, seen);
+    return;
+  }
+  if (Array.isArray(value)) {
+    for (const item of value) repairAgents(item, seen);
+    return;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.kind === "agent" && typeof record.name === "string" && record.name.includes(" ")) record.shortName = record.name;
+  for (const child of Object.values(record)) repairAgents(child, seen);
 }
 
 function measuredNumber(value: { kind: string; value?: number; money?: { amountMinor: number }; percent?: number } | null | undefined): number | undefined {
@@ -154,6 +213,7 @@ export class World {
   private readonly history = new Map<string, HistoryAction>();
   private readonly overnightAliases = new Map<string, string>();
   private readonly fixtureActions = new Set<string>();
+  private readonly fixtureMessageIds = new Set<string>();
   private readonly reverted = new Map<string, Set<string>>();
   private readonly seen = new Map<string, string>();
   private readonly pinned = new Map<string, string[]>();
@@ -246,6 +306,10 @@ export class World {
       this.rememberOvernight(row);
     }
     this.prepareRecords();
+    repairAgents(this);
+    for (const thread of this.threads.values()) {
+      for (const message of thread.messages) this.fixtureMessageIds.add(message.id);
+    }
   }
 
   viewer(id: string | null): Actor {
@@ -290,7 +354,7 @@ export class World {
       case "LaneView": return this.visibleLane(key, viewer);
       case "ManagerView": this.requireOwner(viewer); return this.manager(viewer);
       case "DraftsView": return this.draftsView(viewer);
-      case "SkillsView": this.requireOwner(viewer); return this.skills;
+      case "SkillsView": this.requireOwner(viewer); this.syncBusy(); return this.skills;
       case "SettingsView": return { ...this.settings, decisionRights: viewer.id === this.owner.id ? this.settings.decisionRights : [],
         ...this.prefsOf(viewer, query.get("deviceId")) };
       case "PullsView": this.requireOwner(viewer); return this.pullsView();
@@ -600,10 +664,13 @@ export class World {
             return step;
           });
           if (lane.id === "tax-rates") {
+            lane.steps = lane.steps.map(step => /your ok to run/i.test(step.text) ? { ...step, kind: "ok", doneAt: this.now } : step);
             const migration = lane.steps.findIndex(step => /migration runs/i.test(step.text));
             if (migration >= 0 && !lane.steps.some(step => /back up the production database/i.test(step.text))) {
-              lane.steps.splice(migration, 0, { kind: "ok", text: "Back up the production database", who: "Builder", doneAt: null });
+              lane.steps.splice(migration, 0, { kind: "now", text: "Back up the production database", who: "Builder", doneAt: null });
             }
+            const runsAt = lane.steps.findIndex(step => /migration runs/i.test(step.text));
+            if (runsAt >= 0 && lane.steps[runsAt]?.kind === "now") lane.steps[runsAt] = { ...lane.steps[runsAt], kind: "todo" };
             lane.next = "The migration runs tonight at 23:00, after the backup";
             lane.nextAt = "2026-11-16T23:00:00+01:00";
           }
@@ -679,7 +746,17 @@ export class World {
     const decision = requireRecord(this.decisions.get(id), "decision");
     if (!this.fullTopic(decision.topicId, viewer)) throw new Problem("forbidden", "That decision is outside this reader’s access.");
     const queue = this.queue(viewer);
-    return { ...decision, position: { index: queue.items.findIndex(item => item.id === id) + 1, of: queue.total, open: queue.open } };
+    const lane = decision.state === "approved" && decision.laneId ? this.lane(decision.laneId) : undefined;
+    const nextSteps = decision.nextSteps.map(step => {
+      const match = lane?.steps
+        .map(item => ({ item, score: this.sharedWords(item.text, step.step) }))
+        .filter(row => row.score > 0 && !(/your ok/i.test(row.item.text) && !/your ok/i.test(step.step)))
+        .sort((left, right) => right.score - left.score)[0]?.item;
+      if (!match) return step;
+      const state = match.kind === "ok" || match.kind === "now" || match.kind === "todo" ? match.kind : step.state;
+      return { ...step, state, doneAt: match.doneAt };
+    });
+    return { ...decision, nextSteps, position: { index: queue.items.findIndex(item => item.id === id) + 1, of: queue.total, open: queue.open } };
   }
 
   private brief(viewer: Actor): BriefView {
@@ -699,14 +776,21 @@ export class World {
     });
     view.overnight = view.overnight.filter(item => viewer.id === this.owner.id || (item.topicId && this.fullTopic(item.topicId, viewer)))
       .map(item => ({ ...item, undone: this.history.get(item.id)?.row.undone ?? false }));
+    let capMinor = 0;
+    let capCurrency = view.spend?.cap.currency ?? "EUR";
     view.topics = view.topics.filter(topic => this.fullTopic(topic.id, viewer)).map(item => {
       const topic = this.topicView(item.id, viewer, new URLSearchParams());
+      if (viewer.id === this.owner.id && topic.spend) {
+        capMinor += topic.spend.cap.amountMinor;
+        capCurrency = topic.spend.cap.currency;
+      }
       const original = this.topics.get(item.id)?.goal;
       const progress = topic.goal && original && topic.goal.target !== original.target
         ? `${topic.goal.signed} of ${topic.goal.target} ${topic.goal.unit}` : item.progress;
       return { ...item, progress, verdict: topic.goal?.verdict.word ?? topic.health?.word ?? item.verdict,
         state: topic.goal?.verdict.state ?? topic.health?.state ?? item.state };
     });
+    if (viewer.id === this.owner.id && view.spend && capMinor > 0) view.spend.cap = { amountMinor: capMinor, currency: capCurrency };
     view.settledBurns = [...this.settlements.values()].filter(item => {
       const lane = this.lane(item.laneId);
       return lane && this.sharedLane(lane, viewer) && viewer.id === this.owner.id;
@@ -778,8 +862,16 @@ export class World {
         target: target("lane", lane.id),
       }];
     });
+    for (const decision of this.decisions.values()) {
+      if (decision.state !== "open" || !decision.goalChange) continue;
+      asks.unshift({
+        id: `ask-${decision.id}`, quote: decision.title, at: decision.dueAt, chat: decision.topicName,
+        went: "a goal change · waits for you in Decide", target: target("decision", decision.id),
+      });
+    }
     return {
       ...this.managerBase,
+      since: this.sinceLines(),
       summary: `${lanes.length} lanes in ${projects.size} ${this.module === "dev" ? "projects" : "topics"} · ${waiting ? `${waiting} wait for you` : "none waits for you"}`,
       lanes: lanes.map(lane => ({
         id: lane.id, title: lane.title, topicId: lane.topicId, topicName: this.topics.get(lane.topicId ?? "")?.name ?? "Manager",
@@ -859,15 +951,17 @@ export class World {
     if (view.goal) {
       const goal = view.goal;
       for (const change of changes) {
-        if (change.field === "priority" && change.priority?.to === 1 && change.topicId !== id && view.meta?.priority === 1) {
-          view.meta.priority = change.priority.from;
-        }
         if (change.topicId !== id) continue;
         if (change.field === "budget" && change.budget && view.spend) view.spend.cap = structuredClone(change.budget.to);
-        else if (change.field === "priority" && change.priority && view.meta) view.meta.priority = change.priority.to;
         else if (change.field === "guardrail" && change.guardrail) this.applyGuardrailChange(goal, change.guardrail);
         else if (change.field === "target" || change.field === "deadline" || change.field === "unit") this.projectGoalChange(goal, change);
       }
+      if (view.meta) {
+        const rank = this.priorityRanks().get(id);
+        if (rank !== undefined) view.meta.priority = rank;
+      }
+      this.refreshGuardrailCopy(goal);
+      this.scoreForecast(goal);
       const decision = goal.decision?.decisionId && this.decisions.get(goal.decision.decisionId);
       if (goal.decision && decision && decision.state === "approved") {
         goal.decision.title = goal.decision.done ?? goal.decision.title;
@@ -910,7 +1004,7 @@ export class World {
           limit: { kind: "money", money: view.spend.cap, cap: null },
           ratio,
           state: ratio >= 1 ? "breached" : ratio >= 0.8 ? "near" : "held",
-          id: null, switchId: null, action: null,
+          id: `${id}-agents-this-week`, switchId: null, action: null,
         });
       }
     }
@@ -918,12 +1012,13 @@ export class World {
     const liveLanes = this.module === "dev" ? this.allLanes(this.owner).filter(lane => lane.topicId === id).sort(sortLanes) : [];
     if (goal) {
       view.health = { state: goal.verdict.state, word: goal.verdict.word };
-    } else if (this.module === "gtm") {
+    } else {
       view.health = this.healthWithoutGoal(id);
-    } else if (this.module === "dev" && [...this.decisions.values()].some(decision => decision.topicId === id && decision.state !== "open")) {
-      const worst = liveLanes.find(lane => lane.state !== "done" && lane.state !== "parked");
-      view.health = { state: worst?.state === "bad" ? "bad" : worst?.state === "warn" ? "warn" : worst ? "ok" : "idle",
-        word: worst ? WORDS[worst.state] : "Idle" };
+      if (this.module === "dev" && [...this.decisions.values()].some(decision => decision.topicId === id && decision.state !== "open")) {
+        const worst = liveLanes.find(lane => lane.state !== "done" && lane.state !== "parked");
+        view.health = { state: worst?.state === "bad" ? "bad" : worst?.state === "warn" ? "warn" : worst ? "ok" : "idle",
+          word: worst ? WORDS[worst.state] : "Idle" };
+      }
     }
     const relatedDeadline = changes.findLast(change => change.topicId !== id && change.deadlineAt)?.deadlineAt;
     const nextReportAt = relatedDeadline ?? view.meta?.nextReportAt ?? null;
@@ -1208,7 +1303,14 @@ export class World {
     setting.who = who;
     setting.personId = personId;
     setting.dailyLimit = who === "you" ? null : dailyLimit ?? null;
-    return done([{ type: "prefs.changed" }]);
+    if (who === "you") {
+      setting.usedToday = null;
+      setting.resetsAt = null;
+    } else if (setting.dailyLimit != null) {
+      setting.usedToday = setting.usedToday != null && setting.usedToday <= setting.dailyLimit ? setting.usedToday : 0;
+      setting.resetsAt = setting.resetsAt ?? this.nextMidnight();
+    }
+    return done([{ type: "prefs.changed" }, { type: "decisionRight.changed" }]);
   }
 
   private pinsOf(viewer: Actor): string[] {
@@ -1320,12 +1422,55 @@ export class World {
 
   private sinceLines(): string[] {
     const stored = this.threads.get("manager")?.since?.lines ?? [];
-    const lines = stored.filter(line => !(/promo/i.test(line) && /stuck/i.test(line)) && !/no goal or priority changes wait for you/i.test(line));
-    if (this.lane("webinar")?.state === "bad") lines.push("Content: the promo is stuck; you decide in the topic.");
+    const badTopics = new Set([...this.lanes.values()].flatMap(lane => {
+      if (lane.state !== "bad" || !lane.topicId) return [];
+      const name = this.topics.get(lane.topicId)?.name;
+      return name ? [name.toLowerCase()] : [];
+    }));
     const open = [...this.decisions.values()].filter(item => item.state === "open" && item.goalChange);
-    if (open.length === 0) lines.push("No goal or priority changes wait for you.");
-    else for (const item of open) lines.push(`${item.topicName}: a ${item.goalChange?.field === "deadline" ? "deadline" : "goal"} change waits for you.`);
+    const lines = stored.filter(line => {
+      if (/stuck/i.test(line)) return [...badTopics].some(name => line.toLowerCase().includes(name));
+      if (/no goal or priority changes wait for you/i.test(line)) return open.length === 0;
+      return true;
+    });
+    for (const topic of this.topics.values()) {
+      const thread = this.threads.get(`topic:${topic.id}`);
+      if (!thread) continue;
+      const fresh = thread.messages.filter(message => !this.fixtureMessageIds.has(message.id));
+      const questions = fresh.filter(message => message.label?.kind === "question" || isQuestion(message.text)).length;
+      const instructions = fresh.filter(message => message.label?.kind === "request" || message.label?.kind === "goalChange").length;
+      if (!questions && !instructions) continue;
+      const index = lines.findIndex(line => line.toLowerCase().startsWith(`${topic.name.toLowerCase()}:`) && /instruction|question/i.test(line));
+      const bumped = this.activityLine(topic.name, index >= 0 ? lines[index] : undefined, instructions, questions);
+      if (index >= 0 && bumped) lines[index] = bumped;
+      else if (bumped) lines.unshift(bumped);
+    }
+    for (const item of open) {
+      const field = item.goalChange?.field === "deadline" ? "deadline" : item.goalChange?.field === "priority" ? "priority" : "goal";
+      const line = `${item.topicName}: a ${field} change waits for you.`;
+      if (!lines.includes(line)) lines.push(line);
+    }
+    if (open.length === 0 && !lines.some(line => /no goal or priority changes wait for you/i.test(line))) {
+      lines.push("No goal or priority changes wait for you.");
+    }
     return lines;
+  }
+
+  private activityLine(name: string, existing: string | undefined, instructions: number, questions: number): string | undefined {
+    if (!instructions && !questions) return existing;
+    const instructionWord = (count: number) => `${count} instruction${count === 1 ? "" : "s"}`;
+    const questionWord = (count: number) => `${count} question${count === 1 ? "" : "s"}`;
+    if (!existing) {
+      const parts = [
+        instructions ? instructionWord(instructions) : "",
+        questions ? `${questionWord(questions)} answered` : "",
+      ].filter(Boolean);
+      return `${name}: ${parts.join(", ")} in the topic.`;
+    }
+    let line = existing;
+    if (instructions) line = line.replace(/(\d+)\s+instructions?/, (_match, count: string) => instructionWord(Number(count) + instructions));
+    if (questions) line = line.replace(/(\d+)\s+questions?/, (_match, count: string) => questionWord(Number(count) + questions));
+    return line;
   }
 
   private healthWithoutGoal(topicId: string): NonNullable<TopicView["health"]> {
@@ -1344,6 +1489,74 @@ export class World {
     if (value === undefined || limit === undefined || limit <= 0) return;
     item.ratio = value / limit;
     item.state = value > limit ? "breached" : value / limit >= 0.8 ? "near" : "held";
+  }
+
+  private refreshGuardrailCopy(goal: NonNullable<TopicView["goal"]>): void {
+    const items = goal.guardrails?.items ?? [];
+    for (const blocker of goal.blockers) {
+      const item = items.find(entry => entry.id && entry.id === blocker.guardrailId);
+      if (!item || item.value.kind !== "money" || item.limit?.kind !== "money") continue;
+      blocker.short = `a lead costs ${eurosLabel(item.value.money.amountMinor)} against the ${eurosLabel(item.limit.money.amountMinor)} guardrail`;
+      blocker.state = item.state === "breached" ? "bad" : item.state === "near" ? "warn" : "ok";
+    }
+    if (items.some(item => item.state === "breached") || goal.verdict.word !== "Over cost") return;
+    const near = items.some(item => item.state === "near");
+    goal.verdict = { ...goal.verdict, state: near ? "warn" : "ok", word: near ? "Near the limit" : "On track" };
+  }
+
+  private scoreForecast(goal: NonNullable<TopicView["goal"]>): void {
+    const scored = goal.forecastLog.filter(row => row.scoredAt);
+    if (scored.length > 0) {
+      goal.calibrationScore = { kind: "count", value: scored.filter(row => row.held).length, of: scored.length, unit: "held" };
+    }
+    const next = goal.forecastLog.find(row => !row.scoredAt && row.scoreAt);
+    if (next?.scoreAt) goal.nextScoreAt = next.scoreAt;
+  }
+
+  private priorityRanks(): Map<string, number> {
+    const ids = this.sidebarBase.groups.map(group => group.id).filter(id => this.topics.get(id)?.meta);
+    const ranks = new Map<string, number>();
+    ids.forEach((id, index) => ranks.set(id, this.topics.get(id)?.meta?.priority ?? index + 1));
+    for (const decision of this.decisions.values()) {
+      const change = decision.goalChange;
+      if (decision.state !== "approved" || change?.field !== "priority" || change.priority?.to == null) continue;
+      this.shiftRank(ranks, change.topicId, change.priority.to);
+    }
+    return ranks;
+  }
+
+  private shiftRank(ranks: Map<string, number>, topicId: string, to: number): void {
+    const from = ranks.get(topicId);
+    if (from === undefined || from === to) return;
+    for (const [id, rank] of ranks) {
+      if (id === topicId) continue;
+      if (to < from && rank >= to && rank < from) ranks.set(id, rank + 1);
+      if (to > from && rank <= to && rank > from) ranks.set(id, rank - 1);
+    }
+    ranks.set(topicId, to);
+  }
+
+  private sharedWords(left: string, right: string): number {
+    const words = (value: string) => new Set(value.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 4));
+    const first = words(left);
+    let score = 0;
+    for (const word of words(right)) if (first.has(word)) score += 1;
+    return score;
+  }
+
+  private syncBusy(): void {
+    if (this.module !== "dev") return;
+    const server = this.skills.connections.find(item => item.id === "your-server");
+    if (server?.capacity?.kind !== "count" || server.capacity.of == null) return;
+    const busy = [...this.lanes.values()].filter(lane => !this.removed.has(lane.id) && (lane.state === "ok" || lane.state === "bad" || lane.state === "new")).length;
+    server.capacity = { ...server.capacity, value: Math.min(server.capacity.of, busy) };
+  }
+
+  private nextMidnight(): string {
+    const localDay = new Date(Date.parse(this.now) + 3600000).toISOString().slice(0, 10);
+    const midnight = Date.parse(`${localDay}T00:00:00+01:00`);
+    const next = Date.parse(this.now) < midnight ? midnight : midnight + 86400000;
+    return `${new Date(next + 3600000).toISOString().slice(0, 19)}+01:00`;
   }
 
   private membersView(): MembersView {
@@ -1392,7 +1605,7 @@ export class World {
       this.records.set(runId, {
         id: runId, kind: "run", laneId: stuck.actions.find(action => action.target?.kind === "run")?.laneId ?? "red-main",
         title: "Nightly checks", detail: stuck.detail, url: `https://files.example.test/runs/${runId}`,
-        trigger: "nightly", startedAt: "2026-11-16T02:10:00+01:00", finishedAt: "2026-11-16T02:18:00+01:00",
+        trigger: "nightly", startedAt: "2026-11-16T03:20:00+01:00", finishedAt: "2026-11-16T06:40:00+01:00",
         state: "fail", checks: stuck.checks, log: stuck.log, pullId: null,
       });
     }
@@ -1404,15 +1617,38 @@ export class World {
         scheduleId: "partnerships-report", dueAt: "2026-11-20T08:00:00+01:00", state: "scheduled", draftId: null,
         sentAt: null, checkedBy: null, periodFrom: "2026-11-09T00:00:00+01:00", periodTo: "2026-11-15T23:59:00+01:00",
       });
+      for (const [id, topicId, title] of [
+        ["content-weekly", "content", "Weekly content report"],
+        ["outbound-weekly", "outbound", "Weekly outbound report"],
+        ["paid-weekly", "paid", "Weekly paid report"],
+        ["seo-weekly", "seo", "Weekly SEO report"],
+      ] as const) {
+        const topic = this.topics.get(topicId);
+        const dueAt = topic?.meta?.nextReportAt;
+        const writer = topic?.crew.find(actor => actor.kind === "agent") ?? reporter;
+        if (!topic?.meta || !dueAt) continue;
+        topic.meta.nextReportId = topic.meta.nextReportId ?? id;
+        this.reports.set(id, {
+          id, topicId, title, recipients: [tom], writer, scheduleId: null, dueAt, state: "scheduled", draftId: null,
+          sentAt: null, checkedBy: null, periodFrom: "2026-11-09T00:00:00+01:00", periodTo: "2026-11-15T23:59:00+01:00",
+        });
+      }
     }
     const lea = this.people.get("lea-brandt");
     const checker = [...this.topics.values()].flatMap(topic => topic.crew).find(actor => actor.id === "manager") ?? blankActor("Manager");
     if (lea) {
       this.checks.set("batch-3", {
-        id: "batch-3", kind: "random", topicId: "partnerships", laneId: "brand-list", scheduleId: "friday-check",
-        checker, subject: lea, at: "2026-11-16T07:20:00+01:00", rule: "no yes waited more than a day",
-        sample: { kind: "count", value: 5, of: 24, unit: "brands" }, outcome: "held", passed: 5, failed: 0,
+        id: "batch-3", kind: "random", topicId: "partnerships", laneId: "brand-list", scheduleId: null,
+        checker, subject: lea, at: "2026-11-16T07:20:00+01:00", rule: "the batch matches the partner profile",
+        sample: { kind: "count", value: 5, of: 40, unit: "brands" }, outcome: "held", passed: 5, failed: 0,
         text: "spot-checked 5 brands of Lea's batch 3 at random: all 5 fit the profile", followUpLaneId: null,
+      });
+      const reply = this.lanes.get("reply-handling");
+      this.checks.set("friday-reply", {
+        id: "friday-reply", kind: "periodic", topicId: "outbound", laneId: "reply-handling", scheduleId: "friday-check",
+        checker, subject: reply?.lead ?? lea, at: "2026-11-13T09:00:00+01:00", rule: "no yes waited more than a day",
+        sample: { kind: "count", value: 8, of: 8, unit: "replies" }, outcome: "held", passed: 8, failed: 0,
+        text: "Friday check of reply handling: no yes waited more than a day", followUpLaneId: null,
       });
     }
   }
@@ -1421,19 +1657,26 @@ export class World {
     const built = this.records.get(id);
     if (built) {
       const lane = this.lanes.get(built.laneId);
-      if (!lane || this.removed.has(lane.id) || !this.sharedLane(lane, viewer)) return undefined;
+      if (!lane || this.removed.has(lane.id)) return undefined;
+      if (!this.sharedLane(lane, viewer)) throw new Problem("forbidden", "This record is outside this reader’s lanes.");
       return built;
     }
+    let hidden = false;
     for (const lane of this.lanes.values()) {
       const kind = lane.made.find(item => item.target?.id === id &&
         (item.target.kind === "run" || item.target.kind === "review"))?.target?.kind;
-      if (!kind || this.removed.has(lane.id) || !this.sharedLane(lane, viewer)) continue;
+      if (!kind || this.removed.has(lane.id)) continue;
+      if (!this.sharedLane(lane, viewer)) {
+        hidden = true;
+        continue;
+      }
       const item = this.visibleLane(lane.id, viewer).made.find(made => made.target?.id === id && made.target.kind === kind);
       if (item) return {
         id, kind, laneId: lane.id, title: item.title, detail: item.detail, url: null, trigger: null, startedAt: null,
         finishedAt: null, state: null, checks: [], log: null, pullId: null,
       };
     }
+    if (hidden) throw new Problem("forbidden", "This record is outside this reader’s lanes.");
   }
 
   private recentTitle(page: Target, viewer: Actor): string | undefined {
@@ -1478,14 +1721,20 @@ export class World {
     return done();
   }
 
+  private knownByFirstName(people: AccessView["people"], lookup: string): AccessView["people"][number] | undefined {
+    const matches = people.filter(entry => entry.person.shortName.toLowerCase() === lookup || entry.person.name.toLowerCase().split(/\s+/)[0] === lookup);
+    return matches.length === 1 ? matches[0] : undefined;
+  }
+
   private invite(id: string, nameOrEmail: string, viewer: Actor): Effect {
     this.requireOwner(viewer);
     const access = requireRecord(this.access.get(id), "topic");
     const name = nameOrEmail.trim();
     if (!name) throw new Problem("badRequest", "Enter a name or email address.");
     const lookup = name.toLowerCase();
-    const known = [...this.access.values()].flatMap(record => record.people)
-      .find(entry => entry.person.name.toLowerCase() === lookup || entry.email?.toLowerCase() === lookup);
+    const people = [...new Map([...this.access.values()].flatMap(record => record.people).map(entry => [entry.person.id, entry])).values()];
+    const known = people.find(entry => entry.person.name.toLowerCase() === lookup || entry.email?.toLowerCase() === lookup)
+      ?? this.knownByFirstName(people, lookup);
     if (known) {
       const current = this.accessEntry(id, known.person);
       const message = this.message(viewer, `${known.person.name} is already in Tidewell; set what they see.`, null);
@@ -1613,7 +1862,16 @@ export class World {
   }
 
   private undo(id: string, undone: boolean, viewer: Actor): Effect {
-    const action = requireRecord(this.history.get(this.overnightAliases.get(id) ?? id), "action");
+    const alias = this.overnightAliases.get(id) ?? id;
+    const overnightRow = this.briefBase.overnight.find(row => row.id === id || row.id === alias);
+    if (undone && overnightRow) {
+      if (viewer.id !== this.owner.id) this.requireOwner(viewer);
+      if (overnightRow.outcome?.sentOutside) throw new Problem("conflict", "An action sent outside the workspace cannot be undone.");
+      if (overnightRow.undoUntilAt && Date.parse(overnightRow.undoUntilAt) <= Date.parse(this.now)) {
+        throw new Problem("conflict", "The undo window for this action has passed.");
+      }
+    }
+    const action = requireRecord(this.history.get(alias), "action");
     action.authorize(viewer);
     if (action.row.undone === undone) return done();
     if (undone) {
@@ -1701,11 +1959,8 @@ export class World {
     });
     const events: Event[] = [filed];
     if (this.module === "dev") {
-      const server = this.skills.connections.find(item => item.id === "your-server");
-      if (server?.capacity?.kind === "count") {
-        server.capacity = { ...server.capacity, value: server.capacity.value + 1 };
-        events.push({ type: "skills.changed" });
-      }
+      this.syncBusy();
+      events.push({ type: "skills.changed" });
     }
     return { lane, receipt, message, events };
   }
@@ -1722,6 +1977,7 @@ export class World {
     }
     const groupId = `group-${++this.serial}`;
     const filed = parts.map(part => this.file(part, viewer, options));
+    for (const item of filed) item.receipt.text = command.text;
     const ids = filed.map(item => item.lane.id);
     for (const item of filed) {
       item.lane.groupId = groupId;
@@ -1772,10 +2028,33 @@ export class World {
     if (id === "outreach-wave-2" && actionId === "send-wave-2" && lane.waitsFor?.id === viewer.id) {
       const base = requireRecord(this.lanes.get(id), "lane");
       const status = "Wave 2 goes out at 20 a day. Mara sees it in her brief.";
-      const prior = { waitsFor: base.waitsFor, state: base.state, stateWord: base.stateWord, status: base.status, standing: base.standing, acts: base.acts };
+      const next = "Sent from your mail, 20 a day";
+      const resource = this.managerBase.sharedResources.find(item => item.laneIds.includes(id) && item.quota);
+      const priorQuota = resource?.quota ? structuredClone(resource.quota) : null;
+      const priorTurn = resource?.turn ?? null;
+      const sentSteps = base.steps.map(step => {
+        if (/lea checks/i.test(step.text)) return { ...step, kind: "ok" as const, doneAt: this.now };
+        if (/20 a day/i.test(step.text)) return { ...step, kind: "now" as const };
+        return step;
+      });
+      const sentQuota = priorQuota?.kind === "count"
+        ? { ...priorQuota, value: Math.min(priorQuota.of ?? priorQuota.value + 20, priorQuota.value + 20) }
+        : priorQuota;
+      const prior = {
+        waitsFor: base.waitsFor, state: base.state, stateWord: base.stateWord, status: base.status,
+        standing: base.standing, acts: base.acts, next: base.next, steps: structuredClone(base.steps),
+      };
       const apply = (undone: boolean): Event[] => {
-        Object.assign(base, undone ? prior : { waitsFor: null, state: "ok", stateWord: "Working", status, standing: { headline: "Wave 2 is scheduled.", detail: status }, acts: [] });
-        return [...laneUpdate(id, base.topicId), { type: "thread.changed", threadId: "topic:partnerships" }, { type: "brief.changed" }];
+        Object.assign(base, undone ? prior : {
+          waitsFor: null, state: "ok", stateWord: "Working", status, next,
+          standing: { headline: "Wave 2 is scheduled.", detail: status }, acts: [], steps: sentSteps,
+        });
+        if (resource) {
+          resource.turn = undone ? priorTurn : id;
+          resource.quota = undone ? priorQuota : sentQuota;
+        }
+        return [...laneUpdate(id, base.topicId), { type: "thread.changed", threadId: "topic:partnerships" }, { type: "brief.changed" },
+          ...(resource?.id ? [{ type: "resource.changed" as const, resourceId: resource.id }] : [])];
       };
       const record = this.remember(base.topicId, id, status, viewer, apply, id, undefined, this.now, reader => {
         if (base.topicId) this.writableTopic(base.topicId, reader, base);
@@ -1998,7 +2277,7 @@ export class World {
     if (command.stage) throw new Problem("badRequest", "Choose a topic conversation to post in a stage.");
     const thread = this.writableThread(threadId, viewer);
     const topic = topicId ? this.topicView(topicId, viewer, new URLSearchParams()) : null;
-    const suggested = thread.suggestions.includes(text);
+    const suggested = thread.suggestions.includes(text) || matchesSuggestion(text, thread.suggestions);
     const kind = scope.kind === "topic" || scope.kind === "manager" || scope.kind === "general"
       ? suggested || (command.page && /^(sum up|summari[sz]e)\b/i.test(text)) ? "question" : classify(text) : null;
     const model = this.model(command.model);
@@ -2030,12 +2309,16 @@ export class World {
       const detail = named && page?.kind === "lane" ? this.lane(page.id ?? "")?.status
         : named && page?.kind === "topic" ? this.topics.get(page.id ?? "")?.goal?.insight : undefined;
       reply = this.message(blankActor("Manager"), detail ? `From the record: ${detail}` : brief.lede, null);
-    } else if (kind === "goalChange" && topic?.goal) {
-      const decision = this.proposeGoal(topic, text, sent);
-      reply = this.message(blankActor(`${topic.name} manager`), `I put the goal change in Decide. The goal stays as it is until ${this.owner.shortName} approves it.`, null);
-      reply.decisionId = decision.id;
-      events.push(...this.decisionEvents(decision), { type: "thread.changed", threadId: "manager" });
-      if (!this.prefsOf(viewer).interruptOnlyUrgent) events.push({ type: "attention.raised", target: target("decision", decision.id), reason: "A proposed goal change needs a decision." });
+    } else if (kind === "goalChange") {
+      const goalTopic = this.topicForGoal(text, topic);
+      if (goalTopic?.goal) {
+        const decision = this.proposeGoal(goalTopic, text, sent);
+        const approver = viewer.id === this.owner.id ? "you" : this.owner.shortName;
+        reply = this.message(blankActor(`${goalTopic.name} manager`), `I put the goal change in Decide. The goal stays as it is until ${approver} ${approver === "you" ? "approve" : "approves"} it.`, null);
+        reply.decisionId = decision.id;
+        events.push(...this.decisionEvents(decision), { type: "thread.changed", threadId: "manager" });
+        if (!this.prefsOf(viewer).interruptOnlyUrgent) events.push({ type: "attention.raised", target: target("decision", decision.id), reason: "A proposed goal change needs a decision." });
+      }
     } else if (kind === "done" && topic) {
       reply = this.message(blankActor(`${topic.name} manager`), "Logged as done on the thread it belongs to.", null);
     } else if (kind === "decision" && topic) {
@@ -2069,6 +2352,14 @@ export class World {
     if (goal.gap) {
       goal.gap.says = gap === 0 ? `The current forecast reaches the goal of ${goal.target}.` : `To reach ${goal.target}, the forecast still needs ${gap} more ${unit}.`;
     }
+    if (change.to !== priorTarget) {
+      const forecast = goal.signed + (goal.likely ?? 0);
+      goal.verdict = forecast > goal.target
+        ? { ...goal.verdict, state: "ok", word: "Ahead of plan" }
+        : forecast === goal.target
+          ? { ...goal.verdict, state: "ok", word: "On track" }
+          : { ...goal.verdict, state: "warn", word: "Behind plan" };
+    }
     const trajectory = goal.trajectory;
     const end = change.deadlineAt ? Math.round((Date.parse(change.deadlineAt.slice(0, 10)) - Date.parse(trajectory.start)) / 86400000) : null;
     if (end !== null && end > trajectory.now) {
@@ -2101,19 +2392,81 @@ export class World {
     return null;
   }
 
+  private topicMentioned(text: string): TopicView | undefined {
+    return [...this.topics.values()]
+      .filter(topic => new RegExp(`\\b${topic.name}\\b`, "i").test(text))
+      .sort((left, right) => right.name.length - left.name.length)[0];
+  }
+
+  private topicForGoal(text: string, current: TopicView | null): TopicView | null {
+    const named = this.topicMentioned(text);
+    let id = current?.goal ? current.id : null;
+    if (named?.goal && (!current || !new RegExp(`\\b${current.name}\\b`, "i").test(text))) id = named.id;
+    else if (!id && /\bguardrail\b/i.test(text)) {
+      id = [...this.topics.values()].find(topic => topic.goal && this.findGuardrail(topic.goal, text))?.id ?? null;
+    }
+    if (!id || !this.topics.get(id)?.goal) return null;
+    return this.topicView(id, this.owner, new URLSearchParams());
+  }
+
+  private budgetSentences(goal: TopicView["goal"] | undefined): string[] {
+    return [goal?.outside, goal?.insight, goal?.calibration].filter((line): line is string => Boolean(line)).join(" ").split(/(?<=[.])/);
+  }
+
   private affectedTopicIds(topicId: string): string[] {
     const found = new Set<string>();
-    if (topicId === "partnerships" && this.topics.has("paid")) found.add("paid");
+    const topic = this.topics.get(topicId);
+    for (const sentence of this.budgetSentences(topic?.goal)) {
+      if (!/\bbudget\b/i.test(sentence)) continue;
+      for (const other of this.topics.values()) {
+        if (other.id !== topicId && new RegExp(`\\b${other.name}\\b`, "i").test(sentence)) found.add(other.id);
+      }
+    }
+    for (const other of this.topics.values()) {
+      if (other.id === topicId || !topic) continue;
+      for (const sentence of this.budgetSentences(other.goal)) {
+        if (/\bbudget\b/i.test(sentence) && new RegExp(`\\b${topic.name}\\b`, "i").test(sentence)) found.add(other.id);
+      }
+    }
     for (const resource of this.managerBase.sharedResources) {
       const topics = new Set(resource.laneIds.flatMap(id => {
-        const topic = this.lanes.get(id)?.topicId;
-        return topic ? [topic] : [];
+        const related = this.lanes.get(id)?.topicId;
+        return related ? [related] : [];
       }));
       if (!topics.has(topicId)) continue;
       for (const other of topics) if (other !== topicId) found.add(other);
     }
+    for (const report of this.reports.values()) {
+      if (report.topicId !== topicId) continue;
+      for (const other of this.topics.values()) {
+        if (other.id !== topicId && new RegExp(`\\b${other.name}\\b`, "i").test(report.title)) found.add(other.id);
+      }
+    }
     found.delete(topicId);
     return [...found];
+  }
+
+  private findGuardrail(goal: NonNullable<TopicView["goal"]>, text: string): NonNullable<NonNullable<TopicView["goal"]>["guardrails"]>["items"][number] | undefined {
+    const items = (goal.guardrails?.items ?? []).filter(item => item.id && item.what !== "Agents this week");
+    const lower = text.toLowerCase();
+    const direct = items.find(item => lower.includes(item.what.toLowerCase()));
+    if (direct) return direct;
+    if (/\bemails?\b|\bsends?\b/i.test(text)) return items.find(item => /send|email/i.test(item.what));
+    if (/\bspend\b/i.test(text)) return items.find(item => /spend/i.test(item.what));
+    const phrase = /guardrail on ([a-z0-9][^.]{0,60}?)(?:\s+to\b|$)/i.exec(text)?.[1]
+      ?? /([a-z0-9][^.]{0,40}?)\s+guardrail/i.exec(text)?.[1];
+    const words = (phrase ?? "").toLowerCase().split(/\s+/).filter(word => word.length > 2 && !["the", "and"].includes(word));
+    return items.map(item => ({ item, score: words.filter(word => item.what.toLowerCase().includes(word)).length }))
+      .filter(row => row.score > 0).sort((left, right) => right.score - left.score)[0]?.item;
+  }
+
+  private goalChangeDetail(change: NonNullable<DecisionView["goalChange"]>): string {
+    if (change.affectedTopics.includes("paid")) return "Paid's partner budget and the Friday report follow the new goal.";
+    if (change.field === "budget") return "The new budget applies to this topic's plan.";
+    if (change.field === "priority") return "The new priority applies across this module's topics.";
+    if (change.field === "guardrail") return "The new guardrail applies to this topic's plan.";
+    if (change.field === "deadline") return "The new deadline applies to this topic's plan.";
+    return "The new target applies to this topic's plan.";
   }
 
   private typedGoalChange(topic: TopicView, goal: NonNullable<TopicView["goal"]>, text: string): GoalChange | null {
@@ -2127,14 +2480,18 @@ export class World {
       const amount = eurosMinor(text);
       const cap = topic.spend?.cap;
       if (!amount || !cap) throw new Problem("badRequest", "Include the new budget for this goal.");
-      return { ...base, field, from: cap.amountMinor, to: amount, budget: { from: structuredClone(cap), to: { amountMinor: amount, currency: cap.currency }, period: /\b(a|per) week\b/i.test(text) ? "a week" : null } };
+      return { ...base, field, from: cap.amountMinor, to: amount, budget: { from: structuredClone(cap), to: { amountMinor: amount, currency: cap.currency }, period: budgetPeriod(text) } };
     }
     if (field === "priority") {
-      const from = topic.meta?.priority ?? null;
-      return { ...base, field, from: from ?? 0, to: 1, priority: { from, to: 1 } };
+      const ranks = this.priorityRanks();
+      const from = topic.meta?.priority ?? ranks.get(topic.id) ?? null;
+      const count = Math.max(ranks.size, 1);
+      const to = from != null && /\b(lower|reduce|decrease)\b/i.test(text) ? Math.min(count, from + 1)
+        : from != null && /\b(raise|increase|higher)\b/i.test(text) && !/\b(top|first)\b/i.test(text) ? Math.max(1, from - 1) : 1;
+      return { ...base, field, from: from ?? 0, to, priority: { from, to } };
     }
-    const item = goal.guardrails?.items.find(entry => text.toLowerCase().includes(entry.what.toLowerCase()));
-    const amount = eurosMinor(text);
+    const item = this.findGuardrail(goal, text);
+    const amount = item?.limit?.kind === "count" ? countSpoken(text) : eurosMinor(text);
     if (!item?.id || !item.limit || amount === null) throw new Problem("badRequest", "Name the guardrail and its new limit.");
     const to = item.limit.kind === "money"
       ? { ...item.limit, money: { amountMinor: amount, currency: item.limit.money.currency } }
@@ -2168,7 +2525,7 @@ export class World {
     const goal = requireRecord(topic.goal, "goal");
     const goalChange = this.typedGoalChange(topic, goal, text) ?? this.quantityGoalChange(topic, goal, text);
     const id = `dc-${++this.serial}`;
-    const detail = goalChange.affectedTopics.includes("paid") ? "Paid’s partner budget and the Friday report follow the new goal." : "The new target applies to this topic’s plan.";
+    const detail = this.goalChangeDetail(goalChange);
     const decision: DecisionView = {
       id, title: text, shortTitle: `Change the ${topic.name} goal`, state: "open", topicId: topic.id, topicName: topic.name,
       dueAt: this.nextBrief(3), whyYours: "Yours: changes a goal", minutes: 2, contextLine: topic.name, cardContext: detail,
@@ -2286,7 +2643,9 @@ export class World {
   private guardrail(name: string, on: boolean, viewer: Actor, id: string | null = null): Effect {
     this.requireOwner(viewer);
     const guardrail = requireRecord(
-      (id ? this.skills.guardrails.find(item => item.id === id) : undefined) ?? this.skills.guardrails.find(item => item.name === name),
+      (id ? this.skills.guardrails.find(item => item.id === id) : undefined)
+        ?? this.skills.guardrails.find(item => item.name === name)
+        ?? this.skills.guardrails.find(item => item.name.toLowerCase() === name.toLowerCase() || item.id === slug(name)),
       "guardrail",
     );
     if (guardrail.on === on) return done();
@@ -2545,6 +2904,13 @@ export class World {
         const decision = this.decisions.get(event.target.id ?? "");
         return Boolean(decision && this.fullTopic(decision.topicId, viewer));
       }
+    }
+    if (event.type === "resource.changed") {
+      const resource = this.managerBase.sharedResources.find(item => item.id === event.resourceId);
+      return Boolean(resource?.laneIds.some(laneId => {
+        const lane = this.lanes.get(laneId);
+        return Boolean(lane && this.sharedLane(lane, viewer));
+      }));
     }
     if ("topicId" in event) return event.topicId !== null && this.role(event.topicId, viewer) !== "none";
     return event.type === "brief.published" || event.type === "brief.changed" || event.type === "feed.reset"
