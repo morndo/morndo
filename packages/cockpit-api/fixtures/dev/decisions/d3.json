@@ -52,7 +52,9 @@
         "kind": "lane",
         "id": "new-sign-in"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     }
   ],
   "ifNoAnswer": "The lane waits for your pick.",
@@ -66,5 +68,19 @@
   "goalChange": null,
   "release": null,
   "changeRequest": null,
-  "rule": "onlyYouKnow"
+  "rule": "onlyYouKnow",
+  "proposer": {
+    "id": "web-app-manager",
+    "name": "Web app manager",
+    "shortName": "Web app manager",
+    "kind": "agent",
+    "avatar": "W",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "Batches 1 to 3: 120 brands, checked by Lea",
-      "who": "Lea · Friday"
+      "who": "Lea · Friday",
+      "doneAt": "2026-11-13T10:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Batch 4: 40 brands, 32 of them added overnight",
-      "who": "Brand scout · now"
+      "who": "Brand scout · now",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Batch 5: the last 40",
-      "who": "Brand scout · Wed"
+      "who": "Brand scout · Wed",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Lea checks batches 4 and 5",
-      "who": "Lea · Thu"
+      "who": "Lea · Thu",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
@@ -102,8 +106,8 @@
       "title": "Brand list in HubSpot",
       "detail": "160 brands, 64 marked as a fit",
       "target": {
-        "kind": "lane",
-        "id": "brand-list"
+        "kind": "file",
+        "id": "file-brand-list-0"
       }
     },
     {
@@ -111,8 +115,8 @@
       "title": "Why each brand fits",
       "detail": "One line per brand, from the partner profile",
       "target": {
-        "kind": "lane",
-        "id": "brand-list"
+        "kind": "file",
+        "id": "file-brand-list-1"
       }
     }
   ],
@@ -125,5 +129,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-16T18:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

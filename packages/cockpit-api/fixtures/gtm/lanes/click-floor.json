@@ -47,17 +47,20 @@
     {
       "kind": "ok",
       "text": "Every running ad checked against the floor",
-      "who": "Analyst · 08:10"
+      "who": "Analyst · 08:10",
+      "doneAt": "2026-11-16T08:10:00+01:00"
     },
     {
       "kind": "ok",
       "text": "3 ads switched off, inside your €500 guardrail",
-      "who": "Paid buyer · 08:30"
+      "who": "Paid buyer · 08:30",
+      "doneAt": "2026-11-16T08:29:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Logged in the brief, with Undo",
-      "who": "Manager · 08:30"
+      "who": "Manager · 08:30",
+      "doneAt": "2026-11-16T08:30:00+01:00"
     }
   ],
   "doneNote": "Done means all three. You can undo it from the brief until tonight.",
@@ -83,8 +86,8 @@
       "title": "The 3 ads",
       "detail": "LinkedIn: 2, Search: 1 · 0.31% to 0.52% clicks",
       "target": {
-        "kind": "lane",
-        "id": "click-floor"
+        "kind": "file",
+        "id": "file-click-floor-0"
       }
     }
   ],
@@ -97,5 +100,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": "click-floor-weekly",
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

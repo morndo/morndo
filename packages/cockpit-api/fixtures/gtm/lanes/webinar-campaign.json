@@ -47,17 +47,20 @@
     {
       "kind": "ok",
       "text": "Campaign live on LinkedIn, €400 in all",
-      "who": "Paid buyer · Fri 13 Nov"
+      "who": "Paid buyer · Fri 13 Nov",
+      "doneAt": "2026-11-13T10:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Running until Thursday",
-      "who": "Paid buyer · €290 of €400"
+      "who": "Paid buyer · €290 of €400",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Sign-ups and their cost reported",
-      "who": "Manager · Fri 20 Nov"
+      "who": "Manager · Fri 20 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 3. The Manager set them when it opened the lane.",
@@ -83,8 +86,8 @@
       "title": "2 ads",
       "detail": "The webinar title and one line from the agenda",
       "target": {
-        "kind": "lane",
-        "id": "webinar-campaign"
+        "kind": "file",
+        "id": "file-webinar-campaign-0"
       }
     }
   ],
@@ -97,5 +100,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-19T17:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -108,28 +108,32 @@
       "purpose": "Code, pull requests and checks",
       "state": "connected",
       "capacity": null,
-      "id": "github"
+      "id": "github",
+      "scope": "readWrite"
     },
     {
       "name": "Claude Code",
       "purpose": "Agent, builds and fixes",
       "state": "signedIn",
       "capacity": null,
-      "id": "claude-code"
+      "id": "claude-code",
+      "scope": "agent"
     },
     {
       "name": "Codex",
       "purpose": "Agent, does the fresh reviews",
       "state": "signedIn",
       "capacity": null,
-      "id": "codex"
+      "id": "codex",
+      "scope": "agent"
     },
     {
       "name": "Cursor",
       "purpose": "Agent, does QA in the browser",
       "state": "signedIn",
       "capacity": null,
-      "id": "cursor"
+      "id": "cursor",
+      "scope": "agent"
     },
     {
       "name": "Your server",
@@ -141,14 +145,16 @@
         "of": 8,
         "unit": "busy"
       },
-      "id": "your-server"
+      "id": "your-server",
+      "scope": "runsLanes"
     },
     {
       "name": "Sentry",
       "purpose": "Errors from production",
       "state": "addKey",
       "capacity": null,
-      "id": "sentry"
+      "id": "sentry",
+      "scope": "read"
     }
   ],
   "connected": 5,
@@ -156,27 +162,52 @@
     {
       "name": "Production",
       "detail": "Ask me before anything is released",
-      "on": true
+      "on": true,
+      "id": "production",
+      "topicId": null,
+      "action": "ask",
+      "limit": null
     },
     {
       "name": "Database",
       "detail": "Backup first, and ask me before a change",
-      "on": true
+      "on": true,
+      "id": "database",
+      "topicId": null,
+      "action": "ask",
+      "limit": null
     },
     {
       "name": "Merging",
       "detail": "Tests and one fresh review before any merge",
-      "on": true
+      "on": true,
+      "id": "merging",
+      "topicId": null,
+      "action": "ask",
+      "limit": null
     },
     {
       "name": "Tries",
       "detail": "3 tries at a fix, then stop and ask",
-      "on": true
+      "on": true,
+      "id": "tries",
+      "topicId": null,
+      "action": "stop",
+      "limit": {
+        "kind": "count",
+        "value": 3,
+        "of": 3,
+        "unit": "tries"
+      }
     },
     {
       "name": "Keys",
       "detail": "Stay in the vault, never in a chat",
-      "on": true
+      "on": true,
+      "id": "keys",
+      "topicId": null,
+      "action": "ask",
+      "limit": null
     }
   ],
   "rulesNote": "On from the start. Agents cannot change them. You can."

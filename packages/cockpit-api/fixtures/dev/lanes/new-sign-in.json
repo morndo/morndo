@@ -55,7 +55,8 @@
     {
       "kind": "now",
       "text": "Your pick: passkeys or a link by email",
-      "who": "You · due Wednesday"
+      "who": "You · due Wednesday",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 1. The Manager set them when it opened the lane.",
@@ -85,5 +86,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

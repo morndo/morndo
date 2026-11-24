@@ -27,6 +27,10 @@ pub enum Event {
         lane_id: LaneId,
         /// Identifier of the associated topic.
         topic_id: Present<TopicId>,
+        /// Schedule that filed the lane, or null when none did.
+        schedule_id: Present<crate::ScheduleId>,
+        /// Group shared with the sibling lanes when an ask was split, or null when it was not split.
+        group_id: Present<String>,
     },
     #[serde(rename = "lane.changed")]
     LaneChanged {
@@ -84,6 +88,8 @@ pub enum Event {
     GuardrailBreached {
         topic_id: Present<TopicId>,
         name: String,
+        /// Guardrail that was breached.
+        guardrail_id: String,
     },
     #[serde(rename = "usage.changed")]
     UsageChanged {},
@@ -99,6 +105,67 @@ pub enum Event {
     ModuleChanged { module_id: crate::ModuleId },
     #[serde(rename = "feed.reset")]
     FeedReset {},
+    /// A CI run record was created or changed.
+    #[serde(rename = "run.changed")]
+    RunChanged {
+        /// Run record that changed.
+        record_id: crate::RecordId,
+        /// Lane the run belongs to.
+        lane_id: LaneId,
+    },
+    /// A schedule was created, switched or fired.
+    #[serde(rename = "schedule.changed")]
+    ScheduleChanged {
+        /// Schedule that changed.
+        schedule_id: crate::ScheduleId,
+    },
+    /// A report changed state or was rescheduled.
+    #[serde(rename = "report.changed")]
+    ReportChanged {
+        /// Report that changed.
+        report_id: crate::ReportId,
+        /// Topic the report covers.
+        topic_id: TopicId,
+    },
+    /// A spot check was recorded.
+    #[serde(rename = "check.recorded")]
+    CheckRecorded {
+        /// Check that was recorded.
+        check_id: crate::CheckId,
+        /// Topic the check belongs to.
+        topic_id: TopicId,
+    },
+    /// A decision right's count or limit changed.
+    #[serde(rename = "decisionRight.changed")]
+    DecisionRightChanged {},
+    /// A decision right reached its daily limit; the next item of that rule becomes a decision in Decide.
+    #[serde(rename = "decisionRight.limitReached")]
+    DecisionRightLimitReached {
+        /// Rule whose daily limit was reached.
+        rule: crate::DecisionRule,
+        /// Person whose right it is, or null when the right belongs to the reader.
+        person_id: Present<crate::PersonId>,
+    },
+    /// A shared resource changed hands or its quota moved.
+    #[serde(rename = "resource.changed")]
+    ResourceChanged {
+        /// Resource that changed.
+        resource_id: String,
+    },
+    /// A forecast was scored against what was measured.
+    #[serde(rename = "forecast.scored")]
+    ForecastScored {
+        /// Topic whose goal the forecast belongs to.
+        topic_id: TopicId,
+        /// Forecast that was scored.
+        forecast_id: String,
+    },
+    /// The workspace's members or their access changed.
+    #[serde(rename = "members.changed")]
+    MembersChanged {
+        /// Person who changed, or null when the change concerns the list as a whole.
+        person_id: Present<crate::PersonId>,
+    },
     #[serde(other)]
     #[schemars(skip)]
     Unknown,

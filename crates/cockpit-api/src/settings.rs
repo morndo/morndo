@@ -105,7 +105,7 @@ pub struct ModuleCard {
     pub here: bool,
 }
 
-/// Decision right for the cockpit.
+/// Decision right for the cockpit. A right with a daily limit counts what it has used today. At the limit the next item of that rule becomes a decision in Decide (the action gateway does this in the real hub).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DecisionRight {
@@ -123,6 +123,10 @@ pub struct DecisionRight {
     pub daily_limit: Present<DailyLimit>,
     /// Risky for this record.
     pub risky: bool,
+    /// Items decided under this right today, or null when the right is yours.
+    pub used_today: Present<i64>,
+    /// Time the count resets, or null when the right is yours.
+    pub resets_at: Present<crate::Timestamp>,
 }
 
 /// Editable cockpit preferences and decision rights.

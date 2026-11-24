@@ -51,32 +51,38 @@
     {
       "kind": "ok",
       "text": "Call notes with what Halden asked for",
-      "who": "Notetaker · 13 Nov"
+      "who": "Notetaker · 13 Nov",
+      "doneAt": "2026-11-13T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Offer drafted from the partner template",
-      "who": "Jonas · today, 08:30"
+      "who": "Jonas · today, 08:30",
+      "doneAt": "2026-11-16T08:30:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Numbers checked: 2,400 customers, about 4% take it up",
-      "who": "Call prep · today"
+      "who": "Call prep · today",
+      "doneAt": "2026-11-16T08:45:00+01:00"
     },
     {
       "kind": "now",
       "text": "Your OK to send",
-      "who": "You · by Thursday"
+      "who": "You · by Thursday",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Sent from your mail",
-      "who": "Sender · after your OK"
+      "who": "Sender · after your OK",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Halden signs",
-      "who": "Halden · goal: December"
+      "who": "Halden · goal: December",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 6. The Manager set them when it opened the lane.",
@@ -130,8 +136,8 @@
       "title": "The offer",
       "detail": "2 pages, from the partner template",
       "target": {
-        "kind": "lane",
-        "id": "halden-offer"
+        "kind": "file",
+        "id": "file-halden-offer-0"
       }
     },
     {
@@ -139,8 +145,8 @@
       "title": "Halden call notes",
       "detail": "13 November, 34 minutes",
       "target": {
-        "kind": "lane",
-        "id": "halden-offer"
+        "kind": "file",
+        "id": "file-halden-offer-1"
       }
     },
     {
@@ -162,5 +168,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": "2026-11-23T17:00:00+01:00"
+  "afterNextAt": "2026-11-23T17:00:00+01:00",
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -93,27 +93,32 @@
     {
       "kind": "ok",
       "text": "Promo text written and approved",
-      "who": "Writer · Friday"
+      "who": "Writer · Friday",
+      "doneAt": "2026-11-13T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "6 images made",
-      "who": "Visuals · Saturday"
+      "who": "Visuals · Saturday",
+      "doneAt": "2026-11-14T11:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Every image passes the brand check: 4 of 6 so far",
-      "who": "Visuals · stuck since 09:12"
+      "who": "Visuals · stuck since 08:44",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Post scheduled for 16:00",
-      "who": "Publisher · today"
+      "who": "Publisher · today",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Sign-ups reported after the webinar",
-      "who": "Manager · Fri 20 Nov"
+      "who": "Manager · Fri 20 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
@@ -167,8 +172,8 @@
       "title": "Promo text",
       "detail": "120 words, approved Friday",
       "target": {
-        "kind": "lane",
-        "id": "webinar"
+        "kind": "file",
+        "id": "file-webinar-0"
       }
     },
     {
@@ -176,8 +181,8 @@
       "title": "6 images",
       "detail": "4 pass the brand check, 2 fail",
       "target": {
-        "kind": "topic",
-        "id": "content"
+        "kind": "file",
+        "id": "file-webinar-1"
       }
     }
   ],
@@ -190,5 +195,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

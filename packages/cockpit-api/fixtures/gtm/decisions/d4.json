@@ -31,5 +31,19 @@
   "goalChange": null,
   "release": null,
   "changeRequest": null,
-  "rule": "hardToUndo"
+  "rule": "hardToUndo",
+  "proposer": {
+    "id": "partnerships-manager",
+    "name": "Partnerships manager",
+    "shortName": "Partnerships manager",
+    "kind": "agent",
+    "avatar": "P",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

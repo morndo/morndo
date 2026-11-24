@@ -58,27 +58,32 @@
     {
       "kind": "ok",
       "text": "A test that fails before the fix and passes after",
-      "who": "Builder · Friday"
+      "who": "Builder · Friday",
+      "doneAt": "2026-11-13T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "One fresh review, every finding fixed",
-      "who": "Reviewer · Saturday"
+      "who": "Reviewer · Saturday",
+      "doneAt": "2026-11-14T11:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Fenwick's 1.2 GB export runs on staging",
-      "who": "QA · Sunday"
+      "who": "QA · Sunday",
+      "doneAt": "2026-11-15T12:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Released to production",
-      "who": "Release · waits for you"
+      "who": "Release · waits for you",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Fenwick's export runs on production",
-      "who": "QA · after the release"
+      "who": "QA · after the release",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
@@ -187,5 +192,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

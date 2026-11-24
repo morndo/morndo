@@ -49,7 +49,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m35",
@@ -79,7 +80,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     }
   ],
   "nextCursor": null,

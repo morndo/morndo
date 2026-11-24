@@ -73,7 +73,8 @@
       "laneId": "export-for-big-accounts",
       "state": "open",
       "dueAt": "2026-11-16T14:00:00+01:00",
-      "rule": "hardToUndo"
+      "rule": "hardToUndo",
+      "proposer": null
     },
     {
       "id": "d2",
@@ -87,7 +88,8 @@
       "laneId": "tax-rates",
       "state": "open",
       "dueAt": "2026-11-17T17:00:00+01:00",
-      "rule": "hardToUndo"
+      "rule": "hardToUndo",
+      "proposer": null
     },
     {
       "id": "d3",
@@ -101,7 +103,8 @@
       "laneId": "new-sign-in",
       "state": "open",
       "dueAt": "2026-11-18T17:00:00+01:00",
-      "rule": "onlyYouKnow"
+      "rule": "onlyYouKnow",
+      "proposer": null
     }
   ],
   "openCount": 3,
@@ -132,8 +135,18 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-15T23:12:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "released",
+        "count": null,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "hardToUndo"
     },
     {
       "id": "o2",
@@ -144,8 +157,18 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T01:40:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "merged",
+        "count": null,
+        "heldBack": null,
+        "rounds": 2,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "hardToUndo"
     },
     {
       "id": "o3",
@@ -156,8 +179,18 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T03:05:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "updated",
+        "count": 6,
+        "heldBack": 1,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "insideGuardrails"
     },
     {
       "id": "o4",
@@ -168,8 +201,18 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T04:30:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "renewed",
+        "count": null,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "insideGuardrails"
     },
     {
       "id": "o5",
@@ -180,8 +223,18 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T05:15:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "deleted",
+        "count": 4,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "hardToUndo"
     }
   ],
   "drafts": {
@@ -215,5 +268,9 @@
   "overnightSinceAt": "2026-11-15T18:00:00+01:00",
   "burnsSub": "One thing an agent could not fix on its own",
   "settledBurns": [],
-  "sharedTopics": []
+  "sharedTopics": [],
+  "edition": {
+    "used": 1,
+    "of": 3
+  }
 }

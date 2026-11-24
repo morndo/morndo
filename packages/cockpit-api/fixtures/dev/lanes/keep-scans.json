@@ -47,12 +47,14 @@
     {
       "kind": "now",
       "text": "Fresh review, round 1",
-      "who": "Reviewer · today"
+      "who": "Reviewer · today",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "QA by hand",
-      "who": "QA"
+      "who": "QA",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 2. The Manager set them when it opened the lane.",
@@ -82,5 +84,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-16T15:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "The 52-minute recording summed up in 8 points",
-      "who": "Writer · Saturday"
+      "who": "Writer · Saturday",
+      "doneAt": "2026-11-14T10:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Draft 2 of 3, shorter and with one chart",
-      "who": "Writer · now"
+      "who": "Writer · now",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Checked against the recording",
-      "who": "Checker · Wed 18 Nov"
+      "who": "Checker · Wed 18 Nov",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Posted on LinkedIn",
-      "who": "Publisher · Thu 19 Nov"
+      "who": "Publisher · Thu 19 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 4. The Manager set them when it opened the lane.",
@@ -102,8 +106,8 @@
       "title": "Summary in 8 points",
       "detail": "From the October recording",
       "target": {
-        "kind": "lane",
-        "id": "recap"
+        "kind": "file",
+        "id": "file-recap-0"
       }
     },
     {
@@ -111,8 +115,8 @@
       "title": "Draft 1",
       "detail": "Too long at 900 words; draft 2 aims at 350",
       "target": {
-        "kind": "lane",
-        "id": "recap"
+        "kind": "file",
+        "id": "file-recap-1"
       }
     }
   ],
@@ -125,5 +129,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-19T17:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

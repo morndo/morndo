@@ -76,7 +76,7 @@
       "id": "research",
       "name": "Research",
       "state": "idle",
-      "verdict": "No goal set",
+      "verdict": "Idle",
       "progress": "Answers asks from the other topics",
       "spend": {
         "amountMinor": 300,
@@ -97,7 +97,8 @@
       "laneId": "search-budget",
       "state": "open",
       "dueAt": "2026-11-16T14:00:00+01:00",
-      "rule": "overWeeklyCap"
+      "rule": "overWeeklyCap",
+      "proposer": null
     },
     {
       "id": "d2",
@@ -111,7 +112,8 @@
       "laneId": "sequence-b",
       "state": "open",
       "dueAt": "2026-11-17T17:00:00+01:00",
-      "rule": "inYourName"
+      "rule": "inYourName",
+      "proposer": null
     },
     {
       "id": "d3",
@@ -125,7 +127,8 @@
       "laneId": "fenwick",
       "state": "open",
       "dueAt": "2026-11-18T17:00:00+01:00",
-      "rule": "inYourName"
+      "rule": "inYourName",
+      "proposer": null
     },
     {
       "id": "d4",
@@ -139,7 +142,8 @@
       "laneId": "halden-offer",
       "state": "open",
       "dueAt": "2026-11-19T17:00:00+01:00",
-      "rule": "hardToUndo"
+      "rule": "hardToUndo",
+      "proposer": null
     }
   ],
   "openCount": 4,
@@ -170,8 +174,18 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T07:10:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T07:00:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "updated",
+        "count": null,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "insideGuardrails"
     },
     {
       "id": "o2",
@@ -182,11 +196,21 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T07:30:00+01:00",
-      "undoUntilAt": null,
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
       "relatedLaneIds": [
         "contact-data",
         "outreach-wave-2"
-      ]
+      ],
+      "outcome": {
+        "kind": "added",
+        "count": 32,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "insideGuardrails"
     },
     {
       "id": "o3",
@@ -194,11 +218,21 @@
       "topicName": "SEO",
       "laneId": "comparison-pages",
       "text": "SEO published the 2 comparison pages you approved on Friday.",
-      "undoable": true,
+      "undoable": false,
       "undone": false,
       "at": "2026-11-16T07:42:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "published",
+        "count": 2,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": true
+      },
+      "rule": "hardToUndo"
     },
     {
       "id": "o4",
@@ -209,8 +243,18 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T08:05:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "stopped",
+        "count": 14,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "insideGuardrails"
     },
     {
       "id": "o5",
@@ -221,14 +265,24 @@
       "undoable": true,
       "undone": false,
       "at": "2026-11-16T08:30:00+01:00",
-      "undoUntilAt": null,
-      "relatedLaneIds": []
+      "undoUntilAt": "2026-11-16T23:30:00+01:00",
+      "relatedLaneIds": [],
+      "outcome": {
+        "kind": "switchedOff",
+        "count": 3,
+        "heldBack": null,
+        "rounds": null,
+        "checks": [],
+        "pullId": null,
+        "sentOutside": false
+      },
+      "rule": "insideGuardrails"
     }
   ],
   "drafts": {
-    "count": 4,
-    "text": "4 drafts wait in your mail",
-    "detail": "The team update, the board note and 2 customer replies. Nothing is sent until you send it."
+    "count": 7,
+    "text": "7 drafts wait in your mail",
+    "detail": "The team update, the board note, 2 customer replies, and 3 lane drafts. Nothing is sent until you send it."
   },
   "artwork": {
     "index": 13,
@@ -247,5 +301,9 @@
   "overnightSinceAt": "2026-11-15T18:00:00+01:00",
   "burnsSub": "This needs your call.",
   "settledBurns": [],
-  "sharedTopics": []
+  "sharedTopics": [],
+  "edition": {
+    "used": 1,
+    "of": 3
+  }
 }

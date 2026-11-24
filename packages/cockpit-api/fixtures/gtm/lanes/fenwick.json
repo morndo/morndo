@@ -47,27 +47,32 @@
     {
       "kind": "ok",
       "text": "Interview with Fenwick's ops lead, written up",
-      "who": "Writer · Tue 10 Nov"
+      "who": "Writer · Tue 10 Nov",
+      "doneAt": "2026-11-10T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Draft signed off by Fenwick, quote included",
-      "who": "Fenwick · Friday"
+      "who": "Fenwick · Friday",
+      "doneAt": "2026-11-13T11:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Your OK on the 38% claim",
-      "who": "You · by Wednesday"
+      "who": "You · by Wednesday",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Published on the site",
-      "who": "Publisher · Wed 18 Nov"
+      "who": "Publisher · Wed 18 Nov",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Shared on LinkedIn and in the newsletter",
-      "who": "Publisher · Wed 18 Nov"
+      "who": "Publisher · Wed 18 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
@@ -107,8 +112,8 @@
       "title": "The story",
       "detail": "1,100 words, signed off by Fenwick",
       "target": {
-        "kind": "lane",
-        "id": "fenwick"
+        "kind": "file",
+        "id": "file-fenwick-0"
       }
     },
     {
@@ -116,8 +121,8 @@
       "title": "Fenwick's sign-off",
       "detail": "From their ops lead, Friday 16:20",
       "target": {
-        "kind": "drafts",
-        "id": null
+        "kind": "draft",
+        "id": "fenwick"
       }
     },
     {
@@ -125,8 +130,8 @@
       "title": "Source for the 38%",
       "detail": "Fenwick's Q3 ops report, page 4",
       "target": {
-        "kind": "lane",
-        "id": "fenwick"
+        "kind": "file",
+        "id": "file-fenwick-2"
       }
     }
   ],
@@ -139,5 +144,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": "2026-11-18T17:00:00+01:00"
+  "afterNextAt": "2026-11-18T17:00:00+01:00",
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

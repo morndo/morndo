@@ -40,6 +40,13 @@ pub(crate) fn text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String,
     bounded_text::<D, 4000>(deserializer)
 }
 
+/// A text that may be left out. Present, it is a string: the schema publishes no null for it, so null is refused here too.
+pub(crate) fn optional_text<'de, D: Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<String>, D::Error> {
+    bounded_text::<D, 4000>(deserializer).map(Some)
+}
+
 pub(crate) fn name<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
     bounded_text::<D, 200>(deserializer)
 }
@@ -157,6 +164,10 @@ pub(crate) fn target_id_schema(_: &mut SchemaGenerator) -> Schema {
         { "type": "string", "minLength": 1, "maxLength": 200 },
         { "type": "null" }
     ] })
+}
+
+pub(crate) fn text_schema(_: &mut SchemaGenerator) -> Schema {
+    schemars::json_schema!({ "type": "string", "minLength": 1, "maxLength": 4000 })
 }
 
 pub(crate) fn stage_names_schema(_: &mut SchemaGenerator) -> Schema {

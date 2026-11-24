@@ -52,7 +52,9 @@
         "kind": "lane",
         "id": "tax-rates"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Run the tax-rate migration",
@@ -62,7 +64,9 @@
         "kind": "lane",
         "id": "tax-rates"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     }
   ],
   "ifNoAnswer": "The migration waits for your OK.",
@@ -76,5 +80,19 @@
   "goalChange": null,
   "release": null,
   "changeRequest": null,
-  "rule": "hardToUndo"
+  "rule": "hardToUndo",
+  "proposer": {
+    "id": "billing-manager",
+    "name": "Billing manager",
+    "shortName": "Billing manager",
+    "kind": "agent",
+    "avatar": "B",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

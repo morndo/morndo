@@ -231,10 +231,11 @@ pub enum Command {
         model: Option<ModelId>,
         /// Skill for this record.
         skill: SkillId,
-        /// Text shown to the reader.
-        #[schemars(length(min = 1, max = 4000))]
-        #[serde(deserialize_with = "input::text")]
-        text: String,
+        /// What to ask the skill. Without it the hub runs the skill's default ask.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[schemars(schema_with = "input::text_schema")]
+        #[serde(deserialize_with = "input::optional_text")]
+        text: Option<String>,
     },
     #[serde(rename = "access.set")]
     AccessSet {
@@ -304,6 +305,11 @@ pub enum Command {
     },
     #[serde(rename = "guardrail.set")]
     GuardrailSet {
+        /// Guardrail to switch. The name is still accepted without it.
+        #[serde(default)]
+        #[schemars(length(min = 1, max = 200))]
+        #[serde(deserialize_with = "input::optional_name")]
+        id: Option<String>,
         /// Name shown to the reader.
         #[schemars(length(min = 1, max = 200))]
         #[serde(deserialize_with = "input::name")]
@@ -387,6 +393,8 @@ pub struct Receipt {
     pub chain: bool,
     /// Identifier of the associated lane.
     pub lane_id: LaneId,
+    /// Lanes filed together when the ask was split into independent parts. Empty when it was not split.
+    pub group_lane_ids: Vec<LaneId>,
 }
 
 fn enabled_by_default() -> bool {

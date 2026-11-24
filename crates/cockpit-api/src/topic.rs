@@ -55,6 +55,10 @@ pub struct TopicMeta {
     pub next_report_at: Present<Timestamp>,
     /// Parts for this record.
     pub parts: Vec<String>,
+    /// Report that is due next, or null when none is scheduled.
+    pub next_report_id: Present<crate::ReportId>,
+    /// Rank among the topics of the module (1 is first), or null when the topic has none.
+    pub priority: Present<i64>,
 }
 
 /// Fact for the cockpit.
@@ -209,6 +213,12 @@ pub struct Deal {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct GuardrailItem {
+    /// Stable identifier of the guardrail, or null when it has none.
+    pub id: Present<String>,
+    /// Switch on the Skills page that turns this guardrail on or off, or null when it has none.
+    pub switch_id: Present<String>,
+    /// What happens when the guardrail is breached, or null when it only reports.
+    pub action: Present<crate::skills::GuardrailAction>,
     /// Current state of the record.
     pub state: GuardrailState,
     /// What for this record.
@@ -269,6 +279,8 @@ pub struct Blocker {
     pub target: Target,
     /// Identifier of the associated lane.
     pub lane_id: Present<LaneId>,
+    /// Guardrail this blocker is about, or null when it is not a guardrail breach.
+    pub guardrail_id: Present<String>,
 }
 
 /// Funnel step for the cockpit.
@@ -391,6 +403,10 @@ pub struct Goal {
     pub figures: Vec<Figure>,
     /// Path title for this record.
     pub path_title: Present<String>,
+    /// How well the forecasts have held so far, or null before one is scored.
+    pub calibration_score: Present<MeasuredValue>,
+    /// Time the next forecast is scored, or null when none is waiting.
+    pub next_score_at: Present<Timestamp>,
 }
 
 /// Stage alt for the cockpit.
@@ -523,6 +539,8 @@ pub enum HistoryEntry {
         samples: Vec<String>,
         /// Identifier of the associated decision.
         decision_id: Present<DecisionId>,
+        /// Spot check the row records, or null when it records no check.
+        check_id: Present<crate::CheckId>,
     },
     #[serde(other)]
     #[schemars(skip)]
@@ -575,6 +593,8 @@ pub struct Job {
     pub cadence: Present<JobCadence>,
     /// Identifier of the associated lane.
     pub lane_id: Present<LaneId>,
+    /// Schedule that runs the job, or null when it is not scheduled.
+    pub schedule_id: Present<crate::ScheduleId>,
 }
 
 /// Topic lane for the cockpit.
@@ -661,6 +681,10 @@ pub struct StuckReport {
     pub actions: Vec<StuckAction>,
     /// Note for this record.
     pub note: Present<String>,
+    /// CI run the report was written from, or null when it names none. The action "Open the run" targets it.
+    pub run_id: Present<crate::RecordId>,
+    /// Tries used out of the tries allowed, or null when the lane does not retry.
+    pub tries: Present<MeasuredValue>,
 }
 
 /// Task row for the cockpit.
@@ -685,7 +709,7 @@ pub struct TaskRow {
     pub reason: Present<String>,
 }
 
-/// Progress, work and conversation context for one topic or project.
+/// Progress, work and conversation context for one topic or project. Whether the recovery plan is open, the history filter and the "Earlier days" fold belong to the client; the hub keeps none of that state.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct TopicView {
@@ -718,7 +742,7 @@ pub struct TopicView {
     pub intro: String,
     /// Progress through the planning period, or the date of its next milestone.
     pub when: Present<MeasuredValue>,
-    /// Health for this record.
+    /// Health of the topic. With no goal, a bad lane gives Stuck, open lanes give On track, and otherwise the topic is Idle. In the dev module a project reads as its lanes: Stuck, Needs you, Working or Idle.
     pub health: Present<Health>,
     /// Goal for this record.
     pub goal: Present<Goal>,
@@ -740,7 +764,7 @@ pub struct TopicView {
     pub chat_sub: String,
     /// Lanes for this record.
     pub lanes: Vec<TopicLane>,
-    /// Spend for this record.
+    /// Spend of the topic's agents. A person who can work everything sees it; stage workers and status watchers do not and get null.
     pub spend: Present<AgentSpend>,
     /// Stuck for this record.
     pub stuck: Present<StuckReport>,
@@ -790,8 +814,24 @@ pub struct Forecast {
     pub word: String,
     /// Time associated with given.
     pub given_at: Timestamp,
-    /// Outcome for this record.
+    /// Outcome for this record. Empty until the forecast is scored.
     pub outcome: String,
+    /// Stable identifier of the forecast, or null when it has none.
+    pub id: Present<String>,
+    /// The forecast value, or null when the forecast is only a word.
+    pub value: Present<MeasuredValue>,
+    /// Low end of the forecast range, or null when it has none.
+    pub low: Present<MeasuredValue>,
+    /// High end of the forecast range, or null when it has none.
+    pub high: Present<MeasuredValue>,
+    /// Time the forecast is scored, or null when it is not scheduled.
+    pub score_at: Present<Timestamp>,
+    /// What was measured when the forecast was scored, or null before then.
+    pub actual: Present<MeasuredValue>,
+    /// Time the forecast was scored, or null before then.
+    pub scored_at: Present<Timestamp>,
+    /// Whether the forecast held when scored, or null before then.
+    pub held: Present<bool>,
 }
 
 /// Aggregate progress without lanes, names, or private commentary.
@@ -812,6 +852,8 @@ pub struct SharedTopicStatus {
     pub health: Present<Health>,
     /// Time of the next status report.
     pub next_report_at: Present<Timestamp>,
+    /// Report that is due next, or null when none is scheduled.
+    pub next_report_id: Present<crate::ReportId>,
 }
 
 /// Numeric or machine-readable value rendered according to its measurement kind.
@@ -859,6 +901,8 @@ pub enum MeasuredValue {
 pub enum JobCadence {
     EveryMorning,
     AfterDecision,
+    Weekly,
+    Monthly,
     #[serde(other)]
     #[schemars(skip)]
     Unknown,

@@ -165,7 +165,7 @@ export async function start(module: Module, port: number, clock?: () => string):
           }
           const audience = world.notificationAudience();
           const effect = world.act(command, viewer);
-          const settings = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit";
+          const settings = command.type.startsWith("pin.") || command.type === "prefs.set" || command.type === "topic.seen" || command.type === "since.edit" || command.type === "decisionRight.set";
           const privateTo = (event: (typeof effect.events)[number]) => settings || event.type === "drafts.changed" ? viewer.id : undefined;
           const events = feed.publish(world, effect.events, now(), {
             caller: viewer.id,

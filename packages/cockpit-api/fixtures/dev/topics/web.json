@@ -159,12 +159,19 @@
         "id": "open-the-run",
         "laneId": "red-main",
         "target": {
-          "kind": "thread",
-          "id": "lane:red-main"
+          "kind": "run",
+          "id": "red-main-ci"
         }
       }
     ],
-    "note": "Pinning takes about 3 minutes and turns main green"
+    "note": "Pinning takes about 3 minutes and turns main green",
+    "runId": "red-main-ci",
+    "tries": {
+      "kind": "count",
+      "value": 3,
+      "of": 3,
+      "unit": "tries"
+    }
   },
   "tasks": [
     {

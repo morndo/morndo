@@ -47,6 +47,17 @@ fn installed_readers_tolerate_new_fields_and_tags() {
 }
 
 #[test]
+fn a_skill_run_without_text_leaves_the_key_out() {
+    let source = json!({ "type": "skill.run", "skill": "weekly-summary" });
+    let command: Command = serde_json::from_value(source).unwrap();
+    let sent = serde_json::to_value(&command).unwrap();
+    assert!(sent.get("text").is_none(), "{sent}");
+    assert_eq!(serde_json::from_value::<Command>(sent).unwrap(), command);
+    let null = json!({ "type": "skill.run", "skill": "weekly-summary", "text": null });
+    assert!(serde_json::from_value::<Command>(null).is_err());
+}
+
+#[test]
 fn composer_inputs_reject_text_beyond_the_contract_limits() {
     use serde_json::{from_value, json};
     let long_name = "a".repeat(201);

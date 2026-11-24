@@ -134,7 +134,8 @@ function walk(value: unknown, at: string, visit: (key: string, v: unknown, path:
   if (Array.isArray(value)) value.forEach((v, i) => walk(v, `${at}[${i}]`, visit));
   else if (value && typeof value === "object") for (const [k, v] of Object.entries(value)) { visit(k, v, `${at}.${k}`, value); walk(v, `${at}.${k}`, visit); }
 }
-const TARGETS = ["topic", "lane", "decision", "thread", "person", "draft", "skill", "pull", "manager", "brief", "drafts", "skills", "settings"];
+const TARGETS = ["topic", "lane", "decision", "thread", "person", "draft", "skill", "pull", "run", "review", "file", "report", "check",
+  "manager", "brief", "drafts", "skills", "settings"];
 const targetsSeen: any[] = [];
 function shapeRules(body: unknown, where: string) {
   const bad: string[] = [];

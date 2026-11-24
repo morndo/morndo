@@ -1,6 +1,6 @@
 {
   "intro": "Morndo wrote these from this morning's work. They sit in your mail as drafts. Nothing is sent until you send it.",
-  "count": 4,
+  "count": 7,
   "items": [
     {
       "id": "team",
@@ -30,7 +30,7 @@
       "body": "Thank you for signing off the quote. Here is the final text. We plan to publish on Wednesday if the last number is confirmed.",
       "writtenAt": "2026-11-16T08:10:00+01:00",
       "openUrl": "https://mail.example.test/mail/u/0/#drafts/fenwick",
-      "laneId": null
+      "laneId": "fenwick"
     },
     {
       "id": "guest",

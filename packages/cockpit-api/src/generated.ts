@@ -21,6 +21,20 @@ export type MembershipState = "active" | "invited";
  */
 export type LaneState = "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
 /**
+ * A point in time with an RFC 3339 UTC offset.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "Timestamp".
+ */
+export type Timestamp = string;
+/**
+ * Identifier of a topic or project.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "TopicId".
+ */
+export type TopicId = string;
+/**
  * Identifier of an action recorded in history.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -42,13 +56,6 @@ export type ActionTone = "ink" | "quiet";
  */
 export type ActorKind = "person" | "agent";
 /**
- * A point in time with an RFC 3339 UTC offset.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "Timestamp".
- */
-export type Timestamp = string;
-/**
  * Identifier of a lane.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -63,12 +70,19 @@ export type LaneId = string;
  */
 export type DecisionRule = "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap";
 /**
- * Identifier of a topic or project.
+ * Identifier of a pull request.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "TopicId".
+ * via the `definition` "PullId".
  */
-export type TopicId = string;
+export type PullId = string;
+/**
+ * Identifier of a status report.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "ReportId".
+ */
+export type ReportId = string;
 /**
  * Chat mode for the cockpit.
  *
@@ -76,6 +90,75 @@ export type TopicId = string;
  * via the `definition` "ChatMode".
  */
 export type ChatMode = "floating" | "sidebar";
+/**
+ * Identifier of a spot check.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "CheckId".
+ */
+export type CheckId = string;
+/**
+ * Numeric or machine-readable value rendered according to its measurement kind.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MeasuredValue".
+ */
+export type MeasuredValue =
+  | {
+      kind: "count";
+      /**
+       * Total, when presented as a fraction.
+       */
+      of: number | null;
+      /**
+       * Count unit or interval.
+       */
+      unit: string | null;
+      /**
+       * Observed count.
+       */
+      value: number;
+    }
+  | {
+      kind: "rate";
+      /**
+       * Percentage points, e.g. 1.2 for 1.2%.
+       */
+      percent: number;
+      /**
+       * Whether the rate is the standard policy.
+       */
+      standard: boolean;
+    }
+  | {
+      /**
+       * Budget cap, when applicable.
+       */
+      cap: Money8 | null;
+      kind: "money";
+      money: Money9;
+    }
+  | {
+      /**
+       * A point in time with an RFC 3339 UTC offset.
+       */
+      at: string;
+      kind: "time";
+    }
+  | {
+      kind: "policy";
+      /**
+       * Rule expressed in words when it has no measurable threshold.
+       */
+      text: string;
+    };
+/**
+ * Identifier of a recurring schedule.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleId".
+ */
+export type ScheduleId = string;
 /**
  * A user request accepted by the cockpit.
  *
@@ -328,9 +411,9 @@ export type Command =
        */
       skill: string;
       /**
-       * Text shown to the reader.
+       * What to ask the skill. Without it the hub runs the skill's default ask.
        */
-      text: string;
+      text?: string;
       /**
        * Explicit destination when the skill is run from shared work.
        */
@@ -427,6 +510,10 @@ export type Command =
     }
   | {
       /**
+       * Guardrail to switch. The name is still accepted without it.
+       */
+      id?: string | null;
+      /**
        * Name shown to the reader.
        */
       name: string;
@@ -438,14 +525,14 @@ export type Command =
     }
   | {
       /**
-       * Identifier of the associated pull.
+       * Identifier of a pull request.
        */
       pullId: string;
       type: "pull.hold";
     }
   | {
       /**
-       * Auto-merge pull request whose hold is lifted.
+       * Identifier of a pull request.
        */
       pullId: string;
       type: "pull.unhold";
@@ -544,9 +631,17 @@ export type FeedEvent1 =
        */
       chain: boolean;
       /**
+       * Group shared with the sibling lanes when an ask was split, or null when it was not split.
+       */
+      groupId: string | null;
+      /**
        * Identifier of a lane.
        */
       laneId: string;
+      /**
+       * Schedule that filed the lane, or null when none did.
+       */
+      scheduleId: ScheduleId | null;
       /**
        * Identifier of the associated topic.
        */
@@ -627,6 +722,10 @@ export type FeedEvent1 =
       type: "attention.raised";
     }
   | {
+      /**
+       * Guardrail that was breached.
+       */
+      guardrailId: string;
       name: string;
       topicId: TopicId | null;
       type: "guardrail.breached";
@@ -655,6 +754,85 @@ export type FeedEvent1 =
     }
   | {
       type: "feed.reset";
+    }
+  | {
+      /**
+       * Identifier of a lane.
+       */
+      laneId: string;
+      /**
+       * Run record that changed.
+       */
+      recordId: string;
+      type: "run.changed";
+    }
+  | {
+      /**
+       * Identifier of a recurring schedule.
+       */
+      scheduleId: string;
+      type: "schedule.changed";
+    }
+  | {
+      /**
+       * Identifier of a status report.
+       */
+      reportId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "report.changed";
+    }
+  | {
+      /**
+       * Check that was recorded.
+       */
+      checkId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "check.recorded";
+    }
+  | {
+      type: "decisionRight.changed";
+    }
+  | {
+      /**
+       * Person whose right it is, or null when the right belongs to the reader.
+       */
+      personId: PersonId | null;
+      /**
+       * Decision rule for the cockpit.
+       */
+      rule: "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap";
+      type: "decisionRight.limitReached";
+    }
+  | {
+      /**
+       * Resource that changed.
+       */
+      resourceId: string;
+      type: "resource.changed";
+    }
+  | {
+      /**
+       * Forecast that was scored.
+       */
+      forecastId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "forecast.scored";
+    }
+  | {
+      /**
+       * Person who changed, or null when the change concerns the list as a whole.
+       */
+      personId: PersonId | null;
+      type: "members.changed";
     };
 /**
  * Identifier of a decision.
@@ -678,13 +856,6 @@ export type PinId = string;
  */
 export type ThreadId = string;
 /**
- * Identifier of a pull request.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "PullId".
- */
-export type PullId = string;
-/**
  * Available cockpit modules.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -692,60 +863,12 @@ export type PullId = string;
  */
 export type ModuleId = "gtm" | "dev";
 /**
- * Numeric or machine-readable value rendered according to its measurement kind.
+ * What a connection's grant lets agents do. The action gateway refuses a write beyond the scope.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "MeasuredValue".
+ * via the `definition` "ConnectionScope".
  */
-export type MeasuredValue =
-  | {
-      kind: "count";
-      /**
-       * Total, when presented as a fraction.
-       */
-      of: number | null;
-      /**
-       * Count unit or interval.
-       */
-      unit: string | null;
-      /**
-       * Observed count.
-       */
-      value: number;
-    }
-  | {
-      kind: "rate";
-      /**
-       * Percentage points, e.g. 1.2 for 1.2%.
-       */
-      percent: number;
-      /**
-       * Whether the rate is the standard policy.
-       */
-      standard: boolean;
-    }
-  | {
-      /**
-       * Budget cap, when applicable.
-       */
-      cap: Money6 | null;
-      kind: "money";
-      money: Money7;
-    }
-  | {
-      /**
-       * A point in time with an RFC 3339 UTC offset.
-       */
-      at: string;
-      kind: "time";
-    }
-  | {
-      kind: "policy";
-      /**
-       * Rule expressed in words when it has no measurable threshold.
-       */
-      text: string;
-    };
+export type ConnectionScope = "read" | "draftsOnly" | "readWrite" | "runsLanes" | "agent";
 /**
  * Identifier of a service connection.
  *
@@ -774,6 +897,13 @@ export type Decider = "you" | "agent";
  * via the `definition` "DecisionState".
  */
 export type DecisionState = "open" | "approved" | "declined" | "expired";
+/**
+ * Step kind for the cockpit.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "StepKind".
+ */
+export type StepKind = "ok" | "now" | "todo";
 /**
  * Identifier of a draft.
  *
@@ -824,9 +954,17 @@ export type Event =
        */
       chain: boolean;
       /**
+       * Group shared with the sibling lanes when an ask was split, or null when it was not split.
+       */
+      groupId: string | null;
+      /**
        * Identifier of a lane.
        */
       laneId: string;
+      /**
+       * Schedule that filed the lane, or null when none did.
+       */
+      scheduleId: ScheduleId | null;
       /**
        * Identifier of the associated topic.
        */
@@ -907,6 +1045,10 @@ export type Event =
       type: "attention.raised";
     }
   | {
+      /**
+       * Guardrail that was breached.
+       */
+      guardrailId: string;
       name: string;
       topicId: TopicId | null;
       type: "guardrail.breached";
@@ -935,6 +1077,85 @@ export type Event =
     }
   | {
       type: "feed.reset";
+    }
+  | {
+      /**
+       * Identifier of a lane.
+       */
+      laneId: string;
+      /**
+       * Run record that changed.
+       */
+      recordId: string;
+      type: "run.changed";
+    }
+  | {
+      /**
+       * Identifier of a recurring schedule.
+       */
+      scheduleId: string;
+      type: "schedule.changed";
+    }
+  | {
+      /**
+       * Identifier of a status report.
+       */
+      reportId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "report.changed";
+    }
+  | {
+      /**
+       * Check that was recorded.
+       */
+      checkId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "check.recorded";
+    }
+  | {
+      type: "decisionRight.changed";
+    }
+  | {
+      /**
+       * Person whose right it is, or null when the right belongs to the reader.
+       */
+      personId: PersonId | null;
+      /**
+       * Decision rule for the cockpit.
+       */
+      rule: "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap";
+      type: "decisionRight.limitReached";
+    }
+  | {
+      /**
+       * Resource that changed.
+       */
+      resourceId: string;
+      type: "resource.changed";
+    }
+  | {
+      /**
+       * Forecast that was scored.
+       */
+      forecastId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "forecast.scored";
+    }
+  | {
+      /**
+       * Person who changed, or null when the change concerns the list as a whole.
+       */
+      personId: PersonId | null;
+      type: "members.changed";
     };
 /**
  * A change event or an unsequenced control message on the feed.
@@ -977,9 +1198,17 @@ export type FeedEvent2 = {
        */
       chain: boolean;
       /**
+       * Group shared with the sibling lanes when an ask was split, or null when it was not split.
+       */
+      groupId: string | null;
+      /**
        * Identifier of a lane.
        */
       laneId: string;
+      /**
+       * Schedule that filed the lane, or null when none did.
+       */
+      scheduleId: ScheduleId | null;
       /**
        * Identifier of the associated topic.
        */
@@ -1060,6 +1289,10 @@ export type FeedEvent2 = {
       type: "attention.raised";
     }
   | {
+      /**
+       * Guardrail that was breached.
+       */
+      guardrailId: string;
       name: string;
       topicId: TopicId | null;
       type: "guardrail.breached";
@@ -1089,6 +1322,85 @@ export type FeedEvent2 = {
   | {
       type: "feed.reset";
     }
+  | {
+      /**
+       * Identifier of a lane.
+       */
+      laneId: string;
+      /**
+       * Run record that changed.
+       */
+      recordId: string;
+      type: "run.changed";
+    }
+  | {
+      /**
+       * Identifier of a recurring schedule.
+       */
+      scheduleId: string;
+      type: "schedule.changed";
+    }
+  | {
+      /**
+       * Identifier of a status report.
+       */
+      reportId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "report.changed";
+    }
+  | {
+      /**
+       * Check that was recorded.
+       */
+      checkId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "check.recorded";
+    }
+  | {
+      type: "decisionRight.changed";
+    }
+  | {
+      /**
+       * Person whose right it is, or null when the right belongs to the reader.
+       */
+      personId: PersonId | null;
+      /**
+       * Decision rule for the cockpit.
+       */
+      rule: "inYourName" | "hardToUndo" | "onlyYouKnow" | "insideGuardrails" | "overWeeklyCap";
+      type: "decisionRight.limitReached";
+    }
+  | {
+      /**
+       * Resource that changed.
+       */
+      resourceId: string;
+      type: "resource.changed";
+    }
+  | {
+      /**
+       * Forecast that was scored.
+       */
+      forecastId: string;
+      /**
+       * Identifier of a topic or project.
+       */
+      topicId: string;
+      type: "forecast.scored";
+    }
+  | {
+      /**
+       * Person who changed, or null when the change concerns the list as a whole.
+       */
+      personId: PersonId | null;
+      type: "members.changed";
+    }
 );
 /**
  * A feed control message without a sequence number; the reader should fetch fresh views.
@@ -1107,6 +1419,13 @@ export type FeedResetSignal = {
  */
 export type HealthState = "ok" | "warn" | "bad" | "idle";
 /**
+ * Identifier of a staging run or review record.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "RecordId".
+ */
+export type RecordId = string;
+/**
  * Gate state for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -1114,12 +1433,19 @@ export type HealthState = "ok" | "warn" | "bad" | "idle";
  */
 export type GateState = "pass" | "running" | "todo" | "fail" | "skipped";
 /**
+ * What happens when a guardrail is breached.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "GuardrailAction".
+ */
+export type GuardrailAction = "ask" | "pause" | "revert" | "stop";
+/**
  * Goal field being edited.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "GoalField".
  */
-export type GoalField = "target" | "deadline" | "unit";
+export type GoalField = "target" | "deadline" | "unit" | "budget" | "priority" | "guardrail";
 /**
  * Group kind for the cockpit.
  *
@@ -1146,11 +1472,15 @@ export type HistoryEntry =
       kind: "seen";
     }
   | {
-      actor: Actor4;
+      actor: Actor5;
       /**
        * A point in time with an RFC 3339 UTC offset.
        */
       at: string;
+      /**
+       * Spot check the row records, or null when it records no check.
+       */
+      checkId: CheckId | null;
       /**
        * Count for this record.
        */
@@ -1213,7 +1543,7 @@ export type InvitationState = "pending" | "accepted";
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "JobCadence".
  */
-export type JobCadence = "everyMorning" | "afterDecision";
+export type JobCadence = "everyMorning" | "afterDecision" | "weekly" | "monthly";
 /**
  * Access kind for the cockpit.
  *
@@ -1266,6 +1596,9 @@ export type KnownTargetKind =
   | "pull"
   | "run"
   | "review"
+  | "file"
+  | "report"
+  | "check"
   | "manager"
   | "brief"
   | "drafts"
@@ -1320,6 +1653,23 @@ export type MessageId = string;
  */
 export type ModelState = "signedIn" | "default" | "connected" | "addKey" | "signIn";
 /**
+ * What an overnight action did to the work.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "OutcomeKind".
+ */
+export type OutcomeKind =
+  | "released"
+  | "merged"
+  | "updated"
+  | "renewed"
+  | "deleted"
+  | "published"
+  | "sent"
+  | "switchedOff"
+  | "added"
+  | "stopped";
+/**
  * Pin kind for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -1348,13 +1698,6 @@ export type StageState = "done" | "next" | "now" | "wait";
  */
 export type PullState = "ready" | "blocked" | "inReview" | "autoMerge" | "releasing" | "released" | "held";
 /**
- * Identifier of a staging run or review record.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "RecordId".
- */
-export type RecordId = string;
-/**
  * Rollout lifecycle for a release decision.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -1362,12 +1705,26 @@ export type RecordId = string;
  */
 export type ReleaseStage = "scheduled" | "rolling" | "watching" | "done" | "held" | "rolledBack";
 /**
+ * Where a report is in its cycle.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "ReportState".
+ */
+export type ReportState = "scheduled" | "drafting" | "drafted" | "sent" | "skipped";
+/**
  * Which side of the forecast the chart describes.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "ScenarioKind".
  */
 export type ScenarioKind = "opportunity" | "risk";
+/**
+ * What a schedule runs when it fires.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "ScheduleKind".
+ */
+export type ScheduleKind = "lane" | "report" | "check" | "brief";
 /**
  * Search kind for the cockpit.
  *
@@ -1391,19 +1748,26 @@ export type SearchState =
  */
 export type SkillId = string;
 /**
+ * How a spot check picked what to look at.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "SpotCheckKind".
+ */
+export type SpotCheckKind = "random" | "periodic" | "numbers";
+/**
+ * What a spot check found.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "SpotCheckOutcome".
+ */
+export type SpotCheckOutcome = "held" | "failed" | "mixed";
+/**
  * Access a reader has to one stage.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "StageAccess".
  */
 export type StageAccess = "work" | "view" | "locked";
-/**
- * Step kind for the cockpit.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "StepKind".
- */
-export type StepKind = "ok" | "now" | "todo";
 /**
  * Destination category for navigation within the cockpit.
  *
@@ -1421,6 +1785,9 @@ export type TargetKind =
   | "pull"
   | "run"
   | "review"
+  | "file"
+  | "report"
+  | "check"
   | "manager"
   | "brief"
   | "drafts"
@@ -1579,7 +1946,7 @@ export interface Actor {
    */
   role: string | null;
   /**
-   * Short name for this record.
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
    */
   shortName: string;
   /**
@@ -1619,7 +1986,7 @@ export interface AccessView {
    */
   statusLink: StatusLink | null;
   /**
-   * Identifier of the associated topic.
+   * Identifier of a topic or project.
    */
   topicId: string;
   /**
@@ -1635,13 +2002,21 @@ export interface AccessView {
  */
 export interface Invitation {
   /**
+   * Time the invitation was accepted, or null while it is pending.
+   */
+  acceptedAt: Timestamp | null;
+  /**
    * Stable identifier for this record.
    */
   id: string;
   /**
-   * Time associated with invited.
+   * A point in time with an RFC 3339 UTC offset.
    */
   invitedAt: string;
+  /**
+   * Person who sent the invitation, or null when it is not recorded.
+   */
+  invitedBy: Actor1 | null;
   /**
    * Name or email for this record.
    */
@@ -1654,22 +2029,10 @@ export interface Invitation {
    * Current state of the record.
    */
   state: "pending" | "accepted";
-}
-/**
- * A link showing status without names, lanes or chat.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "StatusLink".
- */
-export interface StatusLink {
   /**
-   * Org only for this record.
+   * Topic the invitation is for, or null when it is for the workspace.
    */
-  orgOnly: boolean;
-  /**
-   * Url for this record.
-   */
-  url: string;
+  topicId: TopicId | null;
 }
 /**
  * A person or agent, resolved to the record the screens show.
@@ -1712,7 +2075,7 @@ export interface Actor1 {
    */
   role: string | null;
   /**
-   * Short name for this record.
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
    */
   shortName: string;
   /**
@@ -1731,6 +2094,22 @@ export interface Actor1 {
    * Word for this record.
    */
   word: string | null;
+}
+/**
+ * A link showing status without names, lanes or chat.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "StatusLink".
+ */
+export interface StatusLink {
+  /**
+   * Org only for this record.
+   */
+  orgOnly: boolean;
+  /**
+   * Url for this record.
+   */
+  url: string;
 }
 /**
  * Agent spend for the cockpit.
@@ -1797,7 +2176,7 @@ export interface AgentsStrip {
  */
 export interface StripItem {
   /**
-   * Time the record was created or observed.
+   * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
   /**
@@ -1863,6 +2242,9 @@ export interface Target {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2024,6 +2406,9 @@ export interface Target1 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2086,6 +2471,10 @@ export interface AttachmentInput {
  */
 export interface Blocker {
   /**
+   * Guardrail this blocker is about, or null when it is not a guardrail breach.
+   */
+  guardrailId: string | null;
+  /**
    * Identifier of the associated lane.
    */
   laneId: LaneId | null;
@@ -2133,6 +2522,9 @@ export interface Target2 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2171,6 +2563,10 @@ export interface BriefDecision {
    */
   minutes: number;
   /**
+   * The manager or agent that proposed this, or null when the reader did.
+   */
+  proposer: Actor1 | null;
+  /**
    * Decision right that governs this request.
    */
   rule: DecisionRule | null;
@@ -2183,7 +2579,7 @@ export interface BriefDecision {
    */
   title: string;
   /**
-   * Identifier of the associated topic.
+   * Identifier of a topic or project.
    */
   topicId: string;
   /**
@@ -2203,7 +2599,7 @@ export interface BriefDecision {
  */
 export interface BriefTopic {
   /**
-   * Stable identifier for this record.
+   * Identifier of a topic or project.
    */
   id: string;
   /**
@@ -2266,6 +2662,10 @@ export interface BriefView {
    */
   decisions: BriefDecision[];
   drafts: DraftsSummary;
+  /**
+   * Which edition of the day this is, for example 1 of 3, or null when the brief has one.
+   */
+  edition: MeterCount | null;
   /**
    * In works for this record.
    */
@@ -2389,7 +2789,7 @@ export interface Burn {
    */
   title: string;
   /**
-   * Identifier of the associated topic.
+   * Identifier of a topic or project.
    */
   topicId: string;
   /**
@@ -2419,6 +2819,9 @@ export interface Target3 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2441,6 +2844,22 @@ export interface DraftsSummary {
    * Text shown to the reader.
    */
   text: string;
+}
+/**
+ * Used and allowed requests in the current window.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MeterCount".
+ */
+export interface MeterCount {
+  /**
+   * Request allowance.
+   */
+  of: number;
+  /**
+   * Requests used.
+   */
+  used: number;
 }
 /**
  * Pull requests still in progress, grouped by what happens next.
@@ -2489,6 +2908,9 @@ export interface Target4 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2515,9 +2937,17 @@ export interface OvernightAction {
    */
   laneId: LaneId | null;
   /**
+   * What the action produced, or null when the row carries no count of results.
+   */
+  outcome: OvernightOutcome | null;
+  /**
    * Other lanes modified by a grouped action.
    */
   relatedLaneIds?: LaneId[];
+  /**
+   * Decision right the action was taken under, or null when none applied.
+   */
+  rule: DecisionRule | null;
   /**
    * Text shown to the reader.
    */
@@ -2531,7 +2961,7 @@ export interface OvernightAction {
    */
   topicName: string;
   /**
-   * Time associated with undo until.
+   * Time until which the action can be undone. Set on every undoable overnight row. An undo after it, or on a row whose outcome was sent outside, is a conflict.
    */
   undoUntilAt: Timestamp | null;
   /**
@@ -2542,6 +2972,68 @@ export interface OvernightAction {
    * Undone for this record.
    */
   undone: boolean;
+}
+/**
+ * What an overnight action produced.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "OvernightOutcome".
+ */
+export interface OvernightOutcome {
+  /**
+   * Checks the action made; empty when it made none.
+   */
+  checks: CheckResult[];
+  /**
+   * Items the action covered, or null when it is not a count.
+   */
+  count: number | null;
+  /**
+   * Items the action held back, or null when none were.
+   */
+  heldBack: number | null;
+  /**
+   * What happened to the work.
+   */
+  kind:
+    | "released"
+    | "merged"
+    | "updated"
+    | "renewed"
+    | "deleted"
+    | "published"
+    | "sent"
+    | "switchedOff"
+    | "added"
+    | "stopped";
+  /**
+   * Pull request the action belongs to, or null when it has none.
+   */
+  pullId: PullId | null;
+  /**
+   * Review rounds it took, or null when it had no review.
+   */
+  rounds: number | null;
+  /**
+   * Whether the action sent something outside the workspace. Such an action cannot be undone.
+   */
+  sentOutside: boolean;
+}
+/**
+ * Check result for the cockpit.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "CheckResult".
+ */
+export interface CheckResult {
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Passed for this record.
+   */
+  passed: boolean;
 }
 /**
  * A burn resolved by the reader during this edition.
@@ -2594,6 +3086,9 @@ export interface Target5 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2623,6 +3118,10 @@ export interface SharedTopicStatus {
    * Time of the next status report.
    */
   nextReportAt: Timestamp | null;
+  /**
+   * Report that is due next, or null when none is scheduled.
+   */
+  nextReportId: ReportId | null;
   /**
    * Current progress toward the goal.
    */
@@ -2703,6 +3202,46 @@ export interface Money5 {
   currency: string;
 }
 /**
+ * A proposed change to a topic's spend cap.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "BudgetChange".
+ */
+export interface BudgetChange {
+  from: Money6;
+  /**
+   * Period the cap covers, for example "week", or null when it has none.
+   */
+  period: string | null;
+  to: Money7;
+}
+/**
+ * Cap before the change.
+ */
+export interface Money6 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
+}
+/**
+ * Cap the proposal asks for.
+ */
+export interface Money7 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
+}
+/**
  * Annotation at a category on the chart.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -2735,20 +3274,156 @@ export interface ChartPoint {
   y: number;
 }
 /**
- * Check result for the cockpit.
+ * One spot check, read by id: the fields of a [`SpotCheck`].
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "CheckResult".
+ * via the `definition` "CheckView".
  */
-export interface CheckResult {
+export interface CheckView {
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  at: string;
+  checker: Actor2;
+  /**
+   * Items that broke the rule.
+   */
+  failed: number;
+  /**
+   * Lane filed to fix what the check found, or null when none was.
+   */
+  followUpLaneId: LaneId | null;
+  /**
+   * Stable identifier of the check.
+   */
+  id: string;
+  /**
+   * How the check picked its sample.
+   */
+  kind: "random" | "periodic" | "numbers";
+  /**
+   * Lane whose work was checked, or null when the check spans lanes.
+   */
+  laneId: LaneId | null;
+  /**
+   * What the check found.
+   */
+  outcome: "held" | "failed" | "mixed";
+  /**
+   * Items that met the rule.
+   */
+  passed: number;
+  /**
+   * The rule the sample was checked against.
+   */
+  rule: string;
+  /**
+   * Size of the sample, or null when it is not a count.
+   */
+  sample: MeasuredValue | null;
+  /**
+   * Schedule that ran the check, or null for a one-off check.
+   */
+  scheduleId: ScheduleId | null;
+  /**
+   * Person or agent whose work was checked, or null when several.
+   */
+  subject: Actor1 | null;
+  /**
+   * The finding in words.
+   */
+  text: string;
+  /**
+   * Identifier of a topic or project.
+   */
+  topicId: string;
+}
+/**
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
+ */
+export interface Actor2 {
+  /**
+   * Avatar for this record.
+   */
+  avatar: string | null;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Kind for this record.
+   */
+  kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
   /**
    * Name shown to the reader.
    */
   name: string;
   /**
-   * Passed for this record.
+   * Record for this record.
    */
-  passed: boolean;
+  record: string | null;
+  /**
+   * Role for this record.
+   */
+  role: string | null;
+  /**
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
+   */
+  shortName: string;
+  /**
+   * Skill for this record.
+   */
+  skill: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: LaneState | null;
+  /**
+   * Text shown to the reader.
+   */
+  text: string | null;
+  /**
+   * Word for this record.
+   */
+  word: string | null;
+}
+/**
+ * A currency amount in the currency's minor units.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "Money".
+ */
+export interface Money8 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
+}
+/**
+ * A currency amount in the currency's minor units.
+ */
+export interface Money9 {
+  /**
+   * Amount in cents for currencies with two fractional digits.
+   */
+  amountMinor: number;
+  /**
+   * ISO 4217 alphabetic currency code.
+   */
+  currency: string;
 }
 /**
  * Context supplied by a composer when sending a message.
@@ -2775,6 +3450,9 @@ export interface TargetInput {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2853,6 +3531,9 @@ export interface TargetInput1 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -2896,6 +3577,10 @@ export interface Message {
    */
   actions: MessageAction[];
   /**
+   * Person the message is written to, or null when it is for everyone in the thread. A message written to the previous stage holder names them, so the new holder's client can label it.
+   */
+  addressee: PersonId | null;
+  /**
    * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
@@ -2927,7 +3612,7 @@ export interface Message {
          */
         stage: string;
       };
-  author: Actor2;
+  author: Actor3;
   /**
    * Identifier of the associated decision.
    */
@@ -2986,9 +3671,10 @@ export interface MessageAction {
   personId: PersonId | null;
 }
 /**
- * Author for this record.
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
  */
-export interface Actor2 {
+export interface Actor3 {
   /**
    * Avatar for this record.
    */
@@ -3022,7 +3708,7 @@ export interface Actor2 {
    */
   role: string | null;
   /**
-   * Short name for this record.
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
    */
   shortName: string;
   /**
@@ -3118,6 +3804,10 @@ export interface Message1 {
    */
   actions: MessageAction[];
   /**
+   * Person the message is written to, or null when it is for everyone in the thread. A message written to the previous stage holder names them, so the new holder's client can label it.
+   */
+  addressee: PersonId | null;
+  /**
    * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
@@ -3149,7 +3839,7 @@ export interface Message1 {
          */
         stage: string;
       };
-  author: Actor2;
+  author: Actor3;
   /**
    * Identifier of the associated decision.
    */
@@ -3203,19 +3893,24 @@ export interface Receipt {
    */
   filedUnder: Target | null;
   /**
+   * Lanes filed together when the ask was split into independent parts. Empty when it was not split.
+   */
+  groupLaneIds: LaneId[];
+  /**
    * Identifier of a lane.
    */
   laneId: string;
-  lead: Actor3;
+  lead: Actor4;
   /**
    * Text shown to the reader.
    */
   text: string;
 }
 /**
- * Lead for this record.
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
  */
-export interface Actor3 {
+export interface Actor4 {
   /**
    * Avatar for this record.
    */
@@ -3249,7 +3944,7 @@ export interface Actor3 {
    */
   role: string | null;
   /**
-   * Short name for this record.
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
    */
   shortName: string;
   /**
@@ -3293,38 +3988,13 @@ export interface Connection {
    */
   purpose: string;
   /**
+   * What the grant lets agents do, or null when the connection has no grant. The action gateway refuses a write beyond the scope.
+   */
+  scope: ConnectionScope | null;
+  /**
    * Current state of the record.
    */
   state: "connected" | "signedIn" | "addKey" | "signIn";
-}
-/**
- * A currency amount in the currency's minor units.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "Money".
- */
-export interface Money6 {
-  /**
-   * Amount in cents for currencies with two fractional digits.
-   */
-  amountMinor: number;
-  /**
-   * ISO 4217 alphabetic currency code.
-   */
-  currency: string;
-}
-/**
- * A currency amount in the currency's minor units.
- */
-export interface Money7 {
-  /**
-   * Amount in cents for currencies with two fractional digits.
-   */
-  amountMinor: number;
-  /**
-   * ISO 4217 alphabetic currency code.
-   */
-  currency: string;
 }
 /**
  * Deal for the cockpit.
@@ -3352,7 +4022,7 @@ export interface Deal {
   /**
    * Unit cost when the cohort is measured by cost per lead.
    */
-  costPerLead: Money6 | null;
+  costPerLead: Money8 | null;
   /**
    * Evidence for this record.
    */
@@ -3429,6 +4099,9 @@ export interface Target6 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -3491,6 +4164,10 @@ export interface QueueItem {
    */
   id: string;
   /**
+   * The manager or agent that proposed this, or null when the reader did.
+   */
+  proposer: Actor1 | null;
+  /**
    * Current state of the record.
    */
   state: "open" | "approved" | "declined" | "expired";
@@ -3512,9 +4189,13 @@ export interface QueueItem {
  */
 export interface GoalChange {
   /**
-   * Affected topics for this record.
+   * Affected topics for this record. Never the changed topic itself: the other topics that share a budget, a resource or a report with it.
    */
   affectedTopics: TopicId[];
+  /**
+   * Typed payload of a budget change, or null for any other field.
+   */
+  budget: BudgetChange | null;
   /**
    * Desired deadline, when it changes.
    */
@@ -3522,11 +4203,15 @@ export interface GoalChange {
   /**
    * Field for this record.
    */
-  field: "target" | "deadline" | "unit";
+  field: "target" | "deadline" | "unit" | "budget" | "priority" | "guardrail";
   /**
-   * From for this record.
+   * Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value, rounded when a limit is fractional (the payload holds the exact one).
    */
   from: number;
+  /**
+   * Typed payload of a guardrail change, or null for any other field.
+   */
+  guardrail: GuardrailChange | null;
   /**
    * Original deadline when this proposal was written.
    */
@@ -3536,7 +4221,11 @@ export interface GoalChange {
    */
   previousUnit: string | null;
   /**
-   * To for this record.
+   * Typed payload of a priority change, or null for any other field.
+   */
+  priority: PriorityChange | null;
+  /**
+   * Value the proposal asks for, as `from`.
    */
   to: number;
   /**
@@ -3547,6 +4236,142 @@ export interface GoalChange {
    * Desired unit, when it changes.
    */
   unit: string | null;
+}
+/**
+ * A proposed change to the limit of a guardrail.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "GuardrailChange".
+ */
+export interface GuardrailChange {
+  /**
+   * Numeric or machine-readable value rendered according to its measurement kind.
+   */
+  from:
+    | {
+        kind: "count";
+        /**
+         * Total, when presented as a fraction.
+         */
+        of: number | null;
+        /**
+         * Count unit or interval.
+         */
+        unit: string | null;
+        /**
+         * Observed count.
+         */
+        value: number;
+      }
+    | {
+        kind: "rate";
+        /**
+         * Percentage points, e.g. 1.2 for 1.2%.
+         */
+        percent: number;
+        /**
+         * Whether the rate is the standard policy.
+         */
+        standard: boolean;
+      }
+    | {
+        /**
+         * Budget cap, when applicable.
+         */
+        cap: Money8 | null;
+        kind: "money";
+        money: Money9;
+      }
+    | {
+        /**
+         * A point in time with an RFC 3339 UTC offset.
+         */
+        at: string;
+        kind: "time";
+      }
+    | {
+        kind: "policy";
+        /**
+         * Rule expressed in words when it has no measurable threshold.
+         */
+        text: string;
+      };
+  /**
+   * Guardrail the proposal changes.
+   */
+  guardrailId: string;
+  /**
+   * Name of the guardrail as the reader sees it.
+   */
+  name: string;
+  /**
+   * Numeric or machine-readable value rendered according to its measurement kind.
+   */
+  to:
+    | {
+        kind: "count";
+        /**
+         * Total, when presented as a fraction.
+         */
+        of: number | null;
+        /**
+         * Count unit or interval.
+         */
+        unit: string | null;
+        /**
+         * Observed count.
+         */
+        value: number;
+      }
+    | {
+        kind: "rate";
+        /**
+         * Percentage points, e.g. 1.2 for 1.2%.
+         */
+        percent: number;
+        /**
+         * Whether the rate is the standard policy.
+         */
+        standard: boolean;
+      }
+    | {
+        /**
+         * Budget cap, when applicable.
+         */
+        cap: Money8 | null;
+        kind: "money";
+        money: Money9;
+      }
+    | {
+        /**
+         * A point in time with an RFC 3339 UTC offset.
+         */
+        at: string;
+        kind: "time";
+      }
+    | {
+        kind: "policy";
+        /**
+         * Rule expressed in words when it has no measurable threshold.
+         */
+        text: string;
+      };
+}
+/**
+ * A proposed change to a topic's rank among the topics of its module.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "PriorityChange".
+ */
+export interface PriorityChange {
+  /**
+   * Rank before the change (1 is first), or null when the topic had none.
+   */
+  from: number | null;
+  /**
+   * Rank the proposal asks for (1 is first).
+   */
+  to: number;
 }
 /**
  * An internal link resolved by the client.
@@ -3570,6 +4395,9 @@ export interface Target7 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -3577,7 +4405,7 @@ export interface Target7 {
     | "settings";
 }
 /**
- * Decision right for the cockpit.
+ * Decision right for the cockpit. A right with a daily limit counts what it has used today. At the limit the next item of that rule becomes a decision in Decide (the action gateway does this in the real hub).
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "DecisionRight".
@@ -3596,6 +4424,10 @@ export interface DecisionRight {
    */
   personId: PersonId | null;
   /**
+   * Time the count resets, or null when the right is yours.
+   */
+  resetsAt: Timestamp | null;
+  /**
    * Risky for this record.
    */
   risky: boolean;
@@ -3607,6 +4439,10 @@ export interface DecisionRight {
    * Title displayed above the record.
    */
   title: string;
+  /**
+   * Items decided under this right today, or null when the right is yours.
+   */
+  usedToday: number | null;
   /**
    * Who for this record.
    */
@@ -3689,6 +4525,10 @@ export interface DecisionView {
    */
   proof: Proof | null;
   /**
+   * The manager or agent that proposed this, or null when the reader did.
+   */
+  proposer: Actor1 | null;
+  /**
    * Provenance for this record.
    */
   provenance: Provenance | null;
@@ -3741,6 +4581,10 @@ export interface DecisionView {
  */
 export interface NextStep {
   /**
+   * Time the step finished, or null while it is not done.
+   */
+  doneAt: Timestamp | null;
+  /**
    * Time an answer or action is due.
    */
   dueAt: Timestamp | null;
@@ -3748,6 +4592,10 @@ export interface NextStep {
    * Module to open when the next step crosses into another module.
    */
   moduleId: ModuleId | null;
+  /**
+   * Whether the step is done, under way or still to do, or null when it is not tracked.
+   */
+  state: StepKind | null;
   /**
    * Step for this record.
    */
@@ -3775,7 +4623,7 @@ export interface Stat {
   /**
    * Money for this record.
    */
-  money: Money6 | null;
+  money: Money8 | null;
   /**
    * Sub for this record.
    */
@@ -4031,6 +4879,10 @@ export interface Message2 {
    */
   actions: MessageAction[];
   /**
+   * Person the message is written to, or null when it is for everyone in the thread. A message written to the previous stage holder names them, so the new holder's client can label it.
+   */
+  addressee: PersonId | null;
+  /**
    * A point in time with an RFC 3339 UTC offset.
    */
   at: string;
@@ -4062,7 +4914,7 @@ export interface Message2 {
          */
         stage: string;
       };
-  author: Actor2;
+  author: Actor3;
   /**
    * Identifier of the associated decision.
    */
@@ -4141,9 +4993,9 @@ export interface Fact {
         /**
          * Budget cap, when applicable.
          */
-        cap: Money6 | null;
+        cap: Money8 | null;
         kind: "money";
-        money: Money7;
+        money: Money9;
       }
     | {
         /**
@@ -4220,13 +5072,45 @@ export interface Figure {
  */
 export interface Forecast {
   /**
+   * What was measured when the forecast was scored, or null before then.
+   */
+  actual: MeasuredValue | null;
+  /**
    * A point in time with an RFC 3339 UTC offset.
    */
   givenAt: string;
   /**
-   * Outcome for this record.
+   * Whether the forecast held when scored, or null before then.
+   */
+  held: boolean | null;
+  /**
+   * High end of the forecast range, or null when it has none.
+   */
+  high: MeasuredValue | null;
+  /**
+   * Stable identifier of the forecast, or null when it has none.
+   */
+  id: string | null;
+  /**
+   * Low end of the forecast range, or null when it has none.
+   */
+  low: MeasuredValue | null;
+  /**
+   * Outcome for this record. Empty until the forecast is scored.
    */
   outcome: string;
+  /**
+   * Time the forecast is scored, or null when it is not scheduled.
+   */
+  scoreAt: Timestamp | null;
+  /**
+   * Time the forecast was scored, or null before then.
+   */
+  scoredAt: Timestamp | null;
+  /**
+   * The forecast value, or null when the forecast is only a word.
+   */
+  value: MeasuredValue | null;
   /**
    * Word for this record.
    */
@@ -4340,6 +5224,18 @@ export interface Gate {
    */
   name: string;
   /**
+   * Person or agent that reviewed, or null when the gate is not a review.
+   */
+  reviewer: Actor1 | null;
+  /**
+   * Review round the gate belongs to, or null when it is not a review.
+   */
+  round: number | null;
+  /**
+   * CI run record the gate was read from, or null when it has none.
+   */
+  runId: RecordId | null;
+  /**
    * Current state of the record.
    */
   state: "pass" | "running" | "todo" | "fail" | "skipped";
@@ -4359,6 +5255,10 @@ export interface Goal {
    * Calibration for this record.
    */
   calibration: string | null;
+  /**
+   * How well the forecasts have held so far, or null before one is scored.
+   */
+  calibrationScore: MeasuredValue | null;
   /**
    * Calm for this record.
    */
@@ -4419,6 +5319,10 @@ export interface Goal {
    * Milestones for this record.
    */
   milestones: string[];
+  /**
+   * Time the next forecast is scored, or null when none is waiting.
+   */
+  nextScoreAt: Timestamp | null;
   /**
    * Outside for this record.
    */
@@ -4518,6 +5422,14 @@ export interface Guardrails {
  */
 export interface GuardrailItem {
   /**
+   * What happens when the guardrail is breached, or null when it only reports.
+   */
+  action: GuardrailAction | null;
+  /**
+   * Stable identifier of the guardrail, or null when it has none.
+   */
+  id: string | null;
+  /**
    * Numeric or machine-readable value rendered according to its measurement kind.
    */
   limit:
@@ -4551,9 +5463,9 @@ export interface GuardrailItem {
         /**
          * Budget cap, when applicable.
          */
-        cap: Money6 | null;
+        cap: Money8 | null;
         kind: "money";
-        money: Money7;
+        money: Money9;
       }
     | {
         /**
@@ -4577,6 +5489,10 @@ export interface GuardrailItem {
    * Current state of the record.
    */
   state: "held" | "near" | "breached";
+  /**
+   * Switch on the Skills page that turns this guardrail on or off, or null when it has none.
+   */
+  switchId: string | null;
   /**
    * Numeric or machine-readable value rendered according to its measurement kind.
    */
@@ -4611,9 +5527,9 @@ export interface GuardrailItem {
         /**
          * Budget cap, when applicable.
          */
-        cap: Money6 | null;
+        cap: Money8 | null;
         kind: "money";
-        money: Money7;
+        money: Money9;
       }
     | {
         /**
@@ -4792,9 +5708,21 @@ export interface Verdict {
  */
 export interface GuardrailSwitch {
   /**
+   * What happens when the guardrail is breached, or null when it only reports.
+   */
+  action: GuardrailAction | null;
+  /**
    * Explanation shown alongside the summary.
    */
   detail: string;
+  /**
+   * Stable identifier of the guardrail, or null when it has none.
+   */
+  id: string | null;
+  /**
+   * The limit the switch guards, or null when it has none.
+   */
+  limit: MeasuredValue | null;
   /**
    * Name shown to the reader.
    */
@@ -4803,6 +5731,10 @@ export interface GuardrailSwitch {
    * On for this record.
    */
   on: boolean;
+  /**
+   * Topic the guardrail covers, or null when it is workspace-wide.
+   */
+  topicId: TopicId | null;
 }
 /**
  * Handover for the cockpit.
@@ -4869,9 +5801,10 @@ export interface HistoryDay {
   label: string;
 }
 /**
- * Actor for this record.
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
  */
-export interface Actor4 {
+export interface Actor5 {
   /**
    * Avatar for this record.
    */
@@ -4905,7 +5838,7 @@ export interface Actor4 {
    */
   role: string | null;
   /**
-   * Short name for this record.
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
    */
   shortName: string;
   /**
@@ -4995,6 +5928,10 @@ export interface Job {
    */
   laneId: LaneId | null;
   /**
+   * Schedule that runs the job, or null when it is not scheduled.
+   */
+  scheduleId: ScheduleId | null;
+  /**
    * Lane state for the cockpit.
    */
   state: "new" | "ok" | "warn" | "bad" | "done" | "idle" | "next" | "parked";
@@ -5028,7 +5965,7 @@ export interface LaneAct {
   tone: "ink" | "quiet";
 }
 /**
- * A work item and its record of progress.
+ * A work item and its record of progress. The lane's chat is shared with whoever works the lane.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "LaneView".
@@ -5100,6 +6037,10 @@ export interface LaneView {
    */
   fresh: boolean;
   /**
+   * Group the lane was split into with its sibling lanes, or null when it was not split.
+   */
+  groupId: string | null;
+  /**
    * Handover for this record.
    */
   handover: Handover | null;
@@ -5107,7 +6048,11 @@ export interface LaneView {
    * Identifier of a lane.
    */
   id: string;
-  lead: Actor5;
+  lead: Actor6;
+  /**
+   * Name of the lead as a topic's lane row shows it ("Brand scout", "Jonas", "You").
+   */
+  leadName: string | null;
   /**
    * Made for this record.
    */
@@ -5136,6 +6081,10 @@ export interface LaneView {
    * Reminder for this record.
    */
   reminder: Reminder | null;
+  /**
+   * Schedule that filed the lane, or null when it was not filed by one.
+   */
+  scheduleId: ScheduleId | null;
   /**
    * Short for this record.
    */
@@ -5174,9 +6123,17 @@ export interface LaneView {
    */
   topicId: TopicId | null;
   /**
+   * Tries used out of the tries allowed, or null when the lane does not retry.
+   */
+  tries: MeasuredValue | null;
+  /**
    * Waits for for this record.
    */
   waitsFor: Actor1 | null;
+  /**
+   * Shared resource the lane waits on, or null when it waits on none.
+   */
+  waitsOnResource: string | null;
   /**
    * Yours for this record.
    */
@@ -5199,7 +6156,7 @@ export interface AskedMeta1 {
  * A person or agent, resolved to the record the screens show.
  * Fields a particular card does not carry are null.
  */
-export interface Actor5 {
+export interface Actor6 {
   /**
    * Avatar for this record.
    */
@@ -5233,7 +6190,7 @@ export interface Actor5 {
    */
   role: string | null;
   /**
-   * Short name for this record.
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
    */
   shortName: string;
   /**
@@ -5314,7 +6271,11 @@ export interface Standing {
  */
 export interface Step {
   /**
-   * Kind for this record.
+   * Time the step finished, or null while it is not done.
+   */
+  doneAt: Timestamp | null;
+  /**
+   * Step kind for the cockpit.
    */
   kind: "ok" | "now" | "todo";
   /**
@@ -5363,18 +6324,26 @@ export interface Layout {
   sidebarWidth: number;
 }
 /**
- * A staging run or review opened from the work it records.
+ * A staging run, CI run, review or file opened from the work it records. Every target a lane's made items point at resolves to one of these, never to the lane itself.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "MadeRecordView".
  */
 export interface MadeRecordView {
   /**
+   * Checks the run made; empty for a record that is not a run.
+   */
+  checks: CheckResult[];
+  /**
    * Result shown in the record.
    */
   detail: string;
   /**
-   * Identifier in the lane's made-item target.
+   * Time the run finished, or null while it runs or when it is not a run.
+   */
+  finishedAt: Timestamp | null;
+  /**
+   * Identifier of a staging run or review record.
    */
   id: string;
   /**
@@ -5391,6 +6360,9 @@ export interface MadeRecordView {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -5401,9 +6373,33 @@ export interface MadeRecordView {
    */
   laneId: string;
   /**
+   * The failing test the run stopped on, or null when none failed.
+   */
+  log: FailingTest | null;
+  /**
+   * Pull request the run belongs to, or null when it ran outside one.
+   */
+  pullId: PullId | null;
+  /**
+   * Time the run started, or null for a record that is not a run.
+   */
+  startedAt: Timestamp | null;
+  /**
+   * Outcome of the run, or null for a record that is not a run.
+   */
+  state: GateState | null;
+  /**
    * Heading of the record.
    */
   title: string;
+  /**
+   * What started a run, in words, or null for a review or file.
+   */
+  trigger: string | null;
+  /**
+   * Link to the file, draft or page the record points at, or null when it has none.
+   */
+  url: string | null;
 }
 /**
  * Manager lane for the cockpit.
@@ -5473,6 +6469,10 @@ export interface ManagerView {
    */
   lanes: ManagerLane[];
   /**
+   * Recurring schedules of the workspace.
+   */
+  schedules: Schedule[];
+  /**
    * Shared resources for this record.
    */
   sharedResources: SharedResource[];
@@ -5486,6 +6486,121 @@ export interface ManagerView {
   summary: string;
 }
 /**
+ * A recurring rule that files a lane, writes a report, runs a spot check or publishes a brief.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "Schedule".
+ */
+export interface Schedule {
+  /**
+   * Identifier of a recurring schedule.
+   */
+  id: string;
+  /**
+   * What the schedule runs when it fires.
+   */
+  kind: "lane" | "report" | "check" | "brief";
+  /**
+   * Time of the last run, or null when it has not run yet.
+   */
+  lastAt: Timestamp | null;
+  /**
+   * Lane the last run filed, or null when it filed none.
+   */
+  lastLaneId: LaneId | null;
+  /**
+   * Time of the next run, or null when the schedule is off.
+   */
+  nextAt: Timestamp | null;
+  /**
+   * Whether the schedule is switched on.
+   */
+  on: boolean;
+  opener: Actor7;
+  /**
+   * Recurrence as an RFC 5545 rule, read in the workspace time zone.
+   */
+  rrule: string;
+  /**
+   * Where the schedule came from, in words.
+   */
+  source: string;
+  /**
+   * The recurrence in words.
+   */
+  text: string;
+  /**
+   * Local time of day the schedule fires ("HH:MM"), or null when the rule has no fixed time.
+   */
+  time: string | null;
+  /**
+   * Name of the schedule as the reader sees it.
+   */
+  title: string;
+  /**
+   * Topic the schedule belongs to, or null when it covers the whole workspace.
+   */
+  topicId: TopicId | null;
+}
+/**
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
+ */
+export interface Actor7 {
+  /**
+   * Avatar for this record.
+   */
+  avatar: string | null;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Kind for this record.
+   */
+  kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Record for this record.
+   */
+  record: string | null;
+  /**
+   * Role for this record.
+   */
+  role: string | null;
+  /**
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
+   */
+  shortName: string;
+  /**
+   * Skill for this record.
+   */
+  skill: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: LaneState | null;
+  /**
+   * Text shown to the reader.
+   */
+  text: string | null;
+  /**
+   * Word for this record.
+   */
+  word: string | null;
+}
+/**
  * Shared resource for the cockpit.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -5497,7 +6612,15 @@ export interface SharedResource {
    */
   icon: string;
   /**
-   * Lanes for this record.
+   * Stable identifier of the resource, or null when it has none.
+   */
+  id: string | null;
+  /**
+   * Lanes that use the resource.
+   */
+  laneIds: LaneId[];
+  /**
+   * Number of lanes that use the resource. Equals `laneIds.len()`.
    */
   lanes: number;
   /**
@@ -5505,9 +6628,140 @@ export interface SharedResource {
    */
   name: string;
   /**
+   * Order in which the lanes take their turn.
+   */
+  order: LaneId[];
+  /**
+   * Use of the resource against its quota, for example 18 of 40 sends today, or null when it has none.
+   */
+  quota: MeasuredValue | null;
+  /**
+   * People and agents that only read the resource.
+   */
+  readers: Actor1[];
+  /**
+   * Time the quota resets, or null when it does not.
+   */
+  resetsAt: Timestamp | null;
+  /**
    * Rule for this record.
    */
   rule: string;
+  /**
+   * Lane whose turn it is, or null when the resource is free.
+   */
+  turn: LaneId | null;
+  /**
+   * People and agents that write to the resource.
+   */
+  writers: Actor1[];
+}
+/**
+ * A person in the workspace, with the access they hold.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "Member".
+ */
+export interface Member {
+  /**
+   * Access the person holds on each topic.
+   */
+  access: OtherTopicAccess[];
+  /**
+   * Address used for the person's invitations, or null when unknown.
+   */
+  email: string | null;
+  /**
+   * Time the person was invited, or null when they were not invited.
+   */
+  invitedAt: Timestamp | null;
+  /**
+   * Time the person joined, or null while the invitation is pending.
+   */
+  joinedAt: Timestamp | null;
+  /**
+   * Whether the person owns the workspace.
+   */
+  owner: boolean;
+  person: Actor8;
+  /**
+   * Role in the workspace, or null when none is set.
+   */
+  role: string | null;
+}
+/**
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
+ */
+export interface Actor8 {
+  /**
+   * Avatar for this record.
+   */
+  avatar: string | null;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Kind for this record.
+   */
+  kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Record for this record.
+   */
+  record: string | null;
+  /**
+   * Role for this record.
+   */
+  role: string | null;
+  /**
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
+   */
+  shortName: string;
+  /**
+   * Skill for this record.
+   */
+  skill: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: LaneState | null;
+  /**
+   * Text shown to the reader.
+   */
+  text: string | null;
+  /**
+   * Word for this record.
+   */
+  word: string | null;
+}
+/**
+ * Everyone in the workspace and the invitations still open. Only the owner can read it.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "MembersView".
+ */
+export interface MembersView {
+  /**
+   * Invitations across the workspace.
+   */
+  invitations: Invitation[];
+  /**
+   * Active and invited members.
+   */
+  items: Member[];
 }
 /**
  * Meter for the cockpit.
@@ -5519,7 +6773,7 @@ export interface Meter {
   /**
    * Cap for this record.
    */
-  cap: Money6 | null;
+  cap: Money8 | null;
   /**
    * Exact counts for meters measured in requests.
    */
@@ -5535,7 +6789,7 @@ export interface Meter {
   /**
    * Spend for this record.
    */
-  spend: Money6 | null;
+  spend: Money8 | null;
   /**
    * Used for this record.
    */
@@ -5544,22 +6798,6 @@ export interface Meter {
    * What for this record.
    */
   what: string;
-}
-/**
- * Used and allowed requests in the current window.
- *
- * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
- * via the `definition` "MeterCount".
- */
-export interface MeterCount {
-  /**
-   * Request allowance.
-   */
-  of: number;
-  /**
-   * Requests used.
-   */
-  used: number;
 }
 /**
  * Model offered by the cockpit.
@@ -5690,9 +6928,9 @@ export interface NightStat {
         /**
          * Budget cap, when applicable.
          */
-        cap: Money6 | null;
+        cap: Money8 | null;
         kind: "money";
-        money: Money7;
+        money: Money9;
       }
     | {
         /**
@@ -5938,9 +7176,9 @@ export interface StageRow {
         /**
          * Budget cap, when applicable.
          */
-        cap: Money6 | null;
+        cap: Money8 | null;
         kind: "money";
-        money: Money7;
+        money: Money9;
       }
     | {
         /**
@@ -6120,6 +7358,9 @@ export interface Target8 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -6139,6 +7380,236 @@ export interface RecentView {
    * @maxItems 6
    */
   items: RecentPage[];
+}
+/**
+ * A status report a topic sends to its recipients on a schedule.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "Report".
+ */
+export interface Report {
+  /**
+   * Person or agent that checked the numbers, or null when unchecked.
+   */
+  checkedBy: Actor1 | null;
+  /**
+   * Draft that holds the written report, or null before one exists.
+   */
+  draftId: DraftId | null;
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  dueAt: string;
+  /**
+   * Identifier of a status report.
+   */
+  id: string;
+  /**
+   * Start of the period the report covers, or null when it has none.
+   */
+  periodFrom: Timestamp | null;
+  /**
+   * End of the period the report covers, or null when it has none.
+   */
+  periodTo: Timestamp | null;
+  /**
+   * People who receive the report.
+   */
+  recipients: Actor1[];
+  /**
+   * Schedule that produces the report, or null when it was written once.
+   */
+  scheduleId: ScheduleId | null;
+  /**
+   * Time the report was sent, or null while it is not sent.
+   */
+  sentAt: Timestamp | null;
+  /**
+   * Where the report is in its cycle.
+   */
+  state: "scheduled" | "drafting" | "drafted" | "sent" | "skipped";
+  /**
+   * Title of the report.
+   */
+  title: string;
+  /**
+   * Identifier of a topic or project.
+   */
+  topicId: string;
+  writer: Actor9;
+}
+/**
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
+ */
+export interface Actor9 {
+  /**
+   * Avatar for this record.
+   */
+  avatar: string | null;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Kind for this record.
+   */
+  kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Record for this record.
+   */
+  record: string | null;
+  /**
+   * Role for this record.
+   */
+  role: string | null;
+  /**
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
+   */
+  shortName: string;
+  /**
+   * Skill for this record.
+   */
+  skill: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: LaneState | null;
+  /**
+   * Text shown to the reader.
+   */
+  text: string | null;
+  /**
+   * Word for this record.
+   */
+  word: string | null;
+}
+/**
+ * One report, read by id: the fields of a [`Report`].
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "ReportView".
+ */
+export interface ReportView {
+  /**
+   * Person or agent that checked the numbers, or null when unchecked.
+   */
+  checkedBy: Actor1 | null;
+  /**
+   * Draft that holds the written report, or null before one exists.
+   */
+  draftId: DraftId | null;
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  dueAt: string;
+  /**
+   * Identifier of a status report.
+   */
+  id: string;
+  /**
+   * Start of the period the report covers, or null when it has none.
+   */
+  periodFrom: Timestamp | null;
+  /**
+   * End of the period the report covers, or null when it has none.
+   */
+  periodTo: Timestamp | null;
+  /**
+   * People who receive the report.
+   */
+  recipients: Actor1[];
+  /**
+   * Schedule that produces the report, or null when it was written once.
+   */
+  scheduleId: ScheduleId | null;
+  /**
+   * Time the report was sent, or null while it is not sent.
+   */
+  sentAt: Timestamp | null;
+  /**
+   * Where the report is in its cycle.
+   */
+  state: "scheduled" | "drafting" | "drafted" | "sent" | "skipped";
+  /**
+   * Title of the report.
+   */
+  title: string;
+  /**
+   * Identifier of a topic or project.
+   */
+  topicId: string;
+  writer: Actor10;
+}
+/**
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
+ */
+export interface Actor10 {
+  /**
+   * Avatar for this record.
+   */
+  avatar: string | null;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Kind for this record.
+   */
+  kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Record for this record.
+   */
+  record: string | null;
+  /**
+   * Role for this record.
+   */
+  role: string | null;
+  /**
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
+   */
+  shortName: string;
+  /**
+   * Skill for this record.
+   */
+  skill: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: LaneState | null;
+  /**
+   * Text shown to the reader.
+   */
+  text: string | null;
+  /**
+   * Word for this record.
+   */
+  word: string | null;
 }
 /**
  * Route preview for the cockpit.
@@ -6227,6 +7698,9 @@ export interface Target9 {
     | "pull"
     | "run"
     | "review"
+    | "file"
+    | "report"
+    | "check"
     | "manager"
     | "brief"
     | "drafts"
@@ -6234,7 +7708,7 @@ export interface Target9 {
     | "settings";
 }
 /**
- * A page of records matching the query and an optional answer.
+ * A page of records matching the query and an optional answer. An empty query returns no results: the client builds the empty panel from /decisions, /brief, /recent and /skills.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "SearchView".
@@ -6483,7 +7957,7 @@ export interface SidebarView {
  */
 export interface SinceSummary {
   /**
-   * Lines for this record.
+   * Lines computed from the current records, not stored: a settled item drops out and an open goal change is named.
    */
   lines: string[];
   seen: SeenMarker3;
@@ -6578,6 +8052,129 @@ export interface SkillsView {
   skills: Skill[];
 }
 /**
+ * A check of a sample of finished work against a rule.
+ *
+ * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
+ * via the `definition` "SpotCheck".
+ */
+export interface SpotCheck {
+  /**
+   * A point in time with an RFC 3339 UTC offset.
+   */
+  at: string;
+  checker: Actor11;
+  /**
+   * Items that broke the rule.
+   */
+  failed: number;
+  /**
+   * Lane filed to fix what the check found, or null when none was.
+   */
+  followUpLaneId: LaneId | null;
+  /**
+   * Identifier of a spot check.
+   */
+  id: string;
+  /**
+   * How the check picked its sample.
+   */
+  kind: "random" | "periodic" | "numbers";
+  /**
+   * Lane whose work was checked, or null when the check spans lanes.
+   */
+  laneId: LaneId | null;
+  /**
+   * What the check found.
+   */
+  outcome: "held" | "failed" | "mixed";
+  /**
+   * Items that met the rule.
+   */
+  passed: number;
+  /**
+   * The rule the sample was checked against.
+   */
+  rule: string;
+  /**
+   * Size of the sample, or null when it is not a count.
+   */
+  sample: MeasuredValue | null;
+  /**
+   * Schedule that ran the check, or null for a one-off check.
+   */
+  scheduleId: ScheduleId | null;
+  /**
+   * Person or agent whose work was checked, or null when several.
+   */
+  subject: Actor1 | null;
+  /**
+   * The finding in words.
+   */
+  text: string;
+  /**
+   * Identifier of a topic or project.
+   */
+  topicId: string;
+}
+/**
+ * A person or agent, resolved to the record the screens show.
+ * Fields a particular card does not carry are null.
+ */
+export interface Actor11 {
+  /**
+   * Avatar for this record.
+   */
+  avatar: string | null;
+  /**
+   * Engine for this record.
+   */
+  engine: string | null;
+  /**
+   * Stable identifier for this record.
+   */
+  id: string;
+  /**
+   * Kind for this record.
+   */
+  kind: "person" | "agent";
+  /**
+   * Membership state, set for invited readers who have not joined.
+   */
+  membershipState?: MembershipState | null;
+  /**
+   * Name shown to the reader.
+   */
+  name: string;
+  /**
+   * Record for this record.
+   */
+  record: string | null;
+  /**
+   * Role for this record.
+   */
+  role: string | null;
+  /**
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
+   */
+  shortName: string;
+  /**
+   * Skill for this record.
+   */
+  skill: string | null;
+  /**
+   * Current state of the record.
+   */
+  state: LaneState | null;
+  /**
+   * Text shown to the reader.
+   */
+  text: string | null;
+  /**
+   * Word for this record.
+   */
+  word: string | null;
+}
+/**
  * Aggregated progress in one stage, without names or work records.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
@@ -6669,6 +8266,10 @@ export interface StuckReport {
    */
   note: string | null;
   /**
+   * CI run the report was written from, or null when it names none. The action "Open the run" targets it.
+   */
+  runId: RecordId | null;
+  /**
    * A point in time with an RFC 3339 UTC offset.
    */
   sinceAt: string;
@@ -6676,6 +8277,10 @@ export interface StuckReport {
    * Title displayed above the record.
    */
   title: string;
+  /**
+   * Tries used out of the tries allowed, or null when the lane does not retry.
+   */
+  tries: MeasuredValue | null;
 }
 /**
  * Task row for the cockpit.
@@ -6761,7 +8366,7 @@ export interface ThreadView {
    */
   id: string;
   /**
-   * Messages for this record.
+   * Messages on this page, oldest first by `at`. In a lane thread the chat is shared with whoever works the lane.
    */
   messages: Message1[];
   /**
@@ -6793,7 +8398,7 @@ export interface ThreadView {
    */
   sub: string | null;
   /**
-   * Suggestions for this record.
+   * Suggestions the composer offers. A suggestion sent as written is answered from the record and never files a lane.
    */
   suggestions: string[];
   /**
@@ -6853,6 +8458,10 @@ export interface TopicMeta {
    */
   nextReportAt: Timestamp | null;
   /**
+   * Report that is due next, or null when none is scheduled.
+   */
+  nextReportId: ReportId | null;
+  /**
    * Owner line for this record.
    */
   ownerLine: string | null;
@@ -6860,6 +8469,10 @@ export interface TopicMeta {
    * Parts for this record.
    */
   parts: string[];
+  /**
+   * Rank among the topics of the module (1 is first), or null when the topic has none.
+   */
+  priority: number | null;
 }
 /**
  * Redacted progress shared through an organization-only status link.
@@ -6881,6 +8494,10 @@ export interface TopicStatusView {
    */
   nextReportAt: Timestamp | null;
   /**
+   * Report that is due next, or null when none is scheduled.
+   */
+  nextReportId: ReportId | null;
+  /**
    * Progress measured for the current goal.
    */
   signed: number | null;
@@ -6894,7 +8511,7 @@ export interface TopicStatusView {
   unit: string | null;
 }
 /**
- * Progress, work and conversation context for one topic or project.
+ * Progress, work and conversation context for one topic or project. Whether the recovery plan is open, the history filter and the "Earlier days" fold belong to the client; the hub keeps none of that state.
  *
  * This interface was referenced by `CockpitSchemaRoot`'s JSON-Schema
  * via the `definition` "TopicView".
@@ -6929,7 +8546,7 @@ export interface TopicView {
    */
   goal: Goal | null;
   /**
-   * Health for this record.
+   * Health of the topic. With no goal, a bad lane gives Stuck, open lanes give On track, and otherwise the topic is Idle. In the dev module a project reads as its lanes: Stuck, Needs you, Working or Idle.
    */
   health: Health | null;
   /**
@@ -6985,7 +8602,7 @@ export interface TopicView {
    */
   seenBy: SeenByFace[];
   /**
-   * Spend for this record.
+   * Spend of the topic's agents. A person who can work everything sees it; stage workers and status watchers do not and get null.
    */
   spend: AgentSpend | null;
   /**
@@ -7289,7 +8906,7 @@ export interface WorkspaceView {
    */
   contractVersion: string;
   layout: Layout2;
-  me: Actor6;
+  me: Actor12;
   module: ModuleInfo1;
   /**
    * Modules available in the workspace.
@@ -7318,7 +8935,7 @@ export interface Layout2 {
  * A person or agent, resolved to the record the screens show.
  * Fields a particular card does not carry are null.
  */
-export interface Actor6 {
+export interface Actor12 {
   /**
    * Avatar for this record.
    */
@@ -7352,7 +8969,7 @@ export interface Actor6 {
    */
   role: string | null;
   /**
-   * Short name for this record.
+   * Short name. Agents show their full name, people their first name, and the viewer reads "You".
    */
   shortName: string;
   /**

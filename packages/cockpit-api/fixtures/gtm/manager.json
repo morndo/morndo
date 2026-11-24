@@ -200,19 +200,186 @@
       "name": "Your mail",
       "icon": "mail",
       "rule": "Wave 1 follow-ups and wave 2 share 40 sends a day; wave 1 goes first",
-      "lanes": 2
+      "lanes": 2,
+      "id": "your-mail",
+      "laneIds": [
+        "outreach-wave-1",
+        "outreach-wave-2"
+      ],
+      "order": [
+        "outreach-wave-1",
+        "outreach-wave-2"
+      ],
+      "turn": "outreach-wave-1",
+      "writers": [
+        {
+          "id": "sender",
+          "name": "Sender",
+          "shortName": "Sender",
+          "kind": "agent",
+          "avatar": "S",
+          "role": null,
+          "state": "ok",
+          "word": "Leads",
+          "text": "Follow-ups",
+          "skill": "/outbound-sequence",
+          "engine": "Claude",
+          "record": null
+        }
+      ],
+      "readers": [
+        {
+          "id": "manager",
+          "name": "Manager",
+          "shortName": "Manager",
+          "kind": "agent",
+          "avatar": null,
+          "role": null,
+          "state": null,
+          "word": null,
+          "text": null,
+          "skill": null,
+          "engine": null,
+          "record": null
+        }
+      ],
+      "quota": {
+        "kind": "count",
+        "value": 18,
+        "of": 40,
+        "unit": "sends today"
+      },
+      "resetsAt": "2026-11-17T00:00:00+01:00"
     },
     {
       "name": "HubSpot",
       "icon": "partner",
       "rule": "Brand scout, Contact finder and Sender write to it, one at a time per brand",
-      "lanes": 3
+      "lanes": 3,
+      "id": "hubspot",
+      "laneIds": [
+        "brand-list",
+        "contact-data",
+        "outreach-wave-1"
+      ],
+      "order": [
+        "brand-list",
+        "contact-data",
+        "outreach-wave-1"
+      ],
+      "turn": "brand-list",
+      "writers": [
+        {
+          "id": "brand-scout",
+          "name": "Brand scout",
+          "shortName": "Brand",
+          "kind": "agent",
+          "avatar": "B",
+          "role": null,
+          "state": "ok",
+          "word": "Leads",
+          "text": "Batch 4 in Clay",
+          "skill": "/find-brands",
+          "engine": "Clay",
+          "record": null
+        },
+        {
+          "id": "contact-finder",
+          "name": "Contact finder",
+          "shortName": "Contact",
+          "kind": "agent",
+          "avatar": "C",
+          "role": null,
+          "state": "ok",
+          "word": "Leads",
+          "text": "Batch 4 in Apollo",
+          "skill": "/find-contacts",
+          "engine": "Apollo",
+          "record": null
+        },
+        {
+          "id": "sender",
+          "name": "Sender",
+          "shortName": "Sender",
+          "kind": "agent",
+          "avatar": "S",
+          "role": null,
+          "state": "ok",
+          "word": "Leads",
+          "text": "Follow-ups",
+          "skill": "/outbound-sequence",
+          "engine": "Claude",
+          "record": null
+        }
+      ],
+      "readers": [
+        {
+          "id": "manager",
+          "name": "Manager",
+          "shortName": "Manager",
+          "kind": "agent",
+          "avatar": null,
+          "role": null,
+          "state": null,
+          "word": null,
+          "text": null,
+          "skill": null,
+          "engine": null,
+          "record": null
+        }
+      ],
+      "quota": null,
+      "resetsAt": null
     },
     {
       "name": "The ad accounts",
       "icon": "horn",
       "rule": "Only Paid buyer changes them; Analyst reads",
-      "lanes": 2
+      "lanes": 2,
+      "id": "ad-accounts",
+      "laneIds": [
+        "search-budget",
+        "click-floor"
+      ],
+      "order": [
+        "search-budget",
+        "click-floor"
+      ],
+      "turn": "search-budget",
+      "writers": [
+        {
+          "id": "paid-buyer",
+          "name": "Paid buyer",
+          "shortName": "Paid",
+          "kind": "agent",
+          "avatar": "B",
+          "role": null,
+          "state": "warn",
+          "word": "Leads",
+          "text": "Holds the shift until you decide",
+          "skill": "/decision-brief",
+          "engine": "Claude",
+          "record": null
+        }
+      ],
+      "readers": [
+        {
+          "id": "analyst",
+          "name": "Analyst",
+          "shortName": "Analyst",
+          "kind": "agent",
+          "avatar": "A",
+          "role": null,
+          "state": "done",
+          "word": "Done",
+          "text": "Pulled 14 days of spend and leads",
+          "skill": "/weekly-summary",
+          "engine": "Claude",
+          "record": null
+        }
+      ],
+      "quota": null,
+      "resetsAt": null
     }
   ],
   "asks": [
@@ -276,5 +443,147 @@
     "Partnerships: 1 instruction (wave 2 to retail first), 1 question answered in the topic.",
     "Content: the promo is stuck; you decide in the topic.",
     "No goal or priority changes wait for you."
+  ],
+  "schedules": [
+    {
+      "id": "click-floor-weekly",
+      "kind": "lane",
+      "title": "Click floor",
+      "topicId": "paid",
+      "rrule": "FREQ=WEEKLY;BYDAY=MO",
+      "text": "each Monday",
+      "time": "08:00",
+      "nextAt": "2026-11-23T08:00:00+01:00",
+      "lastAt": "2026-11-16T08:00:00+01:00",
+      "lastLaneId": "click-floor",
+      "source": "Your standing rule since October",
+      "opener": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "on": true
+    },
+    {
+      "id": "competitor-watch-monthly",
+      "kind": "lane",
+      "title": "Competitor watch",
+      "topicId": "research",
+      "rrule": "FREQ=MONTHLY;BYDAY=2MO",
+      "text": "the second Monday of each month",
+      "time": "08:00",
+      "nextAt": "2026-12-14T08:00:00+01:00",
+      "lastAt": "2026-11-09T08:00:00+01:00",
+      "lastLaneId": "competitor-watch",
+      "source": "Your standing ask, monthly",
+      "opener": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "on": true
+    },
+    {
+      "id": "friday-check",
+      "kind": "check",
+      "title": "Friday check",
+      "topicId": "outbound",
+      "rrule": "FREQ=WEEKLY;BYDAY=FR",
+      "text": "each Friday",
+      "time": "09:00",
+      "nextAt": "2026-11-20T09:00:00+01:00",
+      "lastAt": "2026-11-13T09:00:00+01:00",
+      "lastLaneId": "reply-handling",
+      "source": "The Manager checks Outbound reply handling each Friday",
+      "opener": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "on": true
+    },
+    {
+      "id": "partnerships-report",
+      "kind": "report",
+      "title": "Weekly partner report",
+      "topicId": "partnerships",
+      "rrule": "FREQ=WEEKLY;BYDAY=FR",
+      "text": "Friday at 08:00",
+      "time": "08:00",
+      "nextAt": "2026-11-20T08:00:00+01:00",
+      "lastAt": null,
+      "lastLaneId": null,
+      "source": "The weekly report for the CEO",
+      "opener": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "on": true
+    },
+    {
+      "id": "morning-brief",
+      "kind": "brief",
+      "title": "Morning brief",
+      "topicId": null,
+      "rrule": "FREQ=DAILY",
+      "text": "the next one is today at 13:00",
+      "time": "13:00",
+      "nextAt": "2026-11-16T13:00:00+01:00",
+      "lastAt": "2026-11-16T07:15:00+01:00",
+      "lastLaneId": null,
+      "source": "The Monday brief, and the two that follow",
+      "opener": {
+        "id": "manager",
+        "name": "Manager",
+        "shortName": "Manager",
+        "kind": "agent",
+        "avatar": null,
+        "role": null,
+        "state": null,
+        "word": null,
+        "text": null,
+        "skill": null,
+        "engine": null,
+        "record": null
+      },
+      "on": true
+    }
   ]
 }

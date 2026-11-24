@@ -108,45 +108,114 @@
       "purpose": "Text and images",
       "state": "connected",
       "capacity": null,
-      "id": "openai"
+      "id": "openai",
+      "scope": "readWrite"
     },
     {
       "name": "Adobe",
       "purpose": "Edit and export visuals",
       "state": "connected",
       "capacity": null,
-      "id": "adobe"
+      "id": "adobe",
+      "scope": "readWrite"
     },
     {
       "name": "Supabase",
       "purpose": "Customers and deals, read only",
       "state": "connected",
       "capacity": null,
-      "id": "supabase"
+      "id": "supabase",
+      "scope": "read"
     },
     {
       "name": "Obsidian",
       "purpose": "Memory and notes",
       "state": "connected",
       "capacity": null,
-      "id": "obsidian"
+      "id": "obsidian",
+      "scope": "readWrite"
     },
     {
       "name": "Mail",
       "purpose": "Writes drafts, never sends",
       "state": "connected",
       "capacity": null,
-      "id": "mail"
+      "id": "mail",
+      "scope": "draftsOnly"
     },
     {
       "name": "Seedance",
       "purpose": "Video",
       "state": "addKey",
       "capacity": null,
-      "id": "seedance"
+      "id": "seedance",
+      "scope": "readWrite"
     }
   ],
   "connected": 5,
-  "guardrails": [],
+  "guardrails": [
+    {
+      "name": "Publishing",
+      "detail": "Ask me before anything goes public",
+      "on": true,
+      "id": "publishing",
+      "topicId": null,
+      "action": "ask",
+      "limit": null
+    },
+    {
+      "name": "Spend",
+      "detail": "Ask me above €500 per change",
+      "on": true,
+      "id": "spend",
+      "topicId": "paid",
+      "action": "ask",
+      "limit": {
+        "kind": "money",
+        "money": {
+          "amountMinor": 50000,
+          "currency": "EUR"
+        },
+        "cap": null
+      }
+    },
+    {
+      "name": "Outbound",
+      "detail": "60 emails a day, pause at 4% bounces",
+      "on": true,
+      "id": "outbound",
+      "topicId": "outbound",
+      "action": "pause",
+      "limit": {
+        "kind": "count",
+        "value": 60,
+        "of": 60,
+        "unit": "emails a day"
+      }
+    },
+    {
+      "name": "Visuals",
+      "detail": "3 feedback rounds, then stop and ask",
+      "on": true,
+      "id": "visuals",
+      "topicId": "content",
+      "action": "stop",
+      "limit": {
+        "kind": "count",
+        "value": 3,
+        "of": 3,
+        "unit": "rounds"
+      }
+    },
+    {
+      "name": "Customer data",
+      "detail": "Never sent to image or video models",
+      "on": true,
+      "id": "customer-data",
+      "topicId": null,
+      "action": "stop",
+      "limit": null
+    }
+  ],
   "rulesNote": "What agents may do on their own is set in one place."
 }

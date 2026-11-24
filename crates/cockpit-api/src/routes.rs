@@ -133,6 +133,9 @@ pub const ROUTES: &[Route] = &[
     read!("/models", ModelsView),
     read!("/recent", RecentView),
     read!("/records/{id}", MadeRecordView, id("RecordId")),
+    read!("/reports/{id}", ReportView, id("ReportId")),
+    read!("/checks/{id}", CheckView, id("CheckId")),
+    read!("/members", MembersView),
     Route {
         method: "post",
         path: "/uploads",
@@ -226,7 +229,7 @@ fn response_headers(allow: bool) -> Value {
     let mut headers = json!({
         "cockpit-contract": {
             "required": true,
-            "schema": {"type": "string", "const": crate::CONTRACT_VERSION}
+            "schema": {"type": "string", "pattern": "^1\\.[0-9]+\\.[0-9]+$"}
         }
     });
     if allow {

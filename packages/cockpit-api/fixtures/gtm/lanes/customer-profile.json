@@ -47,17 +47,20 @@
     {
       "kind": "ok",
       "text": "212 won deals read from Supabase, read only",
-      "who": "Researcher · 06:40"
+      "who": "Researcher · 06:40",
+      "doneAt": "2026-11-16T06:40:00+01:00"
     },
     {
       "kind": "ok",
       "text": "4 segments, ranked by how fast they close",
-      "who": "Researcher · 07:00"
+      "who": "Researcher · 07:00",
+      "doneAt": "2026-11-16T07:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Saved to memory and checked by the Manager",
-      "who": "Manager · 07:10"
+      "who": "Manager · 07:10",
+      "doneAt": "2026-11-16T07:10:00+01:00"
     }
   ],
   "doneNote": "Done means all three. No customer data left Supabase: the guardrail keeps it away from other models.",
@@ -83,8 +86,8 @@
       "title": "Customer profile",
       "detail": "4 segments, fintech ops first",
       "target": {
-        "kind": "lane",
-        "id": "customer-profile"
+        "kind": "file",
+        "id": "file-customer-profile-0"
       }
     },
     {
@@ -92,8 +95,8 @@
       "title": "What changed",
       "detail": "Fintech ops moved up, retail moved down",
       "target": {
-        "kind": "lane",
-        "id": "customer-profile"
+        "kind": "file",
+        "id": "file-customer-profile-1"
       }
     }
   ],
@@ -106,5 +109,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

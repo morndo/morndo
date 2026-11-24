@@ -47,22 +47,26 @@
     {
       "kind": "ok",
       "text": "Market map: 40 kinds of partner, ranked",
-      "who": "Researcher · 20 Oct"
+      "who": "Researcher · 20 Oct",
+      "doneAt": "2026-10-20T10:00:00+02:00"
     },
     {
       "kind": "ok",
       "text": "Partner profile: who fits and why",
-      "who": "You · 21 Oct"
+      "who": "You · 21 Oct",
+      "doneAt": "2026-10-21T11:00:00+02:00"
     },
     {
       "kind": "ok",
       "text": "The offer: 15% of first-year revenue, co-marketing",
-      "who": "You · 22 Oct"
+      "who": "You · 22 Oct",
+      "doneAt": "2026-10-22T12:00:00+02:00"
     },
     {
       "kind": "ok",
       "text": "Goal agreed with the CEO: 3 signed partners by 31 Jan",
-      "who": "Tom Ahrens · 23 Oct"
+      "who": "Tom Ahrens · 23 Oct",
+      "doneAt": "2026-10-23T00:00:00+02:00"
     }
   ],
   "doneNote": "Done means all four. The CEO signed off the goal; the Manager closed the lane.",
@@ -102,8 +106,8 @@
       "title": "Partner profile",
       "detail": "Freight networks, business banks, ERP vendors first",
       "target": {
-        "kind": "lane",
-        "id": "partner-strategy"
+        "kind": "file",
+        "id": "file-partner-strategy-0"
       }
     },
     {
@@ -111,8 +115,8 @@
       "title": "Partner offer, one page",
       "detail": "15% of first-year revenue, joint webinar, integration",
       "target": {
-        "kind": "lane",
-        "id": "partner-strategy"
+        "kind": "file",
+        "id": "file-partner-strategy-1"
       }
     },
     {
@@ -120,8 +124,8 @@
       "title": "Market map",
       "detail": "40 kinds of partner, ranked by reach and fit",
       "target": {
-        "kind": "lane",
-        "id": "partner-strategy"
+        "kind": "file",
+        "id": "file-partner-strategy-2"
       }
     }
   ],
@@ -134,5 +138,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

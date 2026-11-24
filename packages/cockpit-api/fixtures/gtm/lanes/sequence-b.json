@@ -47,27 +47,32 @@
     {
       "kind": "ok",
       "text": "180 fintech ops leads, built from the new customer profile",
-      "who": "Prospector · Wednesday"
+      "who": "Prospector · Wednesday",
+      "doneAt": "2026-11-11T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Pilot of 30 emails: 6 replies, 2 meetings",
-      "who": "Sender · Friday"
+      "who": "Sender · Friday",
+      "doneAt": "2026-11-13T11:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Your OK to start",
-      "who": "You · by tomorrow"
+      "who": "You · by tomorrow",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "180 emails over 3 days, 60 a day",
-      "who": "Sender · from 10:00"
+      "who": "Sender · from 10:00",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Meetings booked and reported",
-      "who": "Manager · Fri 27 Nov"
+      "who": "Manager · Fri 27 Nov",
+      "doneAt": null
     }
   ],
   "doneNote": "Done means all 5. The Manager set them when it opened the lane.",
@@ -121,8 +126,8 @@
       "title": "The 4 emails of sequence B",
       "detail": "Short, one question each, no attachments",
       "target": {
-        "kind": "lane",
-        "id": "sequence-b"
+        "kind": "file",
+        "id": "file-sequence-b-0"
       }
     },
     {
@@ -130,8 +135,8 @@
       "title": "List of 180 leads",
       "detail": "Fintech ops, 50 to 500 people",
       "target": {
-        "kind": "lane",
-        "id": "sequence-b"
+        "kind": "file",
+        "id": "file-sequence-b-1"
       }
     },
     {
@@ -139,8 +144,8 @@
       "title": "Pilot results",
       "detail": "30 sent, 6 replies, 2 meetings, 0 bounces",
       "target": {
-        "kind": "lane",
-        "id": "sequence-b"
+        "kind": "file",
+        "id": "file-sequence-b-2"
       }
     }
   ],
@@ -153,5 +158,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": "2026-11-20T17:00:00+01:00"
+  "afterNextAt": "2026-11-20T17:00:00+01:00",
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

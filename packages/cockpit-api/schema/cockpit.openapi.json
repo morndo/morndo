@@ -231,7 +231,7 @@
             "description": "Role for this record."
           },
           "shortName": {
-            "description": "Short name for this record.",
+            "description": "Short name. Agents show their full name, people their first name, and the viewer reads \"You\".",
             "type": "string"
           },
           "skill": {
@@ -597,6 +597,17 @@
       "Blocker": {
         "description": "Blocker for the cockpit.",
         "properties": {
+          "guardrailId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Guardrail this blocker is about, or null when it is not a guardrail breach."
+          },
           "laneId": {
             "anyOf": [
               {
@@ -654,7 +665,8 @@
           "why",
           "who",
           "target",
-          "laneId"
+          "laneId",
+          "guardrailId"
         ],
         "type": "object"
       },
@@ -693,6 +705,17 @@
             "format": "int64",
             "type": "integer"
           },
+          "proposer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The manager or agent that proposed this, or null when the reader did."
+          },
           "rule": {
             "anyOf": [
               {
@@ -726,6 +749,7 @@
           }
         },
         "required": [
+          "proposer",
           "rule",
           "id",
           "topicId",
@@ -823,6 +847,17 @@
             "$ref": "#/components/schemas/DraftsSummary",
             "description": "Drafts for this record."
           },
+          "edition": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeterCount"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which edition of the day this is, for example 1 of 3, or null when the brief has one."
+          },
           "inWorks": {
             "anyOf": [
               {
@@ -919,7 +954,38 @@
           "burns",
           "overnight",
           "drafts",
-          "artwork"
+          "artwork",
+          "edition"
+        ],
+        "type": "object"
+      },
+      "BudgetChange": {
+        "description": "A proposed change to a topic's spend cap.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Cap before the change."
+          },
+          "period": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Period the cap covers, for example \"week\", or null when it has none."
+          },
+          "to": {
+            "$ref": "#/components/schemas/Money",
+            "description": "Cap the proposal asks for."
+          }
+        },
+        "required": [
+          "from",
+          "to",
+          "period"
         ],
         "type": "object"
       },
@@ -1036,6 +1102,11 @@
         ],
         "type": "string"
       },
+      "CheckId": {
+        "description": "Identifier of a spot check.",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+        "type": "string"
+      },
       "CheckResult": {
         "description": "Check result for the cockpit.",
         "properties": {
@@ -1051,6 +1122,126 @@
         "required": [
           "name",
           "passed"
+        ],
+        "type": "object"
+      },
+      "CheckView": {
+        "description": "One spot check, read by id: the fields of a [`SpotCheck`].",
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Time the check ran."
+          },
+          "checker": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Person or agent that ran the check."
+          },
+          "failed": {
+            "description": "Items that broke the rule.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "followUpLaneId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaneId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lane filed to fix what the check found, or null when none was."
+          },
+          "id": {
+            "$ref": "#/components/schemas/CheckId",
+            "description": "Stable identifier of the check."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SpotCheckKind",
+            "description": "How the check picked its sample."
+          },
+          "laneId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaneId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lane whose work was checked, or null when the check spans lanes."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/SpotCheckOutcome",
+            "description": "What the check found."
+          },
+          "passed": {
+            "description": "Items that met the rule.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rule": {
+            "description": "The rule the sample was checked against.",
+            "type": "string"
+          },
+          "sample": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Size of the sample, or null when it is not a count."
+          },
+          "scheduleId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schedule that ran the check, or null for a one-off check."
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Person or agent whose work was checked, or null when several."
+          },
+          "text": {
+            "description": "The finding in words.",
+            "type": "string"
+          },
+          "topicId": {
+            "$ref": "#/components/schemas/TopicId",
+            "description": "Topic the check belongs to."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "topicId",
+          "laneId",
+          "scheduleId",
+          "checker",
+          "subject",
+          "at",
+          "rule",
+          "sample",
+          "outcome",
+          "passed",
+          "failed",
+          "text",
+          "followUpLaneId"
         ],
         "type": "object"
       },
@@ -1667,7 +1858,7 @@
                 "description": "Skill for this record."
               },
               "text": {
-                "description": "Text shown to the reader.",
+                "description": "What to ask the skill. Without it the hub runs the skill's default ask.",
                 "maxLength": 4000,
                 "minLength": 1,
                 "type": "string"
@@ -1691,8 +1882,7 @@
             },
             "required": [
               "type",
-              "skill",
-              "text"
+              "skill"
             ],
             "type": "object"
           },
@@ -1905,6 +2095,16 @@
           {
             "additionalProperties": false,
             "properties": {
+              "id": {
+                "default": null,
+                "description": "Guardrail to switch. The name is still accepted without it.",
+                "maxLength": 200,
+                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
               "name": {
                 "description": "Name shown to the reader.",
                 "maxLength": 200,
@@ -2120,6 +2320,17 @@
             "description": "Purpose for this record.",
             "type": "string"
           },
+          "scope": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConnectionScope"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the grant lets agents do, or null when the connection has no grant. The action gateway refuses a write beyond the scope."
+          },
           "state": {
             "$ref": "#/components/schemas/ConnectionState",
             "description": "Current state of the record."
@@ -2130,13 +2341,26 @@
           "name",
           "purpose",
           "state",
-          "capacity"
+          "capacity",
+          "scope"
         ],
         "type": "object"
       },
       "ConnectionId": {
         "description": "Identifier of a service connection.",
         "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+        "type": "string"
+      },
+      "ConnectionScope": {
+        "$comment": "cockpit-reader:enum",
+        "description": "What a connection's grant lets agents do. The action gateway refuses a write beyond the scope.",
+        "enum": [
+          "read",
+          "draftsOnly",
+          "readWrite",
+          "runsLanes",
+          "agent"
+        ],
         "type": "string"
       },
       "ConnectionState": {
@@ -2407,7 +2631,7 @@
         "type": "object"
       },
       "DecisionRight": {
-        "description": "Decision right for the cockpit.",
+        "description": "Decision right for the cockpit. A right with a daily limit counts what it has used today. At the limit the next item of that rule becomes a decision in Decide (the action gateway does this in the real hub).",
         "properties": {
           "dailyLimit": {
             "anyOf": [
@@ -2435,6 +2659,17 @@
             ],
             "description": "Person explicitly granted this decision right. Topic work access by itself does not grant it."
           },
+          "resetsAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the count resets, or null when the right is yours."
+          },
           "risky": {
             "description": "Risky for this record.",
             "type": "boolean"
@@ -2446,6 +2681,18 @@
           "title": {
             "description": "Title displayed above the record.",
             "type": "string"
+          },
+          "usedToday": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Items decided under this right today, or null when the right is yours."
           },
           "who": {
             "$ref": "#/components/schemas/Decider",
@@ -2459,7 +2706,9 @@
           "detail",
           "who",
           "dailyLimit",
-          "risky"
+          "risky",
+          "usedToday",
+          "resetsAt"
         ],
         "type": "object"
       },
@@ -2624,6 +2873,17 @@
             ],
             "description": "Proof for this record."
           },
+          "proposer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The manager or agent that proposed this, or null when the reader did."
+          },
           "provenance": {
             "anyOf": [
               {
@@ -2712,6 +2972,7 @@
           }
         },
         "required": [
+          "proposer",
           "rule",
           "shortTitle",
           "goalChange",
@@ -2913,9 +3174,31 @@
                 "description": "Chain for this record.",
                 "type": "boolean"
               },
+              "groupId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Group shared with the sibling lanes when an ask was split, or null when it was not split."
+              },
               "laneId": {
                 "$ref": "#/components/schemas/LaneId",
                 "description": "Identifier of the associated lane."
+              },
+              "scheduleId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ScheduleId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Schedule that filed the lane, or null when none did."
               },
               "topicId": {
                 "anyOf": [
@@ -2937,7 +3220,9 @@
               "type",
               "chain",
               "laneId",
-              "topicId"
+              "topicId",
+              "scheduleId",
+              "groupId"
             ],
             "type": "object"
           },
@@ -3191,6 +3476,10 @@
           },
           {
             "properties": {
+              "guardrailId": {
+                "description": "Guardrail that was breached.",
+                "type": "string"
+              },
               "name": {
                 "type": "string"
               },
@@ -3212,7 +3501,8 @@
             "required": [
               "type",
               "topicId",
-              "name"
+              "name",
+              "guardrailId"
             ],
             "type": "object"
           },
@@ -3313,6 +3603,202 @@
             },
             "required": [
               "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A CI run record was created or changed.",
+            "properties": {
+              "laneId": {
+                "$ref": "#/components/schemas/LaneId",
+                "description": "Lane the run belongs to."
+              },
+              "recordId": {
+                "$ref": "#/components/schemas/RecordId",
+                "description": "Run record that changed."
+              },
+              "type": {
+                "const": "run.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "recordId",
+              "laneId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A schedule was created, switched or fired.",
+            "properties": {
+              "scheduleId": {
+                "$ref": "#/components/schemas/ScheduleId",
+                "description": "Schedule that changed."
+              },
+              "type": {
+                "const": "schedule.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "scheduleId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A report changed state or was rescheduled.",
+            "properties": {
+              "reportId": {
+                "$ref": "#/components/schemas/ReportId",
+                "description": "Report that changed."
+              },
+              "topicId": {
+                "$ref": "#/components/schemas/TopicId",
+                "description": "Topic the report covers."
+              },
+              "type": {
+                "const": "report.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "reportId",
+              "topicId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A spot check was recorded.",
+            "properties": {
+              "checkId": {
+                "$ref": "#/components/schemas/CheckId",
+                "description": "Check that was recorded."
+              },
+              "topicId": {
+                "$ref": "#/components/schemas/TopicId",
+                "description": "Topic the check belongs to."
+              },
+              "type": {
+                "const": "check.recorded",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "checkId",
+              "topicId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A decision right's count or limit changed.",
+            "properties": {
+              "type": {
+                "const": "decisionRight.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A decision right reached its daily limit; the next item of that rule becomes a decision in Decide.",
+            "properties": {
+              "personId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PersonId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Person whose right it is, or null when the right belongs to the reader."
+              },
+              "rule": {
+                "$ref": "#/components/schemas/DecisionRule",
+                "description": "Rule whose daily limit was reached."
+              },
+              "type": {
+                "const": "decisionRight.limitReached",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "rule",
+              "personId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A shared resource changed hands or its quota moved.",
+            "properties": {
+              "resourceId": {
+                "description": "Resource that changed.",
+                "type": "string"
+              },
+              "type": {
+                "const": "resource.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "resourceId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A forecast was scored against what was measured.",
+            "properties": {
+              "forecastId": {
+                "description": "Forecast that was scored.",
+                "type": "string"
+              },
+              "topicId": {
+                "$ref": "#/components/schemas/TopicId",
+                "description": "Topic whose goal the forecast belongs to."
+              },
+              "type": {
+                "const": "forecast.scored",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "topicId",
+              "forecastId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The workspace's members or their access changed.",
+            "properties": {
+              "personId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PersonId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Person who changed, or null when the change concerns the list as a whole."
+              },
+              "type": {
+                "const": "members.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "personId"
             ],
             "type": "object"
           }
@@ -3408,9 +3894,31 @@
                 "description": "Chain for this record.",
                 "type": "boolean"
               },
+              "groupId": {
+                "anyOf": [
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Group shared with the sibling lanes when an ask was split, or null when it was not split."
+              },
               "laneId": {
                 "$ref": "#/components/schemas/LaneId",
                 "description": "Identifier of the associated lane."
+              },
+              "scheduleId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/ScheduleId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Schedule that filed the lane, or null when none did."
               },
               "topicId": {
                 "anyOf": [
@@ -3432,7 +3940,9 @@
               "type",
               "chain",
               "laneId",
-              "topicId"
+              "topicId",
+              "scheduleId",
+              "groupId"
             ],
             "type": "object"
           },
@@ -3686,6 +4196,10 @@
           },
           {
             "properties": {
+              "guardrailId": {
+                "description": "Guardrail that was breached.",
+                "type": "string"
+              },
               "name": {
                 "type": "string"
               },
@@ -3707,7 +4221,8 @@
             "required": [
               "type",
               "topicId",
-              "name"
+              "name",
+              "guardrailId"
             ],
             "type": "object"
           },
@@ -3808,6 +4323,202 @@
             },
             "required": [
               "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A CI run record was created or changed.",
+            "properties": {
+              "laneId": {
+                "$ref": "#/components/schemas/LaneId",
+                "description": "Lane the run belongs to."
+              },
+              "recordId": {
+                "$ref": "#/components/schemas/RecordId",
+                "description": "Run record that changed."
+              },
+              "type": {
+                "const": "run.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "recordId",
+              "laneId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A schedule was created, switched or fired.",
+            "properties": {
+              "scheduleId": {
+                "$ref": "#/components/schemas/ScheduleId",
+                "description": "Schedule that changed."
+              },
+              "type": {
+                "const": "schedule.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "scheduleId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A report changed state or was rescheduled.",
+            "properties": {
+              "reportId": {
+                "$ref": "#/components/schemas/ReportId",
+                "description": "Report that changed."
+              },
+              "topicId": {
+                "$ref": "#/components/schemas/TopicId",
+                "description": "Topic the report covers."
+              },
+              "type": {
+                "const": "report.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "reportId",
+              "topicId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A spot check was recorded.",
+            "properties": {
+              "checkId": {
+                "$ref": "#/components/schemas/CheckId",
+                "description": "Check that was recorded."
+              },
+              "topicId": {
+                "$ref": "#/components/schemas/TopicId",
+                "description": "Topic the check belongs to."
+              },
+              "type": {
+                "const": "check.recorded",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "checkId",
+              "topicId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A decision right's count or limit changed.",
+            "properties": {
+              "type": {
+                "const": "decisionRight.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A decision right reached its daily limit; the next item of that rule becomes a decision in Decide.",
+            "properties": {
+              "personId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PersonId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Person whose right it is, or null when the right belongs to the reader."
+              },
+              "rule": {
+                "$ref": "#/components/schemas/DecisionRule",
+                "description": "Rule whose daily limit was reached."
+              },
+              "type": {
+                "const": "decisionRight.limitReached",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "rule",
+              "personId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A shared resource changed hands or its quota moved.",
+            "properties": {
+              "resourceId": {
+                "description": "Resource that changed.",
+                "type": "string"
+              },
+              "type": {
+                "const": "resource.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "resourceId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "A forecast was scored against what was measured.",
+            "properties": {
+              "forecastId": {
+                "description": "Forecast that was scored.",
+                "type": "string"
+              },
+              "topicId": {
+                "$ref": "#/components/schemas/TopicId",
+                "description": "Topic whose goal the forecast belongs to."
+              },
+              "type": {
+                "const": "forecast.scored",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "topicId",
+              "forecastId"
+            ],
+            "type": "object"
+          },
+          {
+            "description": "The workspace's members or their access changed.",
+            "properties": {
+              "personId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/PersonId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Person who changed, or null when the change concerns the list as a whole."
+              },
+              "type": {
+                "const": "members.changed",
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "personId"
             ],
             "type": "object"
           }
@@ -3921,13 +4632,101 @@
       "Forecast": {
         "description": "Forecast and its later outcome, for calibration.",
         "properties": {
+          "actual": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What was measured when the forecast was scored, or null before then."
+          },
           "givenAt": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "Time associated with given."
           },
+          "held": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the forecast held when scored, or null before then."
+          },
+          "high": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "High end of the forecast range, or null when it has none."
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable identifier of the forecast, or null when it has none."
+          },
+          "low": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Low end of the forecast range, or null when it has none."
+          },
           "outcome": {
-            "description": "Outcome for this record.",
+            "description": "Outcome for this record. Empty until the forecast is scored.",
             "type": "string"
+          },
+          "scoreAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the forecast is scored, or null when it is not scheduled."
+          },
+          "scoredAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the forecast was scored, or null before then."
+          },
+          "value": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The forecast value, or null when the forecast is only a word."
           },
           "word": {
             "description": "Word for this record.",
@@ -3937,7 +4736,15 @@
         "required": [
           "word",
           "givenAt",
-          "outcome"
+          "outcome",
+          "id",
+          "value",
+          "low",
+          "high",
+          "scoreAt",
+          "actual",
+          "scoredAt",
+          "held"
         ],
         "type": "object"
       },
@@ -4127,6 +4934,40 @@
             "description": "Name shown to the reader.",
             "type": "string"
           },
+          "reviewer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Person or agent that reviewed, or null when the gate is not a review."
+          },
+          "round": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Review round the gate belongs to, or null when it is not a review."
+          },
+          "runId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CI run record the gate was read from, or null when it has none."
+          },
           "state": {
             "$ref": "#/components/schemas/GateState",
             "description": "Current state of the record."
@@ -4135,7 +4976,10 @@
         "required": [
           "name",
           "state",
-          "detail"
+          "detail",
+          "round",
+          "reviewer",
+          "runId"
         ],
         "type": "object"
       },
@@ -4171,6 +5015,17 @@
               }
             ],
             "description": "Calibration for this record."
+          },
+          "calibrationScore": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "How well the forecasts have held so far, or null before one is scored."
           },
           "calm": {
             "anyOf": [
@@ -4311,6 +5166,17 @@
             },
             "type": "array"
           },
+          "nextScoreAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the next forecast is scored, or null when none is waiting."
+          },
           "outside": {
             "anyOf": [
               {
@@ -4421,7 +5287,9 @@
           "funnel",
           "restSub",
           "figures",
-          "pathTitle"
+          "pathTitle",
+          "calibrationScore",
+          "nextScoreAt"
         ],
         "type": "object"
       },
@@ -4429,11 +5297,22 @@
         "description": "Proposed change to the numeric goal for a topic.",
         "properties": {
           "affectedTopics": {
-            "description": "Affected topics for this record.",
+            "description": "Affected topics for this record. Never the changed topic itself: the other topics that share a budget, a resource or a report with it.",
             "items": {
               "$ref": "#/components/schemas/TopicId"
             },
             "type": "array"
+          },
+          "budget": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BudgetChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Typed payload of a budget change, or null for any other field."
           },
           "deadlineAt": {
             "anyOf": [
@@ -4451,9 +5330,20 @@
             "description": "Field for this record."
           },
           "from": {
-            "description": "From for this record.",
+            "description": "Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value, rounded when a limit is fractional (the payload holds the exact one).",
             "format": "int64",
             "type": "integer"
+          },
+          "guardrail": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuardrailChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Typed payload of a guardrail change, or null for any other field."
           },
           "previousDeadlineAt": {
             "anyOf": [
@@ -4477,8 +5367,19 @@
             ],
             "description": "Original unit when this proposal was written."
           },
+          "priority": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PriorityChange"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Typed payload of a priority change, or null for any other field."
+          },
           "to": {
-            "description": "To for this record.",
+            "description": "Value the proposal asks for, as `from`.",
             "format": "int64",
             "type": "integer"
           },
@@ -4507,7 +5408,10 @@
           "field",
           "from",
           "to",
-          "affectedTopics"
+          "affectedTopics",
+          "budget",
+          "priority",
+          "guardrail"
         ],
         "type": "object"
       },
@@ -4595,7 +5499,10 @@
         "enum": [
           "target",
           "deadline",
-          "unit"
+          "unit",
+          "budget",
+          "priority",
+          "guardrail"
         ],
         "type": "string"
       },
@@ -4608,9 +5515,70 @@
         ],
         "type": "string"
       },
+      "GuardrailAction": {
+        "$comment": "cockpit-reader:enum",
+        "description": "What happens when a guardrail is breached.",
+        "enum": [
+          "ask",
+          "pause",
+          "revert",
+          "stop"
+        ],
+        "type": "string"
+      },
+      "GuardrailChange": {
+        "description": "A proposed change to the limit of a guardrail.",
+        "properties": {
+          "from": {
+            "$ref": "#/components/schemas/MeasuredValue",
+            "description": "Limit before the change."
+          },
+          "guardrailId": {
+            "description": "Guardrail the proposal changes.",
+            "type": "string"
+          },
+          "name": {
+            "description": "Name of the guardrail as the reader sees it.",
+            "type": "string"
+          },
+          "to": {
+            "$ref": "#/components/schemas/MeasuredValue",
+            "description": "Limit the proposal asks for."
+          }
+        },
+        "required": [
+          "guardrailId",
+          "name",
+          "from",
+          "to"
+        ],
+        "type": "object"
+      },
       "GuardrailItem": {
         "description": "Guardrail item for the cockpit.",
         "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuardrailAction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What happens when the guardrail is breached, or null when it only reports."
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable identifier of the guardrail, or null when it has none."
+          },
           "limit": {
             "$ref": "#/components/schemas/MeasuredValue",
             "description": "Limit for this record."
@@ -4631,6 +5599,17 @@
             "$ref": "#/components/schemas/GuardrailState",
             "description": "Current state of the record."
           },
+          "switchId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Switch on the Skills page that turns this guardrail on or off, or null when it has none."
+          },
           "value": {
             "$ref": "#/components/schemas/MeasuredValue",
             "description": "Value for this record."
@@ -4641,6 +5620,9 @@
           }
         },
         "required": [
+          "id",
+          "switchId",
+          "action",
           "state",
           "what",
           "value",
@@ -4662,9 +5644,42 @@
       "GuardrailSwitch": {
         "description": "Guardrail switch for the cockpit.",
         "properties": {
+          "action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuardrailAction"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What happens when the guardrail is breached, or null when it only reports."
+          },
           "detail": {
             "description": "Explanation shown alongside the summary.",
             "type": "string"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable identifier of the guardrail, or null when it has none."
+          },
+          "limit": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The limit the switch guards, or null when it has none."
           },
           "name": {
             "description": "Name shown to the reader.",
@@ -4673,9 +5688,24 @@
           "on": {
             "description": "On for this record.",
             "type": "boolean"
+          },
+          "topicId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TopicId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Topic the guardrail covers, or null when it is workspace-wide."
           }
         },
         "required": [
+          "id",
+          "topicId",
+          "action",
+          "limit",
           "name",
           "detail",
           "on"
@@ -4851,6 +5881,17 @@
                 "$ref": "#/components/schemas/Timestamp",
                 "description": "Time the record was created or observed."
               },
+              "checkId": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/CheckId"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "description": "Spot check the row records, or null when it records no check."
+              },
               "count": {
                 "anyOf": [
                   {
@@ -4934,7 +5975,8 @@
               "undoable",
               "count",
               "samples",
-              "decisionId"
+              "decisionId",
+              "checkId"
             ],
             "type": "object"
           }
@@ -5037,6 +6079,17 @@
       "Invitation": {
         "description": "A request to share the topic with someone.",
         "properties": {
+          "acceptedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the invitation was accepted, or null while it is pending."
+          },
           "id": {
             "$ref": "#/components/schemas/InvitationId",
             "description": "Stable identifier for this record."
@@ -5044,6 +6097,17 @@
           "invitedAt": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "Time associated with invited."
+          },
+          "invitedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Person who sent the invitation, or null when it is not recorded."
           },
           "nameOrEmail": {
             "description": "Name or email for this record.",
@@ -5056,6 +6120,17 @@
           "state": {
             "$ref": "#/components/schemas/InvitationState",
             "description": "Current state of the record."
+          },
+          "topicId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TopicId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Topic the invitation is for, or null when it is for the workspace."
           }
         },
         "required": [
@@ -5063,7 +6138,10 @@
           "id",
           "nameOrEmail",
           "state",
-          "invitedAt"
+          "invitedAt",
+          "acceptedAt",
+          "topicId",
+          "invitedBy"
         ],
         "type": "object"
       },
@@ -5136,6 +6214,17 @@
             ],
             "description": "Identifier of the associated lane."
           },
+          "scheduleId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schedule that runs the job, or null when it is not scheduled."
+          },
           "state": {
             "$ref": "#/components/schemas/LaneState",
             "description": "Current state of the record."
@@ -5148,7 +6237,8 @@
           "dueAt",
           "completedAt",
           "cadence",
-          "laneId"
+          "laneId",
+          "scheduleId"
         ],
         "type": "object"
       },
@@ -5157,7 +6247,9 @@
         "description": "Schedule for a job whose next run does not have a timestamp.",
         "enum": [
           "everyMorning",
-          "afterDecision"
+          "afterDecision",
+          "weekly",
+          "monthly"
         ],
         "type": "string"
       },
@@ -5237,6 +6329,9 @@
           "pull",
           "run",
           "review",
+          "file",
+          "report",
+          "check",
           "manager",
           "brief",
           "drafts",
@@ -5358,7 +6453,7 @@
         "type": "string"
       },
       "LaneView": {
-        "description": "A work item and its record of progress.",
+        "description": "A work item and its record of progress. The lane's chat is shared with whoever works the lane.",
         "properties": {
           "acts": {
             "description": "Acts for this record.",
@@ -5500,6 +6595,17 @@
             "description": "Fresh for this record.",
             "type": "boolean"
           },
+          "groupId": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Group the lane was split into with its sibling lanes, or null when it was not split."
+          },
           "handover": {
             "anyOf": [
               {
@@ -5518,6 +6624,17 @@
           "lead": {
             "$ref": "#/components/schemas/Actor",
             "description": "Lead for this record."
+          },
+          "leadName": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Name of the lead as a topic's lane row shows it (\"Brand scout\", \"Jonas\", \"You\")."
           },
           "made": {
             "description": "Made for this record.",
@@ -5584,6 +6701,17 @@
               }
             ],
             "description": "Reminder for this record."
+          },
+          "scheduleId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schedule that filed the lane, or null when it was not filed by one."
           },
           "short": {
             "anyOf": [
@@ -5652,6 +6780,17 @@
             ],
             "description": "Identifier of the associated topic."
           },
+          "tries": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tries used out of the tries allowed, or null when the lane does not retry."
+          },
           "waitsFor": {
             "anyOf": [
               {
@@ -5662,6 +6801,17 @@
               }
             ],
             "description": "Waits for for this record."
+          },
+          "waitsOnResource": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Shared resource the lane waits on, or null when it waits on none."
           },
           "yours": {
             "anyOf": [
@@ -5714,7 +6864,12 @@
           "crew",
           "made",
           "handover",
-          "fresh"
+          "fresh",
+          "tries",
+          "scheduleId",
+          "groupId",
+          "waitsOnResource",
+          "leadName"
         ],
         "type": "object"
       },
@@ -5807,11 +6962,29 @@
         "type": "object"
       },
       "MadeRecordView": {
-        "description": "A staging run or review opened from the work it records.",
+        "description": "A staging run, CI run, review or file opened from the work it records. Every target a lane's made items point at resolves to one of these, never to the lane itself.",
         "properties": {
+          "checks": {
+            "description": "Checks the run made; empty for a record that is not a run.",
+            "items": {
+              "$ref": "#/components/schemas/CheckResult"
+            },
+            "type": "array"
+          },
           "detail": {
             "description": "Result shown in the record.",
             "type": "string"
+          },
+          "finishedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the run finished, or null while it runs or when it is not a run."
           },
           "id": {
             "$ref": "#/components/schemas/RecordId",
@@ -5825,9 +6998,75 @@
             "$ref": "#/components/schemas/LaneId",
             "description": "Work this record belongs to."
           },
+          "log": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FailingTest"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The failing test the run stopped on, or null when none failed."
+          },
+          "pullId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PullId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pull request the run belongs to, or null when it ran outside one."
+          },
+          "startedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the run started, or null for a record that is not a run."
+          },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GateState"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Outcome of the run, or null for a record that is not a run."
+          },
           "title": {
             "description": "Heading of the record.",
             "type": "string"
+          },
+          "trigger": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What started a run, in words, or null for a review or file."
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Link to the file, draft or page the record points at, or null when it has none."
           }
         },
         "required": [
@@ -5835,7 +7074,15 @@
           "kind",
           "laneId",
           "title",
-          "detail"
+          "detail",
+          "url",
+          "trigger",
+          "startedAt",
+          "finishedAt",
+          "state",
+          "checks",
+          "log",
+          "pullId"
         ],
         "type": "object"
       },
@@ -5939,6 +7186,13 @@
             },
             "type": "array"
           },
+          "schedules": {
+            "description": "Recurring schedules of the workspace.",
+            "items": {
+              "$ref": "#/components/schemas/Schedule"
+            },
+            "type": "array"
+          },
           "sharedResources": {
             "description": "Shared resources for this record.",
             "items": {
@@ -5964,7 +7218,8 @@
           "lanes",
           "sharedResources",
           "asks",
-          "since"
+          "since",
+          "schedules"
         ],
         "type": "object"
       },
@@ -6103,6 +7358,104 @@
           }
         ]
       },
+      "Member": {
+        "description": "A person in the workspace, with the access they hold.",
+        "properties": {
+          "access": {
+            "description": "Access the person holds on each topic.",
+            "items": {
+              "$ref": "#/components/schemas/OtherTopicAccess"
+            },
+            "type": "array"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Address used for the person's invitations, or null when unknown."
+          },
+          "invitedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the person was invited, or null when they were not invited."
+          },
+          "joinedAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the person joined, or null while the invitation is pending."
+          },
+          "owner": {
+            "description": "Whether the person owns the workspace.",
+            "type": "boolean"
+          },
+          "person": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "The person."
+          },
+          "role": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Role in the workspace, or null when none is set."
+          }
+        },
+        "required": [
+          "person",
+          "email",
+          "role",
+          "owner",
+          "access",
+          "invitedAt",
+          "joinedAt"
+        ],
+        "type": "object"
+      },
+      "MembersView": {
+        "description": "Everyone in the workspace and the invitations still open. Only the owner can read it.",
+        "properties": {
+          "invitations": {
+            "description": "Invitations across the workspace.",
+            "items": {
+              "$ref": "#/components/schemas/Invitation"
+            },
+            "type": "array"
+          },
+          "items": {
+            "description": "Active and invited members.",
+            "items": {
+              "$ref": "#/components/schemas/Member"
+            },
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "invitations"
+        ],
+        "type": "object"
+      },
       "MembershipState": {
         "$comment": "cockpit-reader:enum",
         "description": "Membership of the person in the workspace.",
@@ -6121,6 +7474,17 @@
               "$ref": "#/components/schemas/MessageAction"
             },
             "type": "array"
+          },
+          "addressee": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PersonId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Person the message is written to, or null when it is for everyone in the thread. A message written to the previous stage holder names them, so the new holder's client can label it."
           },
           "at": {
             "$ref": "#/components/schemas/Timestamp",
@@ -6233,7 +7597,8 @@
           "label",
           "threadCard",
           "readBack",
-          "actions"
+          "actions",
+          "addressee"
         ],
         "type": "object"
       },
@@ -6652,6 +8017,17 @@
       "NextStep": {
         "description": "Next step for the cockpit.",
         "properties": {
+          "doneAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the step finished, or null while it is not done."
+          },
           "dueAt": {
             "anyOf": [
               {
@@ -6674,6 +8050,17 @@
             ],
             "description": "Module to open when the next step crosses into another module."
           },
+          "state": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StepKind"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whether the step is done, under way or still to do, or null when it is not tracked."
+          },
           "step": {
             "description": "Step for this record.",
             "type": "string"
@@ -6695,6 +8082,8 @@
           }
         },
         "required": [
+          "state",
+          "doneAt",
           "moduleId",
           "target",
           "step",
@@ -6739,6 +8128,23 @@
         ],
         "type": "object"
       },
+      "OutcomeKind": {
+        "$comment": "cockpit-reader:enum",
+        "description": "What an overnight action did to the work.",
+        "enum": [
+          "released",
+          "merged",
+          "updated",
+          "renewed",
+          "deleted",
+          "published",
+          "sent",
+          "switchedOff",
+          "added",
+          "stopped"
+        ],
+        "type": "string"
+      },
       "OvernightAction": {
         "description": "Overnight action for the cockpit.",
         "properties": {
@@ -6761,6 +8167,17 @@
             ],
             "description": "Identifier of the associated lane."
           },
+          "outcome": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OvernightOutcome"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What the action produced, or null when the row carries no count of results."
+          },
           "relatedLaneIds": {
             "default": [],
             "description": "Other lanes modified by a grouped action.",
@@ -6768,6 +8185,17 @@
               "$ref": "#/components/schemas/LaneId"
             },
             "type": "array"
+          },
+          "rule": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DecisionRule"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Decision right the action was taken under, or null when none applied."
           },
           "text": {
             "description": "Text shown to the reader.",
@@ -6797,7 +8225,7 @@
                 "type": "null"
               }
             ],
-            "description": "Time associated with undo until."
+            "description": "Time until which the action can be undone. Set on every undoable overnight row. An undo after it, or on a row whose outcome was sent outside, is a conflict."
           },
           "undoable": {
             "description": "Undoable for this record.",
@@ -6817,7 +8245,86 @@
           "text",
           "at",
           "undoable",
-          "undone"
+          "undone",
+          "outcome",
+          "rule"
+        ],
+        "type": "object"
+      },
+      "OvernightOutcome": {
+        "description": "What an overnight action produced.",
+        "properties": {
+          "checks": {
+            "description": "Checks the action made; empty when it made none.",
+            "items": {
+              "$ref": "#/components/schemas/CheckResult"
+            },
+            "type": "array"
+          },
+          "count": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Items the action covered, or null when it is not a count."
+          },
+          "heldBack": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Items the action held back, or null when none were."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/OutcomeKind",
+            "description": "What happened to the work."
+          },
+          "pullId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PullId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Pull request the action belongs to, or null when it has none."
+          },
+          "rounds": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Review rounds it took, or null when it had no review."
+          },
+          "sentOutside": {
+            "description": "Whether the action sent something outside the workspace. Such an action cannot be undone.",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "kind",
+          "count",
+          "heldBack",
+          "rounds",
+          "checks",
+          "pullId",
+          "sentOutside"
         ],
         "type": "object"
       },
@@ -7034,6 +8541,33 @@
         "required": [
           "stages",
           "night"
+        ],
+        "type": "object"
+      },
+      "PriorityChange": {
+        "description": "A proposed change to a topic's rank among the topics of its module.",
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rank before the change (1 is first), or null when the topic had none."
+          },
+          "to": {
+            "description": "Rank the proposal asks for (1 is first).",
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "from",
+          "to"
         ],
         "type": "object"
       },
@@ -7308,6 +8842,17 @@
             "$ref": "#/components/schemas/DecisionId",
             "description": "Stable identifier for this record."
           },
+          "proposer": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The manager or agent that proposed this, or null when the reader did."
+          },
           "state": {
             "$ref": "#/components/schemas/DecisionState",
             "description": "Current state of the record."
@@ -7326,6 +8871,7 @@
           }
         },
         "required": [
+          "proposer",
           "goalChange",
           "id",
           "title",
@@ -7387,6 +8933,13 @@
             ],
             "description": "Filed under for this record."
           },
+          "groupLaneIds": {
+            "description": "Lanes filed together when the ask was split into independent parts. Empty when it was not split.",
+            "items": {
+              "$ref": "#/components/schemas/LaneId"
+            },
+            "type": "array"
+          },
           "laneId": {
             "$ref": "#/components/schemas/LaneId",
             "description": "Identifier of the associated lane."
@@ -7406,7 +8959,8 @@
           "filedUnder",
           "lead",
           "chain",
-          "laneId"
+          "laneId",
+          "groupLaneIds"
         ],
         "type": "object"
       },
@@ -7535,6 +9089,259 @@
         "required": [
           "personId",
           "at"
+        ],
+        "type": "object"
+      },
+      "Report": {
+        "description": "A status report a topic sends to its recipients on a schedule.",
+        "properties": {
+          "checkedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Person or agent that checked the numbers, or null when unchecked."
+          },
+          "draftId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Draft that holds the written report, or null before one exists."
+          },
+          "dueAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Time the report is due."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ReportId",
+            "description": "Stable identifier of the report."
+          },
+          "periodFrom": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start of the period the report covers, or null when it has none."
+          },
+          "periodTo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End of the period the report covers, or null when it has none."
+          },
+          "recipients": {
+            "description": "People who receive the report.",
+            "items": {
+              "$ref": "#/components/schemas/Actor"
+            },
+            "type": "array"
+          },
+          "scheduleId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schedule that produces the report, or null when it was written once."
+          },
+          "sentAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the report was sent, or null while it is not sent."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReportState",
+            "description": "Where the report is in its cycle."
+          },
+          "title": {
+            "description": "Title of the report.",
+            "type": "string"
+          },
+          "topicId": {
+            "$ref": "#/components/schemas/TopicId",
+            "description": "Topic the report covers."
+          },
+          "writer": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Person or agent that writes the report."
+          }
+        },
+        "required": [
+          "id",
+          "topicId",
+          "title",
+          "recipients",
+          "writer",
+          "scheduleId",
+          "dueAt",
+          "state",
+          "draftId",
+          "sentAt",
+          "checkedBy",
+          "periodFrom",
+          "periodTo"
+        ],
+        "type": "object"
+      },
+      "ReportId": {
+        "description": "Identifier of a status report.",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+        "type": "string"
+      },
+      "ReportState": {
+        "$comment": "cockpit-reader:enum",
+        "description": "Where a report is in its cycle.",
+        "enum": [
+          "scheduled",
+          "drafting",
+          "drafted",
+          "sent",
+          "skipped"
+        ],
+        "type": "string"
+      },
+      "ReportView": {
+        "description": "One report, read by id: the fields of a [`Report`].",
+        "properties": {
+          "checkedBy": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Person or agent that checked the numbers, or null when unchecked."
+          },
+          "draftId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DraftId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Draft that holds the written report, or null before one exists."
+          },
+          "dueAt": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Time the report is due."
+          },
+          "id": {
+            "$ref": "#/components/schemas/ReportId",
+            "description": "Stable identifier of the report."
+          },
+          "periodFrom": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Start of the period the report covers, or null when it has none."
+          },
+          "periodTo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "End of the period the report covers, or null when it has none."
+          },
+          "recipients": {
+            "description": "People who receive the report.",
+            "items": {
+              "$ref": "#/components/schemas/Actor"
+            },
+            "type": "array"
+          },
+          "scheduleId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schedule that produces the report, or null when it was written once."
+          },
+          "sentAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the report was sent, or null while it is not sent."
+          },
+          "state": {
+            "$ref": "#/components/schemas/ReportState",
+            "description": "Where the report is in its cycle."
+          },
+          "title": {
+            "description": "Title of the report.",
+            "type": "string"
+          },
+          "topicId": {
+            "$ref": "#/components/schemas/TopicId",
+            "description": "Topic the report covers."
+          },
+          "writer": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Person or agent that writes the report."
+          }
+        },
+        "required": [
+          "id",
+          "topicId",
+          "title",
+          "recipients",
+          "writer",
+          "scheduleId",
+          "dueAt",
+          "state",
+          "draftId",
+          "sentAt",
+          "checkedBy",
+          "periodFrom",
+          "periodTo"
         ],
         "type": "object"
       },
@@ -7753,6 +9560,130 @@
         ],
         "type": "string"
       },
+      "Schedule": {
+        "description": "A recurring rule that files a lane, writes a report, runs a spot check or publishes a brief.",
+        "properties": {
+          "id": {
+            "$ref": "#/components/schemas/ScheduleId",
+            "description": "Stable identifier of the schedule."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/ScheduleKind",
+            "description": "What the schedule runs when it fires."
+          },
+          "lastAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time of the last run, or null when it has not run yet."
+          },
+          "lastLaneId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaneId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lane the last run filed, or null when it filed none."
+          },
+          "nextAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time of the next run, or null when the schedule is off."
+          },
+          "on": {
+            "description": "Whether the schedule is switched on.",
+            "type": "boolean"
+          },
+          "opener": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Person or agent that set the schedule up."
+          },
+          "rrule": {
+            "description": "Recurrence as an RFC 5545 rule, read in the workspace time zone.",
+            "type": "string"
+          },
+          "source": {
+            "description": "Where the schedule came from, in words.",
+            "type": "string"
+          },
+          "text": {
+            "description": "The recurrence in words.",
+            "type": "string"
+          },
+          "time": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Local time of day the schedule fires (\"HH:MM\"), or null when the rule has no fixed time."
+          },
+          "title": {
+            "description": "Name of the schedule as the reader sees it.",
+            "type": "string"
+          },
+          "topicId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TopicId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Topic the schedule belongs to, or null when it covers the whole workspace."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "title",
+          "topicId",
+          "rrule",
+          "text",
+          "time",
+          "nextAt",
+          "lastAt",
+          "lastLaneId",
+          "source",
+          "opener",
+          "on"
+        ],
+        "type": "object"
+      },
+      "ScheduleId": {
+        "description": "Identifier of a recurring schedule.",
+        "pattern": "^[a-z0-9][a-z0-9-]{0,199}$",
+        "type": "string"
+      },
+      "ScheduleKind": {
+        "$comment": "cockpit-reader:enum",
+        "description": "What a schedule runs when it fires.",
+        "enum": [
+          "lane",
+          "report",
+          "check",
+          "brief"
+        ],
+        "type": "string"
+      },
       "SearchKind": {
         "$comment": "cockpit-reader:enum",
         "description": "Search kind for the cockpit.",
@@ -7857,7 +9788,7 @@
         "type": "string"
       },
       "SearchView": {
-        "description": "A page of records matching the query and an optional answer.",
+        "description": "A page of records matching the query and an optional answer. An empty query returns no results: the client builds the empty panel from /decisions, /brief, /recent and /skills.",
         "properties": {
           "answer": {
             "anyOf": [
@@ -8090,8 +10021,26 @@
             "description": "Icon for this record.",
             "type": "string"
           },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Stable identifier of the resource, or null when it has none."
+          },
+          "laneIds": {
+            "description": "Lanes that use the resource.",
+            "items": {
+              "$ref": "#/components/schemas/LaneId"
+            },
+            "type": "array"
+          },
           "lanes": {
-            "description": "Lanes for this record.",
+            "description": "Number of lanes that use the resource. Equals `laneIds.len()`.",
             "format": "int64",
             "type": "integer"
           },
@@ -8099,16 +10048,78 @@
             "description": "Name shown to the reader.",
             "type": "string"
           },
+          "order": {
+            "description": "Order in which the lanes take their turn.",
+            "items": {
+              "$ref": "#/components/schemas/LaneId"
+            },
+            "type": "array"
+          },
+          "quota": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Use of the resource against its quota, for example 18 of 40 sends today, or null when it has none."
+          },
+          "readers": {
+            "description": "People and agents that only read the resource.",
+            "items": {
+              "$ref": "#/components/schemas/Actor"
+            },
+            "type": "array"
+          },
+          "resetsAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the quota resets, or null when it does not."
+          },
           "rule": {
             "description": "Rule for this record.",
             "type": "string"
+          },
+          "turn": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaneId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lane whose turn it is, or null when the resource is free."
+          },
+          "writers": {
+            "description": "People and agents that write to the resource.",
+            "items": {
+              "$ref": "#/components/schemas/Actor"
+            },
+            "type": "array"
           }
         },
         "required": [
           "name",
           "icon",
           "rule",
-          "lanes"
+          "lanes",
+          "id",
+          "laneIds",
+          "order",
+          "turn",
+          "writers",
+          "readers",
+          "quota",
+          "resetsAt"
         ],
         "type": "object"
       },
@@ -8153,6 +10164,17 @@
             ],
             "description": "Time of the next status report."
           },
+          "nextReportId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Report that is due next, or null when none is scheduled."
+          },
           "signed": {
             "anyOf": [
               {
@@ -8188,7 +10210,8 @@
           "goal",
           "unit",
           "health",
-          "nextReportAt"
+          "nextReportAt",
+          "nextReportId"
         ],
         "type": "object"
       },
@@ -8344,7 +10367,7 @@
         "description": "Since summary for the cockpit.",
         "properties": {
           "lines": {
-            "description": "Lines for this record.",
+            "description": "Lines computed from the current records, not stored: a settled item drops out and an open goal change is named.",
             "items": {
               "type": "string"
             },
@@ -8516,6 +10539,146 @@
           "cap"
         ],
         "type": "object"
+      },
+      "SpotCheck": {
+        "description": "A check of a sample of finished work against a rule.",
+        "properties": {
+          "at": {
+            "$ref": "#/components/schemas/Timestamp",
+            "description": "Time the check ran."
+          },
+          "checker": {
+            "$ref": "#/components/schemas/Actor",
+            "description": "Person or agent that ran the check."
+          },
+          "failed": {
+            "description": "Items that broke the rule.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "followUpLaneId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaneId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lane filed to fix what the check found, or null when none was."
+          },
+          "id": {
+            "$ref": "#/components/schemas/CheckId",
+            "description": "Stable identifier of the check."
+          },
+          "kind": {
+            "$ref": "#/components/schemas/SpotCheckKind",
+            "description": "How the check picked its sample."
+          },
+          "laneId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/LaneId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Lane whose work was checked, or null when the check spans lanes."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/SpotCheckOutcome",
+            "description": "What the check found."
+          },
+          "passed": {
+            "description": "Items that met the rule.",
+            "format": "int64",
+            "type": "integer"
+          },
+          "rule": {
+            "description": "The rule the sample was checked against.",
+            "type": "string"
+          },
+          "sample": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Size of the sample, or null when it is not a count."
+          },
+          "scheduleId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ScheduleId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Schedule that ran the check, or null for a one-off check."
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Actor"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Person or agent whose work was checked, or null when several."
+          },
+          "text": {
+            "description": "The finding in words.",
+            "type": "string"
+          },
+          "topicId": {
+            "$ref": "#/components/schemas/TopicId",
+            "description": "Topic the check belongs to."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "topicId",
+          "laneId",
+          "scheduleId",
+          "checker",
+          "subject",
+          "at",
+          "rule",
+          "sample",
+          "outcome",
+          "passed",
+          "failed",
+          "text",
+          "followUpLaneId"
+        ],
+        "type": "object"
+      },
+      "SpotCheckKind": {
+        "$comment": "cockpit-reader:enum",
+        "description": "How a spot check picked what to look at.",
+        "enum": [
+          "random",
+          "periodic",
+          "numbers"
+        ],
+        "type": "string"
+      },
+      "SpotCheckOutcome": {
+        "$comment": "cockpit-reader:enum",
+        "description": "What a spot check found.",
+        "enum": [
+          "held",
+          "failed",
+          "mixed"
+        ],
+        "type": "string"
       },
       "Stage": {
         "description": "Stage for the cockpit.",
@@ -8825,6 +10988,17 @@
       "Step": {
         "description": "Step for the cockpit.",
         "properties": {
+          "doneAt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Timestamp"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Time the step finished, or null while it is not done."
+          },
           "kind": {
             "$ref": "#/components/schemas/StepKind",
             "description": "Kind for this record."
@@ -8839,6 +11013,7 @@
           }
         },
         "required": [
+          "doneAt",
           "kind",
           "text",
           "who"
@@ -8972,6 +11147,17 @@
             ],
             "description": "Note for this record."
           },
+          "runId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RecordId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "CI run the report was written from, or null when it names none. The action \"Open the run\" targets it."
+          },
           "sinceAt": {
             "$ref": "#/components/schemas/Timestamp",
             "description": "Time the blocker first appeared."
@@ -8979,6 +11165,17 @@
           "title": {
             "description": "Title displayed above the record.",
             "type": "string"
+          },
+          "tries": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MeasuredValue"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Tries used out of the tries allowed, or null when the lane does not retry."
           }
         },
         "required": [
@@ -8989,7 +11186,9 @@
           "checks",
           "log",
           "actions",
-          "note"
+          "note",
+          "runId",
+          "tries"
         ],
         "type": "object"
       },
@@ -9060,6 +11259,9 @@
           "pull",
           "run",
           "review",
+          "file",
+          "report",
+          "check",
           "manager",
           "brief",
           "drafts",
@@ -9293,7 +11495,7 @@
             "description": "Stable identifier for this record."
           },
           "messages": {
-            "description": "Messages for this record.",
+            "description": "Messages on this page, oldest first by `at`. In a lane thread the chat is shared with whoever works the lane.",
             "items": {
               "$ref": "#/components/schemas/Message"
             },
@@ -9370,7 +11572,7 @@
             "description": "Sub for this record."
           },
           "suggestions": {
-            "description": "Suggestions for this record.",
+            "description": "Suggestions the composer offers. A suggestion sent as written is answered from the record and never files a lane.",
             "items": {
               "type": "string"
             },
@@ -9540,6 +11742,17 @@
             ],
             "description": "Next report for this record."
           },
+          "nextReportId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Report that is due next, or null when none is scheduled."
+          },
           "ownerLine": {
             "anyOf": [
               {
@@ -9557,13 +11770,27 @@
               "type": "string"
             },
             "type": "array"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "format": "int64",
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Rank among the topics of the module (1 is first), or null when the topic has none."
           }
         },
         "required": [
           "askedBy",
           "ownerLine",
           "nextReportAt",
-          "parts"
+          "parts",
+          "nextReportId",
+          "priority"
         ],
         "type": "object"
       },
@@ -9604,6 +11831,17 @@
             ],
             "description": "Next report time."
           },
+          "nextReportId": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReportId"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Report that is due next, or null when none is scheduled."
+          },
           "signed": {
             "anyOf": [
               {
@@ -9641,12 +11879,13 @@
           "unit",
           "nextReportAt",
           "stages",
-          "health"
+          "health",
+          "nextReportId"
         ],
         "type": "object"
       },
       "TopicView": {
-        "description": "Progress, work and conversation context for one topic or project.",
+        "description": "Progress, work and conversation context for one topic or project. Whether the recovery plan is open, the history filter and the \"Earlier days\" fold belong to the client; the hub keeps none of that state.",
         "properties": {
           "appliedGoalChanges": {
             "default": [],
@@ -9709,7 +11948,7 @@
                 "type": "null"
               }
             ],
-            "description": "Health for this record."
+            "description": "Health of the topic. With no goal, a bad lane gives Stuck, open lanes give On track, and otherwise the topic is Idle. In the dev module a project reads as its lanes: Stuck, Needs you, Working or Idle."
           },
           "history": {
             "anyOf": [
@@ -9809,7 +12048,7 @@
                 "type": "null"
               }
             ],
-            "description": "Spend for this record."
+            "description": "Spend of the topic's agents. A person who can work everything sees it; stage workers and status watchers do not and get null."
           },
           "stages": {
             "description": "Stages for this record.",
@@ -10342,7 +12581,7 @@
   },
   "info": {
     "title": "Morndo cockpit API",
-    "version": "1.0.0"
+    "version": "1.1.0"
   },
   "openapi": "3.1.1",
   "paths": {
@@ -10391,7 +12630,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10410,7 +12649,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10429,7 +12668,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10448,7 +12687,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10473,7 +12712,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10492,7 +12731,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10511,7 +12750,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10530,7 +12769,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10549,7 +12788,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10568,7 +12807,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10587,7 +12826,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10622,7 +12861,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10641,7 +12880,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10660,7 +12899,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10679,7 +12918,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10704,7 +12943,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10723,7 +12962,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10767,7 +13006,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10786,7 +13025,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10805,7 +13044,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10824,7 +13063,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10849,7 +13088,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10868,7 +13107,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10920,7 +13159,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10939,7 +13178,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10958,7 +13197,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -10977,7 +13216,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11002,7 +13241,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11021,7 +13260,151 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cockpit/checks/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/CheckId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PersonId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckView"
+                }
+              }
+            },
+            "description": "Successful cockpit response",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11056,7 +13439,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11075,7 +13458,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11094,7 +13477,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11113,7 +13496,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11138,7 +13521,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11157,7 +13540,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11200,7 +13583,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11219,7 +13602,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11238,7 +13621,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11257,7 +13640,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11282,7 +13665,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11301,7 +13684,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11336,7 +13719,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11355,7 +13738,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11374,7 +13757,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11393,7 +13776,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11418,7 +13801,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11437,7 +13820,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11475,7 +13858,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11494,7 +13877,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11513,7 +13896,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11532,7 +13915,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11557,7 +13940,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11576,7 +13959,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11622,7 +14005,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11641,7 +14024,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11660,7 +14043,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11679,7 +14062,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11704,7 +14087,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11723,7 +14106,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11758,7 +14141,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11777,7 +14160,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11796,7 +14179,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11815,7 +14198,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11840,7 +14223,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11859,7 +14242,143 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cockpit/members": {
+      "get": {
+        "parameters": [
+          {
+            "in": "query",
+            "name": "as",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PersonId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MembersView"
+                }
+              }
+            },
+            "description": "Successful cockpit response",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11894,7 +14413,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11913,7 +14432,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11932,7 +14451,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11951,7 +14470,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11976,7 +14495,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -11995,7 +14514,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12030,7 +14549,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12049,7 +14568,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12068,7 +14587,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12087,7 +14606,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12112,7 +14631,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12131,7 +14650,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12166,7 +14685,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12185,7 +14704,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12204,7 +14723,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12223,7 +14742,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12248,7 +14767,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12267,7 +14786,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12310,7 +14829,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12329,7 +14848,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12348,7 +14867,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12367,7 +14886,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12392,7 +14911,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12411,7 +14930,151 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/cockpit/reports/{id}": {
+      "get": {
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "$ref": "#/components/schemas/ReportId"
+            }
+          },
+          {
+            "in": "query",
+            "name": "as",
+            "required": false,
+            "schema": {
+              "$ref": "#/components/schemas/PersonId"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReportView"
+                }
+              }
+            },
+            "description": "Successful cockpit response",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "405": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "Allow": {
+                "required": true,
+                "schema": {
+                  "type": "string"
+                }
+              },
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "500": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ApiError"
+                }
+              }
+            },
+            "description": "Request failed",
+            "headers": {
+              "cockpit-contract": {
+                "required": true,
+                "schema": {
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12463,7 +15126,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12482,7 +15145,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12501,7 +15164,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12520,7 +15183,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12545,7 +15208,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12564,7 +15227,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12635,7 +15298,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12654,7 +15317,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12673,7 +15336,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12692,7 +15355,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12717,7 +15380,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12736,7 +15399,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12781,7 +15444,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12800,7 +15463,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12819,7 +15482,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12838,7 +15501,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12863,7 +15526,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12882,7 +15545,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12917,7 +15580,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12936,7 +15599,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12955,7 +15618,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12974,7 +15637,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -12999,7 +15662,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13018,7 +15681,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13053,7 +15716,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13072,7 +15735,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13091,7 +15754,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13110,7 +15773,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13135,7 +15798,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13154,7 +15817,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13216,7 +15879,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13235,7 +15898,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13254,7 +15917,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13273,7 +15936,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13298,7 +15961,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13317,7 +15980,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13360,7 +16023,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13379,7 +16042,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13398,7 +16061,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13417,7 +16080,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13442,7 +16105,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13461,7 +16124,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13504,7 +16167,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13523,7 +16186,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13542,7 +16205,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13561,7 +16224,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13586,7 +16249,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13605,7 +16268,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13675,7 +16338,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13694,7 +16357,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13713,7 +16376,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13732,7 +16395,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13757,7 +16420,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13776,7 +16439,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13819,7 +16482,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13838,7 +16501,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13857,7 +16520,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13876,7 +16539,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13901,7 +16564,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13920,7 +16583,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13965,7 +16628,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -13984,7 +16647,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14003,7 +16666,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14022,7 +16685,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14047,7 +16710,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14066,7 +16729,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14085,7 +16748,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14104,7 +16767,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14123,7 +16786,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14142,7 +16805,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14161,7 +16824,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14200,7 +16863,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14219,7 +16882,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14238,7 +16901,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14257,7 +16920,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14282,7 +16945,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14301,7 +16964,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14336,7 +16999,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14355,7 +17018,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14374,7 +17037,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14393,7 +17056,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14418,7 +17081,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14437,7 +17100,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14482,7 +17145,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14501,7 +17164,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14520,7 +17183,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14539,7 +17202,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14564,7 +17227,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }
@@ -14583,7 +17246,7 @@
               "cockpit-contract": {
                 "required": true,
                 "schema": {
-                  "const": "1.0.0",
+                  "pattern": "^1\\.[0-9]+\\.[0-9]+$",
                   "type": "string"
                 }
               }

@@ -189,7 +189,9 @@
         "kind": "pull",
         "id": "412"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Roll out to 10% of accounts and watch for 30 minutes",
@@ -199,7 +201,9 @@
         "kind": "lane",
         "id": "export-for-big-accounts"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Roll out to everyone",
@@ -209,7 +213,9 @@
         "kind": "lane",
         "id": "export-for-big-accounts"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Run Fenwick's export on production and compare the file",
@@ -219,7 +225,9 @@
         "kind": "thread",
         "id": "lane:export-for-big-accounts"
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Draft the \"it is fixed\" note to Fenwick Freight",
@@ -229,7 +237,9 @@
         "kind": "topic",
         "id": "content"
       },
-      "moduleId": "gtm"
+      "moduleId": "gtm",
+      "state": null,
+      "doneAt": null
     },
     {
       "step": "Report the result against the dream output",
@@ -239,7 +249,9 @@
         "kind": "manager",
         "id": null
       },
-      "moduleId": null
+      "moduleId": null,
+      "state": null,
+      "doneAt": null
     }
   ],
   "ifNoAnswer": "If you do not answer by 14:00, nothing is released.",
@@ -261,5 +273,19 @@
     "scheduledAt": "2026-11-16T22:00:00+01:00"
   },
   "changeRequest": null,
-  "rule": "hardToUndo"
+  "rule": "hardToUndo",
+  "proposer": {
+    "id": "api-manager",
+    "name": "API manager",
+    "shortName": "API manager",
+    "kind": "agent",
+    "avatar": "A",
+    "role": null,
+    "state": null,
+    "word": null,
+    "text": null,
+    "skill": null,
+    "engine": null,
+    "record": null
+  }
 }

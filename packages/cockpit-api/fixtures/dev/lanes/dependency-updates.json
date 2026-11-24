@@ -47,7 +47,8 @@
     {
       "kind": "ok",
       "text": "Merge the dependency updates",
-      "who": "Builder"
+      "who": "Builder",
+      "doneAt": "2026-11-16T03:05:00+01:00"
     }
   ],
   "doneNote": "Dependency updates merged.",
@@ -77,5 +78,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

@@ -45,17 +45,17 @@
       {
         "name": "Visuals",
         "text": "asked for one more round to darken the photo behind the logo: 4 minutes, €0.60, over its limit of 3",
-        "at": "2026-11-15T09:21:00+01:00"
+        "at": "2026-11-16T08:44:59+01:00"
       },
       {
         "name": "Publisher",
         "text": "held the 16:00 promo post until the images are settled",
-        "at": "2026-11-15T09:13:00+01:00"
+        "at": "2026-11-16T08:44:51+01:00"
       },
       {
         "name": "Visuals",
         "text": "stopped after round 3: 4 of 6 images pass the brand check, 3 and 6 fail",
-        "at": "2026-11-15T09:12:00+01:00"
+        "at": "2026-11-16T08:44:50+01:00"
       }
     ]
   },
@@ -89,7 +89,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m37",
@@ -119,7 +120,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m38",
@@ -149,7 +151,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     },
     {
       "id": "m39",
@@ -192,7 +195,8 @@
       "page": null,
       "audience": {
         "kind": "topic"
-      }
+      },
+      "addressee": null
     }
   ],
   "nextCursor": null,

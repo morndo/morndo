@@ -62,8 +62,8 @@
       "id": "open-the-run",
       "personId": null,
       "target": {
-        "kind": "thread",
-        "id": "lane:red-main"
+        "kind": "run",
+        "id": "red-main-ci"
       }
     }
   ],
@@ -72,12 +72,14 @@
     {
       "kind": "ok",
       "text": "3 fixes tried",
-      "who": "Builder · 06:40"
+      "who": "Builder · 06:40",
+      "doneAt": "2026-11-16T06:55:00+01:00"
     },
     {
       "kind": "now",
       "text": "Your call: pin the old session library, or allow one more try",
-      "who": "You · now"
+      "who": "You · now",
+      "doneAt": null
     }
   ],
   "doneNote": "Pinning takes about 3 minutes and turns main green.",
@@ -107,5 +109,15 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": {
+    "kind": "count",
+    "value": 3,
+    "of": 3,
+    "unit": "tries"
+  },
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

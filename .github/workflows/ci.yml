@@ -305,3 +305,5 @@ jobs:
           fi
 
       - run: node scripts/cockpit-contract-v2-check.ts
+
+      - run: node scripts/cockpit-contract-v3-check.ts

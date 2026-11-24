@@ -10,7 +10,7 @@
   "when": null,
   "health": {
     "state": "idle",
-    "word": "No goal set"
+    "word": "Idle"
   },
   "goal": null,
   "noGoal": "Research answers asks from the other topics. A goal needs a measure and a date, for example: the profile refreshed every month.",
@@ -79,7 +79,8 @@
             "decisionId": null,
             "at": "2026-11-16T07:10:00+01:00",
             "id": "research-history-1",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "event",
@@ -107,7 +108,8 @@
             "decisionId": null,
             "at": "2026-11-16T06:40:00+01:00",
             "id": "research-history-2",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       },
@@ -140,7 +142,8 @@
             "decisionId": null,
             "at": "2026-11-15T21:30:00+01:00",
             "id": "research-history-3",
-            "undone": false
+            "undone": false,
+            "checkId": null
           },
           {
             "kind": "seen"
@@ -176,7 +179,8 @@
             "decisionId": null,
             "at": "2026-11-12T15:00:00+01:00",
             "id": "research-history-4",
-            "undone": false
+            "undone": false,
+            "checkId": null
           }
         ]
       }

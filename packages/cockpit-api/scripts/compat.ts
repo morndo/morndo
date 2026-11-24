@@ -66,7 +66,23 @@ function reachable(defs: Contract["$defs"], root: string): Set<string> {
 interface Operation {
   parameters?: { name: string; in: string; required?: boolean; schema: Shape }[];
   requestBody?: { required?: boolean; content: Record<string, { schema?: Shape }> };
-  responses: Record<string, { content?: Record<string, { schema?: Shape }> }>;
+  responses: Record<string, { content?: Record<string, { schema?: Shape }>; headers?: Record<string, Header> }>;
+}
+interface Header {
+  required?: boolean;
+  schema?: Shape;
+}
+
+// A response header may keep its schema, or replace a const by a pattern that the old const matches.
+function headerCompatible(before: Header, after: Header | undefined): boolean {
+  if (!after || Boolean(before.required) !== Boolean(after.required)) return false;
+  if (JSON.stringify(before.schema) === JSON.stringify(after.schema)) return true;
+  const old = before.schema;
+  const next = after.schema;
+  if (old?.const === undefined || typeof old.const !== "string" || !next?.pattern || next.const !== undefined) return false;
+  const { const: _const, ...oldRest } = old;
+  const { pattern, ...nextRest } = next;
+  return JSON.stringify(oldRest) === JSON.stringify(nextRest) && new RegExp(pattern).test(old.const);
 }
 interface OpenApi {
   paths: Record<string, Record<string, Operation>>;
@@ -108,6 +124,12 @@ function compareRoutes(released: OpenApi, current: OpenApi): string[] {
         if (!actual || Object.entries(response.content ?? {}).some(([media, body]) =>
           !actual.content?.[media] || body.schema?.$ref !== actual.content[media]?.schema?.$ref)) {
           failures.push(`${label}: removed or changed response ${status}`);
+        } else {
+          for (const [name, header] of Object.entries(response.headers ?? {})) {
+            if (!headerCompatible(header, actual.headers?.[name])) {
+              failures.push(`${label}: removed or changed header ${name} on response ${status}`);
+            }
+          }
         }
       }
     }

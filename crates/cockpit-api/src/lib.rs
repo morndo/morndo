@@ -16,6 +16,7 @@ pub mod lane;
 pub mod manager;
 pub mod present;
 pub mod pulls;
+pub mod records;
 pub mod route;
 pub mod search;
 pub mod settings;
@@ -26,15 +27,19 @@ pub mod topic;
 pub mod usage;
 pub mod workspace;
 
-pub use access::{AccessGrant, AccessKind, AccessPerson, AccessView, OtherTopicAccess};
+pub use access::{
+    AccessGrant, AccessKind, AccessPerson, AccessView, Invitation, Member, MembersView,
+    OtherTopicAccess,
+};
 pub use actor::{Actor, ActorKind};
 pub use brief::{
-    Artwork, BriefDecision, BriefTopic, BriefView, Burn, DraftsSummary, OvernightAction, SpendLine,
+    Artwork, BriefDecision, BriefTopic, BriefView, Burn, DraftsSummary, OutcomeKind,
+    OvernightAction, OvernightOutcome, SpendLine,
 };
 pub use command::{Attachment, Command, CommandResult};
 pub use decision::{
-    DecisionQueueView, DecisionState, DecisionView, NextStep, Proof, Provenance, QueueItem,
-    Scenario, Stat,
+    BudgetChange, DecisionQueueView, DecisionState, DecisionView, GoalChange, GoalField,
+    GuardrailChange, NextStep, PriorityChange, Proof, Provenance, QueueItem, Scenario, Stat,
 };
 pub use drafts::{Draft, DraftsView};
 pub use error::{ApiError, ErrorCode, FieldError};
@@ -46,6 +51,10 @@ pub use lane::{
 pub use manager::{Ask, ManagerLane, ManagerView, SharedResource};
 pub use present::Present;
 pub use pulls::{Gate, GateState, PullRequest, PullsView};
+pub use records::{
+    CheckView, Report, ReportState, ReportView, Schedule, ScheduleKind, SpotCheck, SpotCheckKind,
+    SpotCheckOutcome,
+};
 pub use route::RoutePreview;
 pub use search::{Answer, SearchKind, SearchResult, SearchView};
 pub use settings::{
@@ -53,7 +62,10 @@ pub use settings::{
     Theme, ThemeId, ThemePatch,
 };
 pub use sidebar::{GroupKind, Pin, PinKind, SidebarGroup, SidebarLane, SidebarView};
-pub use skills::{Connection, ConnectionState, GuardrailSwitch, Skill, SkillsView};
+pub use skills::{
+    Connection, ConnectionScope, ConnectionState, GuardrailAction, GuardrailSwitch, Skill,
+    SkillsView,
+};
 pub use thread::{
     AgentsStrip, LabelKind, Message, MessageAction, MessageLabel, PinState, PinnedDecision,
     ReadBack, SinceSummary, StripItem, ThreadCard, ThreadView,

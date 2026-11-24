@@ -47,17 +47,20 @@
     {
       "kind": "ok",
       "text": "The 5 tools we lose deals to, from the lost-deal notes",
-      "who": "Researcher · 2 Nov"
+      "who": "Researcher · 2 Nov",
+      "doneAt": "2026-11-02T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Searches a month and today's top 10 for each",
-      "who": "Checker · 3 Nov"
+      "who": "Checker · 3 Nov",
+      "doneAt": "2026-11-03T11:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "One keyword per page, approved by you",
-      "who": "You · 4 Nov"
+      "who": "You · 4 Nov",
+      "doneAt": "2026-11-04T00:00:00+01:00"
     }
   ],
   "doneNote": "Done means all three. You approved the keywords; the Manager closed the lane.",
@@ -83,8 +86,8 @@
       "title": "Keyword map",
       "detail": "5 pages, 410 to 1,300 searches a month each",
       "target": {
-        "kind": "lane",
-        "id": "keyword-map"
+        "kind": "file",
+        "id": "file-keyword-map-0"
       }
     }
   ],
@@ -97,5 +100,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": null,
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }

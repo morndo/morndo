@@ -47,27 +47,32 @@
     {
       "kind": "ok",
       "text": "Call 1, Kestrel Parcel: not before spring",
-      "who": "You · 12 Nov"
+      "who": "You · 12 Nov",
+      "doneAt": "2026-11-12T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Call 2, Halden Freight Network: they want an offer",
-      "who": "You · 13 Nov"
+      "who": "You · 13 Nov",
+      "doneAt": "2026-11-13T11:00:00+01:00"
     },
     {
       "kind": "now",
       "text": "Call 3, Brightmoor Retail",
-      "who": "You · today 15:00"
+      "who": "You · today 15:00",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Call 4, Northvale Bank",
-      "who": "You · Wed"
+      "who": "You · Wed",
+      "doneAt": null
     },
     {
       "kind": "todo",
       "text": "Call 5, Corvane ERP",
-      "who": "You · Thu"
+      "who": "You · Thu",
+      "doneAt": null
     }
   ],
   "doneNote": "Every call gets a brief before and notes after. You only talk; the agents do the rest.",
@@ -121,8 +126,8 @@
       "title": "Brief: Brightmoor Retail",
       "detail": "Ready 13:00",
       "target": {
-        "kind": "lane",
-        "id": "partner-calls"
+        "kind": "file",
+        "id": "file-partner-calls-0"
       }
     },
     {
@@ -130,8 +135,8 @@
       "title": "Notes: Halden Freight Network",
       "detail": "They want a referral deal for 2,400 customers",
       "target": {
-        "kind": "lane",
-        "id": "partner-calls"
+        "kind": "file",
+        "id": "file-partner-calls-1"
       }
     },
     {
@@ -139,8 +144,8 @@
       "title": "Notes: Kestrel Parcel",
       "detail": "Budget frozen until spring",
       "target": {
-        "kind": "lane",
-        "id": "partner-calls"
+        "kind": "file",
+        "id": "file-partner-calls-2"
       }
     }
   ],
@@ -153,5 +158,10 @@
   "chain": false,
   "reminder": null,
   "nextAt": "2026-11-16T16:00:00+01:00",
-  "afterNextAt": null
+  "afterNextAt": null,
+  "tries": null,
+  "scheduleId": null,
+  "groupId": null,
+  "waitsOnResource": null,
+  "leadName": null
 }
