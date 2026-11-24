@@ -124,3 +124,45 @@ describe("a command that throws leaves nothing half applied", () => {
     expect(snapshot()).toBe(before);
   });
 });
+
+describe("what a record says matches what it does", () => {
+  it("serves a history row as undoable only while its overnight action can be undone", () => {
+    const { read, act } = fresh();
+    const rows = (read("HistoryPage", "research").days as any[]).flatMap(day => day.entries);
+    expect(rows.find(row => row.id === "research-history-1")).toMatchObject({ undoable: false });
+    expect(() => act({ type: "agentAction.undo", actionId: "research-history-1" })).toThrow();
+  });
+
+  it("gives a run that passed a finish after its start", () => {
+    const world = new World("dev");
+    const run = world.read("MadeRecordView", "export-staging", query, world.owner) as any;
+    expect(run.state).toBe("pass");
+    expect(Date.parse(run.finishedAt)).toBeGreaterThan(Date.parse(run.startedAt));
+  });
+
+  it("gives each report schedule the weekly rule that leads to its next date", () => {
+    const { read } = fresh();
+    const days = ["SU", "MO", "TU", "WE", "TH", "FR", "SA"];
+    const reports = (read("ManagerView").schedules as any[]).filter(item => item.kind === "report");
+    expect(reports.length).toBeGreaterThan(1);
+    for (const item of reports) {
+      const at = new Date(item.nextAt);
+      expect(item.rrule).toContain(`BYDAY=${days[at.getUTCDay()]}`);
+    }
+    expect(reports.find(item => item.topicId === "seo").rrule).toContain("INTERVAL=2");
+  });
+
+  it("counts what a delegated person decides today, and takes it back on undo", () => {
+    const { read, act } = fresh();
+    const rule = read("DecisionView", "d4").rule;
+    act({ type: "access.set", topicId: "partnerships", personId: "lea-brandt", access: { kind: "all", stages: [] } });
+    act({ type: "decisionRight.set", rule, who: "agent", personId: "lea-brandt", dailyLimit: 5 });
+    const used = () => (read("SettingsView").decisionRights as any[]).find(item => item.rule === rule).usedToday;
+    const before = used();
+    const approved = act({ type: "decision.approve", decisionId: "d4" }, "lea-brandt");
+    expect(used()).toBe(before + 1);
+    expect(approved.events).toContainEqual({ type: "decisionRight.changed" });
+    act({ type: "decision.undo", decisionId: "d4" }, "lea-brandt");
+    expect(used()).toBe(before);
+  });
+});
