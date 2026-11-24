@@ -122,24 +122,35 @@ function matchesSuggestion(text: string, suggestions: string[]): boolean {
   });
 }
 
+// Words every guardrail ask may hold; they name no guardrail.
+const GUARDRAIL_FILLER = new Set(["the", "and", "guardrail", "guardrails", "set", "change", "week", "this", "per", "you", "without", "for", "our"]);
+
+// "8,000", "8.000", "12.500,50" and "1.5" as numbers: groups of three are thousands, anything else after the last mark is decimals.
+const AMOUNT = String.raw`\d+(?:[.,]\d+)*`;
+function amountOf(digits: string): number {
+  if (/^\d{1,3}(?:[.,]\d{3})+$/.test(digits)) return Number(digits.replace(/[.,]/g, ""));
+  const mark = Math.max(digits.lastIndexOf("."), digits.lastIndexOf(","));
+  if (mark < 0) return Number(digits);
+  return Number(`${digits.slice(0, mark).replace(/[.,]/g, "")}.${digits.slice(mark + 1)}`);
+}
+
 function eurosMinor(text: string): number | null {
-  const thousands = /(\d+(?:\.\d+)?)\s*k\s*euros?\b/i.exec(text);
-  if (thousands?.[1]) return Math.round(Number(thousands[1]) * 1000 * 100);
-  const kilos = /€\s*(\d+(?:\.\d+)?)\s*k\b/i.exec(text) ?? (/\b(?:budget|guardrail|eur|euro)\b/i.test(text) ? /\b(\d+(?:\.\d+)?)\s*k\b/i.exec(text) : null);
-  if (kilos?.[1]) return Math.round(Number(kilos[1]) * 1000 * 100);
-  const symbol = /€\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/.exec(text);
-  if (symbol?.[1]) return Math.round(Number(symbol[1].replace(/,/g, "")) * 100);
-  const code = /\bEUR\s*(\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?/i.exec(text);
-  if (code?.[1]) return Math.round(Number(code[1].replace(/,/g, "")) * 100);
-  const word = /(\d{1,3}(?:,\d{3})+|\d+)\s*euros?\b/i.exec(text);
-  return word?.[1] ? Math.round(Number(word[1].replace(/,/g, "")) * 100) : null;
+  const found = new RegExp(`(?:€|\\bEUR)\\s*(${AMOUNT})\\s*(k\\b)?`, "i").exec(text)
+    ?? new RegExp(`\\b(${AMOUNT})\\s*(k)?\\s*(?:€|euros?\\b|EUR\\b)`, "i").exec(text)
+    ?? (/\b(?:budget|guardrail)/i.test(text) ? new RegExp(`\\b(${AMOUNT})\\s*(k)\\b`, "i").exec(text) : null);
+  return found?.[1] ? Math.round(amountOf(found[1]) * (found[2] ? 1000 : 1) * 100) : null;
+}
+
+function percentSpoken(text: string): number | null {
+  const found = new RegExp(`\\b(${AMOUNT})\\s*(?:%|percent\\b)`, "i").exec(text);
+  return found?.[1] ? amountOf(found[1]) : null;
 }
 
 function countSpoken(text: string): number | null {
-  const unit = /(\d+)\s*(?:emails?|sends?|tries|posts?|leads?|meetings?)\b/i.exec(text);
-  if (unit?.[1]) return Number(unit[1]);
-  const bare = /\b(?:to|at)\s+(\d+)\b/i.exec(text);
-  return bare?.[1] ? Number(bare[1]) : null;
+  const numbers = [...text.matchAll(new RegExp(`\\b${AMOUNT}\\b`, "g"))].map(match => amountOf(match[0]));
+  const bare = new RegExp(`\\b(?:to|at)\\s+(${AMOUNT})\\b`, "i").exec(text);
+  if (bare?.[1]) return amountOf(bare[1]);
+  return numbers.length === 1 ? numbers[0] ?? null : null;
 }
 
 function budgetPeriod(text: string): string | null {
@@ -1555,7 +1566,8 @@ export class World {
     const reading = measuredNumber(item.value);
     const limit = measuredNumber(item.limit);
     if (item.value.kind === "money" && item.limit?.kind === "money" && reading != null && limit != null) {
-      return `a lead costs ${eurosLabel(reading)} against the ${eurosLabel(limit)} guardrail`;
+      const subject = /cost per lead/i.test(item.what) ? "a lead costs" : `${item.what} is`;
+      return `${subject} ${eurosLabel(reading)} against the ${eurosLabel(limit)} guardrail`;
     }
     if (reading != null && limit != null && item.limit?.kind === "rate") return `${item.what} is ${reading}% against the ${limit}% guardrail`;
     if (reading != null && limit != null) return `${item.what} is ${reading} against the ${limit} guardrail`;
@@ -2621,15 +2633,14 @@ export class World {
 
   private topicForGoal(text: string, current: TopicView | null): TopicView | null {
     const named = [...this.topics.values()].filter(topic => topic.goal && new RegExp(`\\b${topic.name}\\b`, "i").test(text));
-    const pointed = /\b(?:priorit\w*|priority of|for|of)\s+(?:the\s+)?([a-z][\w-]*)/i.exec(text);
+    const pointed = /\b(?:priorit\w*(?:\s+of)?|for|of)\s+(?:the\s+)?([a-z][\w-]*)/i.exec(text);
     const pointedTopic = pointed ? named.find(topic => topic.name.toLowerCase() === pointed[1]?.toLowerCase()) : undefined;
     let id = pointedTopic?.id ?? (named.length === 1 ? named[0]?.id ?? null : null);
     if (!id && current?.goal && (named.length === 0 || named.some(topic => topic.id === current.id))) id = current.id;
     if (/\bguardrail/i.test(text)) {
       const here = id ? this.topics.get(id) : undefined;
-      const home = (here?.goal && this.findGuardrail(here.goal, text) ? here : undefined)
-        ?? named.find(topic => topic.goal && this.findGuardrail(topic.goal, text))
-        ?? [...this.topics.values()].find(topic => topic.goal && this.findGuardrail(topic.goal, text));
+      const having = [...this.topics.values()].filter(topic => topic.goal && this.findGuardrail(topic.goal, text));
+      const home = having.find(topic => topic === here) ?? having.find(topic => named.includes(topic)) ?? (having.length === 1 ? having[0] : undefined);
       if (home) id = home.id;
     }
     if (!id || !this.topics.get(id)?.goal) return null;
@@ -2674,21 +2685,20 @@ export class World {
   }
 
   private findGuardrail(goal: NonNullable<TopicView["goal"]>, text: string): NonNullable<NonNullable<TopicView["goal"]>["guardrails"]>["items"][number] | undefined {
-    const items = (goal.guardrails?.items ?? []).filter(item => item.id && item.what !== "Agents this week");
+    const items = (goal.guardrails?.items ?? []).filter(item => item.id);
     const lower = text.toLowerCase();
     const direct = items.find(item => lower.includes(item.what.toLowerCase()));
     if (direct) return direct;
     if (/\bemails?\b|\bsends?\b/i.test(text)) return items.find(item => /send|email/i.test(item.what));
-    if (/\bspend\b/i.test(text)) return items.find(item => /spend/i.test(item.what));
-    const phrase = /guardrail on ([a-z0-9][^.]{0,60}?)(?:\s+to\b|$)/i.exec(text)?.[1]
-      ?? /([a-z0-9][^.]{0,40}?)\s+guardrail/i.exec(text)?.[1];
-    const words = (phrase ?? "").toLowerCase().split(/\s+/).filter(word => word.length > 2 && !["the", "and"].includes(word));
-    return items.map(item => ({ item, score: words.filter(word => item.what.toLowerCase().includes(word)).length }))
-      .filter(row => row.score > 0).sort((left, right) => right.score - left.score)[0]?.item;
+    const wordsOf = (value: string) => value.toLowerCase().split(/[^a-z0-9]+/).filter(word => word.length > 2 && !GUARDRAIL_FILLER.has(word)).map(word => word.replace(/s$/, ""));
+    const spoken = new Set(wordsOf(text));
+    const scored = items.map(item => ({ item, score: wordsOf(item.what).filter(word => spoken.has(word)).length }))
+      .filter(row => row.score > 0).sort((left, right) => right.score - left.score);
+    return scored[0] && scored[0].score !== scored[1]?.score ? scored[0].item : undefined;
   }
 
   private goalChangeDetail(change: NonNullable<DecisionView["goalChange"]>): string {
-    if (change.affectedTopics.includes("paid")) return "Paid's partner budget and the Friday report follow the new goal.";
+    if (change.topicId === "partnerships" && change.affectedTopics.includes("paid")) return "Paid's partner budget and the Friday report follow the new goal.";
     if (change.field === "budget") return "The new budget applies to this topic's plan.";
     if (change.field === "priority") return "The new priority applies across this module's topics.";
     if (change.field === "guardrail") return "The new guardrail applies to this topic's plan.";
@@ -2713,11 +2723,17 @@ export class World {
     const ordinals: Record<string, number> = { first: 1, second: 2, third: 3, fourth: 4, fifth: 5, sixth: 6 };
     const ordinal = /\b(first|second|third|fourth|fifth|sixth)\b/i.exec(text);
     if (ordinal?.[1]) return clamp(ordinals[ordinal[1].toLowerCase()] ?? 1);
+    const place = /\b(\d+)(?:st|nd|rd|th)\b/i.exec(text);
+    if (place?.[1]) return clamp(Number(place[1]));
     const relative = /\b(over|above|ahead of|before|under|below|behind|after)\s+(?:the\s+)?([a-z][\w-]*)/i.exec(text);
     if (relative?.[1] && relative[2]) {
       const other = [...this.topics.values()].find(topic => topic.id !== topicId && topic.name.toLowerCase() === relative[2]?.toLowerCase());
       const otherRank = other ? ranks.get(other.id) : undefined;
-      if (otherRank != null) return clamp(/^(?:over|above|ahead of|before)$/i.test(relative[1]) ? otherRank - 1 : otherRank + 1);
+      if (otherRank != null) {
+        // the others close up once this topic leaves its place, so a place behind it moves up by one
+        const others = from != null && from < otherRank ? otherRank - 1 : otherRank;
+        return clamp(/^(?:over|above|ahead of|before)$/i.test(relative[1]) ? others : others + 1);
+      }
     }
     if (/\b(?:top|first)\b/i.test(text)) return 1;
     if (from == null) return null;
@@ -2746,20 +2762,21 @@ export class World {
       const item = this.findGuardrail(goal, text);
       if (!item?.id || !item.limit) return null;
       const amount = item.limit.kind === "rate" || /%|percent/i.test(text)
-        ? Number((/(\d+(?:\.\d+)?)\s*(?:%|percent)\b/i.exec(text) ?? [])[1])
+        ? percentSpoken(text)
         : item.limit.kind === "count" ? countSpoken(text) : eurosMinor(text);
-      if (typeof amount !== "number" || !Number.isFinite(amount)) return null;
+      if (amount == null || !Number.isFinite(amount) || amount === measuredNumber(item.limit)) return null;
+      if (item.limit.kind === "count" && !Number.isInteger(amount)) return null;
       const to = item.limit.kind === "money"
         ? { ...item.limit, money: { amountMinor: amount, currency: item.limit.money.currency } }
         : item.limit.kind === "count" ? { ...item.limit, value: amount }
         : item.limit.kind === "rate" ? { ...item.limit, percent: amount } : null;
       if (!to) return null;
-      return { ...base, field: "guardrail", from: measuredNumber(item.limit) ?? 0, to: amount, guardrail: { guardrailId: item.id, name: item.what, from: structuredClone(item.limit), to } };
+      return { ...base, field: "guardrail", from: Math.round(measuredNumber(item.limit) ?? 0), to: Math.round(amount), guardrail: { guardrailId: item.id, name: item.what, from: structuredClone(item.limit), to } };
     }
     if (/\bbudget/i.test(text)) {
       const amount = eurosMinor(text);
       const cap = topic.spend?.cap;
-      if (!amount || !cap) return null;
+      if (!amount || !cap || amount === cap.amountMinor) return null;
       return { ...base, field: "budget", from: cap.amountMinor, to: amount, budget: { from: structuredClone(cap), to: { amountMinor: amount, currency: cap.currency }, period: budgetPeriod(text) } };
     }
     if (/\bpriorit/i.test(text)) {
@@ -2773,8 +2790,8 @@ export class World {
     const spoken = dateOnly ? null : this.spokenTarget(text);
     const namedUnit = spoken?.unit ?? /\bunit to ([a-z][a-z -]{0,199}?)(?=\s+by\b|[.!?,]|$)/i.exec(text)?.[1]?.trim();
     const unit = namedUnit && namedUnit.toLowerCase() !== goal.unit?.toLowerCase() ? namedUnit : null;
-    if (!spoken && !deadlineAt && !unit) return null;
     const to = spoken?.value ?? goal.target;
+    if (to === goal.target && !deadlineAt && !unit) return null;
     if (!Number.isSafeInteger(to) || to <= 0) return null;
     return {
       ...base, field: spoken && to !== goal.target ? "target" : deadlineAt ? "deadline" : "unit",
@@ -2962,7 +2979,7 @@ export class World {
       for (const topic of this.topics.values()) {
         for (const guardrail of topic.goal?.guardrails?.items ?? []) {
           if (guardrail.state === "breached") events.push(
-            { type: "guardrail.breached", topicId: topic.id, name: guardrail.what, guardrailId: slug(guardrail.what) },
+            { type: "guardrail.breached", topicId: topic.id, name: guardrail.what, guardrailId: guardrail.id ?? slug(guardrail.what) },
             { type: "attention.raised", target: target("topic", topic.id), reason: `${guardrail.what} breached its guardrail.` },
           );
         }

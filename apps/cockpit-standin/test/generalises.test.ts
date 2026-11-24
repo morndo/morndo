@@ -298,4 +298,56 @@ describe("behaviours the locked check does not send", () => {
       await stop();
     }
   });
+
+  it("proposes exactly what an ask says, and asks back when it cannot tell", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const change = async (threadTopic: string, text: string): Promise<Record<string, any> | null> => {
+        const sent = await act(url, { type: "message.send", threadId: `topic:${threadTopic}`, text });
+        expect(sent.status).toBe(200);
+        expect(sent.body.message.label.kind).toBe("goalChange");
+        expect(sent.body.laneId ?? null).toBeNull();
+        const id = sent.body.message.decisionId as string | null;
+        return id ? (await get(url, `/decisions/${id}`)).body.goalChange : null;
+      };
+      const rank = async (topic: string, text: string) => (await change(topic, text))?.priority?.to ?? null;
+      expect(await rank("paid", "Prioritise Paid over Content")).toBe(2);
+      expect(await rank("seo", "Prioritise SEO over Outbound this month")).toBe(3);
+      expect(await rank("partnerships", "Priority of Partnerships below Outbound")).toBe(3);
+      expect(await rank("content", "Content priority 4th")).toBe(4);
+      expect(await rank("outbound", "Prioritise Outbound over Paid")).toBe(3);
+
+      const cap = async (topic: string, text: string) => (await change(topic, text))?.budget?.to.amountMinor ?? null;
+      expect(await cap("seo", "Give SEO a budget of 2.000 euros a week")).toBe(200000);
+      expect(await cap("paid", "Budget for Paid: 12.500,50 € a month")).toBe(1250050);
+      expect(await cap("paid", "Paid budget of EUR 3,250.75 per week")).toBe(325075);
+      expect(await cap("seo", "A budget of 1.5k euros for SEO")).toBe(150000);
+
+      const guardrail = async (topic: string, text: string) => (await change(topic, text))?.guardrail ?? null;
+      expect(await guardrail("content", "Set the agents this week guardrail to €60")).toMatchObject({ guardrailId: "content-agents-this-week", to: { money: { amountMinor: 6000 } } });
+      expect(await guardrail("paid", "Guardrail weekly spend at 4.500 euro")).toMatchObject({ guardrailId: "paid-weekly-spend", to: { money: { amountMinor: 450000 } } });
+      expect(await guardrail("outbound", "The guardrail on bounces should be 3.5%")).toMatchObject({ guardrailId: "outbound-bounces", to: { percent: 3.5 } });
+      expect(await guardrail("outbound", "Spam complaints guardrail: at most 2")).toMatchObject({ guardrailId: "outbound-spam-complaints", to: { value: 2 } });
+      expect(await guardrail("content", "Set the bounces guardrail to 3%")).toBeNull();
+
+      expect(await change("content", "Target 300 sign-ups")).toBeNull();
+      expect(await change("paid", "We are done with the budget review")).toBeNull();
+    } finally {
+      await stop();
+    }
+  });
+
+  it("words a breached guardrail's blocker by that guardrail", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const asked = await act(url, { type: "message.send", threadId: "topic:paid", text: "Set the weekly spend guardrail to 3000 euros" });
+      expect((await act(url, { type: "decision.approve", decisionId: decisionId(asked.body) })).status).toBe(200);
+      const blocker = (await get(url, "/topics/paid")).body.goal.blockers.find((item: { guardrailId?: string }) => item.guardrailId === "paid-weekly-spend");
+      expect(blocker.short).toContain("€3,640");
+      expect(blocker.short).toContain("€3,000");
+      expect(blocker.short).not.toMatch(/a lead costs/);
+    } finally {
+      await stop();
+    }
+  });
 });
