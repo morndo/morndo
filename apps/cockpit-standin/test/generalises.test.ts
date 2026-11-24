@@ -72,7 +72,7 @@ describe("behaviours the locked check does not send", () => {
       expect(euros.status).toBe(200);
       const budget = (await get(url, `/decisions/${decisionId(euros.body)}`)).body.goalChange;
       expect(budget.budget.to.amountMinor).toBe(800000);
-      expect(budget.budget.period).toBe("a month");
+      expect(budget.budget.period).toBe("month");
       expect(euros.body.message.text).toContain("€8,000");
 
       const guardrail = await act(url, { type: "message.send", threadId: "topic:outbound", text: "Raise the outbound guardrail to 80 emails a day" });
@@ -101,9 +101,9 @@ describe("behaviours the locked check does not send", () => {
       expect((await act(url, { type: "decision.approve", decisionId: id })).status).toBe(200);
       const paid = (await get(url, "/topics/paid")).body;
       const blocker = paid.goal.blockers.find((item: { guardrailId?: string }) => item.guardrailId === "cost-per-lead");
-      expect(blocker.short).toContain("€120");
-      expect(blocker.short).not.toContain("€100");
-      expect(paid.goal.verdict.word).not.toBe("Over cost");
+      expect(blocker).toBeUndefined();
+      expect(JSON.stringify(paid.goal.gap)).not.toContain("€100");
+      expect(paid.goal.verdict.word).toBe("Over cost");
 
       const target = await act(url, { type: "message.send", threadId: "topic:outbound", text: "Raise the Outbound target to 90" });
       expect((await act(url, { type: "decision.approve", decisionId: decisionId(target.body) })).status).toBe(200);
@@ -114,7 +114,7 @@ describe("behaviours the locked check does not send", () => {
       const before = (await get(url, "/brief")).body.spend.cap.amountMinor as number;
       const budget = await act(url, { type: "message.send", threadId: "topic:paid", text: "Raise the budget for Paid to 2000 euros a week" });
       const change = (await get(url, `/decisions/${decisionId(budget.body)}`)).body.goalChange;
-      expect(change.budget.period).toBe("a week");
+      expect(change.budget.period).toBe("week");
       expect(change.affectedTopics).not.toContain("paid");
       const asks = (await get(url, "/manager")).body.asks as { quote?: string; went?: string }[];
       expect(asks.some(item => item.quote === "Raise the budget for Paid to 2000 euros a week" && item.went === "a goal change · waits for you in Decide")).toBe(true);
@@ -201,6 +201,99 @@ describe("behaviours the locked check does not send", () => {
       expect(quotes).toContain(text);
       const single = await act(url, { type: "lane.file", text: "Write a recap of the webinar for the newsletter" });
       expect(single.body.receipt.groupLaneIds).toEqual([]);
+    } finally {
+      await stop();
+    }
+  });
+
+  it("opens a report only for the owner and a recipient who can read the topic", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const content = (await get(url, "/topics/content")).body.meta.nextReportId as string;
+      expect((await get(url, `/reports/${content}`)).status).toBe(200);
+      expect((await get(url, `/reports/${content}?as=tom-ahrens`)).status).toBe(403);
+      expect((await get(url, "/topics/content?as=lea-brandt")).body.meta.nextReportId).toBeNull();
+      expect((await get(url, "/reports/no-such-report")).status).toBe(404);
+      const partnerships = (await get(url, "/topics/partnerships")).body.meta.nextReportId as string;
+      expect((await get(url, `/reports/${partnerships}?as=tom-ahrens`)).status).toBe(200);
+      expect((await act(url, { type: "access.set", topicId: "partnerships", personId: "tom-ahrens", access: { kind: "none", stages: [] } })).status).toBe(200);
+      expect((await get(url, `/reports/${partnerships}?as=tom-ahrens`)).status).toBe(403);
+    } finally {
+      await stop();
+    }
+  });
+
+  it("reads a dev project from its lanes", async () => {
+    const { url, stop } = await boot("dev");
+    try {
+      const word = async (id: string) => {
+        const topic = (await get(url, `/topics/${id}`)).body.health.word as string;
+        const side = ((await get(url, "/sidebar")).body.groups as { id: string; stateWord: string }[]).find(group => group.id === id)?.stateWord;
+        return [topic, side];
+      };
+      expect(await word("web")).toEqual(["Stuck", "Stuck"]);
+      expect(await word("api")).toEqual(["Needs you", "Needs you"]);
+      expect(await word("billing")).toEqual(["Needs you", "Needs you"]);
+      expect(await word("mobile")).toEqual(["Working", "Working"]);
+      expect(await word("infra")).toEqual(["Idle", "Idle"]);
+      expect((await act(url, { type: "lane.file", text: "Rotate the spare certificate", topicId: "infra" })).status).toBe(200);
+      expect(await word("infra")).toEqual(["Working", "Working"]);
+    } finally {
+      await stop();
+    }
+  });
+
+  it("keeps an unreadable goal change and files an ordinary request", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const ordinary = await act(url, { type: "message.send", threadId: "topic:paid", text: "Lift the cap for Paid" });
+      expect(ordinary.status).toBe(200);
+      expect(ordinary.body.message.label.kind).toBe("request");
+      expect(ordinary.body.laneId).toBeTruthy();
+      const open = await act(url, { type: "message.send", threadId: "topic:seo", text: "The budget needs another look" });
+      expect(open.status).toBe(200);
+      expect(open.body.message.label.kind).toBe("goalChange");
+      expect(open.body.laneId).toBeNull();
+      expect(open.body.message.decisionId).toBeNull();
+      const ranked = await act(url, { type: "message.send", threadId: "topic:content", text: "Make Paid priority number 2" });
+      expect(ranked.status).toBe(200);
+      const change = (await get(url, `/decisions/${decisionId(ranked.body)}`)).body.goalChange;
+      expect(change.topicId).toBe("paid");
+      expect(change.priority.to).toBe(2);
+    } finally {
+      await stop();
+    }
+  });
+
+  it("keeps a guardrail, its switch and its blocker on the same limit", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const before = (await get(url, "/topics/outbound")).body.goal.verdict.word as string;
+      const asked = await act(url, { type: "message.send", threadId: "topic:outbound", text: "Hold the sends a day guardrail at 40" });
+      expect((await act(url, { type: "decision.approve", decisionId: decisionId(asked.body) })).status).toBe(200);
+      const outbound = (await get(url, "/topics/outbound")).body.goal;
+      const sends = outbound.guardrails.items.find((item: { id?: string }) => item.id === "outbound-sends-a-day");
+      expect(sends.limit.value).toBe(40);
+      expect(sends.state).toBe("breached");
+      expect(outbound.blockers.some((item: { guardrailId?: string; short?: string }) => item.guardrailId === "outbound-sends-a-day" && item.short?.includes("40"))).toBe(true);
+      expect(outbound.verdict.word).toBe(before);
+      const sw = ((await get(url, "/skills")).body.guardrails as { id: string; limit?: { value?: number }; detail?: string }[]).find(item => item.id === "outbound");
+      expect(sw?.limit?.value).toBe(40);
+      expect(sw?.detail).toContain("40");
+    } finally {
+      await stop();
+    }
+  });
+
+  it("keeps a second clause that refers back in the same lane", async () => {
+    const { url, stop } = await boot("gtm");
+    try {
+      const apart = await act(url, { type: "lane.file", text: "Photograph the banner and rank the replies" });
+      expect(apart.body.receipt.groupLaneIds).toHaveLength(2);
+      const together = await act(url, { type: "lane.file", text: "Photograph the banner and crop it" });
+      expect(together.body.receipt.groupLaneIds).toEqual([]);
+      const nouns = await act(url, { type: "lane.file", text: "Note the retail and logistics partners" });
+      expect(nouns.body.receipt.groupLaneIds).toEqual([]);
     } finally {
       await stop();
     }
