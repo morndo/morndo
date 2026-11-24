@@ -467,7 +467,7 @@ export class World {
     if ("decisionId" in command) {
       this.requireDecisionRight(requireRecord(this.decisions.get(command.decisionId), "decision"), viewer);
     } else if ("actionId" in command) {
-      requireRecord(this.history.get(this.overnightAliases.get(command.actionId) ?? command.actionId), "action").authorize(viewer);
+      requireRecord(this.history.get(this.actionKey(command.actionId)), "action").authorize(viewer);
     } else if ("laneId" in command) {
       const lane = requireRecord(this.lanes.get(command.laneId), "lane");
       if (!lane.topicId || !this.sharedLane(lane, viewer)) throw forbid();
@@ -571,9 +571,18 @@ export class World {
     return this.goalChangeDetail(this.goalChangeFor(decision.goalChange, viewer));
   }
 
-  /** The history action of a decision's latest approval or decline. */
+  /** The history action of a decision's live approval or decline: the last one that is not undone, else the last one. */
   private decisionAction(decisionId: string): HistoryAction | undefined {
-    return this.history.get(this.overnightAliases.get(`decision-${decisionId}`) ?? `decision-${decisionId}`);
+    const acts = [...this.history.values()].filter(action => action.row.decision && action.row.decisionId === decisionId);
+    return acts.filter(action => !action.row.undone).at(-1) ?? acts.at(-1);
+  }
+
+  /** The history id an undo or redo names: the row itself, the overnight row it stands for, or a decision's live act. */
+  private actionKey(id: string): string {
+    const alias = this.overnightAliases.get(id);
+    if (alias) return alias;
+    if (this.history.has(id) || !id.startsWith("decision-")) return id;
+    return this.decisionAction(id.slice("decision-".length))?.row.id ?? id;
   }
 
   private requireDecisionRight(decision: DecisionView, viewer: Actor): void {
@@ -905,6 +914,13 @@ export class World {
       .reduce((best, at) => Date.parse(at) < Date.parse(best) ? at : best);
   }
 
+  /** The weekly rule whose next occurrence is this date. */
+  private weeklyRule(dueAt: string): string {
+    const weeks = Math.max(1, Math.ceil((Date.parse(dueAt) - Date.parse(this.now)) / (7 * 86400000)));
+    const day = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Europe/Berlin" }).format(new Date(dueAt)).slice(0, 2).toUpperCase();
+    return `FREQ=WEEKLY;${weeks > 1 ? `INTERVAL=${weeks};` : ""}BYDAY=${day}`;
+  }
+
   private schedules(): ManagerView["schedules"] {
     const kept = this.managerBase.schedules.filter(item => item.kind !== "brief");
     const present = new Set(kept.map(item => item.id));
@@ -915,8 +931,8 @@ export class World {
       present.add(id);
       const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(report.dueAt));
       return [{
-        id, kind: "report" as const, title: report.title, topicId: report.topicId, rrule: "FREQ=WEEKLY",
-        text: "when the report is due", time, nextAt: report.dueAt, lastAt: null, lastLaneId: null,
+        id, kind: "report" as const, title: report.title, topicId: report.topicId, rrule: this.weeklyRule(report.dueAt),
+        text: `each ${new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: "Europe/Berlin" }).format(new Date(report.dueAt))} at ${time}`, time, nextAt: report.dueAt, lastAt: null, lastLaneId: null,
         source: report.title, opener: report.writer, on: true,
       }];
     });
@@ -1190,7 +1206,10 @@ export class World {
     const existing = (base?.days ?? []).flatMap(day => day.entries.flatMap(entry => {
       if (entry.kind !== "event" || !canSee(entry)) return [];
       const action = this.history.get(this.overnightAliases.get(entry.id) ?? entry.id);
-      return [{ label: day.label, entry: action ? { ...entry, actor: action.row.actor, at: action.row.at, undone: action.row.undone } : entry }];
+      const overnight = action && byId(this.briefBase.overnight, action.row.id);
+      const closed = Boolean(overnight && (overnight.outcome?.sentOutside || (overnight.undoUntilAt && Date.parse(overnight.undoUntilAt) <= Date.parse(this.now))));
+      return [{ label: day.label, entry: action
+        ? { ...entry, actor: action.row.actor, at: action.row.at, undone: action.row.undone, undoable: entry.undoable && !closed } : entry }];
     }));
     const added = [...this.history.values()].filter(action => action.topicId === id && !this.fixtureActions.has(action.row.id) && canSee(action.row)).reverse()
       .map(action => ({ label: Date.parse(action.row.at) < Date.parse(hour("00:00")) ? "Yesterday" : "Today", entry: action.row }));
@@ -1375,7 +1394,7 @@ export class World {
       else prefs.layout = layout;
     }
     this.preferences.set(viewer.id, prefs);
-    return done([{ type: "prefs.changed" }, ...(command.briefsPerDay != null ? [{ type: "brief.published" } as const] : [])]);
+    return done([{ type: "prefs.changed" }, ...(command.briefsPerDay != null ? [{ type: "brief.changed" } as const] : [])]);
   }
 
   private decisionRight(rule: string, who: "you" | "agent", dailyLimit: DailyLimit | null | undefined, personId: string | null, viewer: Actor): Effect {
@@ -1466,7 +1485,7 @@ export class World {
     const events: Event[] = [...this.access.values()].filter(view => view.topicId !== id && view.people.some(item => item.person.id === personId))
       .map(view => ({ type: "access.changed", topicId: view.topicId }));
     events.push({ type: "access.changed", topicId: id, ...(hadAccess || kind !== "none" ? { personId } : {}) });
-    events.push({ type: "topic.changed", topicId: id });
+    events.push({ type: "topic.changed", topicId: id }, { type: "members.changed", personId });
     return done(events);
   }
 
@@ -1498,6 +1517,7 @@ export class World {
     }
     stage.runBy = next;
     return done([
+      { type: "members.changed", personId }, ...(prior && prior.id !== personId ? [{ type: "members.changed", personId: prior.id } as const] : []),
       { type: "access.changed", topicId: id, personId },
       ...(prior && prior.id !== personId ? [{ type: "access.changed", topicId: id, personId: prior.id } as const] : []),
       { type: "topic.changed", topicId: id },
@@ -1787,7 +1807,9 @@ export class World {
     const today = calendarDay(this.now);
     return this.settings.decisionRights.map(right => ({
       ...right,
-      usedToday: right.who === "you" ? null : this.briefBase.overnight.filter(row => row.rule === right.rule && calendarDay(row.at) === today).length,
+      usedToday: right.who === "you" ? null : this.briefBase.overnight.filter(row => row.rule === right.rule && calendarDay(row.at) === today).length
+        + [...this.history.values()].filter(action => action.row.decision && !action.row.undone && action.row.actor.id === right.personId
+          && this.decisions.get(action.row.decisionId ?? "")?.rule === right.rule && calendarDay(action.row.at) === today).length,
       resetsAt: right.who === "you" ? null : this.nextMidnight(),
     }));
   }
@@ -1857,11 +1879,12 @@ export class World {
         const kind = item.target?.kind;
         const id = item.target?.id;
         if (!id || (kind !== "file" && kind !== "run" && kind !== "review") || this.records.has(id)) continue;
+        // a finished run of the lane's first day: 10:00, 26 minutes
+        const runAt = (minutes: number) => new Date(Date.parse(lane.openedAt) + (600 + minutes) * 60000).toISOString();
         this.records.set(id, {
           id, kind, laneId: lane.id, title: item.title, detail: item.detail,
           url: kind === "file" ? `https://files.example.test/${id}` : null,
-          trigger: kind === "run" ? "staging" : null, startedAt: kind === "run" ? lane.openedAt : null,
-          finishedAt: null, state: kind === "run" ? "pass" : null, checks: [], log: null, pullId: null,
+          trigger: kind === "run" ? "staging" : null, startedAt: kind === "run" ? runAt(0) : null, finishedAt: kind === "run" ? runAt(26) : null, state: kind === "run" ? "pass" : null, checks: [], log: null, pullId: null,
         });
       }
     }
@@ -1967,8 +1990,14 @@ export class World {
       case "run":
       case "review":
       case "file": {
-        const record = this.madeRecord(id, viewer);
-        return record?.kind === page.kind ? record.title : undefined;
+        try {
+          const record = this.madeRecord(id, viewer);
+          return record?.kind === page.kind ? record.title : undefined;
+        } catch (error) {
+          // out of reach is no title here: Recent drops the page, a visit answers 404
+          if (error instanceof Problem) return undefined;
+          throw error;
+        }
       }
       case "report": return this.canReadReport(id, viewer) ? this.reports.get(id)?.title : undefined;
       case "check": {
@@ -2070,14 +2099,17 @@ export class World {
       if (!invitation) continue;
       const person = this.people.get(invitation.personId);
       const pending = person?.membershipState === "invited";
-      const stages = this.topics.get(topicId)?.stages ?? [];
-      for (const view of this.access.values()) {
+      const left = new Set([topicId]);
+      for (const [other, view] of this.access) {
         view.invitations = view.invitations.filter(item => item.id !== id);
-        if (pending) view.people = view.people.filter(entry => entry.person.id !== invitation.personId);
+        if (!pending && other !== topicId) continue;
+        const entry = view.people.find(item => item.person.id === invitation.personId);
+        if (entry && entry.access.kind !== "none") left.add(other);
+        if (pending) view.people = view.people.filter(item => item !== entry);
+        for (const stage of this.topics.get(other)?.stages ?? []) if (stage.runBy?.id === invitation.personId) stage.runBy = null;
       }
-      for (const stage of stages) if (stage.runBy?.id === invitation.personId) stage.runBy = null;
       if (pending) this.people.delete(invitation.personId);
-      return done([{ type: "access.changed", topicId, personId: invitation.personId }, { type: "topic.changed", topicId },
+      return done([...[...left].flatMap((other): Event[] => [{ type: "access.changed", topicId: other, personId: invitation.personId }, { type: "topic.changed", topicId: other }]),
         { type: "members.changed", personId: invitation.personId }]);
     }
     throw missing("invitation");
@@ -2108,6 +2140,8 @@ export class World {
         count: null, samples: [], decisionId: null, checkId: null },
       topicId, record, apply, authorize,
     };
+    // an act that uses its id again is the newest one
+    this.history.delete(id);
     this.history.set(id, action);
     return action;
   }
@@ -2148,7 +2182,7 @@ export class World {
   }
 
   private undo(id: string, undone: boolean, viewer: Actor): Effect {
-    const alias = this.overnightAliases.get(id) ?? id;
+    const alias = this.actionKey(id);
     const overnightRow = this.briefBase.overnight.find(row => row.id === id || row.id === alias);
     if (undone && overnightRow) {
       if (viewer.id !== this.owner.id) this.requireOwner(viewer);
@@ -2167,13 +2201,17 @@ export class World {
         throw new Problem("conflict", "The undo window for this action has passed.");
       }
     }
+    this.requireLatest(action);
+    const events = action.apply(undone);
+    action.row.undone = undone;
+    return done([...events, { type: "agentAction.changed", actionId: action.row.id }], action.row.laneId);
+  }
+
+  private requireLatest(action: HistoryAction): void {
     const overnight = byId(this.briefBase.overnight, action.row.id);
     const actions = [...this.history.values()].filter(item => item.record === action.record || overnight?.relatedLaneIds?.includes(item.record));
     const later = actions.slice(actions.indexOf(action) + 1);
     if (later.some(item => !item.row.undone)) throw new Problem("conflict", "Undo the newer change to this record first.");
-    const events = action.apply(undone);
-    action.row.undone = undone;
-    return done([...events, { type: "agentAction.changed", actionId: action.row.id }], action.row.laneId);
   }
 
   /** Where an ask would be filed, and whether this reader may file it there; nothing is written. */
@@ -2277,13 +2315,16 @@ export class World {
     const first = requireRecord(filed[0], "lane");
     const members = ids.map(id => requireRecord(this.history.get(`file-${id}`), "action"));
     const record = this.remember(null, `file-${groupId}`, text, viewer, undone => {
-      const events = members.flatMap(member => {
+      const pending = members.filter(member => member.row.undone !== undone);
+      for (const member of pending) this.requireLatest(member);
+      return pending.flatMap(member => {
         const changed = member.apply(undone);
         member.row.undone = undone;
         return changed;
       });
-      return events;
     }, first.lane.id, `file-${groupId}`, this.now, reader => { for (const member of members) member.authorize(reader); });
+    // the group is undone exactly while all its parts are
+    Object.defineProperty(record.row, "undone", { enumerable: true, configurable: true, get: () => members.every(member => member.row.undone), set: () => undefined });
     const receipt = { ...first.receipt, actionId: record.row.id, laneId: first.lane.id, groupLaneIds: ids };
     return { lane: first.lane, receipt, message: first.message, events: filed.flatMap(item => item.events) };
   }
@@ -2511,7 +2552,7 @@ export class World {
     const actionId = fixture?.id ?? `decision-${id}`;
     if (state === "open") {
       if (decision.release?.stage === "done") throw new Problem("conflict", "The rollout has already finished.");
-      return this.undo(`decision-${id}`, true, viewer);
+      return this.undo(this.decisionAction(id)?.row.id ?? `decision-${id}`, true, viewer);
     }
     const pull = this.pulls.items.find(item => item.decisionId === id);
     if (state === "approved" && pull?.held) throw new Problem("conflict", "The pull request is held.");
@@ -2554,23 +2595,20 @@ export class World {
       }
       return events;
     };
-    const record = this.remember(decision.topicId, actionId, fixture?.text ?? `${state === "approved" ? "Approved" : "Declined"}: ${decision.title}`, viewer,
+    const record = this.remember(decision.topicId, `decision-${id}`, fixture?.text ?? `${state === "approved" ? "Approved" : "Declined"}: ${decision.title}`, viewer,
       apply, decision.laneId ?? fixture?.laneId ?? null, actionId, this.now, reader => this.requireDecisionRight(decision, reader));
     record.row.decision = true;
     record.row.decisionId = id;
-    // The alias belongs to this act only: a decline after an approval is undone as itself.
-    const aliased = this.overnightAliases.get(`decision-${id}`);
     if (fixture) {
       fixture.undoable = true;
       this.fixtureActions.add(fixture.id);
-      this.overnightAliases.set(`decision-${id}`, fixture.id);
-    } else this.overnightAliases.delete(`decision-${id}`);
+    }
     try {
-      return done(apply(false));
+      const events = apply(false);
+      if (viewer.id !== this.owner.id && decision.rule) events.push({ type: "decisionRight.changed" });
+      return done(events);
     } catch (error) {
       this.history.delete(record.row.id);
-      if (aliased === undefined) this.overnightAliases.delete(`decision-${id}`);
-      else this.overnightAliases.set(`decision-${id}`, aliased);
       throw error;
     }
   }
@@ -2612,7 +2650,7 @@ export class World {
       if (this.role(topicId, recipient) !== "view") throw new Problem("forbidden", "This person does not have status access.");
       const thread = requireRecord(this.threads.get(threadId), "thread");
       const message = this.message(viewer, text, null, { kind: "viewer", personId });
-      message.addressee = personId;
+      message.addressee = personId === viewer.id ? null : personId;
       message.attachment = command.attachment ?? null;
       thread.messages.push(message);
       return done([{ type: "message.posted", threadId, message }], null, message);
@@ -2626,7 +2664,8 @@ export class World {
       if (!stages.includes(stage)) throw new Problem("forbidden", "This reader cannot post in that stage.");
       const thread = requireRecord(this.threads.get(threadId), "thread");
       const message = this.message(viewer, text, classify(text), { kind: "stage", stage });
-      message.addressee = topic.stages.find(item => item.name === stage)?.runBy?.id ?? null;
+      const holder = topic.stages.find(item => item.name === stage)?.runBy?.id ?? null;
+      message.addressee = holder === viewer.id ? null : holder;
       message.attachment = command.attachment ?? null;
       message.model = this.model(command.model)?.id ?? null;
       thread.messages.push(message);
