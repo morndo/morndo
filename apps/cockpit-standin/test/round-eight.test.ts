@@ -232,3 +232,54 @@ describe("schedule.changed", () => {
     expect(scheduleEvents(world.advance(new Date(Date.parse(was) + 120000).toISOString()))).not.toContain("friday-check");
   });
 });
+
+describe("a report schedule", () => {
+  const reports = (world: World) => (asAny(world.read("ManagerView", "", query, world.owner)).schedules as any[]).filter(item => item.kind === "report");
+  const view = (item: any) => JSON.stringify([item.id, item.title, item.rrule, item.text, item.time, item.nextAt]);
+
+  it("says in words what its rule says, and does not call a two-weekly report weekly", () => {
+    const seo = reports(new World("gtm")).find(item => item.topicId === "seo");
+    expect(seo.rrule).toBe("FREQ=WEEKLY;INTERVAL=2;BYDAY=MO");
+    expect(seo.text).toBe("every second Monday at 17:00");
+    expect(seo.title).not.toMatch(/weekly/i);
+    const content = reports(new World("gtm")).find(item => item.topicId === "content");
+    expect(content.rrule).toBe("FREQ=WEEKLY;BYDAY=FR");
+    expect(content.text).toBe("each Friday at 17:00");
+    expect(content.title).toMatch(/weekly/i);
+  });
+
+  it("is fixed when it is made: the clock moves neither its rule, its words nor its next date", () => {
+    const world = new World("gtm");
+    const before = reports(world).map(view);
+    for (const at of ["2026-11-17T09:00:00+01:00", "2026-11-23T12:00:00+01:00", "2026-11-29T12:00:00+01:00"]) {
+      world.advance(at);
+      expect(reports(world).map(view)).toEqual(before);
+    }
+  });
+});
+
+describe("a job that is scheduled says so", () => {
+  for (const module of MODULES) {
+    it(`${module}: a job whose lane or due time has a schedule carries its id and cadence`, () => {
+      const world = new World(module);
+      const schedules = (asAny(world.read("ManagerView", "", query, world.owner)).schedules as any[]).filter(item => item.kind !== "brief");
+      const cadenceOf = (rrule: string) => rrule.startsWith("FREQ=WEEKLY") ? "weekly" : rrule.startsWith("FREQ=MONTHLY") ? "monthly" : null;
+      let scheduled = 0;
+      for (const topic of topicIds(module)) {
+        for (const job of asAny(world.read("TopicView", topic, query, world.owner)).jobs as any[]) {
+          const lane = job.laneId ? readLane(world, job.laneId) : null;
+          const byLane = lane?.scheduleId ? schedules.find(item => item.id === lane.scheduleId) : undefined;
+          // a job named for a report that falls due when the topic's report schedule does is that schedule's own
+          const byTime = !byLane && job.dueAt && /report/i.test(job.job)
+            ? schedules.find(item => item.kind === "report" && item.topicId === topic && item.nextAt === job.dueAt) : undefined;
+          const schedule = byLane ?? byTime;
+          if (!schedule) continue;
+          scheduled += 1;
+          expect(job.scheduleId, `${topic}: ${job.job}`).toBe(schedule.id);
+          expect(job.cadence, `${topic}: ${job.job}`).toBe(cadenceOf(schedule.rrule));
+        }
+      }
+      if (module === "gtm") expect(scheduled).toBeGreaterThanOrEqual(2);
+    });
+  }
+});

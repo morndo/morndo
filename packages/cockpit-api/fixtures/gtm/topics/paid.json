@@ -1011,8 +1011,8 @@
       "laneId": "click-floor",
       "dueAt": null,
       "completedAt": "2026-11-16T08:30:00+01:00",
-      "cadence": null,
-      "scheduleId": null
+      "cadence": "weekly",
+      "scheduleId": "click-floor-weekly"
     },
     {
       "job": "3 new Search ads",
@@ -1031,8 +1031,8 @@
       "laneId": null,
       "dueAt": "2026-11-23T17:00:00+01:00",
       "completedAt": null,
-      "cadence": null,
-      "scheduleId": null
+      "cadence": "weekly",
+      "scheduleId": "paid-report"
     }
   ],
   "chatSub": "Mara and 3 agents · the Manager reads it, it is not in it",

@@ -246,6 +246,7 @@ export class World {
   private readonly asked = new Map<string, { at: string; chat: string }>();
   private readonly approvedAt = new Map<string, string>();
   /** The dates of a member whose accepted invitation was removed: the invitation held them, the member keeps them. */
+  private readonly reportRules = new Map<string, { weeks: number; rrule: string; text: string; time: string }>();
   private readonly memberDates = new Map<string, { invitedAt: string; joinedAt: string | null }>();
   private approvalSerial = 0;
   private serial = 0;
@@ -945,12 +946,19 @@ export class World {
       .reduce((best, at) => Date.parse(at) < Date.parse(best) ? at : best);
   }
 
-  /** The weekly rule whose next occurrence is this date. */
-  private weeklyRule(dueAt: string): string {
+  /**
+   * The one place a report schedule's rule, its words and its time come from: counted from the clock when the schedule is made,
+   * never again, so the same schedule says the same thing on every day.
+   */
+  private reportCadence(dueAt: string): { weeks: number; rrule: string; text: string; time: string } {
     const days = (Date.parse(calendarDay(dueAt)) - Date.parse(calendarDay(this.now))) / 86400000;
     const weeks = Math.max(1, Math.floor(days / 7));
-    const day = new Intl.DateTimeFormat("en-GB", { weekday: "short", timeZone: "Europe/Berlin" }).format(new Date(dueAt)).slice(0, 2).toUpperCase();
-    return `FREQ=WEEKLY;${weeks > 1 ? `INTERVAL=${weeks};` : ""}BYDAY=${day}`;
+    const format = (options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", ...options }).format(new Date(dueAt));
+    const day = format({ weekday: "short" }).slice(0, 2).toUpperCase();
+    const time = format({ hour: "2-digit", minute: "2-digit", hourCycle: "h23" });
+    const ordinals = ["", "", "second", "third", "fourth", "fifth", "sixth"];
+    const every = weeks === 1 ? "each" : `every ${ordinals[weeks] ?? `${weeks}th`}`;
+    return { weeks, rrule: `FREQ=WEEKLY;${weeks > 1 ? `INTERVAL=${weeks};` : ""}BYDAY=${day}`, text: `${every} ${format({ weekday: "long" })} at ${time}`, time };
   }
 
   private schedules(): ManagerView["schedules"] {
@@ -961,10 +969,10 @@ export class World {
       const id = report.scheduleId ?? `${report.topicId}-report`;
       if (present.has(id)) return [];
       present.add(id);
-      const time = new Intl.DateTimeFormat("en-GB", { timeZone: "Europe/Berlin", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).format(new Date(report.dueAt));
+      const cadence = this.reportRules.get(id) ?? this.reportCadence(report.dueAt);
       return [{
-        id, kind: "report" as const, title: report.title, topicId: report.topicId, rrule: this.weeklyRule(report.dueAt),
-        text: `each ${new Intl.DateTimeFormat("en-GB", { weekday: "long", timeZone: "Europe/Berlin" }).format(new Date(report.dueAt))} at ${time}`, time, nextAt: report.dueAt, lastAt: null, lastLaneId: null,
+        id, kind: "report" as const, title: report.title, topicId: report.topicId, rrule: cadence.rrule,
+        text: cadence.text, time: cadence.time, nextAt: report.dueAt, lastAt: null, lastLaneId: null,
         source: report.title, opener: report.writer, on: true,
       }];
     });
@@ -1942,16 +1950,19 @@ export class World {
         scheduleId: "partnerships-report", dueAt: "2026-11-20T08:00:00+01:00", state: "scheduled", draftId: null,
         sentAt: null, checkedBy: null, periodFrom: "2026-11-09T00:00:00+01:00", periodTo: "2026-11-15T23:59:00+01:00",
       });
-      for (const [id, topicId, title] of [
-        ["content-weekly", "content", "Weekly content report"],
-        ["outbound-weekly", "outbound", "Weekly outbound report"],
-        ["paid-weekly", "paid", "Weekly paid report"],
-        ["seo-weekly", "seo", "Weekly SEO report"],
+      for (const [id, topicId, name] of [
+        ["content-weekly", "content", "content"],
+        ["outbound-weekly", "outbound", "outbound"],
+        ["paid-weekly", "paid", "paid"],
+        ["seo-weekly", "seo", "SEO"],
       ] as const) {
         const topic = this.topics.get(topicId);
         const dueAt = topic?.meta?.nextReportAt;
         const writer = topic?.crew.find(actor => actor.kind === "agent") ?? reporter;
         if (!topic?.meta || !dueAt) continue;
+        const cadence = this.reportCadence(dueAt);
+        this.reportRules.set(`${topicId}-report`, cadence);
+        const title = cadence.weeks === 1 ? `Weekly ${name} report` : `${name[0]?.toUpperCase()}${name.slice(1)} report`;
         topic.meta.nextReportId = topic.meta.nextReportId ?? id;
         this.reports.set(id, {
           id, topicId, title, recipients: [this.owner], writer, scheduleId: `${topicId}-report`, dueAt, state: "scheduled", draftId: null,
