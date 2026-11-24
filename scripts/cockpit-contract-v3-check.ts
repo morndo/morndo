@@ -1322,9 +1322,234 @@ async function invariants() {
   });
 }
 
+// ---- a proposal says what the ask says, or there is none
+const MONTHS = ["January", "February", "March", "April", "May", "June"];
+type Want = (gc: any) => boolean;
+const wantBudget = (topicId: string, euros: number, period: string | null = null): Want => gc => gc.field === "budget" && gc.topicId === topicId
+  && gc.budget?.to?.amountMinor === euros * 100 && (period === null || gc.budget?.period === period);
+const wantTarget = (topicId: string, n: number): Want => gc => gc.field === "target" && gc.topicId === topicId && gc.to === n && gc.unit === null && gc.deadlineAt === null;
+const wantRank = (topicId: string, n: number): Want => gc => gc.field === "priority" && gc.topicId === topicId && gc.priority?.to === n;
+const wantLimit = (id: string, n: number): Want => gc => gc.field === "guardrail" && gc.guardrail?.guardrailId === id
+  && (numberOf(gc.guardrail?.to) === (gc.guardrail?.to?.kind === "money" ? n * 100 : n));
+const wantDeadline = (topicId: string, date: string): Want => gc => gc.field === "deadline" && gc.topicId === topicId && gc.from === gc.to
+  && isTime(gc.deadlineAt) && local(gc.deadlineAt, "Europe/Berlin", "date") === date;
+async function propose(url: string, threadTopic: string, text: string, as?: string) {
+  const sent = await act(url, { type: "message.send", threadId: `topic:${threadTopic}`, text }, as);
+  const id = decisionOf(sent);
+  return { sent, id, gc: id ? (await get(url, `/decisions/${id}`)).body?.goalChange ?? null : null };
+}
+const said = (gc: any) => short(gc && [gc.field, gc.topicId, gc.to, gc.unit, gc.deadlineAt, gc.budget?.to, gc.guardrail?.guardrailId]);
+
+async function faithful() {
+  // plain asks in the mockup's words are understood
+  await scenario("G1 plain asks are understood", "gtm", async url => {
+    const n = rand(31, 89);
+    const [month, year, monthNumber] = (() => { const m = rand(1, 5); return [MONTHS[m]!, 2027, String(m + 1).padStart(2, "0")] as const; })();
+    const day = rand(10, 28);
+    const plain: [string, string, Want][] = [
+      ["seo", `Set the SEO budget to €${n} a week`, wantBudget("seo", n, "week")],
+      ["paid", `Raise the Paid budget cap to ${n}00 euros`, wantBudget("paid", n * 100)],
+      ["content", `Give Content a budget of €${n} per month`, wantBudget("content", n, "month")],
+      ["outbound", `Cut the Outbound budget to EUR ${n} a month`, wantBudget("outbound", n, "month")],
+      ["outbound", `Set the Outbound target to ${n}`, wantTarget("outbound", n)],
+      ["paid", `Raise the Paid target to 1,${n}0 leads`, wantTarget("paid", 1000 + n * 10)],
+      ["outbound", `The Outbound goal is now ${n} meetings`, wantTarget("outbound", n)],
+      ["partnerships", `Move the Partnerships deadline to ${day} ${month}`, wantDeadline("partnerships", `${year}-${monthNumber}-${day}`)],
+      ["content", `Extend the Content deadline to 3 December 2026`, wantDeadline("content", "2026-12-03")],
+      ["outbound", `Set the sends a day guardrail to ${n}`, wantLimit("outbound-sends-a-day", n)],
+      ["outbound", `Change the guardrail on bounces to 3 percent`, wantLimit("outbound-bounces", 3)],
+      ["paid", `Raise the cost per lead guardrail to €1${n}`, wantLimit("cost-per-lead", 100 + n)],
+      ["seo", "Make SEO the top priority", wantRank("seo", 1)],
+      ["paid", "Raise the priority of Paid to number 2", wantRank("paid", 2)],
+      ["content", "Lower the priority of Content", wantRank("content", 3)],
+      ["seo", "Prioritise SEO over Outbound", wantRank("seo", 3)],
+    ];
+    for (const [thread, text, want] of plain) {
+      const { gc } = await propose(url, thread, text);
+      ok(gc && want(gc), `G1 "${text}" is proposed as asked (${said(gc)})`);
+    }
+  });
+
+  // anything else: the same proposal, or none; never another topic, field, amount, rank or guardrail
+  await scenario("G1 no proposal says something else", "gtm", async url => {
+    const n = rand(31, 89);
+    const asks: [string, string, Want][] = [
+      ["paid", `Raise the Research budget to €${n} a week`, wantBudget("research", n)],
+      ["paid", "Make Research the top priority", wantRank("research", 1)],
+      ["paid", "SEO should get a higher priority than Paid", wantRank("seo", 4)],
+      ["seo", "Give SEO a higher priority than Outbound", wantRank("seo", 3)],
+      ["content", "Move the Content deadline from 19 November 2026 to 3 December 2026", wantDeadline("content", "2026-12-03")],
+      ["outbound", `Raise the Outbound target to ${n} this quarter`, wantTarget("outbound", n)],
+      ["outbound", `Raise the Outbound goal by ${n} meetings`, wantTarget("outbound", 30 + n)],
+      ["outbound", `We missed the target by ${n} meetings last month`, () => false],
+      ["paid", `Cut the Paid budget by €${rand(5, 20)} a week`, gc => gc.field === "budget" && gc.topicId === "paid" && gc.budget.to.amountMinor >= 1000 && gc.budget.to.amountMinor <= 2500],
+      ["content", `Move €1,${n}0 of the Paid budget from LinkedIn to Search`, () => false],
+      ["paid", `We spent €${n} of the Paid budget so far`, () => false],
+      ["content", `Set the budgets of Paid and SEO to €${n} a week`, () => false],
+      ["content", `Target of ${n} for Outbound and ${n}0 for Paid`, () => false],
+      ["outbound", `Raise the sends a day guardrail by ${n}`, wantLimit("outbound-sends-a-day", 60 + n)],
+      ["outbound", "Set the email bounce guardrail to 3%", wantLimit("outbound-bounces", 3)],
+      ["paid", `Raise the spend guardrail to €${n}0 per change`, () => false],
+      ["content", `In Outbound, set the cost per lead guardrail to €${n}`, () => false],
+      ["paid", "Raise the priority of Paid for the first week of December", wantRank("paid", 3)],
+      ["outbound", `The Outbound budget can go up to EUR 1 ${n}0,00 per month`, wantBudget("outbound", 1000 + n * 10)],
+    ];
+    const whole: [string, string, Want][] = [
+      ["seo", `Set the SEO budget to €${n} a week`, wantBudget("seo", n)], ["outbound", `Set the Outbound target to ${n}`, wantTarget("outbound", n)],
+      ["outbound", `Set the sends a day guardrail to ${n}`, wantLimit("outbound-sends-a-day", n)], ["paid", "Raise the priority of Paid to number 2", wantRank("paid", 2)],
+      ["partnerships", "Move the Partnerships deadline to 21 February", wantDeadline("partnerships", "2027-02-21")],
+    ];
+    const tails = [" for the first two weeks of December", ` instead of ${n + 7}`, ` and the Content one to ${n + 9}`, ` unless it falls below ${n - 20}`, ", not more than 12 per person", " except in Paid", " once Outbound is 3rd"];
+    const heads = ["Do not ", "Ask Lea whether to ", "After 12 December, ", "In Content, "];
+    for (const [thread, text, want] of whole) {
+      for (const tail of tails) asks.push([thread, text + tail, want]);
+      const head = pick(heads);
+      asks.push([thread, head + text.charAt(0).toLowerCase() + text.slice(1), () => false]);
+    }
+    const wrong: string[] = [];
+    for (const [thread, text, want] of asks) {
+      const { sent, gc } = await propose(url, thread, text);
+      if (sent.status !== 200 || (gc && !want(gc))) wrong.push(`"${text}" → ${sent.status} ${said(gc)}`);
+      if (hasEvent(sent, "lane.filed") && sent.body?.message?.label?.kind === "goalChange") wrong.push(`"${text}" filed a lane`);
+    }
+    ok(wrong.length === 0, `G1 of ${asks.length} odd asks none is proposed as something else (${wrong.length}: ${wrong.slice(0, 6).join("; ")})`);
+  });
+
+  // E7: nobody opens a goal change on a topic they cannot see, from any chat they can write in
+  await scenario("E7 no goal change on a topic out of reach", "gtm", async url => {
+    const owned = async () => ((await get(url, "/decisions")).body?.items ?? []).filter((d: any) => d.goalChange).length;
+    const before = await owned();
+    const opened: string[] = [];
+    let tried = 0;
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "lea-brandt", access: { kind: "all", stages: [] } });
+    const ids = await topicIds(url);
+    for (const p of PEOPLE) {
+      const sees = new Map<string, boolean>();
+      for (const t of ids) sees.set(t, (await getAs(url, `/topics/${t}`, p)).status === 200);
+      for (const from of ids.filter(t => sees.get(t))) for (const t of ids.filter(x => !sees.get(x))) {
+        const name = t === "seo" ? "SEO" : t.charAt(0).toUpperCase() + t.slice(1);
+        for (const text of [`Set the ${name} budget to €${rand(31, 89)} a week`, `Make ${name} the top priority`]) {
+          tried++;
+          const { sent } = await propose(url, from, text, p);
+          if (decisionOf(sent)) opened.push(`${p} in ${from}: ${text}`);
+        }
+      }
+    }
+    ok(tried > 0 && opened.length === 0 && (await owned()) === before, `E7 ${tried} asks on topics out of reach open no goal change (${opened.slice(0, 4).join("; ")}; ${before} → ${await owned()})`);
+  });
+
+  // G4: the last approval counts, whatever was written first, and undoing it gives back the one before
+  await scenario("G4 approvals apply in the order they are given", "gtm", async url => {
+    const [a, b] = [rand(31, 59), rand(60, 89)];
+    const kinds: [string, string, (n: number) => string, (body: any) => number | undefined][] = [
+      ["target", "outbound", n => `Set the Outbound target to ${n}`, t => t?.goal?.target],
+      ["budget", "seo", n => `Set the SEO budget to €${n} a week`, t => t?.spend?.cap?.amountMinor / 100],
+      ["guardrail", "outbound", n => `Set the sends a day guardrail to ${n}`, t => (t?.goal?.guardrails?.items ?? []).find((x: any) => x.id === "outbound-sends-a-day")?.limit?.value],
+    ];
+    for (const [kind, topicId, text, read] of kinds) {
+      const value = async () => read((await get(url, `/topics/${topicId}`)).body);
+      const start = await value();
+      const first = await propose(url, topicId, text(a));
+      const second = await propose(url, topicId, text(b));
+      await act(url, { type: "decision.approve", decisionId: second.id });
+      ok((await value()) === b, `G4 ${kind}: approving the second proposal sets ${b} (${await value()})`);
+      const r = await act(url, { type: "decision.approve", decisionId: first.id });
+      ok((await value()) === a, `G4 ${kind}: approving the first one last sets ${a} (${await value()})`);
+      ok(hasEvent(r, "thread.changed", { threadId: "manager" }), `G4 ${kind}: the approval changes the Manager's chat too`);
+      const u = await act(url, { type: "decision.undo", decisionId: first.id });
+      ok((await value()) === b && hasEvent(u, "thread.changed", { threadId: "manager" }), `G4 ${kind}: undoing it gives back ${b}, with thread.changed manager (${await value()})`);
+      await act(url, { type: "decision.undo", decisionId: second.id });
+      ok((await value()) === start, `G4 ${kind}: undoing both gives back ${start} (${await value()})`);
+    }
+    const one = await propose(url, "paid", "Make Paid the top priority");
+    const two = await propose(url, "seo", "Make SEO the top priority");
+    await act(url, { type: "decision.approve", decisionId: two.id });
+    await act(url, { type: "decision.approve", decisionId: one.id });
+    const ranks = [(await get(url, "/topics/paid")).body?.meta?.priority, (await get(url, "/topics/seo")).body?.meta?.priority];
+    ok(same(ranks, [1, 2]), `G4 priority: the topic approved last is first (${short(ranks)})`);
+  });
+
+  await scenario("L6 limits reach every place", "gtm", async url => {
+    const before = by((await get(url, "/skills")).body?.guardrails, "id", "outbound")?.limit;
+    const n = rand(20, 58);
+    const { id } = await propose(url, "outbound", `Set the sends a day guardrail to ${n}`);
+    const r = await act(url, { type: "decision.approve", decisionId: id });
+    const after = by((await get(url, "/skills")).body?.guardrails, "id", "outbound")?.limit;
+    ok(same(after, { ...before, value: n, of: n }) && hasEvent(r, "skills.changed"), `L6 the switch keeps its shape and /skills says it changed (${short(before)} → ${short(after)})`);
+    ok(hasEvent(r, "guardrail.breached", { topicId: "outbound", guardrailId: "outbound-sends-a-day" }), "L6 an approval that breaches a guardrail emits guardrail.breached with its id");
+    const u = await act(url, { type: "decision.undo", decisionId: id });
+    ok(same(by((await get(url, "/skills")).body?.guardrails, "id", "outbound")?.limit, before) && hasEvent(u, "skills.changed"), "L6 undoing it restores the switch and says so");
+    const zero = await propose(url, "outbound", "Set the sends a day guardrail to 0");
+    await act(url, { type: "decision.approve", decisionId: zero.id });
+    const goal = (await get(url, "/topics/outbound")).body?.goal;
+    ok((goal?.guardrails?.items ?? []).find((x: any) => x.id === "outbound-sends-a-day")?.state === "breached" && by(goal?.blockers, "guardrailId", "outbound-sends-a-day"), "L6 a reading above a limit of 0 is breached and blocks");
+    const euros = rand(45, 90);
+    const agents = await propose(url, "content", `Set the agents this week guardrail to €${euros}`);
+    await act(url, { type: "decision.approve", decisionId: agents.id });
+    const content = (await get(url, "/topics/content")).body;
+    const item = (content?.goal?.guardrails?.items ?? []).find((x: any) => x.id === "content-agents-this-week");
+    ok(numberOf(item?.limit) === euros * 100 && content?.spend?.cap?.amountMinor === euros * 100, `L6 the agents-this-week limit is the topic's cap (${numberOf(item?.limit)}, ${content?.spend?.cap?.amountMinor})`);
+  });
+
+  await scenario("L8 a forecast is stored once", "gtm", async url => {
+    for (const [topicId, name, date] of [["outbound", "Outbound", "2026-12-18"], ["paid", "Paid", "2026-12-31"]] as const) {
+      const target = (await get(url, `/topics/${topicId}`)).body?.goal?.target;
+      const { id } = await propose(url, topicId, `Set the ${name} target to ${target * rand(3, 5)}`);
+      await act(url, { type: "decision.approve", decisionId: id });
+      const read = async () => (await get(url, `/topics/${topicId}`)).body?.goal?.forecastLog?.at(-1);
+      const first = await read();
+      await pause(1100);
+      ok(same(first, await read()), `L8 ${topicId}: the new forecast does not change between reads (${first?.givenAt}, ${(await read())?.givenAt})`);
+      ok(isTime(first?.scoreAt) && local(first.scoreAt, "Europe/Berlin", "date") === date, `L8 ${topicId}: it is scored on ${date}, the goal's date in the mockup (${first?.scoreAt})`);
+    }
+  });
+
+  await scenario("L2 report dates agree", "gtm", async url => {
+    const { id } = await propose(url, "partnerships", "Move the Partnerships deadline to 21 February");
+    await act(url, { type: "decision.approve", decisionId: id });
+    const schedules: any[] = (await get(url, "/manager")).body?.schedules ?? [];
+    const off: string[] = [];
+    for (const t of await topicIds(url)) {
+      const meta = (await get(url, `/topics/${t}`)).body?.meta;
+      if (!meta?.nextReportId) continue;
+      const report = (await get(url, `/reports/${meta.nextReportId}`)).body;
+      const dates = [meta.nextReportAt, report?.dueAt, by(schedules, "id", report?.scheduleId)?.nextAt].map(d => Date.parse(d));
+      if (new Set(dates).size !== 1) off.push(`${t} ${short([meta.nextReportAt, report?.dueAt])}`);
+    }
+    ok(off.length === 0, `L2 a moved deadline moves no report away from its schedule (${off.join("; ")})`);
+  });
+
+  for (const module of ["gtm", "dev"] as Module[]) await scenario("L4 the mockup's own asks", module, async url => {
+    const asks = (await Promise.all((await laneIds(url)).map(async id => (await get(url, `/lanes/${id}`)).body?.asked as string | undefined))).filter((t): t is string => Boolean(t));
+    const split: string[] = [];
+    for (const text of asks) {
+      const r = await act(url, { type: "lane.file", text });
+      if (r.status !== 200 || events(r).filter(e => e.type === "lane.filed").length !== 1) split.push(text);
+    }
+    ok(asks.length > 5 && split.length === 0, `L4 ${module}: none of the ${asks.length} asks that are one lane in the mockup is split (${split.join("; ")})`);
+  });
+
+  await scenario("E4 edition follows the setting", "gtm", async url => {
+    const n = pick([1, 2]);
+    await act(url, { type: "prefs.set", briefsPerDay: n });
+    ok((await get(url, "/brief")).body?.edition?.of === n, `E4 with ${n} briefs a day the edition is of ${n} (${short((await get(url, "/brief")).body?.edition)})`);
+  });
+
+  await scenario("L3 a check hangs on its own row", "gtm", async url => {
+    const rows = (await Promise.all((await topicIds(url)).map(t => historyRows(url, t)))).flat().filter((e: any) => e.checkId);
+    const off: string[] = [];
+    for (const e of rows) {
+      const check = (await get(url, `/checks/${e.checkId}`)).body;
+      if (check?.laneId !== (e.laneId ?? e.target?.id) || local(check.at, "Europe/Berlin", "date") !== local(e.at, "Europe/Berlin", "date")) off.push(`${e.checkId}: ${short([check?.laneId, check?.at, e.laneId ?? e.target?.id, e.at])}`);
+    }
+    ok(rows.length >= 2 && off.length === 0, `L3 each check is on a row of its lane and day (${off.join("; ")})`);
+  });
+}
+
 try {
   await run();
   await invariants();
+  await faithful();
 } catch (e) {
   fatal(String((e as Error)?.message ?? e));
 }
