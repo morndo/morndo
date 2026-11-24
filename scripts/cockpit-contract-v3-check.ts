@@ -1664,6 +1664,73 @@ async function reviewed() {
     ok(r.status === 200 && row?.actor?.id === "jonas-falk" && /^Jonas/.test(lane?.standing?.headline ?? ""), `S2 a delegate's approval is credited to them (${short([r.status, row?.actor?.id, lane?.standing?.headline])})`);
   });
 
+  await scenario("S2 every order of acts, undos and redos", "gtm", async url => {
+    const state = async () => (await get(url, "/decisions/d4")).body?.state;
+    const rows = async () => (await historyRows(url, "partnerships")).filter((e: any) => e.decisionId === "d4");
+    const wrong: string[] = [];
+    let expected = "open";
+    const steps: string[] = [];
+    // two orders that once went wrong, then drawn ones
+    const fixed = ["decline", "undo", "approve", "undo", "redo declined", "undo", "approve", "undo", "decline", "undo", "redo approved", "undo"];
+    for (let i = 0; i < 36; i++) {
+      const wanted = fixed[i]?.split(" ");
+      const live = (await rows()).filter((e: any) => e.undone && (!wanted?.[1] || (wanted[1] === "declined") === /^declined/i.test(e.text)));
+      const move = wanted?.[0] ?? pick(expected === "open" ? ["approve", "decline", ...(live.length > 0 ? ["redo"] : [])] : ["undo"]);
+      steps.push(move);
+      if (move === "redo") {
+        const row: any = pick(live);
+        const r = await act(url, { type: "agentAction.redo", actionId: row.id });
+        if (r.status === 200) expected = /^declined/i.test(row.text) ? "declined" : "approved";
+      } else {
+        const r = await act(url, { type: `decision.${move}`, decisionId: "d4" });
+        if (r.status !== 200) wrong.push(`${move} ${r.status}`);
+        expected = move === "approve" ? "approved" : move === "decline" ? "declined" : "open";
+      }
+      const now = await state();
+      if (now !== expected) { wrong.push(`${steps.join(" ")}: ${now}, not ${expected}`); break; }
+    }
+    ok(wrong.length === 0, `S2 d4 does what each act, undo and redo says (${wrong.slice(0, 2).join("; ")})`);
+  });
+
+  await scenario("R1 Recent drops what the reader lost", "gtm", async url => {
+    const visited = await act(url, { type: "recent.visit", target: { kind: "file", id: "file-outreach-wave-2-0" } }, "lea-brandt");
+    await act(url, { type: "recent.visit", target: { kind: "topic", id: "content" } }, "lea-brandt");
+    await act(url, { type: "access.set", topicId: "partnerships", personId: "lea-brandt", access: { kind: "view", stages: [] } });
+    const r = await getAs(url, "/recent", "lea-brandt");
+    const kinds = (r.body?.items ?? []).map((i: any) => i.target?.kind);
+    ok(visited.status === 200 && r.status === 200 && !kinds.includes("file"), `R1 a lost record leaves Recent, and Recent stays readable (${r.status} ${short(kinds)})`);
+  });
+
+  await scenario("E1 members.changed follows every change of access", "gtm", async url => {
+    const set = await act(url, { type: "access.set", topicId: "content", personId: "jonas-falk", access: { kind: "all", stages: [] } });
+    ok(hasEvent(set, "members.changed", { personId: "jonas-falk" }), "E1 access.set emits members.changed");
+    const assigned = await act(url, { type: "stage.assign", topicId: "partnerships", stage: "Outreach", personId: "tom-ahrens" });
+    ok(assigned.status === 200 && hasEvent(assigned, "members.changed", { personId: "tom-ahrens" }), "E1 stage.assign emits members.changed");
+    await act(url, { type: "access.invite", topicId: "partnerships", nameOrEmail: "sam@example.test" });
+    const inv = ((await get(url, "/members")).body?.invitations ?? []).find((i: any) => i.nameOrEmail === "sam@example.test");
+    await act(url, { type: "access.set", topicId: "paid", personId: inv?.personId, access: { kind: "view", stages: [] } });
+    const r = await act(url, { type: "access.revoke", invitationId: inv?.id });
+    const topics = [...new Set(events(r).filter(e => e.type === "access.changed").map(e => e.topicId))].sort((x, y) => x.localeCompare(y));
+    ok(same(topics, ["paid", "partnerships"]), `E1 revoking tells every topic the person leaves (${short(topics)})`);
+  });
+
+  await scenario("L4 a group undo respects newer changes", "gtm", async url => {
+    const filed = await act(url, { type: "lane.file", text: SPLIT_ASK });
+    const [, second] = filed.body?.receipt?.groupLaneIds ?? [];
+    const open = async () => Promise.all((filed.body?.receipt?.groupLaneIds ?? []).map(async (id: string) => (await get(url, `/lanes/${id}`)).status));
+    const where = (await get(url, `/lanes/${second}`)).body?.topicId;
+    const moved = await act(url, { type: "lane.move", laneId: second, topicId: where === "seo" ? "content" : "seo" });
+    const refused = await act(url, { type: "agentAction.undo", actionId: filed.body?.receipt?.actionId });
+    ok(moved.status === 200 && refused.status === 409 && (await open()).every(s => s === 200), `L4 a group undo is refused while a part has a newer change (${moved.status}, ${refused.status}, ${short(await open())})`);
+    const again = await act(url, { type: "lane.file", text: "Translate the pricing page and draft three LinkedIn posts" });
+    const [one] = again.body?.receipt?.groupLaneIds ?? [];
+    const undo = () => act(url, { type: "agentAction.undo", actionId: again.body?.receipt?.actionId });
+    await undo();
+    await act(url, { type: "agentAction.redo", actionId: `file-${one}` });
+    await undo();
+    ok(one && (await get(url, `/lanes/${one}`)).status !== 200, "L4 a part redone on its own is taken back by the group undo");
+  });
+
   await scenario("L4 a split is one act", "gtm", async url => {
     await act(url, { type: "access.set", topicId: "partnerships", personId: "jonas-falk", access: { kind: "all", stages: [] } });
     const lanes = async () => (await laneIds(url)).length;
@@ -1691,6 +1758,8 @@ async function reviewed() {
 
   await scenario("E6 a live message names its addressee", "gtm", async url => {
     const r = await act(url, { type: "message.send", threadId: "topic:partnerships", stage: "Outreach", text: "Please check batch 4 before noon" });
+    const own = await act(url, { type: "message.send", threadId: "topic:partnerships", stage: "Outreach", text: "The list is ready for a look" }, "lea-brandt");
+    ok(own.status === 200 && own.body?.message?.addressee === null, `E6 nobody is addressed by their own message (${own.status} ${own.body?.message?.addressee})`);
     ok(r.status === 200 && r.body?.message?.addressee === "lea-brandt", `E6 a message to the Outreach stage names Lea, who runs it (${r.status} ${r.body?.message?.addressee})`);
   });
 
