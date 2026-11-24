@@ -31,8 +31,10 @@ const brief = (ask: ReturnType<typeof read>) => ask && [ask.field, ask.topicId, 
 
 describe("the goal ask grammar", () => {
   it("reads a sentence of each shape for each field", () => {
-    expect(brief(read("Set the Beacon budget to €125 a month"))).toEqual(["budget", "beacon", 12500, null, null]);
-    expect(read("Set the Beacon budget to €125 a month")?.budget?.period).toBe("month");
+    expect(brief(read("Set the Beacon budget to €125 a week"))).toEqual(["budget", "beacon", 12500, null, null]);
+    expect(read("Set the Beacon budget to €125 a week")?.budget?.period).toBe("week");
+    expect(read("Set the Beacon budget to €125 a month")).toBeNull();
+    expect(read("Set the Beacon budget to €5 a day")).toBeNull();
     expect(brief(read("Give Atlas a budget of 1.250,50 euros"))).toEqual(["budget", "atlas", 125050, null, null]);
     expect(brief(read("Budget for Beacon: 2k EUR per week please"))?.[2]).toBe(200000);
     expect(brief(read("Raise the Atlas target to 35"))).toEqual(["target", "atlas", 35, null, null]);

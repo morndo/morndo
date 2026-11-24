@@ -486,8 +486,8 @@ function build(field: GoalAsk["field"], relative: boolean, env: Env, cx: Cx): Go
   const goal = topic.goal;
   if (field === "budget") {
     const cap = topic.cap;
-    // caps are weekly: an amount a day or a month cannot be added to one
-    if (relative && env.period && env.period !== "week") return null;
+    // caps are weekly: an amount a day or a month is not one
+    if (env.period && env.period !== "week") return null;
     if (!amount || !cap || !isEuro(cap) || amount.pct || !(amount.cur || amount.k)) return null;
     const asked = minorOf(amount.v);
     if (asked === null) return null;

@@ -68,11 +68,11 @@ describe("behaviours the locked check does not send", () => {
       expect(priority.priority.to).toBe(priority.priority.from + 1);
       expect(priority.priority.to).not.toBe(1);
 
-      const euros = await act(url, { type: "message.send", threadId: "topic:paid", text: "Raise the Paid budget cap to €8,000 a month" });
+      const euros = await act(url, { type: "message.send", threadId: "topic:paid", text: "Raise the Paid budget cap to €8,000 a week" });
       expect(euros.status).toBe(200);
       const budget = (await get(url, `/decisions/${decisionId(euros.body)}`)).body.goalChange;
       expect(budget.budget.to.amountMinor).toBe(800000);
-      expect(budget.budget.period).toBe("month");
+      expect(budget.budget.period).toBe("week");
       expect(euros.body.message.text).toContain("€8,000");
 
       const guardrail = await act(url, { type: "message.send", threadId: "topic:outbound", text: "Raise the sends a day guardrail to 80" });
@@ -319,7 +319,7 @@ describe("behaviours the locked check does not send", () => {
 
       const cap = async (topic: string, text: string) => (await change(topic, text))?.budget?.to.amountMinor ?? null;
       expect(await cap("seo", "Give SEO a budget of 2.000 euros a week")).toBe(200000);
-      expect(await cap("paid", "Budget for Paid: 12.500,50 € a month")).toBe(1250050);
+      expect(await cap("paid", "Budget for Paid: 12.500,50 € a week")).toBe(1250050);
       expect(await cap("paid", "Paid budget: EUR 3,250.75 per week")).toBe(325075);
       expect(await cap("seo", "A budget of 1.5k euros for SEO")).toBe(150000);
 
