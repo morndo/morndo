@@ -1858,7 +1858,6 @@
                 "description": "Skill for this record."
               },
               "text": {
-                "default": null,
                 "description": "What to ask the skill. Without it the hub runs the skill's default ask.",
                 "maxLength": 4000,
                 "minLength": 1,

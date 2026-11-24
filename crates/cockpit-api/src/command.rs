@@ -232,7 +232,7 @@ pub enum Command {
         /// Skill for this record.
         skill: SkillId,
         /// What to ask the skill. Without it the hub runs the skill's default ask.
-        #[serde(default)]
+        #[serde(default, skip_serializing_if = "Option::is_none")]
         #[schemars(schema_with = "input::text_schema")]
         #[serde(deserialize_with = "input::optional_text")]
         text: Option<String>,

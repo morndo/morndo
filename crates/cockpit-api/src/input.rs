@@ -40,17 +40,11 @@ pub(crate) fn text<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String,
     bounded_text::<D, 4000>(deserializer)
 }
 
+/// A text that may be left out. Present, it is a string: the schema publishes no null for it, so null is refused here too.
 pub(crate) fn optional_text<'de, D: Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<String>, D::Error> {
-    let value = Option::<String>::deserialize(deserializer)?;
-    if value
-        .as_ref()
-        .is_some_and(|text| text.is_empty() || text.chars().count() > 4000)
-    {
-        return Err(de::Error::custom("expected 1 to 4000 characters"));
-    }
-    Ok(value)
+    bounded_text::<D, 4000>(deserializer).map(Some)
 }
 
 pub(crate) fn name<'de, D: Deserializer<'de>>(deserializer: D) -> Result<String, D::Error> {
