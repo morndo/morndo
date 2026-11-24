@@ -1303,7 +1303,7 @@ async function invariants() {
     };
     const pairs = Array.from({ length: 40 }, two).filter(p => p !== null);
     const apart = pairs.slice(0, 4).map(p => `${clause(p.v, p.x)} and ${clause(p.w.toLowerCase(), p.y)}`);
-    const together = [...pairs.slice(4, 8).map(p => `${clause(p.v, p.x)} and ${p.w.toLowerCase()} ${pick(["it", "them", "their first lines"])}`),
+    const together = [...pairs.slice(4, 8).map((p, i) => `${clause(p.v, p.x)} and ${p.w.toLowerCase()} ${["it", "them", "their first lines", "its cover"][i]}`),
       "Compare the Leipzig and Bremen fairs", "Draft a note to the retail and logistics partners"];
     for (const [list, n] of [[apart, 2], [together, 1]] as const) for (const text of list) {
       const r = await act(url, { type: "lane.file", text });
