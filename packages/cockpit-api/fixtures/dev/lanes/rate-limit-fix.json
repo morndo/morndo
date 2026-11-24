@@ -48,7 +48,7 @@
       "kind": "ok",
       "text": "Release the rate-limit fix after review.",
       "who": "Release",
-      "doneAt": null
+      "doneAt": "2026-11-15T23:12:00+01:00"
     }
   ],
   "doneNote": "API released the rate-limit fix after its review. The check on production passed.",

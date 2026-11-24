@@ -48,25 +48,25 @@
       "kind": "ok",
       "text": "Sequence written and approved",
       "who": "You · 27 Oct",
-      "doneAt": null
+      "doneAt": "2026-10-27T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "960 emails sent over 3 weeks",
       "who": "Sender · 13 Nov",
-      "doneAt": null
+      "doneAt": "2026-11-13T11:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Follow-ups stopped for everyone who replied",
       "who": "Sender · today, 08:05",
-      "doneAt": null
+      "doneAt": "2026-11-16T08:04:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Meetings reported: 9",
       "who": "Manager · today",
-      "doneAt": null
+      "doneAt": "2026-11-16T08:05:00+01:00"
     }
   ],
   "doneNote": "Done means all four. Someone other than Sender checked each one: the Manager closed the lane at 08:05.",

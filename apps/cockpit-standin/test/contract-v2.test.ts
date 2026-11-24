@@ -81,7 +81,7 @@ it("applies and reverses lane and handover actions across history and read views
     expect(result.receipt?.text).toBe("The promo goes out at 16:00 with 4 images");
     expect(result.events.map(event => event.type)).toEqual(expect.arrayContaining(["thread.changed", "brief.changed"]));
     const lane = await read<LaneView>(url, "/lanes/webinar");
-    expect(lane.steps).toContainEqual({ kind: "ok", text: "4 images pass the brand check; 2 left out", who: "You · now", doneAt: null });
+    expect(lane.steps).toContainEqual({ kind: "ok", text: "4 images pass the brand check; 2 left out", who: "You · now", doneAt: DEMO_AT });
     const brief = await read<BriefView>(url, "/brief");
     expect(brief.settledBurns[0]).toMatchObject({ actionId: result.receipt?.actionId, stateWord: "Settled by you" });
     expect(brief.burnsSub).toBe("Nothing else is stuck.");

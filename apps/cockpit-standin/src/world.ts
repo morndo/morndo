@@ -692,7 +692,7 @@ export class World {
           lane.lead = { ...lane.lead, state: lane.state, word: lane.stateWord, text: phrase };
           lane.crew = lane.crew.map(member => member.id === lane.lead.id ? lane.lead : member);
           lane.steps = lane.steps.map(step => step.text === "Released to production" ? {
-            ...step, kind: done ? "ok" : scheduled ? "todo" : "now",
+            ...step, kind: done ? "ok" : scheduled ? "todo" : "now", doneAt: done ? this.approvedAt.get(decision.id) ?? this.now : null,
             who: done ? "Release · complete" : scheduled ? "Release · scheduled" : "Release · watching",
           } : step);
           lane.made = lane.made.map(item => item.target?.kind === "decision"
@@ -705,7 +705,7 @@ export class World {
           lane.standing = { headline: "You approved it.", detail: lane.status };
           let promoted = false;
           lane.steps = lane.steps.map(step => {
-            if (step.kind === "now") return { ...step, kind: "ok" };
+            if (step.kind === "now") return { ...step, kind: "ok", doneAt: this.approvedAt.get(decision.id) ?? this.now };
             if (step.kind === "todo" && !promoted) {
               promoted = true;
               return { ...step, kind: "now" };
@@ -2445,6 +2445,7 @@ export class World {
     const topicId = requireRecord(base.topicId, "topic");
     const previous = { state: base.state, stateWord: base.stateWord, status: base.status, next: base.next, nextAt: base.nextAt, standing: base.standing, steps: base.steps, acts: base.acts };
     const id = `action-${++this.serial}`;
+    const at = this.now;
     const settlement = {
       laneId: lane.id, actionId: id, title: values.receipt, stateWord: "Settled by you",
       detail: "Nothing else is stuck.", target: target("topic", topicId),
@@ -2458,7 +2459,7 @@ export class World {
         state: "ok", stateWord: "Working", status: values.status, next: "Promo scheduled",
         nextAt: this.briefBase.burns.find(burn => burn.laneId === lane.id)?.dueAt ?? null, acts: [],
         standing: { headline: "The promo is settled.", detail: values.status },
-        steps: previous.steps.map(step => step.kind === "now" ? { kind: "ok", text: values.step, who: "You · now", doneAt: null } : step),
+        steps: previous.steps.map(step => step.kind === "now" ? { kind: "ok", text: values.step, who: "You · now", doneAt: at } : step),
       });
       if (!undone) this.noteForecast(`forecast-settled-${lane.id}`, topicId, wordBefore);
       return [...laneUpdate(lane.id, topicId), { type: "thread.changed", threadId: `topic:${topicId}` },

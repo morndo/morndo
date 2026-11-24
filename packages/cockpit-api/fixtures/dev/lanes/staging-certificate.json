@@ -48,7 +48,7 @@
       "kind": "ok",
       "text": "Renew the staging certificate before expiry.",
       "who": "Ops",
-      "doneAt": null
+      "doneAt": "2026-11-16T04:30:00+01:00"
     }
   ],
   "doneNote": "Infra renewed the staging certificate, 12 days before it ran out.",

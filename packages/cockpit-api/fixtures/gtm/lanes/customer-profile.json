@@ -48,19 +48,19 @@
       "kind": "ok",
       "text": "212 won deals read from Supabase, read only",
       "who": "Researcher · 06:40",
-      "doneAt": null
+      "doneAt": "2026-11-16T06:40:00+01:00"
     },
     {
       "kind": "ok",
       "text": "4 segments, ranked by how fast they close",
       "who": "Researcher · 07:00",
-      "doneAt": null
+      "doneAt": "2026-11-16T07:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Saved to memory and checked by the Manager",
       "who": "Manager · 07:10",
-      "doneAt": null
+      "doneAt": "2026-11-16T07:10:00+01:00"
     }
   ],
   "doneNote": "Done means all three. No customer data left Supabase: the guardrail keeps it away from other models.",

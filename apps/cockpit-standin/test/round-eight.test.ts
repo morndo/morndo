@@ -42,3 +42,62 @@ describe("history rows and undo agree", () => {
     }
   }
 });
+
+const laneIds = (world: World): string[] => (asAny(world.read("SidebarView", "", query, world.owner)).groups as any[])
+  .flatMap(group => group.lanes.map((lane: any) => lane.id as string));
+const readLane = (world: World, id: string) => asAny(world.read("LaneView", id, query, world.owner));
+
+describe("every done step has a time", () => {
+  for (const module of MODULES) {
+    it(`${module}: ok steps are timed, in order, inside the lane and before the clock`, () => {
+      const world = new World(module);
+      const clock = Date.parse(DEMO_AT);
+      const lanes = laneIds(world);
+      expect(lanes.length).toBeGreaterThan(5);
+      for (const id of lanes) {
+        const lane = readLane(world, id);
+        const opened = Date.parse(lane.openedAt);
+        const end = Math.min(clock, lane.closedAt ? Date.parse(lane.closedAt) : clock);
+        let last = -Infinity;
+        for (const step of lane.steps.filter((item: any) => item.kind === "ok")) {
+          expect(step.doneAt, `${id}: ${step.text}`).not.toBeNull();
+          const at = Date.parse(step.doneAt);
+          expect(at, `${id}: ${step.text}`).toBeGreaterThanOrEqual(opened);
+          expect(at, `${id}: ${step.text}`).toBeLessThanOrEqual(end);
+          expect(at, `${id}: ${step.text} is after the one before`).toBeGreaterThan(last);
+          last = at;
+        }
+        for (const step of lane.steps.filter((item: any) => item.kind !== "ok")) expect(step.doneAt, `${id}: ${step.text}`).toBeNull();
+      }
+    });
+  }
+
+  it("an approved Your OK step carries the time of the approval, in every lane that has one", () => {
+    for (const [module, ids] of [["gtm", ["d1", "d2", "d3", "d4"]], ["dev", ["d1", "d2", "d3"]]] as const) {
+      for (const id of ids) {
+        const world = new World(module);
+        const decision = asAny(world.read("DecisionView", id, query, world.owner));
+        world.advance("2026-11-16T09:10:00+01:00");
+        world.act({ type: "decision.approve", decisionId: id } as never);
+        const approved = asAny(world.read("DecisionView", id, query, world.owner));
+        for (const step of approved.nextSteps.filter((item: any) => /your ok|you approve/i.test(item.step))) {
+          expect(step.doneAt, `${module} ${id}`).toBe("2026-11-16T09:10:00+01:00");
+        }
+        const lane = decision.laneId && readLane(world, decision.laneId);
+        if (!lane) continue;
+        for (const step of lane.steps.filter((item: any) => item.kind === "ok")) expect(step.doneAt, `${module} ${id}: ${step.text}`).not.toBeNull();
+        for (const step of lane.steps.filter((item: any) => /your ok/i.test(item.text) && item.kind === "ok")) {
+          expect(step.doneAt, `${module} ${id}: ${step.text}`).toBe("2026-11-16T09:10:00+01:00");
+        }
+      }
+    }
+  });
+
+  it("a settled webinar step has the time of the act", () => {
+    const world = new World("gtm");
+    world.advance("2026-11-16T09:20:00+01:00");
+    world.act({ type: "lane.act", laneId: "webinar", act: "post-passing" } as never);
+    const step = readLane(world, "webinar").steps.find((item: any) => item.who === "You · now");
+    expect(step).toMatchObject({ kind: "ok", doneAt: "2026-11-16T09:20:00+01:00" });
+  });
+});

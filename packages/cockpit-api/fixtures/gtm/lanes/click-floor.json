@@ -48,19 +48,19 @@
       "kind": "ok",
       "text": "Every running ad checked against the floor",
       "who": "Analyst · 08:10",
-      "doneAt": null
+      "doneAt": "2026-11-16T08:10:00+01:00"
     },
     {
       "kind": "ok",
       "text": "3 ads switched off, inside your €500 guardrail",
       "who": "Paid buyer · 08:30",
-      "doneAt": null
+      "doneAt": "2026-11-16T08:29:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Logged in the brief, with Undo",
       "who": "Manager · 08:30",
-      "doneAt": null
+      "doneAt": "2026-11-16T08:30:00+01:00"
     }
   ],
   "doneNote": "Done means all three. You can undo it from the brief until tonight.",

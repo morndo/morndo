@@ -48,7 +48,7 @@
       "kind": "ok",
       "text": "Merge the dependency updates",
       "who": "Builder",
-      "doneAt": null
+      "doneAt": "2026-11-16T03:05:00+01:00"
     }
   ],
   "doneNote": "Dependency updates merged.",

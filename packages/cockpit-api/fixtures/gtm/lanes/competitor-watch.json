@@ -48,19 +48,19 @@
       "kind": "ok",
       "text": "Pricing pages of all 5 read and compared with October",
       "who": "Researcher · 10 Nov",
-      "doneAt": null
+      "doneAt": "2026-11-10T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Release notes read",
       "who": "Researcher · 11 Nov",
-      "doneAt": null
+      "doneAt": "2026-11-11T11:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Changes sent to SEO and Outbound",
       "who": "Manager · 12 Nov",
-      "doneAt": null
+      "doneAt": "2026-11-12T00:00:00+01:00"
     }
   ],
   "doneNote": "Done means all three. Each change links to the public page it came from.",

@@ -48,7 +48,7 @@
       "kind": "ok",
       "text": "Merge the invoice rounding fix after review.",
       "who": "Builder",
-      "doneAt": null
+      "doneAt": "2026-11-16T01:40:00+01:00"
     }
   ],
   "doneNote": "Billing merged the invoice rounding fix after 2 review rounds.",

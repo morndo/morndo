@@ -59,19 +59,19 @@
       "kind": "ok",
       "text": "A test that fails before the fix and passes after",
       "who": "Builder · Friday",
-      "doneAt": null
+      "doneAt": "2026-11-13T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "One fresh review, every finding fixed",
       "who": "Reviewer · Saturday",
-      "doneAt": null
+      "doneAt": "2026-11-14T11:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "Fenwick's 1.2 GB export runs on staging",
       "who": "QA · Sunday",
-      "doneAt": null
+      "doneAt": "2026-11-15T12:00:00+01:00"
     },
     {
       "kind": "now",

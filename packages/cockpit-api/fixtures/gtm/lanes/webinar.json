@@ -94,13 +94,13 @@
       "kind": "ok",
       "text": "Promo text written and approved",
       "who": "Writer · Friday",
-      "doneAt": null
+      "doneAt": "2026-11-13T10:00:00+01:00"
     },
     {
       "kind": "ok",
       "text": "6 images made",
       "who": "Visuals · Saturday",
-      "doneAt": null
+      "doneAt": "2026-11-14T11:00:00+01:00"
     },
     {
       "kind": "now",
