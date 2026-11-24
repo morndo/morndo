@@ -1432,6 +1432,10 @@ async function faithful() {
           tried++;
           const { sent } = await propose(url, from, text, p);
           if (decisionOf(sent)) opened.push(`${p} in ${from}: ${text}`);
+          // the answer must not tell a topic that exists from a word that means nothing
+          const answer = (r: { status: number; body: any }) => [r.status, r.body?.message?.label?.kind, ...events(r).filter(e => e.type === "message.posted").map(e => e.message).filter(m => m.author?.id !== p && m.author?.kind !== "person").map(m => [m.author?.name, m.text])];
+          const unknown = (await propose(url, from, text.replace(name, "Zeppelins"), p)).sent;
+          if (!same(answer(sent), answer(unknown))) opened.push(`${p} in ${from} hears about ${t}: ${short(answer(sent))} / ${short(answer(unknown))}`);
         }
       }
     }
