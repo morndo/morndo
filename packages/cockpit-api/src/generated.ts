@@ -4205,7 +4205,7 @@ export interface GoalChange {
    */
   field: "target" | "deadline" | "unit" | "budget" | "priority" | "guardrail";
   /**
-   * Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value.
+   * Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value, rounded when a limit is fractional (the payload holds the exact one).
    */
   from: number;
   /**

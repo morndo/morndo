@@ -269,7 +269,7 @@ pub struct GoalChange {
     pub topic_id: TopicId,
     /// Field for this record.
     pub field: GoalField,
-    /// Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value.
+    /// Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value, rounded when a limit is fractional (the payload holds the exact one).
     pub from: i64,
     /// Value the proposal asks for, as `from`.
     pub to: i64,

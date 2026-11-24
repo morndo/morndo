@@ -5330,7 +5330,7 @@
           "description": "Field for this record."
         },
         "from": {
-          "description": "Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value.",
+          "description": "Value before the change. For a typed payload it carries that payload's number: amountMinor, rank or limit value, rounded when a limit is fractional (the payload holds the exact one).",
           "format": "int64",
           "type": "integer"
         },
