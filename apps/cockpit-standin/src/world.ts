@@ -693,10 +693,21 @@ export class World {
     return { ...actor, text: readerCopy(actor.text, owner), word: readerCopy(actor.word, owner), record: readerCopy(actor.record, owner) };
   }
 
+  /** A resource with a quota is a queue: a lane ordered after the one whose turn it is waits on it, and stops when the turn is its own. */
+  private queuedOn(laneId: string): string | null {
+    for (const resource of this.managerBase.sharedResources) {
+      if (!resource.quota || !resource.turn) continue;
+      const at = resource.order.indexOf(laneId);
+      if (at > resource.order.indexOf(resource.turn) && resource.order.indexOf(resource.turn) >= 0) return resource.id ?? null;
+    }
+    return null;
+  }
+
   private lane(id: string): LaneView | undefined {
     const stored = this.lanes.get(id);
     if (!stored || this.removed.has(id)) return undefined;
     const lane = structuredClone(stored);
+    lane.waitsOnResource = this.queuedOn(id);
     if (this.briefBase.overnight.some(row => this.history.get(row.id)?.row.undone &&
       (row.laneId === id || row.relatedLaneIds?.includes(id)))) {
       Object.assign(lane, beforeOvernight(lane));

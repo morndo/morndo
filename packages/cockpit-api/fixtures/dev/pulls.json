@@ -22,9 +22,22 @@
         {
           "name": "Fresh review",
           "state": "pass",
-          "detail": null,
-          "round": null,
-          "reviewer": null,
+          "detail": "2 rounds",
+          "round": 2,
+          "reviewer": {
+            "id": "reviewer",
+            "name": "Reviewer",
+            "shortName": "Reviewer",
+            "kind": "agent",
+            "avatar": "R",
+            "role": null,
+            "state": "done",
+            "word": "Done",
+            "text": "Fresh review, 2 rounds, 3 findings",
+            "skill": "/review",
+            "engine": "Codex",
+            "record": null
+          },
           "runId": null
         },
         {
@@ -33,7 +46,7 @@
           "detail": null,
           "round": null,
           "reviewer": null,
-          "runId": null
+          "runId": "export-staging"
         },
         {
           "name": "Checks",
@@ -164,7 +177,7 @@
           "detail": null,
           "round": null,
           "reviewer": null,
-          "runId": null
+          "runId": "red-main-ci"
         }
       ],
       "verdict": "Blocked by red main",

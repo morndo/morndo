@@ -359,3 +359,38 @@ describe("a guardrail change", () => {
     expect(still.gap.says).toBe("To bring a lead under €110 by December:");
   });
 });
+
+describe("data the plan promises", () => {
+  it("a lane behind another on a resource with a quota waits on it, until it has the turn", () => {
+    const world = new World("gtm");
+    const { read, act } = actor(world);
+    expect(read("LaneView", "outreach-wave-2").waitsOnResource).toBe("your-mail");
+    expect(read("LaneView", "outreach-wave-1").waitsOnResource).toBeNull();
+    expect(read("LaneView", "brand-list").waitsOnResource).toBeNull();
+    const sent = act({ type: "lane.act", laneId: "outreach-wave-2", act: "send-wave-2" }, "lea-brandt");
+    expect(read("LaneView", "outreach-wave-2").waitsOnResource).toBeNull();
+    const actionId = sent.events.find((event: any) => event.type === "agentAction.changed").actionId;
+    act({ type: "agentAction.undo", actionId }, "lea-brandt");
+    expect(read("LaneView", "outreach-wave-2").waitsOnResource).toBe("your-mail");
+  });
+
+  it("the gates of a pull whose lane or record says 2 rounds name the round, the reviewer and the run", () => {
+    const world = new World("dev");
+    const { read } = actor(world);
+    const pull = (id: string) => (read("PullsView").items as any[]).find(item => item.id === id);
+    const gate = (id: string, name: string) => pull(id).gates.find((item: any) => item.name === name);
+    const review = gate("412", "Fresh review");
+    expect(review).toMatchObject({ state: "pass", round: 2 });
+    expect(review.reviewer).toMatchObject({ id: "reviewer", kind: "agent" });
+    const run = read("MadeRecordView", gate("412", "QA by hand").runId);
+    expect(run).toMatchObject({ kind: "run", laneId: "export-for-big-accounts", state: "pass" });
+    expect(gate("731", "Fresh review")).toMatchObject({ round: 2 });
+    expect(read("MadeRecordView", gate("731", "Checks").runId)).toMatchObject({ kind: "run", state: "fail" });
+    for (const item of read("PullsView").items as any[]) {
+      for (const each of item.gates as any[]) {
+        if (each.runId) expect(read("MadeRecordView", each.runId).kind, `${item.id}: ${each.name}`).toBe("run");
+        if (each.round !== null) expect(each.reviewer, `${item.id}: ${each.name}`).not.toBeNull();
+      }
+    }
+  });
+});
