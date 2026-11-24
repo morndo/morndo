@@ -75,13 +75,13 @@ describe("behaviours the locked check does not send", () => {
       expect(budget.budget.period).toBe("month");
       expect(euros.body.message.text).toContain("€8,000");
 
-      const guardrail = await act(url, { type: "message.send", threadId: "topic:outbound", text: "Raise the outbound guardrail to 80 emails a day" });
+      const guardrail = await act(url, { type: "message.send", threadId: "topic:outbound", text: "Raise the sends a day guardrail to 80" });
       expect(guardrail.status).toBe(200);
       const limit = (await get(url, `/decisions/${decisionId(guardrail.body)}`)).body.goalChange;
       expect(limit.guardrail.name).toBe("Sends a day");
       expect(limit.guardrail.to.value).toBe(80);
 
-      const top = await act(url, { type: "message.send", threadId: "manager", text: "Outbound should be our top priority for the rest of the month" });
+      const top = await act(url, { type: "message.send", threadId: "manager", text: "Outbound should be our top priority" });
       expect(top.status).toBe(200);
       const ranked = (await get(url, `/decisions/${decisionId(top.body)}`)).body;
       expect(ranked.topicId).toBe("outbound");
