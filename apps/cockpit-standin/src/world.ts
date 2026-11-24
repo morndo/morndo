@@ -245,6 +245,8 @@ export class World {
   private readonly forecasts = new Map<string, { topicId: string; row: Forecast }>();
   private readonly asked = new Map<string, { at: string; chat: string }>();
   private readonly approvedAt = new Map<string, string>();
+  /** The dates of a member whose accepted invitation was removed: the invitation held them, the member keeps them. */
+  private readonly memberDates = new Map<string, { invitedAt: string; joinedAt: string | null }>();
   private approvalSerial = 0;
   private serial = 0;
   private messageSerial = 0;
@@ -1851,10 +1853,11 @@ export class World {
     const invitations = [...new Map([...this.access.values()].flatMap(view => view.invitations).map(item => [item.id, item])).values()];
     const items = [...this.people.values()].filter(person => person.kind === "person").map(person => {
       const invitation = invitations.find(item => item.personId === person.id);
+      const kept = this.memberDates.get(person.id);
       return {
       person, email: [...this.access.values()].flatMap(view => view.people).find(entry => entry.person.id === person.id)?.email ?? null,
-      role: person.role, owner: person.id === this.owner.id, invitedAt: invitation?.invitedAt ?? null,
-      joinedAt: invitation ? invitation.acceptedAt : person.membershipState === "invited" ? null : "2026-10-01T09:00:00+02:00",
+      role: person.role, owner: person.id === this.owner.id, invitedAt: invitation?.invitedAt ?? kept?.invitedAt ?? null,
+      joinedAt: invitation ? invitation.acceptedAt : kept ? kept.joinedAt : person.membershipState === "invited" ? null : "2026-10-01T09:00:00+02:00",
       access: [...this.access.keys()].map(topicId => ({
         topicId, access: this.access.get(topicId)?.people.find(entry => entry.person.id === person.id)?.access.kind ?? "none" as const,
       })),
@@ -2105,12 +2108,14 @@ export class World {
       const person = this.people.get(invitation.personId);
       const pending = person?.membershipState === "invited";
       const left = new Set([topicId]);
+      if (!pending) this.memberDates.set(invitation.personId, { invitedAt: invitation.invitedAt, joinedAt: invitation.acceptedAt });
       for (const [other, view] of this.access) {
         view.invitations = view.invitations.filter(item => item.id !== id);
         if (!pending && other !== topicId) continue;
         const entry = view.people.find(item => item.person.id === invitation.personId);
         if (entry && entry.access.kind !== "none") left.add(other);
         if (pending) view.people = view.people.filter(item => item !== entry);
+        if (!pending) continue;
         for (const stage of this.topics.get(other)?.stages ?? []) if (stage.runBy?.id === invitation.personId) stage.runBy = null;
       }
       if (pending) this.people.delete(invitation.personId);

@@ -134,3 +134,33 @@ describe("priority ranks", () => {
     expect(dev.priorityRanks().size).toBe(0);
   });
 });
+
+describe("revoking an accepted invitation", () => {
+  it("removes only the invitation: access, stage runner and the member's dates stay", () => {
+    const world = new World("gtm");
+    const read = (definition: string, id = "", as?: string) => asAny(world.read(definition, id, query, as ? world.viewer(as) : world.owner));
+    const act = (command: Record<string, unknown>, as?: string) => asAny(world.act(command as never, as ? world.viewer(as) : world.owner));
+    act({ type: "access.invite", topicId: "partnerships", nameOrEmail: "sam@example.test" });
+    const invitation = read("MembersView").invitations.find((item: any) => item.nameOrEmail === "sam@example.test");
+    const person = invitation.personId as string;
+    world.advance("2026-11-16T09:00:00+01:00");
+    act({ type: "access.accept", invitationId: invitation.id }, person);
+    const stage = "Outreach";
+    act({ type: "access.set", topicId: "partnerships", personId: person, access: { kind: "stages", stages: [stage] } });
+    act({ type: "stage.assign", topicId: "partnerships", stage, personId: person });
+    const row = () => read("MembersView").items.find((item: any) => item.person.id === person);
+    const before = row();
+    expect(before.joinedAt).toBe("2026-11-16T09:00:00+01:00");
+    expect(before.invitedAt).toBe(invitation.invitedAt);
+    const runner = () => read("TopicView", "partnerships").stages.find((item: any) => item.name === stage).runBy?.id ?? null;
+    expect(runner()).toBe(person);
+    const revoked = act({ type: "access.revoke", invitationId: invitation.id });
+    expect(revoked.events).toContainEqual({ type: "members.changed", personId: person });
+    const after = row();
+    expect(after.invitedAt).toBe(before.invitedAt);
+    expect(after.joinedAt).toBe(before.joinedAt);
+    expect(after.access).toEqual(before.access);
+    expect(runner()).toBe(person);
+    expect(read("MembersView").invitations.some((item: any) => item.id === invitation.id)).toBe(false);
+  });
+});
