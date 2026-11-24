@@ -1207,13 +1207,12 @@ export class World {
     const existing = (base?.days ?? []).flatMap(day => day.entries.flatMap(entry => {
       if (entry.kind !== "event" || !canSee(entry)) return [];
       const action = this.history.get(this.overnightAliases.get(entry.id) ?? entry.id);
-      const overnight = action && byId(this.briefBase.overnight, action.row.id);
-      const closed = Boolean(overnight && (overnight.outcome?.sentOutside || (overnight.undoUntilAt && Date.parse(overnight.undoUntilAt) <= Date.parse(this.now))));
       return [{ label: day.label, entry: action
-        ? { ...entry, actor: action.row.actor, at: action.row.at, undone: action.row.undone, undoable: entry.undoable && !closed } : entry }];
+        ? { ...entry, actor: action.row.actor, at: action.row.at, undone: action.row.undone, undoable: entry.undoable && !this.undoClosed(action.row.id) } : entry }];
     }));
     const added = [...this.history.values()].filter(action => action.topicId === id && !this.fixtureActions.has(action.row.id) && canSee(action.row)).reverse()
-      .map(action => ({ label: Date.parse(action.row.at) < Date.parse(hour("00:00")) ? "Yesterday" : "Today", entry: action.row }));
+      .map(action => ({ label: Date.parse(action.row.at) < Date.parse(hour("00:00")) ? "Yesterday" : "Today",
+        entry: action.row.undoable && this.undoClosed(action.row.id) ? { ...action.row, undoable: false } : action.row }));
     const records = [...added, ...existing].sort((a, b) => Date.parse(b.entry.at) - Date.parse(a.entry.at));
     const { items, nextCursor } = page(records, item => item.entry.id, `history:${id}:${viewer.id}:${laneId ?? ""}`, query);
     const days: HistoryPage["days"] = [];
@@ -2185,27 +2184,29 @@ export class World {
   private undo(id: string, undone: boolean, viewer: Actor): Effect {
     const alias = this.actionKey(id);
     const overnightRow = this.briefBase.overnight.find(row => row.id === id || row.id === alias);
-    if (undone && overnightRow) {
-      if (viewer.id !== this.owner.id) this.requireOwner(viewer);
-      if (overnightRow.outcome?.sentOutside) throw new Problem("conflict", "An action sent outside the workspace cannot be undone.");
-      if (overnightRow.undoUntilAt && Date.parse(overnightRow.undoUntilAt) <= Date.parse(this.now)) {
-        throw new Problem("conflict", "The undo window for this action has passed.");
-      }
-    }
+    if (undone && overnightRow && viewer.id !== this.owner.id) this.requireOwner(viewer);
+    if (undone) this.requireUndoOpen(alias);
     const action = requireRecord(this.history.get(alias), "action");
     action.authorize(viewer);
     if (action.row.undone === undone) return done();
-    if (undone) {
-      const overnight = byId(this.briefBase.overnight, action.row.id);
-      if (overnight?.outcome?.sentOutside) throw new Problem("conflict", "An action sent outside the workspace cannot be undone.");
-      if (overnight?.undoUntilAt && Date.parse(overnight.undoUntilAt) <= Date.parse(this.now)) {
-        throw new Problem("conflict", "The undo window for this action has passed.");
-      }
-    }
     this.requireLatest(action);
     const events = action.apply(undone);
     action.row.undone = undone;
     return done([...events, { type: "agentAction.changed", actionId: action.row.id }], action.row.laneId);
+  }
+
+  /** The single answer to "can this overnight action still be undone": history rows and undo both read it. */
+  private undoClosed(id: string): boolean {
+    const row = byId(this.briefBase.overnight, id);
+    if (!row) return false;
+    return Boolean(row.outcome?.sentOutside || (row.undoUntilAt && Date.parse(row.undoUntilAt) <= Date.parse(this.now)));
+  }
+
+  private requireUndoOpen(id: string): void {
+    const row = byId(this.briefBase.overnight, id);
+    if (!row) return;
+    if (row.outcome?.sentOutside) throw new Problem("conflict", "An action sent outside the workspace cannot be undone.");
+    if (this.undoClosed(id)) throw new Problem("conflict", "The undo window for this action has passed.");
   }
 
   private requireLatest(action: HistoryAction): void {
